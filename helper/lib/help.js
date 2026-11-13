@@ -83,20 +83,31 @@ Exit code 1 if anything failed. Fix problems top-down.`,
     examples: ['trif tabs'],
   },
   run: {
-    usage: "trif run [TAB] [--timeout MS] '<code>' | -f file.js | -",
-    summary: 'run JavaScript in the page and print the result',
-    details: `Runs in the page's own JavaScript world (same window as the site and its mods), inside an async
-function, so await works. A single expression is returned automatically (REPL-style); for several
-statements write a function body and use return. -f runs a file; - reads the code from stdin.
-The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come back as outerHTML
-(first 2000 chars). Default timeout 10000 ms.`,
+    usage: "trif run [TAB] [--box | --page] [--timeout MS] '<code>' | -f file.js | -",
+    summary: 'run JavaScript on the page and print the result',
+    details: `Inside an async function, so await works. A single expression is returned automatically
+(REPL-style); for several statements write a function body and use return. -f runs a file; - reads the
+code from stdin. The result is printed as pretty JSON, or as-is if it's a string. Default timeout 10000 ms.
+
+Where it runs:
+  --box   TRIF's box: the API a boxed mod has (page, trif: BOXED.md), plus what's typed in the page's
+          fields (el.value) and the page's data behind an element (el.pageData('props.x')). It can read
+          the page and change what it shows; it can't send, click, type or navigate. Nothing is paused and
+          the user isn't asked. Elements come back as a short description (<button#id.class>).
+  --page  the page's own JavaScript world (document, window, the site's own code and its mods'). From a
+          chat, this pauses the site's posting in every tab until the tab reloads, and may ask the user
+          first. DOM nodes come back as outerHTML (first 2000 chars).
+In a chat (a side-panel run) the box is the default: use it for looking around, and --page only for what
+needs the page's own code. From a terminal the page's world is the default.`,
     examples: [
-      "trif run 'document.title'",
-      "trif run --url x.com 'document.querySelectorAll(\"article\").length'",
-      "trif run 'const a = [...document.links].map(l => l.href); return a.slice(0, 20)'",
-      "trif run 'await (await fetch(\"/api/me\")).json()'",
+      "trif run 'page.title'",
+      "trif run 'page.findAll(\"article\").length'",
+      "trif run 'page.findAll(\"a\").slice(0, 20).map((a) => a.attr(\"href\"))'",
+      "trif run 'page.find(\"[data-testid=tweet]\").pageData(\"props\")'",
+      "trif run --page 'document.title'",
+      "trif run --page 'Object.keys(window).filter((k) => k.startsWith(\"__\"))'",
       'trif run -f probe.js',
-      "echo 'location.href' | trif run -",
+      "echo 'page.url' | trif run -",
     ],
   },
   reload: {

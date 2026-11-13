@@ -38,3 +38,25 @@ New text a person or an agent can see. None of it has been approved; the drafts 
   request's own fields**
 - an agent that's too old, at a run's start: the adapter's existing "is too old for TRIF" sentence, now shown
   there too.
+
+## `trif run` in the box (for agents)
+
+- a boxed run whose code uses the page's own names: **Cannot read properties of undefined (reading 'title')
+  (this ran in TRIF's box, where the page is `page` and `trif`, not `document` and `window`: BOXED.md has what
+  they offer. For the page's own world, `trif run --page`: that pauses the site's posting until the tab
+  reloads, and may ask the user first)**
+- a browser without the sandbox world: **Safari has no box for an agent's code here (TRIF's sandbox isn't
+  available): use `trif run --page`, which runs in the page's own world (document, window) and pauses the
+  site's posting until the tab reloads**
+- an extension older than the helper: **this browser's TRIF extension is from before `trif run` could use
+  TRIF's box (it updates by itself; in Chrome, reload it on chrome://extensions). Until then: `trif run
+  --page`, which runs in the page's own world (document, window) and pauses the site's posting until the tab
+  reloads**
+- the tab moved on: **the tab went to another page while the code ran, so what it returned is thrown away:
+  run it again**
+- a page with the sandbox from before an update: **this tab's page has TRIF's sandbox from before an update:
+  reload the tab (trif reload) and run it again**
+- `trif run --box --page`: **--page or --box, not both**
+- `trif help run`: the new text in helper/lib/help.js, and AGENTS.md's "It runs in one of two places".
+
+Nothing new in the panel: a boxed run shows no lock and asks no question.

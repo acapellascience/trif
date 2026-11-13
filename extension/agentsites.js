@@ -89,8 +89,11 @@ export function agentLevel(hostOrUrl, { sites = {}, sensitive = null } = {}) {
 
 // What each agent command needs on the site of the tab (or address) it works on. Not here: commands that
 // touch no page (status without a tab, mod files, switches), which work at every level.
+// (`run.box`: `trif run` in TRIF's box (background.js boxedRun): code that can read the page and change what
+// it shows, and can't send or act. It needs no asking where the site's level is still "ask": the question is
+// for code in the page's own world. Where the user said Look or Off, it's refused like any code.)
 export const COMMAND_NEEDS = {
-  run: 'run',
+  run: 'run', 'run.box': 'box',
   text: 'look', sweep: 'look', screenshot: 'look', requests: 'look', request: 'look', errors: 'look', logs: 'look', record: 'look',
   reload: 'look', navigate: 'look', open: 'look', close: 'look', status: 'look',
 };
@@ -108,7 +111,7 @@ export function agentCheck(cmd, hostOrUrl, settings) {
   const lv = agentLevel(hostOrUrl, settings);
   if (lv.level === 'run') return 'ok';
   if (lv.level === 'look') return need === 'look' ? 'ok' : `the user has set "Agent on this site" to Look for ${lv.site}: you can read the page and take screenshots there, but not run code (trif run). Work from what you can read, or ask the user to set it to Run code in TRIF's side panel`;
-  if (lv.level === 'ask') return need === 'look' ? 'ok' : 'ask';
+  if (lv.level === 'ask') return need === 'look' || need === 'box' ? 'ok' : 'ask';
   const why = lv.by === 'sensitive' ? ` (it's ${lv.why || 'on TRIF\'s list of sensitive sites'}, so it's off unless the user raises it)` : '';
   return `"Agent on this site" is Off for ${lv.site}${why}: you can't read, screenshot or run code on its tabs. You can still write mods for it (any that can do more than change the page wait for the user's OK, as usual); the user can change the setting in TRIF's side panel`;
 }

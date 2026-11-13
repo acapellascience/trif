@@ -195,7 +195,7 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif tabs` | Open tabs (id, url, title). |
 | `trif open <url>` / `trif navigate [TAB] <url>` | Open a new tab / load a URL in a tab. Wait for load. |
 | `trif close --tab <id>` | Close a tab you opened, when you're done with it (a side-panel run's are closed when it ends). |
-| `trif run [TAB] '<code>'` | Run JS in the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. |
+| `trif run [TAB] [--box \| --page] '<code>'` | Run JS on the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. In a side-panel chat it runs in TRIF's box unless you say `--page`; from a terminal, in the page's own world unless you say `--box` (below). |
 | `trif text [TAB]` | The page's visible text. |
 | `trif sweep [TAB] --selector <css> \| --color <colour> \| --text <regex>` | Every instance of a kind of thing: count, where (landmarks, menus, dialogs, fixed/sticky, shadow roots, frames), kinds with examples; for a colour also the stylesheet rules and CSS variables using it. `--scroll` loads lazy content first by scrolling the tab itself, which the user sees (refused on the tab they're looking at unless `--force`); `--json` lists each match. |
 | `trif screenshot [TAB] [--full] [--copy] [-o file.png]` | PNG of the tab, saved in your screenshots folder (`-o page.png` names it there); prints the path. Firefox captures any tab, showing or not. Chrome only the tab that's showing (TRIF never switches tabs); `--copy` loads the page again, with the user's cookies (signed in as them), in a window that appears briefly at the edge of the screen: not the tab's exact state, the user sees it, and loading the address again can act on it, so never on a sign-in, confirm or unsubscribe link (TRIF refuses addresses that look like one unless `--force`). `--full`: the whole page (in Chrome, with `--copy`). |
@@ -218,13 +218,28 @@ depend on each other's output with `&&` in one call (`trif text --tab 12 && trif
 '^Sponsored$'`). You're already in the workspace: no `cd`. Write files with the Write tool, not with
 `cat >`, heredocs or shell variables: those commands can't be checked before they run, so they're refused.
 
-`trif run` is REPL-like: a single expression just works (`document.title`); otherwise write a
-function body with `return`. `await` works. Return small, shaped results, not whole elements:
+`trif run` is REPL-like: a single expression just works (`page.title`); otherwise write a
+function body with `return`. `await` works. Return small, shaped results, not whole elements.
+
+It runs in one of two places:
+
+- **TRIF's box** (`--box`; what you get in a side-panel chat without a flag). The API a boxed mod has
+  (BOXED.md): `page.find`, `page.findAll`, an element's `.text`, `.attr()`, `.style()`, `.rect()`,
+  `.matches()`, `.children`, and so on; plus, in a run, what's typed in the page's fields (`el.value`) and
+  the page's own data behind an element (`el.pageData('props.post')`). It can read the page and change
+  what it shows; it can't send, click, type or navigate, so nothing is paused and the user isn't asked.
+  There's no `document` or `window` there (they read as undefined). **Use this for looking around: almost
+  everything you run is that.**
+- **The page's own world** (`--page`; what you get from a terminal without a flag): `document`, `window`,
+  the site's own code and state, its mods' hooks. In a side-panel chat this pauses the whole site's posting,
+  in every tab, until the tab reloads, and may ask the user first ("Side-panel runs", below): keep it for
+  what only the page's own code can tell you.
 
 ```sh
-trif run --url x.com 'document.querySelectorAll("[data-testid=cellInnerDiv]").length'
-trif run --url x.com '[...document.querySelectorAll("[data-testid]")].map(e => e.dataset.testid).filter((v, i, a) => a.indexOf(v) === i)'
-trif run --url news.ycombinator.com 'const t = document.querySelector("#hnmain"); return { width: t?.getAttribute("width"), bg: getComputedStyle(document.body).backgroundColor }'
+trif run --url x.com 'page.findAll("[data-testid=cellInnerDiv]").length'
+trif run --url x.com '[...new Set(page.findAll("[data-testid]").map((e) => e.attr("data-testid")))]'
+trif run --url news.ycombinator.com 'const t = page.find("#hnmain"); return { width: t?.attr("width"), bg: page.body.style("background-color") }'
+trif run --page --url x.com 'String(window.fetch).slice(0, 80)'
 ```
 
 ## Sites TRIF is on for
@@ -254,18 +269,18 @@ is limited to it: its folder is the host's, and google.com's folder and tabs are
 
 On a site TRIF is on for, the user also chooses how far you may reach into its tabs ("Agent on this site",
 on the side panel's line over the message box, and in Settings). It applies to you in a terminal too.
-- **Run code**: everything, as described here (`trif run` locks the tab in a side-panel run).
+- **Run code**: everything, as described here (`trif run --page` locks the site in a side-panel run).
 - **Look**: `trif text`, `trif screenshot`, `trif sweep`, `trif requests` and the rest that read, but not
-  `trif run`.
+  `trif run`, in the box or out of it.
 - **Off**: nothing on its tabs (`trif tabs` lists them without their address or title). TRIF starts email,
   banking and payments, password managers, Discord, WhatsApp Web and AI chat sites at Off. At Off you may
   only make **style mods** (`--style`) and **boxed mods** (`--boxed`) for the site, from what the user
   describes: a free mod you write there is held, refused (`trif status` says why). If what they ask needs a
   free mod, say so and stop: the user can change "Agent on this site" or add the mod themselves. Don't
   write one anyway.
-- **Ask** (no choice yet): reading works; the first `trif run` there opens a question in the side panel
-  (Just this once / Always on this site / Not here) and waits up to 25 seconds for the answer. With no side
-  panel open, it fails at once, saying so.
+- **Ask** (no choice yet): reading works, and so does `trif run` in the box; the first `trif run --page`
+  there opens a question in the side panel (Just this once / Always on this site / Not here) and waits up to
+  25 seconds for the answer. With no side panel open, it fails at once, saying so.
 A refused command says the level and what still works. Don't retry it or look for a way round: work from
 what the level allows (read the page, or write the mod and let the user check it), and tell the user, e.g.
 "Agent on this site is Look for bank.com, so I couldn't test it there; raise it to Run code in the side
@@ -363,18 +378,21 @@ logged in to:
   (`dispatchEvent(new CustomEvent('my-mod-…'))`) aren't held. When a mod is held, tell the user in
   plain words what it can do and why it needs to; don't try to get around a hold (rewriting code so
   TRIF can't read it gets it held as code TRIF can't check).
-- **A tab you ran code in is locked.** Before your `trif run` code runs in a tab, TRIF has the browser
+- **`trif run` is in the box; `trif run --page` locks the site.** In the box your code can't send or act,
+  so nothing changes for the user while you look around. Code in the page's own world could, so before
+  your `trif run --page` code runs in a tab, TRIF has the browser
   block every request from that tab that changes something (POST, PUT, PATCH, DELETE: `fetch`, XHR,
   beacons, form posts), every WebSocket, and going to or fetching from any other site (its images,
   scripts and styles still load), until the page is reloaded or replaced (`trif reload` or
-  `trif navigate`, or the user's reload). Reading the page, clicking your mod's own buttons, key
-  presses and test events all work. So `trif run` can never post, send or save anything, and anything
+  `trif navigate`, or the user's reload); the site's other tabs can't post meanwhile either. Reading the
+  page, clicking your mod's own buttons, key
+  presses and test events all work. So `trif run --page` can never post, send or save anything, and anything
   the site's own scripts send in that page meanwhile fails too (blocked by the client): when a test
   needs the site to work normally (loading more posts with a POST, say), `trif reload` first, then
-  test without `trif run` code in between, or tell the user. The side panel shows the user that the
-  tab is locked.
+  test without `trif run --page` code in between, or tell the user. The side panel shows the user that the
+  tab is locked. So: the box unless you need the page's own code, and say so when you do.
 - **Test the saved mod, not a copy.** Use `trif run` to read and measure the page, not to try a mod out
-  by injecting its CSS or code: that locks the tab, and what you see isn't what the user gets. Save the mod,
+  by injecting its CSS or code: what you see isn't what the user gets (and with `--page` it locks the site). Save the mod,
   `trif reload --tab <id>`, then check. Reloading the tab the user is asking about is expected: don't skip
   it to spare them. Hold off only when the page has something they'd lose (text they were typing, a form
   half filled in), and then say so. Don't put notes about the lock or "it applies when you reload" in
@@ -473,9 +491,10 @@ broken ones, and testing. Read BOXED.md for a boxed mod. Then write the file. Pi
 - Re-run the sweeps from "Finish the job" on each page type and state, and compare with the counts
   from before.
 - Check the effect with `trif run`: the hidden thing's count is 0, the thing that should stay is still
-  there, your element exists, your hook is installed (`String(window.fetch).includes('...')`).
-- Exercise the page: scroll (`trif run 'scrollTo(0, document.body.scrollHeight)'`), navigate within
-  the app, reload. For feeds, make sure loading more still works.
+  there, your element exists (`page.find('#…')`); a free mod's hook is installed
+  (`trif run --page 'String(window.fetch).includes("...")'`: the page's own world, which locks the site).
+- Exercise the page: scroll (`trif sweep --scroll`, or `trif run --page 'scrollTo(0, document.body.scrollHeight)'`),
+  navigate within the app, reload. For feeds, make sure loading more still works.
 - Screenshot to check for gaps, flashes and broken layout (`--full` for the whole page). Check with
   sweeps, `text` and `run` first: they work on any tab. In Chrome, use `--copy` for a tab that isn't
   showing only when a visual check is truly needed (it flashes a window at the user), and say so in your

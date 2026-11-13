@@ -4715,7 +4715,7 @@ const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
 const own = require('path').join(process.cwd(), 'bin', 'trif'); // (the workspace's, as the run's cwd is the workspace)
 const trif = fs.existsSync(own) ? own : 'trif';
 const run = (code) => {
-  const r = spawnSync(trif, ['run', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' });
+  const r = spawnSync(trif, ['run', '--page', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' }); // (the page's own world: what the lock is for; a chat's trif run is in TRIF's box otherwise)
   if (r.error) return 'trif failed: ' + r.error.message;
   if (r.status !== 0) return 'trif failed: ' + String(r.stderr || r.stdout || '').trim();
   try { return JSON.parse(r.stdout); } catch { return r.stdout.trim(); } // (a string result prints as it is)
@@ -4890,7 +4890,7 @@ const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile,
 const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
 const own = require('path').join(process.cwd(), 'bin', 'trif');
 const run = (code) => {
-  const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' });
+  const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--page', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' }); // (the page's own world: a chat's trif run is in TRIF's box otherwise)
   return r.status === 0 ? r.stdout.trim() : 'trif failed: ' + String(r.stderr || r.stdout).trim();
 };
 const out = { tab, ran: run('"locked"'), saves: {} };

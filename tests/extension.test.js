@@ -874,7 +874,7 @@ const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
 // otherwise, as for someone who installed TRIF when it was required. `permissions: false` leaves the API out.
 // `sidePanel`: overrides of the chrome.sidePanel mock (whose open() resolves and shows nothing, as in Arc:
 // a test says a side panel loaded by emitting its panel.window), or false for none.
-async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true, sidePanel = {} } = {}) {
+async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true, sidePanel = {}, userScripts = {} } = {}) {
   // (perSiteOnly: past 0.3's one-time step that gives up every site's access, background.js dropEverySite: the
   // fake browser gives every site by default, as the user's own choice in its settings; the tests of that step
   // leave it out)
@@ -929,7 +929,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
         async remove(keys) { for (const k of [].concat(keys)) delete store[k]; },
       },
     },
-    userScripts: mockUserScripts(),
+    userScripts: Object.assign(mockUserScripts(), userScripts), // (extras: configureWorld, execute, for the sandbox world)
     tabs: {
       query: async () => structuredClone(tabs), create: async (o) => { created.push(o); return { id: 99, ...o }; },
       update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated,
@@ -3377,7 +3377,7 @@ test('background: hello says it takes mods in parts; a set in parts is applied o
   try {
     await settle(10);
     const hello = bg.native.sent.find((m) => m.type === 'hello');
-    assert.deepStrictEqual(hello.features, ['modsParts', 'modsSame']);
+    assert.deepStrictEqual(hello.features, ['modsParts', 'modsSame', 'boxRun']);
     const mods = [mod('x.com/a', { code: 'a()'.repeat(50) }), mod('x.com/b', { hash: 'hb' }), mod('y.com/c', { hash: 'hc' })];
     const parts = partsOf({ type: 'mods', mods, sitesOn: [] }, 's1', 100);
     for (const part of parts.slice(0, -1)) bg.native.emit(part);
@@ -3757,4 +3757,75 @@ test('background: a side-panel run\'s navigate and open keep the tab\'s page loa
     r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore' });
     assert.strictEqual(r.ok, true);
   } finally { bg.restore(); }
+});
+
+test('background: trif run in the box needs no lock and no asking; the page\'s own world still does; Look and Off refuse both', async () => {
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X', status: 'complete' }];
+  // TRIF's sandbox world, as the browser would run it: the runtime is there once its script has been put in
+  const world = { runtime: false, injected: 0, evaluated: [], answer: JSON.stringify({ ok: true, json: '3' }) };
+  const execute = async ({ world: w, worldId, js }) => {
+    if (w === 'MAIN') return [{ result: JSON.stringify({ ok: true, json: '"in the page"' }) }];
+    assert.strictEqual(worldId, 'trif-sandbox');
+    if (js.some((x) => x.file)) { world.runtime = true; world.injected++; return [{}]; }
+    const code = js[0].code;
+    if (/typeof globalThis\.__trifSandbox !== "object"/.test(code)) return [{ result: world.runtime ? 'ready' : 'none' }];
+    if (code.startsWith('globalThis.__trifSandbox.evaluate(')) { world.evaluated.push(code); return [{ result: world.answer }]; }
+    return [{ result: null }];
+  };
+  const scripting = { executeScript: async ({ func }) => [{ result: func.name === 'pageGuard' ? null : true }] };
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'] }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+  try {
+    const rules = new Map();
+    chrome.declarativeNetRequest = {
+      updateSessionRules: async ({ addRules = [], removeRuleIds = [] }) => { for (const id of removeRuleIds) rules.delete(id); for (const r of addRules) rules.set(r.id, structuredClone(r)); },
+      getSessionRules: async () => [...rules.values()],
+    };
+    // in the box: the answer, nothing locked, nobody asked (the site's level is still "ask", no panel is open)
+    let r = await bg.native.call('run', { tab: 5, code: 'page.findAll("article").length', expression: true, world: 'box', scope: 'x.com' });
+    assert.deepStrictEqual([r.ok, r.result], [true, { value: 3, world: 'box' }]);
+    assert.strictEqual(rules.size, 0, 'no lock');
+    assert.strictEqual(world.injected, 1, 'the runtime was put there');
+    assert.match(world.evaluated[0], /"page\.findAll\(\\"article\\"\)\.length", true, \{"powers":\["page-data","read-drafts"\],"args":\{\}\}\)$/);
+    r = await bg.native.call('run', { tab: 5, code: 'page.title', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(world.injected, 1, 'once per page');
+    // code written for the page's world: the error says where it ran and what to use
+    world.answer = JSON.stringify({ ok: false, error: 'document is not defined\n    at trif-sandbox://run/x.js:1:1' });
+    r = await bg.native.call('run', { tab: 5, code: 'document.title', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /^document is not defined \(this ran in TRIF's box, where the page is `page` and `trif`.*`trif run --page`/);
+    // (an error of the box's own: as it is)
+    world.answer = JSON.stringify({ ok: false, error: 'TRIF sandbox: clicking for the user needs the click power' });
+    r = await bg.native.call('run', { tab: 5, code: 'document; page.find("a").click()', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(r.error, 'TRIF sandbox: clicking for the user needs the click power');
+    world.answer = JSON.stringify({ ok: true, json: '3' });
+    // the page's own world, from a chat: asks the user first (no panel here to ask), as before
+    r = await bg.native.call('run', { tab: 5, code: 'document.title', expression: true, world: 'page', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /needs the user's OK first/);
+    assert.strictEqual(rules.size, 0);
+  } finally { bg.restore(); }
+  // an older helper (no `world`), on a site set to Run code: the page's own world, as it always was
+  const b1 = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': 'run' } }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+  try {
+    const r = await b1.native.call('run', { tab: 5, code: 'document.title', expression: true });
+    assert.deepStrictEqual([r.ok, r.result], [true, { value: 'in the page' }]);
+  } finally { b1.restore(); }
+  // where the user said Look, or the site is Off: no code, boxed or not
+  for (const level of ['look', 'off']) {
+    const b2 = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': level } }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+    try {
+      const before = world.evaluated.length;
+      const r = await b2.native.call('run', { tab: 5, code: 'page.title', expression: true, world: 'box', scope: 'x.com' });
+      assert.strictEqual(r.ok, false, level);
+      assert.match(r.error, level === 'look' ? /set "Agent on this site" to Look/ : /"Agent on this site" is Off/);
+      assert.strictEqual(world.evaluated.length, before);
+    } finally { b2.restore(); }
+  }
+  // a browser without TRIF's sandbox world: said, with what to use
+  const b3 = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': 'run' } }, tabs, scripting });
+  try {
+    const r = await b3.native.call('run', { tab: 5, code: 'page.title', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /has no box for an agent's code here .*trif run --page/);
+  } finally { b3.restore(); }
 });

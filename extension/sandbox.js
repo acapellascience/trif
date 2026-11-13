@@ -37,6 +37,11 @@ export const SANDBOX_GLOBALS = ['page', 'trif', 'console', 'setTimeout', 'clearT
 export const SANDBOX_EXTRA_GLOBALS = ['Float32Array', 'Float64Array', 'URL', 'URLSearchParams', 'Intl', 'TextEncoder', 'TextDecoder', 'structuredClone', 'atob', 'btoa', 'performance'];
 // The most a mod's settings may take on one site, as JSON, all its keys together (background.js keeps them);
 // and all the boxed mods' settings on one site together.
+// What a one-off boxed run (`trif run` from a chat: background.js boxedRun) may read beyond what the page
+// shows: the page's data behind its elements, and what's typed in its fields (never a password or card
+// field). Reads only: a boxed run can't send or act, and its agent has no network, so there's nowhere for a
+// read to go but the agent's own chat. They last as long as the run does.
+export const BOX_RUN_POWERS = ['page-data', 'read-drafts'];
 export const SETTINGS_MAX = 1024 * 1024;
 export const SETTINGS_SITE_MAX = 8 * SETTINGS_MAX;
 
@@ -2655,6 +2660,87 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
 
   // ---- running a mod
   const SANDBOX_GLOBALS_PAGE = ['page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame'];
+  // (a compartment for a mod's code, or a run's: the language, TRIF's API for that mod, nothing else)
+  const compartmentFor = (api) => {
+    const c = new G.Compartment({ __options__: true, globals: { ...EXTRA, ...api.endowments, Math, Date } });
+    // (no code from strings inside the compartment either, and none of SES's own tools)
+    for (const n of ['eval', 'Function', 'Compartment', 'lockdown', 'harden', 'assert']) {
+      // (set to undefined, not deleted: SES's evaluator needs the property there)
+      try { Object.defineProperty(c.globalThis, n, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch { /* not there */ }
+    }
+    return c;
+  };
+  // ---- a one-off run: an agent's code from `trif run`, in the box (background.js boxedRun). The same
+  // compartment and API as a boxed mod's, so it can read the page and change what it shows, and can't send,
+  // click, type or navigate: which is why it needs no tab lock, where the same code in the page's own world
+  // does. What it returns goes back as plain data (a stand-in as a short description of its element). Its
+  // read powers (BOX_RUN_POWERS) end with the run: what it leaves behind (a listener, a timer) has none, and
+  // the page's other boxed mods, which the page-wide rules stop beside a read, go on once it's done.
+  const runResults = new Map(); // run id -> its answer, kept a minute for a browser whose execute() didn't wait
+  const OUT_MAX = 2 * 1024 * 1024;
+  const describe = (n) => { let s = `<${n.localName}`; try { if (n.id) s += `#${n.id}`; const c = String(n.getAttribute('class') || '').trim(); if (c) s += `.${c.split(/\s+/).slice(0, 3).join('.')}`; } catch { /* as it is */ } return `${s}>`; };
+  const plainOut = (v, depth, seen) => {
+    if (v === null || v === undefined) return null;
+    const t = typeof v;
+    if (t === 'string') return v.length > 200000 ? `${v.slice(0, 200000)}…` : v;
+    if (t === 'number') return Number.isFinite(v) ? v : String(v);
+    if (t === 'boolean') return v;
+    if (t === 'bigint') return `${v}n`;
+    if (t === 'function') return '[function]';
+    if (t === 'symbol') return String(v);
+    if (nodes.has(v)) return describe(nodes.get(v));
+    if (depth > 8) return '[…]';
+    if (seen.has(v)) return '[circular]';
+    seen.add(v);
+    try {
+      if (Array.isArray(v)) return v.slice(0, 5000).map((x) => plainOut(x, depth + 1, seen));
+      if (v instanceof Map) return [...v].slice(0, 5000).map(([k, x]) => [plainOut(k, depth + 1, seen), plainOut(x, depth + 1, seen)]);
+      if (v instanceof Set) return [...v].slice(0, 5000).map((x) => plainOut(x, depth + 1, seen));
+      if (v instanceof Error) return `${v.name}: ${v.message}`;
+      if (v instanceof Date) return Number.isNaN(v.getTime()) ? 'Invalid Date' : v.toISOString();
+      if (ArrayBuffer.isView(v) && !(v instanceof DataView)) return Array.from(v).slice(0, 5000);
+      const out = {};
+      for (const k of Object.keys(v).slice(0, 1000)) { let x; try { x = v[k]; } catch { continue; } out[k] = plainOut(x, depth + 1, seen); }
+      return out;
+    } finally { seen.delete(v); }
+  };
+  const endRun = (api) => {
+    api.powers.clear(); api.combo.clear();
+    apis.delete(api.mod);
+    inPlay.clear();
+    for (const o of apis.values()) for (const p of o.combo) inPlay.add(p);
+  };
+  const evaluate = (runId, source, expression, powers) => {
+    const key = String(runId);
+    const api = apiFor(`run/${key}`, powers);
+    const answer = (env) => {
+      endRun(api);
+      let text;
+      try { text = JSON.stringify(env); } catch { text = JSON.stringify({ ok: false, error: 'the result couldn\'t be written out' }); }
+      runResults.set(key, text);
+      setTimeout(() => runResults.delete(key), 60000);
+      return text;
+    };
+    let p;
+    const prev = current;
+    current = api;
+    try {
+      if (!SANDBOX) throw new TypeError('TRIF sandbox: one-off runs are for TRIF\'s own world');
+      const body = expression ? `return (${source}\n);` : `${source}\n`;
+      p = compartmentFor(api).evaluate(`(async function () { "use strict"; ${body}})();\n//# sourceURL=trif-sandbox://${scriptName(api.mod)}.js`);
+    } catch (e) { p = Promise.reject(e); } finally { current = prev; }
+    return Promise.resolve(p).then((v) => {
+      const json = JSON.stringify(plainOut(v, 0, new Set()));
+      return json.length > OUT_MAX ? { ok: false, error: `the result is over ${OUT_MAX / 1024 / 1024} MB: return less (count, slice, or pick fields)` } : { ok: true, json };
+    }, (e) => {
+      const message = e && typeof e === 'object' && 'message' in e ? String(e.message) : String(e);
+      let stack = '';
+      try { stack = e && typeof e === 'object' ? String(stackOf(e) || '') : ''; } catch { stack = ''; }
+      // (where in the run's own code: the frames of its script, not SES's or TRIF's)
+      const own = stack.split('\n').filter((l) => l.includes(`trif-sandbox://${scriptName(api.mod)}.js`)).map((l) => l.replace(`trif-sandbox://${scriptName(api.mod)}.js`, 'run')).slice(0, 10);
+      return { ok: false, error: `${message}${own.length ? `\n${own.join('\n')}` : ''}`.slice(0, 8000) };
+    }).then(answer);
+  };
   const run = (modId, source, powers) => {
     const id = String(modId);
     const api = apiFor(id, powers);
@@ -2662,12 +2748,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     current = api;
     try {
       if (SANDBOX) {
-        const c = new G.Compartment({ __options__: true, globals: { ...EXTRA, ...api.endowments, Math, Date } });
-        // (no code from strings inside the compartment either, and none of SES's own tools)
-        for (const n of ['eval', 'Function', 'Compartment', 'lockdown', 'harden', 'assert']) {
-          // (set to undefined, not deleted: SES's evaluator needs the property there)
-          try { Object.defineProperty(c.globalThis, n, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch { /* not there */ }
-        }
+        const c = compartmentFor(api);
         // (an async function: a top-level return ends the mod, and await works at the top; what it throws
         // after an await is caught too)
         // (the mod's first line on the first line, so `trif errors` gives the file's own line numbers)
@@ -2697,7 +2778,9 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       if (m) { let id = null; for (const k of apis.keys()) if (scriptName(k) === m[1]) { id = k; break; } if (id) report(id, r); }
     });
   } catch { /* none */ }
-  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, watched: store.watched, stats }), configurable: false, writable: false });
+  // (evaluate, result: a one-off run and its answer, for TRIF's background; this world's global isn't a mod's to reach)
+  const result = (runId) => { const k = String(runId); const v = runResults.get(k); if (v === undefined) return null; runResults.delete(k); return v; };
+  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, evaluate, result, errors: store.errors, logs: store.logs, watched: store.watched, stats }), configurable: false, writable: false });
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
   if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }

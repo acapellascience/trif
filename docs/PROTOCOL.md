@@ -206,7 +206,7 @@ memory is the footprint of all the browser's processes; Firefox's baseline is ab
 
 | message | meaning |
 |---|---|
-| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code). No `features` means 0.2.4 or older. |
+| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code), `boxRun` (`run` takes `world: "box"`). No `features` means 0.2.4 or older. |
 | `{type:"modsResend", reason}` | A set in parts didn't arrive whole, or a mod sent as `same` wasn't there (`reason` says how). The helper logs it and sends the set again, every mod whole, once per set; if that fails too, the next change or reconnect sends it again (whole). |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}], splits:[hosts]}` | After applying a `mods` message. `splits`: the sensitive sites of their own it knows of (mail.google.com), each a site apart in a site's boxed mods together (helper/lib/sitecombos.js). |
@@ -274,7 +274,7 @@ Without one, the target is the active tab of the last-focused normal window.
 |---|---|---|
 | `status` | optional tab selector | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below); with a tab selector also `page: {tab, url, mods:[{id, name, runAt}]}`, the mods that run on that tab's page. A mod with new errors (extension/modhealth.js) has `broken: [{message, line, count, quiet?}]` (`quiet`: "may be broken", nothing it looks for is on the page any more); `trif status` and `trif mods` say so |
 | `tabs` | – | `[{id, windowId, active, url, title}]` (normal windows only) |
-| `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
+| `run` | `code`, `expression: bool`, `timeout` (ms, default 10000), `world` (`"box"` or `"page"`; none: the page) + tab selector | `{value}` (and `world: "box"` when it ran there): the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |
 | `navigate` | `to` (URL) + tab selector | `{url}` after load completes. From a side-panel run: the tab's page loads are kept to the run's site while it loads (see "Run scope", "Navigation") |
 | `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load. From a side-panel run: as `navigate`, from an empty tab |
@@ -504,7 +504,20 @@ the user's `modOrder`.
 
 ### `run` semantics
 
-- The code runs in the page's MAIN world via `chrome.userScripts.execute` (`world:"MAIN"`,
+- **Two places.** `world: "page"` (or none: an older CLI): the page's MAIN world, below. `world: "box"`:
+  TRIF's sandbox world (extension/sandbox.js `evaluate`, background.js `boxedRun`): a compartment of its own
+  with the API a boxed mod has (`page`, `trif`) and two reads (`BOX_RUN_POWERS`: `page-data`,
+  `read-drafts`), which end when the run does. Code there can read the page and change what it shows, and
+  can't send, click, type or navigate, so **a boxed run locks nothing**, and on a site whose "Agent on this
+  site" is still Ask it goes ahead without asking (`agentsites.js` `run.box`; at Look and Off it's refused
+  like any code). The runtime is put into the tab's sandbox world if no boxed mod brought it. The answer is
+  plain data: a stand-in comes back as `<tag#id.class>`; capped at 2 MB. The document is checked from inside
+  before and after (`pageGuard`), as for `text`. A browser without the world (Safari) refuses `world: "box"`,
+  naming `--page`.
+  - The CLI picks: in a side-panel run (`TRIF_RUN_TOKEN`), the box unless `--page`; from a terminal, the
+    page unless `--box`. The helper refuses `world: "box"` for an extension whose hello has no `boxRun`
+    feature, so box code never runs in the page's world by accident.
+- In the page: the code runs in the page's MAIN world via `chrome.userScripts.execute` (`world:"MAIN"`,
   `injectImmediately:true`), which isn't subject to the page's CSP.
 - The CLI decides `expression`: it tries `new Function("return (" + code + "\n)")` in Node; if that
   parses, `expression:true` (REPL-style: `document.title` just works), else the code is a function body

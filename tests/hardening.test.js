@@ -359,3 +359,53 @@ test('Tim\'s mods: a mod that says it is one but isn\'t a version TRIF shipped i
   assert.deepEqual(pre.changedShipped(examplesDir(), [asMod('// ==WebMod==\n// @source webmods\n// @version 9\n// ==/WebMod==\n1;', 'x.com/not-tims')]), { 'x.com/not-tims': true });
   assert.deepEqual(pre.changedShipped(examplesDir(), [asMod('// a mod of the user\'s own\n1;', 'x.com/mine')]), {});
 });
+
+// ---- trif run in the box ----------------------------------------------------------------------------------
+
+test('a boxed run: its answer as plain data, its reads for as long as it runs, and no power to act', async () => {
+  const p = await sandboxPage({ body: [{ tag: 'button', attrs: { id: 'b', class: 'one two' } }, { tag: 'input', attrs: { id: 'f' } }] });
+  p.el('f').type = 'text'; p.el('f').value = 'a draft';
+  const grant = { powers: ['page-data', 'read-drafts'], args: {} };
+  const ev = async (id, code, expression = true) => JSON.parse(await p.G.__trifSandbox.evaluate(id, code, expression, grant));
+  const value = (env) => { assert.equal(env.ok, true, env.error); return JSON.parse(env.json); };
+  // an expression, a function body, an await; elements come back as what they are, in words
+  assert.equal(value(await ev('r1', '1 + 2')), 3);
+  assert.deepEqual(value(await ev('r2', 'const a = await Promise.resolve([1, "two"]); return { a, el: page.find("#b"), none: page.find("#nope"), f: () => 1, big: 10n }', false)),
+    { a: [1, 'two'], el: '<button#b.one.two>', none: null, f: '[function]', big: '10n' });
+  // what's typed in a field: read (read-drafts), for as long as the run runs
+  assert.equal(value(await ev('r3', 'page.find("#f").value')), 'a draft');
+  // it can't act: no click, no writing a draft, whatever it asks for
+  for (const code of ['page.find("#b").click()', 'page.find("#f").setValue("x")', 'trif.signal("app:go")', 'trif.goTo("/x")']) {
+    const env = await ev('r4', code);
+    assert.equal(env.ok, false, code);
+    assert.match(env.error, /needs the [\w-]+ power/, code);
+  }
+  assert.equal(p.el('b').clicks, 0);
+  // an error comes back as text; the answer can be fetched once more by its id (a browser that didn't wait)
+  const bad = await ev('r5', 'nope.nothing');
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /nope is not defined/);
+  assert.match(p.G.__trifSandbox.result('r5'), /nope is not defined/);
+  assert.equal(p.G.__trifSandbox.result('r5'), null, 'once');
+  // its reads end with it: a listener it left hears no drafts, and the page's other boxed mods aren't held up
+  // by a read that's over (the page-wide rules stop a mod's draft writes beside another's read)
+  await ev('r6', 'setTimeout(() => { try { trif.log(String(page.find("#f").value)); } catch (e) { trif.log(String(e.message)); } }, 0); return 1', false);
+  await p.tick();
+  assert.match([...p.G.__trifSandbox.logs].pop().args[0], /needs the read-drafts power/);
+  p.G.HTMLInputElement = function HTMLInputElement() {};
+  Object.defineProperty(p.G.HTMLInputElement.prototype, 'value', { set(v) { this._v = v; }, get() { return this._v; } });
+  p.run('x.com/writer', 'try { page.find("#f").setValue("typed for the user"); trif.log("wrote"); } catch (e) { trif.log(String(e.message)); }', { powers: ['write-drafts'] });
+  assert.equal([...p.G.__trifSandbox.logs].pop().args[0], 'wrote');
+});
+
+test('trif run: the box in a chat, the page\'s own world from a terminal, and each by its flag', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'helper', 'cli.js'), 'utf8');
+  // (the rule itself, as cli.js has it: tests/cli.test.js runs the command against a stand-in extension)
+  const m = /const world = (.+);\n/.exec(src);
+  assert.ok(m, 'cli.js picks a world');
+  const pick = (opts, inRun) => new Function('ctx', 'envVar', `return ${m[1]}`)({ opts }, () => (inRun ? 'token' : ''));
+  assert.equal(pick({}, true), 'box');
+  assert.equal(pick({}, false), 'page');
+  assert.equal(pick({ '--page': true }, true), 'page');
+  assert.equal(pick({ '--box': true }, false), 'box');
+});

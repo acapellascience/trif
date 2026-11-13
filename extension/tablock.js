@@ -508,6 +508,7 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     await ready;
     let l = locks.get(tabId);
     if (l && l.kind === 'site') { locks.delete(tabId); l = null; } // (agent code there now: a lock of its own)
+    const fresh = !l;
     if (!l) {
       const found = parent != null ? (locks.get(parent)?.domains || []) : await inIsolated(tabId, loadedDomains).catch(() => []);
       const domains = Array.isArray(found) ? found : [];
@@ -525,7 +526,27 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     await save();
     await showIcon(tabId, true);
     changed(tabId);
+    if (fresh && parent == null) await lockOpener(tabId, site);
     return l;
+  }
+
+  // The tab that opened this one, when it's on the same site: this tab's code can reach it through
+  // window.opener (the same origin) and run there. A tab the site's rules cover (kind 'site') is let go
+  // when the site unlocks, without a new page, so code that moved into it would carry on unlocked. So the
+  // opener is locked as a tab with agent code of its own: the tab's full rules, until it shows a new
+  // document (and its own opener, in turn, through lock). An opener that can't be locked (a tab the browser
+  // has discarded has no page to reach, or to mark) is logged, and the run goes on.
+  async function lockOpener(tabId, site) {
+    try {
+      const t = await chrome.tabs.get(tabId);
+      if (!t || !Number.isInteger(t.openerTabId)) return;
+      const o = await chrome.tabs.get(t.openerTabId);
+      if (!o || !Number.isInteger(o.id) || !inScope(hostOf(o.url || o.pendingUrl || ''), site)) return;
+      const have = locks.get(o.id);
+      if (have && have.kind !== 'site') return;
+      await lock(o.id, site, null, o.url || '');
+      log(`locked tab ${o.id} too: it opened tab ${tabId}, whose code can reach it`);
+    } catch (e) { log(`the tab that opened tab ${tabId} wasn't locked: ${e?.message ?? e}`); }
   }
 
   async function unlock(tabId, why) {

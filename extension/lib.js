@@ -383,7 +383,8 @@ export function modsStoragePlan(mods, stored) {
  * as {type:"modsPart"} messages (ModsParts); 'modsSame' takes a mod it already has without its code
  * (fillSameMods).
  */
-export const FEATURES = ['modsParts', 'modsSame'];
+// (`boxRun`: `run` takes `world: 'box'`, the agent's code in TRIF's sandbox world: background.js boxedRun)
+export const FEATURES = ['modsParts', 'modsSame', 'boxRun'];
 
 /**
  * A mods message's mods with the code put back in those sent without it (`same: true`: the helper sent

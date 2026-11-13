@@ -34,9 +34,18 @@ extension/agentsites.js, which the user can edit in Settings) get three more wal
   nothing from TRIF runs there or reads it until the user unblocks it. (An update asks first about a host
   the user's mods already reach: keep TRIF on there, with its own copies of those mods, or block it.)
 
-## Agent code in a tab: the tab is locked (0.3)
+## Agent code in a tab: in the box, or the tab is locked (0.3)
 
-`trif run` runs the agent's JavaScript in the page, logged in. Before a side-panel run's code runs in a
+Most of what an agent runs on a page is looking: count these, read that element's text or style. So from a
+side-panel chat `trif run` runs in **TRIF's box** unless the agent says `--page`: the sandbox world boxed mods
+run in, a compartment with their API and two reads (the page's data behind an element, what's typed in its
+fields; never a password or card field), for as long as the run lasts. There the code can't send, click,
+type or navigate, so nothing is locked, the site keeps working in every tab, and the user isn't asked first.
+What it can do is what a boxed mod with no powers can: read what the page shows and change what it shows
+(so the clickjacking gap of the safe tiers applies to it too). The page's own world is still there, for
+what needs the site's own code, with everything below.
+
+`trif run --page` runs the agent's JavaScript in the page, logged in. Before a side-panel run's code runs in a
 tab, TRIF locks the tab (extension/tablock.js): declarativeNetRequest session rules, applied by the
 browser to that tab, block every request that changes something (POST, PUT, PATCH, DELETE: fetch, XHR,
 sendBeacon, form posts, of any kind), every WebSocket, and anything that could carry what the page shows
@@ -109,7 +118,13 @@ document: a reload or a real navigation.
   reloads it (or, when the tab was sent to a blocked page, takes it back to the page it was locked on),
   and TRIF's toolbar icon for that tab shows the robot with a pause sign for eyes until it unlocks.
 
-Not covered: the tab that opened the locked one when it kept a `window.opener` link; a cross-site
+- **The tab that opened it.** A locked tab's code can reach the tab that opened it through
+  `window.opener` when both are the site's, and run there. A tab the site's rules cover is let go when the
+  site unlocks, without a new page, so code that moved there would carry on unlocked. So the opener, on the
+  same site, is locked as a tab with agent code too: the tab's full rules, until it shows a new document
+  (and its own opener in turn). A window found by a name the site gave it isn't covered.
+
+Not covered: a window of the site's that the code finds by name; a cross-site
 subresource that matches a site the page already used (its address can still carry data there); what
 TL-6 above leaves open; the contents of IndexedDB. A page restored from the back/forward cache could run
 for a few milliseconds before it's locked again. The terminal's `trif run` (the user's own agent, which
@@ -208,6 +223,9 @@ check's allowed cases in a real Chromium.
   Claude Code runs can't write `allowed.json`, `seen.json` or an instructions file under the mods folder; the
   key proxy refuses dot segments; report lines are scrubbed before they're cut; the Safari bridge's log lines
   are one line each.
+- **Code in the box.** A chat's `trif run` runs in TRIF's box unless it says `--page` (above), so the lock,
+  and the question before it, are for the runs that ask for the page's own world. The tab that opened a
+  locked tab, on the same site, is locked with it.
 - **Narrower powers.** `write-drafts` doesn't write while the user is pressing a button or Enter (a draft
   swapped as it's sent, unseen). `@click` words in quotes are what the thing has to say, checked at each
   click against the page's own text.
@@ -224,7 +242,7 @@ Still open, known, and why:
   group would outlive it. Not seen to happen in either agent's sandbox, and not ruled out.
 - **Other tabs of a locked site** still load from other sites and follow links out (TL-4's cost was the
   user's own posting; this one would be their own links). Agent code reaches such a tab only through a window
-  reference the page gave it.
+  reference: the opener is now locked in full; a window found by name isn't.
 - **Same-site GETs.** A request with no body to the site itself passes the lock, so a site that changes
   something on a GET is not covered. "Can't post or send as you" means the methods above.
 - **The update feed has no expiry**, and the release key is written to the keychain through an argument

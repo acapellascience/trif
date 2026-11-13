@@ -91,6 +91,23 @@ test('the sandbox runtime under real SES, in Chromium: mods run, stand-ins are t
     assert.equal(await page.evaluate(() => globalThis.__ran), undefined);
     assert.deepEqual(await logsOf('x.com/odd globalThis.__ran = 1;({})'), ['ran as a mod']);
 
+    // a one-off run (trif run in the box): plain data back, the page's fields readable, nothing it can act with
+    const ev = async (id, code, expression = true) => JSON.parse(await page.evaluate(([i, c, e, g]) => globalThis.__trifSandbox.evaluate(i, c, e, g), [id, code, expression, { powers: sb.BOX_RUN_POWERS, args: {} }]));
+    await page.fill('#draft', 'typed by the user');
+    let env = await ev('r1', 'page.findAll("button").map((b) => b.text.trim())');
+    assert.deepEqual(JSON.parse(env.json), ['Show more replies', 'Show more']);
+    env = await ev('r2', 'const d = page.find("#draft"); await null; return { typed: d.value, el: d, title: page.title }', false);
+    assert.deepEqual(JSON.parse(env.json), { typed: 'typed by the user', el: '<input#draft>', title: 't' });
+    env = await ev('r3', 'document.title');
+    // (a name the box doesn't have is undefined there, not an error of its own)
+    assert.equal(env.ok, false);
+    assert.match(env.error, /^Cannot read properties of undefined \(reading 'title'\)\n\s*at .*\brun:1:/);
+    env = await ev('r4', 'page.find("#more").click()');
+    assert.match(env.error, /needs the click power/);
+    env = await ev('r5', 'fetch("/canary?run")');
+    assert.match(env.error, /^fetch is not a function/);
+    assert.deepEqual(await page.evaluate(() => window.clicks), { more: 1, del: 0 });
+
     assert.deepEqual(hits, [], 'nothing loaded from the canary');
     assert.deepEqual(pageErrors, []);
   } finally {

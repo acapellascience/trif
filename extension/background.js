@@ -11,11 +11,11 @@ import {
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, everySiteOrigins,
   sensitiveSites, sensitiveHit, sensitiveListSites, sensitivePlan, normalizeSiteList, normalizePending,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
-  applyNewMods, applyChatWaiting, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
+  applyNewMods, applyChatWaiting, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, sandboxRuntimeScript, SAFARI, siteForUrl,
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, isRobotless,
 } from './lib.js';
 import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
-import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX } from './sandbox.js';
+import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
@@ -1131,8 +1131,14 @@ const commands = {
     requireUserScripts();
     if (typeof args.code !== 'string') throw new Error('missing code');
     const tab = await scopedTab(args);
-    // A side-panel agent's code (args.scope): lock the tab first, so nothing it does can post, send or
-    // change anything as the user (tablock.js). No lock, no code.
+    // In TRIF's box (`world: 'box'`, what `trif run` asks for from a chat unless told --page): the code can
+    // read the page and change what it shows, and can't send or act, so nothing is locked (boxedRun).
+    if (args.world === 'box') {
+      if (!(await runsBoxed(args))) throw new Error(`${BROWSER} has no box for an agent's code here (TRIF's sandbox isn't available): use \`trif run --page\`, which runs in the page's own world (document, window) and pauses the site's posting until the tab reloads`);
+      return boxedRun(tab, args, Number(args.timeout) > 0 ? Number(args.timeout) : 10000);
+    }
+    // In the page's own world. A side-panel agent's code (args.scope): lock the tab first, so nothing it does
+    // can post, send or change anything as the user (tablock.js). No lock, no code.
     if (args.scope) {
       try { await tabLocks.lock(tab.id, args.scope, null, tab.url || ''); } catch (e) {
         throw new Error(`TRIF couldn't lock tab ${tab.id} against sending requests (${errMsg(e)}), so it won't run agent code there`);
@@ -1636,7 +1642,9 @@ const agentSettings = () => ({ sites: state.agentSites, sensitive: state.sensiti
 const ASK_WAIT_MS = 25000;
 const agentLevelOf = (where) => { let h = String(where || ''); try { if (/^[a-z]+:/i.test(h)) h = new URL(h).hostname; } catch { /* a host */ } return agentLevel(h, agentSettings()).level; };
 
-async function agentGate(cmd, args, reqId = null) {
+async function agentGate(cmd0, args, reqId = null) {
+  // (`trif run` in the box is code that can't act: it asks nothing where the site's level is still "ask")
+  const cmd = cmd0 === 'run' && args.world === 'box' && (await runsBoxed(args)) ? 'run.box' : cmd0;
   if (!COMMAND_NEEDS[cmd]) return;
   if (cmd === 'status' && args.tab === undefined && args.url === undefined) return;
   if (cmd === 'record' && (args.on === false || args.on === 'off')) return; // (recording less is always fine)
@@ -1742,6 +1750,53 @@ async function sandboxList(tab, key) {
     const list = typeof out === 'string' ? JSON.parse(out) : null;
     return Array.isArray(list) ? list : [];
   } catch (e) { log('warn', `boxed mods' ${key}: ${errMsg(e)}`); return []; }
+}
+
+// ---- trif run in the box ---------------------------------------------------------------------------
+// An agent's code, run once in TRIF's sandbox world (sandbox.js evaluate): a compartment with the API a boxed
+// mod has (`page`, `trif`) and the reads in BOX_RUN_POWERS, no network, no clicks, no navigation. So no tab
+// lock: the site keeps working, in this tab and its others, while the agent looks around. The page's own
+// world (`trif run --page`: document, window, the site's own code) is still there, with the lock.
+/** Whether a run asked for the box can have it: this browser hosts TRIF's world. */
+async function runsBoxed(args) {
+  if (!args || args.world !== 'box') return false;
+  try { return (await sandboxWorld()) === true && typeof chrome.userScripts?.execute === 'function'; } catch { return false; }
+}
+const BOX_HINT = ' (this ran in TRIF\'s box, where the page is `page` and `trif`, not `document` and `window`: BOXED.md has what they offer. For the page\'s own world, `trif run --page`: that pauses the site\'s posting until the tab reloads, and may ask the user first)';
+async function boxedRun(tab, args, timeout) {
+  const target = { tabId: tab.id };
+  const inBox = async (js) => firstInjectionResult(await chrome.userScripts.execute({ target, world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, injectImmediately: true, js }));
+  // The tab was checked (scopedTab); it may have gone elsewhere since: the document is checked from inside
+  // and marked, and the answer counts only if the mark is still there afterwards (as pageCall does).
+  const token = crypto.randomUUID();
+  const why = await rawPageCall(tab.id, 'ISOLATED', pageGuard, [args.scope || null, onSites(), token, apartFrom(args.scope || null)]);
+  if (why) throw new Error(why);
+  // TRIF's runtime in that world: there already where a boxed mod runs; put there now where none does.
+  const have = await inBox([{ code: 'typeof globalThis.__trifSandbox !== "object" ? "none" : typeof globalThis.__trifSandbox.evaluate === "function" ? "ready" : "old"' }]);
+  if (have === 'old') throw new Error('this tab\'s page has TRIF\'s sandbox from before an update: reload the tab (trif reload) and run it again');
+  if (have !== 'ready') await chrome.userScripts.execute({ target, world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, injectImmediately: true, js: sandboxRuntimeScript([]).js });
+  const runId = crypto.randomUUID();
+  const grant = { powers: BOX_RUN_POWERS, args: {} };
+  let timedOut = false;
+  const work = (async () => {
+    let out = await inBox([{ code: `globalThis.__trifSandbox.evaluate(${JSON.stringify(runId)}, ${JSON.stringify(String(args.code))}, ${args.expression ? 'true' : 'false'}, ${JSON.stringify(grant)})` }]);
+    // (in case execute didn't wait for the promise: ask for the answer until it's there)
+    while (out === null && !timedOut) { await sleep(100); out = await inBox([{ code: `globalThis.__trifSandbox.result(${JSON.stringify(runId)})` }]); }
+    return out;
+  })();
+  let out;
+  try { out = await withTimeout(work, timeout, `timed out after ${timeout}ms`); } finally { timedOut = true; }
+  const same = await rawPageCall(tab.id, 'ISOLATED', (t) => window.__trifPageGuard === t, [token]).catch(() => false);
+  if (!same) throw new Error('the tab went to another page while the code ran, so what it returned is thrown away: run it again');
+  if (out === null) throw new Error('the code gave no answer');
+  try { return { ...parseRunEnvelope(out), world: 'box' }; } catch (e) {
+    // (code written for the page's own world: in the box those names are simply not there, so the error is
+    // about undefined; say where it ran and what to use)
+    const m = errMsg(e);
+    const pageNames = /\b(document|window|localStorage|sessionStorage|fetch|XMLHttpRequest|navigator|location|getComputedStyle|querySelector(All)?)\b/.test(String(args.code));
+    const [first, ...rest] = m.split('\n');
+    throw new Error(pageNames && !/^TRIF sandbox: /.test(first) ? `${first}${BOX_HINT}${rest.length ? `\n${rest.join('\n')}` : ''}` : m);
+  }
 }
 
 function noRuntime() {

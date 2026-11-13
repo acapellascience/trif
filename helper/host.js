@@ -1249,6 +1249,10 @@ function onClientLine(sock, line) {
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
 
+  // (an extension from before `run` could use the box would run box code in the page's own world: say so)
+  if (cmd === 'run' && args.world === 'box' && !(state.hello && Array.isArray(state.hello.features) && state.hello.features.includes('boxRun'))) {
+    return reply(sock, { id, ok: false, error: 'this browser\'s TRIF extension is from before `trif run` could use TRIF\'s box (it updates by itself; in Chrome, reload it on chrome://extensions). Until then: `trif run --page`, which runs in the page\'s own world (document, window) and pauses the site\'s posting until the tab reloads' });
+  }
   if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
   if (cmd === 'mods') {
     return reply(sock, {

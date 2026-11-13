@@ -166,10 +166,18 @@ test('run: expression detection, args forwarded, values printed', async () => {
   assert.equal(req.args.url, 'example');
   assert.equal(req.args.timeout, 10000);
 
+  assert.equal(req.args.world, 'page', 'from a terminal: the page\'s own world');
+
   r = await runCli(['run', '--tab', '12', 'const a = 1; return a'], { home });
   req = lastRequest(ext, 'run');
   assert.equal(req.args.expression, false);
   assert.equal(req.args.tab, 12);
+  // --box asks for TRIF's box; an extension from before it could (no boxRun in its hello) is said, not run in the page
+  r = await runCli(['run', '--box', 'page.title'], { home });
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /from before `trif run` could use TRIF's box.*trif run --page/s);
+  assert.notEqual(lastRequest(ext, 'run').args.code, 'page.title', 'not sent on');
+  assert.match((await runCli(['run', '--box', '--page', '1'], { home })).stderr, /--page or --box, not both/);
 
   r = await runCli(['run', 'obj'], { home });
   assert.equal(r.stdout, JSON.stringify({ a: 1, b: [1, 2] }, null, 2) + '\n');

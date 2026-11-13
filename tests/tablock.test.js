@@ -466,3 +466,38 @@ test('methods: unnamed ones ("other") are blocked too; a browser that won\'t tak
   for (const r of withMethods) assert.deepEqual(r.condition.requestMethods, NAMED_WRITE_METHODS);
   assert.ok(logged.some((m) => /don't take the method "other"/.test(m)));
 });
+
+test('the tab that opened a locked one, on the same site, is locked as a tab with agent code too: until it shows a new page', async () => {
+  const { createTabLocks } = await load();
+  const tabs = [
+    { id: 1, url: 'https://x.com/home' },                      // opened 2
+    { id: 2, url: 'https://x.com/post/1', openerTabId: 1 },    // opened 3: the agent's code runs here
+    { id: 3, url: 'https://x.com/post/2', openerTabId: 2 },
+    { id: 4, url: 'https://x.com/explore' },                   // another tab of the site, no opener link
+    { id: 5, url: 'https://news.example/', openerTabId: 9 },
+    { id: 9, url: 'https://x.com/links' },
+  ];
+  const chrome = fakeChrome({ tabs });
+  const logged = [];
+  const locks = createTabLocks({ chrome, log: (m) => logged.push(m) });
+  await locks.lock(3, 'x.com');
+  const kinds = Object.fromEntries(locks.list().map((l) => [l.tabId, l.kind]));
+  assert.deepEqual(kinds, { 1: 'code', 2: 'code', 3: 'code', 4: 'site', 9: 'site' });
+  for (const id of [1, 2, 3]) assert.equal([...chrome.rules.values()].filter((r) => r.condition.tabIds?.[0] === id).length, 5, `tab ${id}: its own rules`);
+  assert.ok(logged.some((m) => /locked tab 2 too: it opened tab 3/.test(m)) && logged.some((m) => /locked tab 1 too: it opened tab 2/.test(m)));
+  // the agent's tab reloads: unlocked. Its opener still has the page the code could reach: locked, and the site with it
+  chrome.newDocument(3);
+  await locks.check(3);
+  assert.ok(!locks.isLocked(3));
+  assert.ok(locks.isLocked(2) && locks.isLocked(1) && locks.isLocked(4), 'the site stays locked while an opener keeps its page');
+  chrome.newDocument(2); await locks.check(2);
+  chrome.newDocument(1); await locks.check(1);
+  assert.deepEqual(locks.list(), []);
+  assert.equal(chrome.rules.size, 0);
+  // an opener on another site isn't locked; one that can't be found is logged, and the lock holds
+  const c2 = fakeChrome({ tabs: [{ id: 5, url: 'https://x.com/a', openerTabId: 9 }, { id: 9, url: 'https://news.example/' }, { id: 6, url: 'https://x.com/b', openerTabId: 77 }] });
+  const l2 = createTabLocks({ chrome: c2 });
+  await l2.lock(5, 'x.com');
+  await l2.lock(6, 'x.com');
+  assert.deepEqual(l2.list().map((l) => [l.tabId, l.kind]).sort(), [[5, 'code'], [6, 'code']]);
+});

@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance', '--to']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--box', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor', '--replace', '--as-copy']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
@@ -729,7 +729,13 @@ const handlers = {
       throw new UsageError("nothing to run: trif run '<code>' | -f file.js | -");
     }
     const det = detectExpression(code);
-    const args = { code: det.code, expression: det.expression, ...tabArgs(ctx.opts) };
+    // Where the code runs. In a chat (a side-panel run): TRIF's box, where it can read the page and change
+    // what it shows but can't send or act, so nothing is paused; --page for the page's own world (document,
+    // window, the site's own code), which pauses the site's posting until the tab reloads. From a terminal:
+    // the page's own world, as always; --box for the box.
+    if (ctx.opts['--page'] && ctx.opts['--box']) throw new UsageError('--page or --box, not both');
+    const world = ctx.opts['--page'] ? 'page' : ctx.opts['--box'] || envVar('RUN_TOKEN') ? 'box' : 'page';
+    const args = { code: det.code, expression: det.expression, world, ...tabArgs(ctx.opts) };
     if (ctx.opts['--timeout'] !== undefined) {
       const t = Number(ctx.opts['--timeout']);
       if (!(t > 0)) throw new UsageError('--timeout needs a number of milliseconds');

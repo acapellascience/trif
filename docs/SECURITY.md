@@ -237,9 +237,6 @@ Still open, known, and why:
   version's lines isn't held. Closing it would ask the user each time their agent customises one of Tim's mods,
   which is what TRIF is for. This is the free tier's terms: adding Tim's mods is the first OK for what they
   can do. The panel now says "changed" beside "Tim's mod" when the file isn't a version TRIF shipped.
-- **Writes after a run's window.** A mod written more than 10 seconds after its run ended is judged as an
-  outside change (no out-of-scope or risk-2 hold). The run's process group is killed; a process that left the
-  group would outlive it. Not seen to happen in either agent's sandbox, and not ruled out.
 - **Other tabs of a locked site** still load from other sites and follow links out (TL-4's cost was the
   user's own posting; this one would be their own links). Agent code reaches such a tab only through a window
   reference: the opener is now locked in full; a window found by name isn't.
@@ -247,10 +244,20 @@ Still open, known, and why:
   something on a GET is not covered. "Can't post or send as you" means the methods above.
 - **The update feed has no expiry**, and the release key is written to the keychain through an argument
   (scripts/release.js keygen). Both are the releasing Mac's to change.
-- **Runs write the mods folder directly**, and who wrote what is worked out afterwards (snapshots, a time
-  window, the folders a run couldn't write). Several fixes above are that reckoning going wrong. Having runs
-  write to a folder of their own, which the helper copies from once it has decided, would make it a fact
-  instead; it changes how both agents are started and wasn't something to do without running them.
+- **A run without TRIF's sandbox** (an organization's settings, with the user's consent) works in its own
+  folder like any other, but nothing stops it writing the mods folder itself; such a write is judged as an
+  outside change.
+
+## Runs work in a folder of their own (November 2026)
+
+A side-panel run used to write the mods folder itself, and which changes were its own was worked out
+afterwards from snapshots and a time window: a mod written more than 10 s after the run's process group ended
+passed as the user's, and a process can leave the group (on macOS both agents' commands can: Claude Code runs
+each in a session of its own). Now each run works in a copy of the workspace of its own
+(`<boxRoot>/<runId>.ws/`, stage.js), its sandbox writes only that copy's `sites/`, and only the helper writes
+the mods folder: it copies the run's changes over as they're saved (and the mods folder's into the copy), and
+a mod is the run's when it's what the helper copied for it. When the run ends, the copy is synced once more
+and removed; what a leftover process writes there goes nowhere. docs/STAGING.md has the design.
 
 ## The prompt
 

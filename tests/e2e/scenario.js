@@ -4712,7 +4712,7 @@ process.on('uncaughtException', (e) => { const t = 'stand-in crashed: ' + (e && 
 const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
 const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
 const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
-const own = require('path').join(process.cwd(), 'bin', 'trif'); // (the workspace's, as the run's cwd is the workspace)
+const own = require('path').join(process.env.TRIF_HOME || process.cwd(), 'bin', 'trif'); // (the workspace's: the run's cwd is its own copy of it, docs/STAGING.md)
 const trif = fs.existsSync(own) ? own : 'trif';
 const run = (code) => {
   const r = spawnSync(trif, ['run', '--page', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' }); // (the page's own world: what the lock is for; a chat's trif run is in TRIF's box otherwise)
@@ -4888,7 +4888,7 @@ say({ type: 'system', subtype: 'init', session_id: 'e2e-harden' });
 const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
 const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
 const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
-const own = require('path').join(process.cwd(), 'bin', 'trif');
+const own = require('path').join(process.env.TRIF_HOME || process.cwd(), 'bin', 'trif');
 const run = (code) => {
   const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--page', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' }); // (the page's own world: a chat's trif run is in TRIF's box otherwise)
   return r.status === 0 ? r.stdout.trim() : 'trif failed: ' + String(r.stderr || r.stdout).trim();

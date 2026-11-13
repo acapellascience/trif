@@ -183,8 +183,16 @@ async function resolveSock(ws, opts) {
  * run's sandbox enforces that too, and this says so plainly instead of "Operation not permitted".
  */
 function optionPath(ctx, file, { write = false } = {}) {
-  const resolved = path.resolve(String(file));
+  let resolved = path.resolve(String(file));
   if (!envVar('RUN_BOX')) return resolved;
+  // (a run works in its own copy of the workspace, docs/STAGING.md: a path into the mods folder itself,
+  // ~/.trif/sites/x.com/a.js, means the same file in the copy, which the helper copies to the mods folder)
+  const live = envVar('RUN_LIVE_MODS_DIR');
+  if (live && path.isAbsolute(live)) {
+    const realLive = realish(live);
+    const here = realish(resolved);
+    if (isInside(here, realLive, { orEqual: true }) && !isInside(here, ctx.ws.modsDir, { orEqual: true })) resolved = path.join(ctx.ws.modsDir, path.relative(realLive, here));
+  }
   // Real paths, compared as the file system does (pathcheck.js: links, `..`, and case on macOS). For a
   // write, the folder is checked and the file itself must not be a link (written with O_NOFOLLOW below).
   const target = write ? path.join(realish(path.dirname(resolved)), path.basename(resolved)) : realish(resolved);

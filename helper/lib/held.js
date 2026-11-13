@@ -223,8 +223,9 @@ function allowPowers(home, id, needs) {
  * whoever wrote it; otherwise it's let run, and recorded as seen. Mods there when this started (the first
  * time, seen.json missing) are recorded as seen as they are: they keep running, and the panel asks the
  * user to review what they can do (reviewItems).
- * `scopes` are the side-panel runs to check ({runId, site, scope, before, locked}: `before` is the runs.js
- * modSnapshot taken when the run started, `locked` the mods folders it couldn't write): a mod a live run
+ * `scopes` are the side-panel runs to check ({runId, site, scope, written} for a run with a working folder of
+ * its own, stage.js: `written`, what the helper copied into the mods folder for it; or {before, locked}:
+ * `before` the runs.js modSnapshot taken when the run started, `locked` the mods folders it couldn't write): a mod a live run
  * changed is also held for matching outside the run's site, or for saying risk 2, and the hold names the
  * run. A change in a folder the run couldn't write (another site's) isn't the run's: it's judged like any
  * other change.
@@ -261,15 +262,17 @@ function updateHeld(ws, mods, scopes) {
   const seenHash = (v) => (typeof v === 'string' ? v : v && v.hash);
   // Which live run changed each mod, if one did (and could: not a folder it was locked out of)
   const byRun = new Map();
-  const live = scopes.filter((s) => s.before);
+  const live = scopes.filter((s) => s.before || s.written);
   if (live.length) {
     const now = modSnapshot(ws.modsDir, ws.home);
     const ci = ignoresCase(ws.home); // (APFS: sites/X.com is sites/x.com)
     for (const s of live) {
-      const touched = new Set(diffSnapshots(s.before, now));
+      // (a run with a working folder of its own (stage.js): the mods the helper copied in for it, as long as
+      // they're as it left them; else what changed since it started)
+      const touched = s.written ? new Set([...s.written].filter(([rel, h]) => now.get(rel) === h).map(([rel]) => rel)) : new Set(diffSnapshots(s.before, now));
       // (a folder the run couldn't write: only while it's still a plain folder, never a link, whose files
       // are wherever it leads now)
-      const locked = (s.locked || []).filter((d) => { try { return fs.lstatSync(path.join(ws.home, d)).isDirectory(); } catch { return false; } });
+      const locked = s.written ? [] : (s.locked || []).filter((d) => { try { return fs.lstatSync(path.join(ws.home, d)).isDirectory(); } catch { return false; } });
       for (const m of mods) {
         const rel = path.relative(ws.home, m.file);
         if (touched.has(rel) && !locked.some((d) => within(rel, d, { ci, orEqual: true }))) byRun.set(m.id, s);

@@ -6,8 +6,19 @@
 // by the release key (release-key.js holds the public half). A feed that isn't signed by that key is
 // refused, so taking over the repo or the GitHub account isn't enough to ship code to users.
 //
-//   { "version": "0.1.2", "published": "2026-11-02", "notes": "…",
+//   { "version": "0.1.2", "published": "2026-11-02", "signed": "2026-11-02T18:04:11.000Z", "notes": "…",
 //     "package": { "url": "https://github.com/…/releases/download/v0.1.2/trif-0.1.2.tgz", "sha256": "…", "size": 123 } }
+//
+// The feed expires. A signed feed stays signed, so an old one served again (by whoever took over the repo,
+// or anything between the user and GitHub) would keep users on the version it names, a version with a
+// known hole perhaps, and say they're up to date. So the feed carries the time it was signed (`signed`,
+// written by scripts/release.js, at each release and by `release.js refresh-feed` between them), and a
+// feed signed more than FEED_MAX_AGE_MS ago (8 weeks) is refused: nothing is offered and the panel says
+// why. 8 weeks: a few times the gap between releases, so a quiet month or a holiday doesn't stop updates,
+// and short enough that someone held back finds out within two months.
+// Feeds from before `signed` (0.3.0) have only `published`, the release day, also signed: they're dated by
+// that. Every feed release.js has written has one, so the rule is the same for them, with no cutoff date
+// to pick; a feed with neither (none was ever made) is refused. Releases before 0.3.0 ignore `signed`.
 //
 // Installing downloads the package (checking its size and sha256 against the signed feed), unpacks it
 // and runs its own `trif setup --copy`, which swaps it into <home>/app the same way a first install
@@ -26,6 +37,7 @@ const { browserTable, browsersSetUp: setUpIn } = require('./browsers');
 const { acquireInstallLock, LockBusy, LOCK_ENV } = require('./lock');
 
 const CHECK_EVERY_MS = 20 * 60 * 60 * 1000; // a cached answer is good for this long
+const FEED_MAX_AGE_MS = 8 * 7 * 24 * 60 * 60 * 1000; // a feed signed longer ago than this is refused (above)
 const FEED_MAX = 256 * 1024;
 const PACKAGE_MAX = 50 * 1024 * 1024;
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
@@ -110,8 +122,33 @@ function fetchUrl(url, { maxBytes = FEED_MAX, timeoutMs = 20000, redirects = 5 }
   });
 }
 
-/** The feed, if `sig` (base64) is the release key's signature of `bytes`; throws otherwise. */
-function verifyFeed(bytes, sig, publicKey) {
+/**
+ * When the feed was signed (ms), from its signed `signed` time, else its `published` day (feeds from
+ * before 0.3.0); null if it has neither.
+ */
+function feedSignedAt(feed) {
+  const t = typeof feed?.signed === 'string' && /^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(feed.signed) ? Date.parse(feed.signed) : NaN;
+  if (Number.isFinite(t)) return t;
+  const d = typeof feed?.published === 'string' && /^\d{4}-\d\d-\d\d$/.test(feed.published) ? Date.parse(`${feed.published}T00:00:00Z`) : NaN;
+  return Number.isFinite(d) ? d : null;
+}
+
+/** Why a feed is too old to use (a user-facing reason), or null. */
+function feedTooOld(feed, now = Date.now(), maxAge = FEED_MAX_AGE_MS) {
+  const at = feedSignedAt(feed);
+  if (at === null) return 'the update feed has no date, so it may be an old copy that hides a newer version; not using it';
+  if (now - at > maxAge) {
+    const weeks = Math.round(maxAge / (7 * 24 * 60 * 60 * 1000));
+    return `the update feed is from ${new Date(at).toISOString().slice(0, 10)}, more than ${weeks} weeks ago, so it may be an old copy that hides a newer version; not using it`;
+  }
+  return null;
+}
+
+/**
+ * The feed, if `sig` (base64) is the release key's signature of `bytes` and it isn't too old (feedTooOld:
+ * `now`, `maxAge`); throws otherwise.
+ */
+function verifyFeed(bytes, sig, publicKey, { now = Date.now(), maxAge = FEED_MAX_AGE_MS } = {}) {
   if (!publicKey) throw new UpdateError("this build has no release key, so it can't verify updates");
   let ok = false;
   try { ok = crypto.verify(null, bytes, publicKey, Buffer.from(String(sig).trim(), 'base64')); } catch { ok = false; }
@@ -123,14 +160,16 @@ function verifyFeed(bytes, sig, publicKey) {
   if (!pkg || !allowedUrl(pkg.url) || !/^[0-9a-f]{64}$/.test(String(pkg.sha256)) || !(pkg.size > 0 && pkg.size <= PACKAGE_MAX)) {
     throw new UpdateError('the update feed has no valid package (url, sha256, size)');
   }
-  return { version: feed.version, published: typeof feed.published === 'string' ? feed.published : null,
+  const old = feedTooOld(feed, now, maxAge);
+  if (old) throw new UpdateError(old);
+  return { version: feed.version, published: typeof feed.published === 'string' ? feed.published : null, signedAt: feedSignedAt(feed),
     notes: typeof feed.notes === 'string' ? feed.notes.slice(0, 4000) : '', package: { url: pkg.url, sha256: pkg.sha256, size: pkg.size } };
 }
 
-/** Fetch and verify the feed. opts.fetch replaces fetchUrl (tests). */
-async function fetchFeed(url, { publicKey = require('./release-key'), fetch = fetchUrl } = {}) {
+/** Fetch and verify the feed. opts.fetch replaces fetchUrl (tests); opts.now, the time it's judged at. */
+async function fetchFeed(url, { publicKey = require('./release-key'), fetch = fetchUrl, now = Date.now() } = {}) {
   const [bytes, sig] = await Promise.all([fetch(url), fetch(`${url}.sig`, { maxBytes: 1024 })]);
-  return verifyFeed(bytes, sig.toString('utf8'), publicKey);
+  return verifyFeed(bytes, sig.toString('utf8'), publicKey, { now });
 }
 
 // ---------------------------------------------------------------- state and settings
@@ -212,7 +251,7 @@ async function check(ws, { force = false, now = Date.now(), root = P.REPO_ROOT, 
   if (!checksOn(ws) && !force) return summary(ws, s, root);
   if (!force && s.checkedAt && now - s.checkedAt < CHECK_EVERY_MS && !s.error) return summary(ws, s, root);
   try {
-    const feed = await fetchFeed(url, feedOpts);
+    const feed = await fetchFeed(url, { ...feedOpts, now });
     s.latest = { version: feed.version, notes: feed.notes, published: feed.published };
     s.error = null;
   } catch (e) {
@@ -314,7 +353,7 @@ function installedVersion(ws) {
 }
 
 module.exports = {
-  UpdateError, CHECK_EVERY_MS, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
+  UpdateError, CHECK_EVERY_MS, FEED_MAX_AGE_MS, feedSignedAt, feedTooOld, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
   readState, writeState, setConfigKey, autoUpdateOn, checksOn, installable, summary, check, install, installedVersion,
   browsersSetUp,
 };

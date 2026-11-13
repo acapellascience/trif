@@ -60,3 +60,34 @@ New text a person or an agent can see. None of it has been approved; the drafts 
 - `trif help run`: the new text in helper/lib/help.js, and AGENTS.md's "It runs in one of two places".
 
 Nothing new in the panel: a boxed run shows no lock and asks no question.
+
+## Secrets out of arguments; an update feed that expires (branch release-keys)
+
+What a person sees:
+
+- the panel's update line, and `trif update`, when the feed is too old (helper/lib/update.js feedTooOld),
+  after "Couldn't check for updates:": **the update feed is from 2026-09-01, more than 8 weeks ago, so it may
+  be an old copy that hides a newer version; not using it**
+- the same, for a feed with no date at all (none has been made): **the update feed has no date, so it may be
+  an old copy that hides a newer version; not using it**
+- an open-model run whose Codex didn't send the key proxy's token (helper/lib/agents/codex-oss.js
+  friendlyFor): **This Codex didn’t send the run’s key-proxy token, so TRIF’s key proxy refused its request:
+  update Codex (brew upgrade codex, or npm install -g @openai/codex), then try again**
+- what the key proxy answers such a request with (helper/lib/keyproxy.js NO_TOKEN; Codex shows it after
+  "401 Unauthorized", in a plain Codex run's error too): **TRIF's key proxy: this request doesn't carry the
+  run's token. Only the run's own Codex can use it (Codex 0.166 or later sends it)**
+
+What Tim sees, releasing (scripts/release.js):
+
+- after a release and a dry run: **The feed is signed for 2026-11-13T18:04:11.000Z; installs accept it until
+  2027-01-08.** and **The feed is good until 2027-01-08: release again before then, or run node
+  scripts/release.js refresh-feed.**
+- `node scripts/release.js refresh-feed [--dry-run]`: **updates/latest.json: TRIF 0.3.0, signed again (good
+  until 2027-01-08).**, then **Commit and push it on main: git add updates && git commit -m "Update feed
+  signed again" && git push** (or **Dry run: updates/ unchanged.**); its refusals: **there is no
+  updates/latest.json (+ .sig) to sign again: release first**, **updates/latest.json isn't signed by the
+  release key (helper/lib/release-key.js): not signing it again**
+- keygen, when the keychain write fails: **couldn't save the key in the keychain: trif-release-key isn't in
+  the keychain afterwards (…)** (the key itself never in it)
+- the usage line: **usage: node scripts/release.js keygen | refresh-feed [--dry-run] | <version> [--dry-run]
+  [--skip-tests]**

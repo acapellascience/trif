@@ -17,8 +17,9 @@ fs.appendFileSync(path.join(__dirname, 'argv.log'), JSON.stringify(process.argv.
 const readStdin = () => { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } };
 `;
 
-// security: find-generic-password [-w], add-generic-password (-w | -X hex) [-U], delete-generic-password,
-// and -i (commands on stdin, double quotes allowed). Exit 44 when an item isn't found, like the real one.
+// security: find-generic-password [-w] (without -a: any account), add-generic-password (-w | -X hex) [-U],
+// delete-generic-password, and -i (commands on stdin, double quotes allowed). A last argument that isn't an
+// option's value (a keychain file) is ignored. Exit 44 when an item isn't found, like the real one.
 const SECURITY = `#!${process.execPath}
 'use strict';
 ${COMMON}
@@ -35,7 +36,9 @@ function command(args) {
   const [cmd, ...rest] = args;
   const o = opts(cmd, rest);
   const items = load();
-  const id = (o['-s'] || '') + '\\u0000' + (o['-a'] || '');
+  let id = (o['-s'] || '') + '\\u0000' + (o['-a'] || '');
+  // (no -a: the first item of that service, as the real one finds it)
+  if (cmd === 'find-generic-password' && o['-a'] === undefined) id = Object.keys(items).find((k) => k.startsWith((o['-s'] || '') + '\\u0000')) || id;
   if (cmd === 'find-generic-password') {
     if (!(id in items)) { process.stderr.write('security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\\n'); return 44; }
     if (rest.includes('-w')) process.stdout.write(items[id] + '\\n');

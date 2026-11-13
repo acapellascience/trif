@@ -230,6 +230,23 @@ check's allowed cases in a real Chromium.
   swapped as it's sent, unseen). `@click` words in quotes are what the thing has to say, checked at each
   click against the page's own text.
 
+- **Secrets out of process arguments** (branch release-keys). Any process of the same user can read another's
+  arguments and initial environment while it runs (`ps`, sysctl KERN_PROCARGS2, sandbox or not), so neither
+  holds a secret now. The release key goes to the keychain on `security -i`'s stdin, as hex (release.js
+  saveKeychainItem, read back after; the same way keyring.js has saved API keys since 0.2.0). The
+  addons.mozilla.org key and secret are no longer in web-ext's environment: web-ext reads them from the
+  keychain itself, through its config file (scripts/web-ext-amo.cjs). And the key proxy's address in Codex's
+  `-c` arguments opens nothing by itself: Codex's proxy (open models, and plain runs with an API key) wants a
+  token, which Codex reads from a 0600 file in the run's own folder, unreadable to the run's commands, by
+  its provider's `auth` command (codex.js proxyAuth; keyproxy.js token mode).
+- **The update feed expires** (branch release-keys). latest.json carries the time it was signed (`signed`),
+  and the helper refuses a feed signed more than 8 weeks ago (update.js feedTooOld), so an old signed feed
+  served again can't keep a user on a version with a known hole for longer than that while saying they're up
+  to date; the panel says why it isn't using it. 8 weeks: a few release gaps, so a quiet month doesn't stop
+  updates; `release.js refresh-feed` signs the same feed again between releases. Feeds from before have only
+  `published` (signed too, and in every feed release.js ever wrote): they're dated by it, so the rule needs no
+  cutoff date. Releases before this one ignore the new field.
+
 Still open, known, and why:
 
 - **A shipped mod's lines are allowed for its edits.** A mod with `@source webmods` and a shipped id is judged
@@ -245,8 +262,19 @@ Still open, known, and why:
   reference: the opener is now locked in full; a window found by name isn't.
 - **Same-site GETs.** A request with no body to the site itself passes the lock, so a site that changes
   something on a GET is not covered. "Can't post or send as you" means the methods above.
-- **The update feed has no expiry**, and the release key is written to the keychain through an argument
-  (scripts/release.js keygen). Both are the releasing Mac's to change.
+- **Replays inside the 8 weeks.** An old feed younger than 8 weeks still passes (nothing remembers the newest
+  feed seen, since GitHub's cache can briefly serve the one before, and that would read as an attack). Not
+  covered at all: `updates/firefox.json`, Firefox's update manifest, which Firefox reads unsigned (the add-on
+  it points at is Mozilla-signed, and Firefox only moves forward) and which can't carry an expiry Firefox
+  checks.
+- **Claude Code's key proxy address** (a plain Claude Code run with an API key saved) is in its environment,
+  `ANTHROPIC_BASE_URL`, secret path and all. The run's commands can't reach the proxy (no network); another
+  process of the same user that reads the address while the run goes could use the run's key until the run
+  ends. Claude Code's `apiKeyHelper` setting (a command whose output it sends as the key) may carry a token
+  the way Codex's `auth` does; not tried here (claude.js is another workstream's).
+- **The provider `auth` command** was checked on Codex 0.166 only. An older Codex that ignores it sends no
+  token, and its runs through a key proxy fail with a message saying to update Codex (nothing is sent
+  without the token).
 - **Runs write the mods folder directly**, and who wrote what is worked out afterwards (snapshots, a time
   window, the folders a run couldn't write). Several fixes above are that reckoning going wrong. Having runs
   write to a folder of their own, which the helper copies from once it has decided, would make it a fact

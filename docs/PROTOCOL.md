@@ -762,11 +762,15 @@ the denied home-folder entries, since a sandbox that resolves it would deny the 
 on the main branch; both are read from raw.githubusercontent.com for the repo in package.json
 `repository`:
 
-- `updates/latest.json` (+ `latest.json.sig`) for the helper: `{version, published, notes, package:{url,
-  sha256, size}}`, where `package.url` is the release's npm tarball on GitHub. The `.sig` is an Ed25519
-  signature of latest.json's exact bytes by the release key; `helper/lib/release-key.js` holds the public
-  half. A feed with a missing or wrong signature, a non-https package URL, or a download whose size or
-  sha256 doesn't match is refused.
+- `updates/latest.json` (+ `latest.json.sig`) for the helper: `{version, published, signed, notes,
+  package:{url, sha256, size}}`, where `package.url` is the release's npm tarball on GitHub and `signed` the
+  time it was signed (ISO; since 0.3.0). The `.sig` is an Ed25519 signature of latest.json's exact bytes by
+  the release key; `helper/lib/release-key.js` holds the public half. A feed with a missing or wrong
+  signature, a non-https package URL, or a download whose size or sha256 doesn't match is refused, and so is
+  one signed more than 8 weeks ago (`signed`, or for a feed from before 0.3.0 its `published` day; one with
+  neither is refused too): an old signed feed served again could otherwise hold users on its version. Between
+  releases, `node scripts/release.js refresh-feed` signs the same feed again with a new `signed`; the
+  release prints the day its feed stops being accepted. Helpers before 0.3.0 ignore `signed`.
 - `updates/firefox.json` for Firefox: its update manifest (`addons[id].updates[{version, update_link,
   update_hash}]`). The Firefox build's `browser_specific_settings.gecko.update_url` points at it, so
   Firefox updates the signed add-on itself.

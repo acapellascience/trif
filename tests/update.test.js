@@ -11,7 +11,9 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { tempDir, runCli, privDir } = require('./fake-extension');
 const U = require('../helper/lib/update');
-const { changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches, releaseAssets } = require('../scripts/release');
+const { changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches, releaseAssets,
+  refreshFeed, feedStaleOn, keychainItem, keychainWriteInput, saveKeychainItem, webExtSignArgs, webExtEnv } = require('../scripts/release');
+const { makeFakeKeychain } = require('./fake-keychain');
 
 const keys = () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -72,7 +74,7 @@ function fakePackage(version, { copy = true, exit = 0, wait = 0 } = {}) {
 function publish(server, k, { version, tgz, notes = 'Shiny.', tamper } = {}) {
   server.files['/pkg.tgz'] = tgz;
   const sha = crypto.createHash('sha256').update(tgz).digest('hex');
-  const feed = latestFeed({ version, published: '2026-11-01', notes, url: `${server.base}/pkg.tgz`, sha256: tamper === 'sha' ? '0'.repeat(64) : sha, size: tgz.length + (tamper === 'size' ? 1 : 0) });
+  const feed = latestFeed({ version, published: '2026-11-01', signed: new Date().toISOString(), notes, url: `${server.base}/pkg.tgz`, sha256: tamper === 'sha' ? '0'.repeat(64) : sha, size: tgz.length + (tamper === 'size' ? 1 : 0) });
   server.files['/latest.json'] = feed;
   server.files['/latest.json.sig'] = signBytes(feed, k.priv);
 }
@@ -125,7 +127,7 @@ test('compareVersions and allowedUrl', () => {
 test('verifyFeed accepts only the release key\'s signature and a complete feed', () => {
   const k = keys();
   const other = keys();
-  const feed = latestFeed({ version: '0.2.0', published: '2026-11-01', notes: 'n', url: 'https://github.com/a/b/x.tgz', sha256: 'a'.repeat(64), size: 10 });
+  const feed = latestFeed({ version: '0.2.0', published: '2026-11-01', signed: new Date().toISOString(), notes: 'n', url: 'https://github.com/a/b/x.tgz', sha256: 'a'.repeat(64), size: 10 });
   assert.equal(U.verifyFeed(feed, signBytes(feed, k.priv), k.pub).version, '0.2.0');
   assert.throws(() => U.verifyFeed(feed, signBytes(feed, other.priv), k.pub), /not signed by the TRIF release key/);
   const changed = Buffer.from(feed.toString().replace('0.2.0', '9.9.9'));
@@ -134,6 +136,134 @@ test('verifyFeed accepts only the release key\'s signature and a complete feed',
   assert.throws(() => U.verifyFeed(feed, signBytes(feed, k.priv), null), /no release key/);
   const plainHttp = latestFeed({ version: '0.2.0', url: 'http://evil.example/x.tgz', sha256: 'a'.repeat(64), size: 10 });
   assert.throws(() => U.verifyFeed(plainHttp, signBytes(plainHttp, k.priv), k.pub), /no valid package/);
+});
+
+test('the feed expires 8 weeks after it was signed; one from before `signed` is dated by its published day', () => {
+  const k = keys();
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  const pkg = { url: 'https://github.com/a/b/x.tgz', sha256: 'a'.repeat(64), size: 10 };
+  const signedAt = Date.parse('2026-11-13T10:00:00.000Z');
+  const feed = latestFeed({ version: '0.3.0', published: '2026-11-13', signed: new Date(signedAt).toISOString(), notes: 'n', ...pkg });
+  const sig = signBytes(feed, k.priv);
+  assert.equal(U.FEED_MAX_AGE_MS, 8 * WEEK);
+  assert.equal(U.verifyFeed(feed, sig, k.pub, { now: signedAt + 8 * WEEK - 1000 }).signedAt, signedAt);
+  assert.throws(() => U.verifyFeed(feed, sig, k.pub, { now: signedAt + 8 * WEEK + 1000 }),
+    /^Error: the update feed is from 2026-11-13, more than 8 weeks ago, so it may be an old copy that hides a newer version; not using it$/);
+  // The signature still counts first: an old feed with a wrong one says so.
+  assert.throws(() => U.verifyFeed(feed, signBytes(feed, keys().priv), k.pub, { now: signedAt + 9 * WEEK }), /not signed/);
+  // `signed` is the one that counts (refreshed between releases: published stays the release day).
+  const refreshed = latestFeed({ version: '0.3.0', published: '2026-08-01', signed: new Date(signedAt).toISOString(), notes: 'n', ...pkg });
+  assert.equal(U.verifyFeed(refreshed, signBytes(refreshed, k.priv), k.pub, { now: signedAt + WEEK }).version, '0.3.0');
+  // Feeds from before 0.3.0 (no `signed`; every one has `published`, which is signed too): dated by that.
+  const before = Buffer.from(JSON.stringify({ version: '0.2.7', published: '2026-11-12', notes: 'n', package: pkg }, null, 2) + '\n');
+  const at = Date.parse('2026-11-12T00:00:00Z');
+  assert.equal(U.verifyFeed(before, signBytes(before, k.priv), k.pub, { now: at + 3 * WEEK }).version, '0.2.7');
+  assert.throws(() => U.verifyFeed(before, signBytes(before, k.priv), k.pub, { now: at + 8 * WEEK + 1000 }), /from 2026-11-12, more than 8 weeks ago/);
+  // The live feed from before the change (0.2.7's, in this repo) is one of those, and isn't refused today.
+  assert.ok(U.feedSignedAt(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'updates', 'latest.json'), 'utf8'))) > Date.parse('2026-11-01'));
+  // No date at all (no release has made one): refused; a `signed` that isn't a time falls back to published.
+  const undated = Buffer.from(JSON.stringify({ version: '0.2.7', notes: 'n', package: pkg }));
+  assert.throws(() => U.verifyFeed(undated, signBytes(undated, k.priv), k.pub), /the update feed has no date/);
+  assert.equal(U.feedSignedAt({ signed: 'soon', published: '2026-11-12' }), at);
+  assert.equal(U.feedSignedAt({ signed: 12, published: 'yesterday' }), null);
+});
+
+test('check and install: a feed signed more than 8 weeks ago is an error, and nothing is installed from it', async () => {
+  const k = keys();
+  const server = await serve({});
+  try {
+    const { ws, root } = appWorkspace('0.1.0', {});
+    ws.config.updateFeed = `${server.base}/latest.json`;
+    const tgz = fakePackage('0.2.0');
+    publish(server, k, { version: '0.2.0', tgz });
+    const signedAt = Date.parse(JSON.parse(server.files['/latest.json']).signed);
+    const later = signedAt + U.FEED_MAX_AGE_MS + 60000;
+    let s = await U.check(ws, { root, publicKey: k.pub, now: later });
+    assert.deepStrictEqual([s.available, s.latest], [false, null]);
+    assert.match(s.error, /more than 8 weeks ago, so it may be an old copy that hides a newer version/);
+    // (an error isn't cached: the next check asks again, and a fresh feed is taken)
+    s = await U.check(ws, { root, publicKey: k.pub, now: signedAt + 1000 });
+    assert.deepStrictEqual([s.available, s.latest, s.error], [true, '0.2.0', null]);
+    // install judges the feed it fetches now (opts.now: tests)
+    await assert.rejects(U.install(ws, { root, publicKey: k.pub, browsers: [], now: later }), /more than 8 weeks ago/);
+    assert.equal(U.installedVersion(ws), '0.1.0');
+    assert.equal(fs.existsSync(path.join(ws.home, 'setup-ran.json')), false);
+  } finally { await server.close(); }
+});
+
+test('release script: refresh-feed signs the same feed again with a new time, and only a feed the release key signed', () => {
+  const k = keys();
+  const signed = '2026-11-13T10:00:00.000Z';
+  const feed = latestFeed({ version: '0.3.0', published: '2026-11-13', signed, notes: '- n', url: 'https://github.com/a/b/x.tgz', sha256: 'a'.repeat(64), size: 10 });
+  assert.deepStrictEqual(Object.keys(JSON.parse(feed)), ['version', 'published', 'signed', 'notes', 'package']);
+  const now = new Date('2026-12-30T08:00:00.000Z');
+  const out = refreshFeed(feed, signBytes(feed, k.priv), { pub: k.pub, priv: k.priv, now });
+  const f = JSON.parse(out.feed);
+  assert.equal(f.signed, now.toISOString());
+  assert.deepStrictEqual({ ...f, signed }, JSON.parse(feed), 'nothing else changed');
+  assert.equal(U.verifyFeed(out.feed, out.sig, k.pub, { now: now.getTime() + 7 * 24 * 3600e3 }).version, '0.3.0');
+  assert.throws(() => refreshFeed(feed, signBytes(feed, keys().priv), { pub: k.pub, priv: k.priv, now }), /isn't signed by the release key/);
+  assert.equal(feedStaleOn(signed), '2027-01-08');
+  // The release writes `signed` into the feed it signs.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'release.js'), 'utf8');
+  assert.match(src, /latestFeed\(\{ version, published, signed, notes:/);
+});
+
+test('release script: secrets go to security and web-ext in no argv or environment', async () => {
+  const dir = tempDir();
+  const kc = makeFakeKeychain(path.join(dir, 'kc'));
+  const prev = process.env.TRIF_KEYCHAIN_BIN;
+  process.env.TRIF_KEYCHAIN_BIN = kc.bin;
+  try {
+    // keygen's write: `security -i` with the command on stdin; the key (a PEM, with line breaks) as hex.
+    const pem = crypto.generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' });
+    saveKeychainItem('trif-test-release-key', pem, { account: 'tester' });
+    assert.deepStrictEqual(kc.argv(), [['-i'], ['find-generic-password', '-s', 'trif-test-release-key', '-w']]);
+    assert.ok(!kc.argvText().includes(Buffer.from(pem).toString('hex')) && !kc.argvText().includes('PRIVATE KEY'));
+    assert.equal(keychainItem('trif-test-release-key'), pem);
+    assert.match(keychainWriteInput('s', 'a', 'v', { keychain: '/k/x.keychain-db' }), /^add-generic-password -U -s "s" -a "a" -X 76 "\/k\/x\.keychain-db"\n$/);
+    assert.throws(() => keychainWriteInput('s"; delete-keychain', 'a', 'v'), /can't pass/);
+    // keygen uses it: no `add-generic-password … -w <key>` in an argv any more.
+    const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'release.js'), 'utf8');
+    assert.ok(!/\[\s*'add-generic-password'/.test(src) && /saveKeychainItem\(KEY_SERVICE, priv\)/.test(src));
+
+    // Signing: web-ext reads the addons.mozilla.org key and secret from the keychain itself (its config
+    // file, scripts/web-ext-amo.cjs). Against a stand-in AMO: its first request carries a JWT made with them.
+    const ISSUER = 'user:123:45';
+    const SECRET = 'fake-amo-secret-0123456789';
+    execFileSync(kc.bin, ['-i'], { input: keychainWriteInput('trif-amo-issuer', 'x', ISSUER) + keychainWriteInput('trif-amo-secret', 'x', SECRET) });
+    const seen = [];
+    const amo = http.createServer((req, res) => { seen.push({ url: req.url, auth: req.headers.authorization }); req.resume(); res.writeHead(500, { 'content-type': 'application/json' }); res.end('{}'); });
+    await new Promise((r) => amo.listen(0, '127.0.0.1', r));
+    const ext = path.join(dir, 'ext');
+    fs.mkdirSync(ext);
+    fs.writeFileSync(path.join(ext, 'manifest.json'), JSON.stringify({ manifest_version: 2, name: 't', version: '1.0', browser_specific_settings: { gecko: { id: 't@example.com' } } }));
+    const args = webExtSignArgs({ sourceDir: ext, artifactsDir: path.join(dir, 'amo'), amoBaseUrl: `http://127.0.0.1:${amo.address().port}/api/v5/` });
+    const env = webExtEnv({ ...process.env, WEB_EXT_API_KEY: 'from-a-shell', WEB_EXT_API_SECRET: 'from-a-shell', NO_UPDATE_NOTIFIER: '1' });
+    assert.equal(env.WEB_EXT_API_KEY, undefined);
+    assert.equal(env.WEB_EXT_API_SECRET, undefined);
+    const webExt = path.join(__dirname, '..', 'node_modules', '.bin', 'web-ext');
+    const r = await new Promise((resolve) => {
+      const p = require('child_process').spawn(webExt, args, { env, cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      p.stdout.on('data', (d) => { out += d; });
+      p.stderr.on('data', (d) => { out += d; });
+      const t = setTimeout(() => p.kill(), 60000);
+      p.on('exit', (code) => { clearTimeout(t); resolve({ code, out }); });
+    });
+    amo.close();
+    assert.ok(seen.length >= 1, r.out.slice(-1500));
+    const [h, payload, mac] = seen[0].auth.replace(/^JWT /, '').split('.');
+    assert.equal(JSON.parse(Buffer.from(payload, 'base64url')).iss, ISSUER);
+    assert.equal(crypto.createHmac('sha256', SECRET).update(`${h}.${payload}`).digest('base64url'), mac);
+    for (const v of [ISSUER, SECRET]) {
+      assert.ok(!args.join(' ').includes(v) && !JSON.stringify(env).includes(v), 'not in web-ext\'s argv or environment');
+      assert.ok(!kc.argvText().includes(v) && !kc.argvText().includes(Buffer.from(v).toString('hex')), 'nor in security\'s');
+    }
+    assert.ok(kc.argv().some((a) => a.join(' ') === 'find-generic-password -s trif-amo-issuer -w'), 'web-ext asked the keychain by name');
+  } finally {
+    if (prev === undefined) delete process.env.TRIF_KEYCHAIN_BIN; else process.env.TRIF_KEYCHAIN_BIN = prev;
+  }
 });
 
 test('check: fetches and caches the feed, reports what\'s new, records errors', async () => {
@@ -343,7 +473,7 @@ test('release script: changelog sections and feeds the helper and Firefox accept
   assert.equal(repoMismatch('acapellascience/trif', 'git@github.com:acapellascience/Trif.git'), null);
 
   const k = keys();
-  const feed = latestFeed({ version: '0.1.2', published: '2026-11-01', notes: '- one', url: 'https://github.com/a/b/releases/download/v0.1.2/trif-0.1.2.tgz', sha256: 'b'.repeat(64), size: 5 });
+  const feed = latestFeed({ version: '0.1.2', published: '2026-11-01', signed: new Date().toISOString(), notes: '- one', url: 'https://github.com/a/b/releases/download/v0.1.2/trif-0.1.2.tgz', sha256: 'b'.repeat(64), size: 5 });
   assert.equal(U.verifyFeed(feed, signBytes(feed, k.priv), k.pub).notes, '- one');
 
   let ff = firefoxFeed(null, { id: 'webmods@webmods.ext', version: '0.1.1', url: 'https://x/1.xpi', sha256: 'c'.repeat(64) });

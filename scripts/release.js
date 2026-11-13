@@ -6,6 +6,12 @@
 //                                             half goes into the keychain, the public half into
 //                                             helper/lib/release-key.js (commit it).
 //   node scripts/release.js 0.1.2 [--dry-run] [--skip-tests]
+//   node scripts/release.js refresh-feed [--dry-run]
+//                                             between releases: sign updates/latest.json again with
+//                                             today's time, nothing else changed. Installs refuse a
+//                                             feed signed more than 8 weeks ago (helper/lib/update.js),
+//                                             so one is due when there's been no release for ~6 weeks.
+//                                             Then commit and push updates/ on main.
 //
 // A release: checks everything first (clean main branch, a CHANGELOG.md section for the version and no
 // "## Unreleased" one, keys, GitHub login, package.json's repository matching the git remote), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
@@ -20,11 +26,18 @@
 // --dry-run does everything up to publishing, into dist/release/<version>, and changes no tracked file
 // (no Mozilla signing, so no .xpi; feeds are signed only if the release key is there).
 //
-// Keychain entries (service names; `security add-generic-password -s <name> -a "$USER" -w`):
+// Keychain entries (service names; add one with `security add-generic-password -s <name> -a "$USER" -w`,
+// -w last, so security asks for the value and it's in no process's arguments):
 //   trif-amo-issuer, trif-amo-secret   addons.mozilla.org API key and secret
 //   trif-release-key                   the release signing key (made by `keygen`)
 // Each is also found under its name from before 0.2.0, when TRIF was called WebMods (webmods-amo-issuer,
 // webmods-amo-secret, webmods-release-key), so existing keychains keep working without renaming.
+//
+// No secret goes in a command's arguments or environment, which any process of the same user can read
+// while the command runs (`ps`, sysctl KERN_PROCARGS2): keygen gives the key to `security -i` on its stdin;
+// web-ext reads the addons.mozilla.org key and secret from the keychain itself (scripts/web-ext-amo.cjs,
+// its config file), so they're not in its environment.
+// TRIF_KEYCHAIN_BIN (tests): a stand-in for /usr/bin/security (tests/fake-keychain.js).
 
 const fs = require('fs');
 const path = require('path');
@@ -56,14 +69,17 @@ function sh(file, args, opts = {}) {
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function writeJson(file, v) { fs.writeFileSync(file, JSON.stringify(v, null, 2) + '\n'); }
 
+const securityBin = () => process.env.TRIF_KEYCHAIN_BIN || 'security';
+
 /** A keychain item's value by its name, or else by its name before 0.2.0 (LEGACY_SERVICES); null if neither. */
 function keychain(service) {
   const v = keychainItem(service);
   return v !== null || !LEGACY_SERVICES[service] ? v : keychainItem(LEGACY_SERVICES[service]);
 }
 
-function keychainItem(service) {
-  const r = spawnSync('security', ['find-generic-password', '-s', service, '-w'], { encoding: 'utf8' });
+/** opts.keychain: a keychain file instead of the default keychain search (a throwaway one, to try this). */
+function keychainItem(service, { keychain: file = null } = {}) {
+  const r = spawnSync(securityBin(), ['find-generic-password', '-s', service, '-w', ...(file ? [file] : [])], { encoding: 'utf8' });
   if (r.status !== 0) return null;
   const out = r.stdout.replace(/\n$/, '');
   // `security -w` prints a value with line breaks in it (the PEM key) as hex.
@@ -72,6 +88,26 @@ function keychainItem(service) {
     if (text.startsWith('-----BEGIN')) return text;
   }
   return out;
+}
+
+/**
+ * What `security -i` reads to save `value` as the item `service`/`account`: the command on its stdin, not
+ * in argv; the value as hex (-X), so it needs no quoting and may have line breaks (the PEM key).
+ */
+function keychainWriteInput(service, account, value, { keychain: file = null } = {}) {
+  for (const v of [service, account, file || '']) if (/["\\\n]/.test(v)) throw new Error(`can't pass ${JSON.stringify(v)} to security -i`);
+  return `add-generic-password -U -s "${service}" -a "${account}" -X ${Buffer.from(value, 'utf8').toString('hex')}${file ? ` "${file}"` : ''}\n`;
+}
+
+/** Save `value` in the keychain (replacing one there), then read it back. Throws an Error that never holds it. */
+function saveKeychainItem(service, value, { account = process.env.USER || 'trif', keychain: file = null } = {}) {
+  const hex = Buffer.from(value, 'utf8').toString('hex');
+  const scrub = (t) => String(t || '').split(value).join('[the key]').split(hex).join('[the key]').trim();
+  const r = spawnSync(securityBin(), ['-i'], { input: keychainWriteInput(service, account, value, { keychain: file }), encoding: 'utf8' });
+  if (r.error) throw new Error(`couldn't run security: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(scrub(r.stderr) || `security exited with ${r.status}`);
+  // (security -i can exit 0 when a command in it failed: what counts is that the item is there now)
+  if (keychainItem(service, { keychain: file }) !== value) throw new Error(`${service} isn't in the keychain afterwards${r.stderr ? ` (${scrub(r.stderr)})` : ''}`);
 }
 
 // ---------------------------------------------------------------- pure parts (tested)
@@ -156,9 +192,31 @@ function repoMismatch(pkgRepo, remoteUrl) {
     `then: git remote set-url origin https://github.com/${pkgRepo}.git`;
 }
 
-/** latest.json's exact bytes for a release. */
-function latestFeed({ version, published, notes, url, sha256, size }) {
-  return Buffer.from(JSON.stringify({ version, published, notes, package: { url, sha256, size } }, null, 2) + '\n');
+/**
+ * latest.json's exact bytes for a release. `signed`: when it's signed (an ISO time; installs refuse a feed
+ * signed more than 8 weeks ago, helper/lib/update.js feedTooOld; releases before 0.3.0 ignore it).
+ */
+function latestFeed({ version, published, signed, notes, url, sha256, size }) {
+  return Buffer.from(JSON.stringify({ version, published, signed, notes, package: { url, sha256, size } }, null, 2) + '\n');
+}
+
+/**
+ * updates/latest.json signed again at `now`: the same release, with a new `signed` time. Only a feed the
+ * release key signed (`sig`, checked against `pub`) is re-signed. Returns {feed, sig} (bytes, text).
+ */
+function refreshFeed(bytes, sig, { pub, priv, now = new Date() }) {
+  let ok = false;
+  try { ok = crypto.verify(null, bytes, pub, Buffer.from(String(sig).trim(), 'base64')); } catch { ok = false; }
+  if (!ok) throw new Error("updates/latest.json isn't signed by the release key (helper/lib/release-key.js): not signing it again");
+  const f = JSON.parse(bytes.toString('utf8'));
+  if (!f || !f.package) throw new Error('updates/latest.json has no package');
+  const feed = latestFeed({ version: f.version, published: f.published, signed: now.toISOString(), notes: f.notes, url: f.package.url, sha256: f.package.sha256, size: f.package.size });
+  return { feed, sig: signBytes(feed, priv) };
+}
+
+/** The day a feed signed at `signed` (ISO) stops being accepted (helper/lib/update.js FEED_MAX_AGE_MS). */
+function feedStaleOn(signed) {
+  return new Date(Date.parse(signed) + require('../helper/lib/update').FEED_MAX_AGE_MS).toISOString().slice(0, 10);
 }
 
 function signBytes(bytes, privateKeyPem) {
@@ -185,8 +243,8 @@ function keygen(force) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
   const pub = publicKey.export({ type: 'spki', format: 'pem' });
-  const r = spawnSync('security', ['add-generic-password', '-U', '-s', KEY_SERVICE, '-a', process.env.USER || 'trif', '-w', priv], { encoding: 'utf8' });
-  if (r.status !== 0) fail(`couldn't save the key in the keychain: ${r.stderr.trim()}`);
+  // (On security's stdin, never in its argv: saveKeychainItem)
+  try { saveKeychainItem(KEY_SERVICE, priv); } catch (e) { fail(`couldn't save the key in the keychain: ${e.message}`); }
   const src = fs.readFileSync(KEY_FILE, 'utf8').replace(/module\.exports = [\s\S]*$/, `module.exports = ${JSON.stringify(pub)};\n`);
   fs.writeFileSync(KEY_FILE, src);
   const fp = crypto.createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex').slice(0, 16);
@@ -195,7 +253,53 @@ function keygen(force) {
   console.log(`  public:  ${path.relative(ROOT, KEY_FILE)} (commit it; it ships in the next release)`);
 }
 
+// ---------------------------------------------------------------- refresh-feed
+
+function refreshFeedCommand({ dryRun }) {
+  const latestPath = path.join(ROOT, 'updates', 'latest.json');
+  if (!fs.existsSync(latestPath) || !fs.existsSync(`${latestPath}.sig`)) fail('there is no updates/latest.json (+ .sig) to sign again: release first');
+  const pub = require(KEY_FILE);
+  if (!pub) fail('helper/lib/release-key.js has no public key');
+  const priv = keychain(KEY_SERVICE);
+  if (!priv && !dryRun) fail(`the keychain has no ${KEY_SERVICE} (or ${LEGACY_SERVICES[KEY_SERVICE]})`);
+  const bytes = fs.readFileSync(latestPath);
+  const sig = fs.readFileSync(`${latestPath}.sig`, 'utf8');
+  let out;
+  if (priv) {
+    try { out = refreshFeed(bytes, sig, { pub, priv }); } catch (e) { fail(e.message); }
+  } else {
+    // (dry run without the key: the feed as it would be, unsigned)
+    const f = JSON.parse(bytes.toString('utf8'));
+    out = { feed: latestFeed({ ...f, ...f.package, signed: new Date().toISOString() }), sig: null };
+    console.warn('release (dry run): no release key, so the feed is left unsigned');
+  }
+  const dir = dryRun ? path.join(DIST, 'release', 'refresh') : path.join(ROOT, 'updates');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'latest.json'), out.feed);
+  if (out.sig) fs.writeFileSync(path.join(dir, 'latest.json.sig'), out.sig);
+  const { version, signed } = JSON.parse(out.feed.toString('utf8'));
+  console.log(`${path.relative(ROOT, path.join(dir, 'latest.json'))}: TRIF ${version}, ${out.sig ? 'signed again' : 'with a new time, unsigned (no release key)'} (good until ${feedStaleOn(signed)}).`);
+  if (dryRun) console.log('Dry run: updates/ unchanged.');
+  else console.log('Commit and push it on main: git add updates && git commit -m "Update feed signed again" && git push');
+}
+
 // ---------------------------------------------------------------- release
+
+// web-ext's config file for signing: it reads the addons.mozilla.org key and secret from the keychain.
+const WEB_EXT_CONFIG = path.join(__dirname, 'web-ext-amo.cjs');
+
+/** `web-ext sign`'s arguments: no key or secret in them (WEB_EXT_CONFIG reads those). */
+function webExtSignArgs({ sourceDir, artifactsDir, amoBaseUrl = null }) {
+  return ['sign', '--no-config-discovery', '--config', WEB_EXT_CONFIG, '--channel', 'unlisted', '--source-dir', sourceDir, '--artifacts-dir', artifactsDir,
+    ...(amoBaseUrl ? ['--amo-base-url', amoBaseUrl] : [])];
+}
+
+/** web-ext's environment: this one without any WEB_EXT_API_* (a key or secret exported in the shell). */
+function webExtEnv(env = process.env) {
+  const out = { ...env };
+  for (const k of Object.keys(out)) if (/^WEB_EXT_API_/i.test(k)) delete out[k];
+  return out;
+}
 
 function ask(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -371,8 +475,10 @@ async function release(version, { dryRun, skipTests }) {
     console.log('asking Mozilla to sign the Firefox add-on (takes a few minutes)…');
     const amo = path.join(out, 'amo');
     const webExt = path.join(ROOT, 'node_modules', '.bin', 'web-ext');
-    const r = spawnSync(webExt, ['sign', '--channel', 'unlisted', '--source-dir', path.join(builtDist, 'firefox'), '--artifacts-dir', amo], {
-      cwd: ROOT, stdio: 'inherit', env: { ...process.env, WEB_EXT_API_KEY: keychain(AMO_ISSUER), WEB_EXT_API_SECRET: keychain(AMO_SECRET) },
+    // (The key and secret: web-ext reads them from the keychain itself, through its config file, so
+    // they're in neither its arguments nor its environment. webExtSignArgs.)
+    const r = spawnSync(webExt, webExtSignArgs({ sourceDir: path.join(builtDist, 'firefox'), artifactsDir: amo }), {
+      cwd: ROOT, stdio: 'inherit', env: webExtEnv(),
     });
     const signed = fs.existsSync(amo) ? fs.readdirSync(amo).filter((f) => f.endsWith('.xpi')) : [];
     if (r.status !== 0 || signed.length !== 1) fail('Firefox signing failed (see above)');
@@ -385,8 +491,9 @@ async function release(version, { dryRun, skipTests }) {
 
   // Feeds, pointing at the release's files on GitHub.
   const base = `https://github.com/${repo || 'OWNER/trif'}/releases/download/v${version}`;
-  const published = new Date().toISOString().slice(0, 10);
-  const feed = latestFeed({ version, published, notes: panelNotes(notes, { repo, version }), url: `${base}/${tgzName}`, sha256: sha256(tgz), size: fs.statSync(tgz).size });
+  const signed = new Date().toISOString();
+  const published = signed.slice(0, 10);
+  const feed = latestFeed({ version, published, signed, notes: panelNotes(notes, { repo, version }), url: `${base}/${tgzName}`, sha256: sha256(tgz), size: fs.statSync(tgz).size });
   const feedsDir = dryRun ? path.join(out, 'updates') : path.join(ROOT, 'updates');
   fs.mkdirSync(feedsDir, { recursive: true });
   const latestPath = path.join(feedsDir, 'latest.json');
@@ -407,6 +514,7 @@ async function release(version, { dryRun, skipTests }) {
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
   console.log(`\nWhat's new in ${version} (the side panel's summary):\n${panelNotes(notes, { repo, version })}\n`);
+  console.log(`The feed is signed for ${signed}; installs accept it until ${feedStaleOn(signed)}.`);
   if (dryRun) {
     // The copy it built from holds the tests too; left there, `node --test` would find them.
     fs.rmSync(src, { recursive: true, force: true });
@@ -442,6 +550,7 @@ async function release(version, { dryRun, skipTests }) {
     return;
   }
   console.log(`\nPublished TRIF ${version}. Installs pick it up within a day (the panel offers it; Firefox updates the add-on itself).`);
+  console.log(`The feed is good until ${feedStaleOn(signed)}: release again before then, or run node scripts/release.js refresh-feed.`);
   console.log(`Beta zips for new testers: ${zips.map((z) => path.relative(ROOT, z)).join(', ')}`);
 }
 
@@ -449,9 +558,10 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const [cmd] = args.filter((a) => !a.startsWith('--'));
-  if (!cmd) fail('usage: node scripts/release.js keygen | <version> [--dry-run] [--skip-tests]');
+  if (!cmd) fail('usage: node scripts/release.js keygen | refresh-feed [--dry-run] | <version> [--dry-run] [--skip-tests]');
   if (cmd === 'keygen') keygen(flags.has('--force'));
+  else if (cmd === 'refresh-feed') refreshFeedCommand({ dryRun: flags.has('--dry-run') });
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

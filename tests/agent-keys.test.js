@@ -24,7 +24,9 @@ test.after(async () => { for (const fn of cleanups.reverse()) { try { await fn()
 
 // A fake agent (claude or codex): dumps its argv, env and stdin, then calls the API its env or argv points
 // at the way the real one would (Anthropic: POST <ANTHROPIC_BASE_URL>/v1/messages with x-api-key; Codex:
-// GET <provider base_url>/models with no key of its own) and says what came back.
+// GET <provider base_url>/models with no key of its own, and the bearer token its provider's `auth` command
+// prints, as Codex 0.166 does) and says what came back. (Codex: what the auth command gave, its file and
+// that file's mode go in calls/token-<pid>.json, for the test to look for in argv.)
 function fakeAgent(kind) {
   return `#!${process.execPath}
 'use strict';
@@ -46,7 +48,14 @@ const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
     } else {
       const prov = argv.find((a) => a.startsWith('model_providers.trif-openai=')) || '';
       const base = (/base_url = "([^"]+)"/.exec(prov) || [])[1] || '';
-      const r = await fetch(base + '/models');
+      const auth = /auth = . command = "([^"]+)", args = ."([^"]+)". ./.exec(prov); // auth = { command = "…", args = ["…"] }
+      const headers = {};
+      if (auth) {
+        const token = require('child_process').execFileSync(auth[1], [auth[2]], { encoding: 'utf8' }).trim();
+        headers.authorization = 'Bearer ' + token;
+        fs.writeFileSync(path.join(__dirname, 'calls', 'token-' + process.pid + '.json'), JSON.stringify({ token, file: auth[2], mode: fs.statSync(auth[2]).mode & 0o777, dirMode: fs.statSync(path.dirname(auth[2])).mode & 0o777 }));
+      }
+      const r = await fetch(base + '/models', { headers });
       got = 'status ' + r.status + ' auth ' + ((await r.json()).auth || '');
     }
   } catch (e) { got = 'unreachable ' + e.message; }
@@ -71,7 +80,7 @@ function makeHome(config = {}) {
   fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ ...config, env: { ...(config.env || {}), PATH: bin } }));
   return { home, bin };
 }
-const lastCall = (bin) => { const d = path.join(bin, 'calls'); const n = fs.readdirSync(d).sort(); return JSON.parse(fs.readFileSync(path.join(d, n[n.length - 1]), 'utf8')); };
+const lastCall = (bin) => { const d = path.join(bin, 'calls'); const n = fs.readdirSync(d).filter((f) => !f.startsWith('token-')).sort(); return JSON.parse(fs.readFileSync(path.join(d, n[n.length - 1]), 'utf8')); };
 let reqN = 0;
 async function extRequest(ext, cmd, args = {}) {
   const id = `k${++reqN}`;
@@ -181,7 +190,14 @@ test('Codex with a saved key: a provider of its own at the run\'s key proxy (bea
   assert.ok(!JSON.stringify(call).includes(OAI_KEY));
   assert.equal(call.env.OPENAI_API_KEY, undefined);
   const prov = call.argv.find((a) => a.startsWith('model_providers.trif-openai='));
-  assert.match(prov, /base_url = "http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1", wire_api = "responses"/);
+  // The proxy's address has no secret in it (it's in Codex's argv, which other processes can read); its
+  // token is in a file of the run's (0600, in a 0700 folder), which Codex's provider reads (`auth`).
+  assert.match(prov, /base_url = "http:\/\/127\.0\.0\.1:\d+\/v1", wire_api = "responses", supports_websockets = false, auth = \{ command = "\/bin\/cat", args = \["[^"]+\/key-proxy-token"\] \}/);
+  const tok = JSON.parse(fs.readFileSync(path.join(bin, 'calls', fs.readdirSync(path.join(bin, 'calls')).find((f) => f.startsWith('token-'))), 'utf8'));
+  assert.match(tok.token, /^[0-9a-f]{64}$/);
+  assert.deepEqual([tok.mode, tok.dirMode], [0o600, 0o700]);
+  assert.ok(!JSON.stringify(call.argv).includes(tok.token) && !JSON.stringify(call.env).includes(tok.token) && !call.prompt.includes(tok.token), 'the token is in no argv or environment');
+  assert.ok(!fs.existsSync(tok.file), 'gone with the run');
   assert.ok(call.argv.includes('model_provider="trif-openai"'));
   assert.ok(call.argv.some((a) => a.startsWith('shell_environment_policy.exclude=')));
   assert.equal(srv.requests.find((x) => x.url === '/v1/models').headers.authorization, `Bearer ${OAI_KEY}`);

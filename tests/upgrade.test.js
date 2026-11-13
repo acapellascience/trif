@@ -26,7 +26,8 @@ const U = require(path.join(appDir, 'helper/lib/update.js'));
 const P = require(path.join(appDir, 'helper/lib/paths.js'));
 const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
 const tgz = fs.readFileSync(tgzFile);
-const feed = Buffer.from(JSON.stringify({ version, published: '2026-11-03', notes: 'n', package: { url: 'https://example.invalid/trif.tgz', sha256: crypto.createHash('sha256').update(tgz).digest('hex'), size: tgz.length } }));
+// (with \`signed\`, which feeds have carried since 0.3.0: an updater from before it ignores it)
+const feed = Buffer.from(JSON.stringify({ version, published: '2026-11-03', signed: new Date().toISOString(), notes: 'n', package: { url: 'https://example.invalid/trif.tgz', sha256: crypto.createHash('sha256').update(tgz).digest('hex'), size: tgz.length } }));
 const sig = crypto.sign(null, feed, privateKey).toString('base64');
 const fetch = async (url) => (url.endsWith('.sig') ? Buffer.from(sig) : url.endsWith('.tgz') ? tgz : feed);
 U.install(P.workspace(), { root: appDir, fetch, publicKey, browsers: ['chrome'] }).then(

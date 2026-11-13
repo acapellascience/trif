@@ -327,5 +327,8 @@ It needs, on the releasing Mac: `gh auth login`; the addons.mozilla.org API key 
 keychain as `trif-amo-issuer` and `trif-amo-secret`; and the release signing key, made once with
 `node scripts/release.js keygen` (private half in the keychain as `trif-release-key`, public half in
 `helper/lib/release-key.js`). Back the private key up: installs only accept updates signed with it.
+Installs also refuse a feed signed more than 8 weeks ago, so with no release for about six weeks, run
+`node scripts/release.js refresh-feed` (it signs updates/latest.json again, nothing else changed) and push
+`updates/` on main.
 (Keychain items under their WebMods-era names, `webmods-amo-issuer`, `webmods-amo-secret` and
 `webmods-release-key`, are found too.)

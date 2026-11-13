@@ -58,10 +58,15 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   assert.match(providerToml(c.args), /name = "LM Studio \(TRIF\)", base_url = "http:\/\/127\.0\.0\.1:1234\/v1"/);
   assert.deepEqual(c.args.slice(-3), ['-m', 'qwen/qwen3-coder-30b', '-']);
 
-  // OpenRouter: Codex gets no key and no key variable: its base_url is the run's key proxy (prepare).
-  om = { ...oss.resolve({ provider: 'openrouter' }, null, 'qwen/qwen3-coder'), proxyUrl: 'http://127.0.0.1:5555/0123abcd/v1' };
-  c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS });
-  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:5555/0123abcd/v1", wire_api = "responses", supports_websockets = false }');
+  // OpenRouter: Codex gets no key and no key variable: its base_url is the run's key proxy (prepare), and
+  // the proxy's token is in a file in the run's folder, which Codex reads (`auth`): not in argv.
+  const TOKEN = 'f'.repeat(64);
+  om = { ...oss.resolve({ provider: 'openrouter' }, null, 'qwen/qwen3-coder'), proxyUrl: 'http://127.0.0.1:5555/v1', proxyToken: TOKEN };
+  c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS, agentDir: '/boxes/r1.agent' });
+  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:5555/v1", wire_api = "responses", auth = { command = "/bin/cat", args = ["/boxes/r1.agent/key-proxy-token"] }, supports_websockets = false }');
+  assert.deepEqual(c.files, [{ path: '/boxes/r1.agent/key-proxy-token', content: TOKEN }]);
+  assert.ok(!c.args.join(' ').includes(TOKEN) && !c.stdin.includes(TOKEN));
+  assert.throws(() => oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS }), /no run folder for the key proxy's token/);
   assert.ok(!c.args.some((a) => /env_key/.test(a)));
   assert.ok(c.args.includes(EXCLUDE));
   assert.deepEqual(c.args.slice(-3), ['-m', 'qwen/qwen3-coder', '-']);
@@ -239,8 +244,9 @@ test('keyring: macOS `security` (written through -i on stdin, as hex: never in a
 });
 
 // A fake codex: `--version`; `exec` dumps argv and env to <dir>/calls, asks its base_url for /models (the
-// key proxy, whose stand-in upstream echoes the Authorization header it got) and plays a run that leaks
-// what came back on stdout and stderr, to check the helper redacts it.
+// key proxy, whose stand-in upstream echoes the Authorization header it got; with the token its provider's
+// `auth` command prints, as Codex 0.166 does, kept in calls/token-<pid>) and plays a run that leaks what
+// came back on stdout and stderr, to check the helper redacts it.
 const FAKE_CODEX = `#!${process.execPath}
 'use strict';
 const fs = require('fs');
@@ -256,7 +262,14 @@ const base = (/base_url = "([^"]+)"/.exec(prov) || [])[1] || '';
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 (async () => {
   let got = '';
-  try { const r = await fetch(base + '/models'); got = (await r.json()).auth || ''; } catch (e) { got = 'unreachable ' + e.message; }
+  const auth = /auth = . command = "([^"]+)", args = ."([^"]+)". ./.exec(prov); // auth = { command = "…", args = ["…"] }
+  const headers = {};
+  if (auth) {
+    const token = require('child_process').execFileSync(auth[1], [auth[2]], { encoding: 'utf8' }).trim();
+    fs.writeFileSync(path.join(calls, 'token-' + process.pid), token);
+    headers.authorization = 'Bearer ' + token;
+  }
+  try { const r = await fetch(base + '/models', { headers }); got = (await r.json()).auth || ''; } catch (e) { got = 'unreachable ' + e.message; }
   say({ type: 'thread.started', thread_id: 'th-oss-1' });
   say({ type: 'item.completed', item: { id: 'i0', type: 'error', message: 'Model metadata for \`x\` not found. Defaulting to fallback metadata' } });
   say({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'leaking ' + got } });
@@ -278,7 +291,7 @@ function makeHome(config = {}) {
 }
 function lastCall(bin) {
   const dir = path.join(bin, 'calls');
-  const names = fs.readdirSync(dir).sort();
+  const names = fs.readdirSync(dir).filter((f) => !f.startsWith('token-')).sort();
   return JSON.parse(fs.readFileSync(path.join(dir, names[names.length - 1]), 'utf8'));
 }
 let reqN = 0;
@@ -382,7 +395,12 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   assert.ok(!call.argv.some((a) => /env_key/.test(a)));
   assert.ok(call.argv.includes(EXCLUDE));
   const base = /base_url = "([^"]+)"/.exec(providerToml(call.argv))[1];
-  assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1$/);
+  // (no secret in the address, which is in Codex's argv: the proxy's token, from a file of the run's)
+  assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/v1$/);
+  const tokenFile = fs.readdirSync(path.join(bin, 'calls')).find((f) => f.startsWith('token-'));
+  const token = fs.readFileSync(path.join(bin, 'calls', tokenFile), 'utf8');
+  assert.match(token, /^[0-9a-f]{64}$/);
+  assert.ok(!JSON.stringify(call).includes(token), 'the proxy\'s token is in no argv or environment');
   assert.deepEqual(call.argv.slice(call.argv.indexOf('-m'), call.argv.indexOf('-m') + 2), ['-m', 'qwen/qwen3-coder']);
   // The proxy added the key on the way to the provider.
   const viaProxy = srv.requests.filter((x) => x.url === '/v1/models');
@@ -413,7 +431,7 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   const r3 = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: '-P-FAIL', openModel: { provider: 'custom', baseUrl: 'http://127.0.0.1:9/v1' }, model: 'm1' });
   const d3 = await waitDone(ext, r3.result.runId);
   assert.equal(d3.ok, false);
-  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1"/);
+  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/v1", wire_api = "responses", auth = /);
   assert.ok(!JSON.stringify(eventsOf(ext, r3.result.runId)).includes(FAKE_KEY));
   assert.ok(!fs.readFileSync(path.join(privDir(home), 'runs', `${r3.result.runId}.jsonl`), 'utf8').includes(FAKE_KEY));
 });
@@ -665,20 +683,31 @@ test('codex-oss prepare: a proxy only with a saved key, read afresh each run; th
   const prep = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
   assert.deepEqual(prep.env, {});
   assert.ok(prep.unsetEnv.includes('OPENAI_API_KEY') && prep.unsetEnv.includes('ANTHROPIC_API_KEY'));
-  assert.deepEqual(prep.secrets, [FAKE_KEY]);
   assert.equal(prep.state.openModel.baseUrl, `${srv.url}/v1`); // (messages name the real server)
   const proxied = prep.options.openModel.proxyUrl;
+  const token = prep.options.openModel.proxyToken;
   cleanups.push(() => prep.cleanup());
-  assert.match(proxied, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1$/);
-  assert.ok(!JSON.stringify(oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, ...prep.options }).args).includes(FAKE_KEY));
-  const ok = await fetch(`${proxied}/models`);
+  // The address has no secret in it (it goes in Codex's argv); the token is what opens the proxy, and it
+  // goes into a file of the run's (redacted from logs too).
+  assert.match(proxied, /^http:\/\/127\.0\.0\.1:\d+\/v1$/);
+  assert.match(token, /^[0-9a-f]{64}$/);
+  assert.deepEqual(prep.secrets, [FAKE_KEY, token]);
+  const cmd = oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, agentDir: '/boxes/r2.agent', ...prep.options });
+  assert.ok(!JSON.stringify(cmd.args).includes(FAKE_KEY) && !JSON.stringify(cmd.args).includes(token));
+  assert.deepEqual(cmd.files, [{ path: '/boxes/r2.agent/key-proxy-token', content: token }]);
+  const noToken = await fetch(`${proxied}/models`);
+  assert.equal(noToken.status, 401, 'the address alone opens nothing');
+  assert.match((await noToken.json()).error.message, /doesn't carry the run's token/);
+  assert.equal((await fetch(`${proxied}/models`, { headers: { authorization: `Bearer ${'0'.repeat(64)}` } })).status, 401);
+  const ok = await fetch(`${proxied}/models`, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(ok.status, 200);
+  assert.ok(!srv.requests.some((x) => String(x.headers.authorization || '').includes(token)), 'the token stays between Codex and the proxy');
   await prep.cleanup();
   await assert.rejects(fetch(`${proxied}/models`));
   // Read afresh: a key replaced, then removed, counts for the next run at once.
   await keyring.setKey(account, 'replaced-key-0123456789', { env });
   const p2 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
-  assert.deepEqual(p2.secrets, ['replaced-key-0123456789']);
+  assert.deepEqual(p2.secrets, ['replaced-key-0123456789', p2.options.openModel.proxyToken]);
   await p2.cleanup();
   await keyring.removeKey(account, { env });
   const p3 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
@@ -691,7 +720,7 @@ test('codex-oss prepare: a proxy only with a saved key, read afresh each run; th
   await keyring.setKey(`custom:127.0.0.1:${refusing.address().port}`, FAKE_KEY, { env });
   const warned = [];
   const p4 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `http://127.0.0.1:${refusing.address().port}/v1`, model: 'm' }), env, logger: { warn: (m) => warned.push(m), info() {} } });
-  assert.equal((await fetch(`${p4.options.openModel.proxyUrl}/responses`, { method: 'POST', body: '{}' })).status, 401);
+  assert.equal((await fetch(`${p4.options.openModel.proxyUrl}/responses`, { method: 'POST', body: '{}', headers: { authorization: `Bearer ${p4.options.openModel.proxyToken}` } })).status, 401);
   assert.deepEqual(warned, ['open model: the model server refused the API key (401)']);
   await p4.cleanup();
   // No key (a local server): no proxy, the keyring isn't asked.

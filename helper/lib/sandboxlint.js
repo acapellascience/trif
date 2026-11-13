@@ -180,8 +180,30 @@ function sandboxLint(code, { powers = [] } = {}) {
   return finish(found);
 }
 
+/**
+ * Could this free mod be a boxed one? Only when everything the sandbox wouldn't give it has a box equivalent
+ * (the page's elements as stand-ins, page for document, trif.observe for MutationObserver…), and nothing needs
+ * the page's own world (fetch or XHR, the page's code or globals, window, storage, frames…). A reading, so it
+ * errs towards saying nothing. -> { boxable: boolean, swaps: ['document: use page (…)', …] }
+ */
+function boxable(code) {
+  const lint = sandboxLint(code, { powers: Object.keys(POWER_FREE) });
+  const swaps = [];
+  for (const f of lint) {
+    const tip = /^elements are TRIF's stand-ins here: (use .*)$/.exec(f.why) || /: (use .*)$/.exec(f.why);
+    const swappable = (f.why.startsWith('elements are TRIF\'s stand-ins') || f.what === '.style.…' || (PAGE_GLOBALS.has(f.what) && Object.prototype.hasOwnProperty.call(BOX_GLOBALS, f.what)));
+    if (!swappable) return { boxable: false, swaps: [] };
+    swaps.push(`${f.what}: ${f.what === '.style.…' ? 'use style(property, value)' : tip ? tip[1] : f.why}`);
+  }
+  return { boxable: true, swaps };
+}
+// (page globals a DOM-only free mod uses that the box has in another form: GLOBAL_TIPS, minus the ones needing a power)
+const BOX_GLOBALS = Object.fromEntries(Object.entries(GLOBAL_TIPS).filter(([k]) => !/AudioContext|DOMPoint|ImageData/.test(k)));
+// (powers are a question of their own: the lint is read as if the mod had them, so only the page's world counts here)
+const POWER_FREE = { sound: 1, controls: 1, click: 1, media: 1, 'write-drafts': 1, 'go-to': 1, mods: 1 };
+
 function finish(found) {
   return [...found.values()].map((f) => ({ what: f.what, why: f.why, lines: [...f.lines].sort((a, b) => a - b) })).sort((a, b) => a.lines[0] - b.lines[0]);
 }
 
-module.exports = { sandboxLint, PAGE_GLOBALS, LANGUAGE_MISSING };
+module.exports = { boxable, sandboxLint, PAGE_GLOBALS, LANGUAGE_MISSING };

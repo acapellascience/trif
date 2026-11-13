@@ -514,8 +514,16 @@ const handlers = {
     const id = rel.length === 2 ? `${rel[0]}/${rel[1].replace(/\.js$/, '')}` : path.basename(file, '.js');
     const powers = powersOf(code, { sites: modSites({ id, matches: header.matches }) });
     const lines = code.split('\n');
-    if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })) });
+    // (a free mod that only does what a boxed one can: say so, as the lowest tier that does the job is the one to write)
+    const box = require('./lib/sandboxlint').boxable(code);
+    if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })), boxable: box.boxable });
     out(`ok: ${path.resolve(file)} parses`);
+    if (box.boxable) {
+      out('\nThis free mod only does what a boxed mod can, and a boxed mod is the safer tier (it can\'t send, click or load anything, and never waits for the user\'s OK): rewrite it as one (`// @boxed`; BOXED.md), unless it needs the page\'s own world.');
+      for (const sw of box.swaps.slice(0, 6)) out(`- ${sw}`);
+      if (box.swaps.length > 6) out(`- (${box.swaps.length - 6} more: trif check after the rewrite lists what's left)`);
+      out('');
+    }
     if (!powers.length) return out('TRIF finds nothing in it that waits for the user\'s OK.');
     out(`\nTRIF reads this in it, so it waits for the user's OK (unless they've allowed it before):`);
     for (const p of powers) {

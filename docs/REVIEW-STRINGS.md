@@ -60,3 +60,62 @@ New text a person or an agent can see. None of it has been approved; the drafts 
 - `trif help run`: the new text in helper/lib/help.js, and AGENTS.md's "It runs in one of two places".
 
 Nothing new in the panel: a boxed run shows no lock and asks no question.
+
+## Shipped mods as a baseline, and style sections (branch holds-style)
+
+The panel and `trif status`:
+
+- A hold's fact, when an edit of one of Tim's mods makes it run on a host its shipped version doesn't while it
+  can do something (helper/lib/held.js `shippedSiteNeeds`): **runs on https://bank.example/\*, where Tim's
+  version of this mod doesn't**
+
+What agents read:
+
+- `trif check`, a mod with a style section (helper/cli.js): **Its style section (lines 5-20) checks out, with 2
+  settings for the code: trif.style.size, trif.style.accent. TRIF applies it itself, so a change there alone
+  never waits for the user's OK.** (one setting: "with a setting for the code: …"; none: "checks out. TRIF
+  applies it …")
+- A style mod with a style section (helper/lib/mods.js): **a style mod is all style: its CSS and hide list go in
+  its JSON, without a // ==Style== section**
+- The style section's own errors (helper/lib/stylesection.js; in `trif check`, `trif status` and `trif doctor`
+  as the mod's problem):
+  - **a style section (// ==Style== … // ==/Style==) goes right after the header's // ==/WebMod== line (only
+    blank lines between)**; **…, and this mod has no header**
+  - **the style section has no closing // ==/Style== line**; **a mod has one style section**
+  - **line 7: every line of the style section is a // comment**
+  - **the style section needs a JSON object between its two lines**; **the style section isn't valid JSON: …**;
+    **the style section must be a JSON object**; **the style section can be up to 300000 characters**
+  - **style section: unknown key "script" (a style section has css, hide, settings)**, and the rest after
+    "style section: ", joined with "; ":
+    - **"settings".size: a setting's name is a letter, then letters, digits or _ (up to 40)**
+    - **"settings".size must be an object { type, value, … }**
+    - **"settings".size.type must be number, colour, on-off or choice**
+    - **"settings".size: "label" isn't for a colour setting (it has type, value)**
+    - **"settings".size: a number setting needs "min" and "max", numbers, min below max**
+    - **"settings".size.step must be a number above 0**; **"settings".size.unit must be one of px, em, …**
+    - **"settings".size.value must be a number from 10 to 40**
+    - **"settings".accent.value must be a colour as #rgb or #rrggbb (or with alpha: #rgba, #rrggbbaa)**
+    - **"settings".marks.value must be true or false**
+    - **"settings".layout.options must be 2 to 20 different words (a letter, then letters, digits or -, up to
+      40)**; **"settings".layout.value must be one of its options (list, grid)**
+    - **"css": var(--marks) is an on-off setting, which CSS can't use as a value (the code can:
+      trif.style.marks)**
+    - **"settings" must be an object: { "name": { "type": …, "value": … } }**; **at most 40 settings**
+    - **"css" must be text, or a list of lines**; **"css" can be up to 200000 characters**
+    - **"hide" must be a list of at most 500 selectors**; and the style mods' CSS and selector errors as they
+      are, after **"css": ** or **"hide"[0]: **
+- `trif errors`, from the sandbox when a boxed mod's style CSS came in unchecked (only if something other than
+  the helper sent it): **TRIF sandbox: the style section's CSS loads from an address, or reads a field, so
+  TRIF didn't apply it**
+
+The guide (helper/workspace):
+
+- AGENTS.md: the new section **A style section in boxed and free mods**; in "Mods that wait for the user's
+  OK": **…; a change to a mod's style section alone (above) always does.**; in "Mods TRIF ships": **An edit
+  of one that keeps using what the shipped version did runs straight away; one that adds a power, a line
+  that uses one, or a site it runs on or talks to waits for the user's OK.**
+- TECHNIQUES.md: **A free or boxed mod's looks: its style section** (one paragraph), and one sentence in
+  "1. CSS": **Fixed CSS belongs in the mod's style section (above); the helper below is for CSS the code works
+  out.**
+- BOXED.md: **Its looks in a style section.** (a paragraph, an example, a line on `trif.settings` and
+  `trif.css`), and `style` in the list of what `trif` has.

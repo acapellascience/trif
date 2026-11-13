@@ -164,7 +164,25 @@ nothing at all. The mod's `@risk` header plays no part: whoever wrote the code w
   that can do something not yet allowed shows its facts once in the panel ("Looks right" allows them).
   Edited, they're held like any other. A mod TRIF ships is judged against its shipped version
   (`~/.trif/.shipped/`, which runs can't write, written before the mod itself): an unchanged one, or an
-  update TRIF brings, has nothing to ask about.
+  update TRIF brings, has nothing to ask about, nor has an edit that reuses its lines. An edit that adds a
+  power, a line using one, a site its URLs name, or (while the mod can do anything) a `@match` for a host
+  the shipped version doesn't run on waits, whoever made it (held.js `shippedSiteNeeds`): Tim's mod that
+  may send on x.com, now also on the user's bank, is a change in what that power means.
+- **Style sections** (helper/lib/stylesection.js): a boxed or free mod's `// ==Style==` block right after
+  its header (CSS, a hide list, typed settings) is applied by TRIF, and a change to it alone runs without a
+  question: held.js compares the code's own hash (`codeHash`: the file without the section, plus what each
+  setting is) with the version that last ran. The condition is that the code can't read the section as
+  text, or a "style" change could carry code or an address into it. So the helper strips it before
+  anything reads the code: what TRIF reads for powers, hashes as the code and sends to the browser has
+  those lines blank, whatever surrounds them (inside a template literal too). The browser gets the CSS TRIF
+  built (checked as a style mod's: nothing loads from an address) and the settings' values, checked against
+  their types (a number in its range, a colour, true or false, one of a list of words), which the code reads
+  as `trif.style`; what a setting is (its range, its choices) is part of the code. The CSS is on the page,
+  where page code can see how things look, exactly as with any style mod (which an agent may write without
+  asking), so a style section gives the code nothing a style mod couldn't already put in front of it, plus
+  those few typed values. A run's change to the section of a mod that matches outside the run's site still
+  waits for that, as a style mod's would. A change to both parts waits for its code; the version that keeps
+  running meanwhile gets the new CSS and the values its own settings take (stylesection.js `restyle`).
 
 Writes through a name worked out at run time (`x[k] = v`, `setAttribute(k, v)`) can't be told apart from
 setting an element's `src` or `href` by reading the code: whether `k` can be `"src"` is undecidable. TRIF

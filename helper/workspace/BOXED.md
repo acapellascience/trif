@@ -49,8 +49,8 @@ What it has (everything else is simply not there, and `trif check` lists what yo
   patterns up to 200 characters, no nested repeats or back-references), `onUrl(fn)` (the page's address
   as it changes, in-app moves too), `ready` and `loaded` (promises: the document parsed, and loaded),
   `settings(key, defaults)` (a promise of `{value, save(obj)}`: the mod's own, per site, kept by TRIF, not
-  in the site's storage; JSON, up to 1 MB per mod on a site), `log`, `warn`, `error` (`trif logs`;
-  `console.log` and friends do the same).
+  in the site's storage; JSON, up to 1 MB per mod on a site), `style` (its style section's settings, below),
+  `log`, `warn`, `error` (`trif logs`; `console.log` and friends do the same).
 - **`page`**: `find(sel)`, `findAll(sel)`, `create(tag)` (harmless tags only: `div`, `span`, `p`, `a`,
   `button`, `img`, lists, `dl`/`dt`/`dd`, headings, tables, `canvas`, `output`, `meter`, `abbr`, `time`,
   ...), `createSvg(tag)` (`svg`, `g`, `path`, `circle`, `rect`, `line`, `polygon`, `text`, gradients,
@@ -103,6 +103,28 @@ What it has (everything else is simply not there, and `trif check` lists what yo
   (`Float32Array`, `Float64Array` too), and the browser's pure tools, frozen: `URL` (a parser; no
   `createObjectURL`), `URLSearchParams`, `Intl`, `TextEncoder`, `TextDecoder`, `structuredClone`,
   `atob`, `btoa`, and `performance.now()` (only).
+
+**Its looks in a style section.** Fixed CSS, things to hide and the values the user may want to tweak go
+in the mod's style section, right after the header (AGENTS.md, "A style section in boxed and free mods"),
+not in `trif.css` calls: TRIF applies it, and the code reads the settings as `trif.style.<name>` (frozen
+values: numbers, true or false, a colour, a choice's word). The example above, that way:
+
+```js
+// ==/WebMod==
+// ==Style==
+// {
+//   "css": [".trif-box-calm-long { outline: 2px solid var(--color); }", "[data-testid=sidebarColumn] { display: none !important }"],
+//   "settings": { "color": { "type": "colour", "value": "#ffe696" }, "longAt": { "type": "number", "value": 3, "min": 1, "max": 20 } }
+// }
+// ==/Style==
+trif.observe('article', (post) => {
+  if (post.text.includes('Promoted')) return post.hide();
+  if (post.findAll('[data-testid=tweetText]').length > trif.style.longAt) post.classes.add('trif-box-calm-long');
+});
+```
+
+Use `trif.settings` for what the mod keeps as it runs (what the user picks in its own controls), and
+`trif.css` for CSS the code works out on the page.
 
 Good to know:
 - **A boxed mod names only its own things, or copies addresses the page already has.** Names you give

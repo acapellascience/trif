@@ -2381,7 +2381,8 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
       const sbx = state.mods.find((m) => m.id === msg.id && m.held && m.held.by === 'sandbox');
       if (sbx) {
         if (typeof msg.hash === 'string' && msg.hash !== sbx.held.hash) throw new Error(`${sbx.id} changed again since you looked at it: look at what's waiting now`);
-        state.unsandboxedOk = { ...state.unsandboxedOk, [sbx.id]: sbx.held.hash };
+        // (by its code's version when it has a style section: an edit of that alone doesn't ask again)
+        state.unsandboxedOk = { ...state.unsandboxedOk, [sbx.id]: sbx.held.codeHash ? `code:${sbx.held.codeHash}` : sbx.held.hash };
         await save({ unsandboxedOk: state.unsandboxedOk });
         await serial(applyMods).then(reportApplied);
         const mod = state.mods.find((m) => m.id === sbx.id);

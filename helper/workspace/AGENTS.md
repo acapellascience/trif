@@ -143,6 +143,39 @@ style mod's old name, `@rules`, still works):
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
+### A style section in boxed and free mods
+
+Most follow-up requests are looks: a colour, a size, a gap, what's hidden. In a boxed or free mod, put those
+in its **style section**, right after the header, and TRIF applies them itself: a change there alone never
+makes the mod wait for the user's OK again, whatever the mod can do. JSON on `//` lines:
+
+```js
+// ==/WebMod==
+// ==Style==
+// {
+//   "css": ["[data-testid=primaryColumn] { max-width: var(--width); }", ".trif-box-mark { outline: 2px solid var(--accent); }"],
+//   "hide": ["[data-testid=sidebarColumn] [aria-label=Trending]"],
+//   "settings": {
+//     "width":  { "type": "number", "value": 700, "min": 400, "max": 1400, "unit": "px" },
+//     "accent": { "type": "colour", "value": "#1d9bf0" },
+//     "marks":  { "type": "on-off", "value": true },
+//     "layout": { "type": "choice", "value": "list", "options": ["list", "grid"] }
+//   }
+// }
+// ==/Style==
+if (trif.style.marks) { /* … */ }
+```
+
+- `css` (text, or a list of lines) and `hide` are a style mod's: nothing that loads from an address.
+  `var(--name)` is a setting's value (a number with its `unit`, a colour, a choice's word).
+- `settings` are what the code reads, as `trif.style.<name>`: `number` (with `min` and `max`, optional
+  `step` and `unit`), `colour` (`#rgb` or `#rrggbb`, alpha too), `on-off` (true or false), `choice` (one of
+  `options`, words). Nothing else: the code never sees the section's text.
+- What a setting is (its type, range, choices) counts as code: changing it is judged like a code change.
+  Its `value`, the CSS and the hide list are style.
+- So write the values the user may want to tweak there, not as constants in the code; then "make it a bit
+  wider" is a change to the section. `trif check` checks the section and says it found one.
+
 ### Mods TRIF ships
 
 Tim's mods (the ones the user chose to add, site by site, at setup or later in Settings: Detox Timeline, X-Flyer, the Google, Amazon and Instagram ones…) say `// @source webmods` (or `trif`) and `// @version <n>` in their header. You may change them
@@ -150,7 +183,9 @@ like any other mod when the user asks. While a copy is exactly as shipped, TRIF 
 version silently; once it's changed, it never does: when a new version comes, the user gets an offer in
 the side panel to use it (their copy goes to the trash), keep theirs, or merge the two with their agent.
 `trif mods` shows "update available (you've changed it)" on such a mod. Keep the `@source` and
-`@version` lines when you edit one.
+`@version` lines when you edit one. An edit of one that keeps using what the shipped version did runs
+straight away; one that adds a power, a line that uses one, or a site it runs on or talks to waits for the
+user's OK.
 
 Merging (a side-panel run started from that offer says so, with the three files): `.shipped/<site>/<mod>.js`
 is what was shipped before, the version the user's copy started from; `.shipped/<site>/<mod>.new.js` is the
@@ -345,7 +380,7 @@ click or type for the user, navigate, load from addresses it works out while run
 or run code TRIF can't read waits, not running, until the user allows it (in the side panel, or `trif
 approve <site>/<mod>` in their terminal). TRIF reads this from the code, not from your `@risk` header.
 Once allowed, later edits run straight away unless they add such a power or add or change a line that
-uses one. `trif status` and `trif mods` show what's waiting (HELD) and what TRIF found, and `trif check
+uses one; a change to a mod's style section alone (above) always does. `trif status` and `trif mods` show what's waiting (HELD) and what TRIF found, and `trif check
 <site>/<mod>` shows what it reads in a mod before anything waits, line by line, with how to avoid each
 thing where there's a way. Write mods it can read ("Writing mods TRIF can read" in TECHNIQUES.md): a fake
 key press to reach your own code, `x[k] = v` in a mod that mentions `href`, or a tag name in a variable

@@ -22,7 +22,8 @@ const { envVar } = require('./lib/env');
 const { workspace, VERSION, examplesDir } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
-const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames } = require('./lib/mods');
+const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
+const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
@@ -286,7 +287,12 @@ function syncMods(reason, force) {
     try {
       const old = buildMod({ site: m.site, file: m.file, code: before }).mod;
       pendingIds.add(m.id);
-      return old;
+      // (and the waiting change's style section, which needs no OK, on it: its CSS, and its settings' values
+      // where the running version's settings take them; lib/stylesection.js restyle. A boxed or free mod only.)
+      if (!m.style || old.rules) return old;
+      const style = restyle(old.style, m.style);
+      if (JSON.stringify(style) === JSON.stringify(old.style || null)) return old;
+      return { ...old, style, hash: sha1(`${old.hash}\nstyle ${JSON.stringify(style)}`) };
     } catch { return m; }
   });
   // An extension from before sets could go in parts takes 1 MB of mods in all (planModsMessage).

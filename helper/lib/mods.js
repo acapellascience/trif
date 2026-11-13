@@ -176,9 +176,21 @@ function buildMod({ site, file, code }) {
   // (`sandboxed` only when it is: the hashes of every other mod stay as they were. The code is hashed with its
   // header's new names spelled the old way, so a mod that only changes `@rules` to `@style`, or `@sandboxed` to
   // `@boxed`, keeps its hash: what was allowed for it, and whether it waits, stay as they were.)
-  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, ...(header.sandboxed ? ['sandboxed'] : [])]) + '\n' + oldSpelling(code));
+  const metaJson = JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, ...(header.sandboxed ? ['sandboxed'] : [])]);
+  const hash = sha1(metaJson + '\n' + oldSpelling(code));
   if (header.rules && header.sandboxed) throw new Error('a mod is either a style mod (@style) or a boxed mod (@boxed), not both');
   if (header.powers.length && !header.sandboxed) throw new Error('powers (@powers) are for boxed mods (@boxed): a free mod has every power the page has, and a style mod none');
+  // A style section (lib/stylesection.js): taken out of the code before anything reads it. `code` has its lines
+  // blank, `text` is the file; `style` is what TRIF applies (its CSS) and hands the code (the settings' values);
+  // `codeHash` is the code's own version: the file without the section, with what the settings are, so held.js
+  // can tell a change to the section alone. (`hash` stays the file's: the browser re-registers on any change.)
+  const section = require('./stylesection').parseSection(code);
+  if (section && header.rules) throw new Error('a style mod is all style: its CSS and hide list go in its JSON, without a // ==Style== section');
+  const styled = section ? {
+    text: code, style: { css: section.css, values: section.values, settings: section.decl },
+    codeHash: sha1(JSON.stringify([metaJson, 'style', section.decl]) + '\n' + oldSpelling(section.without)),
+  } : {};
+  if (section) code = section.code;
   if (header.sandboxed) {
     // (its powers, checked against the menu: throws a PowersError for the scanner to report)
     const bp = require('./boxpowers');
@@ -191,7 +203,7 @@ function buildMod({ site, file, code }) {
     if (events.length) powerArgs.events = events;
     const migrate = bp.parseMigrate(header.migrate);
     if (migrate.length) powerArgs.migrate = migrate;
-    return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), ...(Object.keys(powerArgs).length ? { powerArgs } : {}), code, hash }, warnings: header.warnings };
+    return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), ...(Object.keys(powerArgs).length ? { powerArgs } : {}), code, hash, ...styled }, warnings: header.warnings };
   }
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
@@ -199,7 +211,7 @@ function buildMod({ site, file, code }) {
     const parsed = rules.parseRules(code);
     return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(parsed, meta.id), selectors: rules.selectorsOf(parsed), hash }, warnings: header.warnings };
   }
-  return { mod: { ...meta, code, hash }, warnings: header.warnings };
+  return { mod: { ...meta, code, hash, ...styled }, warnings: header.warnings };
 }
 
 function statSafe(p) {

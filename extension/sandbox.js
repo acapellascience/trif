@@ -63,10 +63,13 @@ export function sandboxRuntimeCode() {
  * powers (docs/POWERS.md), which come from its header as the helper read it, not from its code.
  */
 // (a mod's powers, from its header as the helper read it: a list of names, or {powers, args})
+// (and its style section, lib.js styleOf: {css, values}, which the runtime applies and hands its `trif`)
 const grantOf = (g) => {
   const names = Array.isArray(g) ? g : g && Array.isArray(g.powers) ? g.powers : [];
   const args = g && !Array.isArray(g) && g.args && typeof g.args === 'object' ? g.args : {};
-  return JSON.stringify({ powers: names.map(String), args: Object.fromEntries(Object.entries(args).map(([k, v]) => [String(k), (Array.isArray(v) ? v : []).map(String)])) });
+  const st = g && !Array.isArray(g) && g.style && typeof g.style === 'object' ? g.style : null;
+  const style = st ? { css: String(st.css || ''), values: st.values && typeof st.values === 'object' ? st.values : {} } : null;
+  return JSON.stringify({ powers: names.map(String), args: Object.fromEntries(Object.entries(args).map(([k, v]) => [String(k), (Array.isArray(v) ? v : []).map(String)])), ...(style ? { style } : {}) });
 };
 export function sandboxModCode(id, source, powers = []) {
   const P = grantOf(powers);
@@ -1923,7 +1926,17 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       urlFns.add(f);
       return harden(() => { urlFns.delete(f); });
     };
+    // (its style section's settings, as values: numbers, true or false, a colour or a word, and nothing else;
+    // its CSS TRIF applies when the mod starts, run below)
+    const styleValues = {};
+    const sv = grant.style && typeof grant.style === 'object' && grant.style.values && typeof grant.style.values === 'object' ? grant.style.values : {};
+    for (const k of Object.keys(sv).slice(0, 40)) {
+      const v = sv[k];
+      if (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) && ((typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && /^(?:[A-Za-z][A-Za-z0-9-]{0,39}|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8}))$/.test(v)))) styleValues[k] = v;
+    }
+    self.styleCss = grant.style && typeof grant.style === 'object' && typeof grant.style.css === 'string' ? grant.style.css : '';
     const trifApi = {
+      ...(grant.style && typeof grant.style === 'object' ? { style: Object.freeze(styleValues) } : {}),
       css, observe, text, settings, audio: audioApi, changes, wrap: wrapTextIn, onUrl, ready: readyP, loaded: loadedP,
       block, signal, storage, imageVariant, onUpload, embed, localFonts, reload,
       // site-data: filter the site's JSON responses whose address matches `glob` (* for anything)
@@ -2746,6 +2759,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     const api = apiFor(id, powers);
     const prev = current, t = now();
     current = api;
+    // (its style section's CSS, which TRIF applies, checked as trif.css's is; never seen by the mod as text:
+    // a sheet of TRIF's, which page.styleSheets() leaves out)
+    if (api.styleCss && !api.styleApplied) {
+      api.styleApplied = true;
+      if (cssOk(api.styleCss) && !READS_FIELDS.test(api.styleCss)) { try { styleSheet(api.styleCss); } catch (err) { report(id, err); } } else report(id, new TypeError('TRIF sandbox: the style section\'s CSS loads from an address, or reads a field, so TRIF didn\'t apply it'));
+    }
     try {
       if (SANDBOX) {
         const c = compartmentFor(api);

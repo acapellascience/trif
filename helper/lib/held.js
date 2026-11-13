@@ -19,14 +19,22 @@
 // - Mods the user had when this started keep running, but one that can do something not yet allowed is
 //   marked for REVIEW: the panel shows the same facts once, with "Looks right" (allows them) and the
 //   mod's switch. (Mods TRIF ships start from what their shipped version can do: an unchanged one, or an
-//   update TRIF brings, has nothing to ask about.)
+//   update TRIF brings, has nothing to ask about; an edit that reuses its lines doesn't ask either. One that
+//   adds a power or a line using one, a site its URLs name, or a @match for a site the shipped version
+//   doesn't run on while the mod can do something, waits: shippedSiteNeeds.)
+// - A change to a mod's style section alone (lib/stylesection.js: CSS, hidden selectors, typed settings'
+//   values, which TRIF applies itself; the code never gets the section's text) runs straight away: the
+//   code is the version that last ran (codeOf). Only a run's change for another site waits, as a style
+//   mod's would. A change to both is judged on its code; meanwhile the running version gets the new style
+//   (host.js, stylesection.js restyle).
 //
 // Files (the helper's, outside sites/: side-panel runs can't write them):
 //   $TRIF_HOME/held.json     mod id -> {hash, site, scope, runId, at, reason, facts, needs, claim}
 //   $TRIF_HOME/allowed.json  mod id -> {powers: [key], lines: {key: [sha1 of a line]}, at}   (keys as
 //                            powers.js gives them, plus `match:<pattern>` and `risk2`)
-//   $TRIF_HOME/seen.json     mod id -> {hash, lines: {key: [line hash]}}: the version TRIF last let run, and
-//                            its lines that use a power (a change is judged on what it adds to those)
+//   $TRIF_HOME/seen.json     mod id -> {hash, code?, lines: {key: [line hash]}}: the version TRIF last let run
+//                            (`code`: its codeHash, for a mod with a style section), and its lines that use a
+//                            power (a change is judged on what it adds to those)
 //   $TRIF_HOME/.ran/<site>/<mod>.js  that version's text: while a change to the mod waits, it's what runs
 //                            (lastRun), and "Don't allow" puts it back
 // A held entry lasts while that version of the mod is there; an edit makes it be worked out again.
@@ -85,7 +93,12 @@ const everywhere = (pattern) => pattern === '<all_urls>' || /^(\*|https?):\/\/\*
 // on any site, change what runs on all of them without a word. Style and boxed mods don't ask again: they
 // can't act, wherever they run. (As a "line" of the match: allowed.json keeps it with the key, isAllowed
 // compares it.)
-const versionLine = (mod) => `version:${String(mod.hash || '').slice(0, 24)}`;
+// (the code's version: a change to the mod's style section alone isn't a new one, lib/stylesection.js)
+const versionLine = (mod) => `version:${String(codeOf(mod) || '').slice(0, 24)}`;
+// The version of a mod's code: the file's hash, or for a mod with a style section the hash of the file without
+// it (mods.js codeHash). A change that keeps it changed only the section: TRIF applies that itself, and the code
+// gets only its typed values, so it runs without asking (updateHeld).
+const codeOf = (mod) => (mod && (mod.codeHash || mod.hash)) || null;
 
 function needsOf(mod, scope = null, agentLevel = null) {
   const out = powersFor(mod).map((p) => ({ key: p.key, fact: p.fact, lines: hashLines(mod.code, p.lines || []) }));
@@ -100,15 +113,45 @@ function needsOf(mod, scope = null, agentLevel = null) {
   return out;
 }
 
-// What a shipped mod's own version can do (its base in <home>/.shipped/), so the user's edit of it is
-// judged on what it adds. null when the mod isn't one TRIF shipped.
-function shippedBaseline(home, mod) {
-  if (!home || !mod.source || !['webmods', 'trif'].includes(mod.source)) return null;
+// The version TRIF shipped of a mod (its base in <home>/.shipped/, as a mod), or null when the mod isn't one
+// TRIF shipped.
+function shippedVersion(home, mod) {
+  if (!home || !mod || !mod.source || !['webmods', 'trif'].includes(mod.source)) return null;
   const [site, ...rest] = String(mod.id).split('/');
   const file = path.join(home, '.shipped', site, `${rest.join('/')}.js`);
   let code;
   try { code = fs.readFileSync(file, 'utf8'); } catch { return null; }
-  return powersOf(code, { sites: modSites(mod) }).map((p) => ({ key: p.key, lines: hashLines(code, p.lines) }));
+  try { return require('./mods').buildMod({ site, file, code }).mod; } catch { return null; }
+}
+
+// What a shipped mod's own version can do, so the user's edit of it is judged on what it adds: its powers and
+// their lines, read with its own sites (an edit that adds a site doesn't widen what counts as the shipped
+// version's own). null when the mod isn't one TRIF shipped.
+function shippedBaseline(home, mod, shipped = shippedVersion(home, mod)) {
+  if (!shipped) return null;
+  return powersFor(shipped).map((p) => ({ key: p.key, lines: hashLines(shipped.code, p.lines || []) }));
+}
+
+// Where a pattern runs: its host without www., and whether it takes the host's subdomains too (*.x.com).
+function patternHost(pattern) {
+  const m = /^[^:]+:\/\/([^/]+)/.exec(String(pattern));
+  if (!m || m[1] === '*') return null;
+  const wild = m[1].startsWith('*.');
+  return { host: m[1].replace(/^\*\./, '').replace(/^www\./, '').toLowerCase(), wild };
+}
+// The sites an edit of a shipped mod runs on that its shipped version never did (@match patterns for other
+// hosts, or for every site), as needs: while it can do something, that's a change in what it does there
+// (Tim's mod that may send on x.com, now on your bank's site). An edit within the shipped hosts (another
+// path, www. or not) asks nothing.
+function shippedSiteNeeds(mod, shipped) {
+  if (!shipped || !powersFor(mod).some((p) => !isSoft(p.key))) return [];
+  const base = (shipped.matches || []).map((p) => (everywhere(p) ? 'all' : patternHost(p)));
+  if (base.includes('all')) return [];
+  const covered = (pattern) => {
+    const h = !everywhere(pattern) && patternHost(pattern);
+    return !!h && base.some((b) => b && (b.wild ? h.host === b.host || h.host.endsWith(`.${b.host}`) : !h.wild && h.host === b.host));
+  };
+  return (mod.matches || []).filter((p) => !covered(p)).map((p) => ({ key: `match:${p}`, fact: `runs on ${p}, where Tim's version of this mod doesn't` }));
 }
 
 // The text a hold or review shows: TRIF's own words, one fact per line.
@@ -171,12 +214,12 @@ const loadSeen = (home) => (fs.existsSync(seenFile(home)) ? loadJson(seenFile(ho
 
 // What's allowed for a mod: {keys: Set, lines: Map key -> Set of line hashes}, from allowed.json and, for
 // a mod TRIF ships, its shipped version.
-function allowedFor(home, mod, allowed = loadAllowed(home), seenVersion = null) {
+function allowedFor(home, mod, allowed = loadAllowed(home), seenVersion = null, shipped = shippedVersion(home, mod)) {
   const a = allowed[mod.id] || {};
   const keys = new Set(Array.isArray(a.powers) ? a.powers : []);
   const lines = new Map(Object.entries(a.lines && typeof a.lines === 'object' ? a.lines : {}).map(([k, v]) => [k, new Set(Array.isArray(v) ? v : [])]));
   // (and what the version TRIF last let run already did: a change is judged on what it adds)
-  const before = [...(shippedBaseline(home, mod) || []),
+  const before = [...(shippedBaseline(home, mod, shipped) || []),
     ...Object.entries(seenVersion && seenVersion.lines && typeof seenVersion.lines === 'object' ? seenVersion.lines : {}).map(([key, l]) => ({ key, lines: Array.isArray(l) ? l : [] }))];
   for (const b of before) {
     keys.add(b.key);
@@ -256,9 +299,11 @@ function updateHeld(ws, mods, scopes) {
     const was = seen && typeof seen[m.id] === 'object' && seen[m.id] && seen[m.id].lines ? seen[m.id].lines : {};
     const lines = { ...was };
     for (const n of needsOf(m, null)) if (n.lines && n.lines.length) lines[n.key] = [...new Set([...(lines[n.key] || []), ...n.lines])].slice(-2000);
-    return { hash: m.hash, lines };
+    return { hash: m.hash, ...(m.codeHash ? { code: m.codeHash } : {}), lines };
   };
   const seenHash = (v) => (typeof v === 'string' ? v : v && v.hash);
+  // (the code's version TRIF last let run, for a mod with a style section)
+  const seenCode = (v) => (v && typeof v === 'object' && typeof v.code === 'string' ? v.code : null);
   // Which live run changed each mod, if one did (and could: not a folder it was locked out of)
   const byRun = new Map();
   const live = scopes.filter((s) => s.before);
@@ -293,13 +338,26 @@ function updateHeld(ws, mods, scopes) {
       if (held[m.id]) { delete held[m.id]; changed = true; }
       continue;
     }
-    const ok = allowedFor(ws.home, m, allowed, typeof seen[m.id] === 'object' ? seen[m.id] : null);
-    let needs = needsOf(m, run ? run.scope : null, run ? run.agentLevel : null)
-      .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
-      .map((n) => described(n, ok));
-    // (and, where its powers add a holding power to what its site's boxed mods together are approved for, the
-    // site's new union: sitecombos.js; approving it approves that for the site)
-    needs = needs.concat(sites.siteNeeds(m, mods, { allowed, isOff, splits }));
+    // Only its style section changed since the version TRIF last let run (lib/stylesection.js): the code is
+    // that version's, so nothing it can do is new. It's judged as a style mod is: a run's change still waits
+    // for running outside the run's site, unless that's allowed.
+    const styleOnly = !forced && !!m.codeHash && seenCode(seen[m.id]) === m.codeHash;
+    const shipped = shippedVersion(ws.home, m);
+    const ok = allowedFor(ws.home, m, allowed, typeof seen[m.id] === 'object' ? seen[m.id] : null, shipped);
+    let needs;
+    if (styleOnly) {
+      needs = needsOf(m, run ? run.scope : null, null).filter((n) => n.key.startsWith('match:')).map((n) => ({ key: n.key, fact: n.fact }))
+        .filter((n) => !isAllowed(n, ok, true));
+    } else {
+      needs = needsOf(m, run ? run.scope : null, run ? run.agentLevel : null)
+        .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
+        .map((n) => described(n, ok));
+      // (one of Tim's mods, changed to run on a site its shipped version doesn't, while it can do something)
+      for (const n of shippedSiteNeeds(m, shipped)) if (!needs.some((x) => x.key === n.key) && !isAllowed(n, ok, true)) needs.push(n);
+      // (and, where its powers add a holding power to what its site's boxed mods together are approved for, the
+      // site's new union: sitecombos.js; approving it approves that for the site)
+      needs = needs.concat(sites.siteNeeds(m, mods, { allowed, isOff, splits }));
+    }
     // (a boxed mod's `controls` and `mods` are listed on a hold, but don't make one on their own)
     if (needs.length && needs.every((n) => isSoft(n.key))) needs = [];
     // (held as it is, for the same needs: as it was; a combination the site approved since, or another mod
@@ -309,7 +367,7 @@ function updateHeld(ws, mods, scopes) {
       // (by 'switch': the very version that ran, switched on, adding what its site hasn't approved)
       const by = run ? 'agent' : forced && seenHash(seen[m.id]) === m.hash ? 'switch' : 'outside';
       held[m.id] = {
-        hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by, at: same ? held[m.id].at : Date.now(),
+        hash: m.hash, ...(m.codeHash ? { codeHash: m.codeHash } : {}), site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by, at: same ? held[m.id].at : Date.now(),
         ...(run && run.agentLevel === 'off' ? { agentLevel: 'off' } : {}),
         reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
         lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
@@ -349,7 +407,7 @@ function approveHeld(home, id, hash = null) {
   const lines = held[id].lines || {};
   allowPowers(home, id, (held[id].needs || []).map((key) => ({ key, lines: lines[key] || [] })));
   const seen = loadSeen(home) || {};
-  seen[id] = { hash: held[id].hash, lines: (seen[id] && typeof seen[id] === 'object' && seen[id].lines) || {} }; // (its lines are allowed now)
+  seen[id] = { hash: held[id].hash, ...(held[id].codeHash ? { code: held[id].codeHash } : {}), lines: (seen[id] && typeof seen[id] === 'object' && seen[id].lines) || {} }; // (its lines are allowed now)
   saveJson(seenFile(home), seen);
   try { fs.unlinkSync(ranFile(home, id)); } catch { /* none */ } // (the next sync keeps the approved version's text)
   delete held[id];
@@ -452,7 +510,7 @@ function heldOnError(ws, mods, before, error) {
 }
 
 module.exports = {
-  heldOnError, everywhere,
+  heldOnError, everywhere, codeOf, shippedVersion, shippedSiteNeeds,
   loadHeld, saveHeld, updateHeld, approveHeld, rejectHeld, lastRun, heldFile, allowedFile, seenFile, holdReason,
   needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys,
 };

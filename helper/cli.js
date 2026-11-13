@@ -433,8 +433,25 @@ const handlers = {
     let file = pos[0];
     if (!fs.existsSync(file) && /^[^/\s]+\/[^/\s]+$/.test(file.replace(/\.js$/, ''))) file = path.join(ctx.ws.modsDir, `${file.replace(/\.js$/, '')}.js`);
     file = optionPath(ctx, file);
-    const code = fs.readFileSync(file, 'utf8');
+    let code = fs.readFileSync(file, 'utf8');
     const header = require('./lib/mods').parseHeader(code);
+    // (its style section, lib/stylesection.js: checked, then taken out, as TRIF does before it reads the code)
+    let section = null;
+    try {
+      section = require('./lib/stylesection').parseSection(code);
+      if (section && header.rules) throw new Error('a style mod is all style: its CSS and hide list go in its JSON, without a // ==Style== section');
+    } catch (e) {
+      if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (section) code = section.code;
+    const styleJson = section ? { style: { settings: Object.keys(section.values), lines: section.lines } } : {};
+    const styleNote = () => {
+      if (!section) return;
+      const names = Object.keys(section.values);
+      out(`Its style section (lines ${section.lines[0]}-${section.lines[1]}) checks out${names.length ? `, with ${names.length === 1 ? 'a setting' : `${names.length} settings`} for the code: ${names.map((n) => `trif.style.${n}`).join(', ')}` : ''}. TRIF applies it itself, so a change there alone never waits for the user's OK.`);
+    };
     if (header.rules && header.sandboxed) {
       const error = 'a mod is either a style mod (@style) or a boxed mod (@boxed), not both';
       if (ctx.json) printJson({ ok: false, error }); else out(`${path.resolve(file)}: ${error}`);
@@ -486,8 +503,9 @@ const handlers = {
       const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
       const needs = bp.powerNeeds({ site: rel.length === 2 ? rel[0] : '', powers: asked, powerArgs: askedArgs });
       const lint = require('./lib/sandboxlint').sandboxLint(code, { powers: asked });
-      if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: needs.map((n) => ({ key: n.key, power: n.power, fact: n.fact, holds: !n.soft })), lint });
+      if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: needs.map((n) => ({ key: n.key, power: n.power, fact: n.fact, holds: !n.soft })), lint, ...styleJson });
       out(`ok: ${path.resolve(file)} is a boxed mod and parses`);
+      styleNote();
       // (no powers but @migrate: it still waits once, for bringing its old settings over: held.js holds it)
       if (!needs.length) out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
       else {
@@ -514,8 +532,9 @@ const handlers = {
     const id = rel.length === 2 ? `${rel[0]}/${rel[1].replace(/\.js$/, '')}` : path.basename(file, '.js');
     const powers = powersOf(code, { sites: modSites({ id, matches: header.matches }) });
     const lines = code.split('\n');
-    if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })) });
+    if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })), ...styleJson });
     out(`ok: ${path.resolve(file)} parses`);
+    styleNote();
     if (!powers.length) return out('TRIF finds nothing in it that waits for the user\'s OK.');
     out(`\nTRIF reads this in it, so it waits for the user's OK (unless they've allowed it before):`);
     for (const p of powers) {

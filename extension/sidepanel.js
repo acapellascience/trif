@@ -1579,8 +1579,12 @@ function modItem(m) {
   // What the mod does, from its header's @description, on one line (all of it in the tooltip).
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
   if (desc) desc.title = m.description;
-  main.append(light, name, ...(desc ? [desc] : []));
+  main.append(light, name);
+  // Two lines (Tim, 11-13): the name and its icons run to the switch, which sits at the right of the first;
+  // the description under them, with </> and the bin at the right of the second (sidepanel.css .mod-row).
   const row = el('div', 'mod-row');
+  const right = el('div', 'mod-right');
+  const tools = el('div', 'mod-tools');
   if (m.held) {
     // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
     // its code, or matches outside the site): not running until the user allows it, in the approval dialog
@@ -1589,14 +1593,16 @@ function modItem(m) {
     // (held for being switched on, adding what its site hasn't approved: its switch stays, to turn it off again)
     const sw = m.held.by === 'switch' ? [modSwitch(document, { id: m.id, site: switchSite(m), enabled: isOn(m.id, switchSite(m)), labelId,
       apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }) })] : [];
-    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), ...sw, codeButton(m, labelId), deleteButton(m, labelId, li));
+    right.append(holdTag(m, 'on hold', labelId), ...sw);
   } else {
     const site = switchSite(m);
-    row.append(gripButton(labelId), main, modSwitch(document, {
+    right.append(modSwitch(document, {
       id: m.id, site, enabled: isOn(m.id, site), labelId,
       apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }),
-    }), codeButton(m, labelId), deleteButton(m, labelId, li));
+    }));
   }
+  tools.append(codeButton(m, labelId), deleteButton(m, labelId, li));
+  row.append(gripButton(labelId), main, right, ...(desc ? [desc] : []), tools);
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
@@ -1619,7 +1625,9 @@ function modItem(m) {
 
 /** One tag on a row at most: the most urgent with something to say. A held row's switch-place tag outranks all. */
 function showOneTag(li, held) {
-  const tags = [...li.querySelectorAll('.mod-name .row-tag')].filter((t) => t.textContent).sort((a, b) => a.dataset.rank - b.dataset.rank);
+  const all = [...li.querySelectorAll('.mod-name .row-tag')];
+  for (const t of all) if (!t.textContent) t.hidden = true; // (one that had something to say, now empty: e.g. "new", then switched on)
+  const tags = all.filter((t) => t.textContent).sort((a, b) => a.dataset.rank - b.dataset.rank);
   tags.forEach((t, i) => { t.hidden = held || i > 0; });
 }
 

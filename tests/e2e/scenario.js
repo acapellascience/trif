@@ -4216,8 +4216,10 @@ process.exitCode = 1;
         const icons = [...li.querySelectorAll('.mod-icons .mod-ic')], desc = li.querySelector('.mod-desc'), sw = li.querySelector('button.switch, .tag.on-hold'), code = li.querySelector('.mod-code'), bin = li.querySelector('.mod-delete');
         const r = (e) => e.getBoundingClientRect();
         return [li.dataset.mod.split('/')[1], { chip: icons.map((i) => i.dataset.icon).join(' ') || null, tone: icons.length ? [...new Set(icons.map((i) => [...i.classList].filter((c) => c !== 'mod-ic').join()))].join('/') : null, hover: icons.map((i) => i.title).join('\\n'), drawn: icons.every((i) => i.querySelector('svg path')),
-          old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
-          gapSwitch: Math.round(r(code).left - r(sw).right), gapBin: Math.round(r(bin).left - r(code).right) }];
+          old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, emptyTag: [...li.querySelectorAll('.tag')].some((t) => !t.textContent.trim() && t.getClientRects().length > 0), oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
+          // (two lines: the switch at the right of the first, </> and the bin under it at the right of the second)
+          gapSwitch: Math.round(r(sw).right - r(bin).right), gapBin: Math.round(r(bin).left - r(code).right), below: r(code).top >= r(sw).bottom - 4 && r(bin).top >= r(sw).bottom - 4,
+          sameLine: Math.abs((r(li.querySelector('.mod-name')).top + r(li.querySelector('.mod-name')).bottom) / 2 - (r(sw).top + r(sw).bottom) / 2) < 6 }];
       }))`);
       const rows = await waitFor('the rows', async () => { const x = await rowsOf(); return Object.keys(x).length === 5 && x['e2e-row-together'].chip ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
       await this.dismissApproval();
@@ -4227,8 +4229,9 @@ process.exitCode = 1;
         const x = rows[id];
         if (x.chip !== chip || x.tone !== tone || (chip && !x.drawn)) problems.push(`${id}'s icons: ${JSON.stringify(x)}`);
         if (x.old) problems.push(`${id} still shows ${x.old} of the old row's parts`);
+        if (x.emptyTag) problems.push(`${id} shows an empty tag (a line beside its name)`);
         if (!x.oneLine) problems.push(`${id}'s description isn't one line with an ellipsis: ${JSON.stringify(x)}`);
-        if (Math.abs(x.gapSwitch - 10) > 1 || Math.abs(x.gapBin - 2) > 1) problems.push(`${id}'s controls: ${x.gapSwitch}px, then ${x.gapBin}px`);
+        if (Math.abs(x.gapSwitch) > 6 || Math.abs(x.gapBin - 2) > 1 || !x.below || !x.sameLine) problems.push(`${id}'s controls: ${JSON.stringify({ switchVsBin: x.gapSwitch, codeToBin: x.gapBin, below: x.below, sameLine: x.sameLine })}`);
       }
       if (!/^It can see and filter/.test(rows['e2e-row-power'].hover) || !/Noticeable: 127\.0\.0\.1 could tell/.test(rows['e2e-row-power'].hover)) problems.push(`the icons' hover: ${rows['e2e-row-power'].hover}`);
       await themes('mod-rows');
@@ -4239,7 +4242,7 @@ process.exitCode = 1;
       if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.more < 2 || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
       if (problems.length) throw new Error(problems.join('\n'));
-      return `icons: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; controls ${rows['e2e-row-plain'].gapSwitch}px then ${rows['e2e-row-plain'].gapBin}px; the icons open the card`;
+      return `icons: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; the switch on the name's line, </> and the bin ${rows['e2e-row-plain'].gapBin}px apart under it; the icons open the card`;
     } finally {
       for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});

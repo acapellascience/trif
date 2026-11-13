@@ -351,10 +351,15 @@ body.no-site .site-starter { display: none; }
 }
 .mod-list li { padding: 5px 0; border-top: 1px solid var(--line); }
 .mod-list li:first-child { border-top: 0; }
-.mod-row { display: flex; align-items: center; gap: 10px; }
-/* The row's right side: the switch (or "on hold"), a little room, then </> and the bin close together,
-   icon-sized hit areas (24px), the bin pulled toward the box's edge. */
-.mod-row > .mod-delete { margin-left: -8px; margin-right: -4px; }
+.mod-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; align-items: center; }
+/* Two lines: the grip down the left; the name (light, name, icons, a tag) to the switch, at the right of the
+   first line; the description under it, with </> and the bin at the right of the second, the bin pulled
+   toward the box's edge. Icon-sized hit areas (24px). */
+.mod-row > .mod-grip { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
+.mod-row > .mod-main { grid-column: 2; grid-row: 1; }
+.mod-row > .mod-right { grid-column: 3; grid-row: 1; justify-self: end; display: flex; align-items: center; gap: 8px; }
+.mod-row > .mod-desc { grid-column: 2; grid-row: 2; padding-left: 14px; }
+.mod-row > .mod-tools { grid-column: 3; grid-row: 2; justify-self: end; display: flex; align-items: center; gap: 2px; margin: -4px -4px -4px 0; /* (24px buttons beside a 12px line: they don't make it taller) */ }
 /* Reordering (sidepanel.js): the grip at the start of each row, the row being dragged, the rows making way. */
 .mod-list { position: relative; } /* (the rows' offsetTop is within the list) */
 .mod-grip { flex: none; width: 16px; height: 24px; margin-right: -6px; color: var(--faint); cursor: grab; touch-action: none; opacity: 0.6; }

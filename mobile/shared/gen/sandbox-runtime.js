@@ -1836,7 +1836,17 @@ globalThis.__trifStartSandbox = function () {
       urlFns.add(f);
       return harden(() => { urlFns.delete(f); });
     };
+    // (its style section's settings, as values: numbers, true or false, a colour or a word, and nothing else;
+    // its CSS TRIF applies when the mod starts, run below)
+    const styleValues = {};
+    const sv = grant.style && typeof grant.style === 'object' && grant.style.values && typeof grant.style.values === 'object' ? grant.style.values : {};
+    for (const k of Object.keys(sv).slice(0, 40)) {
+      const v = sv[k];
+      if (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) && ((typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && /^(?:[A-Za-z][A-Za-z0-9-]{0,39}|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8}))$/.test(v)))) styleValues[k] = v;
+    }
+    self.styleCss = grant.style && typeof grant.style === 'object' && typeof grant.style.css === 'string' ? grant.style.css : '';
     const trifApi = {
+      ...(grant.style && typeof grant.style === 'object' ? { style: Object.freeze(styleValues) } : {}),
       css, observe, text, settings, audio: audioApi, changes, wrap: wrapTextIn, onUrl, ready: readyP, loaded: loadedP,
       block, signal, storage, imageVariant, onUpload, embed, localFonts, reload,
       // site-data: filter the site's JSON responses whose address matches `glob` (* for anything)
@@ -2659,6 +2669,12 @@ globalThis.__trifStartSandbox = function () {
     const api = apiFor(id, powers);
     const prev = current, t = now();
     current = api;
+    // (its style section's CSS, which TRIF applies, checked as trif.css's is; never seen by the mod as text:
+    // a sheet of TRIF's, which page.styleSheets() leaves out)
+    if (api.styleCss && !api.styleApplied) {
+      api.styleApplied = true;
+      if (cssOk(api.styleCss) && !READS_FIELDS.test(api.styleCss)) { try { styleSheet(api.styleCss); } catch (err) { report(id, err); } } else report(id, new TypeError('TRIF sandbox: the style section\'s CSS loads from an address, or reads a field, so TRIF didn\'t apply it'));
+    }
     try {
       if (SANDBOX) {
         const c = compartmentFor(api);

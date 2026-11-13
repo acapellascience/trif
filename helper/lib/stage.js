@@ -252,9 +252,11 @@ class Stage {
   }
 
   // sha1 of each file found, by its stat (read again only when that changes). which: 's' (the copy) or 'l'.
+  // One that can't be read is in `out.failed` (taken as unchanged: never as deleted).
   _hashes(which, found) {
     const cache = this.cache[which];
     const out = new Map();
+    out.failed = new Set();
     for (const [rel, st] of found) {
       const key = statKey(st);
       const hit = cache.get(rel);
@@ -265,6 +267,7 @@ class Stage {
         cache.set(rel, { key, hash });
         out.set(rel, hash);
       } catch (e) {
+        out.failed.add(rel);
         if (which === 's') this._refuse(rel, e.message);
       }
     }
@@ -305,8 +308,8 @@ class Stage {
     const rels = new Set([...this.entries.keys(), ...stageNow.keys(), ...liveNow.keys()]);
     for (const rel of [...rels].sort()) {
       const e = this.entries.get(rel) || { s: null, l: null };
-      const s = stageNow.has(rel) ? stageNow.get(rel) : null;
-      const l = liveNow.has(rel) ? liveNow.get(rel) : null;
+      const s = stageNow.has(rel) ? stageNow.get(rel) : stageNow.failed.has(rel) ? e.s : null;
+      const l = liveNow.has(rel) ? liveNow.get(rel) : liveNow.failed.has(rel) ? e.l : null;
       if (s !== e.s) {
         if (s === l) { this._set(rel, s, l); continue; }
         const why = this._pushRefused(rel);

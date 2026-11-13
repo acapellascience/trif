@@ -94,6 +94,11 @@ test('stage: the run\'s changes reach the mods folder as facts (written), its ot
   const sha = (f) => require('crypto').createHash('sha1').update(fs.readFileSync(f)).digest('hex');
   assert.equal(stage.written.get(rel('x.com', 'new.js')), sha(l('x.com', 'new.js')));
   assert.ok(!stage.written.has(rel('y.com', 'sneaky.js')));
+  // A file of the copy swapped for a hard link isn't read, nor taken as deleted.
+  fs.unlinkSync(s('x.com', '_notes.md'));
+  fs.linkSync(outside, s('x.com', '_notes.md'));
+  stage.sync();
+  assert.equal(read(l('x.com', '_notes.md')), 'notes');
   // Nothing more the next time; the file the run deleted it made itself just goes.
   assert.deepEqual(stage.sync().pushed, []);
   fs.unlinkSync(s('x.com', 'new.js'));

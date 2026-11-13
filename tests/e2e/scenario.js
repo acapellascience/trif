@@ -1295,6 +1295,7 @@ class Scenario {
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a style mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
+      await r.check('a style section (helper/lib/stylesection.js): a free mod\'s and a boxed mod\'s CSS applied by TRIF, their settings as trif.style; the code finds no trace of the section; a change to the section alone runs without asking; a code change waits as before, the version that runs meanwhile wearing the new style', () => this.styleSectionCheck(win));
       await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
@@ -2464,6 +2465,69 @@ process.exitCode = 1;
     } finally {
       for (const f of [good, bad]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', site]).catch(() => {});
+    }
+  }
+
+  // ---- a mod's style section (helper/lib/stylesection.js): applied by TRIF, never held on its own
+
+  async styleSectionCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const free = path.join(dir, 'e2e-styled.js'), boxed = path.join(dir, 'e2e-styled-box.js');
+    const posted = (p) => this.o.servers.requests.filter((q) => q.url.startsWith(p) && q.method !== 'GET');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => (st.split('\n').find((l) => l.includes(id)) || '').trim();
+    // (the section as an agent writes it; "Zmarkerq", an option the code never gets, is what it looks for)
+    const section = (spec) => `// ==Style==\n${JSON.stringify(spec, null, 2).split('\n').map((l) => `// ${l}`).join('\n')}\n// ==/Style==\n`;
+    const spec = (colour, hide) => ({
+      css: '#title { color: var(--accent); }', hide: hide ? ['a[href="/two.html"]'] : [],
+      settings: { accent: { type: 'colour', value: colour }, size: { type: 'number', value: colour === '#010203' ? 1 : 2, min: 0, max: 9 }, look: { type: 'choice', value: 'plain', options: ['plain', 'Zmarkerq'] } },
+    });
+    // The free mod sends (so it waits once), and reads every way it has to its own text
+    const freeFile = (s, path0) => `// ==WebMod==\n// @name E2E styled\n// @match *://127.0.0.1/*\n// ==/WebMod==\n${section(s)}(() => {
+  const found = [String(document.currentScript && document.currentScript.textContent), [...document.scripts].map((x) => x.textContent).join(' '),
+    (function probe() { return 1; }).toString(), String(new Error('where').stack), JSON.stringify(trif), document.documentElement.outerHTML];
+  document.documentElement.dataset.e2eStyled = JSON.stringify({ code: ${JSON.stringify(path0)}, style: trif.style, frozen: Object.isFrozen(trif.style), leak: found.some((f) => /Zmarkerq|"settings"|==Style==/.test(f)) });
+  fetch(${JSON.stringify(path0)}, { method: 'POST' });
+})();\n`;
+    const boxedFile = (gap) => `// ==WebMod==\n// @name E2E styled box\n// @match *://127.0.0.1/*\n// @boxed\n// ==/WebMod==\n${section({ css: `#title { letter-spacing: var(--gap); }`, settings: { gap: { type: 'number', value: gap, min: 0, max: 20, unit: 'px' }, look: { type: 'choice', value: 'grid', options: ['grid', 'Zmarkerq'] } } })}await trif.ready;\npage.body.classes.add('trif-box-styled-' + trif.style.look + '-' + trif.style.gap);\n`;
+    const look = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({
+      colour: getComputedStyle(document.getElementById('title')).color, spacing: getComputedStyle(document.getElementById('title')).letterSpacing,
+      linkShown: document.querySelector('a[href="/two.html"]').getClientRects().length > 0, body: document.body.className,
+      mod: document.documentElement.dataset.e2eStyled ? JSON.parse(document.documentElement.dataset.e2eStyled) : null })`], { timeoutMs: 20000 })).stdout);
+    const reload = async (q) => { await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=style-${q}`]); await sleep(1500); };
+    // (reloaded each time: the browser may still have the version before when the first reload lands)
+    let n = 0;
+    const shows = (what, ok) => waitFor(what, async () => { await reload(`${++n}`); const x = await look(); return ok(x) ? x : null; }, { timeoutMs: 25000, intervalMs: 300 });
+    try {
+      fs.writeFileSync(free, freeFile(spec('#010203', true), '/e2e-styled-v1'));
+      fs.writeFileSync(boxed, boxedFile(3));
+      let st = await waitFor('the free mod held for sending, the boxed one registered', async () => { const x = await status(); return /e2e-styled\s+HELD: it can send/.test(x) && /e2e-styled-box\s+registered \(boxed/.test(x) ? x : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const ok = await this.cli(['approve', `${site}/e2e-styled`], { timeoutMs: 20000 });
+      if (ok.status !== 0) throw new Error(`trif approve: ${ok.stderr}`);
+      const one = await shows('both styles applied', (x) => x.colour === 'rgb(1, 2, 3)' && x.spacing === '3px' && x.mod && x.body.includes('trif-box-styled-grid-3'));
+      if (one.linkShown) throw new Error(`the hide list: ${JSON.stringify(one)}`);
+      if (one.mod.leak) throw new Error('the free mod found the section\'s text');
+      if (JSON.stringify(one.mod.style) !== JSON.stringify({ accent: '#010203', size: 1, look: 'plain' }) || !one.mod.frozen) throw new Error(`trif.style: ${JSON.stringify(one.mod)}`);
+      await waitFor('its POST', () => posted('/e2e-styled-v1').length || null, { timeoutMs: 5000 });
+      // A change to the section alone (colour, hide list, a setting's value): registered, nothing waits
+      fs.writeFileSync(free, freeFile(spec('#040506', false), '/e2e-styled-v1'));
+      fs.writeFileSync(boxed, boxedFile(7));
+      st = await waitFor('the style edits registered, not held', async () => { const x = await status(); return /e2e-styled\s+registered/.test(x) && /e2e-styled-box\s+registered/.test(x) ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      if (/e2e-styled\s+(HELD|CHANGE WAITING)/.test(st)) throw new Error(`a style edit waits: ${line(st, 'e2e-styled ')}`);
+      const two = await shows('the new style', (x) => x.colour === 'rgb(4, 5, 6)' && x.spacing === '7px' && x.mod && x.mod.style.size === 2);
+      if (!two.linkShown) throw new Error('the link is still hidden');
+      // A change to the code (where it sends) and the style at once: the code waits; meanwhile the version that
+      // ran runs, with the new style
+      fs.writeFileSync(free, freeFile(spec('#070809', false), '/e2e-styled-v2'));
+      st = await waitFor('the code change waiting', async () => { const x = await status(); return /e2e-styled\s+CHANGE WAITING \(the version before runs meanwhile\): it can send/.test(x) ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      const three = await shows('the old code in the new style', (x) => x.colour === 'rgb(7, 8, 9)' && x.mod && x.mod.code === '/e2e-styled-v1');
+      if (posted('/e2e-styled-v2').length) throw new Error('the waiting code ran');
+      if (JSON.stringify(three.mod.style) !== JSON.stringify({ accent: '#070809', size: 2, look: 'plain' })) throw new Error(`trif.style meanwhile: ${JSON.stringify(three.mod.style)}`);
+      return `CSS, hide list and trif.style applied (free and boxed), no trace of the section in what the code can read; a style edit registered without asking (${two.colour}, ${two.spacing}); a code edit waits, the version before running in the new style (${three.colour})`;
+    } finally {
+      for (const f of [free, boxed]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
     }
   }
 

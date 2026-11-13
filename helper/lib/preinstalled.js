@@ -447,7 +447,7 @@ function pendingUpdates(home, mods) {
   for (const m of mods) {
     const rec = shipped[m.id];
     if (!rec || rec.own || rec.retired || !rec.pending) continue;
-    const mine = sha1(m.code);
+    const mine = sha1(m.text ?? m.code); // (the file, not the code TRIF makes of it: a style mod's, or one with a style section)
     if (mine === rec.pending.hash) continue;
     out[m.id] = { version: rec.pending.version || null, from: rec.version || null, modified: mine !== rec.hash };
   }

@@ -9,6 +9,14 @@ safety rules, which always apply.
 In AGENTS.md ("Style mods"): CSS, things to hide, text to replace and items to filter, as data TRIF's own
 code runs. Start there; reach for the rest of this file only when a style mod can't do the job.
 
+## A free or boxed mod's looks: its style section
+
+A free or boxed mod's CSS, the things it hides, and the values it uses for looks (sizes, colours, which
+parts are on) go in its **style section** (AGENTS.md, "A style section in boxed and free mods"), not in
+its code: TRIF applies the CSS itself and hands the code the values as `trif.style`, so the user's
+follow-up tweaks never make the mod wait for their OK again. Keep in the code only what needs code: CSS
+the code builds while it runs (from what it finds on the page), or rules it adds and removes.
+
 ## Boxed mods: when a style mod isn't enough
 
 When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **boxed
@@ -77,7 +85,8 @@ is flagged as code TRIF can't check, which is a worse question to put to the use
 ### 1. CSS
 
 For hiding, resizing, recolouring and rearranging, CSS is the most robust tool: it applies before the
-first paint, survives re-renders, and can't break the app's logic.
+first paint, survives re-renders, and can't break the app's logic. Fixed CSS belongs in the mod's style
+section (above); the helper below is for CSS the code works out.
 
 ```js
 const addStyle = (css) => {

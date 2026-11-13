@@ -57,14 +57,52 @@ export function normalizeRunAt(runAt) {
   return RUN_AT[String(runAt || '').trim().toLowerCase()] || 'document_start';
 }
 
-/** Wrap a mod's code exactly as PROTOCOL.md specifies. */
-export function wrapModCode(id, code) {
+/**
+ * Wrap a mod's code exactly as PROTOCOL.md specifies. With `values` (a style section's settings, styleOf), the
+ * mod's own `trif` has them as `trif.style` (the page's window.trif for the rest), on the first line, so the
+ * file's first line is still the script's second.
+ */
+export function wrapModCode(id, code, values = null) {
   const mod = JSON.stringify(id);
-  return `(() => { const __mod = ${mod}; window.__webmods && (window.__webmods.current = __mod);
+  const own = values ? ` const trif = (() => { const t = window.trif; return Object.freeze(Object.create(t && (typeof t === 'object' || typeof t === 'function') ? t : null, { style: { value: Object.freeze(${JSON.stringify(values)}), enumerable: true } })); })();` : '';
+  return `(() => { const __mod = ${mod}; window.__webmods && (window.__webmods.current = __mod);${own}
 try { ${code}
 } catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[TRIF]", __mod, e); }
 })();
 //# sourceURL=trif://${scriptName(id)}.js`;
+}
+
+// ---- a mod's style section (helper/lib/stylesection.js) ---------------------------------------------------
+// The helper takes it out of the mod's code and sends `style: {css, values, settings}`: CSS that TRIF puts on
+// the page itself (checked as a style mod's), and the settings' values, which the code gets as `trif.style`.
+// The code never gets the section's text: only those values, checked again here (a number, a colour, a word,
+// true or false).
+
+const STYLE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const STYLE_WORD = /^(?:[A-Za-z][A-Za-z0-9-]{0,39}|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8}))$/;
+/** A mod's style section as this file uses it: {css, values}, or null when it has none (or it isn't one). */
+export function styleOf(mod) {
+  const st = mod && mod.style;
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return null;
+  const values = {};
+  const raw = st.values && typeof st.values === 'object' && !Array.isArray(st.values) ? st.values : {};
+  for (const [k, v] of Object.entries(raw).slice(0, 40)) {
+    if (!STYLE_NAME.test(k)) continue;
+    if ((typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && STYLE_WORD.test(v))) values[k] = v;
+  }
+  return { css: typeof st.css === 'string' ? st.css : '', values };
+}
+
+// (in the page, by itself: the section's CSS in a style element of its own, as a style mod's is)
+function putStyle(css) {
+  const style = document.createElement('style');
+  style.textContent = css;
+  const put = () => (document.head || document.documentElement).append(style);
+  if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
+}
+/** The script that puts a free mod's style section CSS on the page (before the mod's code, in its registration). */
+export function styleSectionCode(id, css) {
+  return `(${putStyle.toString()})(${JSON.stringify(String(css))});\n//# sourceURL=trif-style://${scriptName(id)}.css`;
 }
 
 export function modToUserScript(mod) {
@@ -82,10 +120,15 @@ export function modToUserScript(mod) {
   // (and `site`: what the user approved for each site it's on, its mods' powers together, "<site> <a>+<b>+…", as
   // the helper sends it (helper/lib/sitecombos.js): the sandbox's page-wide rules let those act)
   const args = mod.powerArgs && typeof mod.powerArgs === 'object' ? mod.powerArgs : {};
-  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.siteOk) && mod.siteOk.length ? { ...args, site: mod.siteOk } : args };
+  // (a style section: a boxed mod's goes to the sandbox with its powers, which puts its CSS on the page and hands
+  // the values to its `trif`; a free mod's CSS is a script of TRIF's before its code, its values in its wrapper)
+  const style = styleOf(mod);
+  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.siteOk) && mod.siteOk.length ? { ...args, site: mod.siteOk } : args, ...(style ? { style } : {}) };
   if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
   if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
-  return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
+  const js = [{ code: wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null) }];
+  if (style && style.css) js.unshift({ code: styleSectionCode(mod.id, style.css) });
+  return { ...base, js, world: 'MAIN' };
 }
 
 /** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
@@ -127,9 +170,10 @@ export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser
     if (!m || !m.sandboxed || canSandbox) return m;
     // (held by the helper anyway: its own Allow first)
     if (m.held) return { ...m, unsandboxed: true };
-    if (allowed[m.id] && allowed[m.id] === m.hash) return { ...m, unsandboxed: true };
+    // (allowed for its code: a change to its style section alone doesn't ask again, helper/lib/stylesection.js)
+    if (allowed[m.id] && (allowed[m.id] === m.hash || (typeof m.codeHash === 'string' && allowed[m.id] === `code:${m.codeHash}`))) return { ...m, unsandboxed: true };
     const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts.map((f) => `as a free mod, it ${f}`) : [])];
-    return { ...m, unsandboxed: true, held: { by: 'sandbox', site: modSiteName(m), reason: facts.join('; '), facts, claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash } };
+    return { ...m, unsandboxed: true, held: { by: 'sandbox', site: modSiteName(m), reason: facts.join('; '), facts, claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash, ...(typeof m.codeHash === 'string' ? { codeHash: m.codeHash } : {}) } };
   });
 }
 

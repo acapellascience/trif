@@ -157,13 +157,20 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated?, rules?, text?, sandboxed?, pageFacts? }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated?, rules?, text?, sandboxed?, pageFacts?, style?:{css, values, settings}, codeHash? }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods
 (`sandboxed` is part of it only when set, so other mods' hashes are as before); `pageFacts`, on a sandboxed
 mod: what its code could do as a free mod (helper/lib/powers.js facts), for a browser without the sandbox;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods"; `autoUpdated`: a stamp
 when TRIF itself replaced the user's unchanged copy of a shipped mod with a new version, kept while the copy is
-that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "Mods from outside the chat start off".)
+that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "Mods from outside the chat start off";
+`style`, on a boxed or free mod with a style section (`// ==Style==` … `// ==/Style==` right after the header,
+helper/lib/stylesection.js): the CSS TRIF built from it (`css`), its settings' values (`values`: numbers, true or
+false, colours, words) and what each setting is (`settings`, for the helper); its `code` then has the section's
+lines blank, `text` is the file, and `codeHash` is the sha1 of the file without the section plus what the
+settings are, so a change to the section alone keeps it. The extension puts `css` on the page itself (a free mod:
+a script of TRIF's before the mod's in the same registration; a boxed mod: the sandbox's own style sheet) and gives
+the code `values` as `trif.style`, frozen; nothing else of the section reaches the code.)
 
 The extension keeps the mods it last had in `chrome.storage.local`, one per key: **`mod:<id>`** = the Mod,
 and **`modIds`** = their ids in order, so it can apply them before the helper connects. Only the mods that
@@ -479,7 +486,8 @@ A browser that can't host the world (Safari: its userScripts is TRIF's adapter, 
 `configureWorld` that fails) holds every boxed mod in the extension (`sandboxFallback` in lib.js):
 `held = {by: "sandbox", site, reason, facts, claim, hash}`, `unsandboxed: true`, so it isn't registered and
 the panel shows it on hold, in the Free mods group. Allow in the panel (`mod.approve` for such a mod is
-answered by the extension, not the helper) stores **`unsandboxedOk`** = `{"<id>": "<hash>"}` and registers
+answered by the extension, not the helper) stores **`unsandboxedOk`** = `{"<id>": "<hash>"}` (`"code:<codeHash>"`
+for a mod with a style section, so a change to the section alone doesn't wait again) and registers
 it in the MAIN world as a free mod with the same API (sandbox.js `sandboxPageCode`; its settings in the
 page's localStorage under `trif.settings.<id>.<key>`); a new version waits again. Panel only. `status`
 says `sandbox: false` there, and each boxed mod's `sandboxed` is `true` (in the world) or `"page"`.

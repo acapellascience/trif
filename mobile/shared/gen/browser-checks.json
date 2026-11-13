@@ -1,0 +1,209 @@
+[
+ {
+  "id": "worlds.separate",
+  "group": "Worlds",
+  "title": "TRIF's world and the page's can't see each other's things",
+  "steps": [
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n        window.__trifProbePageMark = 'set';\n        return {\n          kit: typeof globalThis.__trifKit, box: typeof globalThis.__trifSandbox,\n          handler: typeof (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.trif),\n          page: window.__probePage || null,\n        };\n      })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   },
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async (prev) => {\n        // (a page that has changed JSON answers with something else: then only this world's view counts)\n        const p = prev && typeof prev === 'object' ? prev : { kit: 'undefined', handler: 'undefined', note: 'the page answered with something else' };\n        const mark = typeof globalThis.__trifProbePageMark;\n        const ok = mark === 'undefined' && p.kit === 'undefined' && p.handler === 'undefined' && typeof globalThis.__trifKit === 'object';\n        return { answer: ok ? 'yes' : 'no', detail: { whatThePageSees: prev, pagesMarkSeenFromTrifsWorld: mark, kitInTrifsWorld: typeof globalThis.__trifKit } };\n      })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "worlds.clean",
+  "group": "Worlds",
+  "title": "A page that has changed the built-ins hasn't changed them for TRIF's world",
+  "steps": [
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => ({ pageChangedThings: !!window.__probeTampered, mapInPage: (() => { try { return String([1, 2].map((x) => x * 2)); } catch (e) { return `threw: ${e.message}`; } })() }))(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   },
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async (prev) => {\n        const d = {\n          map: String([1, 2].map((x) => x * 2)) === '2,4',\n          native: Function.prototype.toString.call(Array.prototype.map).includes('[native code]'),\n          find: !!document.querySelector('body'),\n          rect: document.body.getBoundingClientRect().width > 0,\n          json: JSON.stringify({ a: 1 }) === '{\"a\":1}',\n          outlineLines: globalThis.__trifKit ? globalThis.__trifKit.outline(6000).lines : 0,\n        };\n        return { answer: d.map && d.native && d.find && d.rect && d.json && d.outlineLines > 3 ? 'yes' : 'no', detail: { inThePage: prev, inTrifsWorld: d } };\n      })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "page.eval",
+  "group": "Running code",
+  "title": "eval and new Function in the page's world (the page's policy decides)",
+  "steps": [
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const out = {};\n      try { out.eval = String((0, eval)('20 + 22')); } catch (e) { out.eval = `refused: ${e.message}`; }\n      try { out.Function = String(new Function('return (20 + 22);')()); } catch (e) { out.Function = `refused: ${e.message}`; }\n      return { answer: out.eval === '42' && out.Function === '42' ? 'yes' : 'no', detail: out };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "own.eval",
+  "group": "Running code",
+  "title": "eval and new Function in TRIF's world (what a box needs)",
+  "steps": [
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const out = {};\n      try { out.eval = String((0, eval)('20 + 22')); } catch (e) { out.eval = `refused: ${e.message}`; }\n      try { out.Function = String(new Function('return (20 + 22);')()); } catch (e) { out.Function = `refused: ${e.message}`; }\n      return { answer: out.eval === '42' && out.Function === '42' ? 'yes' : 'no', detail: out };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "timing.own",
+  "group": "Timing",
+  "title": "TRIF's script ran before anything of the page's, with the hide rules already in",
+  "steps": [
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const r = globalThis.__trifProbeStart;\n      if (!r) return { answer: 'no', detail: 'the start script left nothing on this page' };\n      return { answer: r.start.readyState === 'loading' && !r.start.pageRan ? 'yes' : 'no', detail: r };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "timing.page",
+  "group": "Timing",
+  "title": "A script put in the page's own world ran before the page's first script",
+  "steps": [
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const r = window.__trifProbePageStart;\n      if (!r) return { answer: 'no', detail: 'the start script left nothing on this page' };\n      return { answer: r.readyState === 'loading' && !r.pageRan ? 'yes' : 'no', detail: r };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "messaging",
+  "group": "The app",
+  "title": "A message from TRIF's world to the app and back",
+  "steps": [
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.trif;\n      if (!h) return { answer: 'no', detail: \"no handler in TRIF's world\" };\n      const out = {};\n      for (const [name, size] of [['small', 16], ['100 KB', 100 * 1024], ['1 MB', 1024 * 1024], ['8 MB', 8 * 1024 * 1024]]) {\n        const t0 = performance.now();\n        try { const r = await h.postMessage({ type: 'ping', pad: 'x'.repeat(size) }); out[name] = { ms: Math.round(performance.now() - t0), received: r && r.received }; } catch (e) { out[name] = { ms: Math.round(performance.now() - t0), error: String(e && e.message) }; }\n      }\n      return { answer: out.small.received === 16 ? 'yes' : 'no', detail: out };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "styles.own",
+  "group": "Styling",
+  "title": "Ways to add a style rule from TRIF's world, on this page",
+  "steps": [
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const root = document.documentElement;\n      const read = (name) => getComputedStyle(root).getPropertyValue(name).trim() === '1';\n      const out = {};\n      try { const st = document.createElement('style'); st.textContent = ':root { --trif-probe-tag: 1 }'; (document.head || root).append(st); out.styleElement = read('--trif-probe-tag'); st.remove(); } catch (e) { out.styleElement = `error: ${e.message}`; }\n      try {\n        const sheet = new CSSStyleSheet(); sheet.replaceSync(':root { --trif-probe-adopted: 1 }');\n        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];\n        out.adoptedSheet = read('--trif-probe-adopted');\n        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);\n      } catch (e) { out.adoptedSheet = `error: ${e.message}`; }\n      try {\n        const d = document.createElement('trif-probe-el'); d.setAttribute('style', '--trif-probe-attr: 1'); root.append(d);\n        out.styleAttribute = getComputedStyle(d).getPropertyValue('--trif-probe-attr').trim() === '1';\n        d.removeAttribute('style'); d.style.setProperty('--trif-probe-om', '1');\n        out.styleObject = getComputedStyle(d).getPropertyValue('--trif-probe-om').trim() === '1';\n        d.remove();\n      } catch (e) { out.styleAttribute = `error: ${e.message}`; }\n      const all = Object.values(out).every((v) => v === true);\n      return { answer: all ? 'yes' : out.adoptedSheet === true || out.styleElement === true ? 'some' : 'no', detail: out };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "styles.seen",
+  "group": "Styling",
+  "title": "What the page can see of TRIF's styling",
+  "steps": [
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n        const sheet = new CSSStyleSheet(); sheet.replaceSync(':root { --trif-probe-seen: 1 }');\n        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];\n        globalThis.__trifProbeSeenSheet = sheet;\n        return { sheetsFromTrifsWorld: document.adoptedStyleSheets.length };\n      })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   },
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async (prev) => ({ ...prev, sheetsFromThePage: document.adoptedStyleSheets.length, valueFromThePage: getComputedStyle(document.documentElement).getPropertyValue('--trif-probe-seen').trim() }))(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   },
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async (prev) => {\n        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== globalThis.__trifProbeSeenSheet);\n        return { answer: 'info', detail: prev };\n      })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "kit",
+  "group": "Styling",
+  "title": "The picker's code can name what it sees, and outline the page",
+  "steps": [
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const k = globalThis.__trifKit;\n      if (!k) return { answer: 'no', detail: \"no kit in TRIF's world\" };\n      const t0 = performance.now();\n      const o = k.outline(6000);\n      const ms = Math.round(performance.now() - t0);\n      const first = document.querySelector('article, [role=\"dialog\"], aside, nav, header');\n      return { answer: 'yes', detail: { outlineMs: ms, outlineChars: o.chars, outlineLines: o.lines, outlineTokens: o.tokens, cut: o.cut, sample: first ? k.describe(first) : null } };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "page.features",
+  "group": "The page",
+  "title": "What web pages get in this app",
+  "steps": [
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => ({\n      answer: 'info',\n      detail: {\n        secureContext: typeof isSecureContext === 'boolean' ? isSecureContext : null,\n        serviceWorker: 'serviceWorker' in navigator, passkeys: typeof PublicKeyCredential, share: typeof navigator.share,\n        clipboard: !!navigator.clipboard, notifications: typeof Notification, storage: (() => { try { localStorage.setItem('trif-probe', '1'); localStorage.removeItem('trif-probe'); return true; } catch (e) { return e.message; } })(),\n        userAgent: navigator.userAgent,\n      },\n    }))(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "box.start",
+  "group": "The box",
+  "title": "TRIF's sandbox runtime starts in the box world (it locks the language down)",
+  "steps": [
+   {
+    "world": "box",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      if (typeof lockdown !== 'function') return { answer: 'no', detail: 'SES is not in this world' };\n      if (globalThis.__trifSandbox) return { answer: 'yes', detail: { already: true, lockdownMs: globalThis.__trifSandbox.stats.lockdownMs } };\n      if (typeof globalThis.__trifStartSandbox !== 'function') return { answer: 'no', detail: \"the runtime's file is not in this world\" };\n      const t0 = performance.now();\n      try { globalThis.__trifStartSandbox(); } catch (e) { return { answer: 'no', detail: { error: String((e && e.message) || e).slice(0, 600) } }; }\n      const s = globalThis.__trifSandbox;\n      return s ? { answer: 'yes', detail: { lockdownMs: Math.round(s.stats.lockdownMs * 10) / 10, wholeStartMs: Math.round((performance.now() - t0) * 10) / 10 } } : { answer: 'no', detail: 'the runtime ran and left nothing' };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "box.compartment",
+  "group": "The box",
+  "title": "A compartment evaluates code",
+  "steps": [
+   {
+    "world": "box",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      try { const v = String(new Compartment().evaluate('20 + 22')); return { answer: v === '42' ? 'yes' : 'no', detail: `returned ${v}` }; } catch (e) { return { answer: 'no', detail: `refused: ${e.message}` }; }\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "box.run",
+  "group": "The box",
+  "title": "A boxed run reads the page (trif run in the box)",
+  "steps": [
+   {
+    "world": "box",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      if (!globalThis.__trifSandbox) return { answer: 'no', detail: 'the runtime did not start' };\n      const t0 = performance.now();\n      const text = await Promise.race([\n        globalThis.__trifSandbox.evaluate('probe-1', '({ links: page.findAll(\"a\").length, title: page.title })', true, { powers: ['page-data', 'read-drafts'], args: {} }),\n        new Promise((r) => setTimeout(() => r(JSON.stringify({ ok: false, error: 'no answer in 8 seconds' })), 8000)),\n      ]);\n      const env = JSON.parse(text);\n      return { answer: env.ok ? 'yes' : 'no', detail: { ms: Math.round(performance.now() - t0), result: env.ok ? env.json : env.error } };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "box.confined",
+  "group": "The box",
+  "title": "Inside it there's no document, fetch or way to the app",
+  "steps": [
+   {
+    "world": "box",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      if (!globalThis.__trifSandbox) return { answer: 'no', detail: 'the runtime did not start' };\n      const text = await Promise.race([\n        globalThis.__trifSandbox.evaluate('probe-2', '[typeof document, typeof window, typeof fetch, typeof XMLHttpRequest, typeof webkit, typeof __trifSandbox, typeof __trifKit, typeof globalThis.webkit].join(\",\")', true, { powers: ['page-data', 'read-drafts'], args: {} }),\n        new Promise((r) => setTimeout(() => r(JSON.stringify({ ok: false, error: 'no answer in 8 seconds' })), 8000)),\n      ]);\n      const env = JSON.parse(text);\n      const types = env.ok ? JSON.parse(env.json) : null;\n      return { answer: types && types.split(',').every((t) => t === 'undefined') ? 'yes' : 'no', detail: env.ok ? types : env.error };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "box.mod",
+  "group": "The box",
+  "title": "A boxed mod runs and changes the page",
+  "steps": [
+   {
+    "world": "box",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => {\n      const s = globalThis.__trifSandbox;\n      if (!s) return { answer: 'no', detail: 'the runtime did not start' };\n      const id = 'probe.test/boxed';\n      const t0 = performance.now();\n      s.run(id, 'const out = page.find(\"#out\"); if (out) out.setText(\"a boxed mod wrote this\"); trif.log(\"boxed mod ran\", out ? \"and wrote to #out\" : \"(no #out on this page)\");', { powers: [], args: {} });\n      await new Promise((r) => setTimeout(r, 500));\n      const out = document.querySelector('#out');\n      const d = { logs: s.logs.filter((l) => l.mod === id).map((l) => l.args.join(' ')), errors: s.errors.filter((e) => e.mod === id).map((e) => e.message), out: out ? out.textContent : null, firstRunMs: s.stats.mods && s.stats.mods[id] ? s.stats.mods[id] : Math.round(performance.now() - t0) };\n      return { answer: d.logs.length > 0 && !d.errors.length ? 'yes' : 'no', detail: d };\n    })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ },
+ {
+  "id": "box.hidden",
+  "group": "The box",
+  "title": "Neither the page nor TRIF's own world can reach into the box",
+  "steps": [
+   {
+    "world": "page",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async () => ({ page: typeof globalThis.__trifSandbox, pageLockdown: typeof globalThis.lockdown, pageFrozen: Object.isFrozen(Array.prototype) }))(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   },
+   {
+    "world": "own",
+    "body": "const prev = JSON.parse(prevJson);\nconst out = await (async (prev) => {\n        const p = prev && typeof prev === 'object' ? prev : { page: 'undefined', pageFrozen: false, note: 'the page answered with something else' };\n        const d = { ...p, own: typeof globalThis.__trifSandbox, ownFrozen: Object.isFrozen(Array.prototype) };\n        return { answer: d.page === 'undefined' && d.own === 'undefined' && !d.pageFrozen && !d.ownFrozen ? 'yes' : 'no', detail: d };\n      })(prev);\nreturn JSON.stringify(out === undefined ? null : out);"
+   }
+  ]
+ }
+]

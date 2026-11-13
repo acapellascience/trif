@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIF probe: a page that changes after loading</title>
+<script nonce="probe">document.documentElement.setAttribute('data-page-ran', String(performance.now())); window.__probePage = 'spa';</script>
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<script nonce="probe" src="body.js"></script>
+<script nonce="probe" src="spa.js"></script>
+</body>
+</html>

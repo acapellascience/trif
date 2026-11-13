@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "TRIF Probe",
+  "version": "0.1.0",
+  "description": "Checks what a TRIF for iPhone could do in Safari. A test tool, not TRIF.",
+  "background": { "scripts": ["background.js"], "persistent": false },
+  "action": { "default_title": "TRIF Probe", "default_popup": "popup.html" },
+  "permissions": ["scripting", "storage", "unlimitedStorage", "tabs", "activeTab", "webNavigation", "nativeMessaging", "declarativeNetRequest", "alarms", "clipboardWrite"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["gen/kit.js", "start.js"], "run_at": "document_start" },
+    { "matches": ["<all_urls>"], "js": ["picker.js"], "run_at": "document_idle" }
+  ],
+  "web_accessible_resources": [{ "resources": ["page-file.js"], "matches": ["<all_urls>"] }]
+}

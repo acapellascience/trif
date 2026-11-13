@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIF Probe report</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<h1>TRIF Probe report</h1>
+<p class="dim">Everything the probe has recorded on this device. It names the sites you ran it on. Nothing is sent anywhere: copy it and pass it on yourself.</p>
+<button id="copy" class="primary">Copy the report</button>
+<button id="share">Share…</button>
+<button id="clear" class="quiet">Clear everything recorded</button>
+<p id="status" class="dim"></p>
+<div id="summary"></div>
+<h2>The whole report</h2>
+<textarea id="json" readonly rows="16"></textarea>
+<script src="ui.js"></script>
+<script src="report.js"></script>
+</body>
+</html>

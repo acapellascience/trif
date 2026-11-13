@@ -112,4 +112,21 @@ function badName(name) {
   return '';
 }
 
-module.exports = { realish, ignoresCase, within, isInside, samePath, badName, platformIgnoresCase };
+// A site folder's or mod file's name as the scanner takes it (mods.js listModFiles): anything a file system
+// allows, since people name their own files, except characters that end a line or hide text. The name becomes
+// the mod's id, which TRIF writes into the code it generates (a `//# sourceURL=` comment) and shows in the
+// panel: a line break in it (U+2028 and U+2029 are line breaks to JavaScript too) would end that comment and
+// make the rest of the name code; a direction override would show another name than the one on disk.
+const UNSAFE_IN_NAME = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/;
+/** Why `name` can't be a site folder's or mod file's name to the scanner ('' when it can). */
+function unsafeName(name) {
+  const s = String(name ?? '');
+  if (!s) return 'empty';
+  if (UNSAFE_IN_NAME.test(s)) return 'has a line break, a control character or a hidden direction mark in its name';
+  if (s.length > 200) return 'is too long';
+  return '';
+}
+/** `name` for a message: its unsafe characters shown as "?". */
+function shownName(name) { return String(name ?? '').replace(new RegExp(UNSAFE_IN_NAME.source, 'g'), '?').slice(0, 200); }
+
+module.exports = { realish, ignoresCase, within, isInside, samePath, badName, unsafeName, shownName, platformIgnoresCase };

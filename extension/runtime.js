@@ -580,7 +580,16 @@ export function pageBridge() {
   // the query's operationName): in a query parameter, its JSON, or a JSON body
   let rewrites = [];
   const lit = (v) => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : /^-?\d/.test(v) ? Number(v) : v);
-  const setPath = (obj, segs, v) => { let o = obj; for (const k of segs.slice(0, -1)) { if (!o[k] || typeof o[k] !== 'object') o[k] = {}; o = o[k]; } o[segs[segs.length - 1]] = v; };
+  // (only the request's own fields: a name every object has (__proto__, constructor) would lead to the
+  // page's Object.prototype, and a value set there shows up on every object the page makes)
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const UNSAFE_KEY = /^(__proto__|prototype|constructor)$/;
+  const setPath = (obj, segs, v) => {
+    if (segs.some((k) => UNSAFE_KEY.test(k))) return;
+    let o = obj;
+    for (const k of segs.slice(0, -1)) { if (!own(o, k) || !o[k] || typeof o[k] !== 'object') o[k] = {}; o = o[k]; }
+    o[segs[segs.length - 1]] = v;
+  };
   const rulesFor = (u, bodyOp) => rewrites.filter((r) => r.op === u.pathname.split('/').pop() || r.op === u.searchParams.get('operationName') || (bodyOp && r.op === bodyOp));
   const rewriteUrl = (url) => {
     let u;
@@ -589,6 +598,7 @@ export function pageBridge() {
     let changed = false;
     for (const r of rulesFor(u)) for (const [path, v] of r.sets) {
       const [top, ...rest] = path.split('.');
+      if (path.split('.').some((k) => UNSAFE_KEY.test(k))) continue;
       if (!rest.length) { u.searchParams.set(top, String(lit(v))); changed = true; continue; }
       if (!u.searchParams.has(top)) continue;
       let o;

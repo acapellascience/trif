@@ -2,7 +2,7 @@
 // functions that need Chrome APIs take them as parameters.
 
 import { safeStringify, formatError } from './runtime.js';
-import { SANDBOX_WORLD, SANDBOX_RUNTIME_ID, SES_FILE, sandboxRuntimeCode, sandboxModCode, sandboxPageCode } from './sandbox.js';
+import { SANDBOX_WORLD, SANDBOX_RUNTIME_ID, SES_FILE, sandboxRuntimeCode, sandboxModCode, sandboxPageCode, scriptName } from './sandbox.js';
 import { sensitiveList, patternMatches } from './agentsites.js';
 
 // The running extension's own id: the Web Store build has a different one from the unpacked dev build
@@ -64,7 +64,7 @@ export function wrapModCode(id, code) {
 try { ${code}
 } catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[TRIF]", __mod, e); }
 })();
-//# sourceURL=trif://${id}.js`;
+//# sourceURL=trif://${scriptName(id)}.js`;
 }
 
 export function modToUserScript(mod) {

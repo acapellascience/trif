@@ -84,48 +84,84 @@ function checkRules(spec) {
   return out;
 }
 
-// Walks CSS outside quoted strings: `visit(char, i)` for each character there. A backslash outside a
-// string is refused (an escape can spell a function's or rule's name: u\72l( is url().
-function outsideStrings(css, visit) {
-  let q = null;
-  for (let i = 0; i < css.length; i++) {
+// Reads CSS as a browser reads it, as far as what loads goes (extension/sandbox.js cssScan is the same
+// reading; tests/rules.test.js keeps the two in step). Three things a checker must read the browser's way, or
+// text it takes for a string's or a comment's is live CSS to the browser, unseen by every check below:
+//   - a quoted string ends at a line break, as CSS ends it (reading on to the next quote would swallow rules);
+//   - an unquoted url(…) is one token, its text the address whatever is in it (a /* there starts no comment);
+//   - a backslash outside a string is refused (an escape can spell a function's or rule's name: u\72l( is url().
+// Returns {error}, or {flat, urls}: the text outside strings and comments (a string and a comment each a
+// space, a url() as `url()`), and each url()'s address as written.
+function cssScan(css) {
+  css = String(css);
+  let flat = '';
+  const urls = [];
+  const WS = ' \t\n\r\f';
+  const stringEnd = (i) => { // (i: the opening quote; the index after the closing one, or -1)
+    const q = css[i];
+    for (let j = i + 1; j < css.length; j++) {
+      const c = css[j];
+      if (c === '\\') { j++; continue; }
+      if (c === '\n' || c === '\r' || c === '\f') return -1;
+      if (c === q) return j + 1;
+    }
+    return -1;
+  };
+  for (let i = 0; i < css.length;) {
     const c = css[i];
-    if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
-    if (c === '"' || c === "'") { q = c; continue; }
-    if (c === '/' && css[i + 1] === '*') { const e = css.indexOf('*/', i + 2); if (e === -1) return 'an unclosed comment'; i = e + 1; continue; }
-    const r = visit(c, i);
-    if (r) return r;
+    if (c === '"' || c === "'") { const e = stringEnd(i); if (e === -1) return { error: 'a quoted string that isn\'t closed on its line' }; flat += ' '; i = e; continue; }
+    if (c === '\\') return { error: 'a backslash escape outside a string' };
+    if (c === '/' && css[i + 1] === '*') { const e = css.indexOf('*/', i + 2); if (e === -1) return { error: 'an unclosed comment' }; flat += ' '; i = e + 2; continue; }
+    if ((c === 'u' || c === 'U') && /^url\($/i.test(css.slice(i, i + 4))) {
+      let j = i + 4, arg;
+      while (j < css.length && WS.includes(css[j])) j++;
+      if (css[j] === '"' || css[j] === "'") {
+        const e = stringEnd(j);
+        if (e === -1) return { error: 'a quoted string that isn\'t closed on its line' };
+        arg = css.slice(j + 1, e - 1);
+        if (arg.includes('\\')) return { error: 'a backslash escape in a url()' };
+        j = e;
+        while (j < css.length && WS.includes(css[j])) j++;
+        if (css[j] !== ')') return { error: 'a url() that isn\'t closed after its address' };
+      } else {
+        const e = css.indexOf(')', j);
+        if (e === -1) return { error: 'a url() that isn\'t closed' };
+        arg = css.slice(j, e).replace(/[ \t\n\r\f]+$/, '');
+        if (/["'()\\]|\/\*|[\s\u0000-\u001f\u007f]/.test(arg)) return { error: 'a url() whose address has a quote, a space, a bracket, a backslash or /* in it (put the address in quotes)' };
+        j = e;
+      }
+      urls.push(arg);
+      flat += 'url()';
+      i = j + 1;
+      continue;
+    }
+    flat += c;
+    i++;
   }
-  return q ? 'an unclosed string' : null;
+  return { flat, urls };
 }
+
+// Selectors that read what's typed in a field: the value attribute (React keeps it in step with what's typed,
+// passwords too) and :autofill. Refused in style mods' selectors and CSS as in boxed mods' (sandbox.js
+// READS_FIELDS): nothing a style mod has can carry the answer anywhere, and this keeps it that way.
+const READS_FIELDS = /\[\s*(?:[\w*-]*\|)?value\b|:(?:-webkit-)?autofill\b/i;
 
 /**
  * CSS a rules mod may have: anything that changes how the page looks, but nothing that loads from an
  * address (which can carry what the page shows to another site): url() only with data:, and no @import,
- * image-set(), image(), cross-fade(), element(), or the old script-running properties. null when fine.
+ * image-set(), image(), cross-fade(), element(), src(), or the old script-running properties. null when fine.
  */
 function checkCss(css) {
-  const flat = [];
-  const bad = outsideStrings(css, (c, i) => {
-    if (c === '\\') return 'a backslash escape outside a string (an escape can spell url( or @import)';
-    flat.push([c, i]);
-    return null;
-  });
-  if (bad) return bad;
-  const text = flat.map(([c]) => c).join('').toLowerCase();
+  const r = cssScan(css);
+  if (r.error) return r.error === 'a backslash escape outside a string' ? 'a backslash escape outside a string (an escape can spell url( or @import)' : r.error;
+  const text = r.flat.toLowerCase();
   if (/@import\b/.test(text)) return '@import loads from an address; put the CSS here instead';
-  if (/(?:^|[^a-z-])(?:-webkit-)?(image-set|image|cross-fade|element)\s*\(/.test(text)) return 'image-set(), image(), cross-fade() and element() can load from an address';
+  if (/(?:^|[^a-z-])(?:-webkit-)?(image-set|image|cross-fade|element|src)\s*\(/.test(text)) return 'image-set(), image(), cross-fade(), element() and src() can load from an address';
   // (behavior: the whole property's name, not the end of overscroll-behavior or scroll-behavior)
   if (/expression\s*\(|-moz-binding|(?<![\w-])(?:-ms-)?behavior\s*:/.test(text)) return 'that property runs code';
-  // url(…): only data: (the argument read from the original text, quotes and all)
-  const re = /url\s*\(/gi;
-  let m;
-  const orig = flat.map(([c]) => c).join('');
-  while ((m = re.exec(orig))) {
-    const start = flat[m.index + m[0].length - 1][1] + 1;
-    const arg = css.slice(start).replace(/^\s*["']?\s*/, '');
-    if (!/^data:/i.test(arg)) return 'url() loads from an address: only data: is allowed in a style mod';
-  }
+  // url(…): only data:
+  for (const a of r.urls) if (!/^\s*data:/i.test(a)) return 'url() loads from an address: only data: is allowed in a style mod';
+  if (READS_FIELDS.test(r.flat)) return 'CSS can\'t select by the value attribute or :autofill (it would read what\'s typed in a field)';
   return null;
 }
 
@@ -133,7 +169,13 @@ function checkCss(css) {
 // so it may not close the rule or start another, and no escapes (as in checkCss).
 function checkSelector(sel) {
   if (typeof sel !== 'string' || !sel.trim() || sel.length > MAX.selector) return `a selector must be text, 1 to ${MAX.selector} characters`;
-  return outsideStrings(sel, (c) => ('{};@\\'.includes(c) ? `"${c}" can't be in a selector here` : null));
+  const r = cssScan(sel);
+  if (r.error) return r.error;
+  const bad = /[{};@]/.exec(r.flat);
+  if (bad) return `"${bad[0]}" can't be in a selector here`;
+  if (r.urls.length) return 'a selector has no url()';
+  if (READS_FIELDS.test(r.flat)) return 'a selector can\'t name the value attribute or :autofill (it would read what\'s typed in a field)';
+  return null;
 }
 
 function checkRegex(src) {
@@ -174,7 +216,9 @@ function rulesRuntime(spec) {
         for (let n = walk.nextNode(); n; n = walk.nextNode()) {
           if (done.get(n) === n.data || n.data.length > MAX_TEXT) continue;
           const p = n.parentElement;
-          if (p && (p.closest('script,style,textarea,[contenteditable=""],[contenteditable=true]'))) continue;
+          // (never what the user is typing: an editor by what the browser says it is, not by how its attribute
+          // is spelled: contenteditable="plaintext-only", "TRUE", and a page in design mode are editors too)
+          if (p && (p.closest('script,style,textarea') || p.isContentEditable || document.designMode === 'on')) continue;
           let t = n.data;
           if (r.re) t = t.replace(r.re, () => r.with);
           else if (r.caseless) { let i, lower = t.toLowerCase(), out = '', from = 0; while ((i = lower.indexOf(r.find, from)) !== -1) { out += t.slice(from, i) + r.with; from = i + r.find.length; } t = out + t.slice(from); }
@@ -222,7 +266,8 @@ function rulesRuntime(spec) {
 
 /** The code a rules mod runs: TRIF's runtime with the checked rules as data. */
 function rulesCode(spec, id) {
-  return `// TRIF rules mod ${JSON.stringify(String(id || ''))}: TRIF's own code, the mod's rules as data (helper/lib/rules.js)\n` +
+  // (the id in a comment: only its plain characters, as a line break in it would end the comment)
+  return `// TRIF rules mod ${JSON.stringify(String(id || '').replace(/[^\x20-\x7e]/g, '?'))}: TRIF's own code, the mod's rules as data (helper/lib/rules.js)\n` +
     `(${rulesRuntime.toString()})(${JSON.stringify(spec)});\n`;
 }
 
@@ -244,4 +289,4 @@ function selectorsOf(rules) {
   return [...out].slice(0, 40);
 }
 
-module.exports = { selectorsOf, parseRules, checkRules, checkCss, checkSelector, checkRegex, rulesRuntime, rulesCode, RulesError };
+module.exports = { selectorsOf, parseRules, checkRules, checkCss, checkSelector, checkRegex, cssScan, rulesRuntime, rulesCode, RulesError };

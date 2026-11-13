@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { MAX_TO_EXTENSION } = require('./framing');
-const { within, ignoresCase } = require('./pathcheck');
+const { within, ignoresCase, unsafeName, shownName } = require('./pathcheck');
 
 const RUN_AT = {
   'document-start': 'document_start',
@@ -216,6 +216,8 @@ function realOrNull(p) {
 // the real mods folder is never a mod: it's skipped, with a warning (`skipped`). Links within the mods
 // folder are fine.
 const LINK_OUTSIDE = 'is a link to somewhere outside the mods folder; ignored';
+// (and an entry whose name TRIF couldn't safely write into the code it generates, or show: skipped the same way)
+const BAD_NAME = 'ignored';
 
 // List candidate mod files: <modsDir>/<site>/<mod>.js, skipping names starting with _ or ., and entries
 // whose real path isn't inside the real mods folder. `skipped` (an array) collects those: {id, file, warning}.
@@ -225,11 +227,14 @@ function listModFiles(modsDir, skipped = null) {
   if (!root) return files;
   const ci = ignoresCase(root);
   const inside = (p) => !!p && within(p, root, { ci });
-  const skip = (id, file) => { if (skipped) skipped.push({ id, file, warning: LINK_OUTSIDE }); };
+  const skip = (id, file, warning = LINK_OUTSIDE) => { if (skipped) skipped.push({ id, file, warning }); };
   let sites;
   try { sites = fs.readdirSync(modsDir); } catch { return files; }
   for (const site of sites.sort()) {
     if (isIgnoredName(site)) continue;
+    // (a name is a mod's id, which TRIF writes into the code it generates: pathcheck.js unsafeName)
+    const badSite = unsafeName(site);
+    if (badSite) { skip(`${shownName(site)}/`, path.join(modsDir, shownName(site)), `${BAD_NAME}: the folder ${badSite}`); continue; }
     const siteDir = path.join(modsDir, site);
     const st = statSafe(siteDir);
     if (!st || !st.isDirectory()) continue;
@@ -238,6 +243,8 @@ function listModFiles(modsDir, skipped = null) {
     try { names = fs.readdirSync(siteDir); } catch { continue; }
     for (const name of names.sort()) {
       if (isIgnoredName(name) || !name.endsWith('.js') || name === '.js') continue;
+      const badMod = unsafeName(name);
+      if (badMod) { skip(`${site}/${shownName(name.slice(0, -3))}`, path.join(siteDir, shownName(name)), `${BAD_NAME}: the file ${badMod}`); continue; }
       const file = path.join(siteDir, name);
       const fst = statSafe(file);
       if (!fst || !fst.isFile()) continue;
@@ -435,6 +442,6 @@ function summarize(mod) {
 
 module.exports = {
   SHIPPED_SOURCES, isShippedSource,
-  RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE,
+  RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE, BAD_NAME,
   planMods, planModsMessage, modsParts, withSame, MAX_MOD_BYTES, MAX_MODS_BYTES, summarize, isIgnoredName, sha1, findRenames,
 };

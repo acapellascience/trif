@@ -102,6 +102,8 @@ function checkRewrite(rest) {
   for (const x of sets) {
     const m = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){0,7})=(.+)$/.exec(x);
     if (!m) throw new PowersError(`rewrite-requests: "${x}" isn't name.path=value`);
+    // (a path names the request's own fields: never the names every object has, which lead to its prototype)
+    if (/(^|\.)(__proto__|prototype|constructor)(\.|$)/.test(m[1])) throw new PowersError(`rewrite-requests: "${m[1]}" names __proto__, prototype or constructor, which aren't a request's own fields`);
     if (!/^(true|false|null|-?\d{1,15}(\.\d{1,10})?|[A-Za-z][\w-]{0,40})$/.test(m[2])) throw new PowersError(`rewrite-requests: "${m[2]}" isn't true, false, null, a number or a plain word (an address or long text could carry data)`);
   }
   return [op, ...sets].join(' ');

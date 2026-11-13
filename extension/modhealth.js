@@ -37,7 +37,8 @@ export function normalizeMessage(message) {
 export function errorLine(err, modId) {
   const stack = String(err?.stack ?? '');
   const id = String(modId || err?.mod || '');
-  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // (as the script is named: lib.js wrapModCode, sandbox.js scriptName)
+  const esc = id.replace(/[^\w.\-/]/g, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(?:trif|webmods|trif-box)[a-z-]*://${esc}\\.js:(\\d+)(?::\\d+)?`, 'i');
   const m = re.exec(stack);
   if (!m) return 0;

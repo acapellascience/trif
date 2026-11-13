@@ -41,6 +41,11 @@ export const SETTINGS_MAX = 1024 * 1024;
 export const SETTINGS_SITE_MAX = 8 * SETTINGS_MAX;
 
 const J = (v) => JSON.stringify(String(v));
+// A mod's id as it's written into a `//# sourceURL=` comment: letters, digits, `.`, `-`, `_` and `/` as they
+// are, anything else as %xx. The id is a folder and a file name, and a line break in one (U+2028 and U+2029
+// are line breaks to JavaScript too) would end the comment and make the rest of the name code: outside the
+// compartment, for a boxed mod. (The helper's scanner skips such names; this holds whatever the helper sends.)
+export const scriptName = (id) => String(id).replace(/[^\w.\-/]/g, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 
 /** The world's runtime: lockdown once, then __trifSandbox.run(id, source) per mod. */
 export function sandboxRuntimeCode() {
@@ -60,7 +65,7 @@ const grantOf = (g) => {
 };
 export function sandboxModCode(id, source, powers = []) {
   const P = grantOf(powers);
-  return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}, ${P}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}, ${P}]));\n//# sourceURL=trif-sandbox://${id}.js`;
+  return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}, ${P}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}, ${P}]));\n//# sourceURL=trif-sandbox://${scriptName(id)}.js`;
 }
 
 /**
@@ -70,7 +75,7 @@ export function sandboxModCode(id, source, powers = []) {
 export function sandboxPageCode(id, source, powers = []) {
   // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
   const P = grantOf(powers);
-  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}, ${JSON.stringify(PAGE_WIDE)}); })();\n//# sourceURL=trif://${id}.js`;
+  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}, ${JSON.stringify(PAGE_WIDE)}); })();\n//# sourceURL=trif://${scriptName(id)}.js`;
 }
 
 /**
@@ -80,6 +85,8 @@ export function sandboxPageCode(id, source, powers = []) {
 export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const G = globalThis;
   const SANDBOX = mode === 'sandbox';
+  // (a mod's id as its script's name: scriptName above, again here, as this function runs in the page by itself)
+  const scriptName = (id) => String(id).replace(/[^\w.\-/]/g, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
   if (SANDBOX && G.__trifSandbox) return;
   // What it costs, for `trif`'s e2e and anyone measuring (__trifSandbox.stats): SES's own load (from the stamp
   // put before it: sandboxRuntimeScript), lockdown, each mod's first run, and the mods' callbacks.
@@ -275,6 +282,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   // and href="#trif-box-…" on use and gradients)
   const svgValueOk = (name, v) => {
     const s = String(v);
+    // (no escapes: u\72l( is url( to the browser, and the checks below read the text as written)
+    if (s.includes('\\')) return false;
     if (/javascript:|data:|@import|expression\s*\(/i.test(s)) return false;
     if (name === 'href' || name === 'xlink:href') return /^#trif-box-[A-Za-z0-9_-]+$/.test(s.trim());
     const re = /url\s*\(/gi;
@@ -353,29 +362,68 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   // CSS that loads nothing new (as rules mods: helper/lib/rules.js checkCss): url() only data:, #somewhere,
   // or an address an image on the page shows or one of the page's style sheets uses (the img src rule), no
   // @import, image-set() and the like, no escapes outside strings (nor inside an address).
-  const cssOk = (css) => {
-    css = String(css);
-    let q = null, flat = '';
-    for (let i = 0; i < css.length; i++) {
+  // Read as a browser reads it, as far as what loads goes (helper/lib/rules.js cssScan is the same reading,
+  // and tests/rules.test.js keeps the two in step): a quoted string ends at a line break, as CSS ends it (a
+  // checker that read on to the next quote would take live CSS for a string's text); an unquoted url(…) is one
+  // token, its text the address whatever is in it (a /* there starts no comment). {error}, or {flat, urls}:
+  // the text outside strings and comments, and each url()'s address as written.
+  const cssScan = (css) => {
+    let flat = '';
+    const urls = [];
+    const WS = ' \t\n\r\f';
+    const stringEnd = (i) => { // (i: the opening quote; the index after the closing one, or -1)
+      const q = css[i];
+      for (let j = i + 1; j < css.length; j++) {
+        const c = css[j];
+        if (c === '\\') { j++; continue; }
+        if (c === '\n' || c === '\r' || c === '\f') return -1;
+        if (c === q) return j + 1;
+      }
+      return -1;
+    };
+    for (let i = 0; i < css.length;) {
       const c = css[i];
-      if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
-      if (c === '"' || c === "'") { q = c; continue; }
-      if (c === '\\') return false;
-      if (c === '/' && css[i + 1] === '*') { const e = css.indexOf('*/', i + 2); if (e === -1) return false; i = e + 1; continue; }
+      if (c === '"' || c === "'") { const e = stringEnd(i); if (e === -1) return { error: 'a quoted string that isn\'t closed on its line' }; flat += ' '; i = e; continue; }
+      if (c === '\\') return { error: 'a backslash escape outside a string' };
+      if (c === '/' && css[i + 1] === '*') { const e = css.indexOf('*/', i + 2); if (e === -1) return { error: 'an unclosed comment' }; flat += ' '; i = e + 2; continue; }
+      if ((c === 'u' || c === 'U') && /^url\($/i.test(css.slice(i, i + 4))) {
+        let j = i + 4, arg;
+        while (j < css.length && WS.includes(css[j])) j++;
+        if (css[j] === '"' || css[j] === "'") {
+          const e = stringEnd(j);
+          if (e === -1) return { error: 'a quoted string that isn\'t closed on its line' };
+          arg = css.slice(j + 1, e - 1);
+          if (arg.includes('\\')) return { error: 'a backslash escape in a url()' };
+          j = e;
+          while (j < css.length && WS.includes(css[j])) j++;
+          if (css[j] !== ')') return { error: 'a url() that isn\'t closed after its address' };
+        } else {
+          const e = css.indexOf(')', j);
+          if (e === -1) return { error: 'a url() that isn\'t closed' };
+          arg = css.slice(j, e).replace(/[ \t\n\r\f]+$/, '');
+          if (/["'()\\]|\/\*|[\s\u0000-\u001f\u007f]/.test(arg)) return { error: 'a url() whose address has a quote, a space, a bracket, a backslash or /* in it (put the address in quotes)' };
+          j = e;
+        }
+        urls.push(arg);
+        flat += 'url()';
+        i = j + 1;
+        continue;
+      }
       flat += c;
+      i++;
     }
-    if (q) return false;
-    const t = flat.toLowerCase();
+    return { flat, urls };
+  };
+  const cssOk = (css) => {
+    const r = cssScan(String(css));
+    if (r.error) return false;
+    const t = r.flat.toLowerCase();
     // (behavior: the whole property's name, not the end of overscroll-behavior or scroll-behavior)
     if (/@import\b|@namespace\b|expression\s*\(|-moz-binding|(?<![\w-])(?:-ms-)?behavior\s*:/.test(t)) return false;
     if (/(?:^|[^a-z-])(?:-webkit-)?(image-set|image|cross-fade|element|src)\s*\(/.test(t)) return false;
-    const re = /url\s*\(/gi;
-    let m;
-    while ((m = re.exec(css))) {
-      const rest = css.slice(m.index + m[0].length);
-      if (/^\s*["']?\s*data:/i.test(rest) || /^\s*["']?#[\w-]+["']?\s*\)/.test(rest)) continue;
-      const a = /^\s*(["']?)([^"'()\s\\]+)\1\s*\)/.exec(rest);
-      if (!a || !shownAddress(a[2])) return false;
+    for (const a of r.urls) {
+      if (/^\s*data:/i.test(a) || /^#[\w-]+$/.test(a)) continue;
+      if (!/^[^"'()\s\\]+$/.test(a) || !shownAddress(a)) return false;
     }
     return true;
   };
@@ -412,10 +460,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const notLeaving = () => { if (leaving) fail('as the page goes away, a mod may only save its settings'); };
   const isRaw = (n) => !!n && n.nodeType === 1 && (RAW_TEXT.has(n.localName) || (FORM_TEXT.has(n.localName) && !created.has(n)));
 
-  // ---- the stand-ins: one per node (identity kept), frozen, sharing one frozen prototype whose methods
-  // find their node in a WeakMap (an object TRIF didn't make has none)
-  const standins = new WeakMap(); // node -> stand-in
+  // ---- the stand-ins: one per node for each mod (identity kept), frozen, sharing one frozen prototype whose
+  // methods find their node in a WeakMap (an object TRIF didn't make has none). A stand-in is its mod's: which
+  // mod is acting through one is whose it is (`owners`), never something read off the call stack or left
+  // over from the last callback, so a mod has its own powers and no other mod's, also after an await.
   const nodes = new WeakMap(); // stand-in -> node
+  const owners = new WeakMap(); // stand-in -> the api of the mod it was made for
   const created = new WeakSet(); // nodes a mod made (page.create, clone)
   const nodeOf = (s) => { const n = s && typeof s === 'object' ? nodes.get(s) : undefined; if (!n) fail('that isn\'t an element TRIF gave you'); return n; };
   const kidOf = (k) => (typeof k === 'string' ? k : nodeOf(k));
@@ -646,8 +696,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     noNewAddress(before, before.slice(0, at) + added + before.slice(at + removed));
   };
   const draftWriters = new Set(); // (boxed mods that changed a draft on this page: see clickOk)
-  const notInEditor = (n, what) => { if (inEditor(n) && !draftsOk(cur())) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
-  const wrote = (n) => { if (inEditor(n)) draftWriters.add(cur().mod); };
+  const notInEditor = (n, what, api = cur()) => { if (inEditor(n) && !draftsOk(api)) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
+  const wrote = (n, api = cur()) => { if (inEditor(n)) draftWriters.add(api.mod); };
   const textInto = (parent, kids) => {
     formsOk(parent, kids);
     for (const k of kids) if (typeof k !== 'string' && insideEditor(k)) fail('a piece of an editor can\'t be moved out of it');
@@ -655,17 +705,20 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   };
 
   let PROTO = null; // made once the per-mod helpers exist (below): the methods need the mod's error reporting
-  const wrap = (node) => {
+  // (`api`: the mod the stand-in is for; inside a stand-in's own method, that stand-in's mod: `current`)
+  const wrap = (node, api = current) => {
     if (!node || node.nodeType !== 1) return null;
-    let s = standins.get(node);
+    if (!api || !api.standins) fail('no mod to hand that element to');
+    let s = api.standins.get(node);
     if (!s) {
       s = Object.freeze(Object.create(PROTO));
-      standins.set(node, s);
+      api.standins.set(node, s);
       nodes.set(s, node);
+      owners.set(s, api);
     }
     return s;
   };
-  const list = (nl) => harden(Array.prototype.map.call(nl, wrap));
+  const list = (nl, api = current) => harden(Array.prototype.map.call(nl, (n) => wrap(n, api)));
 
   // (a copy keeps no page-given id, class or data attribute: the page's code would act on the copy too)
   const SVG_COPY_ATTR = (n) => SVG_ATTRS.test(n) || n === 'class' || n === 'id' || n === 'role' || DATA_OK.test(n) || ARIA_OK.test(n);
@@ -778,7 +831,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     types: () => harden(drag.fromOwn ? [...drag.data.keys()] : []),
     setDropEffect: (v) => { if (!/^(none|copy|link|move)$/.test(String(v))) fail('a drop effect is none, copy, link or move'); if (e.dataTransfer) e.dataTransfer.dropEffect = String(v); },
   });
-  const eventOf = (e, powers) => harden({
+  const eventOf = (e, api) => { const powers = api.powers; return harden({
     type: String(e.type), ...(keyHidden(e, powers) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
     // (what an input event typed: read-drafts only, never in a password or card field)
     ...(powers && powers.has('read-drafts') && typeof e.data === 'string' && !secretField(e.target) ? { data: e.data } : {}),
@@ -791,12 +844,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     // (an animation's or transition's name, and its time)
     ...(typeof e.animationName === 'string' ? { animationName: e.animationName } : {}), ...(typeof e.propertyName === 'string' ? { propertyName: e.propertyName } : {}),
     ...(typeof e.elapsedTime === 'number' ? { elapsedTime: e.elapsedTime } : {}),
-    target: e.target && e.target.nodeType === 1 ? wrap(e.target) : null,
+    target: e.target && e.target.nodeType === 1 ? wrap(e.target, api) : null,
     preventDefault: () => e.preventDefault(),
     stopPropagation: () => { if (!ownTarget(e)) fail('stopping an event is for events on the mod\'s own elements (the page\'s own need the block-events power)'); e.stopPropagation(); },
     stopImmediatePropagation: () => { if (!ownTarget(e)) fail('stopping an event is for events on the mod\'s own elements (the page\'s own need the block-events power)'); e.stopImmediatePropagation(); },
     ...(DRAG.test(String(e.type)) ? { dataTransfer: dataOf(e) } : {}),
-  });
+  }); };
 
   // ---- block-events (0.3): what a mod keeps from the page, by type (and, for clicks, by the header's
   // selectors): TRIF's capture listeners on the window, there before the page's own (the runtime runs at
@@ -820,7 +873,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       let r = true;
       if (b.fn) {
         try { partnersOk(b.api, 'block-events'); } catch { continue; } // (said once, in its errors: refuse)
-        r = b.api.call(b.fn, eventOf(e, b.api.powers));
+        r = b.api.call(b.fn, eventOf(e, b.api));
       }
       if (r === true) { e.stopImmediatePropagation(); return; }
     }
@@ -859,7 +912,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       uploadReaders.add(u.api.mod); // (it sees the picture: a read, for the page-wide rules)
       const w0 = cv.width, h0 = cv.height;
       drawnOn.delete(cv); // (what this mod draws, not an earlier one)
-      const back = u.api.call(u.fn, wrap(cv), harden({ width: cv.width, height: cv.height, type: file.type }));
+      const back = u.api.call(u.fn, wrap(cv, u.api), harden({ width: cv.width, height: cv.height, type: file.type }));
       const out = back && typeof back.then === 'function' ? await back.catch((err) => { report(u.api.mod, err); return undefined; }) : back;
       let mine = drawnOn.has(cv) || cv.width !== w0 || cv.height !== h0;
       if (out !== undefined && out !== null) {
@@ -919,7 +972,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     for (const n of found) {
       if (w.seen.has(n)) continue;
       w.seen.add(n);
-      w.call(wrap(n));
+      w.call(wrap(n, w.api));
     }
   };
   const fixText = (t, tx) => {
@@ -950,7 +1003,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   };
   const flushChanges = (ch) => {
     if (ch.timer || !ch.pending.size) return;
-    ch.timer = setTimeout(() => { ch.timer = null; const got = [...ch.pending].filter((n) => n.isConnected); ch.pending.clear(); if (got.length) ch.call(list(got)); }, 50);
+    ch.timer = setTimeout(() => { ch.timer = null; const got = [...ch.pending].filter((n) => n.isConnected); ch.pending.clear(); if (got.length) ch.call(list(got, ch.api)); }, 50);
   };
   // trif.wrap: a page's text split into the mod's own pieces, outside editors, fields, raw text and what a
   // form sends; the page's own text node stays where it was (empty), the pieces after it. A wrapper never wraps
@@ -1255,7 +1308,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     if (apis.has(modId)) return apis.get(modId);
     // (its powers: docs/POWERS.md; what's not in this set it doesn't get, and a mod TRIF can't name gets none)
     const grant = Array.isArray(powers) ? { powers, args: {} } : powers && typeof powers === 'object' ? powers : { powers: [], args: {} };
-    const self = { mod: modId, powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {} };
+    const self = { mod: modId, powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {}, standins: new WeakMap() };
     // (its powers as the combinations count them: @migrate reads the site's storage, so it's site-storage
     // there, for its own acts and beside other mods' (helper/lib/boxpowers.js powerNeeds counts it so too))
     self.combo = new Set([...self.powers, ...(Array.isArray(self.args.migrate) && self.args.migrate.length ? ['site-storage'] : [])]);
@@ -1299,8 +1352,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       if (type === 'pagehide' && target !== G) fail('pagehide is for page.on');
       const h = type === 'pagehide'
         // (as the page goes: only saving settings; nothing that acts)
-        ? (e) => { leaving++; try { call(fn, eventOf(e, self.powers)); } finally { leaving--; } }
-        : (e) => call(fn, eventOf(e, self.powers));
+        ? (e) => { leaving++; try { call(fn, eventOf(e, self)); } finally { leaving--; } }
+        : (e) => call(fn, eventOf(e, self));
       target.addEventListener(type, h, { passive: !(opts && opts.preventDefault), capture });
       return harden(() => target.removeEventListener(type, h, { capture }));
     };
@@ -1343,7 +1396,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
           names = opts.attributes.map((a) => { const n = str(a, 'an attribute name', 60).toLowerCase(); if (!/^[a-z][\w:.-]*$/.test(n)) fail(`"${n}" isn't an attribute name`); if (n === 'value') fail('the value attribute isn\'t watched (React keeps it in step with what\'s typed in a field)'); return n; });
         }
       }
-      const w = { sel, seen: new WeakSet(), call: (s) => call(fn, s), mod: modId };
+      const w = { sel, seen: new WeakSet(), call: (s) => call(fn, s), mod: modId, api: self };
       watch(modId, sel);
       watchers.add(w);
       ensureObserver();
@@ -1356,7 +1409,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
             if (!n.isConnected || insideEditor(n)) continue;
             let ok = false;
             try { ok = n.matches(sel); } catch { ok = false; }
-            if (ok) call(fn, wrap(n), harden({ attribute: String(r.attributeName) }));
+            if (ok) call(fn, wrap(n, self), harden({ attribute: String(r.attributeName) }));
           }
         });
         am.observe(D, { attributes: true, attributeFilter: names, subtree: true });
@@ -1369,7 +1422,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       str(sel, 'a selector', 2000);
       qsa(D.createDocumentFragment(), sel);
       if (typeof fn !== 'function') fail('changes takes a function');
-      const ch = { sel, call: (l) => call(fn, l), pending: new Set(), timer: null, mod: modId };
+      const ch = { sel, call: (l) => call(fn, l), pending: new Set(), timer: null, mod: modId, api: self };
       watch(modId, sel);
       changers.add(ch);
       ensureObserver();
@@ -1756,7 +1809,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       D.documentElement.append(v);
       v.dispatchEvent(new CustomEvent('trif:image-src', { detail: abs }));
       v.remove();
-      return wrap(v);
+      return wrap(v, self);
     };
     // edit-uploads: trif.onUpload((canvas, {width, height, type}) => canvas): each picture the user attaches
     const onUpload = (fn) => {
@@ -1795,7 +1848,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
         try { partnersOk(self, 'embeds'); } catch (err) { report(modId, err); return; }
         b.dispatchEvent(new CustomEvent('trif:embed', { detail: src }));
       });
-      return wrap(b);
+      return wrap(b, self);
     };
     // local-fonts: the fonts installed here, after the browser's own prompt (call it from the user's click)
     const localFonts = async () => {
@@ -1985,7 +2038,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
           const focusIfFree = () => { const a = D.activeElement; if ((!a || a === D.body || a === D.documentElement) && D.visibilityState === 'visible') input.focus({ preventScroll: true }); };
           if (now() < 10000) setTimeout(focusIfFree, 0);
         }
-        return wrap(host);
+        return wrap(host, self);
       },
       hide: (sel) => { const r = css(`${selectorOk(sel)} { display: none !important; }`); watch(modId, sel); return r; },
       log: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error'),
@@ -1998,8 +2051,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       get height() { return innerHeight; },
       get scrollX() { return scrollX; },
       get scrollY() { return scrollY; },
-      get root() { return wrap(D.documentElement); },
-      get body() { return wrap(D.body); },
+      get root() { return wrap(D.documentElement, self); },
+      get body() { return wrap(D.body, self); },
       get prefersReducedMotion() { return matchMedia('(prefers-reduced-motion: reduce)').matches; },
       get prefersDark() { return matchMedia('(prefers-color-scheme: dark)').matches; },
       // display facts, read only (visibilitychange: page.on)
@@ -2011,12 +2064,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
         const mq = matchMedia(str(q, 'a media query', 500));
         return harden({
           get matches() { return mq.matches; },
-          onChange: (fn) => { if (typeof fn !== 'function') fail('onChange takes a function'); const api = cur(); const h = () => api.call(fn, mq.matches); mq.addEventListener('change', h); return harden(() => mq.removeEventListener('change', h)); },
+          onChange: (fn) => { if (typeof fn !== 'function') fail('onChange takes a function'); const api = self; const h = () => api.call(fn, mq.matches); mq.addEventListener('change', h); return harden(() => mq.removeEventListener('change', h)); },
         });
       },
       // what's at a point: stand-ins (a shadow root's host, a frame's element: never what's inside them)
-      elementFromPoint: (x, y) => { if (typeof x !== 'number' || typeof y !== 'number') fail('a point is two numbers'); return wrap(D.elementFromPoint(x, y)); },
-      elementsFromPoint: (x, y) => { if (typeof x !== 'number' || typeof y !== 'number') fail('a point is two numbers'); return list((D.elementsFromPoint(x, y) || []).slice(0, 100)); },
+      elementFromPoint: (x, y) => { if (typeof x !== 'number' || typeof y !== 'number') fail('a point is two numbers'); return wrap(D.elementFromPoint(x, y), self); },
+      elementsFromPoint: (x, y) => { if (typeof x !== 'number' || typeof y !== 'number') fail('a point is two numbers'); return list((D.elementsFromPoint(x, y) || []).slice(0, 100), self); },
       // the page's style sheets, as plain copies (another site's sheet stays hidden, as the browser hides it)
       styleSheets: () => {
         const out = [];
@@ -2045,10 +2098,10 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
         const n = D.createElementNS(SVG_NS, SVG_TAG_CASE[t] || t);
         created.add(n);
         madeBy.set(n, modId);
-        return wrap(n);
+        return wrap(n, self);
       },
-      find: (sel) => wrap(qs(D, str(sel, 'a selector', 2000))),
-      findAll: (sel) => list(qsa(D, str(sel, 'a selector', 2000))),
+      find: (sel) => wrap(qs(D, str(sel, 'a selector', 2000)), self),
+      findAll: (sel) => list(qsa(D, str(sel, 'a selector', 2000)), self),
       create(tag) {
         const t = str(tag, 'a tag', 40).toLowerCase();
         if (CONTROL_TAGS.has(t) && t !== 'label') needs('controls');
@@ -2059,7 +2112,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
         if (t === 'button') n.setAttribute('type', 'button');
         created.add(n);
         madeBy.set(n, modId);
-        return wrap(n);
+        return wrap(n, self);
       },
       on: (type, fn, opts) => listen(G, type, fn, opts),
     };
@@ -2067,11 +2120,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     return Object.assign(self, { id: modId, listen, guard, call, endowments: { page: g(pageApi), trif: g(trifApi), console: harden(consoleApi), ...Object.fromEntries(Object.entries(timers).map(([k, f]) => [k, harden(guard(f))])) } });
   };
 
-  // ---- the element stand-ins' methods (shared). `listen` and errors are the calling mod's: a stand-in is
-  // the same object for every mod, so which mod listens is the one whose code is running (`current`).
-  // (code after an await runs outside both: then the mod is the one in the call stack, by its sourceURL)
-  const modFromStack = () => { const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(stackOf(new Error()) || '')); return m ? m[1] : null; };
-  const cur = () => current || apiFor(modFromStack() || '(a boxed mod)');
+  // ---- the element stand-ins' methods (shared). `listen`, powers and errors are the mod's whose stand-in it
+  // is: each method runs with `current` set to its stand-in's owner (ownedMethod, below), whatever was running
+  // before, so it's the same after an await as at the top level. (Until 0.3 a stand-in was one object for every
+  // mod, and after an await the mod was read off the call stack by its script's name, which holds function
+  // names too: names a mod chooses.)
+  const cur = () => current || fail('that isn\'t an element TRIF gave you');
   // (each method guarded: a browser error reaches the mod as plain text)
   const guardShared = (fn) => function (...args) {
     try { return fn.apply(this, args); } catch (e) {
@@ -2079,6 +2133,14 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       throw new TypeError(`TRIF sandbox: ${String(e && e.message ? e.message : e).slice(0, 500)}`);
     }
   };
+  // (a stand-in's method: as its owner, for as long as it runs)
+  const ownedMethod = (fn) => guardShared(function (...args) {
+    const api = this && typeof this === 'object' ? owners.get(this) : undefined;
+    if (!api) fail('that isn\'t an element TRIF gave you');
+    const prev = current;
+    current = api;
+    try { return fn.apply(this, args); } finally { current = prev; }
+  });
   // (a picture a mod may draw: its own canvases, images it made from data:/blob: or from an address an image on
   // the page shows, and the page's own images (the browser's taint rules then decide whether pixels read back);
   // never the page's canvas (a signature pad, a drawing the page uploads) or its video)
@@ -2218,15 +2280,15 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     return o;
   };
   const timeOf = (t) => (typeof t === 'number' ? t : t && typeof t.value === 'number' ? t.value : null);
-  const animFacade = (a) => {
-    const mine = () => { if (animOwner.get(a) !== cur().mod) fail('only the mod\'s own animations can be changed (the page may use one of its own as a timer)'); };
+  const animFacade = (a, api) => {
+    const mine = () => { if (animOwner.get(a) !== api.mod) fail('only the mod\'s own animations can be changed (the page may use one of its own as a timer)'); };
     const act = (k) => guardShared(() => { mine(); a[k](); });
     return harden({
       get currentTime() { return timeOf(a.currentTime); },
       get startTime() { return timeOf(a.startTime); },
       get playState() { return String(a.playState); },
       get playbackRate() { return a.playbackRate; },
-      get mine() { return animOwner.get(a) === cur().mod; },
+      get mine() { return animOwner.get(a) === api.mod; },
       get finished() { return a.finished.then(() => true, () => false); },
       play: act('play'), pause: act('pause'), cancel: act('cancel'), finish: act('finish'), reverse: act('reverse'),
       setCurrentTime: guardShared((t) => { mine(); if (typeof t !== 'number' || !Number.isFinite(t)) fail('a time is a number of milliseconds'); a.currentTime = t; }),
@@ -2380,17 +2442,18 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     },
     get classes() {
       const node = nodeOf(this);
-      let c = classesOf.get(node);
+      let c = classesOf.get(this);
       if (!c) {
+        const api = cur();
         // (a mod adds, removes and toggles only its own trif-box- classes; it can read any)
-        const cls = (x) => { str(x, 'a class', 200); notInEditor(node, 'changing classes'); if (!OWN_NAME.test(x)) fail(`classes a boxed mod sets must start with trif-box- (the page's own code, or a free mod, acts on classes like "${x.slice(0, 60)}")`); return x; };
+        const cls = (x) => { str(x, 'a class', 200); notInEditor(node, 'changing classes', api); if (!OWN_NAME.test(x)) fail(`classes a boxed mod sets must start with trif-box- (the page's own code, or a free mod, acts on classes like "${x.slice(0, 60)}")`); return x; };
         c = harden({
           add: guardShared((...x) => node.classList.add(...x.map(cls))),
           remove: guardShared((...x) => node.classList.remove(...x.map(cls))),
           toggle: guardShared((x, on) => node.classList.toggle(cls(x), on === undefined ? undefined : !!on)),
           has: guardShared((x) => node.classList.contains(str(x, 'a class', 200))),
         });
-        classesOf.set(node, c);
+        classesOf.set(this, c);
       }
       return c;
     },
@@ -2413,9 +2476,9 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       if (typeof n.animate !== 'function') fail('this element can\'t be animated');
       const a = n.animate(keyframesOf(keyframes), timingOf(timing));
       animOwner.set(a, cur().mod);
-      return animFacade(a);
+      return animFacade(a, cur());
     },
-    animations() { const n = nodeOf(this); return harden((typeof n.getAnimations === 'function' ? n.getAnimations() : []).slice(0, 100).map(animFacade)); },
+    animations() { const n = nodeOf(this); const api = cur(); return harden((typeof n.getAnimations === 'function' ? n.getAnimations() : []).slice(0, 100).map((a) => animFacade(a, api))); },
     // sizes and visibility, the mod's own observers: numbers
     onResize(fn) {
       const n = nodeOf(this);
@@ -2546,7 +2609,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   };
   const protoOut = {};
   for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(protoDef))) {
-    Object.defineProperty(protoOut, k, d.get ? { get: guardShared(d.get), enumerable: true } : { value: guardShared(d.value), enumerable: true });
+    Object.defineProperty(protoOut, k, d.get ? { get: ownedMethod(d.get), enumerable: true } : { value: ownedMethod(d.value), enumerable: true });
   }
   PROTO = harden(protoOut);
 
@@ -2568,7 +2631,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
         // (an async function: a top-level return ends the mod, and await works at the top; what it throws
         // after an await is caught too)
         // (the mod's first line on the first line, so `trif errors` gives the file's own line numbers)
-        const p = c.evaluate(`(async function () { "use strict"; ${source}\n})();\n//# sourceURL=trif-sandbox://${id}.js`);
+        const p = c.evaluate(`(async function () { "use strict"; ${source}\n})();\n//# sourceURL=trif-sandbox://${scriptName(id)}.js`);
         if (p && typeof p.catch === 'function') p.catch((err) => report(id, err));
       } else {
         const e = api.endowments;
@@ -2589,8 +2652,9 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       const r = ev.reason;
       let st = '';
       try { st = r && typeof r === 'object' ? String(stackOf(r) || '') : ''; } catch { /* none */ }
+      // (whose error list it goes in: by the script's name in the stack, which only says where to file it)
       const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(st);
-      if (m) report(m[1], r);
+      if (m) { let id = null; for (const k of apis.keys()) if (scriptName(k) === m[1]) { id = k; break; } if (id) report(id, r); }
     });
   } catch { /* none */ }
   Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, watched: store.watched, stats }), configurable: false, writable: false });

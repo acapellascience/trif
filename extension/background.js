@@ -2106,11 +2106,15 @@ function openPanelFrom(tab) {
   }
   if (!Number.isInteger(windowId) || sidePanelIn(windowId)) return;
   let opening = null;
+  let notAClick = false;
   if (chrome.sidePanel?.open && !panelWindowIn(windowId) && !state.panelInWindow) {
     try { opening = Promise.resolve(chrome.sidePanel.open(Number.isInteger(tab.id) ? { tabId: tab.id, windowId } : { windowId })); } catch (e) { opening = Promise.reject(e); }
-    opening.catch((e) => console.warn('[TRIF] the side panel didn\'t open', e));
+    // (not from a click, as in the e2e: the browser says so; then no panel window either)
+    opening.catch((e) => { if (/user gesture/i.test(errMsg(e))) { notAClick = true; console.debug('[TRIF] the side panel didn\'t open', e); } else console.warn('[TRIF] the side panel didn\'t open', e); });
   }
   ready.then(async () => {
+    await opening?.catch(() => {});
+    if (notAClick) return;
     const existing = await findPanelWindow(windowId);
     if (existing) { await chrome.windows.update(existing.id, { focused: true }); return; }
     if (panelWindowOpening.has(windowId)) return;
@@ -2149,10 +2153,13 @@ async function hideThis(tab, url, where) {
   const token = crypto.randomUUID();
   const r = await inPage(tab.id, (opts) => globalThis.__trifHide.start(opts), [{ token, site, ...where }]);
   if (!r || r.error || !plainSelector(r.selector)) { log('info', `Hide this on ${site}: ${r?.error || 'nothing to hide there'}`); return; }
-  hideBars.set(tab.id, { token, site, selector: r.selector });
+  const bar = { token, site, selector: r.selector, saving: 1 };
+  hideBars.set(tab.id, bar);
   try {
     await saveHide(tab.id, site, r.selector, '');
+    bar.saving--;
   } catch (e) {
+    bar.saving--;
     hideBars.delete(tab.id);
     await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, func: (t, m) => globalThis.__trifHide?.failed(t, m), args: [token, errMsg(e)] }).catch(() => {});
   }
@@ -2200,7 +2207,8 @@ async function onHideMessage(msg, sender) {
     const selector = String(msg.selector ?? '');
     if (!plainSelector(selector)) throw new Error('that can\'t be hidden');
     if (selector === bar.selector) return { ok: true };
-    await saveHide(tabId, bar.site, selector, bar.selector);
+    bar.saving++;
+    try { await saveHide(tabId, bar.site, selector, bar.selector); } finally { bar.saving--; }
     bar.selector = selector;
     return { ok: true };
   }
@@ -2220,6 +2228,7 @@ chrome.tabs.onRemoved?.addListener((tabId) => { pageHides.delete(tabId); hideBar
  */
 async function syncPageHides() {
   for (const [tabId, rec] of [...pageHides]) {
+    if (hideBars.get(tabId)?.saving > 0) continue; // (a hide being saved: the mod comes, or comes back, with it)
     const id = hiddenModId(rec.site);
     const m = state.mods.find((x) => x.id === id);
     const tab = await chrome.tabs.get(tabId).catch(() => null);

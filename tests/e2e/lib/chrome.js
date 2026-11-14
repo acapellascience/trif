@@ -67,7 +67,7 @@ chrome.action.setIcon = (d, done) => new Promise((res) => setIcon(d, () => {
 // background.js too, so its answer comes first.
 const MENU = `// e2e only (tests/e2e/lib/chrome.js): a right-click menu item, clicked.
 chrome.runtime.onMessage.addListener((m, sender, respond) => {
-  if (!m || !m.e2eMenuClick || sender.id !== chrome.runtime.id || sender.tab) return false;
+  if (!m || !m.e2eMenuClick || sender.id !== chrome.runtime.id || !String(sender.url || '').startsWith(chrome.runtime.getURL(''))) return false;
   Promise.resolve().then(() => globalThis.__trifMenuClick(m.e2eMenuClick.info, m.e2eMenuClick.tab)).then(() => respond({ ok: true }), (e) => respond({ error: String(e) }));
   return true;
 });

@@ -2552,10 +2552,10 @@ process.exitCode = 1;
     return this.ext(`async (id, tabId) => {
       const tab = await chrome.tabs.get(tabId);
       const info = { menuItemId: id, frameId: 0, pageUrl: tab.url, editable: false };
-      if (typeof browser !== 'undefined' && browser.runtime.getBackgroundPage) {
-        const bg = await browser.runtime.getBackgroundPage();
-        if (bg && bg.__trifMenuClick) { bg.__trifMenuClick(info, tab); return 'background page'; }
-      }
+      // (Firefox: its background page; Chrome has a browser namespace too now, but a service worker)
+      let bg = null;
+      try { bg = typeof browser !== 'undefined' && browser.runtime.getBackgroundPage ? await browser.runtime.getBackgroundPage() : null; } catch { /* a service worker */ }
+      if (bg && bg.__trifMenuClick) { bg.__trifMenuClick(info, tab); return 'background page'; }
       await chrome.runtime.sendMessage({ e2eMenuClick: { info, tab } });
       return 'message';
     }`, [id, win.tabId]);
@@ -2566,7 +2566,9 @@ process.exitCode = 1;
   }
 
   async hidePress(win, name) {
-    return this.ext(`async (tabId, name) => { const [r] = await chrome.scripting.executeScript({ target: { tabId }, args: [name], func: (n) => globalThis.__trifHide.press(n) }); return r ? r.result : null; }`, [win.tabId, name]);
+    // (as a person would: once the bar has saved the last change, so it takes clicks again)
+    const press = () => this.ext(`async (tabId, name) => { const [r] = await chrome.scripting.executeScript({ target: { tabId }, args: [name], func: (n) => globalThis.__trifHide.press(n) }); return r ? r.result : null; }`, [win.tabId, name]);
+    return waitFor(`the bar's ${name}`, async () => (await press()) || null, { timeoutMs: 5000, intervalMs: 150 }).catch(() => false);
   }
 
   async shown(win, sel) {
@@ -2655,6 +2657,8 @@ process.exitCode = 1;
       await themes('hide-this-panel');
       if (problems.length) throw new Error(problems.join('\n'));
       return `(${how}) hidden at once with the bar, one rule in "Hidden on ${site}" (green, on, not held); Wider, All 4 like it, Undo (the mod gone); Wider stops below body; Everywhere previewed then Hide them; hidden after a reload; switched off, all back; Hide this switched it on again`;
+    } catch (e) {
+      throw problems.length && e.message !== problems.join('\n') ? new Error([...problems, e.message].join('\n')) : e;
     } finally {
       try { fs.unlinkSync(file); } catch { /* gone */ }
       await this.ext(`async (tabId) => { await chrome.scripting.executeScript({ target: { tabId }, func: () => { globalThis.__trifHide?.close?.(); return 1; } }); }`, [win.tabId]).catch(() => {});
@@ -2715,7 +2719,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const done = await waitFor('the run', async () => { const c = await chat(); return !c.run && c.messages.some((m) => m.role === 'assistant' && m.text === 'A car it is.') ? c : null; }, { timeoutMs: 60000, intervalMs: 500 }).catch(async () => { problems.push(`the run: ${JSON.stringify((await chat()).messages.slice(-3))}`); return null; });
       const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
       for (const [what, re] of [['the message', /turn it into a car/], ['the block', /chose "Point TRIF at this" for this message/], ['the page', new RegExp(`- Page: ${base.replace(/[.]/g, '\\.')}/hide\\.html\\?e2e=point`)],
-        ['the selector', /- Selector: `main\.feed > article:nth-of-type\(3\) > p:nth-of-type\(1\)` \(finds only this element; named by position\)/],
+        ['the selector', /- Selector: `main\.feed > article:nth-of-type\(3\) > p\.words` \(finds only this element; named by position\)/],
         ['its size and place', /- Size and place: \d+×\d+ CSS px at x \d+, y \d+ of the page, a <p>/], ['its text', /```text\nPost 3\n```/], ['its HTML', /```html\n<p class="words">Post 3<\/p>\n```/]]) {
         if (!re.test(prompt)) problems.push(`the agent's prompt has no ${what}: ${prompt.slice(-900)}`);
       }
@@ -2729,6 +2733,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       await themes('point-sent');
       if (problems.length) throw new Error(problems.join('\n'));
       return `the pill ("${p1.label}"${p1.focused ? ', the box focused' : ''}), × took it away; sent, the run got the selector, size and place, text and HTML${m ? `, and a screenshot (${m[1]})` : ' (no screenshot: the browser didn\'t allow one without a real click)'}; the message keeps the pill`;
+    } catch (e) {
+      throw problems.length && e.message !== problems.join('\n') ? new Error([...problems, e.message].join('\n')) : e;
     } finally {
       fs.writeFileSync(cfgFile, saved);
       if (shot) { try { fs.unlinkSync(shot); } catch { /* gone */ } }

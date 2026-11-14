@@ -348,31 +348,33 @@ button.undo:hover { background: #2cb985; }
     b.err.hidden = true;
     box.append(b.wider, b.all, b.every, b.undo, b.err);
     root.append(box);
+    b.act = {
+      wider() {
+        const up = b.el.parentElement;
+        if (!up || up === D.body || up === D.documentElement) return;
+        const s = selectorFor(up);
+        if (s) change(b, { el: up, sel: s.selector, mode: 'one' });
+      },
+      all() { if (b.like) change(b, { sel: b.like.selector, mode: 'all' }); },
+      every() {
+        if (!b.ev || b.busy) return;
+        if (!b.previewing) { b.previewing = true; preview(b.ev.selector); render(b); arm(b); return; }
+        change(b, { sel: b.ev.selector, mode: 'everywhere' });
+      },
+      async undo() {
+        if (b.busy) return;
+        b.busy = true;
+        b.previewing = false;
+        showEls(b);
+        render(b);
+        const r = await send({ type: 'hide.undo', token: b.token });
+        b.busy = false;
+        if (r?.error) { hideEls(b, b.sel); failed(b.token, r.error, { keep: true }); render(b); arm(b); return; }
+        close(b);
+      },
+    };
     // (only the user's own clicks: a page can't reach a closed shadow root, and its synthetic events aren't trusted)
-    b.wider.addEventListener('click', (e) => {
-      if (!e.isTrusted) return;
-      const up = b.el.parentElement;
-      if (!up || up === D.body || up === D.documentElement) return;
-      const s = selectorFor(up);
-      if (s) change(b, { el: up, sel: s.selector, mode: 'one' });
-    });
-    b.all.addEventListener('click', (e) => { if (e.isTrusted && b.like) change(b, { sel: b.like.selector, mode: 'all' }); });
-    b.every.addEventListener('click', (e) => {
-      if (!e.isTrusted || !b.ev || b.busy) return;
-      if (!b.previewing) { b.previewing = true; preview(b.ev.selector); render(b); arm(b); return; }
-      change(b, { sel: b.ev.selector, mode: 'everywhere' });
-    });
-    b.undo.addEventListener('click', async (e) => {
-      if (!e.isTrusted || b.busy) return;
-      b.busy = true;
-      b.previewing = false;
-      showEls(b);
-      render(b);
-      const r = await send({ type: 'hide.undo', token: b.token });
-      b.busy = false;
-      if (r?.error) { hideEls(b, b.sel); failed(b.token, r.error, { keep: true }); render(b); arm(b); return; }
-      close(b);
-    });
+    for (const name of ['wider', 'all', 'every', 'undo']) b[name].addEventListener('click', (e) => { if (e.isTrusted) b.act[name](); });
     box.addEventListener('pointerenter', () => { b.hover = true; clearTimeout(b.timer); });
     box.addEventListener('pointerleave', () => { b.hover = false; arm(b); });
     b.onKey = (e) => { if (e.key === 'Escape' && e.isTrusted) close(b); };
@@ -414,8 +416,8 @@ button.undo:hover { background: #2cb985; }
     buttons: [bar.wider, bar.all, bar.every, bar.undo].filter((x) => !x.hidden).map((x) => x.textContent), previewing: bar.previewing,
     marks: previewBox ? previewBox.children.length : 0, error: bar.err.hidden ? '' : bar.err.textContent } : null);
 
-  /** The bar's buttons, for the e2e (headless browsers can't click into a closed shadow root from outside). */
-  const press = (name) => { if (!bar) return false; const x = { wider: bar.wider, all: bar.all, every: bar.every, undo: bar.undo }[name]; if (!x || x.hidden || x.disabled) return false; x.dispatchEvent(new MouseEvent('click')); return true; };
+  /** The bar's buttons, for the e2e (a click it makes isn't the user's, so it would be ignored). Only TRIF's own world reaches this. */
+  const press = (name) => { if (!bar || !bar.act[name]) return false; const x = bar[name]; if (x.hidden || x.disabled || bar.busy) return false; bar.act[name](); return true; };
 
   // ---- pointing ------------------------------------------------------------------------------------
   const textOf = (el, max) => (el.innerText || el.textContent || '').replace(/[ \t\f\v ]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim().slice(0, max);

@@ -40,7 +40,8 @@
 // site-storage, to read your own saved style where Profile Styler keeps it (trifProfileStyler.mine:<you>, in
 // x.com's localStorage, shared by the family). (Beside other boxed mods, TRIF asks you once for each
 // combination across two mods: see its hold.) What it remembers about pictures it's read
-// (trifPostStyler.seen3: 3 since pictures' fonts are read) is in TRIF's settings now; the free version's old caches
+// (trifPostStyler.seen4: 3 since pictures' fonts are read, 4 since a picture it couldn't read isn't remembered as
+// one without a code) is in TRIF's settings now; the free version's old caches
 // (trifPostStyler.seen, .seen2), which it deleted from localStorage, are left there (deleting them would take
 // site-storage for those keys too), and the new one starts empty once.
 // Names it gives are the sandbox's: data-ps-* is data-trif-box-ps-*, and Profile Styler's emoji spans (boxed
@@ -48,7 +49,9 @@
 
 const STORE = 'trifProfileStyler.mine'; // (Profile Styler's: your saved style, per account)
 // (.seen2: picture code v2 is read now, so pictures the older reader found nothing in are read again)
-const SEEN_KEY = 'trifPostStyler.seen3', SEEN_MAX = 600; // (3: with the picture's fonts)
+// (.seen4, 11-14: .seen3 remembered pictures it couldn't read (TRIF refusing a picture already at 400×400, a
+// load error) as having no code, for good; those are read again, and only what was read is remembered now)
+const SEEN_KEY = 'trifPostStyler.seen4', SEEN_MAX = 600; // (3: with the picture's fonts)
 // PIC CODE begin (the same in profile-styler.js and style-encoder.js, character for character;
 // tests/styler-fonts.test.js checks)
 // Picture code v2: bytes in the four hidden corners of a 400×400 picture, as 2×2-pixel gray cells (red =
@@ -278,15 +281,16 @@ const sizeOf = (img) => {
   return [W, H];
 };
 const reading = new Map(); // url → Promise
-// av: the page's own picture (a stand-in); url: its 400×400 address, the cache's key
+// av: the page's own picture (a stand-in); url: its 400×400 address, the cache's key. Resolves a style, null
+// (read: no code there), or undefined (couldn't be read: not remembered, so it's tried again next time)
 const readCode = (av, url) => {
   if (seenMap.has(url)) return Promise.resolve(seenMap.get(url) || null);
   if (reading.has(url)) return reading.get(url);
   const p = new Promise((resolve) => {
     let img;
     try { img = trif.imageVariant(av, { pixels: true }); } catch (e) {
-      // (already 400×400, or not X's: nothing to read; TRIF refusing it on this page puts that in trif errors itself)
-      resolve(null); return;
+      // (not X's, or TRIF refusing it on this page, which puts that in trif errors itself)
+      resolve(undefined); return;
     }
     img.on('load', () => {
       try {
@@ -316,10 +320,10 @@ const readCode = (av, url) => {
         if (flags.slice(0, 7).some((f) => f === null)) { resolve(fromList(colours.map((c, i) => (i < 5 ? c : null)), [])); return; }
         for (const [at, upTo] of [[7, 7], [8, 8], [9, 8], [10, 10], [11, 11], [12, 12]]) if (flags[at] === null) { n = Math.min(n, upTo); }
         resolve(fromList(colours.map((c, i) => (i < n ? c : null)), KEYS.slice(0, n).filter((k, i) => flags[i])));
-      } catch (e) { trif.warn('post styler: could not read a picture', String(e)); resolve(null); }
+      } catch (e) { trif.warn('post styler: could not read a picture', String(e)); resolve(undefined); }
     });
-    img.on('error', () => resolve(null));
-  }).then((st) => { reading.delete(url); remember(url, st); return st; });
+    img.on('error', () => resolve(undefined));
+  }).then((st) => { reading.delete(url); if (st !== undefined) remember(url, st); return st || null; });
   reading.set(url, p);
   return p;
 };

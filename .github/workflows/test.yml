@@ -24,9 +24,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Chrome for Testing, for the real-browser tests
+        # (the runner has its own Chrome for Testing in /Applications, which findChrome would pick first: this one is used)
         run: |
-          npx --yes @puppeteer/browsers install chrome@stable --path tests/e2e/.browsers
-          node -e "const c = require('./tests/e2e/lib/chrome').findChrome(); if (!c) { console.error('Chrome for Testing not found after installing it'); process.exit(1); } console.log(c)"
+          out=$(npx --yes @puppeteer/browsers install chrome@stable --path tests/e2e/.browsers | tail -1)
+          echo "$out"
+          bin="$PWD/${out#* }"
+          test -x "$bin" || { echo "Chrome for Testing not found after installing it: $bin"; exit 1; }
+          echo "TRIF_E2E_CHROME=$bin" >> "$GITHUB_ENV"
       - run: npm test
         env:
           TRIF_BROWSER_TESTS: 1

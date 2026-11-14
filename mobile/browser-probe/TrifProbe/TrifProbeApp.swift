@@ -51,6 +51,12 @@ final class Model: ObservableObject {
                 report.log("autorun", "done: \(pages.joined(separator: ","))")
             }
         }
+        // (development) `-dumpchat`: the chat's message box and what's around it, ten seconds after start, to
+        // Documents/chat-dom.html (ClaudePane.dumpComposer).
+        if args.contains("-dumpchat") {
+            let pane = self.pane
+            Task { @MainActor in try? await Task.sleep(nanoseconds: 1_000_000_000); browser.wantsChat = true; try? await Task.sleep(nanoseconds: 10_000_000_000); await pane.dumpComposer(); report.log("dumpchat", "done") }
+        }
         // (development) `-shottest addr,addr`: each page's settled screenshot and whole-page PDF, as a mod's
         // follow-up would send them, saved to Documents (shot-N.png, page-N.pdf) instead of the chat.
         if let i = args.firstIndex(of: "-shottest"), i + 1 < args.count {

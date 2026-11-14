@@ -33,7 +33,10 @@
    * after a mod is added: Tim, 11-13), so the person's own words stay theirs.
    */
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const TILES = '[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"], span[class*="group/composer-attachment"]';
+  // (each attachment's own tile: never the row they sit in, Claude's [data-cds="MessageAttachments"], whose label
+  // would cover every tile in it: Tim, 11-14, saw the instruction labelled "TRIF screenshot", the row marked
+  // while only the picture was in it)
+  const TILES = '[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]:not([data-cds="MessageAttachments"]), span[class*="group/composer-attachment"]';
   /** How many attachment tiles in the message box carry this name (in their text, a picture's alt or a label). */
   function tiles(label) {
     return [...document.querySelectorAll(TILES)].filter((t) => `${t.textContent || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')]
@@ -97,11 +100,13 @@
     // (what TRIF attached, by its file's name: its tile marked for the small pill above, the label its name)
     // (Claude's tiles, then ChatGPT's: a span of the group/composer-attachment class; a picture's name only in
     // its alt or its remove button's label)
+    for (const row of document.querySelectorAll('[data-cds="MessageAttachments"][data-trif-chip]')) row.removeAttribute('data-trif-chip');
     for (const tile of document.querySelectorAll(TILES)) {
-      if (tile.hasAttribute('data-trif-chip')) continue;
+      if (tile.querySelector(TILES)) continue; // (a tile around tiles: a row by another name)
       const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
       const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot', 'TRIF full page', 'TRIF pointer'].find((l) => names.includes(l));
-      if (label) tile.setAttribute('data-trif-chip', label);
+      if (label && tile.getAttribute('data-trif-chip') !== label) tile.setAttribute('data-trif-chip', label);
+      else if (!label && tile.hasAttribute('data-trif-chip')) tile.removeAttribute('data-trif-chip');
     }
     for (const pre of document.querySelectorAll('pre')) {
       const t = pre.innerText || '';

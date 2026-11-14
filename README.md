@@ -328,7 +328,10 @@ keychain as `trif-amo-issuer` and `trif-amo-secret`; and the release signing key
 `node scripts/release.js keygen` (private half in the keychain as `trif-release-key`, public half in
 `helper/lib/release-key.js`). Back the private key up: installs only accept updates signed with it.
 Installs also refuse a feed signed more than 8 weeks ago, so with no release for about six weeks, run
-`node scripts/release.js refresh-feed` (it signs updates/latest.json again, nothing else changed) and push
-`updates/` on main.
+`node scripts/release.js refresh-feed` (it signs updates/latest.json and updates/mods.json again, nothing
+else changed) and push `updates/` on main. To ship a fixed or improved shipped mod without a release, bump
+its `@version`, commit it on main, and run `node scripts/release.js mods-feed` (`--dry-run` first; `--only
+<ids>` to pick): it signs updates/mods.json with every shipped mod changed since the last release, and asks
+before committing and pushing it.
 (Keychain items under their WebMods-era names, `webmods-amo-issuer`, `webmods-amo-secret` and
 `webmods-release-key`, are found too.)

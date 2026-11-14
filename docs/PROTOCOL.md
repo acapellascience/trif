@@ -779,6 +779,15 @@ on the main branch; both are read from raw.githubusercontent.com for the repo in
   neither is refused too): an old signed feed served again could otherwise hold users on its version. Between
   releases, `node scripts/release.js refresh-feed` signs the same feed again with a new `signed`; the
   release prints the day its feed stops being accepted. Helpers before 0.3.0 ignore `signed`.
+- `updates/mods.json` (+ `mods.json.sig`), the mods feed (`helper/lib/modsfeed.js`): new versions of the
+  mods TRIF ships, between releases. `{kind: "trif-mods", signed, release, commit, mods: {id: {version,
+  sha256, size, minTrif}}}`, signed like latest.json and refused like it (wrong or no signature, older than 8
+  weeks), and refused when `kind` isn't `trif-mods`. Each file is fetched from the repo at `commit`
+  (`raw.githubusercontent.com/<repo>/<commit>/examples/sites/<id>.js`) and checked against its sha256, size
+  and `@version`. Only ids this TRIF ships, newer than its own and needing at most this TRIF (`minTrif`); the
+  user's copies get them as they get a release's (preinstalled.js updateShippedMods), an unchanged one only
+  with `autoUpdate`. Checked with latest.json (and by `trif update`); config.json `modsFeed` overrides where.
+  Written by `node scripts/release.js mods-feed`, empty at each release, signed again by `refresh-feed`.
 - `updates/firefox.json` for Firefox: its update manifest (`addons[id].updates[{version, update_link,
   update_hash}]`). The Firefox build's `browser_specific_settings.gecko.update_url` points at it, so
   Firefox updates the signed add-on itself.
@@ -913,7 +922,7 @@ docs/        PROTOCOL.md (this file), TESTING.md
 scripts/     build-extension.js (Chrome/Firefox/Safari builds), build-safari.js (the Safari Mac app),
              release.js (releases, see "Updates"), shipped-history.js, render-icon.js
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
-updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
+updates/     the update feeds, written by release.js (latest.json + .sig, mods.json + .sig, firefox.json)
 CHANGELOG.md what's new per version (the panel's "What's new")
 site/        timsrobot.com, the report form (a Cloudflare Worker; site/README.md)
 ```

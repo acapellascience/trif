@@ -166,10 +166,24 @@
     [data-trif-chip="TRIF screenshot"] [data-cds-card-body]::after { content: "TRIF screenshot"; }
     [data-trif-chip="TRIF full page"] [data-cds-card-body]::after { content: "TRIF full page"; }
     [data-trif-chip="TRIF pointer"] [data-cds-card-body]::after { content: "TRIF pointer"; }
+    /* (Claude's picture-preview tile, a PDF's: a fixed box with the preview and "pdf" in it; the box made a pill,
+       its insides hidden, the remove button kept: Tim, 11-14) */
+    [data-trif-chip][class*="group/thumbnail"] > div:first-child {
+      width: auto !important; height: auto !important; min-width: 0 !important; min-height: 0 !important;
+      border-radius: 999px !important; border: 0 !important; box-shadow: none !important; background: #e3f7ee !important;
+      padding: 7px 16px !important; font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
+    }
+    [data-trif-chip][class*="group/thumbnail"] > div:first-child > * { display: none !important; }
+    [data-trif-chip="TRIF instruction"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF instruction"; }
+    [data-trif-chip="TRIF follow-up"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF follow-up"; }
+    [data-trif-chip="TRIF screenshot"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF screenshot"; }
+    [data-trif-chip="TRIF full page"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF full page"; }
+    [data-trif-chip="TRIF pointer"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF pointer"; }
     @media (prefers-color-scheme: dark) {
       [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
       [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }
       span[data-trif-chip][class*="composer-attachment"]::before { background: rgba(52, 211, 153, 0.16); color: #34d399; }
+      [data-trif-chip][class*="group/thumbnail"] > div:first-child { background: rgba(52, 211, 153, 0.16) !important; color: #34d399; }
     }`;
   (document.head || document.documentElement).append(style);
 

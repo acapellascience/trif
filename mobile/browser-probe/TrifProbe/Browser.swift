@@ -43,6 +43,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var canGoBack = false
     @Published var status = ""
     @Published var picked: Picked?
+    /// The last thing hidden, while it can be undone (the status strip's Undo: Tim, 11-14, hid a whole page).
+    @Published var lastHide: HideRule?
+    /// Set when something asks for the chat pane to open (Point TRIF at this); the app opens it.
+    @Published var wantsChat = false
     @Published var modLink: ModLink?
     /// Whole mods (Mods.swift): those kept, and one from the clipboard waiting for an OK.
     let mods = ModStore()
@@ -272,7 +276,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func hide(_ selector: String, how: String, from: String) async {
         let host = self.host
         guard !host.isEmpty else { return }
-        report.add(HideRule(host: host, selector: selector, how: how, from: from, at: Date()))
+        // (never the page itself: the html or body element)
+        if (await call("return String([...document.querySelectorAll(sel)].some((e) => e === document.documentElement || e === document.body));", ["sel": selector], in: Browser.trifWorld)).text == "true" {
+            report.log("hidden", "\(host): not \(selector), which is the whole page")
+            return
+        }
+        let rule = HideRule(host: host, selector: selector, how: how, from: from, at: Date())
+        report.add(rule)
+        lastHide = rule
         report.log("hidden", "\(host): \(selector) (named by \(how), from \(from))")
         installScripts()
         await applyRulesNow()
@@ -284,6 +295,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let selectors = report.rules.filter { $0.host == host }.map { $0.selector }
         let result = await call("return JSON.stringify(globalThis.__trifKit.hide(selectors));", ["selectors": selectors], in: Browser.trifWorld)
         if let error = result.error { status = "Couldn't hide: \(error)" }
+    }
+
+    /// Shows a hidden thing again, at once (no reload): the last one (Undo), or any from the list.
+    func unhide(_ rule: HideRule) async {
+        report.remove(rule)
+        if lastHide?.id == rule.id { lastHide = nil }
+        report.log("hidden", "\(rule.host): shown again: \(rule.selector)")
+        installScripts()
+        if rule.host == host { await applyRulesNow() }
     }
 
     func forgetRulesHere() async {
@@ -322,6 +342,47 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let result = await call("return JSON.stringify(globalThis.__trifKit.pick(selector));", ["selector": selector], in: Browser.trifWorld)
         show(result, from: from)
         return picked != nil
+    }
+
+    /// Point TRIF at this: what was long-pressed, as the chat needs it (where it is, its text and HTML, a picture
+    /// of it), into the chat's message box as an attachment; the pane opens. (Agent-facing words.)
+    var chatPoint: ((String, Data?) async -> Void)?
+    func pointToChat() async {
+        guard let p = picked, let point = chatPoint else { return }
+        let js = """
+        const el = globalThis.__trifKit && globalThis.__trifKit.chosen();
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const html = el.outerHTML.replace(/\\s+/g, ' ');
+        return JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height),
+          top: Math.round(r.top + scrollY), pageH: document.documentElement.scrollHeight, viewW: innerWidth, viewH: innerHeight,
+          html: html.length > 4000 ? html.slice(0, 4000) + ' …(cut)' : html, text: (el.innerText || '').trim().slice(0, 600) });
+        """
+        guard let d = Browser.parse((await call(js, in: Browser.trifWorld)).text) as? [String: Any] else { return }
+        let n = { (k: String) in (d[k] as? NSNumber)?.intValue ?? 0 }
+        var crop: Data?
+        let rect = CGRect(x: n("x"), y: n("y"), width: n("w"), height: n("h")).intersection(webView.bounds)
+        if !rect.isNull, rect.width > 4, rect.height > 4 {
+            let cfg = WKSnapshotConfiguration()
+            cfg.rect = rect
+            crop = await Browser.within(5, nil) { await withCheckedContinuation { c in self.webView.takeSnapshot(with: cfg) { image, _ in c.resume(returning: image?.pngData()) } } }
+        }
+        let text = """
+        I'm pointing at this part of \(webView.url?.absoluteString ?? host) (a picture of it is attached, if it was on the screen):
+
+        Selector: \(p.selector)  (finds \(p.matches); named by \(p.how))
+        \(p.similarSelector.map { "Others like it: \($0) (finds \(p.similarCount))\n" } ?? "")Where: \(n("w"))×\(n("h")) px, \(n("top")) px from the top of a page \(n("pageH")) px tall (the screen is \(n("viewW"))×\(n("viewH")))
+        Its text: “\(d["text"] as? String ?? "")”
+
+        Its HTML:
+        ```html
+        \(d["html"] as? String ?? "")
+        ```
+        """
+        report.log("pointed", "\(host): \(p.selector)\(crop == nil ? "" : ", with a picture")")
+        wantsChat = true
+        await cancelPick()
+        await point(text, crop)
     }
 
     func cancelPick() async {
@@ -374,14 +435,34 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
         I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Its @match must cover \(origin)/*. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
 
+        A screenshot of what I see is attached. If I attach TRIF pointer files, those are the parts of the page I mean.
+
         --- How TRIF mods are written ---
         \(Browser.resource("mod-guide", "txt"))
-
+        \(alreadyHere())
         --- The page: \(page?.absoluteString ?? host) ---
         \(o.text)
         """
         report.log("outline", "\(host): \(o.chars) characters, about \(o.tokens) tokens, with the request (\(request.count) characters in all)")
         return request
+    }
+
+    /// What's already changing this page, for the chat to build on (Tim, 11-14): the mods switched on here, whole,
+    /// and the things hidden by pointing. Empty when there's nothing.
+    func alreadyHere() -> String {
+        let here = webView.url?.absoluteString ?? ""
+        let on = mods.running(on: here)
+        let hidden = report.rules.filter { $0.host == host }.map(\.selector)
+        if on.isEmpty && hidden.isEmpty { return "" }
+        var t = "\n--- Already changing this page (build on these) ---\n"
+        if !on.isEmpty {
+            t += "Mods switched on here. To change one, give back its whole file with the same @name (it replaces that mod); a new @name adds a mod beside them.\n"
+            for m in on { t += "\n### \(m.name) (\(m.tierName.lowercased()))\n```js\n\(m.code)\n```\n" }
+        }
+        if !hidden.isEmpty {
+            t += "\nHidden by me, by pointing (each of these is display: none; the outline below doesn't have them):\n\(hidden.map { "- \($0)" }.joined(separator: "\n"))\n"
+        }
+        return t
     }
 
     /// After a mod is added: once the page has loaded again, what changed (from the layout sent to the chat),

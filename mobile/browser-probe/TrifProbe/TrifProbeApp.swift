@@ -34,6 +34,7 @@ final class Model: ObservableObject {
         // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
         let pane = self.pane
         browser.chatFill = { text, png, pdf in await pane.fill(text, png: png, pdf: pdf, as: "TRIF follow-up.txt") }
+        browser.chatPoint = { text, png in await pane.fill(text, png: png, picture: "TRIF pointer.png", as: "TRIF pointer.txt") }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments
@@ -94,8 +95,19 @@ struct ContentView: View {
                 Divider()
                 ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }, sendPage: {
                     showClaude = true
-                    Task { if let t = await browser.pageForChat() { await pane.fill(t, as: "TRIF instruction.txt") } }
+                    // (with a screenshot of what's on the screen: Tim, 11-14)
+                    Task { if let t = await browser.pageForChat() { let shot = await browser.settledScreenshot().png; await pane.fill(t, png: shot, as: "TRIF instruction.txt") } }
                 }).frame(height: 360)
+            }
+            if let h = browser.lastHide {
+                HStack {
+                    Text("Hidden: \(h.selector)").font(.footnote.monospaced()).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("Undo") { Task { await browser.unhide(h) } }.font(.footnote.bold())
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(.secondarySystemBackground))
             }
             if !browser.status.isEmpty {
                 Text(browser.status)
@@ -109,11 +121,12 @@ struct ContentView: View {
             toolbar
         }
         .onChange(of: browser.address) { _, new in if !editing { entry = new } }
+        .onChange(of: browser.wantsChat) { _, want in if want { showClaude = true; browser.wantsChat = false } }
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(item: $browser.modLink) { link in ModLinkView(link: link).environmentObject(browser) }
         .sheet(item: $browser.modOffer) { mod in ModOfferView(mod: mod).environmentObject(browser) }
-        .sheet(isPresented: $showMods) { ModsListView(store: browser.mods).environmentObject(browser) }
+        .sheet(isPresented: $showMods) { ModsListView(store: browser.mods, report: report).environmentObject(browser) }
         .alert("What bothers you on this page?", isPresented: $asking) {
             TextField("the cookie notice", text: $question)
             Button("Ask the phone") { let q = question; Task { await browser.askPhone(q) } }
@@ -203,6 +216,9 @@ struct PickedBar: View {
                 Button("Cancel") { Task { await browser.cancelPick() } }
             }
             .font(.subheadline)
+            Button("Point TRIF at this") { Task { await browser.pointToChat() } }
+                .buttonStyle(.bordered)
+                .font(.subheadline)
         }
         .padding(12)
         .background(Color(.secondarySystemBackground))

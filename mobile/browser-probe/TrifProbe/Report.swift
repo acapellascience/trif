@@ -91,6 +91,11 @@ final class Report: ObservableObject {
         save()
     }
 
+    func remove(_ rule: HideRule) {
+        rules.removeAll { $0.id == rule.id }
+        save()
+    }
+
     func forgetRules(for host: String) {
         rules.removeAll { $0.host == host }
         save()

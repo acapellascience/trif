@@ -40,7 +40,7 @@
       .map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`.includes(label)).length;
   }
 
-  async function fill(text, png, name, pdf) {
+  async function fill(text, png, name, pdf, picture) {
     // (a chat that has only just loaded isn't ready for a paste: its page finished, then a moment)
     if (document.readyState !== 'complete') { await new Promise((r) => addEventListener('load', r, { once: true })); await wait(800); }
     const ed = editor();
@@ -50,7 +50,7 @@
     if (png) {
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
-      dt.items.add(new File([bytes], 'TRIF screenshot.png', { type: 'image/png' }));
+      dt.items.add(new File([bytes], picture || 'TRIF screenshot.png', { type: 'image/png' }));
       said.push(paste(ed, dt) ? 'picture pasted' : 'picture not taken');
       await wait(300);
     }
@@ -100,7 +100,7 @@
     for (const tile of document.querySelectorAll(TILES)) {
       if (tile.hasAttribute('data-trif-chip')) continue;
       const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
-      const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot', 'TRIF full page'].find((l) => names.includes(l));
+      const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot', 'TRIF full page', 'TRIF pointer'].find((l) => names.includes(l));
       if (label) tile.setAttribute('data-trif-chip', label);
     }
     for (const pre of document.querySelectorAll('pre')) {
@@ -143,6 +143,7 @@
     span[data-trif-chip="TRIF follow-up"][class*="composer-attachment"]::before { content: "TRIF follow-up"; }
     span[data-trif-chip="TRIF screenshot"][class*="composer-attachment"]::before { content: "TRIF screenshot"; }
     span[data-trif-chip="TRIF full page"][class*="composer-attachment"]::before { content: "TRIF full page"; }
+    span[data-trif-chip="TRIF pointer"][class*="composer-attachment"]::before { content: "TRIF pointer"; }
     [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
     [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
     [data-trif-chip] [data-cds-card-body] > div, [data-trif-chip] img, [data-trif-chip] picture { display: none !important; }
@@ -154,6 +155,7 @@
     [data-trif-chip="TRIF follow-up"] [data-cds-card-body]::after { content: "TRIF follow-up"; }
     [data-trif-chip="TRIF screenshot"] [data-cds-card-body]::after { content: "TRIF screenshot"; }
     [data-trif-chip="TRIF full page"] [data-cds-card-body]::after { content: "TRIF full page"; }
+    [data-trif-chip="TRIF pointer"] [data-cds-card-body]::after { content: "TRIF pointer"; }
     @media (prefers-color-scheme: dark) {
       [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
       [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }

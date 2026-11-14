@@ -56,6 +56,16 @@ final class ModStore: ObservableObject {
                              code: s("code"), script: s("script"), world: s("world"), at: s("at")), nil)
     }
 
+    /// The mods switched on whose @match covers this address.
+    func running(on url: String) -> [InstalledMod] {
+        guard let c = js else { return [] }
+        return mods.filter(\.on).filter { m in
+            c.setObject(m.code, forKeyedSubscript: "__code" as NSString)
+            c.setObject(url, forKeyedSubscript: "__url" as NSString)
+            return c.evaluateScript("(function () { const p = __trifMods.parseMod(__code); return !p.error && __trifMods.matchesUrl(__url, p.matches); })()")?.toBool() ?? false
+        }
+    }
+
     /// Adds a mod, or replaces the one with its name.
     func add(_ m: InstalledMod) {
         if let i = mods.firstIndex(where: { $0.id == m.id }) { mods[i] = m } else { mods.append(m) }
@@ -126,6 +136,7 @@ struct ModOfferView: View {
 struct ModsListView: View {
     @EnvironmentObject var browser: Browser
     @ObservedObject var store: ModStore
+    @ObservedObject var report: Report
 
     var body: some View {
         NavigationStack {
@@ -143,6 +154,14 @@ struct ModsListView: View {
                     }
                 }
                 .onDelete { idx in for i in idx { browser.removeMod(store.mods[i]) } }
+                // (each thing hidden by pointing, by site: swipe to show it again)
+                ForEach(Array(Set(report.rules.map(\.host))).sorted(), id: \.self) { host in
+                    Section("Hidden on \(host)") {
+                        let list = report.rules.filter { $0.host == host }
+                        ForEach(list) { r in Text(r.selector).font(.caption.monospaced()).lineLimit(2) }
+                            .onDelete { idx in let gone = idx.map { list[$0] }; Task { for r in gone { await browser.unhide(r) } } }
+                    }
+                }
             }
             .navigationTitle("Your mods")
             .navigationBarTitleDisplayMode(.inline)

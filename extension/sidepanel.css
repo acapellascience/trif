@@ -633,7 +633,7 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .pointed-x:hover { background: color-mix(in srgb, var(--led-green) 18%, transparent); color: var(--text); }
 .pointed-x svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .composer.has-pointed textarea { padding-top: 5px; }
-.msg .pointed.in-msg { display: flex; width: fit-content; margin: 0 0 4px; padding-right: 7px; }
+.msg .pointed.in-msg { display: flex; width: fit-content; max-width: 100%; margin: 0 0 4px; padding-right: 7px; white-space: nowrap; }
 .composer textarea:disabled { cursor: not-allowed; }
 /* Robotless (body.robotless: no chat agent in this browser): one quiet line in the message box's place, and
    nothing that asks the agent (the agent's line, the empty chat's starters, Explain, Merge with my agent,

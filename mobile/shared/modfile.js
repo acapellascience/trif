@@ -68,7 +68,8 @@ function parseMod(text) {
         `globalThis.__trifSandbox.run(${JSON.stringify(id)}, ${JSON.stringify(String(text))}, { powers: ${JSON.stringify(powers)}, args: {} });\n})();`;
       world = 'box'; at = 'end';
     } else {
-      script = `(async function () { ${guard}\n${String(text)}\n})().catch((e) => console.error("TRIF mod ${id}:", e));`;
+      // (its errors kept on the page, for the report to the chat: Browser.reportToChat)
+      script = `(async function () { ${guard}\n${String(text)}\n})().catch((e) => { (window.__trifModErrors = window.__trifModErrors || []).push(${JSON.stringify(id)} + ": " + ((e && e.message) || e)); console.error("TRIF mod ${id}:", e); });`;
       world = 'page'; at = runAt === 'document-start' ? 'start' : 'end';
     }
     const description = (h.description && h.description[0]) || '';

@@ -112,6 +112,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         installScripts()
         reload()
         status = "Added \(m.name). It runs on \(m.sites.joined(separator: ", "))."
+        Task { await reportToChat(m) }
     }
 
     func removeMod(_ m: InstalledMod) { mods.remove(m); installScripts(); reload() }
@@ -338,7 +339,22 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     func copyOutline() async {
-        guard let o = await outline() else { return }
+        guard let request = await pageForChat() else { return }
+        UIPasteboard.general.string = request
+        status = "Copied: the page and how to write a mod for it. Paste it into the chat and say what you want changed; then copy the reply and Add a mod from the clipboard."
+    }
+
+    // MARK: the chat, both ways (Tim, 11-13)
+
+    /// The page's parts and sizes when it was last sent to the chat, to say afterwards what a mod did.
+    private var baseline: (host: String, layout: String)?
+    /// Puts text (and a screenshot) into the chat's message box: the pane's fill, set by the app.
+    var chatFill: ((String, Data?) async -> Void)?
+
+    /// What the chat gets for this page: how TRIF mods are written, then its outline. Notes its layout.
+    func pageForChat() async -> String? {
+        guard let o = await outline() else { return nil }
+        if let l = (await call("return JSON.stringify(globalThis.__trifKit.layout());", in: Browser.trifWorld)).text { baseline = (host, l) }
         // (agent-facing words: what TRIF mods are and how to hand one over, then the page)
         let page = webView.url
         let origin = page.map { "\($0.scheme ?? "https")://\($0.host ?? "")" } ?? "https://\(host)"
@@ -353,9 +369,43 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         --- The page: \(page?.absoluteString ?? host) ---
         \(o.text)
         """
-        UIPasteboard.general.string = request
-        report.log("outline", "\(host): \(o.chars) characters, about \(o.tokens) tokens, copied with the request (\(request.count) characters in all)")
-        status = "Copied: the page and how to write a mod for it. Paste it into the chat and say what you want changed; then copy the reply and Add a mod from the clipboard."
+        report.log("outline", "\(host): \(o.chars) characters, about \(o.tokens) tokens, with the request (\(request.count) characters in all)")
+        return request
+    }
+
+    /// After a mod is added: once the page has loaded again, what changed (from the layout sent to the chat),
+    /// the mod's errors and a screenshot, into the chat's message box for the person to send.
+    func reportToChat(_ m: InstalledMod) async {
+        guard let fill = chatFill else { return }
+        for _ in 0..<40 where loading { try? await Task.sleep(nanoseconds: 250_000_000) }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        var lines: [String] = []
+        if let b = baseline, b.host == host, let r = (await call("return JSON.stringify(globalThis.__trifKit.compare(JSON.parse(before)));", ["before": b.layout], in: Browser.trifWorld)).text,
+           let changed = Browser.parse(r) as? [[String: Any]] {
+            for c in changed.prefix(25) {
+                let text = (c["text"] as? String).map { $0.isEmpty ? "" : " “\($0)”" } ?? ""
+                lines.append("- \(c["what"] as? String ?? "changed"): \(c["sel"] as? String ?? "?")\(text) (was \(c["was"] as? String ?? "?"), now \(c["now"] as? String ?? "gone"))")
+            }
+        }
+        var errors: [String] = []
+        if m.world == "box", let t = (await call("return JSON.stringify(globalThis.__trifSandbox ? globalThis.__trifSandbox.errors.filter((e) => e.mod === id).map((e) => e.message) : []);", ["id": m.id], in: Browser.boxWorld)).text,
+           let list = Browser.parse(t) as? [String] { errors += list }
+        if m.world == "page", let t = (await call("return JSON.stringify(window.__trifModErrors || []);", in: .page)).text,
+           let list = Browser.parse(t) as? [String] { errors += list.filter { $0.hasPrefix("\(m.id):") } }
+        var text = "I added your mod \"\(m.name)\" and reloaded \(webView.url?.absoluteString ?? host). Here's the page now (screenshot attached).\n"
+        text += lines.isEmpty ? "\nNothing that was on the page before disappeared or shrank.\n" : "\nWhat disappeared or shrank, of what was on the page when I sent it to you:\n\(lines.joined(separator: "\n"))\n"
+        if !errors.isEmpty { text += "\nThe mod's errors:\n\(errors.prefix(10).map { "- \($0)" }.joined(separator: "\n"))\n" }
+        text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again."
+        let shot = await screenshot()
+        await fill(text, shot)
+        status = "Added \(m.name). What it did is in the chat's message box: send it if it needs fixing."
+    }
+
+    /// The page as it looks, as PNG.
+    func screenshot() async -> Data? {
+        await withCheckedContinuation { c in
+            webView.takeSnapshot(with: nil) { image, _ in c.resume(returning: image?.pngData()) }
+        }
     }
 
     func askPhone(_ question: String) async {

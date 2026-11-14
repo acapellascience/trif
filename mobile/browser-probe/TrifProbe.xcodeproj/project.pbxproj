@@ -10,6 +10,7 @@
 		066931474CC5139D68D2F470 /* Browser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C92814A95137C3CC4B0A8C2F /* Browser.swift */; };
 		17237858CB0A046A273784DC /* Checks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67596316AFDF35B8CF90704 /* Checks.swift */; };
 		1C17BC0B5A6D8672C0959C5C /* start-own.js in Resources */ = {isa = PBXBuildFile; fileRef = 29CF97A92F672EEB375D02B9 /* start-own.js */; };
+		D8F519A0F55D42F8360FDF5A /* chat.js in Resources */ = {isa = PBXBuildFile; fileRef = B410339C0BE962E0C942C43E /* chat.js */; };
 		2679806E8533E50DD21775E6 /* TrifProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1BAF62AC50245BCF5ECE0A9 /* TrifProbeApp.swift */; };
 		2DAEC88739AD3260C6F25F64 /* kit.js in Resources */ = {isa = PBXBuildFile; fileRef = 901B721F27019757A750630C /* kit.js */; };
 		3AE3D94B4CB20B1F2756BBBC /* start-page.js in Resources */ = {isa = PBXBuildFile; fileRef = E312BD6E2475815E36C63107 /* start-page.js */; };
@@ -31,6 +32,7 @@
 		1FD4645E79F7F18C7685F439 /* mod-guide.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "mod-guide.txt"; path = "../shared/gen/mod-guide.txt"; sourceTree = "<group>"; };
 		2F3DB6397438BF2558AD37B0 /* mods.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "mods.js"; path = "../shared/gen/mods.js"; sourceTree = "<group>"; };
 		29CF97A92F672EEB375D02B9 /* start-own.js */ = {isa = PBXFileReference; includeInIndex = 1; path = "start-own.js"; sourceTree = "<group>"; };
+		B410339C0BE962E0C942C43E /* chat.js */ = {isa = PBXFileReference; includeInIndex = 1; path = "chat.js"; sourceTree = "<group>"; };
 		32DE102B13442D7BC15C2099 /* browser-checks.json */ = {isa = PBXFileReference; includeInIndex = 1; name = "browser-checks.json"; path = "../shared/gen/browser-checks.json"; sourceTree = "<group>"; };
 		60C99213D444E37C779A1D54 /* Pages.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Pages.swift; sourceTree = "<group>"; };
 		67A9547FACE37CC4642FD1F6 /* pages */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; name = pages; path = ../shared/pages; sourceTree = "<group>"; };
@@ -80,6 +82,7 @@
 			isa = PBXGroup;
 			children = (
 				29CF97A92F672EEB375D02B9 /* start-own.js */,
+				B410339C0BE962E0C942C43E /* chat.js */,
 				E312BD6E2475815E36C63107 /* start-page.js */,
 			);
 			name = Web;
@@ -179,6 +182,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1C17BC0B5A6D8672C0959C5C /* start-own.js in Resources */,
+				D8F519A0F55D42F8360FDF5A /* chat.js in Resources */,
 				3AE3D94B4CB20B1F2756BBBC /* start-page.js in Resources */,
 				2DAEC88739AD3260C6F25F64 /* kit.js in Resources */,
 				5CDE92BBCFC21139EF6AFC8F /* sandbox-runtime.js in Resources */,

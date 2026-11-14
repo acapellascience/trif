@@ -30,6 +30,9 @@ final class Model: ObservableObject {
         self.report = report
         self.browser = browser
         self.pane = ClaudePane(report: report, browser: browser)
+        // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
+        let pane = self.pane
+        browser.chatFill = { text, png in await pane.fill(text, png: png) }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments
@@ -70,7 +73,10 @@ struct ContentView: View {
             if let picked = browser.picked { PickedBar(picked: picked) }
             if showClaude {
                 Divider()
-                ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }).frame(height: 360)
+                ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }, sendPage: {
+                    showClaude = true
+                    Task { if let t = await browser.pageForChat() { await pane.fill(t) } }
+                }).frame(height: 360)
             }
             if !browser.status.isEmpty {
                 Text(browser.status)

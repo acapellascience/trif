@@ -206,5 +206,51 @@
   /** The first element a selector finds, marked (for a selector that came from somewhere else: a chat, a model). */
   const pick = (selector) => { let el = null; try { el = D.querySelector(selector); } catch { return null; } return el ? mark(el) : null; };
 
-  globalThis.__trifKit = { selectorFor, similarTo, hide, matchesOf, describe, outline, at, wider, unmark, pick, chosen: () => chosenEl, count };
+  /**
+   * The page's parts and their sizes, for telling a chat what its mod did (proof of concept): the outline's
+   * kind of elements, plus every field and search box, each by a selector that finds it again. At most `max`.
+   */
+  function layout(max = 300) {
+    const out = [];
+    const seen = new Set();
+    const LANDMARK = /^(header|nav|main|aside|footer|section|article|form|dialog|h[1-6]|video|iframe|table|ul|ol|input|textarea|select|button)$/;
+    for (const el of D.querySelectorAll('body *')) {
+      if (out.length >= max) break;
+      if (/^(script|style|link|meta|noscript|template|svg|path|br)$/.test(el.localName)) continue;
+      const worth = LANDMARK.test(el.localName) || el.hasAttribute('role') || el.id || el.hasAttribute('data-testid') || el.hasAttribute('aria-label');
+      if (!worth) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+      let sel;
+      try { sel = selectorFor(el).selector; } catch (e) { continue; }
+      if (!sel || seen.has(sel)) continue;
+      seen.add(sel);
+      out.push({ sel, w: Math.round(r.width), h: Math.round(r.height), text: textOf(el, 40) });
+    }
+    return out;
+  }
+
+  /** What became of `before` (layout()): the parts now gone, hidden or shrunk to almost nothing. */
+  function compare(before) {
+    const changed = [];
+    for (const b of before || []) {
+      let el = null;
+      try { el = D.querySelector(b.sel); } catch (e) { continue; }
+      let what = null, now = '';
+      if (!el) what = 'gone';
+      else {
+        const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+        now = `${Math.round(r.width)}x${Math.round(r.height)}`;
+        if (cs.display === 'none' || cs.visibility === 'hidden') what = 'hidden';
+        else if (r.width < 4 || r.height < 4) what = 'shrunk to nothing';
+        else if (r.width * r.height < b.w * b.h * 0.25) what = 'much smaller';
+      }
+      if (what) changed.push({ sel: b.sel, what, was: `${b.w}x${b.h}`, now, text: b.text });
+    }
+    return changed;
+  }
+
+  globalThis.__trifKit = { selectorFor, similarTo, hide, matchesOf, describe, outline, layout, compare, at, wider, unmark, pick, chosen: () => chosenEl, count };
 })();

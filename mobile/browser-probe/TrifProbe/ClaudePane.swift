@@ -17,8 +17,10 @@ enum ChatService: String, CaseIterable, Identifiable {
 }
 
 @MainActor
-final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
+final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     static var home: String { ChatService.claude.home }
+    /// TRIF in the chat (Web/chat.js; Tim, 11-13): its own world beside Claude's or ChatGPT's page.
+    static let chatWorld = WKContentWorld.world(name: "trif-chat")
     @Published var service: ChatService = ChatService(rawValue: UserDefaults.standard.string(forKey: "chatService") ?? "") ?? .claude
 
     @Published var popup: WKWebView?
@@ -35,8 +37,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let config = WKWebViewConfiguration()
         config.applicationNameForUserAgent = Browser.safariSuffix
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // (Add to TRIF under each mod in a reply, and filling the message box: Web/chat.js, main frame only)
+        config.userContentController.addUserScript(WKUserScript(source: Browser.resource("chat", "js"), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
+        config.userContentController.add(self, contentWorld: ClaudePane.chatWorld, name: "trif")
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -52,6 +57,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     func home() {
         if let url = URL(string: service.home) { webView.load(URLRequest(url: url)) }
+    }
+
+    /// An Add to TRIF tap in the chat (Web/chat.js): the code block's text, to the app's Add this mod? sheet.
+    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let d = message.body as? [String: Any], d["type"] as? String == "mod", let text = d["text"] as? String else { return }
+        report.log("claude", "\(service.rawValue): Add to TRIF tapped (\(text.count) characters)")
+        browser?.offer(text: text)
+    }
+
+    /// Puts text (and a PNG) into the chat's message box as a paste, for the person to send (Web/chat.js fill).
+    @discardableResult
+    func fill(_ text: String, png: Data? = nil) async -> String {
+        let r = try? await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png) : 'not loaded';",
+                                                       arguments: ["text": text, "png": png?.base64EncodedString() ?? ""], in: nil, contentWorld: ClaudePane.chatWorld)
+        let said = r as? String ?? "failed"
+        report.log("claude", "\(service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : " and a picture")): \(said)")
+        return said
     }
 
     /// Switches the pane to the other chat (remembered), and loads it.
@@ -128,6 +150,8 @@ struct ClaudePaneView: View {
     /// The mod file in what was just copied from the chat (Browser.offer(text:)), from iOS's own Paste button,
     /// which needs no "Allow Paste?" each time.
     var addPasted: (String?) -> Void = { _ in }
+    /// Send page: the page, and how to write a mod for it, into the message box (Browser.pageForChat).
+    var sendPage: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,6 +163,7 @@ struct ClaudePaneView: View {
                 .fixedSize()
                 if pane.loading { ProgressView().scaleEffect(0.7) }
                 Spacer()
+                Button("Send page") { sendPage() }.font(.subheadline).bold()
                 PasteButton(payloadType: String.self) { texts in Task { @MainActor in addPasted(texts.first) } }
                     .labelStyle(.titleAndIcon)
                     .buttonBorderShape(.capsule)

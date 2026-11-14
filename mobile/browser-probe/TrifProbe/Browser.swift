@@ -450,7 +450,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
         I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Its @match must cover \(origin)/*. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
 
-        A screenshot of what I see is attached. If I attach TRIF pointer files, those are the parts of the page I mean.
+        A screenshot of what I see is attached. If I attach TRIF pointer files, those are the parts of the page I mean. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 
         --- How TRIF mods are written ---
         \(Browser.resource("mod-guide", "txt"))
@@ -502,7 +502,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         var text = "I added your mod \"\(m.name)\" and reloaded \(webView.url?.absoluteString ?? host). Here's the page now: a screenshot of what's on the screen, and the whole page as a PDF, are attached.\n"
         text += lines.isEmpty ? "\nNothing that was on the page before disappeared or shrank.\n" : "\nWhat disappeared or shrank, of what was on the page when I sent it to you:\n\(lines.joined(separator: "\n"))\n"
         if !errors.isEmpty { text += "\nThe mod's errors:\n\(errors.prefix(10).map { "- \($0)" }.joined(separator: "\n"))\n" }
-        text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again."
+        text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again. Work from what I've attached; don't open the page in a browser or another tool."
         let (shot, blank) = await settledScreenshot()
         if blank { text += "\n\n(The screenshot looked blank even after waiting: the page may not have finished drawing.)" }
         let whole = await fullPage()

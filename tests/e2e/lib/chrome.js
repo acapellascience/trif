@@ -400,4 +400,4 @@ class ChromeDriver {
   }
 }
 
-module.exports = { ChromeDriver, EXTENSION_ID, SITE_ACCESS_HOSTS, findChrome };
+module.exports = { ChromeDriver, Cdp, EXTENSION_ID, SITE_ACCESS_HOSTS, findChrome };

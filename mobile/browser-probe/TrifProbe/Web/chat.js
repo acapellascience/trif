@@ -28,9 +28,10 @@
   /**
    * Puts `text` (and a PNG, base64) into the message box, as the person's own pastes would go: the picture
    * first, on its own (a page takes a picture and drops text pasted with it), then the text; typed in if
-   * the page doesn't take a pasted text.
+   * the page doesn't take a pasted text. `name`: the text as an attached file of that name instead (the report
+   * after a mod is added: Tim, 11-13), so the person's own words stay theirs.
    */
-  async function fill(text, png) {
+  async function fill(text, png, name) {
     const ed = editor();
     if (!ed) return 'no message box';
     ed.focus();
@@ -41,6 +42,12 @@
       dt.items.add(new File([bytes], 'page.png', { type: 'image/png' }));
       said.push(paste(ed, dt) ? 'picture pasted' : 'picture not taken');
       await new Promise((r) => setTimeout(r, 300));
+    }
+    if (text && name) {
+      const dt = new DataTransfer();
+      dt.items.add(new File([text], name, { type: 'text/plain' }));
+      if (paste(ed, dt)) { said.push('text attached'); return said.join(', '); }
+      said.push('file not taken, so as text');
     }
     if (text) {
       const dt = new DataTransfer();
@@ -57,6 +64,10 @@
 
   /** Under each finished mod file in a code block, an Add to TRIF button (once). */
   function mark() {
+    // (the page TRIF sent, as a file named "TRIF instruction": its tile marked for the small pill above)
+    for (const tile of document.querySelectorAll('[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]')) {
+      if (!tile.hasAttribute('data-trif-chip') && /TRIF instruction/.test(tile.textContent || '')) tile.setAttribute('data-trif-chip', 'instruction');
+    }
     for (const pre of document.querySelectorAll('pre')) {
       const t = pre.innerText || '';
       if (!t.includes('==WebMod==') || !t.includes('==/WebMod==')) continue;
@@ -71,10 +82,39 @@
       pre.after(b);
     }
   }
+  // The send button in TRIF's green (Tim, 11-14): Claude paints it on a layer inside the button
+  // ([data-cds-part=paint]); ChatGPT on the button. And the page TRIF sent (Send page: a file named
+  // "TRIF instruction") as a small pill saying so, not a big tile (data-trif-chip, set by mark below); its
+  // remove button stays.
+  const style = document.createElement('style');
+  style.textContent = `
+    button[data-testid="chat-input-send"]:not(:disabled) [data-cds-part="paint"],
+    button[data-testid="send-button"]:not(:disabled), #composer-submit-button:not(:disabled) {
+      background: #34d399 !important; background-color: #34d399 !important; border-color: transparent !important;
+    }
+    button[data-testid="chat-input-send"]:not(:disabled), button[data-testid="send-button"]:not(:disabled),
+    #composer-submit-button:not(:disabled) { color: #04291c !important; }
+    [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
+    [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
+    [data-trif-chip] [data-cds-card-body] > div { display: none !important; }
+    [data-trif-chip] [data-cds-card-body]::after {
+      content: "TRIF instruction"; font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
+    }
+    [data-trif-chip] .cds-card-fill { background: #e3f7ee !important; }`;
+  (document.head || document.documentElement).append(style);
+
   let queued = false;
   new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); }, 400); } })
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   mark();
 
-  globalThis.__trifChat = { fill, editor };
+  /** (development) The message box's surroundings, as HTML, to see how a chat builds its chips and buttons. */
+  function dump() {
+    const ed = editor();
+    let box = ed;
+    for (let i = 0; box && i < 8; i++) box = box.parentElement;
+    return (box || document.body).outerHTML.slice(0, 60000);
+  }
+
+  globalThis.__trifChat = { fill, editor, dump };
 })();

@@ -68,12 +68,21 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// Puts text (and a PNG) into the chat's message box as a paste, for the person to send (Web/chat.js fill).
     @discardableResult
-    func fill(_ text: String, png: Data? = nil) async -> String {
-        let r = try? await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png) : 'not loaded';",
-                                                       arguments: ["text": text, "png": png?.base64EncodedString() ?? ""], in: nil, contentWorld: ClaudePane.chatWorld)
+    func fill(_ text: String, png: Data? = nil, as file: String? = nil) async -> String {
+        let r = try? await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null) : 'not loaded';",
+                                                       arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "name": file ?? ""], in: nil, contentWorld: ClaudePane.chatWorld)
         let said = r as? String ?? "failed"
         report.log("claude", "\(service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : " and a picture")): \(said)")
         return said
+    }
+
+    /// (development) Writes the message box's surroundings to Documents/chat-dom.html (Web/chat.js dump).
+    func dumpComposer() async {
+        let r = try? await webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.dump() : 'not loaded';", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld)
+        let html = r as? String ?? "nothing"
+        if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? html.write(to: dir.appendingPathComponent("chat-dom.html"), atomically: true, encoding: .utf8)
+        }
     }
 
     /// Switches the pane to the other chat (remembered), and loads it.

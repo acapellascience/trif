@@ -398,7 +398,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again."
         let shot = await screenshot()
         await fill(text, shot)
-        status = "Added \(m.name). What it did is in the chat's message box: send it if it needs fixing."
+        status = "Added \(m.name). What it did is attached in the chat's message box: send it, with what to fix, if it needs fixing."
     }
 
     /// The page as it looks, as PNG.

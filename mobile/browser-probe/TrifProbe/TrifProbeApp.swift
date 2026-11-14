@@ -32,7 +32,7 @@ final class Model: ObservableObject {
         self.pane = ClaudePane(report: report, browser: browser)
         // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
         let pane = self.pane
-        browser.chatFill = { text, png in await pane.fill(text, png: png) }
+        browser.chatFill = { text, png in await pane.fill(text, png: png, as: "what-the-mod-did.txt") }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments
@@ -75,7 +75,7 @@ struct ContentView: View {
                 Divider()
                 ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }, sendPage: {
                     showClaude = true
-                    Task { if let t = await browser.pageForChat() { await pane.fill(t) } }
+                    Task { if let t = await browser.pageForChat() { await pane.fill(t, as: "TRIF instruction.txt") } }
                 }).frame(height: 360)
             }
             if !browser.status.isEmpty {

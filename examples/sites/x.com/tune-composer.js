@@ -1766,9 +1766,7 @@ page.root.setAttr('data-trif-box-tcp', '');
     R.keys = el('div', 'tcp-keys');
     R.lenBox = field('New notes', R.len);
     R.lenBox.cl.add('tcp-group');
-    // (R.how isn't put in the panel: in the free version el('p') made a <style> (its make() had no 'p'), so the
-    // note never showed, and the boxed one leaves it out to match. Showing it: R.how after head, below.)
-    panel.append(head, R.keys, bar, rows, lanesBox, meter, foot); // (the key hints along the top)
+    panel.append(head, R.how, R.keys, bar, rows, lanesBox, meter, foot); // (how to publish it, then the key hints, along the top)
   }
 
   const greyReader = (g, W, H, corner) => {

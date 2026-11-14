@@ -8,54 +8,38 @@ summary is too long.
 
 ## Unreleased
 
-- **Safer agents.** A mod that can post, click or send for you waits for your OK, and a tab your agent ran
-  code in can't post as you until it reloads.
-- **TRIF asks for each site's permission** when you turn it on there. Had every site? Allow each again once.
-- **Block a site** to keep TRIF away from it; the power button is now a quick pause.
-- A site's mods come in three groups, Style, Boxed and Free mods, each with its own switch.
-- **Mods from outside your chat start off**, Tim's too, until you've looked at them.
+- **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do
+  only what you allow; free mods can do anything. Most of Tim's mods are now style or boxed.
+- **TRIF asks for each site**, not every site at once. Block a site to keep TRIF away; sensitive sites, like
+  email and banking, start blocked.
+- **Safer agents.** A mod that can post or send for you waits for your OK, and a tab your agent ran code in
+  can't post as you until it reloads.
+- **Mods from outside your chat start off**, Tim's too, until you turn them on.
+- **Every mod's code and history**, with Restore; export, import, and mods that break offer a fix.
 
 ### More
 
-- A site's mods come in three groups, each with a switch there: Style mods, **Boxed mods** (JavaScript in
-  TRIF's sandbox that changes what the page shows but can't send, load or click anything itself) and Free
-  mods.
-- **Mods from outside your chat start off**, marked "new" or "updated", until you switch them on: a terminal
-  agent's, a file's, another browser's, TRIF's updates, Tim's mods too. What your chat makes starts on, or
-  waits: Settings, "Mods your chat makes".
-- **Boxed mods can do much more**: fuller sound, animations, SVG, drawing, observers, and nine new powers.
-- **TRIF asks for each site's permission.** Installing TRIF used to give it "all your data on all
-  websites". Now it asks for nothing until you turn it on for a site; then your browser asks for that site
-  only, and it stays disconnected (the panel all grey) until you click Connect there. If TRIF had every
-  site, it gives that up once: your sites keep their settings; allow each one again when you next use it.
-- Turning the robot off on a site keeps it connected, so it comes back on at once. Under Fix, "Disconnect
-  from <site>" gives the site's access back, and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
-  lists blocked sites, each with Unblock).
-- Without access to every site, your agent's screenshots are of the tab you're on, after you click the
-  TRIF toolbar button there (Chrome and Firefox want that before an extension can capture a tab).
-- Your browser now also says TRIF can "block content on any page". That's only blocking, never reading:
-  it's how TRIF stops a tab your agent ran code in from posting, sending or saving as you, including to
-  sites you haven't connected TRIF to.
-- **Your agent looks around in TRIF's box**, where its code can't send or act: nothing is paused, and it
-  doesn't ask. The pause is for `trif run --page`.
-- **Fixes from a security review**: docs/SECURITY.md "Review fixes".
-- **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
-  TRIF no longer counts on the agent to say no:
-  - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
-    sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading,
-    clicks and testing mods work as before. TRIF's icon there shows a paused robot; the panel, Reload.
-  - It also covers the site's other tabs, workers, popups and images from new sites, and the code can't
-    save data there.
-  - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
-    pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
-    your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from
-    what the agent says. The same goes for a mod from anywhere else: your terminal agent, a file you
-    paste in, a mod someone shares. Once you allow it, later changes only ask again if they add
-    something new.
-  - Your existing mods keep running. Ones that can do more than change how a page looks show what
-    TRIF found once, with "Looks right".
-- In Arc, TRIF's panel opens in a window of its own, and its helper connects without setting up Chrome
-  too.
+- **Boxed mods ask for powers** (sound, a search box, reading what the site sends…). A row's icons say what
+  its mod can do; a site's mods that could together send what they read ask once, for the site.
+- **Your agent on each site:** Off, Look, Ask first or Run code, on the chat's line. Your agent looks
+  around in TRIF's box, where its code can't send or act.
+- **Mods that break** show it on their row, and your agent offers to fix them (Undo fix if it didn't help).
+- **Export** a mod, or a site's mods, to a folder you choose; **import** one by dropping its file on the
+  panel. Other files you drop go to your agent.
+- **Mods from outside** (a terminal agent, a file, another browser, TRIF's updates) start off, marked "new"
+  or "updated". What your chat makes starts on, or waits: Settings, "Mods your chat makes".
+- **Site access:** installing TRIF used to give it "all your data on all websites". Now your browser asks
+  for each site when you turn TRIF on there. If TRIF had every site, it gives that up once: allow each site
+  again when you next use it. Your browser also says TRIF can "block content on any page": only blocking,
+  never reading, so a tab your agent ran code in can't post as you.
+- Under Fix: **Disconnect** gives a site's access back; **Block** keeps TRIF away (the panel turns red;
+  Settings lists blocked sites).
+- Without access to every site, screenshots are of the tab you're on, after you click TRIF's button there.
+- **No agent?** Robotless mode runs your mods without one. Log out of your agent in Settings.
+- **The panel:** colours for each kind of mod, the robot's face for each state, a mods list you can resize.
+- **Oppish** (new, Google, off to start): opa lopittople whopimsopy.
+- Faster replies (Settings → Effort). Your agent works on a copy of your mods, which TRIF brings in after.
+- Fixes from a security review: docs/SECURITY.md. In Arc, TRIF's panel opens in a window of its own.
 
 ## 0.2.7
 

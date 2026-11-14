@@ -43,6 +43,16 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         super.init()
         config.userContentController.add(self, contentWorld: ClaudePane.chatWorld, name: "trif")
         webView.navigationDelegate = self
+        // (the chat page stays put in its frame: claude.ai and chatgpt.com scroll their conversation inside
+        // themselves, so the web view's own scrolling only ever hid the top of the chat, after the keyboard
+        // or a send moved it: Tim, 11-14)
+        let sv = webView.scrollView
+        sv.isScrollEnabled = false
+        sv.bounces = false
+        sv.contentInsetAdjustmentBehavior = .never
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak sv] _ in
+            sv?.setContentOffset(.zero, animated: true)
+        }
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.isInspectable = true

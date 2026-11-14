@@ -33,6 +33,7 @@
    * after a mod is added: Tim, 11-13), so the person's own words stay theirs.
    */
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let pdfPastedAt = 0;
   // (each attachment's own tile: never the row they sit in, Claude's [data-cds="MessageAttachments"], whose label
   // would cover every tile in it: Tim, 11-14, saw the instruction labelled "TRIF screenshot", the row marked
   // while only the picture was in it)
@@ -62,6 +63,7 @@
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(pdf), (c) => c.charCodeAt(0));
       dt.items.add(new File([bytes], 'TRIF full page.pdf', { type: 'application/pdf' }));
+      pdfPastedAt = Date.now();
       said.push(paste(editor() || ed, dt) ? 'PDF pasted' : 'PDF not taken');
       await wait(300);
     }
@@ -103,8 +105,11 @@
     for (const row of document.querySelectorAll('[data-cds="MessageAttachments"][data-trif-chip]')) row.removeAttribute('data-trif-chip');
     for (const tile of document.querySelectorAll(TILES)) {
       if (tile.querySelector(TILES)) continue; // (a tile around tiles: a row by another name)
-      const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
-      const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot', 'TRIF full page', 'TRIF pointer'].find((l) => names.includes(l));
+      const names = `${tile.textContent || ''} ${tile.getAttribute('aria-label') || ''} ${tile.title || ''} ${[...tile.querySelectorAll('img[alt], [aria-label], [title]')]
+        .map((i) => i.alt || i.getAttribute('aria-label') || i.title).join(' ')}`;
+      let label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot', 'TRIF full page', 'TRIF pointer'].find((l) => names.includes(l));
+      // (Claude's PDF tile shows only "PDF", its name nowhere: the one TRIF pasted in the last few minutes)
+      if (!label && /^\s*PDF\s*$/.test(tile.textContent || '') && Date.now() - pdfPastedAt < 300000) label = 'TRIF full page';
       if (label && tile.getAttribute('data-trif-chip') !== label) tile.setAttribute('data-trif-chip', label);
       else if (!label && tile.hasAttribute('data-trif-chip')) tile.removeAttribute('data-trif-chip');
     }

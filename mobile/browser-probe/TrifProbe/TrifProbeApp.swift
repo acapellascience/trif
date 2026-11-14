@@ -87,10 +87,39 @@ struct ContentView: View {
     @State private var showChecks = false
     @State private var showReport = false
     @State private var showClaude = false
+    /// The chat pane's height, dragged by the grip on its top edge (Tim, 11-14); kept. 0: half the screen.
+    @AppStorage("paneHeight") private var paneHeight: Double = 0
+    @GestureState private var paneDrag: CGFloat = 0
     @State private var showMods = false
     @State private var asking = false
     @State private var question = ""
     @FocusState private var editing: Bool
+
+    /// The pane's height now: what was dragged, plus the drag going on, kept to between 200 points and all but
+    /// 160 of the screen.
+    private var paneNow: CGFloat {
+        let screen = UIScreen.main.bounds.height
+        let base = paneHeight > 0 ? CGFloat(paneHeight) : screen * 0.5
+        return min(max(base - paneDrag, 200), screen - 160)
+    }
+
+    /// The grip on the pane's top edge: drag up for a taller chat, down for more page.
+    private var paneGrip: some View {
+        ZStack {
+            Rectangle().fill(Color(.systemBackground)).frame(height: 14)
+            Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 36, height: 5)
+        }
+        .overlay(alignment: .top) { Divider() }
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .updating($paneDrag) { v, s, _ in s = v.translation.height }
+            .onEnded { v in
+                let screen = UIScreen.main.bounds.height
+                let base = paneHeight > 0 ? CGFloat(paneHeight) : screen * 0.5
+                paneHeight = Double(min(max(base - v.translation.height, 200), screen - 160))
+            })
+        .accessibilityLabel("Chat height")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,12 +127,12 @@ struct ContentView: View {
             WebViewHost(webView: browser.webView)
             if let picked = browser.picked { PickedBar(picked: picked) }
             if showClaude {
-                Divider()
+                paneGrip
                 ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }, sendPage: {
                     showClaude = true
                     // (with a screenshot of what's on the screen: Tim, 11-14)
                     Task { if let t = await browser.pageForChat() { let shot = await browser.settledScreenshot().png; await pane.fill(t, png: shot, as: "TRIF instruction.txt") } }
-                }).frame(height: 360)
+                }).frame(height: paneNow)
             }
             if let h = browser.lastHide {
                 HStack {

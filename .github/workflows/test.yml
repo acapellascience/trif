@@ -1,8 +1,9 @@
 # The unit suite on every push and pull request, on macOS (several tests cover macOS-only paths: the Safari
 # bridge, APFS case, the keychain stand-ins). Tests that need an installed agent (Claude Code, Codex) skip
-# themselves here. Playwright's Chromium is installed for the three real-browser tests (the sandbox runtime
-# under real SES, the CSS reader, the mobile probes). The e2e suite (tests/e2e) needs a desktop session and
-# isn't run here.
+# themselves here. Chrome for Testing is installed where the e2e looks for it (tests/e2e/.browsers) for the
+# real-browser tests (the sandbox runtime under real SES, the CSS reader, the mobile probes, and their
+# helper), driven over CDP by tests/cdp-page.js; they run only with TRIF_BROWSER_TESTS=1 (or CI) set. The
+# e2e suite (tests/e2e) needs a desktop session and isn't run here.
 name: tests
 on:
   push:
@@ -22,6 +23,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Playwright's Chromium, for the real-browser tests
-        run: npm install --no-save playwright@1.56.1 && npx playwright install chromium
+      - name: Chrome for Testing, for the real-browser tests
+        run: |
+          npx --yes @puppeteer/browsers install chrome@stable --path tests/e2e/.browsers
+          node -e "const c = require('./tests/e2e/lib/chrome').findChrome(); if (!c) { console.error('Chrome for Testing not found after installing it'); process.exit(1); } console.log(c)"
       - run: npm test
+        env:
+          TRIF_BROWSER_TESTS: 1

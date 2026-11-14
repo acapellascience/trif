@@ -2,11 +2,15 @@
 
 Two suites:
 
-- **Unit tests** (fast, no browser): `node --test --test-concurrency=2 --test-timeout=120000`. That's
-  what `npm test` runs, and what `scripts/release.js` runs. `tests/upgrade.test.js` among them is a real
+- **Unit tests** (fast, no browser unless asked): `node --test --test-concurrency=2 --test-timeout=120000`.
+  That's what `npm test` runs, and what `scripts/release.js` runs. `tests/upgrade.test.js` among them is a real
   upgrade without a browser: the v0.1.2 updater (from `git archive v0.1.2`, set up by its own setup in a
   scratch home) installs this checkout packed at the next version, with a test signing key; skipped
-  without the tag.
+  without the tag. A few use a real browser: `tests/sandbox-browser.test.js` (the sandbox runtime under
+  real SES), `tests/css-browser.test.js` (the CSS check against a browser's parsing), `mobile/test/smoke.js`
+  (the phone probes) and `tests/cdp-page.test.js` (their helper). They drive headless Chrome for Testing
+  over CDP (`tests/cdp-page.js`, no Playwright), one browser at a time with a memory guard, and run only with
+  `TRIF_BROWSER_TESTS=1` (CI sets it) and Chrome for Testing installed as below; otherwise they skip.
 - **End-to-end browser suite** (opt-in, real browsers): `node tests/e2e/run.js`. Run it before each
   release. It isn't part of `node --test`.
 

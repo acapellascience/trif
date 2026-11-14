@@ -5,8 +5,24 @@
 // @run-at      document-idle
 // @risk        0 render-only: its own panel, and sounds made on the spot with Web Audio; keeps your tune in this browser; sends nothing
 // @source      trif
-// @version     1
+// @version     2
+// @boxed
+// @powers      sound, controls, block-events keydown keyup keypress, site-storage local:trifTuneComposer.*, image-variants pbs.twimg.com _normal.→_400x400. _bigger.→_400x400. _mini.→_400x400. _x96.→_400x400. _200x200.→_400x400.
 // ==/WebMod==
+
+// Boxed (TRIF's sandbox) with five powers: sound (its NES voices: the same PeriodicWaves and LFSR drums, on
+// the sandbox's sound nodes), controls (its sliders, selects and the tempo box), block-events (the keys the
+// panel takes don't reach X, as stopImmediatePropagation kept them from it) and site-storage (your tune and the
+// panel's place stay where they were, trifTuneComposer.* in x.com's localStorage, which Style Encoder reads) and
+// image-variants (From picture: the open profile's picture again at 400×400, its pixels read for the tune in its corners).
+// What the sandbox changes, against the free version:
+// - The panel puts the focus on its own Play button when it opens or is clicked (a key on the mod's own
+//   button is one TRIF can tell wasn't typed into anything; the free version focused the panel itself).
+// - Alt+Shift+T works where the focus is on the page, a link or a button, not on one of X's posts (TRIF shows a
+//   key there only with the keys power, which this doesn't ask for; the corner ♪ always works).
+// - The lanes' windows move their roll (margin-top) instead of scrolling (a mod only reads an element's scroll).
+// - The time signatures that don't fit at the rows per beat aren't greyed out in the list (a mod can't disable an
+//   option); picking one says why in the status line, as the free version's setMeter did.
 
 // Tim's. A four-channel composer modelled on the NES sound chip (the 2A03, without its sample channel), for
 // tunes that will later ride in the hidden corners of a profile picture, the way Style Encoder stamps a style
@@ -33,9 +49,7 @@
 //   1–8 (9 = 12, 0 = 16) note length, arrows move the cursor and change lanes, Backspace deletes, Space plays
 //   and stops, Ctrl/⌘+Z undoes, Esc closes. Those keys don't reach X while the panel has them.
 //
-// Written so it can become a boxed mod later, with the sound and controls powers (and keys, if that becomes
-// a power): no network, nothing of the page's own (no page globals, X's DOM only for the one button), only
-// localStorage and Web Audio.
+//
 //
 // The format (TuneCodec below, where it's described in full): version 3 bits · length 13 bits · payload · CRC-8.
 // The payload describes the song by its structure: intervals from the last note (in steps of the song's key when
@@ -44,10 +58,9 @@
 // binary range coder (integer maths only, so every browser reads it the same). Up to 64 patterns, 256 bars.
 // A blank song is 11 bytes; the demo tune (TUNE_DEMO) is 117. Measured: tests/dev/measure-tunes.js.
 
-(() => {
-  if (window.top !== window) return;
-  if (document.documentElement.hasAttribute('data-tcp')) return; // (loaded twice)
-  document.documentElement.setAttribute('data-tcp', '');
+
+if (page.root.attr('data-trif-box-tcp') !== null) return; // (loaded twice)
+page.root.setAttr('data-trif-box-tcp', '');
 
   /* tune-codec:begin */
   // The song model and its bytes. Self-contained (no DOM, no audio), to be shared with Style Encoder and
@@ -688,9 +701,10 @@
   /* tune-codec:end */
 
   /* tune-synth:begin */
-  // The sound: the 2A03's channels in Web Audio, made on the spot (no samples, no network). Works with any
-  // BaseAudioContext, so the same code plays live (an AudioContext and a lookahead scheduler) and renders
-  // offline (an OfflineAudioContext, for tests).
+  // The sound: the 2A03's channels in Web Audio, made on the spot (no samples, no network). (Boxed: the same
+  // synth on the sandbox's sound nodes, trif.audio(): oscillators with the same PeriodicWaves, the drums'
+  // LFSR samples as buffers at the context's own rate, gains and filters; no onended there, so a voice is let
+  // go a moment after it stops. The offline render, for the free version's tests, isn't here.)
   const TuneSynth = ((C) => {
     const CPU = 1789773; // the NTSC 2A03's clock, Hz: the channels' timers count it
     const NOISE_PERIODS = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068];
@@ -728,8 +742,9 @@
     const midiHz = (m) => 440 * 2 ** ((m - 69) / 12);
 
     // the noise channel's 15-bit LFSR (feedback from bit 1, or bit 6 in short mode), clocked as the chip does
+    // (→ its samples, and its length in seconds)
     function renderDrum(ctx, d, period, mode) {
-      const shape = DRUMS[d], sr = ctx.sampleRate, spf = sr / 60, frames = shape.vol.length, len = Math.ceil(frames * spf);
+      const shape = DRUMS[d], sr = ctx.rate, spf = sr / 60, frames = shape.vol.length, len = Math.ceil(frames * spf);
       const samples = new Float32Array(len), tap = mode ? 6 : 1;
       let lfsr = 1, acc = 0;
       for (let i = 0; i < len; i++) {
@@ -747,26 +762,23 @@
       }
       const fade = Math.min(len, 96);
       for (let i = 0; i < fade; i++) samples[len - 1 - i] *= i / fade;
-      const buf = ctx.createBuffer(1, len, sr);
-      buf.copyToChannel(samples, 0);
-      return buf;
+      return { samples, rate: sr, duration: len / sr };
     }
 
-    function create(ctx, out = ctx.destination) {
-      const wave = (s) => ctx.createPeriodicWave(s.real, s.imag);
-      const waves = { duty: SERIES.duty.map(wave), tri: wave(SERIES.tri) };
+    // A: trif.audio() (its `now` stands in for currentTime, its `rate` for sampleRate)
+    function create(A, out = 'out') {
+      const ctx = { get currentTime() { return A.now; }, get rate() { return A.rate; } };
+      const waves = { duty: SERIES.duty, tri: SERIES.tri };
       // the console's output filters, roughly: a high-pass at 90 Hz and a low-pass at 14 kHz
-      const hp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(), master = ctx.createGain();
-      hp.type = 'highpass'; hp.frequency.value = 90; hp.Q.value = 0.5;
-      lp.type = 'lowpass'; lp.frequency.value = 14000; lp.Q.value = 0.5;
-      master.gain.value = 0.8;
+      const hp = A.filter({ type: 'highpass', frequency: 90, Q: 0.5 }), lp = A.filter({ type: 'lowpass', frequency: 14000, Q: 0.5 }), master = A.gain(0.8);
       master.connect(hp); hp.connect(lp); lp.connect(out);
-      const bus = { p1: ctx.createGain(), p2: ctx.createGain(), tri: ctx.createGain(), noise: ctx.createGain() };
+      const bus = { p1: A.gain(1), p2: A.gain(1), tri: A.gain(1), noise: A.gain(1) };
       for (const ch of C.CHANNELS) bus[ch].connect(master);
       const live = new Set();
-      const track = (src, g) => {
+      // (no onended in the sandbox: let go a moment after its stop time)
+      const track = (src, g, end) => {
         live.add(src);
-        src.onended = () => { live.delete(src); src.disconnect(); g.disconnect(); };
+        setTimeout(() => { live.delete(src); try { src.disconnect(); g.disconnect(); } catch { /* gone */ } }, Math.max(0, (end - A.now) * 1000) + 250);
       };
       const drumCache = new Map();
       const drumBuffer = (d, period, mode) => {
@@ -778,32 +790,33 @@
       function envelope(param, vol, decay, t, end, level) {
         const amp = (v) => (v / 15) * level;
         let v = vol;
-        param.setValueAtTime(0, t);
-        param.linearRampToValueAtTime(amp(v), t + 0.001);
+        param.set(0, t);
+        param.ramp(amp(v), t + 0.001);
         if (decay) {
           const step = (DECAY_P[decay] + 1) / 240;
-          for (let at = t + step; v > 0 && at < end - 0.004; at += step) { v--; param.setValueAtTime(amp(v), at); }
+          for (let at = t + step; v > 0 && at < end - 0.004; at += step) { v--; param.set(amp(v), at); }
         }
-        param.setValueAtTime(amp(v), Math.max(t + 0.001, end - 0.004));
-        param.linearRampToValueAtTime(0, end);
+        param.set(amp(v), Math.max(t + 0.001, end - 0.004));
+        param.ramp(0, end);
       }
       // a pulse or triangle note: inst is the pulse's instrument (null for the triangle); t, dur in seconds
       function note(ch, n, inst, t, dur) {
-        const osc = ctx.createOscillator(), g = ctx.createGain(), hz = midiHz(C.BASE[ch] + n.pitch), end = t + dur;
+        const osc = A.oscillator(), g = A.gain(), hz = midiHz(C.BASE[ch] + n.pitch), end = t + dur;
+        const freq = osc.param('frequency'), gain = g.param('gain');
         let stop = end;
         if (ch === 'tri') {
-          osc.setPeriodicWave(waves.tri);
+          osc.setWave(waves.tri.real, waves.tri.imag);
           const timer = Math.max(2, Math.min(0x7ff, Math.round(CPU / (32 * hz)) - 1));
-          osc.frequency.setValueAtTime(CPU / (32 * (timer + 1)), t);
-          g.gain.setValueAtTime(0, t);
-          g.gain.linearRampToValueAtTime(LEVEL.tri, t + 0.002);
-          g.gain.setValueAtTime(LEVEL.tri, Math.max(t + 0.002, end - 0.004));
-          g.gain.linearRampToValueAtTime(0, end);
+          freq.set(CPU / (32 * (timer + 1)), t);
+          gain.set(0, t);
+          gain.ramp(LEVEL.tri, t + 0.002);
+          gain.set(LEVEL.tri, Math.max(t + 0.002, end - 0.004));
+          gain.ramp(0, end);
         } else {
           const duty = n.duty ?? inst.duty, vol = n.vol ?? inst.vol, decay = n.decay ?? inst.decay;
-          osc.setPeriodicWave(waves.duty[duty]);
+          osc.setWave(waves.duty[duty].real, waves.duty[duty].imag);
           let timer = Math.max(8, Math.min(0x7ff, Math.round(CPU / (16 * hz)) - 1));
-          osc.frequency.setValueAtTime(CPU / (16 * (timer + 1)), t);
+          freq.set(CPU / (16 * (timer + 1)), t);
           const sw = inst.sweep;
           if (sw) { // the sweep unit: every (P+1)/120 s the timer moves by itself >> shift; out of range, it goes quiet
             const step = (sw.period + 1) / 120;
@@ -811,27 +824,26 @@
               const delta = timer >> sw.shift;
               timer = sw.neg ? timer - delta - (ch === 'p1' ? 1 : 0) : timer + delta;
               if (timer < 8 || timer > 0x7ff) { stop = at; break; }
-              osc.frequency.setValueAtTime(CPU / (16 * (timer + 1)), at);
+              freq.set(CPU / (16 * (timer + 1)), at);
             }
           }
-          envelope(g.gain, vol, decay, t, stop, ch === 'p1' ? LEVEL.p1 : LEVEL.p2);
+          envelope(gain, vol, decay, t, stop, ch === 'p1' ? LEVEL.p1 : LEVEL.p2);
         }
         osc.connect(g);
         g.connect(ch === 'p1' ? bus.p1 : ch === 'p2' ? bus.p2 : bus.tri);
         osc.start(t);
         osc.stop(stop + 0.005);
-        track(osc, g);
+        track(osc, g, stop + 0.005);
       }
       function drum(hit, noise, t, dur) {
-        const k = noise.kit[hit.drum], src = ctx.createBufferSource(), g = ctx.createGain();
-        src.buffer = drumBuffer(hit.drum, k[0], k[1]);
-        const level = (noise.vol / 15) * LEVEL.noise, end = t + Math.min(src.buffer.duration, dur);
-        g.gain.setValueAtTime(level, t);
-        g.gain.setValueAtTime(level, Math.max(t, end - 0.004));
-        g.gain.linearRampToValueAtTime(0, end);
+        const k = noise.kit[hit.drum], buf = drumBuffer(hit.drum, k[0], k[1]), src = A.buffer([buf.samples], buf.rate), g = A.gain();
+        const level = (noise.vol / 15) * LEVEL.noise, end = t + Math.min(buf.duration, dur), gain = g.param('gain');
+        gain.set(level, t);
+        gain.set(level, Math.max(t, end - 0.004));
+        gain.ramp(0, end);
         src.connect(g); g.connect(bus.noise);
         src.start(t); src.stop(end + 0.005);
-        track(src, g);
+        track(src, g, end + 0.005);
       }
       // everything that starts on row r of pattern pi, at time t (rd: a row's length in seconds)
       function row(song, pi, r, t, rd) {
@@ -842,7 +854,7 @@
         for (const n of p.tri) if (n.row === r) note('tri', n, null, t, n.len * rd);
         for (const h of p.noise) if (h.row === r) drum(h, song.inst.noise, t, h.len * rd);
       }
-      const mute = (ch, on) => bus[ch].gain.setValueAtTime(on ? 0 : 1, ctx.currentTime);
+      const mute = (ch, on) => bus[ch].param('gain').set(on ? 0 : 1, A.now);
       const stopAll = () => { for (const s of live) { try { s.stop(); } catch { /* not started */ } } live.clear(); };
       return { ctx, note, drum, row, mute, stopAll };
     }
@@ -877,17 +889,7 @@
       };
     }
 
-    // the whole song, once through its order, rendered offline: resolves to an AudioBuffer
-    function render(song, { sampleRate = 44100, tail = 0.5, Offline = typeof OfflineAudioContext === 'undefined' ? null : OfflineAudioContext } = {}) {
-      const rd = 60 / (song.tempo * song.rpb), per = song.rows || C.ROWS, rows = song.order.length * per;
-      const ctx = new Offline(1, Math.ceil((rows * rd + tail) * sampleRate), sampleRate);
-      const engine = create(ctx);
-      let t = 0;
-      for (const pi of song.order) for (let r = 0; r < per; r++) { engine.row(song, pi, r, t, rd); t += rd; }
-      return ctx.startRendering();
-    }
-
-    return { CPU, NOISE_PERIODS, DUTY, TRI, create, player, render };
+    return { CPU, NOISE_PERIODS, DUTY, TRI, create, player };
   })(TuneCodec);
   /* tune-synth:end */
 
@@ -1109,6 +1111,114 @@
   };
   /* tune-demo:end */
 
+  // --- the page, through TRIF's sandbox --------------------------------------------------------------------
+  // The composer below is the free version's, line for line where it could be. It builds its panel with a
+  // handful of DOM habits (el.className = …, el.css.left = …, el.dataset.v = …, el.txt = '', …):
+  // E wraps one of TRIF's stand-ins with exactly those, mapped to the sandbox's API. Its own names get the
+  // sandbox's prefix on the way (classes and ids tcp-x → trif-box-tcp-x, data-x → data-trif-box-x), so the
+  // stylesheet names them that way too. A button can't be disabled by a mod (the attribute isn't offered):
+  // aria-disabled, styled the same, and its clicks ignored. (The wrapper's own names, like listen and txt,
+  // are its own: TRIF's check reads element-like names, addEventListener and the rest, as the page's.)
+  const PFX = 'trif-box-';
+  const own = (c) => String(c).split(/\s+/).filter(Boolean).map((x) => (x.startsWith(PFX) ? x : PFX + x));
+  const attrName = (n) => (/^data-/.test(n) && !/^data-trif-box-/.test(n) ? `data-trif-box-${n.slice(5)}` : n);
+  const kebab = (k) => k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+  const selOwn = (sel) => sel.replace(/([.#])tcp-/g, `$1${PFX}tcp-`);
+  const ROOT_S = page.root;
+  const ES = new WeakMap();
+  // (a drag's data: the sandbox's, which holds only the mod's own; effectAllowed is the browser's to choose)
+  const dragOf = (dt) => (dt ? { setData: (t, v) => dt.setData(t, v), getData: (t) => dt.getData(t), set effectAllowed(v) { /* (not offered) */ }, set dropEffect(v) { try { dt.setDropEffect(v); } catch { /* fine */ } } } : null);
+  const evOf = (ev) => {
+    const target = E.of(ev.target);
+    return {
+      type: ev.type, key: ev.key, code: ev.code, repeat: ev.repeat, altKey: ev.alt, shiftKey: ev.shift, ctrlKey: ev.ctrl, metaKey: ev.meta,
+      clientX: ev.x, clientY: ev.y, button: ev.button, buttons: ev.buttons, pointerId: ev.pointerId, target, composedPath: () => [target],
+      dataTransfer: dragOf(ev.dataTransfer),
+      preventDefault: () => ev.preventDefault(), stopPropagation: () => ev.stopPropagation(), stopImmediatePropagation: () => ev.stopImmediatePropagation(),
+    };
+  };
+  class E {
+    static of(s) { if (!s) return null; let e = ES.get(s); if (!e) { e = new E(s); ES.set(s, e); } return e; }
+    static make(tag) { return E.of(page.create(tag)); }
+    constructor(s) {
+      this.s = s; this._cls = []; this._styles = new Map(); this._data = new Map(); this._disabled = false; this._off = new Map();
+      const self = this;
+      this.css = new Proxy({}, {
+        get(_, k) {
+          if (k === 'setProperty') return (n, v) => self._css(n, v);
+          if (k === 'removeProperty') return (n) => self._css(n, '');
+          return self._styles.get(kebab(String(k))) || '';
+        },
+        set(_, k, v) { self._css(kebab(String(k)), v); return true; },
+      });
+      this.dataset = new Proxy({}, {
+        get(_, k) { return self._data.get(String(k)); },
+        set(_, k, v) { self._data.set(String(k), String(v)); s.setAttr(`data-trif-box-${kebab(String(k))}`, String(v)); return true; },
+      });
+      this.cl = {
+        add: (...c) => { const x = own(c.join(' ')); if (x.length) s.classes.add(...x); },
+        remove: (...c) => { const x = own(c.join(' ')); if (x.length) s.classes.remove(...x); },
+        toggle: (c, on) => s.classes.toggle(own(c)[0], on),
+        contains: (c) => s.classes.has(own(c)[0]),
+      };
+    }
+    _css(n, v) {
+      const val = v == null ? '' : String(v);
+      if (val === '') { this._styles.delete(n); this.s.style(n, null); } else { this._styles.set(n, val); this.s.style(n, val); }
+    }
+    get tagName() { return this.s.tag.toUpperCase(); }
+    get className() { return this._cls.map((c) => c.slice(PFX.length)).join(' '); }
+    set className(c) { if (this._cls.length) this.s.classes.remove(...this._cls); this._cls = own(c); if (this._cls.length) this.s.classes.add(...this._cls); }
+    get txt() { return this.s.text; }
+    set txt(t) { this.s.setText(t == null ? '' : String(t)); }
+    get id() { const v = this.s.attr('id'); return v ? v.replace(PFX, '') : ''; }
+    set id(v) { this.s.setAttr('id', PFX + v); }
+    set title(v) { this.s.setAttr('title', String(v)); }
+    get title() { return this.s.attr('title') || ''; }
+    set tabIndex(v) { this.s.setAttr('tabindex', String(v)); }
+    set draggable(v) { this.s.setAttr('draggable', v ? 'true' : 'false'); }
+    get type() { return this.s.attr('type') || ''; }
+    set type(v) { if (this.s.tag !== 'button') this.s.setAttr('type', String(v)); } // (a mod's button is always type=button)
+    set min(v) { this.s.setAttr('min', String(v)); }
+    set max(v) { this.s.setAttr('max', String(v)); }
+    set step(v) { this.s.setAttr('step', String(v)); }
+    get value() { return this.s.value; }
+    set value(v) { if (this.s.tag === 'option') this.s.setAttr('value', String(v)); else this.s.setValue(String(v)); }
+    get disabled() { return this._disabled; }
+    set disabled(v) { this._disabled = !!v; if (this._disabled) this.s.setAttr('aria-disabled', 'true'); else this.s.removeAttr('aria-disabled'); }
+    setA(n, v) { this.s.setAttr(attrName(n), String(v)); }
+    removeA(n) { this.s.removeAttr(attrName(n)); }
+    toggleAttribute(n, on) {
+      const m = attrName(n), want = on === undefined ? this.s.attr(m) === null : !!on;
+      if (want) this.s.setAttr(m, ''); else this.s.removeAttr(m);
+      return want;
+    }
+    append(...k) { this.s.append(...k.map((x) => (x instanceof E ? x.s : String(x)))); }
+    before(...k) { this.s.before(...k.map((x) => (x instanceof E ? x.s : String(x)))); }
+    remove() { this.s.remove(); }
+    get isConnected() { for (let p = this.s; p; p = p.parent) if (p === ROOT_S) return true; return false; }
+    get prev() { return E.of(this.s.previous); }
+    rectOf() { return this.s.rect(); }
+    get offsetWidth() { return this.s.offsetWidth; }
+    get offsetLeft() { return this.s.offsetLeft; }
+    get offsetTop() { return this.s.offsetTop; }
+    all(sel) { return this.s.findAll(selOwn(sel)).map((x) => E.of(x)); }
+    closest(sel) { return E.of(this.s.closest(selOwn(sel))); }
+    listen(type, fn, opt) {
+      const capture = opt === true || !!(opt && opt.capture);
+      const off = this.s.on(type, (ev) => { if (this._disabled && type === 'click') return; fn(evOf(ev)); }, { capture, preventDefault: true });
+      this._off.set(fn, off);
+    }
+    unlisten(type, fn) { const off = this._off.get(fn); if (off) { off(); this._off.delete(fn); } }
+    capture(id) { try { this.s.capturePointer(id); } catch { /* not now */ } }
+    focusIt() { this.s.focusIt(); }
+    blur() { try { this.s.blur(); } catch { /* not now */ } }
+  }
+  const ROOT = E.of(ROOT_S);
+  // (numbers with thousands commas, as toLocaleString('en') wrote them: the sandbox's toLocaleString has no locale)
+  const NF = new Intl.NumberFormat('en');
+  const fmt = (n) => NF.format(n);
+
   // --- the composer ------------------------------------------------------------------------------------
   const C = TuneCodec, S = TuneSynth, P = C.PITCHES;
   const STORE = 'trifTuneComposer.song'; // the saved tune: its encoded bytes, base64
@@ -1144,9 +1254,11 @@
   const PADS = new Map(['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK'].map((k, i) => [k, i]));
   const OCT = { p1: [2, 6], p2: [2, 6], tri: [1, 5] }; // the piano's octave range per lane (its A key's C)
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  // (x.com's localStorage, as before, through the site-storage power: Style Encoder reads the song there)
+  const ls = trif.storage('local');
   const store = {
-    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
+    get(k) { try { return ls.get(k); } catch { return null; } },
+    set(k, v) { try { ls.set(k, v); return true; } catch { return false; } },
   };
 
   // the tune: the saved one, or the demo
@@ -1194,7 +1306,7 @@
   let actx = null, engine = null, player = null;
   const audio = () => {
     if (!actx) {
-      actx = new AudioContext({ latencyHint: 'interactive' });
+      actx = trif.audio();
       engine = S.create(actx);
       for (const ch of ui.muted) engine.mute(ch, true);
       player = S.player(engine, { song: () => song, pattern: () => ui.pat, mode: () => ui.loop, from: () => (ui.loop === 'song' && ui.from < song.order.length ? ui.from : 0) });
@@ -1203,7 +1315,7 @@
     return engine;
   };
   const preview = (ch, key, len) => {
-    const e = audio(), t = actx.currentTime + 0.01, d = clamp((len || ui.len) * rowDur(), 0.12, 0.4);
+    const e = audio(), t = actx.now + 0.01, d = clamp((len || ui.len) * rowDur(), 0.12, 0.4);
     if (ch === 'noise') e.drum({ row: 0, len: 8, drum: key }, song.inst.noise, t, 1);
     else e.note(ch, { pitch: key }, instFor(ch), t, d);
   };
@@ -1247,32 +1359,31 @@
 
   // --- the panel ---
   // (each tag by name: TRIF reads a tag worked out at run time as maybe a script or a frame)
-  const make = (tag) => (tag === 'div' ? document.createElement('div') : tag === 'span' ? document.createElement('span') : tag === 'button' ? document.createElement('button')
-    : tag === 'select' ? document.createElement('select') : tag === 'option' ? document.createElement('option') : tag === 'input' ? document.createElement('input')
-    : tag === 'i' ? document.createElement('i') : tag === 'b' ? document.createElement('b') : tag === 'kbd' ? document.createElement('kbd') : document.createElement('style'));
-  const el = (tag, cls, text) => { const e = make(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-  const btn = (cls, text, title, on) => { const b = el('button', cls, text); b.type = 'button'; if (title) b.title = title; if (on) b.addEventListener('click', on); return b; };
+  // (TRIF's stand-ins, through the small E wrapper above; <kbd> isn't one of the sandbox's tags: <code> instead)
+  const make = (tag) => E.make(tag === 'kbd' ? 'code' : tag);
+  const el = (tag, cls, text) => { const e = make(tag); if (cls) e.className = cls; if (text != null) e.txt = text; return e; };
+  const btn = (cls, text, title, on) => { const b = el('button', cls, text); b.type = 'button'; if (title) b.title = title; if (on) b.listen('click', (e) => { if (performance.now() - tookKeyUp < 60) return; on(e); }); return b; };
   const seg = (items, onPick, label) => {
     const box = el('div', 'tcp-seg');
-    box.setAttribute('role', 'group');
-    if (label) box.setAttribute('aria-label', label);
+    box.setA('role', 'group');
+    if (label) box.setA('aria-label', label);
     const bs = items.map(([v, text, title]) => { const b = btn('', text, title, () => onPick(v)); b.dataset.v = String(v); box.append(b); return b; });
-    box.set = (v) => { for (const b of bs) b.setAttribute('aria-pressed', String(b.dataset.v === String(v))); };
+    box.set = (v) => { for (const b of bs) b.setA('aria-pressed', String(b.dataset.v === String(v))); };
     return box;
   };
   const select = (items, onPick, label) => {
     const s = el('select');
-    s.setAttribute('aria-label', label);
+    s.setA('aria-label', label);
     for (const [v, text] of items) { const o = el('option', '', text); o.value = String(v); s.append(o); }
-    s.addEventListener('change', () => onPick(s.value));
+    s.listen('change', () => onPick(s.value));
     return s;
   };
   const range = (lo, hi, onPick, label) => {
     const r = el('input'), out = el('span', 'tcp-val');
     r.type = 'range'; r.min = String(lo); r.max = String(hi); r.step = '1';
-    r.setAttribute('aria-label', label);
-    r.addEventListener('input', () => { out.textContent = r.value; });
-    r.addEventListener('change', () => onPick(+r.value));
+    r.setA('aria-label', label);
+    r.listen('input', () => { out.txt = r.value; });
+    r.listen('change', () => onPick(+r.value));
     return [r, out];
   };
   const field = (label, ...nodes) => { const f = el('div', 'tcp-field'); if (label != null) f.append(typeof label === 'string' ? el('span', 'tcp-label', label) : label); f.append(...nodes); return f; };
@@ -1280,137 +1391,135 @@
   const pixelNote = () => {
     const box = el('span', 'tcp-icon'), px = el('i'), sh = [];
     NOTE_ART.forEach((line, y) => [...line].forEach((c, x) => { if (c === 'X') sh.push(`${x * 2}px ${y * 2}px 0 #e0453a`); }));
-    px.style.boxShadow = sh.join(',');
+    px.css.boxShadow = sh.join(',');
     box.append(px);
     return box;
   };
 
-  const css = el('style');
-  css.textContent = `
-    #tcp-panel { all: initial; display: block; position: fixed; top: 56px; right: 16px; z-index: 2147483646; width: 616px; max-width: calc(100vw - 16px);
+  trif.css(`
+    #trif-box-tcp-panel { all: initial; display: block; position: fixed; top: 56px; right: 16px; z-index: 2147483646; width: 616px; max-width: calc(100vw - 16px);
       max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; padding: 12px 14px 10px; border-radius: 16px; background: #fff; color: #0f1419;
       box-shadow: 0 4px 24px rgb(0 0 0 / .25); font: 13px/1.3 -apple-system, system-ui, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased;
       outline: none; user-select: none; -webkit-user-select: none; scrollbar-width: thin; }
-    #tcp-panel *, #tcp-panel *::before, #tcp-panel *::after { box-sizing: border-box; }
-    #tcp-panel button, #tcp-panel select, #tcp-panel input { font: inherit; color: inherit; margin: 0; }
-    #tcp-panel .tcp-head { display: flex; align-items: center; gap: 8px; margin: -2px 0 8px; cursor: grab; }
-    #tcp-panel .tcp-head:active { cursor: grabbing; }
-    #tcp-panel .tcp-title { display: flex; align-items: center; gap: 8px; flex: 1; font-size: 15px; font-weight: 800; }
-    #tcp-panel .tcp-icon { position: relative; width: 16px; height: 16px; flex: none; }
-    #tcp-panel .tcp-icon i { position: absolute; left: 0; top: 0; width: 2px; height: 2px; }
-    #tcp-panel .tcp-chip { font: 700 10px/1 ui-monospace, Menlo, monospace; letter-spacing: .08em; padding: 3px 5px 2px; border-radius: 3px; background: #0f1419; color: #fff; }
-    #tcp-panel .tcp-x { width: 30px; height: 30px; border-radius: 50%; border: 0; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; }
-    #tcp-panel .tcp-x:hover { background: #eff3f4; }
-    #tcp-panel .tcp-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 8px; }
-    #tcp-panel .tcp-group { display: flex; align-items: center; gap: 5px; }
-    #tcp-panel .tcp-label { font: 700 10px/1 ui-monospace, Menlo, monospace; letter-spacing: .07em; text-transform: uppercase; color: #536471; white-space: nowrap; }
-    #tcp-panel .tcp-btn { font-weight: 700; padding: 4px 11px; border-radius: 9999px; border: 1px solid #cfd9de; background: #fff; cursor: pointer; white-space: nowrap; }
-    #tcp-panel .tcp-btn:hover:not(:disabled) { background: #f7f9f9; }
-    #tcp-panel button:disabled { opacity: .4; cursor: default; }
-    #tcp-panel .tcp-primary { background: #0f1419; border-color: #0f1419; color: #fff; box-shadow: 2px 2px 0 #e0453a; }
-    #tcp-panel .tcp-primary:hover:not(:disabled) { background: #272c30; }
-    #tcp-panel .tcp-primary:active:not(:disabled) { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #e0453a; }
-    #tcp-panel .tcp-play { min-width: 76px; }
-    #tcp-panel .tcp-seg { display: inline-flex; border: 1px solid #cfd9de; border-radius: 9999px; overflow: hidden; flex: none; }
-    #tcp-panel .tcp-seg button { border: 0; border-left: 1px solid #cfd9de; background: #fff; padding: 3px 9px; font-weight: 600; cursor: pointer; }
-    #tcp-panel .tcp-seg button:first-child { border-left: 0; }
-    #tcp-panel .tcp-seg button:hover { background: #f7f9f9; }
-    #tcp-panel .tcp-seg button[aria-pressed=true] { background: #0f1419; color: #fff; }
-    #tcp-panel .tcp-small button { padding: 2px 6px; font: 600 11px ui-monospace, Menlo, monospace; }
-    #tcp-panel .tcp-round { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid #cfd9de; background: #fff; cursor: pointer; font-weight: 700; line-height: 1; }
-    #tcp-panel input[type=number] { width: 46px; padding: 3px 2px; border: 1px solid #cfd9de; border-radius: 6px; text-align: center; background: #fff; -moz-appearance: textfield; }
-    #tcp-panel input[type=number]::-webkit-inner-spin-button { display: none; }
-    #tcp-panel select { padding: 2px 3px; border: 1px solid #cfd9de; border-radius: 6px; background: #fff; cursor: pointer; min-width: 0; font-size: 12px; }
-    #tcp-panel input[type=range] { width: 70px; accent-color: var(--c, #0f1419); margin: 0; flex: 1; min-width: 0; }
-    #tcp-panel .tcp-rows { display: grid; grid-template-columns: 62px 1fr; gap: 6px 8px; align-items: center; margin: 0 0 4px; }
-    #tcp-panel .tcp-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
-    #tcp-panel .tcp-tab { min-width: 26px; height: 24px; padding: 0 6px; border-radius: 5px; border: 1px solid #cfd9de; background: #fff; font: 700 12px ui-monospace, Menlo, monospace; cursor: pointer; }
-    #tcp-panel .tcp-tab:hover { background: #f7f9f9; }
-    #tcp-panel .tcp-tab[aria-pressed=true] { background: #0f1419; color: #fff; border-color: #0f1419; }
-    #tcp-panel .tcp-act { height: 24px; padding: 0 9px; font-size: 12px; }
-    #tcp-panel .tcp-order { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; min-height: 30px; padding: 3px; border-radius: 7px; background: #f7f9f9; }
-    #tcp-panel .tcp-o { min-width: 22px; height: 22px; padding: 0 4px; border-radius: 4px; border: 1px solid #cfd9de; background: #fff; font: 700 11px ui-monospace, Menlo, monospace; cursor: grab; }
-    #tcp-panel .tcp-o[data-sel] { box-shadow: 0 0 0 2px #1d9bf0; border-color: #1d9bf0; }
-    #tcp-panel .tcp-o[data-cur] { background: #eaf5fe; }
-    #tcp-panel .tcp-o[data-playing] { background: #1d9bf0; border-color: #1d9bf0; color: #fff; }
-    #tcp-panel .tcp-o.tcp-over { box-shadow: -3px 0 0 #1d9bf0; }
-    #tcp-panel .tcp-o { position: relative; }
-    #tcp-panel .tcp-o-x { display: none; position: absolute; top: -7px; right: -7px; width: 14px; height: 14px; border-radius: 50%;
+    #trif-box-tcp-panel *, #trif-box-tcp-panel *::before, #trif-box-tcp-panel *::after { box-sizing: border-box; }
+    #trif-box-tcp-panel button, #trif-box-tcp-panel select, #trif-box-tcp-panel input { font: inherit; color: inherit; margin: 0; }
+    #trif-box-tcp-panel .trif-box-tcp-head { display: flex; align-items: center; gap: 8px; margin: -2px 0 8px; cursor: grab; }
+    #trif-box-tcp-panel .trif-box-tcp-head:active { cursor: grabbing; }
+    #trif-box-tcp-panel .trif-box-tcp-title { display: flex; align-items: center; gap: 8px; flex: 1; font-size: 15px; font-weight: 800; }
+    #trif-box-tcp-panel .trif-box-tcp-icon { position: relative; width: 16px; height: 16px; flex: none; }
+    #trif-box-tcp-panel .trif-box-tcp-icon i { position: absolute; left: 0; top: 0; width: 2px; height: 2px; }
+    #trif-box-tcp-panel .trif-box-tcp-chip { font: 700 10px/1 ui-monospace, Menlo, monospace; letter-spacing: .08em; padding: 3px 5px 2px; border-radius: 3px; background: #0f1419; color: #fff; }
+    #trif-box-tcp-panel .trif-box-tcp-x { width: 30px; height: 30px; border-radius: 50%; border: 0; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; }
+    #trif-box-tcp-panel .trif-box-tcp-x:hover { background: #eff3f4; }
+    #trif-box-tcp-panel .trif-box-tcp-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 8px; }
+    #trif-box-tcp-panel .trif-box-tcp-group { display: flex; align-items: center; gap: 5px; }
+    #trif-box-tcp-panel .trif-box-tcp-label { font: 700 10px/1 ui-monospace, Menlo, monospace; letter-spacing: .07em; text-transform: uppercase; color: #536471; white-space: nowrap; }
+    #trif-box-tcp-panel .trif-box-tcp-btn { font-weight: 700; padding: 4px 11px; border-radius: 9999px; border: 1px solid #cfd9de; background: #fff; cursor: pointer; white-space: nowrap; }
+    #trif-box-tcp-panel .trif-box-tcp-btn:hover:not([aria-disabled=true]) { background: #f7f9f9; }
+    #trif-box-tcp-panel button[aria-disabled=true] { opacity: .4; cursor: default; }
+    #trif-box-tcp-panel .trif-box-tcp-primary { background: #0f1419; border-color: #0f1419; color: #fff; box-shadow: 2px 2px 0 #e0453a; }
+    #trif-box-tcp-panel .trif-box-tcp-primary:hover:not([aria-disabled=true]) { background: #272c30; }
+    #trif-box-tcp-panel .trif-box-tcp-primary:active:not([aria-disabled=true]) { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #e0453a; }
+    #trif-box-tcp-panel .trif-box-tcp-play { min-width: 76px; }
+    #trif-box-tcp-panel .trif-box-tcp-seg { display: inline-flex; border: 1px solid #cfd9de; border-radius: 9999px; overflow: hidden; flex: none; }
+    #trif-box-tcp-panel .trif-box-tcp-seg button { border: 0; border-left: 1px solid #cfd9de; background: #fff; padding: 3px 9px; font-weight: 600; cursor: pointer; }
+    #trif-box-tcp-panel .trif-box-tcp-seg button:first-child { border-left: 0; }
+    #trif-box-tcp-panel .trif-box-tcp-seg button:hover { background: #f7f9f9; }
+    #trif-box-tcp-panel .trif-box-tcp-seg button[aria-pressed=true] { background: #0f1419; color: #fff; }
+    #trif-box-tcp-panel .trif-box-tcp-small button { padding: 2px 6px; font: 600 11px ui-monospace, Menlo, monospace; }
+    #trif-box-tcp-panel .trif-box-tcp-round { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid #cfd9de; background: #fff; cursor: pointer; font-weight: 700; line-height: 1; }
+    #trif-box-tcp-panel input[type=number] { width: 46px; padding: 3px 2px; border: 1px solid #cfd9de; border-radius: 6px; text-align: center; background: #fff; -moz-appearance: textfield; }
+    #trif-box-tcp-panel input[type=number]::-webkit-inner-spin-button { display: none; }
+    #trif-box-tcp-panel select { padding: 2px 3px; border: 1px solid #cfd9de; border-radius: 6px; background: #fff; cursor: pointer; min-width: 0; font-size: 12px; }
+    #trif-box-tcp-panel input[type=range] { width: 70px; accent-color: var(--c, #0f1419); margin: 0; flex: 1; min-width: 0; }
+    #trif-box-tcp-panel .trif-box-tcp-rows { display: grid; grid-template-columns: 62px 1fr; gap: 6px 8px; align-items: center; margin: 0 0 4px; }
+    #trif-box-tcp-panel .trif-box-tcp-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+    #trif-box-tcp-panel .trif-box-tcp-tab { min-width: 26px; height: 24px; padding: 0 6px; border-radius: 5px; border: 1px solid #cfd9de; background: #fff; font: 700 12px ui-monospace, Menlo, monospace; cursor: pointer; }
+    #trif-box-tcp-panel .trif-box-tcp-tab:hover { background: #f7f9f9; }
+    #trif-box-tcp-panel .trif-box-tcp-tab[aria-pressed=true] { background: #0f1419; color: #fff; border-color: #0f1419; }
+    #trif-box-tcp-panel .trif-box-tcp-act { height: 24px; padding: 0 9px; font-size: 12px; }
+    #trif-box-tcp-panel .trif-box-tcp-order { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; min-height: 30px; padding: 3px; border-radius: 7px; background: #f7f9f9; }
+    #trif-box-tcp-panel .trif-box-tcp-o { min-width: 22px; height: 22px; padding: 0 4px; border-radius: 4px; border: 1px solid #cfd9de; background: #fff; font: 700 11px ui-monospace, Menlo, monospace; cursor: grab; }
+    #trif-box-tcp-panel .trif-box-tcp-o[data-trif-box-sel] { box-shadow: 0 0 0 2px #1d9bf0; border-color: #1d9bf0; }
+    #trif-box-tcp-panel .trif-box-tcp-o[data-trif-box-cur] { background: #eaf5fe; }
+    #trif-box-tcp-panel .trif-box-tcp-o[data-trif-box-playing] { background: #1d9bf0; border-color: #1d9bf0; color: #fff; }
+    #trif-box-tcp-panel .trif-box-tcp-o.trif-box-tcp-over { box-shadow: -3px 0 0 #1d9bf0; }
+    #trif-box-tcp-panel .trif-box-tcp-o { position: relative; }
+    #trif-box-tcp-panel .trif-box-tcp-o-x { display: none; position: absolute; top: -7px; right: -7px; width: 14px; height: 14px; border-radius: 50%;
       background: #0f1419; color: #fff; font: 700 11px/14px -apple-system, system-ui, sans-serif; text-align: center; cursor: pointer; z-index: 1; }
-    #tcp-panel .tcp-o:hover .tcp-o-x { display: block; }
-    #tcp-panel .tcp-o-x:hover { background: #f4212e; }
-    #tcp-panel .tcp-lane { display: grid; grid-template-columns: 160px auto; gap: 10px; padding: 6px 0; border-top: 1px solid #eff3f4; }
-    #tcp-panel .tcp-ctl { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-    #tcp-panel .tcp-ltop { display: flex; align-items: center; gap: 6px; height: 20px; }
-    #tcp-panel .tcp-dot { width: 10px; height: 10px; flex: none; background: var(--c); box-shadow: inset -2px -2px 0 rgb(0 0 0 / .2); }
-    #tcp-panel .tcp-lname { flex: 1; font: 700 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; }
-    #tcp-panel .tcp-lane[data-sel] .tcp-lname { color: var(--c); }
-    #tcp-panel .tcp-mute { width: 20px; height: 20px; padding: 0; border-radius: 4px; border: 1px solid #cfd9de; background: #fff; font: 700 10px ui-monospace, Menlo, monospace; cursor: pointer; }
-    #tcp-panel .tcp-mute[aria-pressed=true] { background: #536471; border-color: #536471; color: #fff; }
-    #tcp-panel .tcp-lane[data-muted] .tcp-layer { opacity: .35; }
-    #tcp-panel .tcp-field { display: flex; align-items: center; gap: 5px; min-width: 0; }
-    #tcp-panel .tcp-field > .tcp-label { width: 30px; flex: none; }
-    #tcp-panel .tcp-field > select { flex: 1; }
-    #tcp-panel .tcp-field > select.tcp-env { flex: 0 0 70px; }
-    #tcp-panel .tcp-val { width: 15px; flex: none; text-align: right; font: 600 11px ui-monospace, Menlo, monospace; color: #536471; }
-    #tcp-panel .tcp-dname { width: auto !important; flex: 1 !important; color: var(--c); }
-    #tcp-panel .tcp-hintc { font-size: 11.5px; line-height: 1.35; color: #536471; }
+    #trif-box-tcp-panel .trif-box-tcp-o:hover .trif-box-tcp-o-x { display: block; }
+    #trif-box-tcp-panel .trif-box-tcp-o-x:hover { background: #f4212e; }
+    #trif-box-tcp-panel .trif-box-tcp-lane { display: grid; grid-template-columns: 160px auto; gap: 10px; padding: 6px 0; border-top: 1px solid #eff3f4; }
+    #trif-box-tcp-panel .trif-box-tcp-ctl { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    #trif-box-tcp-panel .trif-box-tcp-ltop { display: flex; align-items: center; gap: 6px; height: 20px; }
+    #trif-box-tcp-panel .trif-box-tcp-dot { width: 10px; height: 10px; flex: none; background: var(--c); box-shadow: inset -2px -2px 0 rgb(0 0 0 / .2); }
+    #trif-box-tcp-panel .trif-box-tcp-lname { flex: 1; font: 700 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; }
+    #trif-box-tcp-panel .trif-box-tcp-lane[data-trif-box-sel] .trif-box-tcp-lname { color: var(--c); }
+    #trif-box-tcp-panel .trif-box-tcp-mute { width: 20px; height: 20px; padding: 0; border-radius: 4px; border: 1px solid #cfd9de; background: #fff; font: 700 10px ui-monospace, Menlo, monospace; cursor: pointer; }
+    #trif-box-tcp-panel .trif-box-tcp-mute[aria-pressed=true] { background: #536471; border-color: #536471; color: #fff; }
+    #trif-box-tcp-panel .trif-box-tcp-lane[data-trif-box-muted] .trif-box-tcp-layer { opacity: .35; }
+    #trif-box-tcp-panel .trif-box-tcp-field { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    #trif-box-tcp-panel .trif-box-tcp-field > .trif-box-tcp-label { width: 30px; flex: none; }
+    #trif-box-tcp-panel .trif-box-tcp-field > select { flex: 1; }
+    #trif-box-tcp-panel .trif-box-tcp-field > select.trif-box-tcp-env { flex: 0 0 70px; }
+    #trif-box-tcp-panel .trif-box-tcp-val { width: 15px; flex: none; text-align: right; font: 600 11px ui-monospace, Menlo, monospace; color: #536471; }
+    #trif-box-tcp-panel .trif-box-tcp-dname { width: auto !important; flex: 1 !important; color: var(--c); }
+    #trif-box-tcp-panel .trif-box-tcp-hintc { font-size: 11.5px; line-height: 1.35; color: #536471; }
     /* (a note lane shows exactly the piano's reach in its octave, WIN rows, and doesn't scroll: Z and X move it;
        see placeWindow) */
-    #tcp-panel .tcp-scroll { position: relative; height: ${WIN * RH + 2}px; width: max-content; overflow: hidden; border: 1px solid #cfd9de; border-radius: 7px; background: #fff; }
-    #tcp-panel .tcp-win { position: relative; }
-    #tcp-panel .tcp-more { all: unset; position: absolute; right: 3px; z-index: 2; width: 18px; height: 14px; border-radius: 4px; cursor: pointer;
+    #trif-box-tcp-panel .trif-box-tcp-scroll { position: relative; height: ${WIN * RH + 2}px; width: max-content; overflow: hidden; border: 1px solid #cfd9de; border-radius: 7px; background: #fff; }
+    #trif-box-tcp-panel .trif-box-tcp-win { position: relative; }
+    #trif-box-tcp-panel .trif-box-tcp-more { all: unset; position: absolute; right: 3px; z-index: 2; width: 18px; height: 14px; border-radius: 4px; cursor: pointer;
       background: var(--c); color: #fff; font: 700 9px/14px -apple-system, system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px rgb(0 0 0 / .25); }
-    #tcp-panel .tcp-more.tcp-up { top: 3px; } #tcp-panel .tcp-more.tcp-down { bottom: 3px; }
-    #tcp-panel .tcp-more:disabled { opacity: .3; cursor: default; }
+    #trif-box-tcp-panel .trif-box-tcp-more.trif-box-tcp-up { top: 3px; } #trif-box-tcp-panel .trif-box-tcp-more.trif-box-tcp-down { bottom: 3px; }
+    #trif-box-tcp-panel .trif-box-tcp-more[aria-disabled=true] { opacity: .3; cursor: default; }
     /* a note out of the window: a small arrow at the window's edge, in its column, pointing to where it is */
-    #tcp-panel .tcp-marks { position: absolute; inset: 1px; pointer-events: none; overflow: hidden; }
-    #tcp-panel .tcp-mark { position: absolute; height: 9px; color: var(--c); font: 700 8px/9px -apple-system, system-ui, sans-serif; text-align: center; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
-    #tcp-panel .tcp-mark.tcp-mup { top: 0; } #tcp-panel .tcp-mark.tcp-mdown { bottom: 0; }
-    #tcp-panel .tcp-drums { height: ${8 * DH + 2}px; overflow: hidden; }
-    #tcp-panel .tcp-lane[data-sel] .tcp-scroll { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
-    #tcp-panel .tcp-roll { position: relative; cursor: crosshair; touch-action: none; } /* (its width: renderLane) */
-    #tcp-panel .tcp-k { position: absolute; left: 0; right: 0; height: ${RH}px; }
-    #tcp-panel .tcp-k.tcp-bk { background: #f1f4f5; }
-    #tcp-panel .tcp-k.tcp-c { box-shadow: inset 0 -1px 0 #dbe2e6; }
-    #tcp-panel .tcp-drums .tcp-k { height: ${DH}px; }
-    #tcp-panel .tcp-gut { position: absolute; left: 0; top: 0; bottom: 0; width: ${GUT}px; background: #f7f9f9; border-right: 1px solid #dbe2e6; cursor: pointer; }
-    #tcp-panel .tcp-kl { position: absolute; left: 4px; font: 600 8px/${RH}px ui-monospace, Menlo, monospace; color: #8b98a5; }
-    #tcp-panel .tcp-dl { position: absolute; left: 4px; font: 600 9px/${DH}px ui-monospace, Menlo, monospace; color: #536471; white-space: nowrap; }
-    #tcp-panel .tcp-dl[data-sel] { color: var(--c); font-weight: 800; }
-    #tcp-panel .tcp-col { position: absolute; top: 0; bottom: 0; width: 1px; background: #edf0f2; }
-    #tcp-panel .tcp-col.tcp-beat { background: #d0d9de; }
-    #tcp-panel .tcp-col.tcp-barl { width: 2px; margin-left: -1px; background: #8b98a5; }
-    #tcp-panel .tcp-layer { position: absolute; inset: 0; pointer-events: none; }
-    #tcp-panel .tcp-n { position: absolute; background: var(--c); border-radius: 1px; box-shadow: inset 0 -2px 0 rgb(0 0 0 / .2), inset 2px 0 0 rgb(255 255 255 / .45); }
-    #tcp-panel .tcp-cur { position: absolute; top: 0; bottom: 0; background: rgb(29 155 240 / .08); border-left: 2px solid #1d9bf0; pointer-events: none; display: none; }
-    #tcp-panel .tcp-lane[data-sel] .tcp-cur { display: block; }
-    #tcp-panel .tcp-ph { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #0f1419; opacity: .6; pointer-events: none; display: none; }
-    #tcp-panel .tcp-meter { margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid #eff3f4; }
-    #tcp-panel .tcp-mhead { display: flex; align-items: baseline; gap: 8px; margin: 0 0 5px; }
-    #tcp-panel .tcp-mtext { font-size: 12px; color: #536471; }
-    #tcp-panel .tcp-mtext b { color: #0f1419; }
-    #tcp-panel .tcp-mbar { position: relative; height: 12px; border-radius: 2px; background: #eff3f4; }
-    #tcp-panel .tcp-mfill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background-color: var(--m, #2f9e44);
+    #trif-box-tcp-panel .trif-box-tcp-marks { position: absolute; inset: 1px; pointer-events: none; overflow: hidden; }
+    #trif-box-tcp-panel .trif-box-tcp-mark { position: absolute; height: 9px; color: var(--c); font: 700 8px/9px -apple-system, system-ui, sans-serif; text-align: center; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+    #trif-box-tcp-panel .trif-box-tcp-mark.trif-box-tcp-mup { top: 0; } #trif-box-tcp-panel .trif-box-tcp-mark.trif-box-tcp-mdown { bottom: 0; }
+    #trif-box-tcp-panel .trif-box-tcp-drums { height: ${8 * DH + 2}px; overflow: hidden; }
+    #trif-box-tcp-panel .trif-box-tcp-lane[data-trif-box-sel] .trif-box-tcp-scroll { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
+    #trif-box-tcp-panel .trif-box-tcp-roll { position: relative; cursor: crosshair; touch-action: none; } /* (its width: renderLane) */
+    #trif-box-tcp-panel .trif-box-tcp-k { position: absolute; left: 0; right: 0; height: ${RH}px; }
+    #trif-box-tcp-panel .trif-box-tcp-k.trif-box-tcp-bk { background: #f1f4f5; }
+    #trif-box-tcp-panel .trif-box-tcp-k.trif-box-tcp-c { box-shadow: inset 0 -1px 0 #dbe2e6; }
+    #trif-box-tcp-panel .trif-box-tcp-drums .trif-box-tcp-k { height: ${DH}px; }
+    #trif-box-tcp-panel .trif-box-tcp-gut { position: absolute; left: 0; top: 0; bottom: 0; width: ${GUT}px; background: #f7f9f9; border-right: 1px solid #dbe2e6; cursor: pointer; }
+    #trif-box-tcp-panel .trif-box-tcp-kl { position: absolute; left: 4px; font: 600 8px/${RH}px ui-monospace, Menlo, monospace; color: #8b98a5; }
+    #trif-box-tcp-panel .trif-box-tcp-dl { position: absolute; left: 4px; font: 600 9px/${DH}px ui-monospace, Menlo, monospace; color: #536471; white-space: nowrap; }
+    #trif-box-tcp-panel .trif-box-tcp-dl[data-trif-box-sel] { color: var(--c); font-weight: 800; }
+    #trif-box-tcp-panel .trif-box-tcp-col { position: absolute; top: 0; bottom: 0; width: 1px; background: #edf0f2; }
+    #trif-box-tcp-panel .trif-box-tcp-col.trif-box-tcp-beat { background: #d0d9de; }
+    #trif-box-tcp-panel .trif-box-tcp-col.trif-box-tcp-barl { width: 2px; margin-left: -1px; background: #8b98a5; }
+    #trif-box-tcp-panel .trif-box-tcp-layer { position: absolute; inset: 0; pointer-events: none; }
+    #trif-box-tcp-panel .trif-box-tcp-n { position: absolute; background: var(--c); border-radius: 1px; box-shadow: inset 0 -2px 0 rgb(0 0 0 / .2), inset 2px 0 0 rgb(255 255 255 / .45); }
+    #trif-box-tcp-panel .trif-box-tcp-cur { position: absolute; top: 0; bottom: 0; background: rgb(29 155 240 / .08); border-left: 2px solid #1d9bf0; pointer-events: none; display: none; }
+    #trif-box-tcp-panel .trif-box-tcp-lane[data-trif-box-sel] .trif-box-tcp-cur { display: block; }
+    #trif-box-tcp-panel .trif-box-tcp-ph { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #0f1419; opacity: .6; pointer-events: none; display: none; }
+    #trif-box-tcp-panel .trif-box-tcp-meter { margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid #eff3f4; }
+    #trif-box-tcp-panel .trif-box-tcp-mhead { display: flex; align-items: baseline; gap: 8px; margin: 0 0 5px; }
+    #trif-box-tcp-panel .trif-box-tcp-mtext { font-size: 12px; color: #536471; }
+    #trif-box-tcp-panel .trif-box-tcp-mtext b { color: #0f1419; }
+    #trif-box-tcp-panel .trif-box-tcp-mbar { position: relative; height: 12px; border-radius: 2px; background: #eff3f4; }
+    #trif-box-tcp-panel .trif-box-tcp-mfill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background-color: var(--m, #2f9e44);
       background-image: repeating-linear-gradient(90deg, transparent 0 6px, rgb(255 255 255 / .85) 6px 8px); min-width: 2px; }
-    #tcp-panel .tcp-mmark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #8b98a5; }
-    #tcp-panel .tcp-mscale { position: relative; height: 14px; margin-top: 3px; font: 600 10px/14px ui-monospace, Menlo, monospace; color: #536471; }
-    #tcp-panel .tcp-mscale span { position: absolute; top: 0; white-space: nowrap; }
-    #tcp-panel .tcp-foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-    #tcp-panel .tcp-status { flex: 1; margin-left: 4px; font-size: 12px; color: #536471; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #tcp-panel .tcp-how { display: block; margin: 2px 2px 8px; font-size: 12px; line-height: 1.4; color: #536471; }
-    #tcp-panel .tcp-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 3px; margin: 2px 0 8px; font-size: 11px; line-height: 1.5; color: #8b98a5; }
-    #tcp-panel .tcp-keys .tcp-group { margin-right: 8px; }
-    #tcp-panel .tcp-keys .tcp-label { width: auto; }
-    #tcp-panel .tcp-kitrow input[type=range] { flex: 0 0 52px; }
-    #tcp-panel .tcp-keys select { font-size: 11px; padding: 1px 2px; }
-    #tcp-panel kbd { font: 600 10px ui-monospace, Menlo, monospace; padding: 0 3px; border: 1px solid #dbe2e6; border-bottom-width: 2px; border-radius: 3px; color: #536471; background: #fff; }
-    #tcp-open { all: initial; display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 14px; margin: 0 8px 0 0; align-self: center;
+    #trif-box-tcp-panel .trif-box-tcp-mmark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #8b98a5; }
+    #trif-box-tcp-panel .trif-box-tcp-mscale { position: relative; height: 14px; margin-top: 3px; font: 600 10px/14px ui-monospace, Menlo, monospace; color: #536471; }
+    #trif-box-tcp-panel .trif-box-tcp-mscale span { position: absolute; top: 0; white-space: nowrap; }
+    #trif-box-tcp-panel .trif-box-tcp-foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+    #trif-box-tcp-panel .trif-box-tcp-status { flex: 1; margin-left: 4px; font-size: 12px; color: #536471; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #trif-box-tcp-panel .trif-box-tcp-how { display: block; margin: 8px 2px 12px; font-size: 12px; line-height: 1.5; color: #536471; }
+    #trif-box-tcp-panel .trif-box-tcp-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 3px; margin: 2px 0 8px; font-size: 11px; line-height: 1.5; color: #8b98a5; }
+    #trif-box-tcp-panel .trif-box-tcp-keys .trif-box-tcp-group { margin-right: 8px; }
+    #trif-box-tcp-panel .trif-box-tcp-keys .trif-box-tcp-label { width: auto; }
+    #trif-box-tcp-panel .trif-box-tcp-kitrow input[type=range] { flex: 0 0 52px; }
+    #trif-box-tcp-panel .trif-box-tcp-keys select { font-size: 11px; padding: 1px 2px; }
+    #trif-box-tcp-panel .trif-box-tcp-kbd { font: 600 10px ui-monospace, Menlo, monospace; padding: 0 3px; border: 1px solid #dbe2e6; border-bottom-width: 2px; border-radius: 3px; color: #536471; background: #fff; }
+    #trif-box-tcp-open { all: initial; display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 14px; margin: 0 8px 0 0; align-self: center;
       border-radius: 9999px; border: 1px solid rgb(128 128 128 / .5); color: inherit; font: 700 14px TwitterChirp, -apple-system, system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
-    #tcp-open:hover { background: rgb(128 128 128 / .12); }
-    #tcp-open.tcp-float { position: fixed; left: 16px; bottom: 16px; z-index: 2147483645; margin: 0; background: #fff; color: #0f1419; border-color: #cfd9de; box-shadow: 0 2px 10px rgb(0 0 0 / .2); }
-  `;
-  document.documentElement.append(css);
+    #trif-box-tcp-open:hover { background: rgb(128 128 128 / .12); }
+    #trif-box-tcp-open.trif-box-tcp-float { position: fixed; left: 16px; bottom: 16px; z-index: 2147483645; margin: 0; background: #fff; color: #0f1419; border-color: #cfd9de; box-shadow: 0 2px 10px rgb(0 0 0 / .2); }
+  `);
 
   let panel = null;
   const R = {}; // the panel's parts
@@ -1419,7 +1528,7 @@
   function buildLane(L) {
     const drums = L.ch === 'noise', pulse = L.ch === 'p1' || L.ch === 'p2';
     const ref = { L, drums, pulse, box: el('div', 'tcp-lane') };
-    ref.box.style.setProperty('--c', L.color);
+    ref.box.css.setProperty('--c', L.color);
     ref.box.dataset.ch = L.ch;
     const ctl = el('div', 'tcp-ctl'), top = el('div', 'tcp-ltop');
     ref.mute = btn('tcp-mute', 'M', `Mute ${L.name} while you work (not saved)`, () => {
@@ -1434,11 +1543,11 @@
     const setNoise = (fn) => { edit(() => fn(song.inst.noise)); preview('noise', ui.drum); };
     if (pulse) {
       ref.duty = seg([0, 1, 2, 3].map((d) => [d, ['12', '25', '50', '75'][d], `Duty ${DUTY_NAMES[d]}`]), (d) => setInst((i) => { i.duty = d; }), 'Duty');
-      ref.duty.classList.add('tcp-small');
+      ref.duty.cl.add('tcp-small');
       [ref.vol, ref.volOut] = range(0, 15, (v) => setInst((i) => { i.vol = v; }), `${L.name} volume`);
       ref.decay = select(DECAY_NAMES.map((n, i) => [i, n]), (v) => setInst((i) => { i.decay = +v; }), `${L.name} envelope`);
       ref.decay.title = 'Envelope: how fast each note fades (Hold: it doesn’t)';
-      ref.decay.classList.add('tcp-env');
+      ref.decay.cl.add('tcp-env');
       ref.sweep = select([...SWEEPS.map((s, i) => [i, s[0]]), ['custom', 'Custom']], (v) => {
         if (v !== 'custom') setInst((i) => { const s = SWEEPS[+v][1]; i.sweep = s && { ...s }; });
       }, `${L.name} sweep`);
@@ -1454,16 +1563,16 @@
       [ref.vol, ref.volOut] = range(0, 15, (v) => setNoise((nz) => { nz.vol = v; }), 'Noise volume');
       ref.drumName = el('span', 'tcp-label tcp-dname');
       ref.mode = seg([[0, 'Long', 'Long noise: a hiss'], [1, 'Short', 'Short noise: metallic, nearly a tone']], (m) => setNoise((nz) => { nz.kit[ui.drum][1] = m; }), 'Noise mode');
-      ref.mode.classList.add('tcp-small');
+      ref.mode.cl.add('tcp-small');
       [ref.period, ref.periodOut] = range(0, 15, (v) => setNoise((nz) => { nz.kit[ui.drum][0] = v; }), 'Drum pitch');
       ref.period.title = 'The drum’s noise period: 0 is the highest, 15 the lowest';
       const kitRow = field(null, ref.kit, ref.vol, ref.volOut);
-      kitRow.classList.add('tcp-kitrow');
+      kitRow.cl.add('tcp-kitrow');
       ctl.append(kitRow, field(ref.drumName, ref.mode), field('Pitch', ref.period, ref.periodOut));
     }
     // the roll
     const scroll = el('div', drums ? 'tcp-scroll tcp-drums' : 'tcp-scroll'), roll = el('div', 'tcp-roll');
-    roll.style.height = `${drums ? 8 * DH : P * RH}px`;
+    roll.css.height = `${drums ? 8 * DH : P * RH}px`;
     roll.title = drums ? 'Click: a hit · drag: its length · click again or right-click: remove · the names: pick a drum to tune'
       : `Click: a note · drag: its length · click again or right-click: remove${pulse ? ' · Alt-click: its volume' : ''}`;
     const gut = el('div', 'tcp-gut');
@@ -1471,15 +1580,15 @@
     if (drums) {
       for (let d = 0; d < 8; d++) {
         const k = el('div', d % 2 ? 'tcp-k tcp-bk' : 'tcp-k'), l = el('span', 'tcp-dl', DRUM_SHORT[d]);
-        k.style.top = `${(7 - d) * DH}px`; l.style.top = `${(7 - d) * DH}px`;
+        k.css.top = `${(7 - d) * DH}px`; l.css.top = `${(7 - d) * DH}px`;
         roll.append(k); gut.append(l); ref.drumLabels.push(l);
       }
     } else {
       for (let p = 0; p < P; p++) {
         const midi = C.BASE[L.ch] + p, k = el('div', `tcp-k${isBlack(midi) ? ' tcp-bk' : ''}${midi % 12 === 0 ? ' tcp-c' : ''}`);
-        k.style.top = `${(P - 1 - p) * RH}px`;
+        k.css.top = `${(P - 1 - p) * RH}px`;
         roll.append(k);
-        if (midi % 12 === 0) { const l = el('span', 'tcp-kl', noteName(midi)); l.style.top = `${(P - 1 - p) * RH}px`; gut.append(l); }
+        if (midi % 12 === 0) { const l = el('span', 'tcp-kl', noteName(midi)); l.css.top = `${(P - 1 - p) * RH}px`; gut.append(l); }
       }
     }
     roll.append(gut);
@@ -1501,26 +1610,26 @@
     ref.scroll = scroll; ref.roll = roll;
 
     const cellAt = (e, loose) => {
-      const r = roll.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const r = roll.rectOf(), x = e.clientX - r.left, y = e.clientY - r.top;
       if (!loose && (x < 0 || y < 0 || x >= r.width || y >= r.height)) return null;
       const col = x < GUT && !loose ? -1 : clamp(Math.floor((x - GUT) / CW), 0, song.rows - 1);
       const key = drums ? 7 - clamp(Math.floor(y / DH), 0, 7) : P - 1 - clamp(Math.floor(y / RH), 0, P - 1);
       return { col, key };
     };
-    ref.box.addEventListener('pointerdown', () => { if (ui.lane !== L.ch) { ui.lane = L.ch; render(); } }, true);
-    roll.addEventListener('contextmenu', (e) => {
+    ref.box.listen('pointerdown', () => { if (ui.lane !== L.ch) { ui.lane = L.ch; render(); } }, true);
+    roll.listen('contextmenu', (e) => {
       e.preventDefault();
       const c = cellAt(e);
       if (!c || c.col < 0) return;
       const n = noteAt(curLane(L.ch), c.col, c.key);
       if (n) edit(() => removeNote(curLane(L.ch), n));
     });
-    roll.addEventListener('pointerdown', (e) => {
+    roll.listen('pointerdown', (e) => {
       if (e.button !== 0) return;
       const c = cellAt(e);
       if (!c) return;
       e.preventDefault();
-      panel.focus({ preventScroll: true });
+      focusPanel();
       if (c.col < 0) { // the gutter: hear the key (and, for drums, pick the drum to tune)
         if (drums) { ui.drum = c.key; render(); }
         preview(L.ch, c.key);
@@ -1540,18 +1649,18 @@
       if (!n) { n = placeNote(lane, c.col, c.key, ui.len, drums); preview(L.ch, c.key, n.len); renderLane(ref); }
       if (drums) ui.drum = c.key;
       let moved = false;
-      roll.setPointerCapture(e.pointerId);
+      roll.capture(e.pointerId);
       const move = (ev) => {
         const col = Math.max(n.row, cellAt(ev, true).col);
         if (col !== c.col) moved = true;
         if (moved) { setLen(lane, n, col - n.row + 1, drums); renderLane(ref); }
       };
       const up = () => {
-        roll.removeEventListener('pointermove', move); roll.removeEventListener('pointerup', up); roll.removeEventListener('pointercancel', up);
+        roll.unlisten('pointermove', move); roll.unlisten('pointerup', up); roll.unlisten('pointercancel', up);
         if (!fresh && !moved) removeNote(lane, n); else ui.cursor = (n.row + n.len) % song.rows;
         commit(was);
       };
-      roll.addEventListener('pointermove', move); roll.addEventListener('pointerup', up); roll.addEventListener('pointercancel', up);
+      roll.listen('pointermove', move); roll.listen('pointerup', up); roll.listen('pointercancel', up);
     });
     return ref;
   }
@@ -1563,23 +1672,22 @@
   function build() {
     panel = el('div');
     panel.id = 'tcp-panel';
-    panel.tabIndex = -1;
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Tune composer');
+    panel.setA('role', 'dialog');
+    panel.setA('aria-label', 'Tune composer');
     // the head (drag it to move the panel)
     const head = el('div', 'tcp-head'), title = el('div', 'tcp-title');
     title.append(pixelNote(), el('span', '', 'Tune composer'), el('span', 'tcp-chip', '2A03'));
     head.append(title, btn('tcp-x', '×', 'Close (Esc)', closePanel));
-    head.addEventListener('pointerdown', (e) => {
+    head.listen('pointerdown', (e) => {
       if (e.button !== 0 || e.target.closest('button')) return;
-      const r = panel.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
-      head.setPointerCapture(e.pointerId);
+      const r = panel.rectOf(), x0 = e.clientX, y0 = e.clientY;
+      head.capture(e.pointerId);
       const move = (ev) => setPos(r.left + ev.clientX - x0, r.top + ev.clientY - y0);
       const up = () => {
-        head.removeEventListener('pointermove', move); head.removeEventListener('pointerup', up);
+        head.unlisten('pointermove', move); head.unlisten('pointerup', up);
         store.set(POS, JSON.stringify({ left: panel.offsetLeft, top: panel.offsetTop }));
       };
-      head.addEventListener('pointermove', move); head.addEventListener('pointerup', up);
+      head.listen('pointermove', move); head.listen('pointerup', up);
     });
     // transport
     const bar = el('div', 'tcp-bar');
@@ -1587,24 +1695,28 @@
     R.loop = seg([['pattern', 'Pattern', 'Loop the pattern you’re editing'], ['song', 'Song', 'Play the song from the selected place, and loop it']], (v) => { ui.loop = v; render(); }, 'Loop');
     R.tempo = el('input');
     R.tempo.type = 'number'; R.tempo.min = String(C.TEMPO_MIN); R.tempo.max = String(C.TEMPO_MAX);
-    R.tempo.setAttribute('aria-label', 'Tempo, beats per minute');
+    R.tempo.setA('aria-label', 'Tempo, beats per minute');
     const setTempo = (v) => edit(() => { song.tempo = clamp(Math.round(v) || song.tempo, C.TEMPO_MIN, C.TEMPO_MAX); });
-    R.tempo.addEventListener('change', () => setTempo(+R.tempo.value));
-    R.tempo.addEventListener('keydown', (e) => { if (e.key === 'Enter') R.tempo.blur(); });
+    R.tempo.listen('change', () => setTempo(+R.tempo.value));
+    // (Enter: the sandbox doesn't show a key typed into a field, so the field's own change, which Enter makes,
+    // lets it go; and whether it has the focus, for render)
+    R.tempo.listen('change', () => R.tempo.blur());
+    R.tempo.listen('focus', () => { tempoFocused = true; });
+    R.tempo.listen('blur', () => { tempoFocused = false; });
     R.rpb = select(C.RPB.map((v) => [v, `${v} rows`]), (v) => edit(() => { song.rpb = +v; }), 'Rows per beat');
     R.rpb.title = 'Rows per beat (4: each row is a 16th note)';
     // the time signature, and how many bars a pattern is (both resize every pattern, as one Undo step)
     R.meter = select(METERS.map(([b, u]) => [`${b}/${u}`, `${b}/${u}`]), (v) => { const [b, u] = v.split('/').map(Number); setMeter(b, u, barsNow() || 1); }, 'Time signature');
     R.meter.title = 'Time signature. Some need fewer rows per beat (a pattern holds 32 rows at most)';
     R.bars = seg([[1, '1', '1 bar per pattern'], [2, '2', '2 bars per pattern']], (n) => setMeter(song.beats, song.unit, n), 'Bars per pattern');
-    R.bars.classList.add('tcp-small');
+    R.bars.cl.add('tcp-small');
     R.bars.title = 'Bars per pattern';
     R.len = select(LENGTHS.map((v) => [v, `${v} row${v > 1 ? 's' : ''}`]), (v) => { ui.len = +v; render(); }, 'Note length');
     R.len.title = 'Length of new notes (keys 1–8, 9 = 12, 0 = 16)';
     bar.append(R.play, field('Loop', R.loop),
       field('Tempo', btn('tcp-round', '−', 'Slower', () => setTempo(song.tempo - 1)), R.tempo, btn('tcp-round', '+', 'Faster', () => setTempo(song.tempo + 1))),
       field('Time', R.meter), field('Beat', R.rpb), field('Bars', R.bars));
-    for (const f of bar.querySelectorAll('.tcp-field')) f.classList.add('tcp-group');
+    for (const f of bar.all('.trif-box-tcp-field')) f.cl.add('tcp-group');
     // patterns and the song's order
     const rows = el('div', 'tcp-rows');
     R.tabs = el('div', 'tcp-tabs');
@@ -1633,11 +1745,11 @@
     const meter = el('div', 'tcp-meter'), mhead = el('div', 'tcp-mhead'), mbar = el('div', 'tcp-mbar'), scale = el('div', 'tcp-mscale');
     R.mtext = el('span', 'tcp-mtext'); R.mfill = el('div', 'tcp-mfill');
     // (a tick where each corner fills)
-    const ticks = [1, 2].map((k) => { const t = el('div', 'tcp-mmark'); t.style.left = `${(100 * k) / TUNE_ROOM.CORNERS}%`; return t; });
+    const ticks = [1, 2].map((k) => { const t = el('div', 'tcp-mmark'); t.css.left = `${(100 * k) / TUNE_ROOM.CORNERS}%`; return t; });
     mbar.title = `The tune’s size, against what a picture’s ${TUNE_ROOM.CORNERS} song corners hold: ${TUNE_ROOM.CORNER_BYTES} bytes each, ${TUNE_ROOM.BYTES} in all`;
     mbar.append(R.mfill, ...ticks);
-    const s0 = el('span', '', '0'), s2 = el('span', '', `${TUNE_ROOM.BYTES.toLocaleString('en')} B · ${TUNE_ROOM.CORNERS} corners`);
-    s0.style.left = '0'; s2.style.right = '0';
+    const s0 = el('span', '', '0'), s2 = el('span', '', `${fmt(TUNE_ROOM.BYTES)} B · ${TUNE_ROOM.CORNERS} corners`);
+    s0.css.left = '0'; s2.css.right = '0';
     scale.append(s0, s2);
     mhead.append(el('span', 'tcp-label', 'Space'), R.mtext);
     meter.append(mhead, mbar, scale);
@@ -1653,8 +1765,10 @@
     R.how = el('p', 'tcp-how', 'Compose a tune, then use Style Encoder to put it in your profile. Anyone with Profile Styler can hear it!');
     R.keys = el('div', 'tcp-keys');
     R.lenBox = field('New notes', R.len);
-    R.lenBox.classList.add('tcp-group');
-    panel.append(head, R.how, R.keys, bar, rows, lanesBox, meter, foot); // (how to publish it, then the key hints, along the top)
+    R.lenBox.cl.add('tcp-group');
+    // (R.how isn't put in the panel: in the free version el('p') made a <style> (its make() had no 'p'), so the
+    // note never showed, and the boxed one leaves it out to match. Showing it: R.how after head, below.)
+    panel.append(head, R.keys, bar, rows, lanesBox, meter, foot); // (the key hints along the top)
   }
 
   const greyReader = (g, W, H, corner) => {
@@ -1670,24 +1784,32 @@
   // the tune in the picture of the profile that's open (the header's picture, at 400 px): as Profile Styler
   // reads it (PicCode's song corners, then TuneCodec)
   const SONG_CORNERS = ['bottom-right', 'top-left', 'top-right'];
+  // (boxed: the page's own picture, a stand-in, is what image-variants asks the 400×400 copy for)
   const openProfilePicture = () => {
-    const handle = /^\/(\w{1,15})(?:\/|$)/.exec(location.pathname)?.[1];
+    const handle = /^\/(\w{1,15})(?:\/|$)/.exec(new URL(page.url).pathname)?.[1];
     if (!handle) return null;
-    for (const a of document.querySelectorAll('[data-testid=primaryColumn] a[href$="/photo"]')) {
-      if (a.getAttribute('href').toLowerCase() !== `/${handle.toLowerCase()}/photo`) continue;
-      const src = a.querySelector('img[src*="/profile_images/"]')?.src;
-      if (src) return { handle, url: src.replace(/_(normal|bigger|mini|x96|200x200|400x400)(\.\w+)(\?.*)?$/, '_400x400$2') };
+    for (const a of page.findAll('[data-testid=primaryColumn] a[href$="/photo"]')) {
+      if ((a.attr('href') || '').toLowerCase() !== `/${handle.toLowerCase()}/photo`) continue;
+      const img = a.find('img[src*="/profile_images/"]');
+      const src = img && img.attr('src');
+      if (src) return { handle, img, url: src.replace(/_(normal|bigger|mini|x96|200x200|400x400)(\.\w+)(\?.*)?$/, '_400x400$2') };
     }
     return { handle, url: null };
   };
-  const songInPicture = (url) => new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
+  // (the picture again at 400×400 through image-variants, its pixels read where X's image server allows it; its
+  // natural size measured by putting it on the page for a moment, unseen)
+  const songInPicture = (pageImg) => new Promise((resolve, reject) => {
+    let img;
+    try { img = trif.imageVariant(pageImg, { pixels: true }); } catch (e) { reject(e); return; }
+    img.on('load', () => {
       try {
-        const W = img.naturalWidth, H = img.naturalHeight, c = document.createElement('canvas');
-        c.width = W; c.height = H;
-        const g = c.getContext('2d', { willReadFrequently: true });
+        for (const [k, v] of [['position', 'absolute'], ['visibility', 'hidden'], ['left', '-10000px'], ['top', '0'], ['width', 'auto'], ['height', 'auto'], ['max-width', 'none'], ['max-height', 'none']]) img.style(k, v);
+        page.root.append(img);
+        const W = img.offsetWidth, H = img.offsetHeight;
+        img.remove();
+        const c = page.create('canvas');
+        c.setAttr('width', String(W)); c.setAttr('height', String(H));
+        const g = c.canvas();
         g.drawImage(img, 0, 0);
         const first = PicCode.decode(SONG_CORNERS[0], greyReader(g, W, H, SONG_CORNERS[0]));
         if (!first) { resolve(null); return; }
@@ -1695,16 +1817,15 @@
         const got = PicCode.gather([first, ...rest], PicCode.KIND.song);
         resolve(got ? Uint8Array.from(got.payload) : null);
       } catch (e) { reject(e); }
-    };
-    img.onerror = () => reject(new Error('the picture could not be loaded'));
-    img.src = url;
+    });
+    img.on('error', () => reject(new Error('the picture could not be loaded')));
   });
   async function loadFromPicture() {
     const p = openProfilePicture();
     if (!p) { ui.status = 'Open a profile first: its picture’s tune loads here.'; render(); return; }
     if (!p.url) { ui.status = `No profile picture found for @${p.handle} on this page.`; render(); return; }
     let bytes;
-    try { bytes = await songInPicture(p.url); } catch (e) { ui.status = `Couldn’t read @${p.handle}’s picture: ${e.message}`; render(); return; }
+    try { bytes = await songInPicture(p.img); } catch (e) { ui.status = `Couldn’t read @${p.handle}’s picture: ${e.message}`; render(); return; }
     if (!bytes) { ui.status = `@${p.handle}’s picture has no tune in it.`; render(); return; }
     let got;
     try { got = C.decode(bytes); } catch (e) { ui.status = `@${p.handle}’s tune couldn’t be read: ${e.message}`; render(); return; }
@@ -1713,96 +1834,96 @@
     render();
   }
 
-  const kbd = (t) => el('kbd', '', t);
+  const kbd = (t) => el('kbd', 'tcp-kbd', t);
   function renderLane(ref) {
     const ch = ref.L.ch, lane = curLane(ch), inst = instFor(ch);
-    ref.layer.textContent = '';
+    ref.layer.txt = '';
     for (const n of lane) {
       const d = el('div', 'tcp-n');
-      d.style.left = `${GUT + n.row * CW + 1}px`;
-      d.style.width = `${n.len * CW - 2}px`;
-      if (ref.drums) { d.style.top = `${(7 - n.drum) * DH + 2}px`; d.style.height = `${DH - 4}px`; }
+      d.css.left = `${GUT + n.row * CW + 1}px`;
+      d.css.width = `${n.len * CW - 2}px`;
+      if (ref.drums) { d.css.top = `${(7 - n.drum) * DH + 2}px`; d.css.height = `${DH - 4}px`; }
       else {
-        d.style.top = `${(P - 1 - n.pitch) * RH}px`; d.style.height = `${RH - 1}px`;
-        if (inst) d.style.opacity = String(0.35 + (0.65 * (n.vol ?? inst.vol)) / 15);
+        d.css.top = `${(P - 1 - n.pitch) * RH}px`; d.css.height = `${RH - 1}px`;
+        if (inst) d.css.opacity = String(0.35 + (0.65 * (n.vol ?? inst.vol)) / 15);
       }
       ref.layer.append(d);
     }
     // the row lines: a bar line at each bar, a lighter one on each beat
-    ref.roll.style.width = `${GUT + song.rows * CW}px`;
+    ref.roll.css.width = `${GUT + song.rows * CW}px`;
     while (ref.cols.length < song.rows) { const col = el('div', 'tcp-col'); ref.layer.before(col); ref.cols.push(col); }
     while (ref.cols.length > song.rows) ref.cols.pop().remove();
     const bar = song.beats * song.rpb;
-    ref.cols.forEach((c, i) => { c.style.left = `${GUT + i * CW}px`; c.classList.toggle('tcp-barl', i % bar === 0); c.classList.toggle('tcp-beat', i % bar !== 0 && i % song.rpb === 0); });
-    ref.cur.style.left = `${GUT + ui.cursor * CW}px`;
-    ref.cur.style.width = `${CW}px`;
+    ref.cols.forEach((c, i) => { c.css.left = `${GUT + i * CW}px`; c.cl.toggle('tcp-barl', i % bar === 0); c.cl.toggle('tcp-beat', i % bar !== 0 && i % song.rpb === 0); });
+    ref.cur.css.left = `${GUT + ui.cursor * CW}px`;
+    ref.cur.css.width = `${CW}px`;
     ref.box.toggleAttribute('data-sel', ui.lane === ch);
     ref.box.toggleAttribute('data-muted', ui.muted.has(ch));
-    ref.mute.setAttribute('aria-pressed', String(ui.muted.has(ch)));
+    ref.mute.setA('aria-pressed', String(ui.muted.has(ch)));
   }
-  let dragFrom = -1;
+  let dragFrom = -1, tempoFocused = false;
   function render() {
     if (!panel) return;
-    R.play.textContent = playing() ? '■ Stop' : '▶ Play';
+    R.play.txt = playing() ? '■ Stop' : '▶ Play';
     R.loop.set(ui.loop);
-    if (document.activeElement !== R.tempo) R.tempo.value = String(song.tempo);
+    if (!tempoFocused) R.tempo.value = String(song.tempo);
     R.rpb.value = String(song.rpb);
     R.len.value = String(ui.len);
     // the time signature (one from elsewhere that isn't on the list gets its own entry), what fits, the bars
     const meter = `${song.beats}/${song.unit}`;
-    if (![...R.meter.options].some((o) => o.value === meter)) { const o = el('option', '', meter); o.value = meter; R.meter.append(o); }
-    for (const o of R.meter.options) { const [b] = o.value.split('/').map(Number); o.disabled = !fits(b, 1); }
+    if (!R.meter.all('option').some((o) => o.value === meter)) { const o = el('option', '', meter); o.value = meter; R.meter.append(o); }
+    // (a meter that doesn't fit at these rows per beat can't be greyed out in the list: a mod can't disable an option; picking it says why, as setMeter does)
     R.meter.value = meter;
     R.bars.set(barsNow());
-    R.bars.querySelectorAll('button')[1].disabled = !fits(song.beats, 2);
+    R.bars.all('button')[1].disabled = !fits(song.beats, 2);
     ui.cursor = Math.min(ui.cursor, song.rows - 1);
     // the grid's columns, and the panel as wide as its lanes need
     CW = colWidth(song.rows);
-    panel.style.width = `${PANEL_W + Math.max(0, song.rows * CW - 16 * 22)}px`;
-    if (panel.style.left && panel.isConnected && panel.getBoundingClientRect().right > innerWidth - 8) setPos(panel.offsetLeft, panel.offsetTop);
+    panel.css.width = `${PANEL_W + Math.max(0, song.rows * CW - 16 * 22)}px`;
+    if (panel.css.left && panel.isConnected && panel.rectOf().right > page.width - 8) setPos(panel.offsetLeft, panel.offsetTop);
     // pattern tabs
-    R.tabs.textContent = '';
+    R.tabs.txt = '';
     song.patterns.forEach((_, i) => {
       const b = btn('tcp-tab', label(i), `Edit pattern ${label(i)}`, () => { ui.pat = i; render(); });
-      b.setAttribute('aria-pressed', String(i === ui.pat));
+      b.setA('aria-pressed', String(i === ui.pat));
       R.tabs.append(b);
     });
     R.add.disabled = R.copy.disabled = song.patterns.length >= C.MAX_PATTERNS;
     R.del.disabled = song.patterns.length <= 1;
     R.tabs.append(R.add, R.copy, R.del);
     // the order strip (drag a chip to move it, right-click to remove it)
-    R.order.textContent = '';
+    R.order.txt = '';
     R.chips = song.order.map((pi, i) => {
       const b = btn('tcp-o', label(pi), `Bar ${i + 1}: pattern ${label(pi)}. Click to edit it and play from here, drag to move, right-click to remove`, () => { ui.from = i; ui.pat = pi; render(); });
       b.draggable = true;
       b.toggleAttribute('data-sel', i === ui.from);
       b.toggleAttribute('data-cur', pi === ui.pat);
       const removeBar = () => { if (song.order.length > 1) edit(() => { song.order.splice(i, 1); ui.from = Math.min(ui.from, song.order.length - 1); }); };
-      b.addEventListener('contextmenu', (e) => { e.preventDefault(); removeBar(); });
+      b.listen('contextmenu', (e) => { e.preventDefault(); removeBar(); });
       // (and a ✕ on the chip, showing on hover: takes this bar out of the song; the pattern itself stays.
       // Not on the last bar left: a song needs one)
       if (song.order.length > 1) {
         const x = el('span', 'tcp-o-x', '×');
         x.title = 'Take this bar out of the song (the pattern stays)';
-        x.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); removeBar(); });
-        x.addEventListener('pointerdown', (e) => e.stopPropagation());
+        x.listen('click', (e) => { e.stopPropagation(); e.preventDefault(); removeBar(); });
+        x.listen('pointerdown', (e) => e.stopPropagation());
         b.append(x);
       }
-      b.addEventListener('dragstart', (e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', label(pi)); });
-      b.addEventListener('dragover', (e) => { if (dragFrom >= 0) { e.preventDefault(); b.classList.add('tcp-over'); } });
-      b.addEventListener('dragleave', () => b.classList.remove('tcp-over'));
-      b.addEventListener('drop', (e) => {
+      b.listen('dragstart', (e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', label(pi)); });
+      b.listen('dragover', (e) => { if (dragFrom >= 0) { e.preventDefault(); b.cl.add('tcp-over'); } });
+      b.listen('dragleave', () => b.cl.remove('tcp-over'));
+      b.listen('drop', (e) => {
         e.preventDefault();
         const from = dragFrom;
         dragFrom = -1;
         if (from < 0 || from === i) { render(); return; }
         edit(() => { const [x] = song.order.splice(from, 1); song.order.splice(from < i ? i - 1 : i, 0, x); ui.from = from < i ? i - 1 : i; });
       });
-      b.addEventListener('dragend', () => { dragFrom = -1; });
+      b.listen('dragend', () => { dragFrom = -1; });
       R.order.append(b);
       return b;
     });
-    R.place.textContent = `+ ${label(ui.pat)}`;
+    R.place.txt = `+ ${label(ui.pat)}`;
     R.place.disabled = song.order.length >= C.MAX_ORDER;
     R.order.append(R.place);
     // lanes and their settings
@@ -1813,7 +1934,7 @@
       if (ref.pulse) {
         const i = instFor(ch);
         ref.duty.set(i.duty);
-        ref.vol.value = String(i.vol); ref.volOut.textContent = String(i.vol);
+        ref.vol.value = String(i.vol); ref.volOut.txt = String(i.vol);
         ref.decay.value = String(i.decay);
         const sw = SWEEPS.findIndex((s) => JSON.stringify(s[1]) === JSON.stringify(i.sweep));
         ref.sweep.value = sw >= 0 ? String(sw) : 'custom';
@@ -1821,10 +1942,10 @@
         const nz = song.inst.noise, k = nz.kit[ui.drum];
         const kit = KITS.findIndex((x) => JSON.stringify(x[1]) === JSON.stringify(nz.kit));
         ref.kit.value = kit >= 0 ? String(kit) : 'custom';
-        ref.vol.value = String(nz.vol); ref.volOut.textContent = String(nz.vol);
-        ref.drumName.textContent = C.DRUM_NAMES[ui.drum];
+        ref.vol.value = String(nz.vol); ref.volOut.txt = String(nz.vol);
+        ref.drumName.txt = C.DRUM_NAMES[ui.drum];
         ref.mode.set(k[1]);
-        ref.period.value = String(k[0]); ref.periodOut.textContent = String(k[0]);
+        ref.period.value = String(k[0]); ref.periodOut.txt = String(k[0]);
         ref.drumLabels.forEach((l, d) => l.toggleAttribute('data-sel', d === ui.drum));
       }
     }
@@ -1832,15 +1953,15 @@
     let bytes = null;
     try { bytes = C.encode(song); } catch (e) { ui.status = e.message; }
     const n = bytes ? bytes.length : 0, room = TUNE_ROOM.BYTES, k = TUNE_ROOM.corners(n);
-    R.mfill.style.width = `${Math.min(100, (100 * n) / room)}%`;
-    R.mfill.style.setProperty('--m', n <= room ? '#2f9e44' : '#e0453a');
-    R.mtext.textContent = '';
-    R.mtext.append(el('b', '', `${n} bytes`), n <= room ? ` · uses ${k} of ${TUNE_ROOM.CORNERS} corners · ${(room - n).toLocaleString('en')} to spare` : ` · ${(n - room).toLocaleString('en')} too many for a picture`);
+    R.mfill.css.width = `${Math.min(100, (100 * n) / room)}%`;
+    R.mfill.css.setProperty('--m', n <= room ? '#2f9e44' : '#e0453a');
+    R.mtext.txt = '';
+    R.mtext.append(el('b', '', `${n} bytes`), n <= room ? ` · uses ${k} of ${TUNE_ROOM.CORNERS} corners · ${fmt(room - n)} to spare` : ` · ${fmt(n - room)} too many for a picture`);
     // footer
     const now = bytes && C.toBase64(bytes);
     R.undo.disabled = !undo.length;
-    R.status.textContent = ui.status || (!saved ? 'The demo tune. Save keeps your own.' : now === saved ? 'Saved.' : 'Not saved yet.');
-    R.keys.textContent = '';
+    R.status.txt = ui.status || (!saved ? 'The demo tune. Save keeps your own.' : now === saved ? 'Saved.' : 'Not saved yet.');
+    R.keys.txt = '';
     R.keys.append(R.lenBox);
     if (ui.lane === 'noise') R.keys.append('Keys: ', kbd('A'), '–', kbd('K'), ' drums');
     else R.keys.append('Keys: ', kbd('A'), kbd('W'), kbd('S'), kbd('E'), kbd('D'), '… piano from ', el('b', '', `C${ui.oct.get(ui.lane)}`), ' · ', kbd('Z'), kbd('X'), ' octave');
@@ -1848,12 +1969,12 @@
   }
   // the playhead, while playing
   function frame() {
-    if (!panel || !playing()) { for (const ref of lanes) ref.ph.style.display = 'none'; if (R.chips) for (const c of R.chips) c.removeAttribute('data-playing'); return; }
+    if (!panel || !playing()) { for (const ref of lanes) ref.ph.css.display = 'none'; if (R.chips) for (const c of R.chips) c.removeA('data-playing'); return; }
     const pos = player.position();
     for (const ref of lanes) {
       const show = !!pos && pos.pi === ui.pat;
-      ref.ph.style.display = show ? 'block' : 'none';
-      if (show) ref.ph.style.left = `${GUT + (pos.row + clamp((actx.currentTime - pos.t) / pos.rd, 0, 1)) * CW}px`;
+      ref.ph.css.display = show ? 'block' : 'none';
+      if (show) ref.ph.css.left = `${GUT + (pos.row + clamp((actx.now - pos.t) / pos.rd, 0, 1)) * CW}px`;
     }
     if (R.chips) R.chips.forEach((c, i) => c.toggleAttribute('data-playing', !!pos && pos.o === i));
     requestAnimationFrame(frame);
@@ -1878,17 +1999,17 @@
     } catch {} // (a song that can't be encoded yet: kept at the last good one)
   }
   function autosave() { clearTimeout(autoT); autoT = setTimeout(flushSave, 300); }
-  addEventListener('pagehide', flushSave);
-  addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+  page.on('pagehide', flushSave);
+  page.on('visibilitychange', () => { if (page.visibilityState === 'hidden') flushSave(); });
   const setPos = (left, top) => {
-    panel.style.left = `${Math.round(clamp(left, 8, Math.max(8, innerWidth - panel.offsetWidth - 8)))}px`;
-    panel.style.top = `${Math.round(clamp(top, 8, Math.max(8, innerHeight - 80)))}px`;
-    panel.style.right = 'auto';
+    panel.css.left = `${Math.round(clamp(left, 8, Math.max(8, page.width - panel.offsetWidth - 8)))}px`;
+    panel.css.top = `${Math.round(clamp(top, 8, Math.max(8, page.height - 80)))}px`;
+    panel.css.right = 'auto';
     fitHeight();
   };
   // (never past the window's bottom: the panel scrolls instead)
-  const fitHeight = () => { if (panel) panel.style.maxHeight = `${Math.max(160, innerHeight - panel.getBoundingClientRect().top - 8)}px`; };
-  addEventListener('resize', () => { if (ui.open) { const r = panel.getBoundingClientRect(); if (panel.style.left) setPos(r.left, r.top); else fitHeight(); } });
+  const fitHeight = () => { if (panel) panel.css.maxHeight = `${Math.max(160, page.height - panel.rectOf().top - 8)}px`; };
+  page.on('resize', () => { if (ui.open) { const r = panel.rectOf(); if (panel.css.left) setPos(r.left, r.top); else fitHeight(); } });
   // A note lane's window: the piano's reach in its octave (C up to the E above the next C, the keys A … ;),
   // fixed there. Each note of the pattern on show that's above or below it gets a small ▲ or ▼ at that edge,
   // centred on the note's very start (its left edge); the octave buttons dim at the ends of the lane's range.
@@ -1896,12 +2017,12 @@
   function placeWindow(ref) {
     if (ref.drums) return;
     const ch = ref.L.ch, low = winLow(ch), high = low + WIN - 1;
-    ref.scroll.scrollTop = (P - 1 - high) * RH;
-    ref.marks.textContent = '';
+    ref.roll.css.marginTop = `${-(P - 1 - high) * RH}px`; // (the sandbox only reads an element's scroll: the roll moves up instead)
+    ref.marks.txt = '';
     for (const n of curLane(ch)) {
       if (n.pitch >= low && n.pitch <= high) continue;
       const up = n.pitch > high, m = el('div', up ? 'tcp-mark tcp-mup' : 'tcp-mark tcp-mdown', up ? '▲' : '▼');
-      m.style.left = `${GUT + n.row * CW + 1 - 4.5}px`; m.style.width = '9px'; // (its point right on the note's very start, its left edge)
+      m.css.left = `${GUT + n.row * CW + 1 - 4.5}px`; m.css.width = '9px'; // (its point right on the note's very start, its left edge)
       m.title = `${noteName(C.BASE[ch] + n.pitch)}, ${up ? 'above' : 'below'}`;
       ref.marks.append(m);
     }
@@ -1924,25 +2045,25 @@
   function openPanel() {
     if (!panel) build();
     ui.open = true;
-    document.documentElement.append(panel);
+    ROOT.append(panel);
     render();
     // (a panel taken out of the page forgets its scroll positions: put back where each lane was)
     if (!ui.centred) { ui.centred = true; centre(); } else lanes.forEach(placeWindow);
     try { const pos = JSON.parse(store.get(POS) || 'null'); if (pos) setPos(pos.left, pos.top); } catch { /* none */ }
     fitHeight();
-    panel.focus({ preventScroll: true });
+    focusPanel();
   }
   function closePanel() {
     if (player && player.playing) player.stop();
     ui.open = false;
-    if (panel) { ui.scrolls = lanes.map((ref) => ref.scroll.scrollTop); panel.remove(); }
+    if (panel) panel.remove();
   }
 
   // --- keys: while the panel is open, and never while you're typing in a field (X's or the panel's) ---
   const typing = (e) => {
+    if (e.code == null) return true; // (TRIF hides the key: it was typed into a field or an editor)
     const t = (e.composedPath && e.composedPath()[0]) || e.target;
-    if (!t || t.nodeType !== 1) return false;
-    if (t.isContentEditable) return true;
+    if (!t) return false;
     if (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return true;
     if (t.tagName === 'INPUT') return !/^(range|checkbox|radio|button|submit|reset|color|file)$/i.test(t.type || 'text');
     return !!(t.closest && t.closest('[role=textbox],[contenteditable=""],[contenteditable=true]'));
@@ -1974,36 +2095,48 @@
     return true;
   }
   const taken = new Set();
-  addEventListener('keydown', (e) => {
-    if (typing(e)) return;
+  let tookKeyUp = -1e9; // (when the last taken key came up: see btn)
+  // (the panel's keys go to one of its own buttons: TRIF can tell a key there wasn't typed into anything)
+  const focusPanel = () => { try { if (R.play && R.play.isConnected) R.play.focusIt(); } catch { /* not now */ } };
+  trif.block('keydown', (ev) => {
+    const e = evOf(ev);
+    if (typing(e)) return false;
     let took = true;
     if (e.code === 'KeyT' && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) { if (ui.open) closePanel(); else openPanel(); }
     else if (!ui.open) took = false;
     else if (e.metaKey || e.ctrlKey) { if (e.code === 'KeyZ' && !e.shiftKey) doUndo(); else took = false; }
     else if (e.altKey) took = false;
     else took = key(e);
-    if (took) { taken.add(e.code); e.preventDefault(); e.stopImmediatePropagation(); }
-  }, true);
-  const swallow = (e) => {
-    if (!taken.has(e.code)) return;
-    e.preventDefault(); e.stopImmediatePropagation();
-    if (e.type === 'keyup') taken.delete(e.code);
+    // (kept from X, and its default (a page scroll on Space or an arrow) stopped too, as the free version did)
+    if (took) { taken.add(e.code); e.preventDefault(); }
+    return took;
+  });
+  const swallow = (ev) => {
+    if (!taken.has(ev.code)) return false;
+    if (ev.type === 'keyup') { taken.delete(ev.code); tookKeyUp = performance.now(); }
+    ev.preventDefault();
+    return true;
   };
-  addEventListener('keypress', swallow, true);
-  addEventListener('keyup', swallow, true);
+  trif.block('keypress', swallow);
+  trif.block('keyup', swallow);
 
   // --- the button in Edit profile (x.com/settings/profile): beside Save, or in the corner if Save isn't found ---
   const opener = btn('', '♪ Tune', 'Compose a tune (Alt+Shift+T anywhere on X)', () => { if (ui.open) closePanel(); else openPanel(); });
   opener.id = 'tcp-open';
   const tick = () => {
-    if (!location.pathname.startsWith('/settings/profile')) { opener.remove(); return; }
-    const saveBtn = document.querySelector('[data-testid=Profile_Save_Button]');
+    if (!new URL(page.url).pathname.startsWith('/settings/profile')) { opener.remove(); return; }
+    const saveBtn = E.of(page.find('[data-testid=Profile_Save_Button]'));
+    let placed = false;
     if (saveBtn) {
-      opener.classList.remove('tcp-float');
-      if (saveBtn.previousElementSibling !== opener) saveBtn.before(opener);
-    } else if (!opener.classList.contains('tcp-float') || !opener.isConnected) {
-      opener.classList.add('tcp-float');
-      document.documentElement.append(opener);
+      try {
+        if (saveBtn.prev !== opener) saveBtn.before(opener);
+        opener.cl.remove('tcp-float');
+        placed = true;
+      } catch (e) { /* (inside a form, where a mod's button can't go: in the corner instead) */ }
+    }
+    if (placed) { /* beside Save */ } else if (!opener.cl.contains('tcp-float') || !opener.isConnected) {
+      opener.cl.add('tcp-float');
+      ROOT.append(opener);
     }
   };
   setInterval(tick, 800);
@@ -2013,13 +2146,11 @@
   // (Alt+Shift+T is taken by some browsers.) Right in the corner.
   const corner = btn('', '♪', 'Tune Composer', () => { if (ui.open) closePanel(); else openPanel(); });
   corner.id = 'tcp-corner';
-  corner.setAttribute('aria-label', 'Tune Composer');
-  const cornerCss = document.createElement('style');
-  cornerCss.textContent = `
-    #tcp-corner { all: initial; position: fixed; right: 10px; bottom: 10px; z-index: 2147483646; width: 40px; height: 40px; box-sizing: border-box;
+  corner.setA('aria-label', 'Tune Composer');
+  trif.css(`
+    #trif-box-tcp-corner { all: initial; position: fixed; right: 10px; bottom: 10px; z-index: 2147483646; width: 40px; height: 40px; box-sizing: border-box;
       display: flex; align-items: center; justify-content: center; border-radius: 50%; cursor: pointer;
       background: rgb(15 20 25 / .75); border: 1px solid rgb(255 255 255 / .35); color: #fff;
       font: 700 20px/1 -apple-system, system-ui, sans-serif; box-shadow: 0 2px 8px rgb(0 0 0 / .3); }
-    #tcp-corner:hover { background: rgb(15 20 25 / .9); border-color: rgb(255 255 255 / .6); }  `;
-  document.documentElement.append(cornerCss, corner);
-})();
+    #trif-box-tcp-corner:hover { background: rgb(15 20 25 / .9); border-color: rgb(255 255 255 / .6); }  `);
+  ROOT.append(corner);

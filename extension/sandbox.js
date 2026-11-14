@@ -1835,7 +1835,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       let rest = u.pathname + u.search;
       for (const ch of rules[0].slice(1)) { const i = ch.indexOf('→'); const from = ch.slice(0, i), to = ch.slice(i + 1); if (rest.includes(from)) rest = rest.replace(from, to); }
       const abs = `${u.origin}${rest}`;
-      if (abs === u.href) fail('the header\'s change doesn\'t apply to that picture\'s address');
+      // (a picture that's already the size the header asks for (_400x400 when it changes _normal to _400x400):
+      // the same address again, which with pixels is fetched with CORS so they can be read: no new address,
+      // nothing the header doesn't allow. Tim, 11-14: his X profile picture is shown at 400×400, so Profile
+      // Styler and Tune Composer couldn't read it.)
+      const already = rules[0].slice(1).some((ch) => { const to = ch.slice(ch.indexOf('→') + 1); return to && rest.includes(to); });
+      if (abs === u.href && !already) fail('the header\'s change doesn\'t apply to that picture\'s address');
       const v = D.createElement('img');
       created.add(v);
       variantImgs.add(v);

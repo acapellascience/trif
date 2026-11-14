@@ -3184,7 +3184,7 @@ process.exitCode = 1;
       for (const [k, v] of Object.entries(N || {})) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
       if (!N || Object.keys(N).length < 14) problems.push(`the undeclared mod's results: ${JSON.stringify(N)}`);
       const exact = { 'B3 the site\'s key, read and changed': 'ok: v1 v2 s1 c1', 'B3 the keys it may see': 'ok: e2e-wide-key', 'B3 its old settings, brought over once': 'ok: {"zoom":3}',
-        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
+        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B10 a picture already the size asked for, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
         'B6 a link the page shows, with a parameter taken out': 'ok: /wideb.html?a=1' };
       for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]} (wanted ${v})`);
       const reqs = this.o.servers.requests.map((q) => q.url);

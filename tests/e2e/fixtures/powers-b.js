@@ -3,7 +3,7 @@
 // @match       *://127.0.0.1/wideb.html*
 // @boxed
 // @powers      block-events keydown click(#pb), page-events e2e-wide-reset, site-storage local:e2e-wide-key session:e2e-wide-s cookie:e2e_c
-// @powers      rewrite-requests E2eOp variables.flag=false mode=loud→quiet variables.added=true, image-variants 127.0.0.1 e2e-wide.png→e2e-wide.png?size=big
+// @powers      rewrite-requests E2eOp variables.flag=false mode=loud→quiet variables.added=true, image-variants 127.0.0.1 e2e-wide.png→e2e-wide.png?size=big e2e-small.→e2e-big.
 // @powers      embeds www.youtube.com/embed, local-fonts, preload, edit-uploads, site-data e2eData, media, go-to reload /wideb.html?mods=[red|blue]
 // @migrate     localStorage e2e-old-setting
 // @run-at      document-start
@@ -69,6 +69,12 @@ t('B6 another site\'s address with a parameter taken out: TRIF keeps what the si
   // ---- B10 image-variants
   t('B10 another size of the page\'s picture, pixels read', () => new Promise((resolve, reject) => {
     const v = trif.imageVariant(page.find('#pimg'), { pixels: true });
+    v.on('load', () => { try { const c = page.create('canvas'); c.setAttr('width', '2'); c.setAttr('height', '2'); const g = c.canvas(); g.drawImage(v, 0, 0, 2, 2); resolve(`${typeof g.getImageData(0, 0, 1, 1).data[3]}`); } catch (e) { reject(e); } });
+    v.on('error', () => reject(new Error('the variant didn\'t load')));
+  }));
+  // (a picture the page already shows at the size the header asks for: the same address, its pixels read)
+  t('B10 a picture already the size asked for, pixels read', () => new Promise((resolve, reject) => {
+    const v = trif.imageVariant(page.find('#pimg-big'), { pixels: true });
     v.on('load', () => { try { const c = page.create('canvas'); c.setAttr('width', '2'); c.setAttr('height', '2'); const g = c.canvas(); g.drawImage(v, 0, 0, 2, 2); resolve(`${typeof g.getImageData(0, 0, 1, 1).data[3]}`); } catch (e) { reject(e); } });
     v.on('error', () => reject(new Error('the variant didn\'t load')));
   }));

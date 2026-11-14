@@ -151,6 +151,7 @@ document.addEventListener('e2e-wide-undeclared', () => __signals.push('undeclare
 <p><a id="yt" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5">a video</a> <a id="shown-q" href="/wideb.html?a=1&b=2">a link with a query</a></p>
 <input id="file" type="file" accept="image/*"> <video id="vid" muted width="10" height="10"></video>
 <div style="height: 4000px"></div><img id="lazy" src="/e2e-wide.png?lazy=1" loading="lazy" width="4" height="4" alt="">
+<img id="pimg-big" src="/e2e-big.png" width="4" height="4" alt="">
 <script>
 window.__api = async () => (await fetch('/e2e-rw/E2eOp?mode=loud&variables=' + encodeURIComponent(JSON.stringify({ flag: true, other: 1 })), { method: 'POST', body: JSON.stringify({ operationName: 'E2eOp', variables: { flag: true } }) })).text();
 window.__xhr = () => new Promise((res) => { const x = new XMLHttpRequest(); x.open('POST', '/e2e-rw/E2eOp'); x.onload = () => res(x.responseText); x.send(JSON.stringify({ variables: { flag: true } })); });
@@ -485,6 +486,8 @@ document.getElementById('cc').addEventListener('click', () => d.setAttribute('da
 document.addEventListener('combo-ping', (e) => d.setAttribute('data-pings', JSON.stringify([...JSON.parse(d.getAttribute('data-pings')), e.detail])));
 </script>`));
     if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
+    // (a picture already the size powers-b.js's header asks for: B10's same-address variant)
+    if (u.pathname === '/e2e-big.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
     if (u.pathname === '/fixes.html') return send(200, 'text/html; charset=utf-8', FIXES_PAGE(tls.address().port));
     // (site-data: an address and the same address with a parameter out; JSON spaced as no serializer writes it)
     if (u.pathname === '/e2e-fix-urls') return send(200, 'application/json', JSON.stringify({ long: 'https://127.0.0.1/watch?v=1&si=e2e', short: 'https://127.0.0.1/watch?v=1' }));

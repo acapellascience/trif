@@ -413,7 +413,7 @@ button.undo:hover { background: #2cb985; }
 
   /** The bar's element, while it shows (the e2e reads it). */
   const state = () => (bar ? { selector: bar.sel, mode: bar.mode, like: bar.like ? bar.like.matches : 0, hidden: bar.hidden.length, wider: !bar.wider.disabled,
-    buttons: [bar.wider, bar.all, bar.every, bar.undo].filter((x) => !x.hidden).map((x) => x.textContent), previewing: bar.previewing,
+    buttons: [bar.wider, bar.all, bar.every, bar.undo].filter((x) => !x.hidden).map((x) => x.textContent), previewing: bar.previewing, busy: bar.busy,
     marks: previewBox ? previewBox.children.length : 0, error: bar.err.hidden ? '' : bar.err.textContent } : null);
 
   /** The bar's buttons, for the e2e (a click it makes isn't the user's, so it would be ignored). Only TRIF's own world reaches this. */

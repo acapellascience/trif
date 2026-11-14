@@ -2633,6 +2633,7 @@ process.exitCode = 1;
       await waitFor('Everywhere saved', () => (JSON.stringify(listOf()) === JSON.stringify(['div[aria-label="Promoted"]']) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`Everywhere's file: ${JSON.stringify(listOf())}`));
       want('the ads after Hide them', await this.shown(win, '.promo'), [false, false]);
       // Escape: the bar goes, the ads stay hidden; after a reload, by the mod itself
+      await waitFor('the bar done saving', async () => { const b = await this.hideBar(win); return b && !b.busy ? b : null; }, { timeoutMs: 5000, intervalMs: 150 }).catch(() => null);
       await this.ext(`async (tabId) => { await chrome.scripting.executeScript({ target: { tabId }, func: () => { dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); globalThis.__trifHide.close(); return 1; } }); }`, [win.tabId]);
       want('the bar after Escape', await this.hideBar(win), null);
       await go('?e2e=hide2');
@@ -2663,8 +2664,9 @@ process.exitCode = 1;
     } catch (e) {
       throw problems.length && e.message !== problems.join('\n') ? new Error([...problems, e.message].join('\n')) : e;
     } finally {
-      try { fs.unlinkSync(file); } catch { /* gone */ }
       await this.ext(`async (tabId) => { await chrome.scripting.executeScript({ target: { tabId }, func: () => { globalThis.__trifHide?.close?.(); return 1; } }); }`, [win.tabId]).catch(() => {});
+      await sleep(1500); // (the helper's own sync of the last change first: a file gone mid-scan is an error in its log)
+      try { fs.unlinkSync(file); } catch { /* gone */ }
     }
   }
 

@@ -1414,7 +1414,7 @@ class Scenario {
     const d = this.d;
     const id = 'www.google.com/dvd-logo';
     const on = await this.cli(['enable', id]);
-    if (on.code !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+    if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
     const url = `https://www.google.com:${this.o.servers.tlsPort}/`;
     const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: false })).id`, [url, win.windowId]);
     try {

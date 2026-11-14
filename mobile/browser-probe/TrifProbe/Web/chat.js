@@ -198,6 +198,40 @@
   }
   setInterval(watch, 700);
 
+  // The reply kept in view (Tim, 11-14): after a send, Claude scrolls the new message to the top of the
+  // conversation, with room below it for the reply; in a pane this short that left only the empty room in view,
+  // the reply and its "working" line above it. So: when the conversation's last message is wholly above what
+  // shows (nothing but space below everything), it's brought back to sit 60% of the way down. Never when the
+  // person has scrolled up to read (then the last message is below the view, not above it).
+  const MSGS = '[data-testid="user-message"], [data-is-streaming], .font-claude-response, [data-message-author-role]';
+  function scrollerOf(el) {
+    for (let n = el && el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
+      if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight + 4) return n;
+    }
+    return null;
+  }
+  function reveal() {
+    const all = document.querySelectorAll(MSGS);
+    const last = all[all.length - 1];
+    const sc = last && scrollerOf(last);
+    if (!sc) return;
+    const box = sc.getBoundingClientRect(), r = last.getBoundingClientRect();
+    if (r.height > 0 && r.bottom < box.top + 24) sc.scrollTop -= box.top + box.height * 0.6 - r.bottom;
+  }
+  setInterval(reveal, 700);
+
+  /** (development) Where things are: each scrolling element, the last message, the window. */
+  function metrics() {
+    const desc = (n) => n ? `${n.localName}${n.id ? `#${n.id}` : ''}${n.getAttribute('data-testid') ? `[data-testid=${n.getAttribute('data-testid')}]` : ''}.${String(n.className && n.className.baseVal !== undefined ? n.className.baseVal : n.className).split(/\s+/).slice(0, 4).join('.')}` : null;
+    const rect = (n) => { const r = n.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom), Math.round(r.height)]; };
+    const scrollers = [...document.querySelectorAll('*')].filter((n) => /(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight + 4)
+      .map((n) => ({ el: desc(n), rect: rect(n), scrollTop: Math.round(n.scrollTop), scrollHeight: n.scrollHeight, clientHeight: n.clientHeight }));
+    const all = document.querySelectorAll(MSGS);
+    const last = all[all.length - 1];
+    return JSON.stringify({ innerHeight, visual: window.visualViewport && Math.round(visualViewport.height), docScroll: Math.round((document.scrollingElement || document.documentElement).scrollTop),
+      messages: all.length, last: last && { el: desc(last), rect: rect(last), scroller: desc(scrollerOf(last)) }, scrollers }, null, 1);
+  }
+
   let queued = false;
   new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); }, 400); } })
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
@@ -205,6 +239,10 @@
 
   /** (development) The message box's surroundings, as HTML, to see how a chat builds its chips and buttons. */
   function dump() {
+    try { var m = metrics(); } catch (e) { m = String(e); }
+    return `<!-- ${m} -->\n` + dumpBox();
+  }
+  function dumpBox() {
     const ed = editor();
     let box = ed;
     for (let i = 0; box && i < 8; i++) box = box.parentElement;

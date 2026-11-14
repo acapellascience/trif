@@ -46,6 +46,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // (the chat page stays put in its frame: claude.ai and chatgpt.com scroll their conversation inside
         // themselves, so the web view's own scrolling only ever hid the top of the chat, after the keyboard
         // or a send moved it: Tim, 11-14)
+        // (development) `xcrun simctl spawn <device> notifyutil -p com.trif.probe.dumpchat`: the chat's layout and
+        // scroll positions to Documents/chat-dom.html, without a relaunch (dumpComposer)
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
+            guard let observer else { return }
+            let pane = Unmanaged<ClaudePane>.fromOpaque(observer).takeUnretainedValue()
+            Task { @MainActor in await pane.dumpComposer() }
+        }, "com.trif.probe.dumpchat" as CFString, nil, .deliverImmediately)
         let sv = webView.scrollView
         sv.isScrollEnabled = false
         sv.bounces = false
@@ -56,16 +63,39 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.isInspectable = true
+        // (the conversation the pane is on, kept, so the app reopens it: Tim, 11-14)
+        urlWatch = webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
+            let url = wv.url
+            Task { @MainActor in self?.remember(url) }
+        }
+    }
+
+    private var urlWatch: NSKeyValueObservation?
+    private func lastKey(_ s: ChatService) -> String { "lastChat.\(s.rawValue)" }
+    /// A conversation's address (claude.ai/chat/…, chatgpt.com/c/…), kept for its chat; nothing else is.
+    private func remember(_ url: URL?) {
+        guard let url, let home = URL(string: service.home), url.host == home.host,
+              url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return }
+        var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        c?.query = nil
+        c?.fragment = nil
+        if let s = c?.url?.absoluteString { UserDefaults.standard.set(s, forKey: lastKey(service)) }
+    }
+    /// Where the pane opens: the conversation it was last on, else a new one.
+    private var resumeURL: URL? {
+        UserDefaults.standard.string(forKey: lastKey(service)).flatMap(URL.init(string:)) ?? URL(string: service.home)
     }
 
     /// Loads Claude the first time the pane is shown (not before: the probe is useful without it).
     func start() {
-        guard !started, let url = URL(string: service.home) else { return }
+        guard !started, let url = resumeURL else { return }
         started = true
         webView.load(URLRequest(url: url))
     }
 
+    /// Start over: a new conversation (and the one kept forgotten).
     func home() {
+        UserDefaults.standard.removeObject(forKey: lastKey(service))
         if let url = URL(string: service.home) { webView.load(URLRequest(url: url)) }
     }
 
@@ -107,7 +137,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         UserDefaults.standard.set(s.rawValue, forKey: "chatService")
         report.log("claude", "switched to \(s.rawValue)")
         started = true
-        home()
+        if let url = resumeURL { webView.load(URLRequest(url: url)) }
     }
 
     /// Where the pane went, without what the address carries after ? (sign-in steps put secrets there).

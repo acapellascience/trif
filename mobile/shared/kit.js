@@ -88,6 +88,23 @@
     return null;
   }
 
+  /**
+   * The element's own name, wherever on the site it turns up (Tim, 11-14: "Everywhere on <site>"):
+   * {selector, how, matches} (matches: on this page), or null when it has none worth that: only a name someone
+   * chose (a test id, an aria-label, a custom element, a readable class), never a bare tag, a position, or a
+   * generic attribute (role, type, name, rel), which would find far more than meant.
+   */
+  function everywhere(el) {
+    if (!el || el.nodeType !== 1) return null;
+    for (const [part, how] of namesOf(el)) {
+      if (how === 'tag' || how === 'id') continue;
+      if (how === 'attribute' && !/\[(aria-label|itemprop)=/.test(part)) continue;
+      const n = count(part);
+      if (n >= 1) return { selector: part, how, matches: n };
+    }
+    return null;
+  }
+
   // ---- hiding --------------------------------------------------------------------------------------
   // Three ways to put a style rule into a page; the probes try each, since a page's own security policy can
   // refuse some of them. Here they're one call that says which way worked.
@@ -120,7 +137,9 @@
     const r = el.getBoundingClientRect();
     const s = selectorFor(el);
     const sim = similarTo(el);
+    const all = everywhere(el);
     return {
+      everywhere: all,
       tag: el.localName, text: textOf(el), selector: s && s.selector, how: s && s.how, matches: s && s.matches,
       similar: sim && sim.matches > 1 ? sim : null,
       rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
@@ -202,7 +221,27 @@
   }
   /** The chosen element's parent instead (the whole card, not the picture in it). */
   const wider = () => (chosenEl && chosenEl.parentElement && chosenEl.parentElement !== D.body ? mark(chosenEl.parentElement) : chosenEl ? describe(chosenEl) : null);
-  const unmark = () => { mark(null); };
+  // (the boxes over everything a selector finds, before hiding it everywhere: at most 200)
+  let previewBox = null;
+  function preview(selector) {
+    if (previewBox) { previewBox.remove(); previewBox = null; }
+    if (!selector) return 0;
+    let els = [];
+    try { els = [...D.querySelectorAll(selector)].slice(0, 200); } catch { return 0; }
+    previewBox = D.createElement('trif-probe-preview');
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const b = D.createElement('trif-probe-marker');
+      for (const [k, v] of [['position', 'fixed'], ['z-index', '2147483646'], ['pointer-events', 'none'], ['box-sizing', 'border-box'],
+        ['border', '3px solid #e5484d'], ['background', 'rgba(229, 72, 77, 0.18)'], ['border-radius', '6px'], ['display', 'block'],
+        ['left', `${r.left}px`], ['top', `${r.top}px`], ['width', `${r.width}px`], ['height', `${r.height}px`]]) b.style.setProperty(k, v, 'important');
+      previewBox.append(b);
+    }
+    D.documentElement.append(previewBox);
+    return els.length;
+  }
+  const unmark = () => { mark(null); preview(null); };
   /** The first element a selector finds, marked (for a selector that came from somewhere else: a chat, a model). */
   const pick = (selector) => { let el = null; try { el = D.querySelector(selector); } catch { return null; } return el ? mark(el) : null; };
 
@@ -252,5 +291,5 @@
     return changed;
   }
 
-  globalThis.__trifKit = { selectorFor, similarTo, hide, matchesOf, describe, outline, layout, compare, at, wider, unmark, pick, chosen: () => chosenEl, count };
+  globalThis.__trifKit = { selectorFor, similarTo, everywhere, preview, hide, matchesOf, describe, outline, layout, compare, at, wider, unmark, pick, chosen: () => chosenEl, count };
 })();

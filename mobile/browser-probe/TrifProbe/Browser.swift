@@ -19,6 +19,8 @@ struct Picked: Equatable {
     var matches: Int
     var similarSelector: String?
     var similarCount: Int
+    var everywhereSelector: String? = nil
+    var everywhereCount: Int = 0
     var from: String
 }
 
@@ -45,6 +47,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var picked: Picked?
     /// The last thing hidden, while it can be undone (the status strip's Undo: Tim, 11-14, hid a whole page).
     @Published var lastHide: HideRule?
+    /// Everywhere on <site>: its matches outlined on the page, waiting for Hide them.
+    @Published var previewing = false
     /// Set when something asks for the chat pane to open (Point TRIF at this); the app opens it.
     @Published var wantsChat = false
     @Published var modLink: ModLink?
@@ -287,7 +291,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         report.log("hidden", "\(host): \(selector) (named by \(how), from \(from))")
         installScripts()
         await applyRulesNow()
-        picked = nil
+        picked = nil; previewing = false
         _ = await call("globalThis.__trifKit && globalThis.__trifKit.unmark(); return 'ok';", in: Browser.trifWorld)
     }
 
@@ -385,7 +389,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         await point(text, crop)
     }
 
+    /// Everywhere on <site>, first tap: outline what it would hide on this page; the second hides it site-wide.
+    func previewEverywhere() async {
+        guard let s = picked?.everywhereSelector else { return }
+        _ = await call("globalThis.__trifKit.preview(sel); return 'ok';", ["sel": s], in: Browser.trifWorld)
+        previewing = true
+    }
+
     func cancelPick() async {
+        previewing = false
         picked = nil
         _ = await call("globalThis.__trifKit && globalThis.__trifKit.unmark(); return 'ok';", in: Browser.trifWorld)
     }
@@ -394,9 +406,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let error = result.error { status = "Couldn't look: \(error)"; picked = nil; return }
         guard let d = Browser.parse(result.text) as? [String: Any], let selector = d["selector"] as? String else { picked = nil; return }
         let similar = d["similar"] as? [String: Any]
+        let all = d["everywhere"] as? [String: Any]
+        previewing = false
         picked = Picked(tag: d["tag"] as? String ?? "", text: d["text"] as? String ?? "", selector: selector,
                         how: d["how"] as? String ?? "", matches: d["matches"] as? Int ?? 0,
-                        similarSelector: similar?["selector"] as? String, similarCount: similar?["matches"] as? Int ?? 0, from: from)
+                        similarSelector: similar?["selector"] as? String, similarCount: similar?["matches"] as? Int ?? 0,
+                        everywhereSelector: all?["selector"] as? String, everywhereCount: all?["matches"] as? Int ?? 0, from: from)
     }
 
     // MARK: the outline, and asking the phone's own model

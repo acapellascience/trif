@@ -219,6 +219,22 @@ struct PickedBar: View {
             Button("Point TRIF at this") { Task { await browser.pointToChat() } }
                 .buttonStyle(.bordered)
                 .font(.subheadline)
+            // (the element's own name, site-wide: outlined first, then hidden: Tim, 11-14)
+            if let all = picked.everywhereSelector {
+                Group {
+                    if browser.previewing {
+                        Button("Hide them") { Task { await browser.hide(all, how: "everywhere", from: picked.from) } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                    } else {
+                        Button("Everywhere on \(browser.host) (\(picked.everywhereCount) here)") { Task { await browser.previewEverywhere() } }
+                            .buttonStyle(.bordered)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                }
+                .font(.subheadline)
+            }
         }
         .padding(12)
         .background(Color(.secondarySystemBackground))

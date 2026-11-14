@@ -525,7 +525,10 @@ test('notes: their pictures and videos are served from the site (byte ranges for
   }
 });
 
-test('notes: site/src/notes-data.js is up to date with site/notes/ (node site/build-notes.js), and its text is the article\'s', async () => {
+// (building a note measures its videos with ffprobe: where there's none, as on CI's runner, this one skips, as
+// the tests that need an installed agent do)
+const HAS_FFPROBE = require('child_process').spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status === 0;
+test('notes: site/src/notes-data.js is up to date with site/notes/ (node site/build-notes.js), and its text is the article\'s', { skip: HAS_FFPROBE ? false : 'no ffprobe here (brew install ffmpeg)' }, async () => {
   const { buildNote, notesModule, OUT, NOTES_DIR, cleanInline } = await import('../site/build-notes.js');
   const slugs = fs.readdirSync(NOTES_DIR).filter((s) => fs.existsSync(path.join(NOTES_DIR, s, 'article.json')));
   const notes = [];

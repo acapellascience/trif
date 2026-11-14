@@ -874,11 +874,12 @@ test('a run never starts with private files in the workspace: they\'re moved fir
   assert.ok(!fs.existsSync(path.join(home, 'helper.log')));
   assert.ok(callFor(bin, 'MOVEDFIRST'));
   // Can't be moved (the private folder isn't writable): refused, the agent never starts.
-  fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
+  // (the private folder locked before the file appears: nothing can move it in between)
   fs.chmodSync(privDir(home), 0o500);
+  fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
   try {
     r = await extRequest(ext, 'agent.start', { ...START, prompt: 'NEVERSTARTS' });
-    assert.equal(r.ok, false);
+    assert.equal(r.ok, false, `started anyway: ${JSON.stringify(r)}; in the workspace: ${fs.readdirSync(home).join(', ')}; private: ${fs.readdirSync(privDir(home)).join(', ')}`);
     assert.match(r.error, /private files are in the workspace.*config\.json.*trif setup/);
     assert.ok(!callFor(bin, 'NEVERSTARTS'));
   } finally {

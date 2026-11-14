@@ -440,6 +440,16 @@ class Scenario {
 
   // ---- Tim's mods, site by site (helper/lib/preinstalled.js)
 
+  /** Upgrading: the sites the old setup added (SITES_ON, and timsrobot.com where the old release shipped its mods). */
+  upgradeAdded() {
+    return starterSites().filter((s) => SITES_ON.includes(s) || (this.oldShipped && this.oldShipped.has(s)));
+  }
+
+  /** The setup page's words for upgradeAdded(). */
+  upgradeAddedText() {
+    return this.upgradeAdded().includes('timsrobot.com') ? 'Google, X, Amazon, Instagram and timsrobot.com' : 'Google, X, Amazon and Instagram';
+  }
+
   /** The sites preinstalled.json says were added. */
   addedSites() {
     const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
@@ -473,8 +483,8 @@ class Scenario {
         const x = await this.waitSetup('Tim\'s mods ticked', (st) => st.steps[3] === 'done');
         const st = await this.starterStepState();
         const added = this.addedSites();
-        if (added.join() !== SITES_ON.join()) throw new Error(`added: ${added.join(', ')}`);
-        if (st.state !== 'Google, X, Amazon and Instagram') throw new Error(`the step says: ${st.state}`);
+        if (added.join() !== this.upgradeAdded().join()) throw new Error(`added: ${added.join(', ')}`);
+        if (st.state !== this.upgradeAddedText()) throw new Error(`the step says: ${st.state}`);
         return `ticked already: ${st.state} (${x.steps.join(',')})`;
       }
       await this.waitSetup('Tim\'s mods open', (st) => st.steps[3] === 'now');
@@ -637,6 +647,11 @@ class Scenario {
   async starterLinkCheck(win) {
     const r = this.r;
     const L = LINK_SITE[this.o.kind];
+    if (this.oldShipped && this.oldShipped.has(L.site)) {
+      // (the old release shipped them and its setup added them: there's nothing to offer)
+      this.r.note(`${L.name}: the old release's setup already added Tim's mods there, so no "Add Tim's mods" link to test`);
+      return;
+    }
     await r.check(`a site's panel: "Add Tim's mods for ${L.name}" adds them`, async () => {
       const url = `https://${L.host}:${this.o.servers.tlsPort}/`;
       const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
@@ -716,22 +731,33 @@ class Scenario {
       if (s.status !== 0) throw new Error(`setup exited ${s.status}:\n${s.out.split('\n').slice(-15).join('\n')}`);
     } else {
       const oldPkg = I.unpack(o.oldTgz, path.join(this.work, 'oldpkg'));
-      const s0 = I.runSetup(oldPkg, this.home, ['--browser', I.oldBrowserArg(oldPkg, browserArg)]);
+      // (the sites the old release shipped Tim's mods for: 0.2.5 to 0.2.7 had timsrobot.com's too, so its setup added them)
+      const oldSites = path.join(oldPkg, 'examples', 'sites');
+      this.oldShipped = new Set(fs.existsSync(oldSites) ? fs.readdirSync(oldSites).map((d) => siteOf(`${d}/x`)) : []);
+      // (a 0.2.x setup adds Tim's mods only when asked, the setup page asking site by site: --examples, as a
+      // user who added them all; earlier setups added them anyway)
+      const asksExamples = /OPTIONAL_VALUE_FLAGS[^\n]*--examples/.test(fs.readFileSync(path.join(oldPkg, 'helper', 'cli.js'), 'utf8'));
+      const s0 = I.runSetup(oldPkg, this.home, ['--browser', I.oldBrowserArg(oldPkg, browserArg), ...(asksExamples ? ['--examples'] : [])]);
       this.r.log(s0.out);
       if (s0.status !== 0) throw new Error(`the old release's setup exited ${s0.status}:\n${s0.out.split('\n').slice(-15).join('\n')}`);
-      const legacy = path.join(this.home, '.webmods');
-      if (!fs.existsSync(path.join(legacy, 'sites'))) throw new Error(`the old setup made no ${legacy}/sites`);
+      // (0.1.x kept everything in ~/.webmods, and its updater ran the new setup with --home ~/.webmods; 0.2.x
+      // already has ~/.trif, and its updater runs the new package's `setup --copy --no-link --home ~/.trif`:
+      // helper/lib/update.js install. Both are tested, 0.2.x being where most users come from.)
+      const oldVersion = (I.readJson(path.join(oldPkg, 'package.json')) || {}).version || '0.0.0';
+      const from02 = !/^0\.[01]\./.test(oldVersion);
+      const legacy = from02 ? this.trif : path.join(this.home, '.webmods');
+      if (!fs.existsSync(path.join(legacy, 'sites'))) throw new Error(`the old setup (${oldVersion}) made no ${legacy}/sites`);
       // The user's own mod, and an edit to a shipped one, before upgrading.
       fs.mkdirSync(path.join(legacy, 'sites', '127.0.0.1'), { recursive: true });
       fs.writeFileSync(path.join(legacy, 'sites', '127.0.0.1', 'e2e-user.js'), USER_MOD);
       const shipped = path.join(legacy, 'sites', 'x.com', 'rainbow-rave.js');
       fs.appendFileSync(shipped, '\n// e2e: the user changed this shipped mod\n');
       this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/rainbow-rave'));
-      // The way a 0.1.x helper's updater runs the new version's setup (--home ~/.webmods).
-      const s = I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
+      // The way the old helper's updater runs the new version's setup.
+      const s = from02 ? I.runSetup(pkg, this.home, ['--home', legacy]) : I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
       this.r.log(s.out);
       if (s.status !== 0) throw new Error(`setup exited ${s.status}:\n${s.out.split('\n').slice(-15).join('\n')}`);
-      await this.r.check('upgrade: ~/.webmods moved to ~/.trif, link left behind', () => {
+      if (!from02) await this.r.check('upgrade: ~/.webmods moved to ~/.trif, link left behind', () => {
         const st = fs.lstatSync(legacy);
         if (!st.isSymbolicLink()) throw new Error('~/.webmods is not a link');
         if (fs.realpathSync(legacy) !== fs.realpathSync(this.trif)) throw new Error(`~/.webmods points at ${fs.readlinkSync(legacy)}`);
@@ -754,6 +780,20 @@ class Scenario {
         if (!rec || !rec.pending) throw new Error(`no pending update recorded: ${JSON.stringify(rec)}`);
         if (!/new version waiting/.test(s.out)) throw new Error('setup didn\'t say a new version is waiting');
         return `pending version ${rec.pending.version}`;
+      });
+      // 0.3.0 ships most of Tim's mods as style or boxed mods: a copy the user never changed comes back as the
+      // new one (setup's updateShippedMods), in its new tier.
+      if (from02) await this.r.check('upgrade: Tim\'s unchanged mods come back in their new tier', () => {
+        const moved = [];
+        for (const id of ['www.google.com/dvd-logo', 'www.google.com/hide-extra-sections', 'amazon.com/simple-shopping', 'x.com/follow-status']) {
+          const mine = path.join(this.trif, 'sites', `${id}.js`), next = path.join(pkg, 'examples', 'sites', `${id}.js`), old = path.join(oldPkg, 'examples', 'sites', `${id}.js`);
+          if (!fs.existsSync(mine) || !fs.existsSync(old) || !fs.existsSync(next)) continue;
+          const t = fs.readFileSync(mine, 'utf8');
+          if (!/^\/\/\s*@(boxed|style|rules)\b/m.test(fs.readFileSync(next, 'utf8'))) continue; // (still free in this package)
+          if (t !== fs.readFileSync(next, 'utf8')) throw new Error(`${id} isn't the new version`);
+          moved.push(id);
+        }
+        return moved.length ? moved.join(', ') : 'none of them installed by the old setup';
       });
       // The shipped mods 0.2.0 folded into others (preinstalled.js RETIRED), unchanged here: in the trash.
       const retired = RETIRED.filter((x) => fs.existsSync(path.join(oldPkg, 'examples', 'sites', `${x.id}.js`)));
@@ -867,7 +907,7 @@ class Scenario {
       // (Upgrading, Tim's mods are there already and TRIF has every site: those steps are ticked.)
       const later = this.o.kind === 'upgrade' ? 'done' : 'later';
       const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${later},later,later`);
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,Google, X, Amazon and Instagram' : 'connected,done')) throw new Error(JSON.stringify(x));
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? `connected,done,${this.upgradeAddedText()}` : 'connected,done')) throw new Error(JSON.stringify(x));
       // (no Site permissions step any more: TRIF asks for each site's permission when it's turned on there)
       if (await this.ext(`async () => !!document.querySelector('#step-sites, #mode-permissive, #mode-restrictive')`)) throw new Error('the setup page still has a site-permissions step');
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
@@ -1880,7 +1920,8 @@ class Scenario {
         // (a running mod's tier colour: its row's stripe; the list's opacity, dimmed while mods can't run; the X eyes)
         // Monochrome (Tim, 11-13): on the robot-off screens (the gate, blocked included, and the landing page),
         // in a state, what's coloured (links, buttons, the line, the title when blocked, the dot, the robot) is
-        // the state's colour, the robot's (--switch-on)
+        // the state's colour, the robot's (--switch-on). The power button counts only when on: off, it's grey
+        // (--muted) in every state, and a gate the browser has access to shows it (an upgrade's, from all sites)
         state: colour('var(--switch-on)'),
         mono: (() => {
           const out = [];
@@ -1889,7 +1930,7 @@ class Scenario {
           for (const e of document.querySelectorAll('a, .link-btn, .file-link, #notice .title, #paused .title, .problem-line, body.site-blocked .gate-title')) if (vis(e)) out.push([name(e), getComputedStyle(e).color]);
           for (const e of document.querySelectorAll('.btn.primary, .btn.go')) if (vis(e)) out.push([name(e), getComputedStyle(e).backgroundColor]);
           if (q('#dot').getClientRects().length) out.push(['the dot', getComputedStyle(q('#dot')).backgroundColor]);
-          for (const [n, e, prop] of [['the robot', q('#bar-robot .rim'), 'fill'], ['the power button', q('#site-switch'), 'color']]) if (e && (e.closest('button') || e).getClientRects().length) out.push([n, getComputedStyle(e)[prop]]);
+          for (const [n, e, prop] of [['the robot', q('#bar-robot .rim'), 'fill'], ['the power button', q('#site-switch[aria-checked="true"]'), 'color']]) if (e && (e.closest('button') || e).getClientRects().length) out.push([n, getComputedStyle(e)[prop]]);
           return out;
         })(),
         stripe: (() => { const li = q('#mod-list li[data-mod][data-group]:not(.off)'); return li ? getComputedStyle(li, '::before').backgroundColor : null; })(),
@@ -2121,6 +2162,9 @@ class Scenario {
   async mergeChecks() {
     const r = this.r;
     const d = this.d;
+    // (the panel back on x.com: the checks before may have left it elsewhere, Chrome's panel window ones)
+    await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]).catch(() => {});
+    await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000).catch(() => {});
     const chatKey = 'chat:x.com';
     const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [chatKey]);
     const file = path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js');

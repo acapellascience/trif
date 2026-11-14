@@ -104,6 +104,7 @@ async function main() {
           headless: o.headless, extensionDirFirefox: fxDir,
         });
         agentDone = true; // agent runs once per browser, in its first scenario
+        servers.requests.length = 0; // (each scenario's checks read what the servers saw: only its own)
         await sc.run();
         console.log(`  (${browser} ${k.kind}: ${((Date.now() - t) / 1000).toFixed(0)} s)`);
       }

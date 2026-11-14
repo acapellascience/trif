@@ -125,6 +125,9 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
 struct ClaudePaneView: View {
     @ObservedObject var pane: ClaudePane
+    /// The mod file in what was just copied from the chat (Browser.offer(text:)), from iOS's own Paste button,
+    /// which needs no "Allow Paste?" each time.
+    var addPasted: (String?) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -136,6 +139,10 @@ struct ClaudePaneView: View {
                 .fixedSize()
                 if pane.loading { ProgressView().scaleEffect(0.7) }
                 Spacer()
+                PasteButton(payloadType: String.self) { texts in Task { @MainActor in addPasted(texts.first) } }
+                    .labelStyle(.titleAndIcon)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
                 Button("Start over") { pane.home() }.font(.subheadline)
             }
             .padding(.horizontal, 12)

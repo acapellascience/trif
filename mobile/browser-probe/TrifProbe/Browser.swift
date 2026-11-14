@@ -43,6 +43,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var status = ""
     @Published var picked: Picked?
     @Published var modLink: ModLink?
+    /// Whole mods (Mods.swift): those kept, and one from the clipboard waiting for an OK.
+    let mods = ModStore()
+    @Published var modOffer: InstalledMod?
     @Published var running = false
 
     let webView: WKWebView
@@ -98,7 +101,22 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         ucc.addUserScript(WKUserScript(source: kit, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
         ucc.addUserScript(WKUserScript(source: startOwn, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
         ucc.addUserScript(WKUserScript(source: startPage, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        for script in mods.userScripts() { ucc.addUserScript(script) }
     }
+
+    // MARK: whole mods
+
+    func addMod(_ m: InstalledMod) {
+        mods.add(m)
+        report.log("mods", "added \(m.tierName.lowercased()) \(m.id) for \(m.sites.joined(separator: ", "))")
+        installScripts()
+        reload()
+        status = "Added \(m.name). It runs on \(m.sites.joined(separator: ", "))."
+    }
+
+    func removeMod(_ m: InstalledMod) { mods.remove(m); installScripts(); reload() }
+
+    func toggleMod(_ m: InstalledMod) { mods.toggle(m); installScripts(); reload() }
 
     // MARK: running JavaScript
 
@@ -213,9 +231,18 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     /// A mod link, or a bare selector, on the clipboard (what a chat gives when it can't make a link).
-    func offerFromClipboard() {
-        guard let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+    func offerFromClipboard() { offer(text: UIPasteboard.general.string) }
+
+    /// What was pasted (iOS's own Paste button hands it over without asking): a whole mod, a mod link, or a selector.
+    func offer(text pasted: String?) {
+        guard let text = pasted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             status = "Nothing on the clipboard."
+            return
+        }
+        // (a whole mod: a chat's reply with a ==WebMod== file in it, or the file)
+        if text.contains("==WebMod==") {
+            let r = mods.read(text)
+            if let m = r.mod { modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
             return
         }
         let words = text.components(separatedBy: .whitespacesAndNewlines)
@@ -312,10 +339,23 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func copyOutline() async {
         guard let o = await outline() else { return }
-        let request = "Here is an outline of the web page I'm looking at. Each line starts with a name for a part of the page.\n\n\(o.text)\n\nI'll say what bothers me. Answer with a link of the form https://example.com/trif-install#hide=NAME where NAME is the part's name from the outline, URL-encoded. Nothing else is needed."
+        // (agent-facing words: what TRIF mods are and how to hand one over, then the page)
+        let page = webView.url
+        let origin = page.map { "\($0.scheme ?? "https")://\($0.host ?? "")" } ?? "https://\(host)"
+        let request = """
+        I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
+
+        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Its @match must cover \(origin)/*. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
+
+        --- How TRIF mods are written ---
+        \(Browser.resource("mod-guide", "txt"))
+
+        --- The page: \(page?.absoluteString ?? host) ---
+        \(o.text)
+        """
         UIPasteboard.general.string = request
         report.log("outline", "\(host): \(o.chars) characters, about \(o.tokens) tokens, copied with the request (\(request.count) characters in all)")
-        status = "Copied: the outline (\(o.chars) characters, about \(o.tokens) tokens) with a request. Paste it to Claude, then say what bothers you."
+        status = "Copied: the page and how to write a mod for it. Paste it into the chat and say what you want changed; then copy the reply and Add a mod from the clipboard."
     }
 
     func askPhone(_ question: String) async {

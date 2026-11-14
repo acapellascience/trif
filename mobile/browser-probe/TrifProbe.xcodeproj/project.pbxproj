@@ -14,6 +14,8 @@
 		2DAEC88739AD3260C6F25F64 /* kit.js in Resources */ = {isa = PBXBuildFile; fileRef = 901B721F27019757A750630C /* kit.js */; };
 		3AE3D94B4CB20B1F2756BBBC /* start-page.js in Resources */ = {isa = PBXBuildFile; fileRef = E312BD6E2475815E36C63107 /* start-page.js */; };
 		5CDE92BBCFC21139EF6AFC8F /* sandbox-runtime.js in Resources */ = {isa = PBXBuildFile; fileRef = 0A12BEDEC58A35DA53AE569B /* sandbox-runtime.js */; };
+		670E80CEEAA7CF94B33065B1 /* mod-guide.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1FD4645E79F7F18C7685F439 /* mod-guide.txt */; };
+		41C4C08CD0D05F3A79B1F52A /* mods.js in Resources */ = {isa = PBXBuildFile; fileRef = 2F3DB6397438BF2558AD37B0 /* mods.js */; };
 		5EB09F329959ACAA829AEE35 /* OnDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7065A86B981029C2C92C75CD /* OnDevice.swift */; };
 		6DC63B91658B4909E935F66B /* ses.umd.min.js in Resources */ = {isa = PBXBuildFile; fileRef = D433E4378C40E0B5BEA34AF4 /* ses.umd.min.js */; };
 		92B584AC73EF0953D7E2E614 /* pages in Resources */ = {isa = PBXBuildFile; fileRef = 67A9547FACE37CC4642FD1F6 /* pages */; };
@@ -21,10 +23,13 @@
 		BCE80973A84268BF7BFB62A7 /* browser-checks.json in Resources */ = {isa = PBXBuildFile; fileRef = 32DE102B13442D7BC15C2099 /* browser-checks.json */; };
 		CE1C45F5A5572E195C50703E /* ClaudePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0E11AB5DA626CF90F0DBC6A /* ClaudePane.swift */; };
 		E88EAFB79BF3818C80300BB0 /* Report.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAF31393ED658C32DF90132B /* Report.swift */; };
+		FA8B849F0EDF4996DCE7F94D /* Mods.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE824E1A29585E6DA63DE65 /* Mods.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0A12BEDEC58A35DA53AE569B /* sandbox-runtime.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "sandbox-runtime.js"; path = "../shared/gen/sandbox-runtime.js"; sourceTree = "<group>"; };
+		1FD4645E79F7F18C7685F439 /* mod-guide.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "mod-guide.txt"; path = "../shared/gen/mod-guide.txt"; sourceTree = "<group>"; };
+		2F3DB6397438BF2558AD37B0 /* mods.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "mods.js"; path = "../shared/gen/mods.js"; sourceTree = "<group>"; };
 		29CF97A92F672EEB375D02B9 /* start-own.js */ = {isa = PBXFileReference; includeInIndex = 1; path = "start-own.js"; sourceTree = "<group>"; };
 		32DE102B13442D7BC15C2099 /* browser-checks.json */ = {isa = PBXFileReference; includeInIndex = 1; name = "browser-checks.json"; path = "../shared/gen/browser-checks.json"; sourceTree = "<group>"; };
 		60C99213D444E37C779A1D54 /* Pages.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Pages.swift; sourceTree = "<group>"; };
@@ -33,6 +38,7 @@
 		901B721F27019757A750630C /* kit.js */ = {isa = PBXFileReference; includeInIndex = 1; name = kit.js; path = ../shared/kit.js; sourceTree = "<group>"; };
 		A67596316AFDF35B8CF90704 /* Checks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Checks.swift; sourceTree = "<group>"; };
 		AAF31393ED658C32DF90132B /* Report.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Report.swift; sourceTree = "<group>"; };
+		FCE824E1A29585E6DA63DE65 /* Mods.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Mods.swift; sourceTree = "<group>"; };
 		C92814A95137C3CC4B0A8C2F /* Browser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Browser.swift; sourceTree = "<group>"; };
 		D433E4378C40E0B5BEA34AF4 /* ses.umd.min.js */ = {isa = PBXFileReference; includeInIndex = 1; name = ses.umd.min.js; path = ../../extension/vendor/ses.umd.min.js; sourceTree = "<group>"; };
 		E312BD6E2475815E36C63107 /* start-page.js */ = {isa = PBXFileReference; includeInIndex = 1; path = "start-page.js"; sourceTree = "<group>"; };
@@ -85,6 +91,8 @@
 			children = (
 				901B721F27019757A750630C /* kit.js */,
 				0A12BEDEC58A35DA53AE569B /* sandbox-runtime.js */,
+				1FD4645E79F7F18C7685F439 /* mod-guide.txt */,
+				2F3DB6397438BF2558AD37B0 /* mods.js */,
 				32DE102B13442D7BC15C2099 /* browser-checks.json */,
 				D433E4378C40E0B5BEA34AF4 /* ses.umd.min.js */,
 				67A9547FACE37CC4642FD1F6 /* pages */,
@@ -108,6 +116,7 @@
 				7065A86B981029C2C92C75CD /* OnDevice.swift */,
 				60C99213D444E37C779A1D54 /* Pages.swift */,
 				AAF31393ED658C32DF90132B /* Report.swift */,
+				FCE824E1A29585E6DA63DE65 /* Mods.swift */,
 				F1BAF62AC50245BCF5ECE0A9 /* TrifProbeApp.swift */,
 				7F92DC7021E05AA5A0BB90F4 /* Web */,
 			);
@@ -173,6 +182,8 @@
 				3AE3D94B4CB20B1F2756BBBC /* start-page.js in Resources */,
 				2DAEC88739AD3260C6F25F64 /* kit.js in Resources */,
 				5CDE92BBCFC21139EF6AFC8F /* sandbox-runtime.js in Resources */,
+				670E80CEEAA7CF94B33065B1 /* mod-guide.txt in Resources */,
+				41C4C08CD0D05F3A79B1F52A /* mods.js in Resources */,
 				BCE80973A84268BF7BFB62A7 /* browser-checks.json in Resources */,
 				6DC63B91658B4909E935F66B /* ses.umd.min.js in Resources */,
 				92B584AC73EF0953D7E2E614 /* pages in Resources */,
@@ -192,6 +203,7 @@
 				5EB09F329959ACAA829AEE35 /* OnDevice.swift in Sources */,
 				AD7F240CA6118A45E99636DB /* Pages.swift in Sources */,
 				E88EAFB79BF3818C80300BB0 /* Report.swift in Sources */,
+				FA8B849F0EDF4996DCE7F94D /* Mods.swift in Sources */,
 				2679806E8533E50DD21775E6 /* TrifProbeApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

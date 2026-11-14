@@ -58,6 +58,7 @@ struct ContentView: View {
     @State private var showChecks = false
     @State private var showReport = false
     @State private var showClaude = false
+    @State private var showMods = false
     @State private var asking = false
     @State private var question = ""
     @FocusState private var editing: Bool
@@ -69,7 +70,7 @@ struct ContentView: View {
             if let picked = browser.picked { PickedBar(picked: picked) }
             if showClaude {
                 Divider()
-                ClaudePaneView(pane: pane).frame(height: 360)
+                ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }).frame(height: 360)
             }
             if !browser.status.isEmpty {
                 Text(browser.status)
@@ -86,6 +87,8 @@ struct ContentView: View {
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(item: $browser.modLink) { link in ModLinkView(link: link).environmentObject(browser) }
+        .sheet(item: $browser.modOffer) { mod in ModOfferView(mod: mod).environmentObject(browser) }
+        .sheet(isPresented: $showMods) { ModsListView(store: browser.mods).environmentObject(browser) }
         .alert("What bothers you on this page?", isPresented: $asking) {
             TextField("the cookie notice", text: $question)
             Button("Ask the phone") { let q = question; Task { await browser.askPhone(q) } }
@@ -133,8 +136,9 @@ struct ContentView: View {
             Button { showChecks = true } label: { Image(systemName: "checklist") }
             Spacer()
             Menu {
-                Button("Copy this page's outline for Claude") { Task { await browser.copyOutline() } }
+                Button("Copy this page for the chat") { Task { await browser.copyOutline() } }
                 Button("Add a mod from the clipboard") { browser.offerFromClipboard() }
+                Button("Your mods") { showMods = true }
                 Button("Ask the phone's own model…") { question = ""; asking = true }
                 Button("Show everything hidden on this site again", role: .destructive) { Task { await browser.forgetRulesHere() } }
             } label: { Image(systemName: "wand.and.stars") }

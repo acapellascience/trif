@@ -2,7 +2,7 @@
 
 **Approved by Tim, 2026-11-10.**
 
-Every user-facing string the code viewer adds, exact, **all awaiting Tim's OK**.
+Every user-facing string the code viewer adds, exact (all approved: see above).
 
 ## The mod row
 

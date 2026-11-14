@@ -2,7 +2,7 @@
 
 **Approved by Tim, 2026-11-10.**
 
-Every user-facing string the powers add, exact, **all awaiting Tim's OK**. The hold sentences are the
+Every user-facing string the powers add, exact (all approved: see above). The hold sentences are the
 sketch's (docs/POWERS.md); a hold stores each as a fact after "it" (as the classifier's facts are), so the
 panel shows "It <fact>." and `trif status` "it <fact>".
 

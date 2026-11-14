@@ -2,7 +2,7 @@
 
 **Approved by Tim, 2026-11-10.**
 
-Every user- and agent-facing string the per-site agent setting adds, exact, **all awaiting Tim's OK**.
+Every user- and agent-facing string the per-site agent setting adds, exact (all approved: see above).
 
 ## How it works (decisions to check)
 
@@ -47,7 +47,7 @@ Every user- and agent-facing string the per-site agent setting adds, exact, **al
   account**, **payments**, **banking**, **a password manager**, **your messages**, **your chats with
   another AI**, or the user's own words; without one: **on your list of sensitive sites**)
 
-## Moved to the chat line (branch faces, 2026-11-11; **new strings awaiting Tim's OK**)
+## Moved to the chat line (branch faces, 2026-11-11; **approved by Tim 2026-11-14**, AWAITING-STRINGS.md)
 
 The control left the header. It's now the third part of the line over the message box, after the agent and
 model ("Claude Code · Default model · Agent asks before running code ▾"), shown only where there's a chat

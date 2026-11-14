@@ -135,7 +135,12 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    markup they key on): what they hide is hidden, and the web results, the other tabs and the search
    box stay. Then DVD Logo, which ships as a boxed mod, switched on: registered in the sandbox (no hold:
    its shipped version is what's allowed), its copy of the home page's logo bounces, the logo hidden in
-   place.
+   place. Chrome: X's real profile pictures (`https://x.com:<port>/e2e_pics`, a stand-in profile page under
+   X's CSP whose pictures are X's own logo from X's real image server, shown at 200×200 and, `?s=400`,
+   already at 400×400): Profile Styler, Post Styler and Tune Composer switched on and allowed in the panel's
+   card each read the 400×400 copy's pixels (nothing in `trif logs` about a picture it couldn't read; Tune
+   Composer's From picture: "has no tune in it"), and Post Styler remembers the picture as read. Skipped
+   without the internet. (Decoding a code from a picture: the conversion cases' fixtures.)
 5. With `--agent`: real Claude Code runs (model haiku unless `--claude-model`): a panel chat (`/model`,
    then a request) that must write a mod under `sites/127.0.0.1/` that shows on the page; `trif agent
    run` asked which browser it's in (must name it); and asked to read TRIF's `config.json` in the private

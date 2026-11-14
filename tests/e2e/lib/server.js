@@ -442,6 +442,21 @@ self.addEventListener('message', (e) => {
 });
 `;
 
+// X's own logo, as X's image server has it (public, stable), and the parts of X's CSP that apply to a page
+// with mods on it (fetched from x.com, 11-14)
+const X_PIC = 'https://pbs.twimg.com/profile_images/1683899100922511378/5lY42eHs';
+const X_CSP = "default-src 'self'; img-src 'self' https://*.twimg.com data: blob:; style-src 'self' 'unsafe-inline' https://*.twimg.com; " +
+  "script-src 'self' 'nonce-e2e' 'wasm-unsafe-eval'; script-src-attr 'none'; font-src 'self' https://*.twimg.com data:; " +
+  "media-src 'self' https://*.twimg.com blob: data:; connect-src 'self' https://*.twimg.com; worker-src 'self' blob:";
+const X_PICS_PAGE = (size) => `<!doctype html><html><head><meta charset="utf-8"><title>Pics (@e2e_pics) / X</title></head><body>
+<div id="react-root"><main><div data-testid="primaryColumn">
+<a href="/e2e_pics/photo"><img alt="" src="${X_PIC}_${size}.jpg" width="134" height="134"></a>
+<div data-testid="UserName"><span>Pics</span> <span>@e2e_pics</span></div>
+<article data-testid="tweet"><div data-testid="Tweet-User-Avatar"><img alt="" src="${X_PIC}_normal.jpg" width="40" height="40"></div>
+<div data-testid="User-Name"><a href="/e2e_pics"><span>Pics</span></a> <a href="/e2e_pics"><span>@e2e_pics</span></a></div>
+<div data-testid="tweetText"><span>A post with X's real picture</span></div><div role="group"><span>3</span></div></article>
+</div></main></div></body></html>`;
+
 /** Starts both servers. Returns {port, tlsPort, requests, timeline, close()}. */
 async function startServers(dir) {
   const requests = []; // {host, url, method, time}
@@ -455,6 +470,13 @@ async function startServers(dir) {
       if (u.pathname.startsWith('/i/api/graphql/')) return send(200, 'application/json', JSON.stringify(tl.body));
       if (u.pathname === '/home' || u.pathname === '/') return send(200, 'text/html; charset=utf-8', X_PAGE());
       if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+      // A stand-in profile page whose pictures are X's own logo from X's real image server (scenario.js
+      // xPicturesCheck), under X's own rules for pictures, styles and scripts (its CSP, 11-14); ?s=400: the
+      // profile's picture already at 400×400, as X shows some
+      if (u.pathname === '/e2e_pics') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': X_CSP });
+        return res.end(X_PICS_PAGE(u.searchParams.get('s') === '400' ? '400x400' : '200x200'));
+      }
       // (another host's picture, with no CORS headers: sandboxFixesCheck's image variant)
       if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
       return send(404, 'text/plain', 'not found');

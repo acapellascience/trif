@@ -1332,6 +1332,8 @@ class Scenario {
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
     await r.check('DVD Logo, a boxed mod TRIF ships: switched on, it runs in the sandbox without a hold, and its copy of the logo bounces', () => this.dvdCheck(win));
+    // (Chrome: Firefox's test profile resolves every host here, and runs no boxed mods)
+    if (this.o.browser === 'chrome') await r.check('X\'s real profile pictures: Profile Styler, Post Styler and Tune Composer, boxed and allowed, read their pixels from X\'s image server (shown at 200×200 and already at 400×400), under X\'s CSP', () => this.xPicturesCheck(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
@@ -1451,6 +1453,91 @@ class Scenario {
 
   // DVD Logo, one of Tim's mods that ships boxed (0.3.0): switched on, it runs in TRIF's sandbox, unheld (its
   // shipped version is what's allowed), and its copy of the logo bounces on the Google home stand-in.
+  /**
+   * Tim, 11-14: the converted Profile Styler and Tune Composer couldn't read his X profile picture. Here the
+   * shipped mods, switched on and allowed in the panel's card, on a stand-in profile page whose pictures are X's
+   * own logo from X's real image server, under X's CSP: each reads the 400×400 copy's pixels (no "could not
+   * read" in trif logs; Tune Composer's From picture says the picture has no tune, not that it couldn't read
+   * it). Decoding a code from a picture is the conversion cases' (fixtures); this is the real server's part.
+   * Needs the internet: without it, skipped.
+   */
+  async xPicturesCheck(win) {
+    const ids = ['x.com/profile-styler', 'x.com/post-styler', 'x.com/tune-composer'];
+    const PIC = 'https://pbs.twimg.com/profile_images/1683899100922511378/5lY42eHs_400x400.jpg';
+    try {
+      const r = await fetch(PIC, { method: 'HEAD', signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return { status: 'skip', detail: `X's image server answered ${r.status} for the test picture` };
+    } catch (e) { return { status: 'skip', detail: `X's image server can't be reached from here (${e.message})` }; }
+    const d = this.d;
+    const base = `https://x.com:${this.o.servers.tlsPort}/e2e_pics`;
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const done = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, base]);
+      await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000);
+      for (const id of ids) {
+        const on = await this.cli(['enable', id]);
+        if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+        done.push(id);
+      }
+      // (each asks for its powers: allowed in the panel's card, as a user would; one card may hold several)
+      const registered = (st) => ids.every((id) => new RegExp(`${id.replace('.', '\\.')}\\s+registered \\(boxed`).test(st));
+      await waitFor('the three allowed and registered', async () => {
+        const st = await status();
+        if (registered(st)) return true;
+        if (await this.approvalState()) await this.d.click(this.panelCtx, '#approval .ap-allow').catch(() => {});
+        else {
+          const held = ids.find((id) => new RegExp(`${id.replace('.', '\\.')}\\s+HELD`).test(st));
+          if (held) await this.panel(`async () => { document.querySelector('li[data-mod="${held}"] .tag.on-hold')?.click(); return true; }`).catch(() => {});
+        }
+        return null;
+      }, { timeoutMs: 45000, intervalMs: 1000 }).catch(async (e) => {
+        throw new Error(`${e.message}: ${(await status()).split('\n').filter((l) => ids.some((id) => l.includes(id))).map((l) => l.trim()).join(' | ')}`);
+      });
+      const out = [];
+      for (const size of ['200x200', '400x400']) {
+        const url = size === '400x400' ? `${base}?s=400` : base;
+        await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+        const ctx = await d.findPage((u) => u === url);
+        // the stylers: the 400×400 copy loaded (theirs, with CORS) and read without a word in trif logs
+        const loaded = await waitFor(`the 400×400 copy loaded (${size})`, () => d.eval(ctx, `async () => performance.getEntriesByType('resource').filter((r) => /5lY42eHs_400x400/.test(r.name)).length || null`), { timeoutMs: 15000 })
+          .catch(() => 0);
+        await sleep(1500);
+        // Tune Composer: the corner ♪, then From picture
+        await d.eval(ctx, `async () => { document.querySelector('[aria-label="Tune Composer"]').click(); return true; }`);
+        const said = await waitFor(`Tune Composer's From picture (${size})`, () => d.eval(ctx, `async () => {
+          const b = document.querySelector('[title^="Load the tune from the profile picture"]');
+          if (!b) return null;
+          if (!window.__e2eFromPic) { window.__e2eFromPic = 1; b.click(); return null; }
+          const s = document.querySelector('[class~=trif-box-tcp-status]');
+          return s && /picture/.test(s.textContent) ? s.textContent : null;
+        }`), { timeoutMs: 15000 }).catch((e) => `(${e.message})`);
+        const logs = (await this.cli(['logs', '--tab', String(win.tabId)], { timeoutMs: 20000 })).stdout;
+        const bad = logs.split('\n').filter((l) => /could not read|no 400×400 copy|can't be read|SecurityError|tainted/i.test(l));
+        const errs = await this.cli(['errors', '--tab', String(win.tabId)], { json: true });
+        await this.shot(ctx, `x-pictures-${size}`);
+        if (!loaded) throw new Error(`${size}: the 400×400 copy was never loaded`);
+        if (bad.length) throw new Error(`${size}: trif logs: ${bad.join(' | ')}`);
+        if (!/has no tune in it/.test(said)) throw new Error(`${size}: Tune Composer said: ${said}`);
+        if (errs.json && errs.json.length) throw new Error(`${size}: mod errors: ${JSON.stringify(errs.json).slice(0, 400)}`);
+        out.push(`${size}: copy loaded, read; Tune Composer: "${said}"`);
+      }
+      // Post Styler remembers what it read (no code in X's logo: 0), and only what it read (11-14: .seen3 kept a
+      // picture it couldn't read as one without a code, for good)
+      const seen = await waitFor('Post Styler\'s memory of the picture', async () => {
+        const all = await this.ext(`async () => (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}`);
+        const v = all['x.com/post-styler'] && all['x.com/post-styler']['x.com'] && all['x.com/post-styler']['x.com']['trifPostStyler.seen4'];
+        return v ? JSON.parse(v) : null;
+      }, { timeoutMs: 8000 }).catch(() => null);
+      if (!seen || seen[PIC] !== 0) throw new Error(`Post Styler's memory: ${JSON.stringify(seen)}`);
+      return `${out.join('; ')}; Post Styler remembers it as read, no code`;
+    } finally {
+      for (const id of done) await this.cli(['disable', id]).catch(() => {});
+      // (their settings gone again: the boxed mods check counts every mod's)
+      await this.ext(`async (ids) => { const s = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}; for (const id of ids) delete s[id]; await chrome.storage.local.set({ sandboxSettings: s }); }`, [ids]).catch(() => {});
+    }
+  }
+
   async dvdCheck(win) {
     const d = this.d;
     const id = 'www.google.com/dvd-logo';

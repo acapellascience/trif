@@ -68,7 +68,7 @@ The menu (new):
 - Heading: **What your agent can do on {site}**
 - **Off:** it can’t see or touch this site. (Was "Nothing"; renamed 2026-11-11 to match Settings.)
 - **Look:** it can read the page and take screenshots.
-- **Ask first:** it can look, and asks you before running code here.
+- **Ask first:** it can look, and asks you before running code on the site.
 - **Run code:** it can change the page live; posting is paused until the page reloads.
 - Footer (muted): **Whatever you pick, a mod that can do more than change this page waits for your OK.**
 

@@ -16,8 +16,10 @@ shown in the panel as such.
 `tiers/style-mods`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label**: Style mods
-- **Line**: Only change how the page looks.
-- **Explanation**: Only change how the page looks. TRIF runs them from data: there's no code in them, only rules about what to restyle, hide or reword, so they can't send, load or click anything themselves. One thing to watch: by restyling, a mod could hide a real button under something else, so your own click lands on it.
+- **Line**: Change how the page looks.
+- **Explanation**: Change how the page looks. Style mods run from data: No code, only rules about what to restyle, hide or reword. They can't send, load or click anything themselves.
+
+One thing to watch: by restyling, a mod could hide a real button under something else, so your own click lands on it.
 - **For agents**:
   - First choice for any mod: `// @style` in the header (old name `@rules` still works); `trif new <site> <mod> --style`. After the header, one JSON object: `css`, `hide`, `replace` ({in?, find, with, regex?, caseless?}), `filter` ({items, hideIfText | hideIfRegex | hideIfHas}).
   - Refused by `trif check` and NOT SENT: CSS that loads anything (`url()` other than `data:` or `#fragment`, `@import`, `image-set()`, backslash escapes outside strings), selectors naming the `value` attribute or `:autofill`, selectors containing `{`, `}`, `;` or `@`.
@@ -30,8 +32,12 @@ shown in the panel as such.
 `tiers/boxed-mods`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label**: Boxed mods
-- **Line**: Do only what you've allowed.
-- **Explanation**: Do only what you've allowed. They run in TRIF's sandbox and change what the page shows; on their own they can't send, load, click or read what you type. One that needs more asks for named powers and gets only those. In Safari, which has no sandbox, a boxed mod runs as a free mod after your OK.
+- **Line**: Do what you've allowed.
+- **Explanation**: Do what you've allowed. Boxed mods run in TRIF's sandbox. Like style mods but with logic, they can build and animate things and change the look of the page, but they can't send, load, click, or read what you type.
+
+A boxed mod can ask for specific additional powers. It gets only those. New powers that could expose information to the site are held for your approval.
+
+In Safari, which has no sandbox, a boxed mod runs as a free mod after your OK.
 - **For agents**:
   - `// @boxed` (old `@sandboxed`); `trif new <site> <mod> --boxed`. JavaScript in an SES compartment in TRIF's user-script world; elements are frozen stand-ins; the API is in BOXED.md.
   - Not there: `window`, `document`, `fetch`/XHR/WebSocket, storage, `postMessage`, `eval`/`Function`, event constructors. `trif check` lints each ("not there in a boxed mod…", with tips). Source containing `import(` or an HTML comment marker is refused, even inside a string or comment.
@@ -45,8 +51,10 @@ shown in the panel as such.
 `tiers/free-mods`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label**: Free mods
-- **Line**: Run in the page with everything it has.
-- **Explanation**: Run in the page with everything it has. A free mod can do anything the page can, including posting or sending as you. TRIF reads its code first and holds one that can send, click, go to other pages or hide what it does, but that reading can miss things, so switch on only free mods you trust.
+- **Line**: Anything code can do.
+- **Explanation**: Anything code can do. A free mod can do anything the page can, including posting or sending as you. TRIF reads its code first and holds anything that looks like it could send, click or go to other pages, and anything whose code it can't read. But a free mod can also make the site's own code act for it, which no reading catches.
+
+Only enable free mods that you trust.
 - **For agents**:
   - No tier line in the header: the default for `trif new <site> <mod>`. Use it only for what needs the page: patching fetch/XHR or the app's code, its state, a network request, acting for the user.
   - helper/lib/powers.js reads it token by token; a new or changed mod that sends, clicks or types, navigates, loads from a computed address, names another site or hides code (`eval`, `Function`, string timers, `import()`) is HELD until the user allows it. Approving (`trif approve`, Allow, allowed.json) is the user's, never yours.
@@ -646,8 +654,8 @@ shown in the panel as such.
 `warnings/many-powers`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label** (drafted): Many powers
-- **Line**: Mods with many powers can act in unspecific or powerful ways. Treat this with caution.
-- **Explanation**: Mods with many powers can act in unspecific or powerful ways. Treat this with caution. It shows in place of the separate warnings when a boxed mod asks for more than three powers. Each power keeps its own limits, but together they're harder to think through, so allow it only if you know why it needs each one.
+- **Line**: Mods with many powers could act in surprising ways. Treat them with caution.
+- **Explanation**: Mods with many powers could act in surprising ways. Treat them with caution. It shows in place of the separate warnings when a boxed mod asks for more than three powers. Each power keeps its own limits, but together they're harder to think through, so allow it only if you know why it needs each one.
 - **For agents**:
   - More than 3 powers, soft ones (controls, mods, preload) included. Keyed by the exact set (`power:together:many:<powers>`); its combinations are still needs, so a later version with fewer powers doesn't ask again for what was allowed.
   - Split into smaller mods or drop powers to get under four; each mod then shows its own specific warnings.
@@ -761,8 +769,8 @@ shown in the panel as such.
 `agent-levels/ask`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label**: Ask first
-- **Line**: it can look, and asks you before running code here.
-- **Explanation**: It can look, and asks you before running code here. The first time it wants to, the panel asks: Just this once, Always on this site (Run code) or Not here (Look). If you don't answer within 25 seconds, or the panel isn't open, the code doesn't run.
+- **Line**: it can look, and asks you before running code on the site.
+- **Explanation**: It can look, and asks you before running code on the site. The first time it wants to, the panel asks: Just this once, Always on this site (Run code) or Not here (Look). If you don't answer within 25 seconds, or the panel isn't open, the code doesn't run. Code in TRIF's box doesn't ask: it can change how the page looks, but it can't act as you.
 - **For agents**:
   - The default for any site not on the sensitive list. Reading works; the first `trif run` opens the question and waits up to 25 s.
   - Just this once covers that side-panel run (every `trif run` in it); from a terminal, that one command. × or Esc: the command fails, saying the user didn't answer.

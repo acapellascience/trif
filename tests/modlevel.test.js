@@ -54,16 +54,21 @@ test('the helper gives the panel each power\'s words and the combination warning
 
 test('the row icons: one per power with what it does for this mod, then how noticeable; warnings turn powers amber', async () => {
   const { modIcons } = await load();
-  assert.deepEqual(modIcons({ name: 'x' }, 'x.com'), []);
-  assert.deepEqual(modIcons({ risk: { tier: 1 } }, 'x.com').map((i) => [i.key, i.tone]), [['noticeable', 'muted']]);
-  assert.deepEqual(modIcons({ risk: { tier: 2 } }, 'x.com').map((i) => [i.key, i.tone]), [['changes-requests', 'amber']]);
+  // a free mod: the chip and infinity always (one icon, two pictures), then the eye where something was found;
+  // a style mod: nothing
+  const free = modIcons({ name: 'x' }, 'x.com');
+  assert.deepEqual(free.map((i) => [i.key, i.tone, i.keys]), [['free', 'muted', ['cpu', 'infinity']]]);
+  assert.equal(free[0].title, 'Runs as code, with no limits');
+  assert.deepEqual(modIcons({ name: 'x', rules: { hide: ['a'] } }, 'x.com'), []);
+  assert.deepEqual(modIcons({ risk: { tier: 1 } }, 'x.com').map((i) => [i.key, i.tone]), [['free', 'muted'], ['noticeable', 'muted']]);
+  assert.deepEqual(modIcons({ risk: { tier: 2 } }, 'x.com').map((i) => [i.key, i.tone]), [['free', 'muted'], ['changes-requests', 'muted']]);
   const one = modIcons({ sandboxed: true, powers: ['site-data'], powerInfo: { facts: [{ power: 'site-data', fact: 'can see and filter what x.com sends this page' }], warnings: [] } }, 'x.com');
   assert.deepEqual(one.map((i) => [i.key, i.tone]), [['site-data', 'muted'], ['noticeable', 'muted']]);
-  assert.equal(one[0].title, 'It can see and filter what x.com sends this page.');
-  assert.match(one[1].title, /^Noticeable: x\.com could tell/);
+  assert.equal(one[0].title, 'Filters what the site sends');
+  assert.equal(one[1].title, 'Noticeable to the site');
   const warned = modIcons({ sandboxed: true, powers: ['read-drafts', 'sound'], powerInfo: { facts: [], warnings: ['together, it can play what you type'] } }, 'x.com');
-  assert.deepEqual(warned.map((i) => [i.key, i.tone]), [['read-drafts', 'amber'], ['sound', 'amber']]);
-  assert.match(warned[0].title, /^read-drafts\nTogether, it can play what you type$/);
+  // (the warnings about powers together are in the code card's Details, not on the icons: Tim, 11-13)
+  assert.deepEqual(warned.map((i) => [i.key, i.tone, i.title]), [['read-drafts', 'muted', 'Reads what you type'], ['sound', 'muted', 'Plays sounds']]);
   const migrate = modIcons({ sandboxed: true, powers: [], powerInfo: { facts: [{ power: 'migrate', fact: 'brings over its old settings from what this site keeps under: a (once)' }], warnings: [] } }, 'x.com');
   assert.deepEqual(migrate.map((i) => i.key), ['@migrate']);
 });
@@ -72,5 +77,9 @@ test('every power TRIF knows, @migrate and both levels have a row icon (extensio
   const { ICONS } = await import('../extension/icons.js');
   const { NAMES } = require('../helper/lib/boxpowers');
   const names = Array.isArray(NAMES) ? NAMES : [...NAMES];
-  for (const p of [...names, '@migrate', 'noticeable', 'changes-requests']) assert.ok(Array.isArray(ICONS[p]) && ICONS[p].length, `no icon for ${p}`);
+  const { ICON_LABELS } = await load();
+  for (const p of [...names, '@migrate', 'noticeable', 'changes-requests']) {
+    assert.ok(Array.isArray(ICONS[p]) && ICONS[p].length, `no icon for ${p}`);
+    assert.ok(ICON_LABELS[p], `no hover words for ${p}`);
+  }
 });

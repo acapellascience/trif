@@ -11,7 +11,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
-import { modIcons, levelWords, modLevel, powerLines } from './modlevel.js';
+import { modIcons, levelWords, modLevel } from './modlevel.js';
 import { iconSvg } from './icons.js';
 import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
@@ -38,7 +38,7 @@ const ui = {
   onBreak: $('#on-break'),
   chatMods: $('#chat-mods'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), gateIcon: $('#gate-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
-  settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
+  settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), agentLogin: $('#agent-login'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
@@ -395,20 +395,57 @@ function el(tag, className, text) {
 // "more": a line's explanation (explain.js), shown in place under it; "less" folds it again. Nothing for a
 // term the table doesn't have (its line alone).
 let moreSeq = 0;
+// A tier's card (its heading's "i"): the tier's name in its colour, its line, then its explanation in paragraphs.
+// Closes with its ×, Esc, or a click outside it; the "i" stays lit while it's open.
+function openTierCard(g, from) {
+  const t = term('tiers', TIER_TERMS[g]);
+  if (!t) return;
+  let d = document.getElementById('tier-card');
+  if (!d) {
+    d = el('dialog', 'approval tier-card');
+    d.id = 'tier-card';
+    d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); // (the backdrop)
+    d.addEventListener('close', () => { for (const b of document.querySelectorAll('.tier-info.open')) b.classList.remove('open'); });
+    document.body.append(d);
+  }
+  d.dataset.group = g;
+  const head = el('div', 'tc-head');
+  const name = el('h2', 'tc-name', GROUP_TEXT[g][0]);
+  name.id = 'tier-card-name';
+  const x = el('button', 'ap-x', '×');
+  x.type = 'button';
+  x.setAttribute('aria-label', 'Close');
+  x.addEventListener('click', () => d.close());
+  head.append(name, x);
+  const body = el('div', 'tc-body');
+  body.append(el('p', 'tc-line', t.line));
+  for (const para of moreText(t).split(/\n\s*\n/)) if (para.trim()) body.append(el('p', null, para.trim()));
+  d.replaceChildren(head, body);
+  d.setAttribute('aria-labelledby', name.id);
+  from?.classList.add('open');
+  if (!d.open) d.showModal();
+}
+
 function addMore(host, t) {
   const text = moreText(t);
   if (!text) return host;
   const box = el('span', 'more-text', text);
   box.id = `more-${++moreSeq}`;
   box.hidden = true;
-  const btn = el('button', 'more-btn', 'more');
+  // (an "i" in place of the word "more": Tim, 11-13. It unfolds the explanation in place, and lights while open)
+  const btn = el('button', 'more-btn');
   btn.type = 'button';
+  btn.append(iconSvg('info'));
+  btn.title = 'More';
+  btn.setAttribute('aria-label', 'More');
   btn.setAttribute('aria-expanded', 'false');
   btn.setAttribute('aria-controls', box.id);
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     box.hidden = !box.hidden;
-    btn.textContent = box.hidden ? 'more' : 'less';
+    btn.classList.toggle('open', !box.hidden);
+    btn.title = box.hidden ? 'More' : 'Less';
+    btn.setAttribute('aria-label', btn.title);
     btn.setAttribute('aria-expanded', String(!box.hidden));
   });
   host.append(' ', btn, box);
@@ -515,6 +552,35 @@ function sandboxCard(li, m) {
   });
   actions.append(stopBtn, goBtn);
   li.append(actions, error);
+}
+
+/**
+ * Settings, under the agent: "<agent> is logged in. Log out", while the chosen agent is logged in with its
+ * own login (not a saved API key). Log out asks first, as it logs the agent out everywhere on the computer;
+ * then the panel shows the logged-out state as usual (helper agents/index.js logout).
+ */
+function renderAgentLogin(a) {
+  const show = !!a?.available && a.canLogout && a.loggedIn === true && !a.loginByKey && !!view.status?.helper?.connected;
+  ui.agentLogin.hidden = !show;
+  if (!show) { ui.agentLogin.replaceChildren(); return; }
+  if (ui.agentLogin.dataset.agent === a.id && ui.agentLogin.childElementCount) return;
+  ui.agentLogin.dataset.agent = a.id;
+  const out = el('button', 'link-btn', 'Log out');
+  out.type = 'button';
+  out.addEventListener('click', async () => {
+    const ok = await askCard(`Log out of ${a.name}?`, 'This logs you out everywhere on your computer, including the terminal.', [['Log out', true, 'go']], '');
+    if (!ok) return;
+    out.disabled = true;
+    try { await request({ type: 'agent.logout', agent: a.id }); } catch (e) {
+      out.disabled = false;
+      ui.agentLogin.title = String(e?.message ?? e);
+      return;
+    }
+    ui.agentLogin.title = '';
+    ui.agentLogin.dataset.agent = '';
+    loadAgents();
+  });
+  ui.agentLogin.replaceChildren(`${a.name} is logged in. `, out);
 }
 
 /** Settings, under the agent: each agent allowed to run without TRIF's sandbox, with Stop allowing. */
@@ -988,10 +1054,10 @@ ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
-  // (the lines for style and boxed mods: approved by Tim, 2026-11-10, docs/TIER-NAMES-STRINGS.md)
-  rules: [GROUP_NAMES.rules, 'Only change how the page looks.'],
-  sandboxed: [GROUP_NAMES.sandboxed, 'Do only what you\'ve allowed.'],
-  page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
+  // (the lines: Tim's, 2026-11-13; explain.json's tiers say the same)
+  rules: [GROUP_NAMES.rules, 'Change how the page looks.'],
+  sandboxed: [GROUP_NAMES.sandboxed, 'Do what you\'ve allowed.'],
+  page: [GROUP_NAMES.page, 'Anything code can do.'],
 };
 const TIER_TERMS = { rules: 'style-mods', sandboxed: 'boxed-mods', page: 'free-mods' }; // (explain.json)
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
@@ -1037,7 +1103,8 @@ function groupHeading(g) {
         request({ type: 'chat.note', site: view.site, text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
       } finally { sw.removeAttribute('aria-busy'); }
     };
-    for (const on of [true, false]) {
+    // (Off, then On: on at the right, as on the mods' switches: Tim, 11-13)
+    for (const on of [false, true]) {
       const btn = el('button', 'gs-btn', on ? 'On' : 'Off');
       btn.type = 'button';
       btn.dataset.on = String(on);
@@ -1046,7 +1113,20 @@ function groupHeading(g) {
     }
     const row = el('div', 'mod-group-row');
     row.append(name, sw);
-    li.append(row, addMore(el('p', 'mod-group-note', GROUP_TEXT[g][1]), term('tiers', TIER_TERMS[g])));
+    // (the tier's line, and its "i": a card with the whole explanation, in paragraphs: openTierCard)
+    const note = el('p', 'mod-group-note', GROUP_TEXT[g][1]);
+    const t = term('tiers', TIER_TERMS[g]);
+    if (moreText(t)) {
+      const info = el('button', 'more-btn tier-info');
+      info.type = 'button';
+      info.append(iconSvg('info'));
+      info.title = `About ${GROUP_TEXT[g][0].toLowerCase()}`;
+      info.setAttribute('aria-label', info.title);
+      info.setAttribute('aria-haspopup', 'dialog');
+      info.addEventListener('click', (e) => { e.stopPropagation(); openTierCard(g, info); });
+      note.append(' ', info);
+    }
+    li.append(row, note);
     groupHeadings.set(g, li);
     applyCollapsed();
   }
@@ -1293,7 +1373,8 @@ schemeQuery.addEventListener?.('change', tellScheme);
 
 /**
  * The robot's face (faces.js, scripts/render-icon.js), one at a time: paused (the agent ran code in this
- * tab), blocked (a red cross), disconnected (a broken link), off (blank), logged out (hollow yellow eyes),
+ * tab), blocked (a red cross), disconnected (a broken link), off (blank), user scripts off (a coral cross),
+ * the helper away (coral X eyes), logged out (yellow X eyes),
  * else his eyes. One colour each, the frame's. On the bar's
  * robot (data-face, sidepanel.css), and the background is told whether the agent needs a login, for the
  * toolbar's yellow face in every tab.
@@ -1302,7 +1383,8 @@ function renderFaces(problem, agentInfo) {
   const state = siteScope() && view.status ? currentState() : null;
   const loggedOut = problem === 'login' || problem === 'key';
   ui.barRobot.dataset.face = document.body.classList.contains('tab-locked') ? 'paused'
-    : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off' : robotless() ? 'robotless' : loggedOut ? 'login' : 'normal';
+    : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off'
+      : problem === 'scripts' ? 'scripts' : problem === 'helper' ? 'helper' : robotless() ? 'robotless' : loggedOut ? 'login' : 'normal';
   // (only once the agent is known, and not while the helper or user scripts are what's wrong: no answer then)
   if (!view.toldScheme && view.status) { view.toldScheme = true; tellScheme(); }
   if (agentInfo && problem !== 'helper' && problem !== 'scripts' && loggedOut !== view.toldLoggedOut) {
@@ -1314,12 +1396,13 @@ function renderFaces(problem, agentInfo) {
 function renderGate(problem, agentInfo) {
   const red = RED.has(problem);
   // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest),
-  // and when something red is in the way, the robot in red and a line saying what.
+  // and when TRIF is missing a part, the robot in coral (a cross for user scripts, X eyes for the helper) and
+  // a line saying what.
   const noSite = !!view.tab && !view.site;
   document.body.classList.toggle('no-site', noSite);
   ui.landing.hidden = !noSite;
   renderProblemLine(ui.landingNote, noSite && red ? problem : null, agentInfo);
-  const icon = `icons/robot-shaded${noSite && red ? '-red' : ''}.svg`;
+  const icon = `icons/robot-shaded${noSite && red ? (problem === 'scripts' ? '-scripts' : '-helper') : ''}.svg`;
   if (ui.landingIcon.getAttribute('src') !== icon) ui.landingIcon.setAttribute('src', icon);
   // This extension's own version (the helper's is in settings: they can differ while one updates).
   if (noSite) ui.landingVersion.textContent = `TRIF ${chrome.runtime.getManifest().version}`;
@@ -1346,9 +1429,9 @@ function renderGate(problem, agentInfo) {
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
   // The gate's robot: a red cross when blocked, a grey broken link when disconnected, else a blank face in
-  // the state's colour (red when TRIF is missing a part, yellow when the agent needs a login).
+  // the state's colour (coral when TRIF is missing a part, yellow when the agent needs a login).
   const loggedOut = problem === 'login' || problem === 'key';
-  const gateIcon = `icons/robot-shaded-${state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : `off${red ? '-red' : loggedOut ? '-yellow' : ''}`}.svg`;
+  const gateIcon = `icons/robot-shaded-${state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : `off${red ? '-coral' : loggedOut ? '-yellow' : ''}`}.svg`;
   if (ui.gateIcon.getAttribute('src') !== gateIcon) ui.gateIcon.setAttribute('src', gateIcon);
   ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
     : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';
@@ -1539,11 +1622,11 @@ function modItem(m) {
       const ic = el('span', `mod-ic ${i.tone}`);
       ic.dataset.icon = i.key;
       ic.title = i.title;
-      const svg = iconSvg(i.key);
-      if (svg) ic.append(svg); else ic.textContent = i.key; // (a power this panel has no icon for: its name)
+      const svgs = (i.keys || [i.key]).map(iconSvg).filter(Boolean); // (a free mod's: the chip and infinity, one icon)
+      if (svgs.length) ic.append(...svgs); else ic.textContent = i.key; // (a power this panel has no icon for: its name)
       box.append(ic);
     });
-    box.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id); });
+    box.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { tab: 'details' }); });
     name.append(box);
   }
   // The tags: at most one shows, the most urgent (updateModItem: showOneTag; data-rank, lowest first)
@@ -2115,7 +2198,14 @@ function renderApproval() {
   approval.shownNeeds = needsNow;
   approval.dialog.dataset.mod = m.id;
   P.group.hidden = !m.group;
-  P.facts.hidden = P.chip.hidden = !!m.group;
+  P.facts.hidden = !!m.group;
+  // (no chip: the card is in its mod's tier colour, as the code card is: Tim, 11-13. A group's card: the
+  // riskiest of its mods' colours, each mod keeping its chip)
+  P.chip.hidden = true;
+  const groupOf = (x) => (x.rules ? 'rules' : x.sandboxed ? 'sandboxed' : 'page');
+  const tiers = (m.group || [m]).map(groupOf);
+  approval.dialog.dataset.group = ['page', 'sandboxed', 'rules'].find((g) => tiers.includes(g));
+  P.together.classList.remove('ap-free');
   if (m.group) { renderGroup(P, m); return; }
   P.name.textContent = m.name || m.id;
   const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
@@ -2153,6 +2243,15 @@ function renderApproval() {
     return addMore(line, many ? warningByLine(x.f) : warningTerm(`together, it ${x.f}`));
   }));
   P.together.hidden = !warns.length;
+  // A free mod: what that means, as plainly as a boxed mod's warnings, its first words in coral (Tim, 11-13)
+  const free = !m.rules && !m.sandboxed && kind !== 'sandbox';
+  if (free) {
+    const p = el('p');
+    p.append(...freeWarning());
+    P.together.replaceChildren(p);
+    P.together.classList.add('ap-free');
+    P.together.hidden = false;
+  }
   // (then what it adds to its site's boxed mods together: helper/lib/sitecombos.js)
   P.siteBox.replaceChildren(...siteBoxes(info.reach));
   P.siteBox.hidden = !P.siteBox.childNodes.length;
@@ -2161,8 +2260,7 @@ function renderApproval() {
   P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
-        : !m.rules && !m.sandboxed ? `${who} A free mod can do anything the page can, so look at the code if you're not sure.`
-          : who;
+        : who; // (a free mod's: its warning above says what it can do)
   P.claim.replaceChildren();
   P.claim.hidden = !info.claim;
   if (info.claim) P.claim.append(el('span', 'ap-claim-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
@@ -2390,8 +2488,6 @@ function codeViewDialog() {
   meta.append(chip, where);
   nameBox.append(name, meta);
   who.append(robot, nameBox);
-  // (what the row leaves out: how noticeable it is, its powers, where it runs)
-  const about = el('div', 'cv-about');
   // (a change waiting: which version)
   const versions = el('div', 'cv-versions');
   versions.setAttribute('role', 'group');
@@ -2412,8 +2508,12 @@ function codeViewDialog() {
   tabs.setAttribute('role', 'tablist');
   const tab = (label, cls, fn) => { const b = button(label, `cv-tab ${cls}`, fn); b.setAttribute('role', 'tab'); return b; };
   const codeTab = tab('Code', 'cv-tab-code', () => showCodeTab());
+  const detailsTab = tab('Details', 'cv-tab-details', () => setCodeTab('details'));
   const historyBtn = tab('History', 'cv-tab-history', () => showHistoryTab());
-  tabs.append(codeTab, historyBtn);
+  tabs.append(detailsTab, codeTab, historyBtn); // (Details first: Tim, 11-13. The icons open on it, </> on Code)
+  // (Details: what the mod can do, as its hold showed it when the user allowed it: renderDetails)
+  const details = el('div', 'cv-details');
+  details.hidden = true;
   // (a kept version shown in place: Diff with the current one, Restore)
   const hTools = el('div', 'cv-h-tools');
   hTools.hidden = true;
@@ -2455,15 +2555,15 @@ function codeViewDialog() {
   acts.append(copy, exportBtn, moreWrap);
   const historyBox = el('ul', 'cv-history-list');
   historyBox.hidden = true;
-  d.append(top, who, about, tabs, versions, errorBox, hTools, codeBox, historyBox, note, err, acts);
+  d.append(top, who, tabs, versions, errorBox, hTools, codeBox, details, historyBox, note, err, acts);
   d.addEventListener('close', () => setTimeout(() => renderMods(), 0)); // (a hold that came meanwhile: its card now)
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, about, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor, copyTo, item };
+  codeView.parts = { name, chip, where, details, detailsTab, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor, copyTo, item };
   return codeView.parts;
 }
 
-function openCodeView(id, { error = null } = {}) {
+function openCodeView(id, { error = null, tab = 'code' } = {}) {
   const m = (view.status?.mods || []).find((x) => x.id === id);
   if (!m) return;
   const P = codeViewDialog();
@@ -2473,30 +2573,20 @@ function openCodeView(id, { error = null } = {}) {
   const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
   P.chip.className = `ap-chip ${k[0]}`;
   P.chip.textContent = k[1];
+  // (no chip here: the card is in its tier's colour instead, and Details says which: Tim, 11-13)
+  P.chip.hidden = true;
+  codeView.dialog.dataset.group = m.rules ? 'rules' : m.sandboxed ? 'sandboxed' : 'page';
   P.where.replaceChildren(`${m.id.split('/')[0]} · `, fileLink(String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`,
     IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'),
     ...(m.source === 'webmods' || m.source === 'trif' ? [' · ', el('span', 'cv-source', `Tim's mod${m.version ? `, v${m.version}` : ''}${m.sourceChanged ? ', changed' : ''}`)] : []));
-  const { everywhere, sites } = modSites(m);
+  renderDetails(P, m);
   const site = m.id.split('/')[0];
-  // (the level, powers and warnings with their "more": explain.json)
-  const level = modLevel(m);
-  const pl = powerLines(m);
-  const lines = [
-    ...(level ? [[levelWords(m, view.site || site), term('chips', level >= 2 ? 'changes-requests' : 'noticeable')]] : []),
-    ...pl.map((l, i) => [`Power: ${l}`, term('powers', m.powers[i])]),
-    ...(m.powerInfo?.warnings || []).map((w) => [w.charAt(0).toUpperCase() + w.slice(1), warningTerm(w)]),
-    ...(everywhere ? ['Runs on every site.'] : sites.length > 1 ? [`Runs on ${sites.join(', ')}.`] : []),
-    ...(m.from ? [`Made from ${m.from}.`] : []),
-    ...(m.enabled !== false && !m.registered && !m.held ? [view.status?.userScripts ? 'Not active right now.' : 'Paused: user scripts are off.'] : []),
-  ];
-  P.about.replaceChildren(...lines.map((l) => (Array.isArray(l) ? addMore(el('p', null, l[0]), l[1]) : el('p', null, l))));
-  P.about.hidden = !lines.length;
   P.versions.hidden = !m.pending;
   P.copy.textContent = 'Copy';
   delete P.copy.dataset.copied;
   // (Show in Finder and Open in editor: the helper does them)
   const connected = !!view.status?.helper?.connected;
-  setCodeTab('code');
+  setCodeTab(tab === 'details' ? 'details' : 'code');
   P.menu.hidden = true;
   for (const b of [P.reveal, P.editor, P.historyBtn, P.exportBtn]) {
     b.disabled = !connected;
@@ -2612,6 +2702,90 @@ function codeLine(cls, text, source = text, extra = 0) {
 let codeWrap = true;
 try { codeWrap = localStorage.getItem('codeWrap') !== 'off'; } catch { /* no storage: on */ }
 
+// Details (Tim, 11-13): what the mod can do, laid out as its hold showed it when the user allowed it: what kind of
+// mod it is; each power with its icon and its sentence for this mod; the warnings about its powers together; what
+// its site's boxed mods can do together; how noticeable it is; where it runs. Each with its "more" (explain.json).
+// The row's icons have only a few words each: this is where the rest is.
+// A free mod's warning on the approval card: its first words (and their comma, as "Together," has it) in coral
+// (Tim, 11-13)
+const freeWarning = () => [el('b', null, 'A free mod can do anything the page can do,'), ' including posting or sending as you. Only enable free mods that you trust.'];
+
+// The code card's Details opens with its tier, in its colour (Tim, 11-13)
+// (the tier's name and its colon in bold, in its colour: Tim, 11-13)
+const DETAILS_TIER = {
+  'style-mods': ['Style mod:', ' changes how the page looks.'],
+  'boxed-mods': ['Boxed mod:', ' can do what you\'ve allowed.'],
+  'free-mods': ['Free mod:', ' can do anything code can do.'],
+};
+function renderDetails(P, m) {
+  const site = m.id.split('/')[0];
+  const out = [];
+  // The tier, in its colour (Tim, 11-13), with its explanation behind the "i"; a free mod's explanation is its
+  // warning instead, in a coral box (the tier card's words, after its line), so no "i" to repeat it.
+  const tierId = m.rules ? 'style-mods' : m.sandboxed ? 'boxed-mods' : 'free-mods';
+  const tierTerm = term('tiers', tierId);
+  const tierLine = el('p', 'cv-d-tier');
+  tierLine.append(el('b', null, DETAILS_TIER[tierId][0]), DETAILS_TIER[tierId][1]);
+  if (m.rules || m.sandboxed) out.push(tierTerm ? addMore(tierLine, tierTerm) : tierLine);
+  else {
+    out.push(tierLine);
+    const warn = tierTerm ? moreText(tierTerm).split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean) : [];
+    if (warn.length) { const box = el('div', 'ap-together cv-d-free'); for (const x of warn) box.append(el('p', null, x)); out.push(box); }
+  }
+  const facts = (m.sandboxed && Array.isArray(m.powerInfo?.facts)) ? m.powerInfo.facts : [];
+  if (facts.length) {
+    out.push(el('p', 'ap-lead', 'It asks for these powers. TRIF holds it to them:'));
+    const ul = el('ul', 'ap-facts cv-d-facts');
+    for (const f of facts) {
+      const li = el('li');
+      const ic = el('span', 'ap-ic');
+      ic.setAttribute('aria-hidden', 'true');
+      const svg = iconSvg(f.power === 'migrate' ? '@migrate' : f.power);
+      if (svg) ic.append(svg); else ic.textContent = iconOf(`power:${f.power}`);
+      const text = el('span', 'ap-text');
+      text.append(el('span', 'ap-line', `It ${f.fact}.`));
+      li.append(ic, addMore(text, f.power === 'migrate' ? term('powers', 'migrate') : powerTerm(`power:${f.power}`)));
+      ul.append(li);
+    }
+    out.push(ul);
+  }
+  const warns = (m.sandboxed && Array.isArray(m.powerInfo?.warnings)) ? m.powerInfo.warnings : [];
+  if (warns.length) {
+    const box = el('div', 'ap-together');
+    for (const w of warns) {
+      const line = el('p');
+      const words = el('span', 'ap-line');
+      const t = /^together, it (.*)$/i.exec(w);
+      if (t) words.append(el('b', null, 'Together,'), ` it ${t[1]}${/[.!?]$/.test(t[1]) ? '' : '.'}`);
+      else words.textContent = w.charAt(0).toUpperCase() + w.slice(1);
+      line.append(words);
+      box.append(addMore(line, warningTerm(w)));
+    }
+    out.push(box);
+  }
+  const boxes = siteBoxes(m.siteReach);
+  if (boxes.length) { const sitesBox = el('div', 'ap-sites'); sitesBox.append(...boxes); out.push(sitesBox); }
+  const level = modLevel(m);
+  if (level) {
+    // (with the row's icon for it: the eye, or the cloud for changes requests)
+    const key = level >= 2 ? 'changes-requests' : 'noticeable';
+    const p = el('p', 'cv-d-level');
+    const ic = el('span', 'ap-ic');
+    ic.setAttribute('aria-hidden', 'true');
+    const svg = iconSvg(key);
+    if (svg) ic.append(svg);
+    p.append(ic, el('span', null, levelWords(m, view.site || site)));
+    out.push(addMore(p, term('chips', key)));
+  }
+  const { everywhere, sites } = modSites(m);
+  for (const l of [
+    ...(everywhere ? ['Runs on every site.'] : sites.length > 1 ? [`Runs on ${sites.join(', ')}.`] : []),
+    ...(m.from ? [`Made from ${m.from}.`] : []),
+    ...(m.enabled !== false && !m.registered && !m.held ? [view.status?.userScripts ? 'Not active right now.' : 'Paused: user scripts are off.'] : []),
+  ]) out.push(el('p', null, l));
+  P.details.replaceChildren(...out);
+}
+
 // History (helper lib/history.js): the versions TRIF kept of this mod, with View, Diff with current and
 // Restore; the code again from the same button.
 const HISTORY_SOURCE = {
@@ -2622,9 +2796,11 @@ const HISTORY_SOURCE = {
 function setCodeTab(which) {
   const P = codeView.parts;
   P.codeTab.setAttribute('aria-selected', String(which === 'code'));
-  P.historyBtn.setAttribute('aria-selected', String(which !== 'code'));
+  P.detailsTab.setAttribute('aria-selected', String(which === 'details'));
+  P.historyBtn.setAttribute('aria-selected', String(which === 'history' || which === 'version'));
   P.historyBox.hidden = which !== 'history';
-  P.codeBox.hidden = which === 'history';
+  P.details.hidden = which !== 'details';
+  P.codeBox.hidden = which === 'history' || which === 'details';
   P.hTools.hidden = which !== 'version';
   if (which !== 'code') P.versions.hidden = true;
   codeView.tab = which;
@@ -2761,8 +2937,9 @@ ui.exportSite?.addEventListener('click', async () => {
   } catch (e) { request({ type: 'chat.note', site: view.site, text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }
 });
 
-// A small card for the import's questions (which site; a copy or Replace): resolves the choice, or null
-function askCard(title, text, choices) {
+// A small card for the import's questions (which site; a copy or Replace), and Log out's: resolves the
+// choice, or null. `head`: the line over the title ('' for none).
+function askCard(title, text, choices, head = 'Import mod') {
   return new Promise((resolve) => {
     resolve = ((r) => (v) => { r(v); setTimeout(() => renderMods(), 0); })(resolve);
     const d = el('dialog', 'approval import-ask');
@@ -2771,7 +2948,7 @@ function askCard(title, text, choices) {
     const x = el('button', 'ap-x', '×');
     x.type = 'button';
     x.setAttribute('aria-label', 'Cancel');
-    top.append(el('span', 'ap-count', 'Import mod'), x);
+    top.append(el('span', 'ap-count', head), x);
     const acts = el('div', 'ap-actions');
     const done = (v) => { siteCards.delete(cancel); d.close(); d.remove(); resolve(v); };
     const cancel = () => done(null);
@@ -3222,6 +3399,7 @@ function renderSettings() {
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
+  renderAgentLogin(chosen);
   renderWithoutSandbox();
   renderModels();
 }

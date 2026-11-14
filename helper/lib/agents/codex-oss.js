@@ -405,6 +405,7 @@ const adapter = {
   // No OpenAI login involved: nothing to check or log in to.
   loginFix: '',
   login: null,
+  logout: null,
 };
 
 // API key variables a shell profile commonly exports (doctor warns when one is in the environment).

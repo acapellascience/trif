@@ -2007,7 +2007,7 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, sourceChanged: !!m.sourceChanged, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, found: Array.isArray(m.found) ? m.found : [],
+      source: m.source || null, sourceChanged: !!m.sourceChanged, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, siteReach: Array.isArray(m.siteReach) ? m.siteReach : null, found: Array.isArray(m.found) ? m.found : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
       chatWaiting: !!state.chatWaiting[m.id],
       ...(waitsThere(m) ? { waitsThere: true } : {}),
@@ -2293,6 +2293,12 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
       const r = await helperRequest('agent.withoutSandbox', { agent: String(msg.agent ?? ''), allow: msg.allow }, 10000);
       if (msg.site && msg.card !== undefined) await answerCard(normalizeSite(msg.site), msg.card, msg.allow ? 'allowed' : 'stop');
       return r;
+    }
+    // Settings' Log out (helper agents/index.js logout): only from the panel, as a run could otherwise log
+    // the user out of their agent everywhere.
+    case 'agent.logout': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('agent.logout', { agent: String(msg.agent ?? '') }, 30000);
     }
     // "Stop" on that card: the run stays stopped and nothing is stored; the card says it was answered.
     case 'chat.sandboxCard': {

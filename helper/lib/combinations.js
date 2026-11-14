@@ -45,7 +45,7 @@ const WARNINGS = {
   'read-into-sound': { rank: 20, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
 };
 // (Tim's words, for a mod with more than three powers, in place of the lines above)
-const MANY = 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.';
+const MANY = 'Mods with many powers could act in surprising ways. Treat them with caution.';
 const MANY_OVER = 3;
 
 // Every pair (66) and triple (220) of the twelve of 0.2, in POWERS order: { warn: <WARNINGS key> }, or why it

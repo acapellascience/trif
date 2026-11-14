@@ -177,7 +177,7 @@ class Scenario {
       const d = document.getElementById('approval');
       if (!d || !d.open) return null;
       const q = (s) => d.querySelector(s);
-      return { mod: d.dataset.mod, count: q('.ap-count').textContent, name: q('.ap-name').textContent, chip: q('.ap-chip').textContent, where: q('.ap-where').textContent,
+      return { mod: d.dataset.mod, group: d.dataset.group, count: q('.ap-count').textContent, name: q('.ap-name').textContent, chip: q('.ap-chip').hidden ? '' : q('.ap-chip').textContent, where: q('.ap-where').textContent,
         lead: q('.ap-lead').textContent, items: [...d.querySelectorAll('.ap-facts li')].map((x) => (x.querySelector('.ap-line') || x.lastChild).textContent),
         together: q('.ap-together').hidden ? [] : [...d.querySelectorAll('.ap-together p')].map((x) => (x.querySelector('.ap-line') || x).textContent),
         note: q('.ap-note').textContent, claim: q('.ap-claim').hidden ? '' : q('.ap-claim').textContent, show: q('.ap-show').textContent,
@@ -1147,6 +1147,7 @@ class Scenario {
       await this.waitBar('the blocked gate\'s bar', GATE_BAR_SHUT);
       // blocked: red with a red cross, in the toolbar for this tab, in the bar and on the gate
       const faces = await this.waitFace('the blocked faces', this.win.tabId, { toolbar: 'robot-16.png', bar: 'blocked', gate: 'robot-shaded-blocked.svg' });
+      Scenario.mono(await this.looks()); // (all red, its links too)
       await this.shot(this.panelCtx, 'panel-blocked');
       for (const args of [['text', '--url', '127.0.0.1'], ['screenshot', '--url', '127.0.0.1', '-o', path.join(this.work, 'blocked.png')], ['run', '--url', '127.0.0.1', '1']]) {
         const x = await this.cli(args);
@@ -1831,7 +1832,24 @@ class Scenario {
         classes: ['blocked', 'needs-login'].filter((c) => document.body.classList.contains(c)),
         problem: document.body.dataset.problem || '',
         dot: q('#dot').className, dotShown: shown('#dot'), dotLabel: q('#dot').getAttribute('aria-label'),
-        green: colour('var(--trif-green)'), bad: colour('var(--bad)'), warn: colour('var(--warn)'),
+        green: colour('var(--trif-green)'), bad: colour('var(--led-coral)'), warn: colour('var(--led-yellow)'),
+        // (a running mod's tier colour: its row's stripe; the list's opacity, dimmed while mods can't run; the X eyes)
+        // Monochrome (Tim, 11-13): on the robot-off screens (the gate, blocked included, and the landing page),
+        // in a state, what's coloured (links, buttons, the line, the title when blocked, the dot, the robot) is
+        // the state's colour, the robot's (--switch-on)
+        state: colour('var(--switch-on)'),
+        mono: (() => {
+          const out = [];
+          const vis = (e) => e.getClientRects().length > 0 && !!e.closest('.gate, .landing');
+          const name = (e) => \`\${e.tagName.toLowerCase()}\${e.id ? '#' + e.id : ''}.\${String(e.className).trim().replace(/\s+/g, '.')} "\${(e.textContent || '').trim().slice(0, 30)}"\`;
+          for (const e of document.querySelectorAll('a, .link-btn, .file-link, #notice .title, #paused .title, .problem-line, body.site-blocked .gate-title')) if (vis(e)) out.push([name(e), getComputedStyle(e).color]);
+          for (const e of document.querySelectorAll('.btn.primary, .btn.go')) if (vis(e)) out.push([name(e), getComputedStyle(e).backgroundColor]);
+          if (q('#dot').getClientRects().length) out.push(['the dot', getComputedStyle(q('#dot')).backgroundColor]);
+          for (const [n, e, prop] of [['the robot', q('#bar-robot .rim'), 'fill'], ['the power button', q('#site-switch'), 'color']]) if (e && (e.closest('button') || e).getClientRects().length) out.push([n, getComputedStyle(e)[prop]]);
+          return out;
+        })(),
+        stripe: (() => { const li = q('#mod-list li[data-mod][data-group]:not(.off)'); return li ? getComputedStyle(li, '::before').backgroundColor : null; })(),
+        listOpacity: style('#mod-list', 'opacity'), xeyes: style('#bar-robot .xeyes', 'display'),
         rim: style('#bar-robot .rim', 'fill'), gateIcon: (document.getElementById('gate-icon')?.getAttribute('src') || '').split('/').pop(), barFace: document.getElementById('bar-robot')?.dataset.face || '', power: style('#site-switch', 'color'),
         modSwitch: style('#mod-list button.switch[aria-checked="true"]', 'backgroundColor'), light: style('#mod-list .light.on', 'backgroundColor'),
         send: { disabled: q('#send').disabled, title: q('#send').title },
@@ -1854,6 +1872,38 @@ class Scenario {
   }
 
   /** Whether two computed rgb() colours are the same, give or take rounding (and a transition's last step). */
+  /**
+   * Settings' Log out, under the agent (Tim, 11-13): the line, and its card, on which only Cancel is clicked
+   * (the real Log out would run the agent's own logout). Settings must be open. Returns the problems found.
+   * `optional`: no line is only a note (the agent there isn't logged in with its own login).
+   */
+  async logoutLine(themes, { optional = false } = {}) {
+    const problems = [];
+    const out = await waitFor('the Log out line', () => this.panel(`async () => { const p = document.getElementById('agent-login'); if (!p || p.hidden) return null; p.scrollIntoView({ block: 'center' }); return { text: p.textContent }; }`), { timeoutMs: optional ? 1500 : 10000 }).catch(() => null);
+    if (!out) {
+      if (optional) this.r.note('Settings: no Log out line (the agent here isn\'t logged in with its own login)');
+      else problems.push('Settings: no Log out line');
+      return problems;
+    }
+    const m = /^(.+) is logged in\. Log out$/.exec(out.text);
+    if (!m) problems.push(`the Log out line: ${out.text}`);
+    await themes('agent-logout-line');
+    await this.panel(`async () => { document.querySelector('#agent-login .link-btn').click(); return true; }`);
+    const card = await waitFor('the Log out card', () => this.panel(`async () => { const d = document.getElementById('import-ask'); return d?.open ? { title: d.querySelector('.ap-name')?.textContent, text: d.querySelector('.ap-lead')?.textContent, buttons: [...d.querySelectorAll('.ap-actions .btn')].map((b) => b.textContent), head: d.querySelector('.ap-count')?.textContent } : null; }`), { timeoutMs: 5000 }).catch(() => null);
+    if (!card || card.title !== `Log out of ${m && m[1]}?` || card.text !== 'This logs you out everywhere on your computer, including the terminal.' || card.buttons.join() !== 'Log out,Cancel' || card.head) problems.push(`the Log out card: ${JSON.stringify(card)}`);
+    await themes('agent-logout-card');
+    await this.panel(`async () => { [...document.querySelectorAll('#import-ask .ap-actions .btn')].find((b) => b.textContent === 'Cancel').click(); return true; }`);
+    const after = await this.panel(`async () => ({ card: !!document.getElementById('import-ask'), line: !document.getElementById('agent-login').hidden })`);
+    if (after.card || !after.line) problems.push(`after Cancel: ${JSON.stringify(after)}`);
+    return problems;
+  }
+
+  /** Throws unless everything coloured on a robot-off screen is the state's colour (looks().mono). */
+  static mono(x) {
+    const off = x.mono.filter(([, c]) => !Scenario.same(c, x.state));
+    if (off.length) throw new Error(`not one colour (${x.state}): ${JSON.stringify(off)}`);
+  }
+
   static same(a, b) {
     const n = (c) => (String(c).match(/[\d.]+/g) || []).slice(0, 3).map(Number);
     const [x, y] = [n(a), n(b)];
@@ -1879,12 +1929,13 @@ class Scenario {
       const first = await this.waitLooks('the panel\'s status', (x) => !!x.dot && !/Checking/.test(x.dotLabel));
       const loggedOut = /isn’t logged in/.test(first.dotLabel);
       if (loggedOut) {
-        await r.check('agent not logged in, on the site\'s page: every green turns yellow, the robot\'s colour (mods\' switches and lights too), the login notice shows', async () => {
+        await r.check('agent not logged in, on the site\'s page: the robot (X eyes) and power button yellow, the mods in their tiers\' colours, the login notice shows', async () => {
           const x = await this.waitLooks('yellow', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn');
-          // One colour while logged out: the mods' switches and lights are yellow too (Tim, 2026-11-11).
-          const want = { rim: x.warn, power: x.warn, modSwitch: x.warn };
+          // The panel's state in yellow; the mods keep their tiers' colours (Tim, 11-13).
+          const want = { rim: x.warn, power: x.warn, modSwitch: x.stripe };
           for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
-          if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
+          if (x.light && !Scenario.same(x.light, x.stripe)) throw new Error(`the running light is ${x.light}`);
+          if (x.barFace !== 'login' || x.xeyes !== 'inline') throw new Error(`the robot's face: ${x.barFace}, X eyes ${x.xeyes}`);
           if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
           // F14: no sending into a run that can only fail with that; the button says why.
           if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);
@@ -1894,6 +1945,7 @@ class Scenario {
         await r.check('agent not logged in, on the gate: the small robot yellow, a line saying so, Fix still there', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('yellow gate', (l) => l.classes.join() === 'needs-login' && !!l.gateNote);
+          Scenario.mono(x);
           if (!['robot-shaded-off-yellow.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-yellow-gate');
@@ -1908,7 +1960,7 @@ class Scenario {
       } else r.note(`the agent is logged in here ("${first.dotLabel}"): no yellow checks`);
 
       // User scripts off: red, everything.
-      const off = await r.check('user scripts off, on the site\'s page: everything red, "Mods are paused" first', async () => {
+      const off = await r.check('user scripts off, on the site\'s page: the robot and power button coral, the mod list dimmed, "Mods are paused" first', async () => {
         this.scriptsRevoked = true; // the "user scripts were turned off" warnings are expected (consoleCheck, helperLogCheck)
         await this.d.revokeUserScripts(this.control);
         try {
@@ -1920,8 +1972,11 @@ class Scenario {
         }
         await this.goColour('site');
         const x = await this.waitLooks('red', (l) => l.problem === 'scripts' && l.classes.join() === 'blocked' && l.notices.length > 0);
-        for (const k of ['rim', 'power', 'modSwitch']) if (!Scenario.same(x[k], x.bad)) throw new Error(`${k} is ${x[k]}, not ${x.bad}: ${JSON.stringify(x)}`);
-        if (x.light && !Scenario.same(x.light, x.bad)) throw new Error(`the running light is ${x.light}`);
+        for (const k of ['rim', 'power']) if (!Scenario.same(x[k], x.bad)) throw new Error(`${k} is ${x[k]}, not ${x.bad}: ${JSON.stringify(x)}`);
+        // The mods can't run: the whole list dims, in its tiers' colours (Tim, 11-13).
+        if (x.modSwitch && !Scenario.same(x.modSwitch, x.stripe)) throw new Error(`the mod switch is ${x.modSwitch}, not its tier's ${x.stripe}`);
+        if (x.listOpacity !== '0.4') throw new Error(`the mod list's opacity: ${x.listOpacity}`);
+        if (x.barFace !== 'scripts') throw new Error(`the robot's face: ${x.barFace}, not the cross`);
         if (x.dot !== 'dot bad') throw new Error(`dot ${x.dot}`);
         if (x.notices[0] !== 'Mods are paused') throw new Error(`notices: ${JSON.stringify(x.notices)}`);
         // F3: not logged in as well, both notices show, the paused one first.
@@ -1935,7 +1990,8 @@ class Scenario {
         await r.check('user scripts off, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate', (l) => l.problem === 'scripts' && !!l.gateNote);
-          if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (!['robot-shaded-off-coral.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-scripts-off-gate');
           return `"${x.gateNote}"`;
@@ -1943,7 +1999,8 @@ class Scenario {
         await r.check('user scripts off, no website: the red robot, the line, the dot', async () => {
           await this.goColour('landing');
           const x = await this.waitLooks('red landing', (l) => l.problem === 'scripts' && !!l.landingNote);
-          if (x.landingIcon !== 'icons/robot-shaded-red.svg' || !x.landingIconLoaded || !x.dotShown || !/^Mods are paused/.test(x.landingNote)) throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (x.landingIcon !== 'icons/robot-shaded-scripts.svg' || !x.landingIconLoaded || !x.dotShown || !/^Mods are paused/.test(x.landingNote)) throw new Error(JSON.stringify(x));
           await this.shot(this.panelCtx, 'panel-scripts-off-landing');
           return `"${x.landingNote}"`;
         });
@@ -1962,11 +2019,12 @@ class Scenario {
       this.helperStopped = true; // its "helper disconnected" warnings are expected (consoleCheck)
       try {
         process.kill(this.helperPid, 'SIGTERM');
-        await r.check('helper not connected, on the site\'s page: the robot and power button red, the mods (still running) green', async () => {
+        await r.check('helper not connected, on the site\'s page: the robot and power button coral, the mods (still running) as usual', async () => {
           await this.goColour('site');
           const x = await this.waitLooks('red, helper', (l) => l.problem === 'helper' && l.classes.join() === 'blocked' && l.notices.length > 0);
           if (!Scenario.same(x.rim, x.bad) || !Scenario.same(x.power, x.bad) || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
-          if (!Scenario.same(x.modSwitch, x.green) || (x.light && !Scenario.same(x.light, x.green))) throw new Error(`the mods aren't green: ${JSON.stringify(x)}`);
+          if (!Scenario.same(x.modSwitch, x.stripe) || (x.light && !Scenario.same(x.light, x.stripe)) || x.listOpacity !== '1') throw new Error(`the mods aren't as usual: ${JSON.stringify(x)}`);
+          if (x.barFace !== 'helper' || x.xeyes !== 'inline') throw new Error(`the robot's face: ${x.barFace}, X eyes ${x.xeyes}`);
           if (!x.notices.includes('The TRIF helper isn’t connected')) throw new Error(`notices: ${JSON.stringify(x.notices)}`);
           await this.shot(this.panelCtx, 'panel-helper-site');
           return `rim ${x.rim}, mods ${x.modSwitch}`;
@@ -1974,7 +2032,8 @@ class Scenario {
         await r.check('helper not connected, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
-          if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (!['robot-shaded-off-coral.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;
@@ -1982,7 +2041,8 @@ class Scenario {
         await r.check('helper not connected, no website: the red robot, the line, the dot', async () => {
           await this.goColour('landing');
           const x = await this.waitLooks('red landing, helper', (l) => l.problem === 'helper' && !!l.landingNote);
-          if (x.landingIcon !== 'icons/robot-shaded-red.svg' || !x.landingIconLoaded || !x.dotShown || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (x.landingIcon !== 'icons/robot-shaded-helper.svg' || !x.landingIconLoaded || !x.dotShown || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
           await this.waitBar('the landing page\'s bar', ['#dot', '#settings-btn']);
           await this.shot(this.panelCtx, 'panel-helper-landing');
           return `"${x.landingNote}"`;
@@ -2141,7 +2201,7 @@ process.exitCode = 1;
       if (!shown.msgs.some(([cls, text]) => cls === 'msg login' && text === 'Claude Code needs you to log in again.')) throw new Error(`no login line: ${JSON.stringify(shown.msgs)}`);
       // Its own check still says logged in, so after logging in from a terminal, sending is how to tell.
       if (x.send.disabled) throw new Error(`Send is off: ${JSON.stringify(x.send)}`);
-      // logged out: hollow yellow eyes, in the bar and (every tab's) in the toolbar
+      // logged out: yellow X eyes in the bar; the toolbar keeps the usual robot
       await this.waitFace('the logged-out faces', win.tabId, { toolbar: 'robot-16.png', bar: 'login' });
       await this.shot(this.panelCtx, 'panel-login-expired');
       // From a terminal: the plain message, and how to log in.
@@ -2375,6 +2435,12 @@ process.exitCode = 1;
       if (s1.sitePicks?.[site]?.agent !== 'codex') throw new Error(`this site's pick: ${JSON.stringify(s1)}`);
       if (!Scenario.same(sw.rim, sw.green)) throw new Error(`not green: ${JSON.stringify(sw)}`);
       out.push('Switch to Codex: this site\'s pick, green');
+      // Codex logged in (the stand-in): Settings offers Log out
+      await this.panelClick('#settings-btn');
+      const lo = await this.logoutLine(themes);
+      await this.panelClick('#settings-btn');
+      if (lo.length) throw new Error(lo.join('\n'));
+      out.push('Settings: "Codex is logged in. Log out", its card, Cancel');
 
       // Back to Claude Code; Use robotless.
       await useClaude();
@@ -2384,8 +2450,10 @@ process.exitCode = 1;
       const x = await this.waitLooks('robotless: green, the off face', (l) => !l.classes.length && l.dot === 'dot ok' && l.barFace === 'robotless', 20000);
       const s2 = await stored();
       if (s2.settings?.agent !== 'none' || s2.sitePicks?.[site]?.agent !== 'claude') throw new Error(`stored: ${JSON.stringify(s2)}`);
-      for (const k of ['rim', 'power', 'modSwitch']) if (x[k] && !Scenario.same(x[k], x.green)) throw new Error(`${k} is ${x[k]}, not green: ${JSON.stringify(x)}`);
-      if (x.light && !Scenario.same(x.light, x.green)) throw new Error(`the running light is ${x.light}`);
+      for (const k of ['rim', 'power']) if (x[k] && !Scenario.same(x[k], x.green)) throw new Error(`${k} is ${x[k]}, not green: ${JSON.stringify(x)}`);
+      // (the mods in their tiers' colours, as always)
+      if (x.modSwitch && !Scenario.same(x.modSwitch, x.stripe)) throw new Error(`the mod switch is ${x.modSwitch}, not its tier's ${x.stripe}`);
+      if (x.light && !Scenario.same(x.light, x.stripe)) throw new Error(`the running light is ${x.light}`);
       if (x.dotLabel !== 'Ready · robotless' || x.notices.length) throw new Error(JSON.stringify(x));
       const r1 = await notice();
       if (r1.line !== 'Robotless: your mods run, no agent. Pick one in Settings to chat.' || r1.composer || r1.using || r1.empty || r1.shown) throw new Error(`robotless: ${JSON.stringify(r1)}`);
@@ -2751,7 +2819,7 @@ process.exitCode = 1;
       return li && li.classList.contains('held') ? { group: li.dataset.group } : null;
     }`), { timeoutMs: 15000 });
     const card = await this.approvalFor('127.0.0.1/e2e-sbx-good');
-    if (row.group !== 'page' || !card.items.some((f) => /can't run boxed mods, so here it would run as a free mod/.test(f)) || card.chip !== 'Boxed mod'
+    if (row.group !== 'page' || !card.items.some((f) => /can't run boxed mods, so here it would run as a free mod/.test(f)) || card.group !== 'sandboxed' || card.chip
       || card.note !== 'Allow runs this version as a free mod, in this browser only.') throw new Error(`the panel: ${JSON.stringify({ row, card })}`);
     await this.shot(this.panelCtx, 'panel-sandbox-fallback-held');
     await this.d.click(this.panelCtx, '#approval .ap-allow');
@@ -2839,13 +2907,13 @@ process.exitCode = 1;
       else if (!opened.focusIn) problems.push(`the focus isn't in the approval dialog: ${JSON.stringify(opened)}`);
       const row = await this.approvalFor('127.0.0.1/e2e-pw-all');
       const want = {
-        name: 'E2E Boxed mod with powers', chip: 'Boxed mod', where: '127.0.0.1 · e2e-pw-all.js', lead: 'It asks for these powers. TRIF holds it to them:',
+        name: 'E2E Boxed mod with powers', group: 'sandboxed', chip: '', where: '127.0.0.1 · e2e-pw-all.js', lead: 'It asks for these powers. TRIF holds it to them:',
         items: ['It can read what you type on this site, but can\'t send it anywhere.', 'It can play sounds.', 'It can add its own controls (sliders, pickers).'],
         together: ['Together, it could turn what it reads into sounds that a device nearby could pick up.'],
         note: 'It\'s new or changed since TRIF last let it run. Updates that ask for the same powers won\'t ask again.', show: 'Show code',
       };
       for (const [k, v] of Object.entries(want)) if (JSON.stringify(row[k]) !== JSON.stringify(v)) problems.push(`the approval dialog's ${k}: ${JSON.stringify(row[k])}`);
-      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'read-drafts sound controls' || !/^It can read what you type/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
+      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'read-drafts sound controls' || !/^Reads what you type\nPlays sounds\nAdds its own controls$/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
       // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
@@ -2856,19 +2924,19 @@ process.exitCode = 1;
       const moreState = () => this.panel(`async () => [...document.querySelectorAll('#approval .more-btn')].map((b) => {
         const box = document.getElementById(b.getAttribute('aria-controls'));
         const d = document.getElementById('approval');
-        return { btn: b.textContent, expanded: b.getAttribute('aria-expanded'), shown: !!box && !box.hidden && box.getClientRects().length > 0, text: box ? box.textContent : '',
+        return { btn: b.title, expanded: b.getAttribute('aria-expanded'), shown: !!box && !box.hidden && box.getClientRects().length > 0, text: box ? box.textContent : '',
           inWarnings: !!b.closest('.ap-together'), wide: d.scrollWidth > d.clientWidth + 1, overflowX: getComputedStyle(d).overflowX };
       })`);
       const before = await moreState();
-      if (before.length !== 4 || before.some((x) => x.btn !== 'more' || x.shown || x.expanded !== 'false')) problems.push(`"more" before a click: ${JSON.stringify(before)}`);
+      if (before.length !== 4 || before.some((x) => x.btn !== 'More' || x.shown || x.expanded !== 'false')) problems.push(`"more" before a click: ${JSON.stringify(before)}`);
       await this.d.click(this.panelCtx, '#approval .ap-facts li:first-child .more-btn');
       await this.d.click(this.panelCtx, '#approval .ap-together .more-btn');
       const opened2 = await waitFor('"more" open', async () => { const s = await moreState(); return s.filter((x) => x.shown).length === 2 ? s : null; }, { timeoutMs: 5000 }).catch(() => null);
       if (!opened2) problems.push(`"more" didn't reveal the explanations: ${JSON.stringify(await moreState())}`);
       else {
         const power = opened2[0], warn = opened2.find((x) => x.inWarnings) || {};
-        if (!power.shown || power.btn !== 'less' || power.expanded !== 'true' || !power.text || !explanation('powers', 'read-drafts').endsWith(power.text)) problems.push(`read-drafts' "more": ${JSON.stringify(power)}`);
-        if (!warn.shown || warn.btn !== 'less' || !warn.text || !explanation('warnings', 'read-into-sound').endsWith(warn.text)) problems.push(`the warning's "more": ${JSON.stringify(warn)}`);
+        if (!power.shown || power.btn !== 'Less' || power.expanded !== 'true' || !power.text || !explanation('powers', 'read-drafts').endsWith(power.text)) problems.push(`read-drafts' "more": ${JSON.stringify(power)}`);
+        if (!warn.shown || warn.btn !== 'Less' || !warn.text || !explanation('warnings', 'read-into-sound').endsWith(warn.text)) problems.push(`the warning's "more": ${JSON.stringify(warn)}`);
         if (opened2.some((x) => x.wide || x.overflowX !== 'hidden')) problems.push(`the card scrolls sideways with "more" open: ${JSON.stringify(opened2[0])}`);
         if ((await this.approvalState()).items[0] !== want.items[0]) problems.push('the line changed when its "more" opened');
       }
@@ -2876,7 +2944,7 @@ process.exitCode = 1;
       await this.d.colorScheme(this.panelCtx, '');
       await this.d.click(this.panelCtx, '#approval .ap-facts li:first-child .more-btn');
       const folded = await moreState();
-      if (folded[0].shown || folded[0].btn !== 'more') problems.push(`"less" didn't fold it: ${JSON.stringify(folded[0])}`);
+      if (folded[0].shown || folded[0].btn !== 'More') problems.push(`"less" didn't fold it: ${JSON.stringify(folded[0])}`);
       // the file name in the card opens the code card over it; Esc closes that one only
       await this.d.click(this.panelCtx, '#approval .ap-where .file-link');
       const over = await waitFor('the code card over the approval', () => this.panel(`async () => { const c = document.getElementById('code-view'); return c && c.open ? { mod: c.dataset.mod, approval: document.getElementById('approval').open } : null; }`), { timeoutMs: 8000 }).catch(() => null);
@@ -2928,7 +2996,7 @@ process.exitCode = 1;
       // a new power (keys): waits for that one only
       fs.writeFileSync(allFile, all.replace('// @powers      sound, controls, read-drafts', '// @powers      sound, controls, read-drafts, keys'));
       const held2 = await waitFor('held for the new power', async () => { const st = await status(); return /e2e-pw-all\s+CHANGE WAITING/.test(st) ? st : null; }, { timeoutMs: 20000, intervalMs: 500 });
-      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts; Mods with many powers can act in unspecific or powerful ways\. Treat this with caution\. \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
+      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts; Mods with many powers could act in surprising ways\. Treat them with caution\. \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
       await this.cli(['approve', '127.0.0.1/e2e-pw-all'], { timeoutMs: 20000 });
       await waitFor('keys allowed', async () => /e2e-pw-all\s+registered \(boxed, powers: read-drafts, keys, sound, controls\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
@@ -3093,7 +3161,7 @@ process.exitCode = 1;
         'can read and change what this site keeps under: e2e-wide-key, e2e-wide-s, e2e_c (a cookie: only read)', `changes what ${site} receives from this page: flag set to false, mode set to quiet in place of loud, added set to true (in E2eOp requests)`,
         'can load other sizes of pictures this page shows (from 127.0.0.1)', 'can play videos this page links to, inside the page (from youtube.com)', 'can see which fonts are installed on this computer',
         'can change pictures you attach on this site before you post them', 'can reload this page', 'brings over its old settings from what this site keeps under: e2e-old-setting (once)',
-        'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.']) if (!hl.includes(want)) problems.push(`the hold doesn't say "${want}": ${hl.slice(0, 1500)}`);
+        'Mods with many powers could act in surprising ways. Treat them with caution.']) if (!hl.includes(want)) problems.push(`the hold doesn't say "${want}": ${hl.slice(0, 1500)}`);
       await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
       await waitFor('registered with its powers', async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/wideb.html`]);
@@ -3529,7 +3597,7 @@ process.exitCode = 1;
       for (const want of ['it can read what you type on this site, but can\'t send it anywhere', 'it can talk to your other boxed mods on this page', 'it can play and pause video and audio on this page',
         `it can take you to these pages on ${site}: /e2e-goto-ok, or to a link the page shows`,
         'it can click these for you: the counter (#pclick), a link on this page (#plink), the form\'s buttons (#fb3, #fr3, #lb3), a link to another site (#ext3)',
-        'it can change what you type and paste on this site before you post it', 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.']) {
+        'it can change what you type and paste on this site before you post it', 'Mods with many powers could act in surprising ways. Treat them with caution.']) {
         if (!hl.includes(want)) problems.push(`trif status doesn't say "${want}": ${hl}`);
       }
       await this.cli(['approve', `${site}/e2e-pw3`], { timeoutMs: 20000 });
@@ -3690,6 +3758,7 @@ process.exitCode = 1;
       }`), { timeoutMs: 8000 });
       if (settings.level !== 'look' || settings.sensitive < 30) problems.push(`Settings: ${JSON.stringify(settings)}`);
       await themes('agent-settings');
+      problems.push(...await this.logoutLine(themes, { optional: true }));
       if (problems.length) throw new Error(problems.join('\n'));
       return `the line over the box ("${atAsk.words}"; the menu opened from the keyboard, Esc closed it); Ask: the dialog ("${asked.ask}"), Just this once ran the code (42) and left the site at Ask; Look from the menu refused trif run and allowed trif text; Off refused trif text; a sensitive site off with the chat's first line; Settings listed the choice and ${settings.sensitive} sensitive patterns`;
     } finally {
@@ -4028,7 +4097,7 @@ process.exitCode = 1;
       const d = document.getElementById('code-view');
       if (!d || !d.open) return null;
       const lines = [...d.querySelectorAll('.cv-code .l')];
-      return { mod: d.dataset.mod, name: d.querySelector('.ap-name').textContent, chip: d.querySelector('.ap-chip').textContent, where: d.querySelector('.ap-where').textContent,
+      return { mod: d.dataset.mod, group: d.dataset.group, name: d.querySelector('.ap-name').textContent, chip: d.querySelector('.ap-chip').hidden ? '' : d.querySelector('.ap-chip').textContent, where: d.querySelector('.ap-where').textContent,
         code: lines.map((l) => l.textContent).join(String.fromCharCode(10)), lines: lines.length, coloured: d.querySelectorAll('.cv-code .tk, .cv-code .ts, .cv-code .tc').length,
         copied: d.querySelector('.cv-copy').dataset.copied || '', reveal: d.querySelector('.cv-reveal').textContent, err: d.querySelector('.ap-err').hidden ? '' : d.querySelector('.ap-err').textContent };
     }`);
@@ -4048,8 +4117,14 @@ process.exitCode = 1;
       await this.panelClick(`li[data-mod="${site}/e2e-banner"] .mod-code`);
       const free = await waitFor('the code card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
       const want = fs.readFileSync(path.join(dir, 'e2e-banner.js'), 'utf8');
-      if (free.mod !== `${site}/e2e-banner` || free.chip !== 'Free mod' || free.where !== `${site} · e2e-banner.js` || free.code !== want || free.lines !== want.split('\n').length) problems.push(`the free mod's card: ${JSON.stringify({ ...free, code: free.code.slice(0, 200) })}`);
+      if (free.mod !== `${site}/e2e-banner` || free.group !== 'page' || free.chip || free.where !== `${site} · e2e-banner.js` || free.code !== want || free.lines !== want.split('\n').length) problems.push(`the free mod's card: ${JSON.stringify({ ...free, code: free.code.slice(0, 200) })}`);
       if (!free.coloured) problems.push('no colouring in the code');
+      // its Details: the tier's line in coral, and the coral warning (the tier's explanation) (Tim, 11-13)
+      await this.panel(`async () => { document.querySelector('#code-view .cv-tab-details').click(); return true; }`);
+      const fd = await waitFor('the free mod\'s Details', () => this.panel(`async () => { const x = document.querySelector('#code-view .cv-details'); return x && !x.hidden ? { tier: x.querySelector('.cv-d-tier')?.textContent, warn: x.querySelector('.cv-d-free')?.textContent || '' } : null; }`), { timeoutMs: 5000 }).catch(() => null);
+      if (!fd || fd.tier !== 'Free mod: can do anything code can do.' || !/Only enable free mods that you trust\.$/.test(fd.warn)) problems.push(`the free mod's Details: ${JSON.stringify(fd)}`);
+      await themes('code-free-details');
+      await this.panel(`async () => { document.querySelector('#code-view .cv-tab-code').click(); return true; }`);
       // its robot: the code card's own face (</>), and nothing of the bar robot's other faces on any card's
       const robots = await this.panel(`async () => ({ code: !!document.querySelector('#code-view .ap-robot svg .code'), eyes: document.querySelectorAll('#code-view .ap-robot .eye').length,
         stray: document.querySelectorAll('.ap-robot :is(.pause, .cross, .link)').length })`);
@@ -4081,7 +4156,7 @@ process.exitCode = 1;
       // a style mod, from its file name on the row: its rules, as in the file
       await this.panelClick(`li[data-mod="${site}/e2e-cv-style"] .mod-code`);
       const style = await waitFor('the style mod\'s card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
-      if (style.chip !== 'Style mod' || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
+      if (style.group !== 'rules' || style.chip || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
       // its long line wrapped (on by default): one numbered line, several rows tall, continuations indented
       const wrapped = await this.panel(`async () => {
         const box = document.querySelector('#code-view .cv-code');
@@ -4215,32 +4290,40 @@ process.exitCode = 1;
       const rowsOf = () => this.panel(`async () => Object.fromEntries([...document.querySelectorAll('#mod-list li[data-mod*="e2e-row-"]')].map((li) => {
         const icons = [...li.querySelectorAll('.mod-icons .mod-ic')], desc = li.querySelector('.mod-desc'), sw = li.querySelector('button.switch, .tag.on-hold'), code = li.querySelector('.mod-code'), bin = li.querySelector('.mod-delete');
         const r = (e) => e.getBoundingClientRect();
-        return [li.dataset.mod.split('/')[1], { chip: icons.map((i) => i.dataset.icon).join(' ') || null, tone: icons.length ? [...new Set(icons.map((i) => [...i.classList].filter((c) => c !== 'mod-ic').join()))].join('/') : null, hover: icons.map((i) => i.title).join('\\n'), drawn: icons.every((i) => i.querySelector('svg path')),
+        return [li.dataset.mod.split('/')[1], { chip: icons.map((i) => i.dataset.icon).join(' ') || null, sep: li.querySelectorAll('.mod-icons .mod-ic-sep').length, tone: icons.length ? [...new Set(icons.map((i) => [...i.classList].filter((c) => c !== 'mod-ic').join()))].join('/') : null, hover: icons.map((i) => i.title).join('\\n'), drawn: icons.every((i) => i.querySelector('svg path')),
           old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, emptyTag: [...li.querySelectorAll('.tag')].some((t) => !t.textContent.trim() && t.getClientRects().length > 0), oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
           // (two lines: the switch at the right of the first, </> and the bin under it at the right of the second)
-          gapSwitch: Math.round(r(sw).right - r(bin).right), gapBin: Math.round(r(bin).left - r(code).right), below: r(code).top >= r(sw).bottom - 4 && r(bin).top >= r(sw).bottom - 4,
+          // (the drawings' own edges, not their buttons': </> starts where the switch starts, the bin ends where it ends)
+          gapSwitch: sw.classList.contains('switch') ? Math.max(Math.abs(r(sw).left - r(code.querySelector('path')).left), Math.abs(r(sw).right - r(bin.querySelector('path')).right)) : Math.abs(r(sw).right - r(bin.querySelector('path')).right), /* (an "on hold" tag is wider than a switch: only the right edges meet) */ gapBin: Math.round(r(bin.querySelector('path')).left - r(code.querySelector('path')).right), /* (between the drawings) */ below: r(code).top >= r(sw).bottom - 4 && r(bin).top >= r(sw).bottom - 4,
           sameLine: Math.abs((r(li.querySelector('.mod-name')).top + r(li.querySelector('.mod-name')).bottom) / 2 - (r(sw).top + r(sw).bottom) / 2) < 6 }];
       }))`);
       const rows = await waitFor('the rows', async () => { const x = await rowsOf(); return Object.keys(x).length === 5 && x['e2e-row-together'].chip ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
       await this.dismissApproval();
       // (the icons, by name, and their tones: modlevel.js modIcons)
-      const want = { 'e2e-row-plain': [null, null], 'e2e-row-noticeable': ['noticeable', 'muted'], 'e2e-row-requests': ['changes-requests', 'amber'], 'e2e-row-power': ['site-data noticeable', 'muted'], 'e2e-row-together': ['read-drafts sound', 'amber'] };
-      for (const [id, [chip, tone]] of Object.entries(want)) {
+      // (a free mod: the chip and infinity always, Tim 11-13; then, past the little line, how noticeable it is)
+      const want = { 'e2e-row-plain': ['free', 'muted', 0], 'e2e-row-noticeable': ['free noticeable', 'muted', 1], 'e2e-row-requests': ['free changes-requests', 'muted', 1], 'e2e-row-power': ['site-data noticeable', 'muted', 1], 'e2e-row-together': ['read-drafts sound', 'muted', 0] };
+      for (const [id, [chip, tone, sep]] of Object.entries(want)) {
         const x = rows[id];
-        if (x.chip !== chip || x.tone !== tone || (chip && !x.drawn)) problems.push(`${id}'s icons: ${JSON.stringify(x)}`);
+        if (x.chip !== chip || x.tone !== tone || (chip && !x.drawn) || x.sep !== sep) problems.push(`${id}'s icons: ${JSON.stringify(x)}`);
         if (x.old) problems.push(`${id} still shows ${x.old} of the old row's parts`);
         if (x.emptyTag) problems.push(`${id} shows an empty tag (a line beside its name)`);
         if (!x.oneLine) problems.push(`${id}'s description isn't one line with an ellipsis: ${JSON.stringify(x)}`);
-        if (Math.abs(x.gapSwitch) > 6 || Math.abs(x.gapBin - 2) > 1 || !x.below || !x.sameLine) problems.push(`${id}'s controls: ${JSON.stringify({ switchVsBin: x.gapSwitch, codeToBin: x.gapBin, below: x.below, sameLine: x.sameLine })}`);
+        if (x.gapSwitch > 1.5 || x.gapBin < 2 || x.gapBin > 9 || !x.below || !x.sameLine) problems.push(`${id}'s controls: ${JSON.stringify({ switchVsBin: x.gapSwitch, codeToBin: x.gapBin, below: x.below, sameLine: x.sameLine })}`);
       }
-      if (!/^It can see and filter/.test(rows['e2e-row-power'].hover) || !/Noticeable: 127\.0\.0\.1 could tell/.test(rows['e2e-row-power'].hover)) problems.push(`the icons' hover: ${rows['e2e-row-power'].hover}`);
+      if (rows['e2e-row-power'].hover !== 'Filters what the site sends\nNoticeable to the site' || rows['e2e-row-together'].hover !== 'Reads what you type\nPlays sounds') problems.push(`the icons' hover: ${rows['e2e-row-power'].hover} | ${rows['e2e-row-together'].hover}`);
       await themes('mod-rows');
       // a click on the chip: the code card, with what the row left out
       await this.dismissApproval();
       await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-icons').click(); return true; }`);
-      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open ? { mod: d.dataset.mod, about: d.querySelector('.cv-about').textContent, more: d.querySelectorAll('.cv-about .more-btn').length, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
-      if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.more < 2 || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
+      // (the icons open the card on Details: the hold's presentation, with each "more")
+      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && x && !x.hidden ? { mod: d.dataset.mod, tab: d.querySelector('.cv-tab-details')?.getAttribute('aria-selected'), about: x.textContent, icons: [...x.querySelectorAll('.cv-d-facts svg')].filter((v) => !v.closest('.more-btn')).length, more: x.querySelectorAll('.more-btn').length, codeShown: !d.querySelector('.cv-code').hidden, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
+      if (about.mod !== `${site}/e2e-row-power` || about.tab !== 'true' || about.codeShown || !/Noticeable/.test(about.about) || !/It can see and filter/.test(about.about) || !/^Boxed mod: can do what you've allowed\./.test(about.about) || about.icons !== 1 || about.more < 3 || about.file !== 'e2e-row-power.js') problems.push(`the card's Details: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
+      // (the warning about two powers together: in Details, as the hold put it, not on the icons)
+      await this.panel(`async () => { document.getElementById('code-view').close(); document.querySelector('li[data-mod="${site}/e2e-row-together"] .mod-icons').click(); return true; }`);
+      const together = await waitFor('the together card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && d.dataset.mod.endsWith('e2e-row-together') && x && !x.hidden ? (x.querySelector('.ap-together')?.textContent || '') : null; }`), { timeoutMs: 8000 });
+      if (!/^Together, it /.test(together)) problems.push(`the together warning in Details: ${JSON.stringify(together)}`);
+      await themes('mod-rows-details-together');
       if (problems.length) throw new Error(problems.join('\n'));
       return `icons: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; the switch on the name's line, </> and the bin ${rows['e2e-row-plain'].gapBin}px apart under it; the icons open the card`;
     } finally {
@@ -4353,7 +4436,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
         } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
-      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
+      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Do what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');
       await clickGroup();
@@ -4859,7 +4942,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         const b = document.body.classList;
         const colour = (v) => { const s = document.createElement('span'); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
         const fills = () => ({ rim: getComputedStyle(document.querySelector('#bar-robot .rim')).fill, bars: getComputedStyle(document.querySelector('#bar-robot .pause')).fill });
-        const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--bad)' : b.contains('needs-login') ? 'var(--warn)' : 'var(--paused)') };
+        const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--led-coral)' : b.contains('needs-login') ? 'var(--led-yellow)' : 'var(--paused)') };
         const had = ['blocked', 'needs-login'].filter((c) => b.contains(c));
         b.remove(...had);
         const paused = { ...fills(), want: colour('var(--paused)'), white: colour('#fff') };
@@ -4878,7 +4961,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // The mod: held for what its code does, its header's claim shown apart
       const card = await this.approvalFor(`${site}/e2e-poster`);
       const held = { facts: card.items, claim: card.claim };
-      if (card.chip !== 'Free mod' || card.lead !== 'TRIF found that this mod:' || !/A free mod can do anything the page can, so look at the code if you're not sure\.$/.test(card.note)) throw new Error(`the approval dialog: ${JSON.stringify(card)}`);
+      // (no chip: the card in coral, a free mod's tier colour; its warning, the free tier's explanation, in the box)
+      if (card.group !== 'page' || card.chip || card.lead !== 'TRIF found that this mod:' || !/in your chat on 127\.0\.0\.1\.$/.test(card.note) || card.together.join() !== 'A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.') throw new Error(`the approval dialog: ${JSON.stringify(card)}`);
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-free-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
       if (!held.facts.some((f) => /send requests or messages from the page as you \(it uses fetch\)/.test(f))) throw new Error(`the held facts: ${JSON.stringify(held)}`);

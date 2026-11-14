@@ -314,6 +314,8 @@ const adapter = {
   //   If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&…
   //   Paste code here if prompted >
   // and waits for the code (shown by the redirect page) on stdin.
+  // Settings' Log out (agents/index.js logout): Claude Code's one login on this computer, the terminal's too.
+  logout: { args: ['auth', 'logout'] },
   login: {
     args: ['auth', 'login'],
     parseLine: parseLoginLine,

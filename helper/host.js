@@ -28,7 +28,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
-const { siteOkFor, splitsOf } = require('./lib/sitecombos');
+const { siteOkFor, splitsOf, sitesOf, approvedUnion, reach: siteReachOf, clickWordsOf } = require('./lib/sitecombos');
 const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
@@ -350,7 +350,10 @@ function syncMods(reason, force) {
     // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)
     // (and what its sites' mods together are approved for: the sandbox lets their acts through beside those powers)
     const siteOk = m.sandboxed ? siteOkFor(m, scanned.mods, allowedNow, splitsNow) : [];
-    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(siteOk.length ? { siteOk } : {}) }
+    // (and, for the code card's Details: what its sites' boxed mods are allowed to do together, as their holds showed it)
+    const siteReach = m.sandboxed ? sitesOf(m, scanned.mods, splitsNow).map((s) => [s, approvedUnion(allowedNow, s)]).filter(([, u]) => u.length)
+      .map(([s, u]) => siteReachOf(s, u, u, clickWordsOf([m]))) : [];
+    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(siteOk.length ? { siteOk } : {}), ...(siteReach.length ? { siteReach } : {}) }
       : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
     return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
   });
@@ -539,7 +542,7 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox']);
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
@@ -1048,10 +1051,10 @@ function onExtensionRequest(msg) {
     try { sendToExtension({ type: 'response', id, ...body }); } catch (e) { logger.warn(`could not answer extension request ${id}: ${e.message}`); }
   };
   if (PANEL_COMMANDS.has(msg.cmd)) {
-    try { return respond({ ok: true, result: panelCommand(msg.cmd, args) }); } catch (e) {
+    return Promise.resolve().then(() => panelCommand(msg.cmd, args)).then((result) => respond({ ok: true, result }), (e) => {
       logger.warn(`${msg.cmd} failed: ${e.message}`);
-      return respond({ ok: false, error: e.message });
-    }
+      respond({ ok: false, error: e.message });
+    });
   }
   if (!AGENT_COMMANDS.has(msg.cmd) && !MOD_FILE_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
   runAgentCommand(msg.cmd, args, (e, result) => {
@@ -1065,9 +1068,14 @@ function onExtensionRequest(msg) {
 
 /**
  * agent.withoutSandbox {agent, allow}: "Use <agent> anyway" (allow: true) or Settings' "Stop allowing"
- * (false). Returns {agents: [ids allowed]}. (PANEL_COMMANDS: the extension's connection only.)
+ * (false). Returns {agents: [ids allowed]}. agent.logout {agent}: Settings' Log out (agents/index.js
+ * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
  */
 function panelCommand(cmd, args) {
+  if (cmd === 'agent.logout') {
+    const agent = typeof args.agent === 'string' ? args.agent : '';
+    return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
+  }
   if (cmd !== 'agent.withoutSandbox') throw new Error(`unknown command "${cmd}"`);
   const agent = typeof args.agent === 'string' ? args.agent : '';
   if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');

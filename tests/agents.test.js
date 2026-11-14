@@ -26,7 +26,8 @@ test.after(async () => {
 // same on stderr, no result line), SAYSLOGIN (a reply that only mentions logins), CRASH, SLEEP, STUBBORN
 // (ignores SIGTERM), EDIT (changes a mod file), EVIL (writes a mod for its site and one for <all_urls>).
 // Every call is dumped to <dir>/calls/<time>-<pid>.json with argv, env and cwd.
-// `auth status --json` says logged in once <dir>/logged-in exists; `auth login` prints the sign-in
+// `auth status --json` says logged in once <dir>/logged-in exists (`auth logout` removes it, noting its
+// call in <dir>/logout.json); `auth login` prints the sign-in
 // lines, dumps its env to <dir>/login-env.json, reads one line and logs in if it's GOODCODE (anything
 // else: "Invalid code: <code>" on stderr, exit 1).
 const FAKE_CLAUDE = `#!${process.execPath}
@@ -39,6 +40,12 @@ const flag = path.join(__dirname, 'logged-in');
 if (argv[0] === 'auth' && argv[1] === 'status') {
   const yes = fs.existsSync(flag);
   console.log(JSON.stringify({ loggedIn: yes, authMethod: yes ? 'claude.ai' : 'none' }, null, 2));
+  process.exit(0);
+}
+if (argv[0] === 'auth' && argv[1] === 'logout') {
+  fs.writeFileSync(path.join(__dirname, 'logout.json'), JSON.stringify({ argv, cwd: process.cwd() }));
+  fs.rmSync(flag, { force: true });
+  console.log('Successfully logged out from your Anthropic account.');
   process.exit(0);
 }
 if (argv[0] === 'auth' && argv[1] === 'login') {
@@ -635,7 +642,7 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing', as
   const c = r.result.agents.find((a) => a.id === 'claude');
   assert.deepEqual(c, {
     id: 'claude', name: 'Claude Code', path: path.join(bin, 'claude'), available: true, version: '9.9.9', note: '',
-    canLogin: true, loginFix: claude.loginFix, loggedIn: false, efforts: claude.efforts,
+    canLogin: true, canLogout: true, loginFix: claude.loginFix, loggedIn: false, efforts: claude.efforts,
   });
   const x = r.result.agents.find((a) => a.id === 'codex');
   assert.equal(x.available, false);
@@ -992,6 +999,30 @@ test('agent.login: URL event, code, done ok; agent.list then says loggedIn (cach
   assert.ok(!log.includes('SECRETSTATE') && !log.includes('CHALLENGE'), 'URL query not logged');
   assert.ok(!fs.existsSync(path.join(privDir(home), 'runs')) || !fs.readdirSync(path.join(privDir(home), 'runs')).filter((f) => f.endsWith('.jsonl')).some((f) => fs.readFileSync(path.join(privDir(home), 'runs', f), 'utf8').includes('GOODCODE')));
   assert.equal((await sockRequest(ext.sock, { id: 'p2', cmd: 'ping' })).result.login, null);
+});
+
+test('agent.logout: only from the side panel; runs the agent\'s own logout; agent.list then says logged out', async () => {
+  const { home, bin } = makeHome();
+  fs.writeFileSync(path.join(bin, 'logged-in'), 'yes');
+  const ext = startHost(home);
+  let claude = (await extRequest(ext, 'agent.list')).result.agents.find((a) => a.id === 'claude');
+  assert.equal(claude.loggedIn, true);
+  assert.equal(claude.canLogout, true);
+  assert.ok(!claude.loginByKey);
+  // Never from the socket (a terminal, or a run's trif): only the extension's own connection.
+  await ext.waitForSocket();
+  const refused = await sockRequest(ext.sock, { id: 'o', cmd: 'agent.logout', args: { agent: 'claude' } });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /only a click in TRIF's side panel/);
+  assert.ok(fs.existsSync(path.join(bin, 'logged-in')), 'still logged in');
+  const r = await extRequest(ext, 'agent.logout', { agent: 'claude' });
+  assert.deepEqual(r.result, { ok: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(bin, 'logout.json'), 'utf8')), { argv: ['auth', 'logout'], cwd: home });
+  // (the login status is asked afresh, not the cached "logged in")
+  claude = (await extRequest(ext, 'agent.list')).result.agents.find((a) => a.id === 'claude');
+  assert.equal(claude.loggedIn, false);
+  assert.match((await extRequest(ext, 'agent.logout', { agent: 'gemini' })).error, /has no log out here/);
+  assert.match(helperLog(home), /claude logged out \(Settings in the side panel\)/);
 });
 
 test('an expired login: one "log in again" error, no reply; agent.list says logged out until a login or a run works', async () => {

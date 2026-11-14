@@ -30,7 +30,9 @@ const upper = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /** What the level means, for the chip's tooltip and the code card; '' at level 0. */
 export function levelWords(m, site) {
   const level = modLevel(m);
-  const why = !m?.sandboxed && m?.risk?.why ? ` ${m.risk.why}` : '';
+  // (a mod's own words after ours: a sentence of its own, capital first, full stop last)
+  const said = !m?.sandboxed && m?.risk?.why ? String(m.risk.why).trim() : '';
+  const why = said ? ` ${upper(said)}${/[.!?]$/.test(said) ? '' : '.'}` : '';
   if (level >= 2) return `Changes requests: this mod changes what ${site} receives, which it could notice (rate limits or an account flag are possible).${why}`;
   if (level === 1) return `Noticeable: ${site} could tell something's different${m?.sandboxed && (m.powers || []).includes('site-data') ? ' (what it sends isn\'t all shown)' : ''}.${why}`;
   return '';
@@ -55,26 +57,37 @@ export function modChip(m, site) {
   return { text: parts.join(' · '), tone, title };
 }
 
+// Each icon's hover: a few words, the same for every mod (Tim, 11-13: the user has seen and allowed the full
+// warnings once; they're in the code card's Details tab). A power newer than this table: its name.
+export const ICON_LABELS = {
+  'read-drafts': 'Reads what you type', 'write-drafts': 'Changes what you type', keys: 'Sees your key presses',
+  'site-data': 'Filters what the site sends', 'page-data': 'Reads the page\'s data', 'site-storage': 'Uses the site\'s storage',
+  'local-fonts': 'Sees your fonts', 'image-variants': 'Loads other picture sizes', sound: 'Plays sounds', controls: 'Adds its own controls',
+  mods: 'Talks to your other mods', preload: 'Loads pictures sooner', media: 'Plays and pauses media', 'search-box': 'Adds a search box',
+  'go-to': 'Takes you to pages', embeds: 'Plays linked videos', 'rewrite-requests': 'Changes the site\'s requests',
+  'block-events': 'Hides your actions from the site', 'page-events': 'Signals the page', click: 'Clicks for you',
+  'edit-uploads': 'Edits pictures you post', '@migrate': 'Brings over old settings', noticeable: 'Noticeable to the site',
+  'changes-requests': 'Changes what the site receives',
+  free: 'Runs as code, with no limits', // (a free mod's chip and infinity, one icon: Tim, 11-13)
+};
+
 /**
- * The row's icons (extension/icons.js), in place of the chip's words: one per power, with what it does for this
- * mod on hover, then one for how noticeable it is. [] when there's nothing to say.
- * Each: {key: an ICONS key, title, tone: 'muted'|'amber'}. Combination warnings (powerInfo.warnings) turn the
- * powers amber, as they turned the chip, and are added to each power's hover.
+ * The row's icons (extension/icons.js), in place of the chip's words: one per power, then one for how noticeable
+ * it is, each with its few words on hover (ICON_LABELS), all the same grey. [] when there's nothing to say.
+ * Each: {key: an ICONS key, title, tone: 'muted'}.
  */
 export function modIcons(m, site) {
   const level = modLevel(m);
   const out = [];
   if (m?.sandboxed) {
     const facts = new Map((m.powerInfo?.facts || []).map((f) => [f.power, f.fact]));
-    const warnings = (m.powerInfo?.warnings || []).map(upper);
-    const tone = warnings.length ? 'amber' : 'muted';
-    const say = (p) => (facts.get(p) ? `It ${facts.get(p)}.` : p);
-    for (const p of Array.isArray(m.powers) ? m.powers : []) {
-      out.push({ key: p, title: [say(p), ...warnings].join('\n'), tone, power: p });
-    }
-    if (facts.has('migrate')) out.push({ key: '@migrate', title: say('migrate'), tone: 'muted', power: 'migrate' });
+    for (const p of Array.isArray(m.powers) ? m.powers : []) out.push({ key: p, title: ICON_LABELS[p] || p, tone: 'muted', power: p });
+    if (facts.has('migrate')) out.push({ key: '@migrate', title: ICON_LABELS['@migrate'], tone: 'muted', power: 'migrate' });
   }
-  if (level >= 2) out.push({ key: 'changes-requests', title: levelWords(m, site), tone: 'amber', level });
-  else if (level === 1) out.push({ key: 'noticeable', title: levelWords(m, site), tone: 'muted', level });
+  // A free mod (not boxed, not a style mod): the chip and infinity, whatever its code reading found, so it
+  // doesn't look harmless beside a boxed mod's powers; then the eye only where something was found (Tim, 11-13).
+  if (m && !m.sandboxed && !m.rules) out.push({ key: 'free', keys: ['cpu', 'infinity'], title: ICON_LABELS.free, tone: 'muted' });
+  if (level >= 2) out.push({ key: 'changes-requests', title: ICON_LABELS['changes-requests'], tone: 'muted', level });
+  else if (level === 1) out.push({ key: 'noticeable', title: ICON_LABELS.noticeable, tone: 'muted', level });
   return out;
 }

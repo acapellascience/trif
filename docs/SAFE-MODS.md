@@ -464,8 +464,8 @@ shows.
 (`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's
 approval dialog lists them in the red box, the strongest first, one line each ("Together, it …"; the same
 sentence once), `trif status` as "together, it …". A mod with more than three powers gets, instead, Tim's
-general warning (key `power:together:many:<its powers>`, so the exact set): "Mods with many powers can act
-in unspecific or powerful ways. Treat this with caution." Its combinations are still needs (without lines),
+general warning (key `power:together:many:<its powers>`, so the exact set): "Mods with many powers could act
+in surprising ways. Treat them with caution." Its combinations are still needs (without lines),
 so a later version with fewer powers doesn't ask again for what the user allowed.
 
 **Across mods: the page-wide rules** (extension/sandbox.js `ACT_PARTNERS`, `clickOk`, `signalOk`). Boxed

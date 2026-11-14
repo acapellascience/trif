@@ -32,7 +32,17 @@
    * the page doesn't take a pasted text. `name`: the text as an attached file of that name instead (the report
    * after a mod is added: Tim, 11-13), so the person's own words stay theirs.
    */
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const TILES = '[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"], span[class*="group/composer-attachment"]';
+  /** How many attachment tiles in the message box carry this name (in their text, a picture's alt or a label). */
+  function tiles(label) {
+    return [...document.querySelectorAll(TILES)].filter((t) => `${t.textContent || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')]
+      .map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`.includes(label)).length;
+  }
+
   async function fill(text, png, name) {
+    // (a chat that has only just loaded isn't ready for a paste: its page finished, then a moment)
+    if (document.readyState !== 'complete') { await new Promise((r) => addEventListener('load', r, { once: true })); await wait(800); }
     const ed = editor();
     if (!ed) return 'no message box';
     ed.focus();
@@ -45,10 +55,21 @@
       await new Promise((r) => setTimeout(r, 300));
     }
     if (text && name) {
-      const dt = new DataTransfer();
-      dt.items.add(new File([text], name, { type: 'text/plain' }));
-      if (paste(ed, dt)) { said.push('text attached'); return said.join(', '); }
-      said.push('file not taken, so as text');
+      // (a chat that has only just loaded may take the file late, without saying so at the paste: Tim, 11-14,
+      // got the attachment and the whole text typed in too. So: its tile looked for, and one more try, before
+      // the text goes in as text)
+      const label = name.replace(/\.[^.]*$/, '');
+      for (let tryNo = 1; tryNo <= 2; tryNo++) {
+        const before = tiles(label);
+        const dt = new DataTransfer();
+        dt.items.add(new File([text], name, { type: 'text/plain' }));
+        const took = paste(editor() || ed, dt);
+        for (let i = 0; i < 25 && !took && tiles(label) <= before; i++) await wait(100);
+        if (took || tiles(label) > before) { said.push(took ? 'text attached' : 'text attached (late)'); return said.join(', '); }
+        said.push(`file not taken (try ${tryNo})`);
+        await wait(1000);
+      }
+      said.push('so as text');
     }
     if (text) {
       const dt = new DataTransfer();
@@ -68,7 +89,7 @@
     // (what TRIF attached, by its file's name: its tile marked for the small pill above, the label its name)
     // (Claude's tiles, then ChatGPT's: a span of the group/composer-attachment class; a picture's name only in
     // its alt or its remove button's label)
-    for (const tile of document.querySelectorAll('[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"], span[class*="group/composer-attachment"]')) {
+    for (const tile of document.querySelectorAll(TILES)) {
       if (tile.hasAttribute('data-trif-chip')) continue;
       const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
       const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot'].find((l) => names.includes(l));

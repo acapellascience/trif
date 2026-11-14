@@ -6,7 +6,7 @@ rest, which goes under "### More" (and on the GitHub release). It's written for 
 `node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
 summary is too long.
 
-## Unreleased
+## 0.3.0
 
 - **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do
   only what you allow; free mods can do anything. Most of Tim's mods are now style or boxed.

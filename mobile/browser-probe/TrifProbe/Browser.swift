@@ -234,6 +234,16 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A mod link, or a bare selector, on the clipboard (what a chat gives when it can't make a link).
     func offerFromClipboard() { offer(text: UIPasteboard.general.string) }
 
+    /// A mod a chat has just finished writing (Web/chat.js): offered by itself, unless that very mod is already
+    /// added or another offer is up.
+    func offerFromChat(_ text: String) {
+        guard modOffer == nil, modLink == nil else { return }
+        let r = mods.read(text)
+        guard let m = r.mod else { return }
+        if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) { return }
+        modOffer = m
+    }
+
     /// What was pasted (iOS's own Paste button hands it over without asking): a whole mod, a mod link, or a selector.
     func offer(text pasted: String?) {
         guard let text = pasted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {

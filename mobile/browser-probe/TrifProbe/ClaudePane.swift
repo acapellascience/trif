@@ -59,11 +59,16 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         if let url = URL(string: service.home) { webView.load(URLRequest(url: url)) }
     }
 
-    /// An Add to TRIF tap in the chat (Web/chat.js): the code block's text, to the app's Add this mod? sheet.
+    /// An Add to TRIF tap in the chat, or a mod just finished in a reply (Web/chat.js): to the app's Add this mod? sheet.
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let d = message.body as? [String: Any], d["type"] as? String == "mod", let text = d["text"] as? String else { return }
-        report.log("claude", "\(service.rawValue): Add to TRIF tapped (\(text.count) characters)")
-        browser?.offer(text: text)
+        if d["auto"] as? Bool == true {
+            report.log("claude", "\(service.rawValue): a mod finished in a reply (\(text.count) characters)")
+            browser?.offerFromChat(text)
+        } else {
+            report.log("claude", "\(service.rawValue): Add to TRIF tapped (\(text.count) characters)")
+            browser?.offer(text: text)
+        }
     }
 
     /// Puts text (and a PNG) into the chat's message box as a paste, for the person to send (Web/chat.js fill).

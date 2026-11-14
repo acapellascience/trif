@@ -3,6 +3,7 @@
 // it. It does two things and nothing else:
 //   - an "Add to TRIF" button under each code block that holds a whole mod file (==WebMod== … ==/WebMod==):
 //     a tap hands the block's text to the app, which shows its Add this mod? sheet;
+//   - a mod just written in a reply, handed to the app by itself once it's finished (watch, below);
 //   - fill(text, png): puts text (and a picture) into the message box, as a paste, for the person to send.
 // It never sends a message, never reads the conversation except a code block's text when its button is
 // tapped, and keeps nothing.
@@ -128,6 +129,31 @@
       span[data-trif-chip][class*="composer-attachment"]::before { background: rgba(52, 211, 153, 0.16); color: #34d399; }
     }`;
   (document.head || document.documentElement).append(style);
+
+  // A mod Claude or ChatGPT has just finished writing, handed to the app by itself (Tim, 11-14: finding the
+  // code block between what a chat says before and after it is the fiddly part). Only a block seen being
+  // written while the pane watched (an old conversation's mods are left alone), once it has stopped changing
+  // and the reply has stopped; a revised mod under the same header is offered again. Keyed by the header, not
+  // the element: a chat may redraw its code block when the reply ends.
+  const live = new Map();
+  const replying = () => !!document.querySelector('button[aria-label="Stop response"], button[aria-label="Stop streaming"], button[data-testid="stop-button"]');
+  function watch() {
+    const now = Date.now();
+    const last = new Map();
+    for (const pre of document.querySelectorAll('pre')) {
+      const t = pre.innerText || '';
+      const end = t.search(/==\/WebMod==/);
+      if (t.indexOf('==WebMod==') === -1 || end === -1) continue;
+      last.set(t.slice(0, end), t);
+    }
+    for (const [key, t] of last) {
+      const st = live.get(key);
+      if (!st) { live.set(key, { text: t, grew: false, at: now, offered: false }); continue; }
+      if (st.text !== t) { st.text = t; st.grew = true; st.at = now; st.offered = false; continue; }
+      if (st.grew && !st.offered && now - st.at > 1500 && !replying()) { st.offered = true; post({ type: 'mod', text: t, auto: true }); }
+    }
+  }
+  setInterval(watch, 700);
 
   let queued = false;
   new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); }, 400); } })

@@ -135,7 +135,10 @@ style mod's old name, `@rules`, still works):
 ```
 
 - `css`: any CSS that changes how things look. Nothing that loads from an address: `url()` only with
-  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings.
+  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings. To recolour,
+  set `background-color`, not the `background` shorthand: the shorthand also sets `background-image` to
+  none, which wipes out every picture the page draws as a background (thumbnails, avatars, icons), and a
+  mod can't put them back.
 - `hide`: selectors to hide (`display: none !important`, including elements that appear later).
 - `replace`: `{ in?, find, with, regex?, caseless? }`: text to replace inside the elements `in` matches
   (default the whole page). `with` is plain text. Patterns are capped and can't nest repeats.

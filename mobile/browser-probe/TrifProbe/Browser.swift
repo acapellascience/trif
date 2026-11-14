@@ -445,6 +445,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // (agent-facing words: what TRIF mods are and how to hand one over, then the page)
         let page = webView.url
         let origin = page.map { "\($0.scheme ?? "https")://\($0.host ?? "")" } ?? "https://\(host)"
+        let here = await alreadyHere()
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
@@ -454,7 +455,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
         --- How TRIF mods are written ---
         \(Browser.resource("mod-guide", "txt"))
-        \(alreadyHere())
+        \(here)
         --- The page: \(page?.absoluteString ?? host) ---
         \(o.text)
         """
@@ -463,21 +464,46 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     /// What's already changing this page, for the chat to build on (Tim, 11-14): the mods switched on here, whole,
-    /// and the things hidden by pointing. Empty when there's nothing.
-    func alreadyHere() -> String {
+    /// their errors since the page loaded, and the things hidden by pointing. Empty when there's nothing.
+    /// `except`: a mod left out (the one a follow-up is about, whose code the chat wrote).
+    /// (Tim, 11-14: a theme mod's `background: … !important` hid Wikipedia's thumbnails; the chat, without the
+    /// theme's code, patched over it with a free mod instead of fixing the theme.)
+    func alreadyHere(except: String? = nil) async -> String {
         let here = webView.url?.absoluteString ?? ""
         let on = mods.running(on: here)
+        let others = on.filter { $0.id != except }
         let hidden = report.rules.filter { $0.host == host }.map(\.selector)
-        if on.isEmpty && hidden.isEmpty { return "" }
-        var t = "\n--- Already changing this page (build on these) ---\n"
-        if !on.isEmpty {
-            t += "Mods switched on here. To change one, give back its whole file with the same @name (it replaces that mod); a new @name adds a mod beside them.\n"
-            for m in on { t += "\n### \(m.name) (\(m.tierName.lowercased()))\n```js\n\(m.code)\n```\n" }
+        let errors = await modErrors(on)
+        if others.isEmpty && hidden.isEmpty && errors.isEmpty { return "" }
+        var t = "\n--- \(except == nil ? "Already changing this page (build on these)" : "Also changing this page") ---\n"
+        if !others.isEmpty {
+            t += "Mods switched on here. To change one, give back its whole file with the same @name (it replaces that mod); a new @name adds a mod beside them. If one of them is what's in the way, fix that one rather than adding a mod that works around it.\n"
+            for m in others { t += "\n### \(m.name) (\(m.tierName.lowercased()))\n```js\n\(m.code)\n```\n" }
+        }
+        if !errors.isEmpty {
+            t += "\nErrors from mods on this page since it loaded (some only happen once I type or click):\n\(errors.prefix(15).map { "- \($0)" }.joined(separator: "\n"))\n"
         }
         if !hidden.isEmpty {
-            t += "\nHidden by me, by pointing (each of these is display: none; the outline below doesn't have them):\n\(hidden.map { "- \($0)" }.joined(separator: "\n"))\n"
+            t += "\nHidden by me, by pointing (each of these is display: none; the outline doesn't have them):\n\(hidden.map { "- \($0)" }.joined(separator: "\n"))\n"
         }
         return t
+    }
+
+    /// Errors these mods have had on the page since it loaded: a boxed mod's (the sandbox's list, refusals
+    /// included), a free mod's (what it threw). Each starts with the mod's name.
+    func modErrors(_ list: [InstalledMod]) async -> [String] {
+        var out: [String] = []
+        let names = Dictionary(list.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let boxed = list.filter { $0.world == "box" }.map(\.id)
+        if !boxed.isEmpty, let t = (await call("return JSON.stringify(globalThis.__trifSandbox ? globalThis.__trifSandbox.errors.filter((e) => ids.includes(e.mod)).map((e) => [e.mod, e.message]) : []);", ["ids": boxed], in: Browser.boxWorld)).text,
+           let rows = Browser.parse(t) as? [[String]] {
+            out += rows.compactMap { $0.count == 2 ? "\(names[$0[0]] ?? $0[0]): \($0[1])" : nil }
+        }
+        let free = list.filter { $0.world == "page" }
+        if !free.isEmpty, let t = (await call("return JSON.stringify(window.__trifModErrors || []);", in: .page)).text, let rows = Browser.parse(t) as? [String] {
+            for r in rows { if let m = free.first(where: { r.hasPrefix("\($0.id):") }) { out.append("\(m.name):\(r.dropFirst(m.id.count + 1))") } }
+        }
+        return out
     }
 
     /// After a mod is added: once the page has loaded again, what changed (from the layout sent to the chat),
@@ -494,14 +520,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                 lines.append("- \(c["what"] as? String ?? "changed"): \(c["sel"] as? String ?? "?")\(text) (was \(c["was"] as? String ?? "?"), now \(c["now"] as? String ?? "gone"))")
             }
         }
-        var errors: [String] = []
-        if m.world == "box", let t = (await call("return JSON.stringify(globalThis.__trifSandbox ? globalThis.__trifSandbox.errors.filter((e) => e.mod === id).map((e) => e.message) : []);", ["id": m.id], in: Browser.boxWorld)).text,
-           let list = Browser.parse(t) as? [String] { errors += list }
-        if m.world == "page", let t = (await call("return JSON.stringify(window.__trifModErrors || []);", in: .page)).text,
-           let list = Browser.parse(t) as? [String] { errors += list.filter { $0.hasPrefix("\(m.id):") } }
+        let errors = await modErrors([m])
         var text = "I added your mod \"\(m.name)\" and reloaded \(webView.url?.absoluteString ?? host). Here's the page now: a screenshot of what's on the screen, and the whole page as a PDF, are attached.\n"
-        text += lines.isEmpty ? "\nNothing that was on the page before disappeared or shrank.\n" : "\nWhat disappeared or shrank, of what was on the page when I sent it to you:\n\(lines.joined(separator: "\n"))\n"
-        if !errors.isEmpty { text += "\nThe mod's errors:\n\(errors.prefix(10).map { "- \($0)" }.joined(separator: "\n"))\n" }
+        text += lines.isEmpty ? "\nNothing that was on the page before disappeared or shrank.\n" : "\nWhat disappeared or shrank, of what was on the page when I sent it to you:\n\(lines.joined(separator: "\n"))\n(I reloaded the page, so anything that opens when I type or click, like a menu or search suggestions, is closed now: some of these may be closed, not gone.)\n"
+        text += errors.isEmpty ? "\nThe mod has had no errors so far; some code only runs once I type or click, so its errors would come later: they'll be in the next page I send you.\n" : "\nThe mod's errors:\n\(errors.prefix(10).map { "- \($0)" }.joined(separator: "\n"))\n"
+        text += await alreadyHere(except: m.id)
         text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again. Work from what I've attached; don't open the page in a browser or another tool."
         let (shot, blank) = await settledScreenshot()
         if blank { text += "\n\n(The screenshot looked blank even after waiting: the page may not have finished drawing.)" }

@@ -6,7 +6,9 @@
 // @run-at      document-start
 // @risk        0 render-only
 // @source      trif
-// @version     3
+// @version     4
+// @boxed
+// @powers      site-storage session:trif-demo-state, page-events trif-demo-reset
 // ==/WebMod==
 
 // Skips the homepage demo's chats: on arrival the demo goes straight to its sandbox mode (what the space
@@ -19,31 +21,29 @@
 // Once only: not when the demo's chats are already all played (sandbox mode marks them so) or right after
 // the reset (the state's `sandbox` flag, which the panel clears once it's applied), so no reload loop.
 // The You Win screen is left alone. Mods the visitor put in the demo's trash stay there.
-(() => {
-  if (window.top !== window) return; // (the panel is an iframe on this site too: the page does this)
-  if (location.pathname !== '/') return; // (the demo lives on the home page)
-  const SAVED = 'trif-demo-state';
-  // The demo's mods, in its order (site/build-demo.js DEMO_ORDER), for a first visit, before the demo has
-  // saved its own list (store.defaultOrder).
-  const ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led', 'gravity', 'tilt', 'shooter', 'rave'];
-  let s = null;
-  try { s = JSON.parse(sessionStorage.getItem(SAVED) || 'null'); } catch {}
-  if (s && s.v !== 1) return; // (a state this doesn't know: leave it be)
-  if (s?.sandbox || (s?.replayed || []).includes('wrapup')) return; // already in sandbox mode (or past the chats)
+// Boxed: that one storage key (site-storage) and that one signal to the demo's script (page-events).
+// (Only the top frame: TRIF runs mods there, so the demo's panel iframe never has this.)
+if (new URL(page.url).pathname !== '/') return; // (the demo lives on the home page)
+const SAVED = 'trif-demo-state';
+const store = trif.storage('session');
+// The demo's mods, in its order (site/build-demo.js DEMO_ORDER), for a first visit, before the demo has
+// saved its own list (store.defaultOrder).
+const ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led', 'gravity', 'tilt', 'shooter', 'rave'];
+let s = null;
+try { s = JSON.parse(store.get(SAVED) || 'null'); } catch {}
+if (s && s.v !== 1) return; // (a state this doesn't know: leave it be)
+if (s?.sandbox || (s?.replayed || []).includes('wrapup')) return; // already in sandbox mode (or past the chats)
 
-  try {
-    s = s || { v: 1, sitesOn: ['timsrobot.com'], store: {}, mods: [] };
-    const order = (s.store?.defaultOrder?.['timsrobot.com'] || []).map((id) => id.replace(/^timsrobot\.com\//, ''));
-    const all = (order.length ? order : ORDER).filter((slug) => /^[a-z0-9-]{1,40}$/.test(slug));
-    const trashed = new Set(s.trash || []);
-    s.mods = [...new Set([...(s.mods || []), ...all.filter((slug) => !trashed.has(slug))])];
-    sessionStorage.setItem(SAVED, JSON.stringify(s));
-  } catch (e) { window.trif?.warn('could not list all mods', String(e)); return; }
+try {
+  s = s || { v: 1, sitesOn: ['timsrobot.com'], store: {}, mods: [] };
+  const order = (s.store?.defaultOrder?.['timsrobot.com'] || []).map((id) => id.replace(/^timsrobot\.com\//, ''));
+  const all = (order.length ? order : ORDER).filter((slug) => /^[a-z0-9-]{1,40}$/.test(slug));
+  const trashed = new Set(s.trash || []);
+  s.mods = [...new Set([...(s.mods || []), ...all.filter((slug) => !trashed.has(slug))])];
+  store.set(SAVED, JSON.stringify(s));
+} catch (e) { trif.warn('could not list all mods', String(e)); return; }
 
-  // The demo's script listens once it's run (it's deferred, so by DOMContentLoaded).
-  const go = () => {
-    window.trif?.log('skipping the demo\'s chats: sandbox mode');
-    dispatchEvent(new CustomEvent('trif-demo-reset', { detail: { to: 'sandbox' } }));
-  };
-  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', go, { once: true }); else go();
-})();
+// The demo's script listens once it's run (it's deferred, so by the time the document is parsed).
+await trif.ready;
+trif.log('skipping the demo\'s chats: sandbox mode');
+trif.signal('trif-demo-reset', { to: 'sandbox' });

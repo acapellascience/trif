@@ -90,6 +90,9 @@ const PREINSTALLED = [
   { id: 'x.com/tune-composer', on: false },
   { id: 'x.com/post-styler', on: false },
   { id: 'x.com/style-encoder', on: false },
+  // Added in 0.3.0 (off): Oppish, a boxed mod for Google. (0.3.0 also ships twelve of the mods above as style or
+  // boxed mods: an unchanged copy becomes the new one with the update, an edited one is offered it.)
+  { id: 'www.google.com/oppish', on: false },
   // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)
 ];
 

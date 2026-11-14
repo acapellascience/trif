@@ -390,7 +390,10 @@ const GOOGLE_SEARCH_BOX = `
   <button type="button" jsname="B6rgad" data-e2e="hide-ai-mode-button">AI Mode</button>
   <button type="submit" data-e2e="keep-search-button">Google Search</button></form>
 <div jsslot data-e2e="hide-ai-promo-slot"><div><promo-middle-slot>Try Gemini, Google's AI</promo-middle-slot></div></div>`;
-const GOOGLE_HOME = () => PAGE('Google (TRIF e2e stand-in)', `<div id="logo" data-e2e="keep-logo">Google</div>${GOOGLE_SEARCH_BOX}`);
+// (and the logo as an <img class=lnXdpd>, for DVD Logo: a picture from elsewhere, so it bounces a copy)
+const GOOGLE_LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='272' height='92'%3E%3Crect width='272' height='92' rx='20' fill='%234285f4'/%3E%3C/svg%3E";
+const GOOGLE_HOME = () => PAGE('Google (TRIF e2e stand-in)', `<div id="logo" data-e2e="keep-logo">Google</div>
+<img class="lnXdpd" alt="Google" width="272" height="92" src="${GOOGLE_LOGO}" data-e2e="keep-logo-img">${GOOGLE_SEARCH_BOX}`);
 const GOOGLE_RESULTS = () => PAGE('trif - Google Search (TRIF e2e stand-in)', `
 ${GOOGLE_SEARCH_BOX}
 <div role="list">

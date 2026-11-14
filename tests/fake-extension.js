@@ -74,7 +74,8 @@ async function waitFor(fn, { timeout = 5000, interval = 25, message = 'condition
 }
 
 class FakeExtension {
-  constructor({ home, env = {} }) {
+  // (`hostJs`: another copy of TRIF's helper/host.js than this checkout's, e.g. tests/run-sandbox.test.js's)
+  constructor({ home, env = {}, hostJs = HOST_JS }) {
     this.home = home;
     this.messages = [];      // every message received from the host (a set in parts as the mods message it makes)
     this.parts = [];         // the modsPart messages received
@@ -83,7 +84,7 @@ class FakeExtension {
     this.handlers = {};      // cmd -> (args, msg) => result | Promise<result>; throw to answer ok:false
     this.autoRespond = true;
     this.waiters = [];
-    this.child = spawn(process.execPath, [HOST_JS, 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/'], {
+    this.child = spawn(process.execPath, [hostJs, 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/'], {
       env: testEnv(home, env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });

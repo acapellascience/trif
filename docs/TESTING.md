@@ -6,7 +6,13 @@ Two suites:
   That's what `npm test` runs, and what `scripts/release.js` runs. `tests/upgrade.test.js` among them is a real
   upgrade without a browser: the v0.1.2 updater (from `git archive v0.1.2`, set up by its own setup in a
   scratch home) installs this checkout packed at the next version, with a test signing key; skipped
-  without the tag. A few use a real browser: `tests/sandbox-browser.test.js` (the sandbox runtime under
+  without the tag. `tests/run-sandbox.test.js` runs real `trif` commands (status, check, new, verify,
+  explain, errors, doctor…) inside the real sandbox of a side-panel run: the real helper starts real
+  Claude Code and Codex runs against stand-in models (no paid call), with TRIF as a git checkout inside a
+  scratch home folder (the strictest layout: only runs.js CODE_ITEMS readable), and checks no command
+  hits a file runs can't read, and that the private folder, the keychain, other sites' mods and the
+  network are refused. macOS with the agents installed (about 15 s); it skips elsewhere, CI included.
+  A few use a real browser: `tests/sandbox-browser.test.js` (the sandbox runtime under
   real SES), `tests/css-browser.test.js` (the CSS check against a browser's parsing), `mobile/test/smoke.js`
   (the phone probes) and `tests/cdp-page.test.js` (their helper). They drive headless Chrome for Testing
   over CDP (`tests/cdp-page.js`, no Playwright), one browser at a time with a memory guard, and run only with

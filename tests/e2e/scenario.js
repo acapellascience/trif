@@ -1416,7 +1416,8 @@ class Scenario {
     const on = await this.cli(['enable', id]);
     if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
     const url = `https://www.google.com:${this.o.servers.tlsPort}/`;
-    const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: false })).id`, [url, win.windowId]);
+    // (in front: a background tab gets no animation frames)
+    const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
     try {
       const ctx = await d.findPage((u) => u === url);
       const look = `async () => {
@@ -1432,8 +1433,10 @@ class Scenario {
         const st = await this.cli(['status']);
         throw new Error(`${e.message}; trif status: ${(st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || 'no dvd-logo line').trim()}`);
       }
-      const later = await waitFor('the logo to move', async () => { const s = await d.eval(ctx, look); return s && s.at !== first.at ? s : null; }, { timeoutMs: 5000 });
-      await this.shot(ctx, 'google-dvd');
+      let later;
+      try {
+        later = await waitFor('the logo to move', async () => { const s = await d.eval(ctx, look); return s && s.at !== first.at ? s : null; }, { timeoutMs: 8000 });
+      } finally { await this.shot(ctx, 'google-dvd'); }
       if (first.logo !== 'hidden' || first.clicks !== 'none') throw new Error(`the logo ${first.logo}, the copy's pointer-events ${first.clicks}`);
       const st = await this.cli(['status']);
       const line = (st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || '').trim();

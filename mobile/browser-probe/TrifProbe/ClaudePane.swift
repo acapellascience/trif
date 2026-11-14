@@ -8,9 +8,18 @@ import SwiftUI
 import UIKit
 import WebKit
 
+/// Which chat the pane shows: Claude, or ChatGPT (Codex on the web works on code repositories, not on a page
+/// someone is looking at, so ChatGPT is its side's chat). Each keeps its own sign-in (the app's one cookie store).
+enum ChatService: String, CaseIterable, Identifiable {
+    case claude = "Claude", chatgpt = "ChatGPT"
+    var id: String { rawValue }
+    var home: String { self == .claude ? "https://claude.ai/new" : "https://chatgpt.com/" }
+}
+
 @MainActor
 final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
-    static let home = "https://claude.ai/new"
+    static var home: String { ChatService.claude.home }
+    @Published var service: ChatService = ChatService(rawValue: UserDefaults.standard.string(forKey: "chatService") ?? "") ?? .claude
 
     @Published var popup: WKWebView?
     @Published var loading = false
@@ -36,19 +45,29 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// Loads Claude the first time the pane is shown (not before: the probe is useful without it).
     func start() {
-        guard !started, let url = URL(string: ClaudePane.home) else { return }
+        guard !started, let url = URL(string: service.home) else { return }
         started = true
         webView.load(URLRequest(url: url))
     }
 
     func home() {
-        if let url = URL(string: ClaudePane.home) { webView.load(URLRequest(url: url)) }
+        if let url = URL(string: service.home) { webView.load(URLRequest(url: url)) }
+    }
+
+    /// Switches the pane to the other chat (remembered), and loads it.
+    func use(_ s: ChatService) {
+        guard s != service else { return }
+        service = s
+        UserDefaults.standard.set(s.rawValue, forKey: "chatService")
+        report.log("claude", "switched to \(s.rawValue)")
+        started = true
+        home()
     }
 
     /// Where the pane went, without what the address carries after ? (sign-in steps put secrets there).
     private func note(_ what: String, _ url: URL?) {
         guard let url = url else { return }
-        report.log("claude", "\(what): \(url.scheme ?? "")://\(url.host ?? "")\(url.path)")
+        report.log("claude", "\(service.rawValue), \(what): \(url.scheme ?? "")://\(url.host ?? "")\(url.path)")
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
@@ -110,7 +129,11 @@ struct ClaudePaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Claude").font(.subheadline).bold()
+                Picker("Chat", selection: Binding(get: { pane.service }, set: { pane.use($0) })) {
+                    ForEach(ChatService.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
                 if pane.loading { ProgressView().scaleEffect(0.7) }
                 Spacer()
                 Button("Start over") { pane.home() }.font(.subheadline)
@@ -124,7 +147,7 @@ struct ClaudePaneView: View {
             if let popup = pane.popup {
                 VStack(spacing: 0) {
                     HStack {
-                        Text("A window Claude opened").font(.subheadline).bold()
+                        Text("A window \(pane.service.rawValue) opened").font(.subheadline).bold()
                         Spacer()
                         Button("Close") { pane.popup = nil }
                     }

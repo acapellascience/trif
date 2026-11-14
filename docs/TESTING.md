@@ -127,7 +127,9 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    Banisher and Just Results, on stand-ins for Google's results and home pages
    (`https://www.google.com:<port>/search?q=trif` and `/`, in background tabs, with the parts of Google's
    markup they key on): what they hide is hidden, and the web results, the other tabs and the search
-   box stay.
+   box stay. Then DVD Logo, which ships as a boxed mod, switched on: registered in the sandbox (no hold:
+   its shipped version is what's allowed), its copy of the home page's logo bounces, the logo hidden in
+   place.
 5. With `--agent`: real Claude Code runs (model haiku unless `--claude-model`): a panel chat (`/model`,
    then a request) that must write a mod under `sites/127.0.0.1/` that shows on the page; `trif agent
    run` asked which browser it's in (must name it); and asked to read TRIF's `config.json` in the private

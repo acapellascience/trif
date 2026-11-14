@@ -1290,6 +1290,7 @@ class Scenario {
     if (this.o.browser === 'chrome') await this.panelWindowChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
+    await r.check('DVD Logo, a boxed mod TRIF ships: switched on, it runs in the sandbox without a hold, and its copy of the logo bounces', () => this.dvdCheck(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
@@ -1405,6 +1406,45 @@ class Scenario {
     const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
     if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
     return out.join('; ');
+  }
+
+  // DVD Logo, one of Tim's mods that ships boxed (0.3.0): switched on, it runs in TRIF's sandbox, unheld (its
+  // shipped version is what's allowed), and its copy of the logo bounces on the Google home stand-in.
+  async dvdCheck(win) {
+    const d = this.d;
+    const id = 'www.google.com/dvd-logo';
+    const on = await this.cli(['enable', id]);
+    if (on.code !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+    const url = `https://www.google.com:${this.o.servers.tlsPort}/`;
+    const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: false })).id`, [url, win.windowId]);
+    try {
+      const ctx = await d.findPage((u) => u === url);
+      const look = `async () => {
+        const box = [...document.querySelectorAll('body > div[aria-hidden="true"]')].find((e) => e.style.position === 'fixed' && /translate/.test(e.style.transform));
+        const logo = document.querySelector('img.lnXdpd');
+        return box ? { at: box.style.transform, logo: logo && logo.style.visibility, clicks: box.style.pointerEvents } : null;
+      }`;
+      let first;
+      try {
+        first = await waitFor('the bouncing logo', () => d.eval(ctx, look), { timeoutMs: 15000 });
+      } catch (e) {
+        await this.shot(ctx, 'google-dvd');
+        const st = await this.cli(['status']);
+        throw new Error(`${e.message}; trif status: ${(st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || 'no dvd-logo line').trim()}`);
+      }
+      const later = await waitFor('the logo to move', async () => { const s = await d.eval(ctx, look); return s && s.at !== first.at ? s : null; }, { timeoutMs: 5000 });
+      await this.shot(ctx, 'google-dvd');
+      if (first.logo !== 'hidden' || first.clicks !== 'none') throw new Error(`the logo ${first.logo}, the copy's pointer-events ${first.clicks}`);
+      const st = await this.cli(['status']);
+      const line = (st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || '').trim();
+      if (!/registered \(boxed/.test(line)) throw new Error(`trif status: ${line || 'no dvd-logo line'}`);
+      const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
+      if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
+      return `${line}; ${first.at} -> ${later.at}, the logo hidden in place`;
+    } finally {
+      await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
+      await this.cli(['disable', id]).catch(() => {});
+    }
   }
 
   // ---- --guidance: the same requests with the AGENTS.md from main and the one in this checkout, with

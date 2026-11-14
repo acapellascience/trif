@@ -1496,7 +1496,10 @@ function renderGate(problem, agentInfo) {
   if (ui.gateIcon.getAttribute('src') !== gateIcon) ui.gateIcon.setAttribute('src', gateIcon);
   ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
     : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';
-  ui.gateWhy.hidden = true;
+  // (a sensitive site TRIF blocked itself, not one the user blocked: Tim's words, 2026-11-14)
+  const sensitiveBlock = state === 'blocked' && (view.status?.sensitiveBlocked || []).includes(scope);
+  ui.gateWhy.textContent = sensitiveBlock ? 'TRIF blocks itself from running on sensitive sites by default.' : '';
+  ui.gateWhy.hidden = !sensitiveBlock;
   ui.gateBtn.hidden = red;
   ui.gateBtn.textContent = state === 'disconnected' ? 'Connect' : state === 'blocked' ? 'Unblock' : `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;

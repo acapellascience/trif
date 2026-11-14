@@ -298,6 +298,7 @@ class Scenario {
         site: q('#site')?.textContent || '',
         gate: !q('#gate').hidden,
         gateTitle: q('#gate-title')?.textContent || '',
+        gateWhy: q('#gate-why')?.hidden === false ? q('#gate-why').textContent : '',
         gateText: q('#gate-btn')?.textContent || '',
         links: q('#gate-links')?.hidden === false
           ? [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent + ' (' + a.title + ')') : [],
@@ -1142,7 +1143,7 @@ class Scenario {
       await d.click(this.panelCtx, '#gate-block');
       const p = await this.waitPanel('the red panel', (x) => x.gate && x.gateTitle === 'The robot is blocked on 127.0.0.1');
       const wantLinks = ['Disconnect from 127.0.0.1 (Disable browser permissions)']; // (blocked keeps Disconnect, not Block)
-      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks)) throw new Error(`the gate: ${JSON.stringify(p)}`);
+      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks) || p.gateWhy) throw new Error(`the gate: ${JSON.stringify(p)}`);
       // (blocked: no power button in the bar; Unblock is the way back)
       await this.waitBar('the blocked gate\'s bar', GATE_BAR_SHUT);
       // blocked: red with a red cross, in the toolbar for this tab, in the bar and on the gate
@@ -3785,7 +3786,7 @@ process.exitCode = 1;
     const view = () => this.panel(`async () => {
       const q = (s) => document.querySelector(s);
       const list = q('#mod-list');
-      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent,
+      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent, gateWhy: q('#gate-why').hidden ? '' : q('#gate-why').textContent,
         red: document.body.classList.contains('site-blocked'), links: q('#gate-links').hidden ? [] : [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent),
         note: q('#agent-site-note').hidden ? '' : q('#agent-site-note').textContent, level: q('#agent-level').dataset.level || '',
         words: q('#agent-level .agent-level-text').textContent, wordsShown: getComputedStyle(q('#agent-level .agent-level-text')).display !== 'none',
@@ -3815,6 +3816,7 @@ process.exitCode = 1;
       await go(at('mail.x.com', '/inbox'));
       const blocked = await waitFor('the blocked screen', async () => { const v = await view(); return v.site === 'mail.x.com' && v.gate && v.red ? v : null; }, { timeoutMs: 15000 });
       if (blocked.gateTitle !== 'The robot is blocked on mail.x.com' || blocked.gateBtn !== 'Unblock') problems.push(`the blocked screen: ${JSON.stringify(blocked)}`);
+      if (blocked.gateWhy !== 'TRIF blocks itself from running on sensitive sites by default.') problems.push(`the sensitive site's line: "${blocked.gateWhy}"`);
       if (blocked.links.some((l) => /Disconnect/.test(l))) problems.push(`Disconnect offered, though its access is x.com's: ${blocked.links}`);
       await themes('sensitive-blocked');
       const refused = await this.cli(['text', '--url', 'mail.x.com']);

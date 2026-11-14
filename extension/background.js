@@ -1999,7 +1999,7 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
+    recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, sensitiveBlocked: s.sensitiveBlocked, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
     starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',

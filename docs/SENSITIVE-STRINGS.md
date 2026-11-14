@@ -73,3 +73,9 @@ host in them (`The robot is blocked on mail.google.com`).
 - `sensitive sites your mods reach, waiting for your choice in the side panel: {hosts}`
 - `{host} is a site of its own, on, with its own copies of {N} mod(s)`
 - `{host} is a site of its own: copied {from -> to, …}` (helper)
+
+## The blocked screen of a sensitive site TRIF blocked itself (Tim's words, 2026-11-14)
+
+Under "The robot is blocked on {site}", only when TRIF started the site blocked as sensitive (status
+`sensitiveBlocked`), not on a site the user blocked: **TRIF blocks itself from running on sensitive sites by
+default.**

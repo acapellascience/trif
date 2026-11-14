@@ -40,7 +40,7 @@
       .map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`.includes(label)).length;
   }
 
-  async function fill(text, png, name) {
+  async function fill(text, png, name, pdf) {
     // (a chat that has only just loaded isn't ready for a paste: its page finished, then a moment)
     if (document.readyState !== 'complete') { await new Promise((r) => addEventListener('load', r, { once: true })); await wait(800); }
     const ed = editor();
@@ -52,7 +52,15 @@
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
       dt.items.add(new File([bytes], 'TRIF screenshot.png', { type: 'image/png' }));
       said.push(paste(ed, dt) ? 'picture pasted' : 'picture not taken');
-      await new Promise((r) => setTimeout(r, 300));
+      await wait(300);
+    }
+    if (pdf) {
+      // (the whole page, after the screenshot of the screen, on its own as the picture is)
+      const dt = new DataTransfer();
+      const bytes = Uint8Array.from(atob(pdf), (c) => c.charCodeAt(0));
+      dt.items.add(new File([bytes], 'TRIF full page.pdf', { type: 'application/pdf' }));
+      said.push(paste(editor() || ed, dt) ? 'PDF pasted' : 'PDF not taken');
+      await wait(300);
     }
     if (text && name) {
       // (a chat that has only just loaded may take the file late, without saying so at the paste: Tim, 11-14,
@@ -92,7 +100,7 @@
     for (const tile of document.querySelectorAll(TILES)) {
       if (tile.hasAttribute('data-trif-chip')) continue;
       const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
-      const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot'].find((l) => names.includes(l));
+      const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot', 'TRIF full page'].find((l) => names.includes(l));
       if (label) tile.setAttribute('data-trif-chip', label);
     }
     for (const pre of document.querySelectorAll('pre')) {
@@ -111,7 +119,7 @@
   }
   // The send button in TRIF's green (Tim, 11-14): Claude paints it on a layer inside the button
   // ([data-cds-part=paint]); ChatGPT on the button. And what TRIF attaches (the page, "TRIF instruction"; after a
-  // mod is added, "TRIF follow-up" and "TRIF screenshot") as small pills saying so, not big tiles
+  // mod is added, "TRIF follow-up", "TRIF screenshot" and "TRIF full page") as small pills saying so, not big tiles
   // (data-trif-chip, set by mark below); their remove buttons stay.
   const style = document.createElement('style');
   style.textContent = `
@@ -134,6 +142,7 @@
     span[data-trif-chip="TRIF instruction"][class*="composer-attachment"]::before { content: "TRIF instruction"; }
     span[data-trif-chip="TRIF follow-up"][class*="composer-attachment"]::before { content: "TRIF follow-up"; }
     span[data-trif-chip="TRIF screenshot"][class*="composer-attachment"]::before { content: "TRIF screenshot"; }
+    span[data-trif-chip="TRIF full page"][class*="composer-attachment"]::before { content: "TRIF full page"; }
     [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
     [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
     [data-trif-chip] [data-cds-card-body] > div, [data-trif-chip] img, [data-trif-chip] picture { display: none !important; }
@@ -144,6 +153,7 @@
     [data-trif-chip="TRIF instruction"] [data-cds-card-body]::after { content: "TRIF instruction"; }
     [data-trif-chip="TRIF follow-up"] [data-cds-card-body]::after { content: "TRIF follow-up"; }
     [data-trif-chip="TRIF screenshot"] [data-cds-card-body]::after { content: "TRIF screenshot"; }
+    [data-trif-chip="TRIF full page"] [data-cds-card-body]::after { content: "TRIF full page"; }
     @media (prefers-color-scheme: dark) {
       [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
       [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }

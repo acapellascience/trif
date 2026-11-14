@@ -33,7 +33,7 @@ final class Model: ObservableObject {
         self.pane = ClaudePane(report: report, browser: browser)
         // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
         let pane = self.pane
-        browser.chatFill = { text, png in await pane.fill(text, png: png, as: "TRIF follow-up.txt") }
+        browser.chatFill = { text, png, pdf in await pane.fill(text, png: png, pdf: pdf, as: "TRIF follow-up.txt") }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments
@@ -48,6 +48,24 @@ final class Model: ObservableObject {
                     browser.running = false
                 }
                 report.log("autorun", "done: \(pages.joined(separator: ","))")
+            }
+        }
+        // (development) `-shottest addr,addr`: each page's settled screenshot and whole-page PDF, as a mod's
+        // follow-up would send them, saved to Documents (shot-N.png, page-N.pdf) instead of the chat.
+        if let i = args.firstIndex(of: "-shottest"), i + 1 < args.count {
+            let pages = args[i + 1].split(separator: ",").map(String.init)
+            Task { @MainActor in
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                for (n, page) in pages.enumerated() {
+                    browser.go(page)
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    let (png, blank) = await browser.settledScreenshot()
+                    let pdf = await browser.fullPage()
+                    try? png?.write(to: docs.appendingPathComponent("shot-\(n).png"))
+                    try? pdf?.write(to: docs.appendingPathComponent("page-\(n).pdf"))
+                    report.log("shottest", "\(page): blank \(blank), png \((png?.count ?? 0) / 1000) kB, pdf \((pdf?.count ?? 0) / 1000) kB")
+                }
+                report.log("shottest", "done")
             }
         }
     }

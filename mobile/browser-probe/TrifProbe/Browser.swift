@@ -8,6 +8,7 @@
 import SwiftUI
 import UIKit
 import WebKit
+import PDFKit
 
 /// What the kit says about the element under a finger (mobile/shared/kit.js describe).
 struct Picked: Equatable {
@@ -359,7 +360,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// The page's parts and sizes when it was last sent to the chat, to say afterwards what a mod did.
     private var baseline: (host: String, layout: String)?
     /// Puts text (and a screenshot) into the chat's message box: the pane's fill, set by the app.
-    var chatFill: ((String, Data?) async -> Void)?
+    var chatFill: ((String, Data?, Data?) async -> Void)?
 
     /// What the chat gets for this page: how TRIF mods are written, then its outline. Notes its layout.
     func pageForChat() async -> String? {
@@ -402,16 +403,119 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
            let list = Browser.parse(t) as? [String] { errors += list }
         if m.world == "page", let t = (await call("return JSON.stringify(window.__trifModErrors || []);", in: .page)).text,
            let list = Browser.parse(t) as? [String] { errors += list.filter { $0.hasPrefix("\(m.id):") } }
-        var text = "I added your mod \"\(m.name)\" and reloaded \(webView.url?.absoluteString ?? host). Here's the page now (screenshot attached).\n"
+        var text = "I added your mod \"\(m.name)\" and reloaded \(webView.url?.absoluteString ?? host). Here's the page now: a screenshot of what's on the screen, and the whole page as a PDF, are attached.\n"
         text += lines.isEmpty ? "\nNothing that was on the page before disappeared or shrank.\n" : "\nWhat disappeared or shrank, of what was on the page when I sent it to you:\n\(lines.joined(separator: "\n"))\n"
         if !errors.isEmpty { text += "\nThe mod's errors:\n\(errors.prefix(10).map { "- \($0)" }.joined(separator: "\n"))\n" }
         text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again."
-        let shot = await screenshot()
-        await fill(text, shot)
+        let (shot, blank) = await settledScreenshot()
+        if blank { text += "\n\n(The screenshot looked blank even after waiting: the page may not have finished drawing.)" }
+        let whole = await fullPage()
+        await fill(text, shot, whole)
         status = "Added \(m.name). What it did is attached in the chat's message box: send it, with what to fix, if it needs fixing."
     }
 
-    /// The page as it looks, as PNG.
+    /// A screenshot of the page once it has finished (Tim, 11-14: look before sending): loaded, the pictures on
+    /// the screen arrived, fonts in, and nothing added to it for a moment (up to 6 seconds: a mod that animates
+    /// keeps changing what's in place, not adding, so it doesn't hold this up). Then the picture is looked at,
+    /// and taken again (up to twice, a second apart) while it's nearly all one colour. `blank`: it still was.
+    func settledScreenshot() async -> (png: Data?, blank: Bool) {
+        let settle = """
+        return await new Promise((done) => {
+          const start = Date.now(); let last = Date.now();
+          const mo = new MutationObserver(() => { last = Date.now(); });
+          mo.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+          const pictures = () => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight; }).every((i) => i.complete);
+          const tick = () => {
+            const ok = document.readyState === 'complete' && pictures() && Date.now() - last > 600;
+            if (ok || Date.now() - start > 6000) { mo.disconnect(); done(JSON.stringify({ ok, ms: Date.now() - start })); } else setTimeout(tick, 200);
+          };
+          (document.fonts ? document.fonts.ready : Promise.resolve()).then(tick, tick);
+        });
+        """
+        for _ in 0..<24 where loading { try? await Task.sleep(nanoseconds: 250_000_000) }
+        // (each step with a time limit of its own: a page that reloads meanwhile, or a snapshot that never comes
+        // back, mustn't leave the follow-up waiting for ever)
+        let settled = await Browser.within(8, "timed out") { let r = await self.call(settle, in: Browser.trifWorld); return r.text ?? "failed: \(r.error ?? "?")" }
+        var shot = await Browser.within(5, nil) { await self.screenshot() }
+        var tries = 1
+        while tries < 3, shot.map(Browser.looksBlank) ?? true {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            shot = await Browser.within(5, nil) { await self.screenshot() }
+            tries += 1
+        }
+        let blank = shot.map(Browser.looksBlank) ?? true
+        report.log("claude", "screenshot: settled \(settled), \(tries) \(tries == 1 ? "try" : "tries")\(blank ? ", still blank" : "")")
+        return (shot, blank)
+    }
+
+    /// What `op` gives, or `fallback` if it hasn't come back within `seconds` (it's left to finish on its own).
+    static func within<T>(_ seconds: Double, _ fallback: T, _ op: @escaping @MainActor () async -> T) async -> T {
+        let once = OnceFlag()
+        return await withCheckedContinuation { (c: CheckedContinuation<T, Never>) in
+            Task { @MainActor in let v = await op(); if !once.done { once.done = true; c.resume(returning: v) } }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                if !once.done { once.done = true; c.resume(returning: fallback) }
+            }
+        }
+    }
+
+    /// Nearly all one colour (a page not drawn yet, or only a spinner): the picture, small, in 4-bit colours.
+    static func looksBlank(_ png: Data) -> Bool {
+        guard let image = UIImage(data: png)?.cgImage else { return true }
+        let w = 64, h = 128
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return false }
+        var counts: [Int: Int] = [:]
+        for i in stride(from: 0, to: px.count, by: 4) { counts[(Int(px[i] >> 4) << 8) | (Int(px[i + 1] >> 4) << 4) | Int(px[i + 2] >> 4), default: 0] += 1 }
+        return Double(counts.values.max() ?? 0) / Double(w * h) > 0.985
+    }
+
+    /// The whole page, top to bottom, as a PDF (what Safari's Full Page screenshot makes; Tim, 11-14): a chat
+    /// shrinks a tall picture until it can't be read, a PDF keeps its detail. Not when it's over 10 MB (an
+    /// endless feed).
+    func fullPage() async -> Data? {
+        guard let data = await Browser.within(15, nil, { try? await self.webView.pdf(configuration: WKPDFConfiguration()) }) else {
+            report.log("claude", "no whole-page PDF (failed or over 15 seconds)")
+            return nil
+        }
+        // (WebKit makes it one page as tall as the page, which a chat would shrink like a tall picture: cut into
+        // pages a screen high, still drawn, not pictures, so its text stays sharp and readable)
+        let paged = Browser.pages(of: data, height: max(webView.bounds.height, 600)) ?? data
+        if paged.count > 10_000_000 { report.log("claude", "the whole-page PDF is \(paged.count / 1_000_000) MB, so not attached"); return nil }
+        return paged
+    }
+
+    /// A one-page PDF cut into pages `height` high, top first.
+    static func pages(of pdf: Data, height: CGFloat) -> Data? {
+        guard let doc = PDFDocument(data: pdf), doc.pageCount == 1, let page = doc.page(at: 0) else { return nil }
+        let box = page.bounds(for: .mediaBox)
+        guard box.height > height * 1.2 else { return nil }
+        let count = Int((box.height / height).rounded(.up))
+        let size = CGRect(x: 0, y: 0, width: box.width, height: height)
+        return UIGraphicsPDFRenderer(bounds: size).pdfData { r in
+            for i in 0..<count {
+                r.beginPage()
+                let c = r.cgContext
+                // (PDF space runs upward: page i shows the stretch from the top down i screens)
+                c.saveGState()
+                c.translateBy(x: 0, y: height)
+                c.scaleBy(x: 1, y: -1)
+                c.translateBy(x: -box.minX, y: -(box.maxY - height * CGFloat(i + 1)))
+                c.clip(to: CGRect(x: box.minX, y: box.maxY - height * CGFloat(i + 1), width: box.width, height: height))
+                page.draw(with: .mediaBox, to: c)
+                c.restoreGState()
+            }
+        }
+    }
+
+    /// What's on the screen of the page, as PNG.
     func screenshot() async -> Data? {
         await withCheckedContinuation { c in
             webView.takeSnapshot(with: nil) { image, _ in c.resume(returning: image?.pngData()) }
@@ -508,3 +612,6 @@ struct WebViewHost: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView { webView }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
+
+/// (Browser.within: whichever of an answer and its time limit comes first)
+@MainActor final class OnceFlag { var done = false }

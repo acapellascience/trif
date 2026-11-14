@@ -73,11 +73,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// Puts text (and a PNG) into the chat's message box as a paste, for the person to send (Web/chat.js fill).
     @discardableResult
-    func fill(_ text: String, png: Data? = nil, as file: String? = nil) async -> String {
-        let r = try? await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null) : 'not loaded';",
-                                                       arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "name": file ?? ""], in: nil, contentWorld: ClaudePane.chatWorld)
+    func fill(_ text: String, png: Data? = nil, pdf: Data? = nil, as file: String? = nil) async -> String {
+        let r = try? await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null, pdf || null) : 'not loaded';",
+                                                       arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "pdf": pdf?.base64EncodedString() ?? "", "name": file ?? ""], in: nil, contentWorld: ClaudePane.chatWorld)
         let said = r as? String ?? "failed"
-        report.log("claude", "\(service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : " and a picture")): \(said)")
+        report.log("claude", "\(service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : ", a picture")\(pdf == nil ? "" : ", a \(pdf!.count / 1000) kB PDF")): \(said)")
         return said
     }
 

@@ -534,7 +534,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
+const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import', 'hide.add', 'hide.remove',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none', 'sensitive.split']);
@@ -764,6 +764,20 @@ function agentCommand(cmd, args) {
       const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? '') });
       if (r.id) { logger.info(`imported ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}`); syncMods('import', false); }
       return r.file ? { ...r, file: path.relative(ws.home, r.file) } : r;
+    }
+    // "Hide this" (the browser's right-click menu): the site's one "Hidden on <site>" style mod, a selector
+    // added (or put in place of one: the bar's Wider and All N like it) or taken out (Undo); lib/hidden.js.
+    // Never held: a style mod. Not from a run.
+    case 'hide.add': {
+      const r = require('./lib/hidden').hideAdd(ws, { site: String(args.site ?? ''), selector: String(args.selector ?? ''), replace: String(args.replace ?? '') });
+      logger.info(`${r.id}: hid ${String(args.selector).slice(0, 200)}${args.replace ? ` (instead of ${String(args.replace).slice(0, 200)})` : ''}`);
+      syncMods('hide', false);
+      return { ...r, file: path.relative(ws.home, r.file) };
+    }
+    case 'hide.remove': {
+      const r = require('./lib/hidden').hideRemove(ws, { site: String(args.site ?? ''), selector: String(args.selector ?? '') });
+      if (r.removed) { logger.info(`${r.id}: showed ${String(args.selector).slice(0, 200)} again${r.deleted ? ' (nothing left in it: removed)' : ''}`); syncMods('hide', false); }
+      return { ...r, file: path.relative(ws.home, r.file) };
     }
     // A site's files (lib/share.js): bytes and a name, never a path; data for the site's mods and runs
     case 'files.add': {

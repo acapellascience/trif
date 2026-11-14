@@ -62,6 +62,17 @@ chrome.action.setIcon = (d, done) => new Promise((res) => setIcon(d, () => {
 }));
 `;
 
+// The right-click menu can't be clicked in a headless browser: the scenario sends {e2eMenuClick: {info, tab}}
+// from an extension page, and the background's own handler gets it (background.js __trifMenuClick). Before
+// background.js too, so its answer comes first.
+const MENU = `// e2e only (tests/e2e/lib/chrome.js): a right-click menu item, clicked.
+chrome.runtime.onMessage.addListener((m, sender, respond) => {
+  if (!m || !m.e2eMenuClick || sender.id !== chrome.runtime.id || sender.tab) return false;
+  Promise.resolve().then(() => globalThis.__trifMenuClick(m.e2eMenuClick.info, m.e2eMenuClick.tab)).then(() => respond({ ok: true }), (e) => respond({ error: String(e) }));
+  return true;
+});
+`;
+
 /** A copy of the extension in `to` with the test manifest described above. Returns `to`. */
 function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   fs.rmSync(to, { recursive: true, force: true });
@@ -72,7 +83,8 @@ function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.map((h) => (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) ? `*://${h}/*` : `*://*.${h}/*`));
   fs.writeFileSync(path.join(to, 'e2e-no-side-panel.js'), NO_SIDE_PANEL);
   fs.writeFileSync(path.join(to, 'e2e-icons.js'), ICONS);
-  fs.writeFileSync(path.join(to, 'e2e-background.js'), `import './e2e-no-side-panel.js';\nimport './e2e-icons.js';\nimport './${m.background.service_worker}';\n`);
+  fs.writeFileSync(path.join(to, 'e2e-menu.js'), MENU);
+  fs.writeFileSync(path.join(to, 'e2e-background.js'), `import './e2e-no-side-panel.js';\nimport './e2e-icons.js';\nimport './e2e-menu.js';\nimport './${m.background.service_worker}';\n`);
   m.background = { ...m.background, service_worker: 'e2e-background.js' };
   fs.writeFileSync(file, JSON.stringify(m, null, 2));
   return to;

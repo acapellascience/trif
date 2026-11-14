@@ -49,6 +49,7 @@ const ui = {
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
+  pointed: $('#pointed'), pointedLabel: $('#pointed .pointed-label'), pointedX: $('#pointed .pointed-x'),
   robotlessLine: $('#robotless-line'), robotlessSettings: $('#robotless-settings'), modelRow: $('#model-row'), effortRow: $('#effort-row'), effort: $('#effort'),
 };
 
@@ -616,6 +617,13 @@ function messageNode(m) {
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
+  // (a message sent with Point TRIF at this: what it was about, as the pill said)
+  if (m.role === 'user' && typeof m.pointed === 'string' && m.pointed) {
+    const pill = el('span', 'pointed in-msg');
+    pill.title = m.pointed;
+    pill.append(ui.pointed.querySelector('.pointed-icon').cloneNode(true), el('span', 'pointed-label', m.pointed));
+    li.prepend(pill);
+  }
   if (m.role === 'tool') li.title = m.text;
   // "x.js was deleted." from the panel's trash icon: Undo until it's used (the restore adds its own line).
   if (m.undo && !m.undone) {
@@ -666,6 +674,26 @@ function messageNode(m) {
   }
   return li;
 }
+
+// Point TRIF at this (the browser's right-click menu, background.js pointAt): a pill above the message box
+// saying what was pointed at, which goes along with the next message; × takes it away. The box gets the
+// focus when a new one arrives.
+let pointedSeen = 0;
+const pointedNow = () => (view.site && view.status?.pointed?.[view.site]) || null;
+function renderPointed() {
+  const p = pointedNow();
+  ui.pointed.hidden = !p;
+  ui.composer.classList.toggle('has-pointed', !!p);
+  if (!p) return;
+  ui.pointedLabel.textContent = p.label;
+  ui.pointed.title = p.label;
+  if (p.at !== pointedSeen) { pointedSeen = p.at; if (!ui.input.disabled) ui.input.focus(); }
+}
+ui.pointedX.addEventListener('click', () => {
+  if (!view.site) return;
+  ui.pointed.hidden = true;
+  request({ type: 'point.clear', site: view.site }).catch(() => {}).finally(() => { refreshStatus(); ui.input.focus(); });
+});
 
 function render() {
   const { site, chat, status } = view;
@@ -738,6 +766,7 @@ function render() {
   renderFaces(problem, agentInfo);
   renderPausedAll();
   renderNotice({ helperOk, agentInfo, anyAgent });
+  renderPointed();
   renderUpdate();
   renderMods();
   renderStarter();
@@ -3571,8 +3600,9 @@ async function send() {
   }
   ui.input.value = '';
   const tabId = view.tab.id;
+  const pointed = pointedNow();
   try {
-    const runId = await startRun(text);
+    const runId = await startRun(text, pointed ? { pointed: pointed.at } : {});
     view.myRuns.set(runId, { prompt: text, tabId }); // (to put it back if the agent needs logging in)
   } catch (e) {
     // The background records start failures in the chat; anything earlier goes back in the box.

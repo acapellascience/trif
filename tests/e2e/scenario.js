@@ -1298,6 +1298,8 @@ class Scenario {
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a style mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
+      await r.check('the right-click menu, Hide this: hidden at once with the bar, saved as one rule in "Hidden on <site>" (a style mod in the list, on, not held); Wider, All N like it, Everywhere on <site> (previewed, then Hide them) and Undo edit it; Wider stops below body; hidden after a reload; switched off, all back', () => this.hideThisCheck(win));
+      await r.check('the right-click menu, Point TRIF at this: the pill above the message box (× takes it away); sent, the run gets the element (selector, size and place, text, HTML, a screenshot where the browser allows) and the message keeps the pill', () => this.pointCheck(win));
       await r.check('a style section (helper/lib/stylesection.js): a free mod\'s and a boxed mod\'s CSS applied by TRIF, their settings as trif.style; the code finds no trace of the section; a change to the section alone runs without asking; a code change waits as before, the version that runs meanwhile wearing the new style', () => this.styleSectionCheck(win));
       await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
@@ -2536,6 +2538,203 @@ process.exitCode = 1;
       for (const f of [good, bad]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', site]).catch(() => {});
     }
+  }
+
+  // ---- the right-click menu: Hide this and Point TRIF at this (background.js onMenuClick, hidethis.js)
+  // A headless browser's own menu can't be clicked: the page gets a right-click (the contextmenu event, which
+  // contextpick.js keeps), then the background's handler is called as the menu would call it (Chrome: the test
+  // build's e2e-menu.js; Firefox: the background page's __trifMenuClick).
+
+  async menuClick(win, id, sel, nth = 0) {
+    const ok = await this.ext(`async (tabId, sel, nth) => { const [r] = await chrome.scripting.executeScript({ target: { tabId }, args: [sel, nth], func: (s, n) => {
+      const el = document.querySelectorAll(s)[n]; if (!el) return false; el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, composed: true })); return true; } }); return r && r.result; }`, [win.tabId, sel, nth]);
+    if (!ok) throw new Error(`no ${sel} to right-click`);
+    return this.ext(`async (id, tabId) => {
+      const tab = await chrome.tabs.get(tabId);
+      const info = { menuItemId: id, frameId: 0, pageUrl: tab.url, editable: false };
+      if (typeof browser !== 'undefined' && browser.runtime.getBackgroundPage) {
+        const bg = await browser.runtime.getBackgroundPage();
+        if (bg && bg.__trifMenuClick) { bg.__trifMenuClick(info, tab); return 'background page'; }
+      }
+      await chrome.runtime.sendMessage({ e2eMenuClick: { info, tab } });
+      return 'message';
+    }`, [id, win.tabId]);
+  }
+
+  async hideBar(win) {
+    return this.ext(`async (tabId) => { const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: () => (globalThis.__trifHide ? globalThis.__trifHide.state() : null) }); return r ? r.result : null; }`, [win.tabId]);
+  }
+
+  async hidePress(win, name) {
+    return this.ext(`async (tabId, name) => { const [r] = await chrome.scripting.executeScript({ target: { tabId }, args: [name], func: (n) => globalThis.__trifHide.press(n) }); return r ? r.result : null; }`, [win.tabId, name]);
+  }
+
+  async shown(win, sel) {
+    return this.ext(`async (tabId, sel) => { const [r] = await chrome.scripting.executeScript({ target: { tabId }, args: [sel], func: (s) => [...document.querySelectorAll(s)].map((e) => e.getClientRects().length > 0) }); return r ? r.result : null; }`, [win.tabId, sel]);
+  }
+
+  async hideThisCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const file = path.join(this.trif, 'sites', site, 'hidden.js');
+    const listOf = () => { try { return JSON.parse(fs.readFileSync(file, 'utf8').split('// ==/WebMod==\n')[1]).hide; } catch { return null; } };
+    const go = (q = '') => this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/hide.html${q}`]);
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    const want = (what, got, exp) => { if (JSON.stringify(got) !== JSON.stringify(exp)) problems.push(`${what}: ${JSON.stringify(got)} (wanted ${JSON.stringify(exp)})`); };
+    const ad = 'main.feed > article:nth-of-type(2) > div[aria-label="Promoted"]';
+    try {
+      try { fs.unlinkSync(file); } catch { /* none */ }
+      await go('?e2e=hide');
+      await sleep(1200);
+      await this.dismissApproval();
+      // Hide this on the first ad: hidden at once, the bar, one rule in "Hidden on 127.0.0.1"
+      const how = await this.menuClick(win, 'trif-hide-this', '.promo');
+      const bar = await waitFor('the bar', () => this.hideBar(win), { timeoutMs: 8000 }).catch(() => null);
+      want('the bar', bar && { selector: bar.selector, buttons: bar.buttons }, { selector: ad, buttons: ['Wider', `Everywhere on ${site} (2 here)`, 'Undo'] });
+      want('the ads shown', await this.shown(win, '.promo'), [false, true]);
+      await waitFor('the rule saved', () => (JSON.stringify(listOf()) === JSON.stringify([ad]) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`the file: ${JSON.stringify(listOf())}`));
+      const row = await waitFor('its row', () => this.panel(`async () => { const li = document.querySelector('li[data-mod="${site}/hidden"]'); return li ? { name: li.querySelector('.mod-name > span:not(.light)')?.textContent || '', group: li.closest('[data-group]')?.dataset.group || li.dataset.group || '', on: li.querySelector('button.switch')?.getAttribute('aria-checked') === 'true', held: li.classList.contains('held') } : null; }`), { timeoutMs: 15000 }).catch(() => null);
+      want('its row in the panel', row, { name: `Hidden on ${site}`, group: 'rules', on: true, held: false });
+      await this.shot(this.panelCtx, 'hide-this-row');
+      // Wider: the whole card; All 4 like it: every card; Undo: all back, and the mod gone with its one rule
+      if (!(await this.hidePress(win, 'wider'))) problems.push('no Wider');
+      const wider = await waitFor('wider', async () => { const b = await this.hideBar(win); return b && b.selector === 'main.feed > article:nth-of-type(2)' ? b : null; }, { timeoutMs: 5000 }).catch(async () => this.hideBar(win));
+      want('after Wider', wider && wider.buttons, ['Wider', 'All 4 like it', `Everywhere on ${site} (4 here)`, 'Undo']);
+      await waitFor('Wider saved', () => (JSON.stringify(listOf()) === JSON.stringify(['main.feed > article:nth-of-type(2)']) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`Wider's file: ${JSON.stringify(listOf())}`));
+      want('the cards shown after Wider', await this.shown(win, 'article'), [true, false, true, true]);
+      await this.hidePress(win, 'all');
+      await waitFor('All saved', () => (JSON.stringify(listOf()) === JSON.stringify(['main.feed > article[data-testid="post"]']) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`All's file: ${JSON.stringify(listOf())}`));
+      want('the cards shown after All', await this.shown(win, 'article'), [false, false, false, false]);
+      await this.hidePress(win, 'undo');
+      await waitFor('Undo: the mod gone', () => (!fs.existsSync(file) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`after Undo: ${JSON.stringify(listOf())}`));
+      await sleep(400);
+      want('the cards shown after Undo', await this.shown(win, 'article'), [true, true, true, true]);
+      want('the bar after Undo', await this.hideBar(win), null);
+      await waitFor('its row gone', () => this.panel(`async () => !document.querySelector('li[data-mod="${site}/hidden"]') || null`), { timeoutMs: 10000 }).catch(() => problems.push('the row stayed after Undo'));
+      // Never body: on the sidebar (a child of body) Wider can't go further
+      await this.menuClick(win, 'trif-hide-this', 'aside.side');
+      const top = await waitFor('the bar on the sidebar', () => this.hideBar(win), { timeoutMs: 8000 }).catch(() => null);
+      want('Wider below body', top && { selector: top.selector, wider: top.wider }, { selector: 'aside.side', wider: false });
+      await this.hidePress(win, 'undo');
+      await waitFor('undone', () => (!fs.existsSync(file) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push('the sidebar\'s Undo'));
+      // Everywhere on 127.0.0.1: the first click outlines them, the second ("Hide them") saves the name alone
+      await this.menuClick(win, 'trif-hide-this', '.promo', 1);
+      await waitFor('the bar again', () => this.hideBar(win), { timeoutMs: 8000 });
+      await this.hidePress(win, 'every');
+      const pre = await this.hideBar(win);
+      want('Everywhere\'s preview', pre && { previewing: pre.previewing, marks: pre.marks, buttons: pre.buttons }, { previewing: true, marks: 1, buttons: ['Wider', 'Hide them', 'Undo'] });
+      await this.hidePress(win, 'every');
+      await waitFor('Everywhere saved', () => (JSON.stringify(listOf()) === JSON.stringify(['div[aria-label="Promoted"]']) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`Everywhere's file: ${JSON.stringify(listOf())}`));
+      want('the ads after Hide them', await this.shown(win, '.promo'), [false, false]);
+      // Escape: the bar goes, the ads stay hidden; after a reload, by the mod itself
+      await this.ext(`async (tabId) => { await chrome.scripting.executeScript({ target: { tabId }, func: () => { dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); globalThis.__trifHide.close(); return 1; } }); }`, [win.tabId]);
+      want('the bar after Escape', await this.hideBar(win), null);
+      await go('?e2e=hide2');
+      await sleep(1500);
+      const reloaded = await waitFor('hidden by the mod after a reload', async () => { const s = await this.shown(win, '.promo'); return s && s.length === 2 && s.every((x) => !x) ? s : null; }, { timeoutMs: 10000, intervalMs: 400 }).catch(async () => this.shown(win, '.promo'));
+      want('the ads after a reload', reloaded, [false, false]);
+      const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout.split('\n').find((l) => l.includes(`${site}/hidden`) || /\bhidden\s/.test(l)) || '';
+      if (!/registered/.test(st)) problems.push(`trif status: ${st}`);
+      // Switched off in the panel: all back
+      await this.panelClick(`li[data-mod="${site}/hidden"] button.switch`);
+      const back = await waitFor('back when switched off', async () => { const s = await this.shown(win, '.promo'); return s && s.length === 2 && s.every(Boolean) ? s : null; }, { timeoutMs: 10000, intervalMs: 400 }).catch(async () => this.shown(win, '.promo'));
+      want('the ads after switching it off', back, [true, true]);
+      await this.panelClick(`li[data-mod="${site}/hidden"] button.switch`).catch(() => {});
+      // Hide this while it's off: on again (the user's own doing), and the new rule added
+      await sleep(800);
+      await this.panelClick(`li[data-mod="${site}/hidden"] button.switch`);
+      await sleep(1200);
+      await this.menuClick(win, 'trif-hide-this', 'button.join');
+      await waitFor('the join button saved', () => ((listOf() || []).length === 2 || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`the second rule: ${JSON.stringify(listOf())}`));
+      const on = await waitFor('on again', () => this.panel(`async () => document.querySelector('li[data-mod="${site}/hidden"] button.switch')?.getAttribute('aria-checked') === 'true' || null`), { timeoutMs: 8000 }).catch(() => false);
+      if (!on) problems.push('Hide this didn\'t switch the hidden mod back on');
+      await this.shot(this.panelCtx, 'hide-this-two-rules');
+      await this.hidePress(win, 'undo');
+      await waitFor('the second Undo', () => (JSON.stringify(listOf()) === JSON.stringify(['div[aria-label="Promoted"]']) || null), { timeoutMs: 8000, intervalMs: 200 }).catch(() => problems.push(`the second Undo: ${JSON.stringify(listOf())}`));
+      await themes('hide-this-panel');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `(${how}) hidden at once with the bar, one rule in "Hidden on ${site}" (green, on, not held); Wider, All 4 like it, Undo (the mod gone); Wider stops below body; Everywhere previewed then Hide them; hidden after a reload; switched off, all back; Hide this switched it on again`;
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
+      await this.ext(`async (tabId) => { await chrome.scripting.executeScript({ target: { tabId }, func: () => { globalThis.__trifHide?.close?.(); return 1; } }); }`, [win.tabId]).catch(() => {});
+    }
+  }
+
+  async pointCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const standin = path.join(this.work, 'standin-point');
+    const promptFile = path.join(standin, 'prompt.txt');
+    fs.mkdirSync(standin, { recursive: true });
+    fs.writeFileSync(path.join(standin, 'claude'), `#!${process.execPath}
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-point' });
+let input = '';
+try { input = fs.readFileSync(0, 'utf8'); } catch { /* none */ }
+fs.writeFileSync(${JSON.stringify(promptFile)}, a.join('\\n') + '\\n---\\n' + input);
+const text = 'A car it is.';
+say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-point' });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [standin, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const chat = async () => (await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`])) || { messages: [] };
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const pill = () => this.panel(`async () => { const p = document.getElementById('pointed'); return p && !p.hidden ? { label: p.querySelector('.pointed-label').textContent, focused: document.activeElement === document.getElementById('input') } : null; }`);
+    const problems = [];
+    let shot = null;
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/hide.html?e2e=point`]);
+      // (the panel again, so it finds the stand-in Claude Code, logged in)
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.dismissApproval();
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000).catch(() => problems.push('Send never came on with the stand-in'));
+      // Point TRIF at this on the third post's words: the pill, the box focused; × takes it away
+      await this.menuClick(win, 'trif-point', 'p.words', 2);
+      const p1 = await waitFor('the pill', () => pill(), { timeoutMs: 10000 }).catch(() => null);
+      want(p1 && p1.label, '“Post 3”');
+      await themes('point-pill');
+      await this.panelClick('#pointed .pointed-x');
+      await waitFor('the pill gone', async () => ((await pill()) === null || null), { timeoutMs: 5000 }).catch(() => problems.push('× left the pill'));
+      // again, and sent: the run gets the element along with the message
+      await this.menuClick(win, 'trif-point', 'p.words', 2);
+      await waitFor('the pill again', () => pill(), { timeoutMs: 10000 });
+      await this.panel(`async () => { const i = document.getElementById('input'); i.value = 'turn it into a car'; i.dispatchEvent(new Event('input', { bubbles: true })); document.getElementById('composer').requestSubmit(); return true; }`);
+      const done = await waitFor('the run', async () => { const c = await chat(); return !c.run && c.messages.some((m) => m.role === 'assistant' && m.text === 'A car it is.') ? c : null; }, { timeoutMs: 60000, intervalMs: 500 }).catch(async () => { problems.push(`the run: ${JSON.stringify((await chat()).messages.slice(-3))}`); return null; });
+      const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
+      for (const [what, re] of [['the message', /turn it into a car/], ['the block', /chose "Point TRIF at this" for this message/], ['the page', new RegExp(`- Page: ${base.replace(/[.]/g, '\\.')}/hide\\.html\\?e2e=point`)],
+        ['the selector', /- Selector: `main\.feed > article:nth-of-type\(3\) > p:nth-of-type\(1\)` \(finds only this element; named by position\)/],
+        ['its size and place', /- Size and place: \d+×\d+ CSS px at x \d+, y \d+ of the page, a <p>/], ['its text', /```text\nPost 3\n```/], ['its HTML', /```html\n<p class="words">Post 3<\/p>\n```/]]) {
+        if (!re.test(prompt)) problems.push(`the agent's prompt has no ${what}: ${prompt.slice(-900)}`);
+      }
+      const m = /- Screenshot of it: (sites\/127\.0\.0\.1\/files\/pointed[^\n]*\.png)/.exec(prompt);
+      if (m) { shot = path.join(this.trif, m[1]); if (!fs.existsSync(shot) || fs.statSync(shot).size < 100) problems.push(`the screenshot ${m[1]} isn't there`); }
+      const sent = done && done.messages.find((x) => x.role === 'user' && x.text === 'turn it into a car');
+      want(sent && sent.pointed, '“Post 3”');
+      if (await pill()) problems.push('the pill stayed after sending');
+      const inMsg = await this.panel(`async () => { const x = [...document.querySelectorAll('#messages li.msg.user .pointed-label')].pop(); return x ? x.textContent : null; }`);
+      want(inMsg, '“Post 3”');
+      await themes('point-sent');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `the pill ("${p1.label}"${p1.focused ? ', the box focused' : ''}), × took it away; sent, the run got the selector, size and place, text and HTML${m ? `, and a screenshot (${m[1]})` : ' (no screenshot: the browser didn\'t allow one without a real click)'}; the message keeps the pill`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      if (shot) { try { fs.unlinkSync(shot); } catch { /* gone */ } }
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+    function want(got, exp) { if (JSON.stringify(got) !== JSON.stringify(exp)) problems.push(`${JSON.stringify(got)} (wanted ${JSON.stringify(exp)})`); }
   }
 
   // ---- a mod's style section (helper/lib/stylesection.js): applied by TRIF, never held on its own

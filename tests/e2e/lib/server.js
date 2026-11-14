@@ -497,6 +497,11 @@ document.getElementById('cc').addEventListener('click', () => d.setAttribute('da
 document.addEventListener('cm-ping', (e) => d.setAttribute('data-pings', JSON.stringify([...JSON.parse(d.getAttribute('data-pings')), e.detail])));
 </script>`));
     if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
+    // (the right-click menu, scenario.js hideThisCheck: a feed of cards, an ad in two of them, a sidebar)
+    if (u.pathname === '/hide.html') {
+      const card = (n, ad) => `<article class="card" data-testid="post"><p class="words">Post ${n}</p>${ad ? '<div class="promo" aria-label="Promoted">Buy now</div>' : ''}<span class="likes">${n} likes</span></article>`;
+      return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e hide', `<h1 id="title">Hide</h1><main class="feed">${[1, 2, 3, 4].map((n) => card(n, n % 2 === 0)).join('')}</main><aside class="side"><button type="button" class="join">Join today</button></aside>`));
+    }
     // (mods that break, scenario.js modHealthCheck: the element a style mod looks for, there with ?has=1)
     if (u.pathname === '/health.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e health', `<h1 id="title">Health</h1>${u.searchParams.get('has') ? '<div id="e2e-quiet-target">here</div>' : '<p>gone</p>'}`));
     if (u.pathname.startsWith('/e2e-goto-')) return send(200, 'text/html; charset=utf-8', PAGE('go-to', `<p id="where">${u.pathname}</p>`));

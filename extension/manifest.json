@@ -34,7 +34,8 @@
     "scripting",
     "sidePanel",
     "activeTab",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "contextMenus"
   ],
   "optional_host_permissions": [
     "<all_urls>"

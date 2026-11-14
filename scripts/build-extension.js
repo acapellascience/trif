@@ -80,7 +80,8 @@ function firefoxManifest(m, repo = githubRepo(readPackage())) {
   delete f.minimum_chrome_version;
   delete f.side_panel;
   f.background = { scripts: [m.background.service_worker], type: 'module' };
-  f.permissions = m.permissions.filter((p) => p !== 'sidePanel' && p !== 'userScripts');
+  // (Firefox's own name for the right-click menu, which also has menus.getTargetElement: background.js onMenuClick)
+  f.permissions = m.permissions.filter((p) => p !== 'sidePanel' && p !== 'userScripts').map((p) => (p === 'contextMenus' ? 'menus' : p));
   f.optional_permissions = ['userScripts'];
   // Firefox shows this title above the sidebar.
   f.sidebar_action = {
@@ -112,7 +113,8 @@ function safariManifest(m) {
   f.background = { scripts: ['safari-background.js'], persistent: false };
   // nativeMessaging stays: in Safari it reaches the extension's own app, which hands out the bridge's key.
   // (activeTab is for Chrome's and Firefox's screenshots without <all_urls>; Safari has <all_urls>.)
-  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts', 'activeTab'].includes(p)), 'webNavigation'];
+  // (and no right-click menu there yet: Hide this and Point TRIF at this are Chrome's and Firefox's)
+  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts', 'activeTab', 'contextMenus'].includes(p)), 'webNavigation'];
   // Safari keeps <all_urls> as a required host permission: Safari doesn't grant it at install anyway, it
   // asks the user per site itself (the toolbar button, or Settings → Extensions → Websites), which is the
   // per-site OK the other builds get from permissions.request. TRIF asking too would be a second question

@@ -238,6 +238,12 @@
 </div>
 <form id="composer" class="composer">
   <label for="input" class="visually-hidden">Message</label>
+  <!-- Point TRIF at this (the right-click menu): what goes along with the next message; × takes it away. -->
+  <div id="pointed" class="pointed" hidden>
+    <svg class="pointed-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.5l9 4.2-3.9 1.3 2.6 4.3-1.5.9-2.6-4.3-2.8 3z"/></svg>
+    <span class="pointed-label"></span>
+    <button type="button" class="pointed-x" aria-label="Remove" title="Remove"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
+  </div>
   <textarea id="input" rows="1" placeholder="What should I fix?"></textarea>
   <button id="send" class="send" type="submit" title="Send" aria-label="Send">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>

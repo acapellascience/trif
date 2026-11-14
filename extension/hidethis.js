@@ -262,9 +262,11 @@ button.undo:hover { background: #2cb985; }
 
   // What closed bars hid with the element's own style, kept so it can all come back without a reload
   // (reveal: the hidden mod switched off or gone, background.js syncPageHides).
+  // `token`: the bar the background knew of when it decided (a newer one, whose hide is still on its way to
+  // being saved, stays).
   let kept = [];
-  function reveal() {
-    if (bar) { showEls(bar); close(bar); }
+  function reveal(token) {
+    if (bar && bar.token === token) { showEls(bar); close(bar); }
     showEls({ hidden: kept });
     kept = [];
     return true;

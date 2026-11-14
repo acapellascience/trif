@@ -2226,21 +2226,28 @@ chrome.tabs.onRemoved?.addListener((tabId) => { pageHides.delete(tabId); hideBar
  * The hidden mod switched off, held, or gone, or the site off or paused: what Hide this put in open pages
  * comes out too, without a reload (each tab's rules, and the elements' own style). Run after each sync.
  */
-async function syncPageHides() {
+let pageHidesChain = Promise.resolve();
+function syncPageHides() {
+  pageHidesChain = pageHidesChain.then(syncPageHidesNow, syncPageHidesNow); // (one at a time, each with the mods as they are by then)
+  return pageHidesChain;
+}
+async function syncPageHidesNow() {
   for (const [tabId, rec] of [...pageHides]) {
-    if (hideBars.get(tabId)?.saving > 0) continue; // (a hide being saved: the mod comes, or comes back, with it)
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    // (a hide being saved: the mod comes, or comes back, with it)
+    if (hideBars.get(tabId)?.saving > 0) continue;
     const id = hiddenModId(rec.site);
     const m = state.mods.find((x) => x.id === id);
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
     const url = tab?.url || '';
     const runs = !!(m && tab && !m.held && isEnabled(id) && !state.paused && siteOnFor(url, onSites(), sens())
       && !offOnSite(state.offSites, id, hostOf(url)) && !offSitesFor(m, state.offSites, state.groupsOff).some((s) => hostInScope(hostOf(url), s)));
-    if (runs) continue;
-    pageHides.delete(tabId);
-    hideBars.delete(tabId);
+    if (runs || hideBars.get(tabId)?.saving > 0) continue;
+    const token = hideBars.get(tabId)?.token || null;
+    if (pageHides.get(tabId) === rec) pageHides.delete(tabId);
+    if (token) hideBars.delete(tabId);
     if (!tab) continue;
     for (const [css, n] of rec.css) for (let i = 0; i < n; i++) await chrome.scripting.removeCSS({ target: { tabId, frameIds: [0] }, css, origin: 'USER' }).catch(() => {});
-    await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: () => globalThis.__trifHide?.reveal() }).catch(() => {});
+    await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: (t) => globalThis.__trifHide?.reveal(t), args: [token] }).catch(() => {});
   }
 }
 

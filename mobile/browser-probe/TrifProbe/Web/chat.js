@@ -65,9 +65,11 @@
   /** Under each finished mod file in a code block, an Add to TRIF button (once). */
   function mark() {
     // (what TRIF attached, by its file's name: its tile marked for the small pill above, the label its name)
-    for (const tile of document.querySelectorAll('[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]')) {
+    // (Claude's tiles, then ChatGPT's: a span of the group/composer-attachment class; a picture's name only in
+    // its alt or its remove button's label)
+    for (const tile of document.querySelectorAll('[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"], span[class*="group/composer-attachment"]')) {
       if (tile.hasAttribute('data-trif-chip')) continue;
-      const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt]')].map((i) => i.alt).join(' ')}`;
+      const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
       const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot'].find((l) => names.includes(l));
       if (label) tile.setAttribute('data-trif-chip', label);
     }
@@ -92,11 +94,24 @@
   const style = document.createElement('style');
   style.textContent = `
     button[data-testid="chat-input-send"]:not(:disabled) [data-cds-part="paint"],
-    button[data-testid="send-button"]:not(:disabled), #composer-submit-button:not(:disabled) {
+    button[data-testid="send-button"]:not(:disabled), #composer-submit-button:not(:disabled),
+    button[aria-label="Send"]:not(:disabled), button[data-testid="composer-speech-button"], button[aria-label*="voice" i] {
       background: #34d399 !important; background-color: #34d399 !important; border-color: transparent !important;
     }
     button[data-testid="chat-input-send"]:not(:disabled), button[data-testid="send-button"]:not(:disabled),
-    #composer-submit-button:not(:disabled) { color: #04291c !important; }
+    #composer-submit-button:not(:disabled), button[aria-label="Send"]:not(:disabled), button[data-testid="composer-speech-button"],
+    button[aria-label*="voice" i] { color: #04291c !important; }
+    :is(button[aria-label="Send"], button[data-testid="composer-speech-button"], button[aria-label*="voice" i]) svg { color: #04291c !important; }
+    /* (ChatGPT's tile: its picture and name hidden, the label before them, its remove button kept) */
+    span[data-trif-chip][class*="composer-attachment"] { width: auto !important; height: auto !important; }
+    span[data-trif-chip][class*="composer-attachment"] > .composer-attachment-surface.flex { display: none !important; }
+    span[data-trif-chip][class*="composer-attachment"]::before {
+      display: inline-block; padding: 7px 16px; border-radius: 999px; background: #e3f7ee; color: #0f6b4a;
+      font: 600 13px/1.2 -apple-system, system-ui, sans-serif; white-space: nowrap;
+    }
+    span[data-trif-chip="TRIF instruction"][class*="composer-attachment"]::before { content: "TRIF instruction"; }
+    span[data-trif-chip="TRIF follow-up"][class*="composer-attachment"]::before { content: "TRIF follow-up"; }
+    span[data-trif-chip="TRIF screenshot"][class*="composer-attachment"]::before { content: "TRIF screenshot"; }
     [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
     [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
     [data-trif-chip] [data-cds-card-body] > div, [data-trif-chip] img, [data-trif-chip] picture { display: none !important; }
@@ -110,6 +125,7 @@
     @media (prefers-color-scheme: dark) {
       [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
       [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }
+      span[data-trif-chip][class*="composer-attachment"]::before { background: rgba(52, 211, 153, 0.16); color: #34d399; }
     }`;
   (document.head || document.documentElement).append(style);
 

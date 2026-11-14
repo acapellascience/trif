@@ -13,6 +13,7 @@ struct TrifProbeApp: App {
             ContentView(pane: model.pane)
                 .environmentObject(model.browser)
                 .environmentObject(model.report)
+                .tint(Color.trifGreen) // (every button and control TRIF's green, not iOS's blue: Tim, 11-14)
         }
     }
 }
@@ -338,4 +339,12 @@ struct ReportView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
+}
+
+extension Color {
+    /// TRIF's green, as the panel has it (--led-green): the robot's own on dark, a darker one on light, so
+    /// text in it stays readable.
+    static let trifGreen = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(red: 0x34 / 255, green: 0xd3 / 255, blue: 0x99 / 255, alpha: 1)
+        : UIColor(red: 0x1f / 255, green: 0x8a / 255, blue: 0x5b / 255, alpha: 1) })
 }

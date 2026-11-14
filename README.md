@@ -2,7 +2,7 @@
 
 Customize any website by asking your coding agent. Open the TRIF side panel in Chrome (or Firefox, or
 Safari), say what you want ("hide the trending sidebar", "only show people I follow"), and your agent
-writes a small mod that runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
+writes a small mod that runs every time that site loads. Mods are small files on your computer; switch each one off
 and on from the side panel.
 
 TRIF uses the coding agent you already have (Claude Code or Codex), on your own account, or an open model
@@ -134,23 +134,22 @@ Settings → Extensions and delete the old WebMods app.
 ### Tim's starter mods
 
 Optional: the setup page asks, site by site, before adding them (or `trif setup --examples [sites]`;
-Settings in the side panel can add any site's later). They're plain JavaScript in `~/.trif/sites`, which
-you can read first ([examples/sites](examples/sites)). TRIF starts on for each of Google, X, Amazon and
-Instagram you add, with these mods. Each has a switch in the side panel on its site; the ones marked *(off)* wait for you to switch
-them on.
+Settings in the side panel can add any site's later). They're small files in `~/.trif/sites` (style mods,
+boxed mods and a few free mods), which you can read first ([examples/sites](examples/sites)). TRIF starts on
+for each of Google, X, Amazon and Instagram you add, and the mods start off: switch each one on in the side
+panel on its site.
 
 - **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
-  or extra sections), and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD
-  screensaver.
+  or extra sections), DVD Logo (the logo on the home page bounces around like an old DVD screensaver), and
+  Oppish (Google in Oppish).
 - **X:** **Detox Timeline**: Home is just the people you follow, newest first, with no ads or suggestions. It
   starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
   menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
-  trends column, tidies post pages, and turns Explore into a plain search field. Rainbow Rave *(off)*,
-  for fun.
+  trends column, tidies post pages, and turns Explore into a plain search field. Rainbow Rave, for fun.
 - **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and
   stars; no sponsored items, ads or recommendations).
 - **Instagram:** Only Following (no suggested posts or ads), Hide Reposts, Hide AI, and
-  Desaturate *(off)*: colours down to 35%.
+  Desaturate (colours down to 35%).
 
 ## Open models (experimental)
 

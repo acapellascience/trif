@@ -39,7 +39,7 @@
     if (png) {
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
-      dt.items.add(new File([bytes], 'page.png', { type: 'image/png' }));
+      dt.items.add(new File([bytes], 'TRIF screenshot.png', { type: 'image/png' }));
       said.push(paste(ed, dt) ? 'picture pasted' : 'picture not taken');
       await new Promise((r) => setTimeout(r, 300));
     }
@@ -64,9 +64,12 @@
 
   /** Under each finished mod file in a code block, an Add to TRIF button (once). */
   function mark() {
-    // (the page TRIF sent, as a file named "TRIF instruction": its tile marked for the small pill above)
+    // (what TRIF attached, by its file's name: its tile marked for the small pill above, the label its name)
     for (const tile of document.querySelectorAll('[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]')) {
-      if (!tile.hasAttribute('data-trif-chip') && /TRIF instruction/.test(tile.textContent || '')) tile.setAttribute('data-trif-chip', 'instruction');
+      if (tile.hasAttribute('data-trif-chip')) continue;
+      const names = `${tile.textContent || ''} ${[...tile.querySelectorAll('img[alt]')].map((i) => i.alt).join(' ')}`;
+      const label = ['TRIF instruction', 'TRIF follow-up', 'TRIF screenshot'].find((l) => names.includes(l));
+      if (label) tile.setAttribute('data-trif-chip', label);
     }
     for (const pre of document.querySelectorAll('pre')) {
       const t = pre.innerText || '';
@@ -83,9 +86,9 @@
     }
   }
   // The send button in TRIF's green (Tim, 11-14): Claude paints it on a layer inside the button
-  // ([data-cds-part=paint]); ChatGPT on the button. And the page TRIF sent (Send page: a file named
-  // "TRIF instruction") as a small pill saying so, not a big tile (data-trif-chip, set by mark below); its
-  // remove button stays.
+  // ([data-cds-part=paint]); ChatGPT on the button. And what TRIF attaches (the page, "TRIF instruction"; after a
+  // mod is added, "TRIF follow-up" and "TRIF screenshot") as small pills saying so, not big tiles
+  // (data-trif-chip, set by mark below); their remove buttons stay.
   const style = document.createElement('style');
   style.textContent = `
     button[data-testid="chat-input-send"]:not(:disabled) [data-cds-part="paint"],
@@ -96,11 +99,18 @@
     #composer-submit-button:not(:disabled) { color: #04291c !important; }
     [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
     [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
-    [data-trif-chip] [data-cds-card-body] > div { display: none !important; }
+    [data-trif-chip] [data-cds-card-body] > div, [data-trif-chip] img, [data-trif-chip] picture { display: none !important; }
     [data-trif-chip] [data-cds-card-body]::after {
-      content: "TRIF instruction"; font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
+      font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
     }
-    [data-trif-chip] .cds-card-fill { background: #e3f7ee !important; }`;
+    [data-trif-chip] .cds-card-fill { background: #e3f7ee !important; }
+    [data-trif-chip="TRIF instruction"] [data-cds-card-body]::after { content: "TRIF instruction"; }
+    [data-trif-chip="TRIF follow-up"] [data-cds-card-body]::after { content: "TRIF follow-up"; }
+    [data-trif-chip="TRIF screenshot"] [data-cds-card-body]::after { content: "TRIF screenshot"; }
+    @media (prefers-color-scheme: dark) {
+      [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
+      [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }
+    }`;
   (document.head || document.documentElement).append(style);
 
   let queued = false;

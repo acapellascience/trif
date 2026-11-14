@@ -32,7 +32,7 @@ final class Model: ObservableObject {
         self.pane = ClaudePane(report: report, browser: browser)
         // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
         let pane = self.pane
-        browser.chatFill = { text, png in await pane.fill(text, png: png, as: "what-the-mod-did.txt") }
+        browser.chatFill = { text, png in await pane.fill(text, png: png, as: "TRIF follow-up.txt") }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments

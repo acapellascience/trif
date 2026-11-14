@@ -156,3 +156,35 @@ test('a site\'s files in slices: appended in order to a hidden temp file, rename
   assert.throws(() => share.fileBegin(ws, { site: 'x.com', name: 'huge.wav', size: 5 * 1024 ** 3 }, { statfs }), /huge\.wav is 5\.0 GB, and there's only 1\.0 MB free on this disk/);
   assert.throws(() => share.fileBegin(ws, { site: '../x', name: 'a', size: 1 }), /isn't a site/);
 });
+
+test('export asks where (helper/lib/choosefolder.js): the system chooser by platform, a cancel is null, tests never see a window', async () => {
+  const { chooseFolder, chooserCommand } = require('../helper/lib/choosefolder');
+  // the stand-ins: TRIF_CHOOSE_FOLDER answers ("cancel" for a cancel); TRIF_DOWNLOADS alone answers with itself
+  assert.strictEqual(await chooseFolder('Where?', { start: '/x', env: { TRIF_CHOOSE_FOLDER: '/tmp/here' } }), '/tmp/here');
+  assert.strictEqual(await chooseFolder('Where?', { start: '/x', env: { TRIF_CHOOSE_FOLDER: 'cancel' } }), null);
+  assert.strictEqual(await chooseFolder('Where?', { start: '/x', env: { TRIF_DOWNLOADS: '/tmp/dl' } }), '/tmp/dl');
+  // where TRIF knows no chooser: the fallback, as before (Downloads)
+  assert.strictEqual(await chooseFolder('Where?', { start: '/x', fallback: '/dl', env: {}, platform: 'plan9' }), '/dl');
+  // macOS: osascript, brought to the front, opening where it's told; quotes in the prompt can't end the string
+  const [cmd, args] = chooserCommand('Where should TRIF save “A \"b\"”?', '/Users/me/Downloads', 'darwin');
+  assert.strictEqual(cmd, 'osascript');
+  assert.deepStrictEqual(args.slice(0, 2), ['-e', 'activate']);
+  assert.match(args[3], /^POSIX path of \(choose folder with prompt "Where should TRIF save “A \\"b\\"”\?" default location \(POSIX file "\/Users\/me\/Downloads"\)\)$/);
+  assert.strictEqual(chooserCommand('Where?', '/home/me/Downloads', 'linux')[0], 'zenity');
+  assert.match(chooserCommand("It's here?", 'C:\\Users\\me', 'win32')[1].join(' '), /Description = 'It''s here\?'/);
+});
+
+test('a site\'s export takes its www. folder too (sites/www.google.com for google.com), names kept apart', () => {
+  const home = tempDir('trif-share-www-');
+  const ws = wsOf(home);
+  const g = ['*://www.google.com/*'];
+  writeMod(home, 'www.google.com', 'dvd.js', `${head('DVD', g)}a();\n`);
+  writeMod(home, 'google.com', 'dvd.js', `${head('DVD too', g)}b();\n`);
+  writeMod(home, 'google.com', 'calm.js', `${head('Calm', g)}c();\n`);
+  const list = scanMods(ws.modsDir).mods;
+  const to = path.join(home, 'dl');
+  const r = share.exportSite(ws, list, 'www.google.com', { to });
+  assert.strictEqual(r.site, 'google.com');
+  assert.deepStrictEqual(r.ids.sort(), ['google.com/calm', 'google.com/dvd', 'www.google.com/dvd']);
+  assert.deepStrictEqual(fs.readdirSync(r.dir).sort(), ['calm.js', 'dvd 2.js', 'dvd.js']);
+});

@@ -744,19 +744,31 @@ function agentCommand(cmd, args) {
       return r;
     }
     // Export (lib/share.js): the mod's file, or a site's, copied to the downloads folder and shown there
+    // (each asks where first, with the system's folder chooser opening in Downloads: Tim, 11-14; a cancel
+    // exports nothing and says so: {cancelled: true})
     case 'mod.export': {
       const share = require('./lib/share');
-      const r = share.exportMod(ws, state.mods, String(args.id ?? ''));
-      require('./lib/reveal').revealPath(r.file, 'folder');
-      logger.info(`exported ${r.id} to ${r.file}`);
-      return { id: r.id, file: path.basename(r.file), dir: path.dirname(r.file) };
+      const id = String(args.id ?? '');
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      return require('./lib/choosefolder').chooseFolder(`Where should TRIF save “${m.name || id}”?`, { start: share.downloadsDir() }).then((to) => {
+        if (!to) return { id, cancelled: true };
+        const r = share.exportMod(ws, state.mods, id, { to });
+        require('./lib/reveal').revealPath(r.file, 'folder');
+        logger.info(`exported ${r.id} to ${r.file}`);
+        return { id: r.id, file: path.basename(r.file), dir: path.dirname(r.file), where: homeShort(path.dirname(r.file)) };
+      });
     }
     case 'mod.exportSite': {
       const share = require('./lib/share');
-      const r = share.exportSite(ws, state.mods, String(args.site ?? ''));
-      require('./lib/reveal').revealPath(r.dir, 'folder');
-      logger.info(`exported ${r.ids.length} mod(s) of ${r.site} to ${r.dir}`);
-      return { site: r.site, dir: path.basename(r.dir), ids: r.ids };
+      const site = String(args.site ?? '');
+      return require('./lib/choosefolder').chooseFolder(`Where should TRIF save the mods for ${site}?`, { start: share.downloadsDir() }).then((to) => {
+        if (!to) return { site, cancelled: true };
+        const r = share.exportSite(ws, state.mods, site, { to });
+        require('./lib/reveal').revealPath(r.dir, 'folder');
+        logger.info(`exported ${r.ids.length} mod(s) of ${r.site} to ${r.dir}`);
+        return { site: r.site, dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };
+      });
     }
     // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so
     // the next sync holds it like any (held.js), and marked imported
@@ -1036,6 +1048,12 @@ async function report(args) {
 
 // Run an agent command and call done(error, result): synchronously when the command is synchronous,
 // so agent.start / agent.login are answered before their first event.
+/** A folder as people read it: ~/Desktop, not /Users/someone/Desktop. */
+function homeShort(dir) {
+  const home = require('os').homedir();
+  return dir === home ? '~' : dir.startsWith(home + path.sep) ? `~${dir.slice(home.length)}` : dir;
+}
+
 function runAgentCommand(cmd, args, done) {
   let result;
   try { result = agentCommand(cmd, args); } catch (e) { return done(e); }

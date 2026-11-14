@@ -2336,8 +2336,9 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'mod.historyCode': return helperRequest('mod.historyCode', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 10000);
     case 'mod.historyDiff': return helperRequest('mod.historyDiff', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 15000);
     case 'mod.historyRestore': return helperRequest('mod.historyRestore', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 15000);
-    case 'mod.export': return helperRequest('mod.export', { id: String(msg.id ?? '') }, 15000);
-    case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? '') }, 30000);
+    // (ten minutes and a bit: the helper asks where first, with the system's folder chooser)
+    case 'mod.export': return helperRequest('mod.export', { id: String(msg.id ?? '') }, 11 * 60 * 1000);
+    case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? '') }, 11 * 60 * 1000);
     case 'mod.import': {
       // Import a mod (the panel's button, or a .js dropped on it): its text; the helper checks and writes it
       const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? '') }, 20000);
@@ -2805,9 +2806,8 @@ async function onAgentEvent(runId, event, relay = true) {
             for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && (m.done === 'fixing' || (!m.done && (!fx.fp || m.fp === fx.fp)))) { m.done = 'fixed'; m.fixRun = runId; }
           } else for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && m.done === 'fixing') delete m.done;
         }
-        for (const h of Array.isArray(event.held) ? event.held : []) {
-          push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it.`);
-        }
+        // (a mod the run made that TRIF held: no line in the chat. Its approval card, its row's "on hold" and the bar's
+        // waiting badge say so already: Tim, 11-14)
         // A long chat dilutes the user's latest words (Tim, 2026-11-12: the agent seemed less sharp; its steps
         // carried ~100k tokens by then): suggest a new chat, once per chat. Mods are files, so nothing is lost.
         if (Number.isFinite(event.contextTokens) && event.contextTokens >= LONG_CHAT_TOKENS && !chat.longNoted) {

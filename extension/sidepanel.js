@@ -1154,6 +1154,67 @@ new ResizeObserver(() => {
   listScrollFrame = requestAnimationFrame(() => { listScrollFrame = 0; markListScroll(); });
 }).observe(ui.modList);
 
+// The mods list's height (Tim, 11-14): the grip under it (under the files line, when there is one), dragged (or arrow keys on it), sets the list's
+// greatest height, kept for next time; dragged past all its rows, it shows them all (as many as there are
+// later); a double-click goes back to the automatic height. The CSS keeps the chat its room however tall.
+const modsGrip = $('#mods-grip');
+function setModsHeight(px) {
+  const l = ui.modList;
+  // (the chat below keeps its place: what's at its bottom stays put while its top edge moves. Tim, 11-14)
+  const c = ui.chat, fromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+  if (px === null) {
+    l.classList.remove('sized'); l.style.removeProperty('--mods-h');
+    try { localStorage.removeItem('modsHeight'); } catch { /* this time only */ }
+  } else {
+    const all = px === 'all' || px >= l.scrollHeight - 2;
+    const h = all ? '100vh' : `${Math.round(Math.max(px, 44))}px`;
+    l.style.setProperty('--mods-h', h); l.classList.add('sized');
+    try { localStorage.setItem('modsHeight', all ? 'all' : h); } catch { /* this time only */ }
+  }
+  c.scrollTop = c.scrollHeight - c.clientHeight - fromBottom;
+  markListScroll();
+}
+try {
+  const kept = localStorage.getItem('modsHeight');
+  if (kept === 'all') { ui.modList.style.setProperty('--mods-h', '100vh'); ui.modList.classList.add('sized'); }
+  else if (parseInt(kept, 10) > 0) { ui.modList.style.setProperty('--mods-h', `${parseInt(kept, 10)}px`); ui.modList.classList.add('sized'); }
+} catch { /* the automatic height */ }
+modsGrip.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  modsGrip.setPointerCapture(e.pointerId);
+  const startY = e.clientY, startH = ui.modList.getBoundingClientRect().height;
+  document.body.classList.add('resizing-mods');
+  const move = (ev) => setModsHeight(startH + ev.clientY - startY);
+  const up = () => {
+    modsGrip.removeEventListener('pointermove', move); modsGrip.removeEventListener('pointerup', up); modsGrip.removeEventListener('pointercancel', up);
+    document.body.classList.remove('resizing-mods');
+  };
+  modsGrip.addEventListener('pointermove', move); modsGrip.addEventListener('pointerup', up); modsGrip.addEventListener('pointercancel', up);
+});
+modsGrip.addEventListener('dblclick', () => setModsHeight(null));
+modsGrip.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  const step = (e.shiftKey ? 60 : 20) * (e.key === 'ArrowDown' ? 1 : -1);
+  setModsHeight(ui.modList.getBoundingClientRect().height + step);
+});
+
+// Opening or closing the files line (or the mods box) above the chat moves the chat's top edge: what's at the
+// chat's bottom stays put meanwhile (Tim, 11-14), for as long as the files list takes to arrive.
+let chatHold = null;
+ui.mods.addEventListener('click', (e) => {
+  if (!e.target.closest('summary')) return;
+  const c = ui.chat;
+  chatHold = { fromBottom: c.scrollHeight - c.scrollTop - c.clientHeight, until: performance.now() + 1500 };
+}, true);
+new ResizeObserver(() => {
+  if (!chatHold) return;
+  if (performance.now() > chatHold.until) { chatHold = null; return; }
+  const c = ui.chat;
+  c.scrollTop = c.scrollHeight - c.clientHeight - chatHold.fromBottom;
+}).observe(ui.chat);
+
 // The folded line at the bottom of the mods box: "N more for other <site> pages", a button that shows them.
 let foldLi = null;
 function foldLine(n, scope) {
@@ -2872,7 +2933,8 @@ async function exportMod() {
   P.err.hidden = true;
   try {
     const r = await request({ type: 'mod.export', id: codeView.id });
-    P.note.textContent = `Exported to ${IS_MAC ? 'Downloads' : 'your downloads folder'} as ${r.file}: send it to a friend, who imports it with Import mod… (or drops it on TRIF's panel).`;
+    if (r?.cancelled) return;
+    P.note.textContent = `Exported to ${r.where} as ${r.file}: send it to a friend, who imports it with Import mod… (or drops it on TRIF's panel).`;
     P.note.hidden = false;
   } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
 }
@@ -2883,7 +2945,8 @@ function renderSiteTools() {
   const ok = !!site && !!view.status?.helper?.connected;
   ui.modsMore.hidden = !ok;
   if (!ok) { ui.modsMenu.hidden = true; ui.siteFilesBox.hidden = true; return; }
-  const mine = (view.status?.mods || []).filter((m) => m.id.startsWith(`${site}/`));
+  // (its folder, or its www. one: the helper exports both, lib/share.js exportSite)
+  const mine = (view.status?.mods || []).filter((m) => m.id.startsWith(`${site}/`) || m.id.startsWith(`www.${site}/`));
   ui.exportSite.hidden = !mine.length;
   ui.exportSite.textContent = `Export all mods for ${site}`;
   if (view.filesFor !== site) { view.filesFor = site; loadSiteFiles(); }
@@ -2933,7 +2996,8 @@ ui.exportSite?.addEventListener('click', async () => {
   ui.modsMenu.hidden = true;
   try {
     const r = await request({ type: 'mod.exportSite', site: view.site });
-    request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${IS_MAC ? 'Downloads' : 'your downloads folder'}.` }).catch(() => {});
+    if (r?.cancelled) return;
+    request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${r.where}.` }).catch(() => {});
   } catch (e) { request({ type: 'chat.note', site: view.site, text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }
 });
 

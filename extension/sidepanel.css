@@ -950,7 +950,7 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .pop-menu .menu-item { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }
 .pop-menu .menu-item:hover { background: var(--raised); }
 .mods > summary { position: relative; padding-right: 28px; }
-.mods > summary .mods-more-wrap { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+.mods > summary .mods-more-wrap { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 6; } /* (its transform makes it a layer of its own, which the menu can't rise above: without the z-index the list after it, rows and switches, painted over the open menu. Tim, 11-14) */
 .mods-more { border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 6px; border-radius: 6px; cursor: pointer; }
 .mods-more:hover { color: var(--text); background: var(--raised); }
 .site-files-box { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
@@ -983,6 +983,15 @@ body.chat-empty .mod-list { max-height: calc(70vh - 40px); }
 .sensitive-note .mod-err { display: block; margin-top: 4px; }
 .sensitive-note .sensitive-also { color: var(--muted); }
 .cv-menu .cv-copy-to { display: contents; }
+/* The grip under the mods list (Tim, 11-14): drag it up or down for the list's height, kept for next time
+   (sidepanel.js "the mods list's height"); never more than leaves the chat its room. */
+.mod-list.sized, body.chat-empty .mod-list.sized { max-height: min(var(--mods-h), calc(100vh - 170px)); }
+.mods-grip { display: flex; justify-content: center; align-items: center; height: 12px; margin: 0 0 -6px; cursor: ns-resize; touch-action: none; outline: none; }
+.mods-grip span { width: 32px; height: 4px; border-radius: 2px; background: var(--line); transition: background-color 0.15s ease; }
+.mods-grip:hover span, body.resizing-mods .mods-grip span { background: var(--faint); }
+.mods-grip:focus-visible span { background: var(--faint); box-shadow: 0 0 0 2px var(--accent); }
+body.resizing-mods, body.resizing-mods * { cursor: ns-resize !important; user-select: none; -webkit-user-select: none; }
+@media (prefers-reduced-motion: reduce) { .mods-grip span { transition: none; } }
 .mod-list.scrolls { padding-right: 18px; } /* (and an overlay one's, which takes none: sidepanel.js markListScroll) */
 
 /* ---- the tiers' colours (Tim, 11-13): each group's heading, count, On, its mods' switches when on, their lights and a

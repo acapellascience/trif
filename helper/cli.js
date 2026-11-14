@@ -646,13 +646,29 @@ const handlers = {
       return;
     }
     const s = await update.check(ctx.ws, { force: true });
-    if (ctx.json) return printJson(s);
+    // The mods feed too (lib/modsfeed.js): new versions of Tim's mods between releases, brought to the
+    // user's copies as setup brings a release's (not inside a run, which can't write them).
+    let mods = null;
+    if (!inRun) {
+      const modsFeed = require('./lib/modsfeed');
+      const c = await modsFeed.check(ctx.ws, { force: true });
+      let applied = { updated: [], waiting: [] };
+      try { applied = modsFeed.apply(ctx.ws); } catch (e) { c.error = c.error || e.message; }
+      mods = { error: c.error || null, available: c.available || [], skipped: c.skipped || [], ...applied };
+    }
+    if (ctx.json) return printJson(mods ? { ...s, mods } : s);
     if (s.error) out(`TRIF ${s.current}: couldn't check for updates (${s.error})`);
     else if (s.available) {
       out(`TRIF ${s.latest} is available (you have ${s.current}).`);
       if (s.notes) out(`\n${s.notes}\n`);
       out(s.canInstall ? 'Install it with: trif update --install' : s.why);
     } else out(`TRIF ${s.current} is up to date.`);
+    if (mods) {
+      const vers = (m) => `${m.id} (version ${m.version})`;
+      if (mods.error) out(`Tim's mods: couldn't check the mods feed (${mods.error})`);
+      if (mods.updated.length) out(`Tim's mods updated (switched off until the user turns them on): ${mods.updated.map(vers).join(', ')}`);
+      if (mods.waiting.length) out(`Tim's mods with a new version waiting (the side panel offers it, or trif mod-update): ${mods.waiting.map(vers).join(', ')}`);
+    }
     out(`Automatic updates: ${s.auto ? 'on (trif update --auto off)' : 'off (trif update --auto on)'}`);
   },
 

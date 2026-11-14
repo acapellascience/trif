@@ -42,6 +42,9 @@
 // A copy that is still exactly what was shipped is replaced with the new version silently. Workspaces set
 // up before the record existed have none: there, a copy matching any version TRIF ever shipped
 // (examples/shipped-history.json, from git) counts as unchanged.
+// The new version is this TRIF's (examples/sites) or, between releases, the mods feed's when newer
+// (modsfeed.js, signed like TRIF's updates): the same rules, except that the feed's replaces an unchanged
+// copy only with automatic updates on (else it's offered), and never with an older version than it brought.
 //
 // Retired mods. A shipped mod can be folded into another one (RETIRED: AI Banisher took in Hide AI Mode
 // and Gemini Promo, Just Results took in Hide Sponsored Results). It's no longer offered to anyone, and
@@ -215,16 +218,19 @@ const shippedBefore = (history, id, hash) => Array.isArray(history[id]) && histo
 /**
  * The ids of mods that say they're TRIF's (`@source webmods`) but aren't a version TRIF shipped: someone's
  * edit of one, or a mod that only says so. A header is the author's to write (an agent's, on a page's say-so),
- * so the panel's "Tim's mod" goes by the file: {id: true}. `text`: a style mod's file.
+ * so the panel's "Tim's mod" goes by the file: {id: true}. `text`: a style mod's file. With `home`, a version
+ * the mods feed brought there counts as shipped.
  */
-function changedShipped(examplesDir, mods) {
+function changedShipped(examplesDir, mods, home = null) {
   const history = loadHistory(examplesDir);
+  // (and the versions the mods feed brought, each checked against its signature: modsfeed.js)
+  const fed = home ? (() => { try { return require('./modsfeed').delivered(home); } catch { return {}; } })() : {};
   const out = {};
   for (const m of mods || []) {
     if (!m || !isShippedSource(m.source)) continue;
     const now = sha1(Buffer.from(String(m.text ?? m.code ?? ''), 'utf8'));
     const current = readShipped(examplesDir, m.id);
-    if (!(current && current.hash === now) && !shippedBefore(history, m.id, now)) out[m.id] = true;
+    if (!(current && current.hash === now) && !shippedBefore(history, m.id, now) && !shippedBefore(fed, m.id, now)) out[m.id] = true;
   }
   return out;
 }
@@ -290,20 +296,39 @@ function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn
 
 /**
  * Bring the shipped mods the user has up to date (see the top of this file). Run by every setup, after
- * preinstallMods. Returns {updated: [{id, version, from}], waiting: [{id, version}]}: copies replaced with
- * the new version, and edited copies with a new version waiting for the user (this time or before).
+ * preinstallMods, and by the helper after it checked the mods feed (modsfeed.js apply). Returns {updated:
+ * [{id, version, from}], waiting: [{id, version}]}: copies replaced with the new version, and edited copies
+ * with a new version waiting for the user (this time or before).
+ * The new version is the examples' or, when newer, the mods feed's (`feed`: {id: {code, hash, version}},
+ * by default what modsfeed.js kept, checked again). A version from the feed replaces an unchanged copy
+ * only with automatic updates on (`autoFeed`, by default config.json "autoUpdate", as for TRIF's own
+ * updates); without, it's offered like one for a changed copy.
  */
-function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
+function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED, { feed, autoFeed } = {}) {
   const state = load(home);
   const history = loadHistory(examplesDir);
   const updated = [];
   const waiting = [];
   let changed = false;
+  const fromFeed = feed !== undefined ? feed || {} : (() => { try { return require('./modsfeed').cached(home, { examplesDir, list }); } catch { return {}; } })();
+  let auto = autoFeed;
+  const autoOn = () => {
+    if (auto === undefined) { try { auto = require('./paths').readConfig(home).config.autoUpdate === true; } catch { auto = false; } }
+    return auto;
+  };
+  // (versions only the feed brought: one the user has isn't replaced by an older one, below)
+  const fed = Object.keys(fromFeed).length || fs.existsSync(path.join(home, '.mods-feed')) ? (() => { try { return require('./modsfeed').delivered(home); } catch { return {}; } })() : {};
   for (const { id } of list) {
     if (!state.offered.includes(id)) continue;
-    const shipped = readShipped(examplesDir, id);
+    const bundled = readShipped(examplesDir, id);
+    const f = fromFeed[id];
+    const shipped = f && (!bundled || require('./modsfeed').newer(f.version, bundled.version)) ? { code: f.code, hash: f.hash, version: f.version, feed: true } : bundled;
     const rec = state.shipped[id] || null;
     if (!shipped || (rec && rec.own)) continue;
+    // Never back to an older version than the feed brought the user (an older feed served again, or the
+    // feed's copy gone): a version newer than this one that the user has, or is offered, stays.
+    if (rec && !rec.retired && [rec, rec.pending].some((r) => r && r.version && require('./modsfeed').newer(r.version, shipped.version)
+      && (shipped.feed || (Array.isArray(fed[id]) && fed[id].includes(r.hash))))) continue;
     const mine = readOrNull(modFile(modsDir, id));
     if (!mine) continue; // deleted: it stays gone
     const mineHash = sha1(mine);
@@ -321,7 +346,7 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       next = current; // the user's changes are on top of this version already (merged, or edited since)
     } else if (rec && rec.declined === shipped.hash) {
       continue; // the user kept theirs over this version
-    } else if (rec && rec.hash ? mineHash === rec.hash : shippedBefore(history, id, mineHash)) {
+    } else if ((rec && rec.hash ? mineHash === rec.hash : shippedBefore(history, id, mineHash)) && !(shipped.feed && !autoOn())) {
       // Unchanged since it was shipped: the new version replaces it (its switch, kept by id, carries over).
       // (the base first: the helper judges a changed shipped mod against it, held.js)
       writeAtomic(baseFile(home, id), shipped.code);
@@ -331,7 +356,8 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       next = { ...current, auto: new Date().toISOString() };
       updated.push({ id, version: shipped.version, from: rec ? rec.version || null : null });
     } else {
-      // Edited: left alone, with the new version kept for the user to use or merge.
+      // Edited (or, from the feed without automatic updates, unchanged): left alone, with the new version
+      // kept for the user to use or merge.
       next = { hash: rec ? rec.hash || null : null, version: rec ? rec.version || null : null, pending: current };
       if (!(readOrNull(newFile(home, id)) || Buffer.alloc(0)).equals(shipped.code)) writeAtomic(newFile(home, id), shipped.code);
       waiting.push({ id, version: shipped.version });

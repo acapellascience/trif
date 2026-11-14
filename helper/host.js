@@ -39,6 +39,7 @@ const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib
 const { deleteMod, emptyTrash } = require('./lib/trash');
 const { runScope } = require('./lib/scope');
 const update = require('./lib/update');
+const modsFeed = require('./lib/modsfeed');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 const { migratePrivate } = require('./lib/migrate');
 const withoutSandbox = require('./lib/withoutsandbox');
@@ -323,7 +324,7 @@ function syncMods(reason, force) {
   let autoUpdated = {};
   try { autoUpdated = autoUpdatedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   let notShipped = {};
-  try { notShipped = changedShipped(examplesDir(), mods); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  try { notShipped = changedShipped(examplesDir(), mods, ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   const allowedNow = loadAllowed(ws.home);
   const splitsNow = splitsOf(ws.home); // (the sensitive sites of their own: each its own site, sitecombos.js)
   const sent = plan.mods.map((m) => {
@@ -942,7 +943,31 @@ async function checkForUpdate(force) {
   else if (info.available) logger.info(`update available: ${info.current} -> ${info.latest}`);
   sendUpdate(info);
   maybeAutoInstall(info);
+  // (and the mods feed, with the same check: new versions of Tim's mods between releases)
+  checkModsFeed(force).catch((e) => logger.warn(`mods feed: ${e.message}`));
   return info;
+}
+
+// The mods feed (lib/modsfeed.js): keeps the new versions of Tim's mods it has for this TRIF, then brings
+// them to the user's copies the way a release's setup does (preinstalled.js updateShippedMods: an unchanged
+// copy replaced with automatic updates on, else offered; a changed one offered). Not while TRIF itself is
+// being installed: the new version's setup does it.
+let modsFeedBusy = false;
+async function checkModsFeed(force) {
+  if (modsFeedBusy || state.installing || state.shuttingDown) return;
+  modsFeedBusy = true;
+  try {
+    const w = workspace(ws.home);
+    const r = await modsFeed.check(w, { force });
+    if (r.error) logger.warn(`mods feed: ${r.error}`);
+    if (state.installing || state.shuttingDown) return;
+    const { updated, waiting } = modsFeed.apply(w);
+    if (updated.length) logger.info(`mods feed: updated ${updated.map((m) => `${m.id} to version ${m.version}`).join(', ')}`);
+    if (waiting.length) logger.info(`mods feed: new version waiting for the user: ${waiting.map((m) => `${m.id} (version ${m.version})`).join(', ')}`);
+    if (updated.length || waiting.length) scheduleSync('mods feed');
+  } finally {
+    modsFeedBusy = false;
+  }
 }
 
 // With "autoUpdate" on, install when nothing is running (else on a later check).

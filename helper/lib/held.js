@@ -114,13 +114,16 @@ function needsOf(mod, scope = null, agentLevel = null) {
 }
 
 // The version TRIF shipped of a mod (its base in <home>/.shipped/, as a mod), or null when the mod isn't one
-// TRIF shipped.
+// TRIF shipped. A base only the mods feed brought (between releases) isn't a release's: the mod is judged
+// against the version this TRIF's release shipped, so a feed version that can do more waits (modsfeed.js).
 function shippedVersion(home, mod) {
   if (!home || !mod || !mod.source || !['webmods', 'trif'].includes(mod.source)) return null;
   const [site, ...rest] = String(mod.id).split('/');
   const file = path.join(home, '.shipped', site, `${rest.join('/')}.js`);
   let code;
   try { code = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  try { code = require('./modsfeed').releasedBaseline(home, mod.id, code); } catch { return null; }
+  if (code === null) return null;
   try { return require('./mods').buildMod({ site, file, code }).mod; } catch { return null; }
 }
 

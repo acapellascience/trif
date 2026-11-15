@@ -59,17 +59,36 @@ final class Report: ObservableObject {
     }
     private static let key = "trif-probe-report"
 
+    /// Kept in Application Support/report.json, written a moment after a change, off the main thread (it was in the
+    /// app's settings, rewritten whole on every page load: 11-15).
+    private static var file: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("report.json")
+    }
+    private static let queue = DispatchQueue(label: "trif.report", qos: .utility)
+    private var saveTask: Task<Void, Never>?
+
     init() {
-        if let data = UserDefaults.standard.data(forKey: Report.key), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
+        let data = (try? Data(contentsOf: Report.file)) ?? UserDefaults.standard.data(forKey: Report.key)
+        if let data, let saved = try? JSONDecoder().decode(Saved.self, from: data) {
             runs = saved.runs
             events = saved.events
             rules = saved.rules
         }
+        if UserDefaults.standard.data(forKey: Report.key) != nil {
+            UserDefaults.standard.removeObject(forKey: Report.key)
+            save()
+        }
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(Saved(runs: runs, events: events, rules: rules)) {
-            UserDefaults.standard.set(data, forKey: Report.key)
+        let saved = Saved(runs: runs, events: events, rules: rules)
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            Report.queue.async { if let data = try? JSONEncoder().encode(saved) { try? data.write(to: Report.file, options: .atomic) } }
         }
     }
 

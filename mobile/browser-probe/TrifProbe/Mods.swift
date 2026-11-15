@@ -100,6 +100,19 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     }
 
     // (every field but the first few optional: mods kept by the proof of concept read in, then read again)
+    /// Kept without `script` (made again from the code when the app starts: ModStore.init), and with at most ten
+    /// earlier versions: Tim's phone kept 323 KB of mods in its settings, each twice, and saved it on every change.
+    func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(site, forKey: .site); try c.encode(name, forKey: .name); try c.encode(description, forKey: .description)
+        try c.encode(tier, forKey: .tier); try c.encode(sites, forKey: .sites); try c.encode(matches, forKey: .matches); try c.encode(excludes, forKey: .excludes)
+        try c.encode(powers, forKey: .powers); try c.encode(powerArgs, forKey: .powerArgs); try c.encode(facts, forKey: .facts); try c.encode(warnings, forKey: .warnings)
+        try c.encodeIfPresent(risk, forKey: .risk); try c.encode(hash, forKey: .hash); try c.encode(needs, forKey: .needs); try c.encode(code, forKey: .code)
+        try c.encode(world, forKey: .world); try c.encode(at, forKey: .at); try c.encode(on, forKey: .on); try c.encode(offSites, forKey: .offSites)
+        try c.encode(allowed, forKey: .allowed); try c.encode(source, forKey: .source); try c.encodeIfPresent(newOff, forKey: .newOff); try c.encode(added, forKey: .added)
+        try c.encode(Array(history.prefix(10)), forKey: .history); try c.encodeIfPresent(ran, forKey: .ran); try c.encode(extraNeeds, forKey: .extraNeeds)
+    }
+
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -168,23 +181,41 @@ final class ModStore: ObservableObject {
         return c
     }()
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: key), let list = try? JSONDecoder().decode([InstalledMod].self, from: data) { mods = list }
-        if let g = UserDefaults.standard.dictionary(forKey: groupsKey) as? [String: [String]] { groupsOff = g }
-        rereadIfNeeded()
+    /// Pause all mods (the Mods tab's ⋯, the app icon's menu): no mod runs anywhere until Resume.
+    @Published private(set) var paused = UserDefaults.standard.bool(forKey: ModStore.pausedKey)
+    func setPaused(_ p: Bool) {
+        paused = p
+        UserDefaults.standard.set(p, forKey: ModStore.pausedKey)
+        Diagnostics.shared.log("paused", p ? "all mods paused" : "mods resumed")
     }
 
+    init() {
+        mods = ModFilesStore.load()
+        // (once: the mods the app kept in its settings, moved to their own files)
+        if !UserDefaults.standard.bool(forKey: "modsInFiles"), let data = UserDefaults.standard.data(forKey: key), let list = try? JSONDecoder().decode([InstalledMod].self, from: data) {
+            if mods.isEmpty { mods = list }
+            ModFilesStore.write(mods)
+            UserDefaults.standard.removeObject(forKey: key)
+            UserDefaults.standard.set(true, forKey: "modsInFiles")
+            Diagnostics.shared.log("storage", "moved \(list.count) mods (\(data.count / 1024) KB) from the app's settings to their own files")
+        }
+        if let g = UserDefaults.standard.dictionary(forKey: groupsKey) as? [String: [String]] { groupsOff = g }
+        rereadIfNeeded(force: mods.contains { $0.script.isEmpty })
+    }
+
+    /// Kept: each mod in a file of its own, written off the main thread (ModFilesStore); the tiers off by site in the
+    /// settings (small).
     private func save() {
-        if let data = try? JSONEncoder().encode(mods) { UserDefaults.standard.set(data, forKey: key) }
+        ModFilesStore.write(mods)
         UserDefaults.standard.set(groupsOff, forKey: groupsKey)
     }
 
     /// The reader's own version (mods.js's text): when the app brings a new one, every mod is read again from its
     /// file, so what runs is what this version makes of it. The proof of concept's mods (ids without a site) are
     /// read in as allowed for what they can do: the user added each from its "Add this mod?" sheet.
-    private func rereadIfNeeded() {
+    private func rereadIfNeeded(force: Bool) {
         let version = SHA256.hash(data: Data(Browser.resource("mods", "js").utf8)).map { String(format: "%02x", $0) }.joined()
-        guard UserDefaults.standard.string(forKey: readerKey) != version else { return }
+        guard force || UserDefaults.standard.string(forKey: readerKey) != version else { return }
         var out: [InstalledMod] = []
         for old in mods {
             let fromProbe = !old.id.contains("/")
@@ -209,8 +240,13 @@ final class ModStore: ObservableObject {
         guard let c = js else { return (nil, "the mod reader didn't start") }
         c.setObject(text, forKeyedSubscript: "__input" as NSString)
         c.setObject(["file": file, "site": site, "here": here], forKeyedSubscript: "__opts" as NSString)
-        let out = c.evaluateScript("JSON.stringify((function () { const f = __trifMods.findMod(__input); return f ? __trifMods.readMod(f, __opts) : { error: 'there is no mod file (a ==WebMod== header) in it' }; })())")?.toString() ?? ""
-        guard let data = out.data(using: .utf8), let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return (nil, "the mod reader gave nothing back: \(c.exception?.toString() ?? out)") }
+        let out = c.evaluateScript(ModReader.readCall)?.toString() ?? ""
+        return ModStore.build(out.isEmpty ? (c.exception?.toString() ?? "") : out)
+    }
+
+    /// The reader's answer (JSON) as the mod the app keeps, or why it can't be one.
+    nonisolated static func build(_ out: String) -> (mod: InstalledMod?, error: String?) {
+        guard let data = out.data(using: .utf8), let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return (nil, "the mod reader gave nothing back: \(out.prefix(200))") }
         if let error = d["error"] as? String { return (nil, error) }
         let s = { (k: String) in d[k] as? String ?? "" }
         let a = { (k: String) in d[k] as? [String] ?? [] }
@@ -226,6 +262,21 @@ final class ModStore: ObservableObject {
         if let r = d["risk"] as? [String: Any], let t = r["tier"] as? Int { m.risk = ModRisk(tier: t, why: r["why"] as? String) }
         m.needs = (d["needs"] as? [[String: Any]] ?? []).map { ModNeed(key: $0["key"] as? String ?? "", fact: $0["fact"] as? String ?? "", power: $0["power"] as? String, lines: $0["lines"] as? [String]) }
         return (m, nil)
+    }
+
+    /// As `read`, on a reader of its own off the main thread (adding a mod from the chat must not hold up the app:
+    /// reading a big free mod's code takes a while on a phone).
+    func readInBackground(_ text: String, file: String = "", site: String = "", here: String = "") async -> (mod: InstalledMod?, error: String?) {
+        let out = await ModReader.shared.evaluate(text, file: file, site: site, here: here)
+        return ModStore.build(out)
+    }
+
+    /// readNamed, off the main thread.
+    func readNamedInBackground(_ text: String, here: String) async -> (mod: InstalledMod?, error: String?) {
+        let r = await readInBackground(text, here: here)
+        guard let m = r.mod, !mods.contains(where: { $0.id == m.id }),
+              let same = mods.first(where: { $0.name == m.name && $0.site == m.site }) else { return r }
+        return await readInBackground(text, file: same.file, site: same.site, here: here)
     }
 
     /// A mod from a chat or the clipboard: as `read`, and when one kept here has its @name and site (the chat's
@@ -246,13 +297,11 @@ final class ModStore: ObservableObject {
         return (try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [[String: String]]) ?? []
     }
 
-    /// Whether a mod's @match (and @exclude) covers an address.
+    /// Whether a mod's @match (and @exclude) covers an address (MatchPattern: in Swift, as it's asked on every page
+    /// load for every mod; modfile.js matchesUrl is the same test, in the page).
     func applies(_ m: InstalledMod, to url: String) -> Bool {
-        guard let c = js else { return false }
-        c.setObject(url, forKeyedSubscript: "__url" as NSString)
-        c.setObject(m.matches, forKeyedSubscript: "__m" as NSString)
-        c.setObject(m.excludes, forKeyedSubscript: "__x" as NSString)
-        return c.evaluateScript("__trifMods.appliesTo(__url, __m, __x)")?.toBool() ?? false
+        guard let u = URL(string: url) else { return false }
+        return MatchPattern.any(m.matches, u) && !MatchPattern.any(m.excludes, u)
     }
 
     static func allow(_ needs: [ModNeed], _ allowed: [String: [String]]) -> [String: [String]] {
@@ -274,6 +323,7 @@ final class ModStore: ObservableObject {
 
     /// The mods switched on, not held (a change on hold: its version before), whose @match covers this address.
     func running(on url: String) -> [InstalledMod] {
+        if paused { return [] }
         let site = Site.of(URL(string: url)?.host ?? "")
         return mods.filter { m in
             guard m.on, !(m.held && m.ran == nil), !groupOff(m.tier, on: site), !(m.multiSite && m.offSites.contains(site)) else { return false }
@@ -285,6 +335,7 @@ final class ModStore: ObservableObject {
     /// mod may run, then each mod that's on and not held (a change on hold: the version before), behind a check of
     /// the sites it's switched off on, and the sites whose tier is off.
     func userScripts() -> [WKUserScript] {
+        if paused { return [] }
         var list: [(InstalledMod, String, String, String)] = []
         for m in mods where m.on {
             if m.held { if let r = m.ran { list.append((m, r.script, r.world, r.at)) }; continue }
@@ -497,6 +548,98 @@ struct ModOfferView: View {
             }
             .navigationTitle("Add this mod?")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+
+/// The mod reader (shared/gen/mods.js) in a JavaScriptCore context of its own, on a queue of its own: reading a mod
+/// off the main thread.
+final class ModReader: @unchecked Sendable {
+    static let shared = ModReader()
+    static let readCall = "JSON.stringify((function () { const f = __trifMods.findMod(__input); return f ? __trifMods.readMod(f, __opts) : { error: 'there is no mod file (a ==WebMod== header) in it' }; })())"
+    private let queue = DispatchQueue(label: "trif.mod-reader", qos: .userInitiated)
+    private var context: JSContext?
+
+    func evaluate(_ text: String, file: String, site: String, here: String) async -> String {
+        await withCheckedContinuation { (k: CheckedContinuation<String, Never>) in
+            queue.async {
+                if self.context == nil {
+                    let c = JSContext()
+                    let src = Bundle.main.url(forResource: "mods", withExtension: "js").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+                    c?.evaluateScript(src)
+                    self.context = c
+                }
+                guard let c = self.context else { k.resume(returning: ""); return }
+                c.setObject(text, forKeyedSubscript: "__input" as NSString)
+                c.setObject(["file": file, "site": site, "here": here], forKeyedSubscript: "__opts" as NSString)
+                k.resume(returning: c.evaluateScript(ModReader.readCall)?.toString() ?? (c.exception?.toString() ?? ""))
+            }
+        }
+    }
+}
+
+/// Chrome-style match patterns (https://x.com/*, *://*.x.com/*, <all_urls>), as modfile.js matchesUrl tests them.
+enum MatchPattern {
+    nonisolated(unsafe) private static var paths: [String: NSRegularExpression] = [:]
+    private static let lock = NSLock()
+
+    static func any(_ patterns: [String], _ u: URL) -> Bool { patterns.contains { one($0, u) } }
+
+    static func one(_ p: String, _ u: URL) -> Bool {
+        let scheme = (u.scheme ?? "").lowercased(), host = (u.host ?? "").lowercased()
+        let web = scheme == "http" || scheme == "https"
+        if p == "<all_urls>" { return web }
+        guard let sep = p.range(of: "://") else { return false }
+        let ps = String(p[..<sep.lowerBound])
+        let rest = p[sep.upperBound...]
+        guard let slash = rest.firstIndex(of: "/") else { return false }
+        let ph = String(rest[..<slash]).lowercased(), path = String(rest[slash...])
+        if ps == "*" { if !web { return false } } else if ps != scheme || !(ps == "http" || ps == "https") { return false }
+        if ph != "*" {
+            if ph.hasPrefix("*.") { let base = String(ph.dropFirst(2)); if host != base && !host.hasSuffix("." + base) { return false } }
+            else if ph.contains("*") || host != ph { return false }
+        }
+        lock.lock(); defer { lock.unlock() }
+        let re: NSRegularExpression
+        if let cached = paths[path] { re = cached } else {
+            let escaped = NSRegularExpression.escapedPattern(for: path).replacingOccurrences(of: "\\*", with: ".*")
+            guard let made = try? NSRegularExpression(pattern: "^\(escaped)$", options: [.dotMatchesLineSeparators]) else { return false }
+            paths[path] = made
+            re = made
+        }
+        var target = u.path.isEmpty ? "/" : u.path
+        if let q = u.query { target += "?" + q }
+        // (URL.path decodes percent escapes; the page's location.pathname keeps them)
+        if let comps = URLComponents(url: u, resolvingAgainstBaseURL: false) { target = (comps.percentEncodedPath.isEmpty ? "/" : comps.percentEncodedPath) + (comps.percentEncodedQuery.map { "?" + $0 } ?? "") }
+        return re.firstMatch(in: target, range: NSRange(target.startIndex..., in: target)) != nil
+    }
+}
+
+/// Mods in files: Application Support/mods/<id>.json and an order file, written atomically on a queue of their own
+/// (the latest list wins; a write in progress finishes first).
+enum ModFilesStore {
+    private static let queue = DispatchQueue(label: "trif.mod-files", qos: .utility)
+    static var dir: URL {
+        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("mods")
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    private static func file(_ id: String) -> URL { dir.appendingPathComponent(id.replacingOccurrences(of: "/", with: "__") + ".json") }
+
+    static func load() -> [InstalledMod] {
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent("order.json")), let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return ids.compactMap { id in (try? Data(contentsOf: file(id))).flatMap { try? JSONDecoder().decode(InstalledMod.self, from: $0) } }
+    }
+
+    static func write(_ mods: [InstalledMod]) {
+        let list = mods
+        queue.async {
+            let enc = JSONEncoder()
+            for m in list { if let d = try? enc.encode(m) { try? d.write(to: file(m.id), options: .atomic) } }
+            if let d = try? enc.encode(list.map(\.id)) { try? d.write(to: dir.appendingPathComponent("order.json"), options: .atomic) }
+            let keep = Set(list.map { file($0.id).lastPathComponent } + ["order.json"])
+            for f in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where !keep.contains(f) { try? FileManager.default.removeItem(at: dir.appendingPathComponent(f)) }
         }
     }
 }

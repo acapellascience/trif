@@ -93,9 +93,12 @@ Open `mobile/browser-probe/TrifProbe.xcodeproj`, pick your team, run. It needs i
 check needs iOS 26 on a phone with Apple Intelligence (iPhone 15 Pro or later), or the Simulator on an Apple
 silicon Mac that has it turned on.
 
-It starts on the plain test page. The bar at the bottom, left to right: back, reload, **pages** (the test
-pages and a few real sites), **checks**, **wand** (outline, clipboard, the phone's model, forget), **Claude**
-(shows the pane), **report**.
+It starts on the plain test page (afterwards, on the tabs it had). The address bar has reload (stop while
+loading). The bar at the bottom, left to right: back, forward, **chat** (shows the pane), **Mods** (the robot;
+its badge counts the site's mods waiting for an OK), **tabs** (the number open), and **⋯**: New tab, History,
+Import…, the wand's items (outline, clipboard, the phone's model, forget), and **The probe** (Checks, Report,
+the test pages and a few real sites). What each of tabs, history, Mods and Import does: "The browser probe as
+an app", below.
 
 - **Checks → Run the checks on this page.** About twenty seconds; the last two reload the page. Run on all
   five test pages, then on real sites.
@@ -117,6 +120,71 @@ pages and a few real sites), **checks**, **wand** (outline, clipboard, the phone
 The app never puts a script into Claude's pane and never reads from it. It only watches which address the
 pane is about to load, which every browser does.
 
+## The browser probe as an app (branch ios-poc, 11-15)
+
+Built on the probe, toward something to use every day:
+
+- **Tabs** (TrifProbe/Tabs.swift). Each tab is a web view of its own (its own back and forward), all made from
+  one configuration, so every tab gets the same scripts, mods and sign-ins. The switcher shows each tab's
+  picture; + opens one, × closes one; a link or page that opens a window opens a tab after its own. Tabs and
+  their back/forward lists (WebKit's interactionState) are kept between launches. A new tab shows the sites
+  visited lately under the address bar.
+- **The chat follows the tab's site** (ClaudePane.follow). Each site (its domain) keeps its own conversation:
+  switching tabs, or going to another site, brings that site's chat back, or a new one. Start over forgets
+  the site's.
+- **History** (History.swift). Every page any tab shows, newest first, by day; search, tap to open, long-press
+  for a new tab, swipe to delete, Clear… (last hour, today, all). Kept in one file in Application Support, left
+  out of backups; nothing sends it anywhere.
+- **The Mods tab** (ModsPanel.swift, Web/mods.html, mods-page.js, mods-page.css). The desktop side panel's mods
+  list for the shown tab's site, drawn with the panel's own sidepanel.css and switch.css and its shared code
+  (shared/gen/panel-kit.js: icons, modlevel, explain with explain.json, modswitch, the robot). The tiers with
+  their colours, counts, On / Off for the site and "i"; each row's light (started on this page), name, power
+  icons (a tap says what each does, with Details), one tag (new, updated, on hold, change on hold, error),
+  switch (a mod for several sites: its switch is the site's), description, </> and the bin (with Undo); the
+  mods for other pages of the site folded into one line. The approval card and the code card (Details, Code,
+  History with See differences and Restore, Copy, Export to the share sheet) are the panel's, in the mod's tier
+  colour with the robot. Things hidden by long-pressing are listed under the mods.
+- **Mods are read and held as on desktop** (shared/modfile.js over the helper's own files, bundled by
+  prepare.js into shared/gen/mods.js). The id, hash, header, a boxed mod's powers and values and a style
+  section are helper/lib/mods.js buildMod's. A mod waits, never running, while it needs something the user
+  hasn't allowed (held.js): a boxed mod's powers (not the soft ones) and their combinations, or what TRIF's
+  reading of a free mod's code found (powers.js), line by line. A new version that needs more: the version
+  before keeps running ("change on hold") until Allow or Don't allow. Style mods run in TRIF's world, boxed
+  mods in the box world with SES and TRIF's sandbox runtime, free mods in the page's own world (WebKit puts the
+  script in before the page's own, whatever the page's policy: the probe's timing.page check). A free mod that
+  should have started on a page and didn't says it can't run there on iPhone. The proof of concept's mods are
+  read again into this, as allowed (each was added from its own Add this mod? sheet).
+- **Import** (Import.swift). Mods as desktop TRIF exports them (helper/lib/share.js: a mod's `<site>-<mod>.js`,
+  a site's folder `<site> mods`, or either zipped, as AirDrop sends a folder) from Files (⋯ → Import…, or Import
+  mod… in the Mods tab), or opened in the app from the share sheet or AirDrop (Info.plist's document types:
+  .js, .zip, .json). Each is named and kept as desktop's import does (its site from its @match, its name from
+  the file, no @source / @version), starts off, marked new (updated, when it replaces one: the one before is
+  in its History), and waits for its OK like any mod from outside. Export and Export all mods for {site} go
+  the other way, through the share sheet.
+
+### Importing from other browsers: what's built, what's possible
+
+| What | From | State |
+|---|---|---|
+| TRIF mods | desktop TRIF's Export / Export all mods for {site}, as files, a folder or a zip | **built** |
+| History | Safari's Export Browsing Data (Mac: File → Export Browsing Data; iPhone, iOS 18.2+: Settings → Apps → Safari → Export): a zip or folder with History.json. Chrome: Google Takeout → Chrome → History.json | **built** (tried with files made to the published formats, not with a real export yet) |
+| Desktop TRIF's per-site settings (which mods are off on which site, tiers off, sensitive and blocked sites, agent levels) | they live in the extension's own storage (and ~/.trif/switches.json, allowed.json); desktop has no export for them | **possible**: a desktop "Export settings" (one small JSON) and about fifty lines here. Needs a change on main, so it's Tim's call. Approvals (allowed.json) shouldn't come along: an imported mod is asked about again, as desktop asks |
+| Bookmarks | every browser exports the same bookmarks HTML (Safari's export zip has Bookmarks.html) | **possible**, cheap to read; the app has no bookmarks to put them in yet |
+| Userscripts and user styles | Tampermonkey / Violentmonkey / the Userscripts app export .user.js files or a zip; Stylus exports JSON | **possible**, a conversion (==UserScript== to ==WebMod== as a free mod; a user style's CSS to a style mod). Desktop doesn't take these either: Tim's call |
+| Passwords | Safari's export has Passwords.csv, Chrome's is a CSV | **not to build**: sign-ins should come from iCloud Keychain or a password manager's AutoFill in the page (needs checking on a device) |
+| Sign-ins, cookies, open tabs, extensions | — | **not possible**: another app's data isn't readable, Safari's export has no cookies (its extensions list is names only), iCloud Tabs aren't open to other apps. People sign in again; the app's one cookie store is shared by every tab and the chat |
+| Being the default browser | — | needs the com.apple.developer.web-browser entitlement (Apple grants it on request) |
+
+### Testing it in the Simulator without touching it
+
+Development hooks (TrifProbeApp.swift): `-go <address>` and `-import <path,…>` at launch; and steps, one at a
+time, for a headless Simulator: write the app's Documents/step.json, then
+`xcrun simctl spawn <device> notifyutil -p com.trif.probe.step` (its answer in Documents/step-out.txt). Steps:
+`{"sheet": "mods|tabs|history|chat|import|none"}`, `{"modsjs": "…"}` (in the Mods tab's page),
+`{"pagejs": "…"}`, `{"go": "…"}`, `{"newtab": "…"}`, `{"select": n}`, `{"close": n}`, `{"back": 1}`,
+`{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"status": 1}`.
+Screenshots from 11-15 are in browser-probe/shots/ (not committed).
+
 ## What isn't probed, because it's known
 
 - **A content blocker in Safari.** Hide rules compiled into a Safari content blocker apply before paint and
@@ -133,7 +201,7 @@ pane is about to load, which every browser does.
 ## For whoever changes this
 
 ```
-node mobile/prepare.js          # remakes shared/gen/ from extension/sandbox.js and browser-probe/checks.js
+node mobile/prepare.js          # remakes shared/gen/ (sandbox runtime, checks, the mod reader, the Mods tab's kit, the guide)
 TRIF_BROWSER_TESTS=1 node mobile/test/smoke.js   # the Safari probe and the browser probe's JS checks, in Chrome for Testing
 ruby mobile/browser-probe/make-project.rb   # rewrites the Xcode project (gem install xcodeproj)
 ```

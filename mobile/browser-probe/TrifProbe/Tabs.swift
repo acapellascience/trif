@@ -58,7 +58,7 @@ struct SavedTabs: Codable {
 struct TabsView: View {
     @EnvironmentObject var browser: Browser
     @Environment(\.dismiss) private var dismiss
-    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    private let columns = [GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top), GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top)]
 
     var body: some View {
         NavigationStack {
@@ -87,6 +87,8 @@ struct TabsView: View {
 }
 
 struct TabCard: View {
+    /// A card's width to its height: about a phone screen's, a little shorter, so two rows show on a small one.
+    static let shape: CGFloat = 0.7
     @ObservedObject var tab: Tab
     let current: Bool
     let select: () -> Void
@@ -96,20 +98,23 @@ struct TabCard: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 Button(action: select) {
-                    ZStack {
-                        Rectangle().fill(Color(.secondarySystemBackground))
-                        if let shot = tab.snapshot {
-                            Image(uiImage: shot).resizable().scaledToFill()
-                        } else {
-                            Text(String(tab.host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased())
-                                .font(.largeTitle.bold()).foregroundStyle(.secondary)
+                    // (a portrait card the column's width: the shape is set by a clear frame, the picture laid over it
+                    // and clipped, so a wide picture can't widen the card past its column. Tim, 11-15, on an SE: it did)
+                    Color(.secondarySystemBackground)
+                        .aspectRatio(TabCard.shape, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .overlay(alignment: .top) {
+                            if let shot = tab.snapshot {
+                                Image(uiImage: shot).resizable().scaledToFill()
+                            } else {
+                                Text(String(tab.host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased())
+                                    .font(.largeTitle.bold()).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
                         }
-                    }
-                    .frame(height: 210)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(current ? Color.trifGreen : Color(.separator), lineWidth: current ? 3 : 0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(current ? Color.trifGreen : Color(.separator), lineWidth: current ? 3 : 0.5))
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 Button(action: close) {
@@ -119,7 +124,7 @@ struct TabCard: View {
                 .padding(6)
                 .accessibilityLabel("Close \(tab.label)")
             }
-            Text(tab.label).font(.caption).lineLimit(1).truncationMode(.tail)
+            Text(tab.label).font(.caption).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

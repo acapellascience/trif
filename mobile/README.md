@@ -193,7 +193,8 @@ time, for a headless Simulator: write the app's Documents/step.json, then
 `xcrun simctl spawn <device> notifyutil -p com.trif.probe.step` (its answer in Documents/step-out.txt). Steps:
 `{"sheet": "mods|tabs|history|chat|import|none"}`, `{"modsjs": "…"}` (in the Mods tab's page),
 `{"pagejs": "…"}`, `{"go": "…"}`, `{"newtab": "…"}`, `{"select": n}`, `{"close": n}`, `{"back": 1}`,
-`{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"status": 1}`.
+`{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"status": 1}`, and for the chat pane
+`{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`.
 Screenshots from 11-15 are in browser-probe/shots/ (not committed).
 
 ## What isn't probed, because it's known

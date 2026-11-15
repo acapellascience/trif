@@ -66,6 +66,7 @@ final class Model: ObservableObject {
         // {"modsjs": "…"} (in the Mods tab's page), {"pagejs": "…"} (in the shown tab's page), {"go": "…"},
         // {"newtab": "…"}, {"select": n}, {"close": n}, {"back": true}.
         let panel = self.modsPanel
+        Model.pane = self.pane
         Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
                                         "com.trif.probe.step" as CFString, nil, .deliverImmediately)
@@ -108,6 +109,7 @@ final class Model: ObservableObject {
 
 extension Model {
     static var stepRunner: (() -> Void)?
+    static weak var pane: ClaudePane?
 
     static func runStep(browser: Browser, panel: ModsPanel) async {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -131,6 +133,14 @@ extension Model {
         if let t = step["offer"] as? String { browser.offer(text: t) }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
+        // ({"panego": "…"}: the chat pane loads an address; {"pane": 1}: its scrolling and size; {"panejs": "…"}: in its page)
+        if let u = step["panego"] as? String, let url = URL(string: u) { Model.pane?.webView.load(URLRequest(url: url)) }
+        if step["pane"] != nil, let sv = Model.pane?.webView.scrollView {
+            out = "scrolls: \(sv.isScrollEnabled), content: \(Int(sv.contentSize.width))x\(Int(sv.contentSize.height)), pane: \(Int(sv.bounds.width))x\(Int(sv.bounds.height)), offset: \(Int(sv.contentOffset.y))"
+        }
+        if let js = step["panejs"] as? String, let wv = Model.pane?.webView {
+            do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
+        }
         try? out.write(to: docs.appendingPathComponent("step-out.txt"), atomically: true, encoding: .utf8)
     }
 }
@@ -158,11 +168,17 @@ struct ContentView: View {
     @FocusState private var editing: Bool
 
     /// The pane's height now: what was dragged, plus the drag going on, kept to between 200 points and all but
-    /// 160 of the screen.
+    /// 160 of the screen, and to what's left above the keyboard while it's up (the app's height then: `room`), so
+    /// the pane and a field in it stay in view (Tim, 11-15, signing in on an iPhone SE).
+    @State private var room: CGFloat = UIScreen.main.bounds.height
+    /// The keyboard is up for a field in the chat pane: the pane takes all the room above it but the address bar
+    /// (the toolbar steps aside, as Safari's does), so the field and what's around it stay in view.
+    @State private var typingInPane = false
     private var paneNow: CGFloat {
+        if typingInPane { return max(room - 60, 160) }
         let screen = UIScreen.main.bounds.height
         let base = paneHeight > 0 ? CGFloat(paneHeight) : screen * 0.5
-        return min(max(base - paneDrag, 200), screen - 160)
+        return max(min(max(base - paneDrag, 200), screen - 160, room - 170), 120)
     }
 
     /// The grip on the pane's top edge: drag up for a taller chat, down for more page.
@@ -226,10 +242,17 @@ struct ContentView: View {
                 .padding(.vertical, 6)
                 .background(Color(.secondarySystemBackground))
             }
-            Divider()
-            toolbar
+            if !typingInPane {
+                Divider()
+                toolbar
+            }
         }
+        .background(GeometryReader { g in Color.clear.onAppear { room = g.size.height }.onChange(of: g.size.height) { _, h in room = h } })
         .onAppear { entry = browser.address; pane.follow(site: browser.site) }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            typingInPane = showClaude && pane.webView.holdsFirstResponder
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in typingInPane = false }
         .onChange(of: browser.address) { _, new in if !editing { entry = new }; pane.follow(site: browser.site) }
         .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site) }
         .onChange(of: browser.wantsChat) { _, want in if want { showClaude = true; browser.wantsChat = false } }
@@ -352,6 +375,11 @@ struct ContentView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
     }
+}
+
+extension UIView {
+    /// Whether this view, or one inside it, has the keyboard's focus (a web view's field is a view inside it).
+    var holdsFirstResponder: Bool { isFirstResponder || subviews.contains { $0.holdsFirstResponder } }
 }
 
 /// The robot as the toolbar's Mods button (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head

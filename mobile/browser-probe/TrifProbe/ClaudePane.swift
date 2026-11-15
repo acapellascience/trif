@@ -53,13 +53,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let pane = Unmanaged<ClaudePane>.fromOpaque(observer).takeUnretainedValue()
             Task { @MainActor in await pane.dumpComposer() }
         }, "com.trif.probe.dumpchat" as CFString, nil, .deliverImmediately)
+        // (but a page taller than the pane, as a sign-in page is (Google's "Sign in to continue"), scrolls as any page
+        // does: the web view's scrolling is on exactly while its page is taller or wider than the pane. Tim, 11-15:
+        // with it always off, signing in on a small iPhone was nearly impossible)
         let sv = webView.scrollView
         sv.isScrollEnabled = false
         sv.bounces = false
         sv.contentInsetAdjustmentBehavior = .never
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak sv] _ in
-            sv?.setContentOffset(.zero, animated: true)
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !ClaudePane.scrolls(self.webView.scrollView) else { return }
+                self.webView.scrollView.setContentOffset(.zero, animated: true)
+            }
         }
+        scrollWatches = [
+            sv.observe(\.contentSize, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.fitScrolling() } },
+            sv.observe(\.bounds, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.fitScrolling() } },
+        ]
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.isInspectable = true
@@ -71,6 +81,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
 
     private var urlWatch: NSKeyValueObservation?
+    private var scrollWatches: [NSKeyValueObservation] = []
+
+    /// Whether a page is bigger than the web view showing it (then it scrolls as a document does).
+    nonisolated static func scrolls(_ sv: UIScrollView) -> Bool {
+        sv.contentSize.height > sv.bounds.height + 2 || sv.contentSize.width > sv.bounds.width + 2
+    }
+
+    /// Scrolling on for a page taller (or wider) than the pane; off, and back at the top, for one that fits (the
+    /// chats, which scroll inside themselves).
+    private func fitScrolling() {
+        let sv = webView.scrollView
+        let on = ClaudePane.scrolls(sv)
+        guard sv.isScrollEnabled != on else { return }
+        sv.isScrollEnabled = on
+        sv.bounces = on
+        if !on { sv.setContentOffset(.zero, animated: false) }
+    }
     /// The site the pane's conversation is for: the shown tab's (follow). Each site keeps its own conversation,
     /// so switching tabs, or going to another site, brings that site's chat back (Tim, 11-15: the chat follows the tab).
     @Published private(set) var site = ""

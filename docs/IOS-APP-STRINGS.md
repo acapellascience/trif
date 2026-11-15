@@ -68,6 +68,23 @@ readers read them on the phone. Worth a phone wording, or leave.
 | An edit's own holds, on the card | runs on {pattern}, outside {site} (desktop's held.js words) · is now a free mod, so it can do anything the page can do (new) |
 | Editor (accessibility) | The mod's code (desktop's) |
 
+## Getting out of a mod that wrecks a page, and diagnostics (added 11-15)
+
+| Where | New |
+|---|---|
+| The Mods tab before its list arrives | Loading mods… |
+| Mods tab's ⋯ | Pause all mods · Resume mods · Send diagnostics… |
+| The app icon's long-press menu | Pause all mods |
+| Mods tab, all paused | **All mods are paused:** none runs on any site. **Resume mods** |
+| Toolbar's Mods button while paused (accessibility; its robot shows two bars for eyes, STYLE.md's paused face) | Mods, all paused |
+| Over the page after safe mode | The app quit while mods were running on {site}, so TRIF switched it/them off. Switch them back on one at a time in Mods. **Mods** · **OK** |
+| Over the page after a runaway offer was taken | TRIF switched off a mod / {n} mods on {site} that kept this iPhone busy. Switch them back on one at a time in Mods. **Mods** · **OK** |
+| Mods tab, after safe mode | The app quit while these were running on {site}, so TRIF switched them off: **{names}**. Switch each back on to try it. **OK** |
+| Mods tab, after a runaway offer | These kept this iPhone busy on {site}, so TRIF switched them off: … / The page on {site} stopped twice while these ran, so TRIF switched them off: … |
+| The runaway offer (an alert) | **{site} keeps this iPhone busy** — Its page has been busy most of the time for 40 seconds while mods ran on it. Switch them off? {name} changed most recently. / Its page stopped twice in three minutes while mods ran on it. Switch them off? — **Switch off its mods** · **Not now** |
+| Status strip, a page's process ended | This page stopped (iPhone ended it, often for memory), so it was loaded again. |
+| The diagnostics file's name | TRIF diagnostics.txt (its lines are for whoever reads the log: not reviewed here) |
+
 ## Adding and importing
 
 | Where | New |

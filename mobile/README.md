@@ -40,6 +40,9 @@ a cookie box, build-tool class names, a shadow root, a frame) and different rule
 
 - `plain.html`: no policy.
 - `strict.html`: a strict Content-Security-Policy, as a header.
+- `heavy.html`, `heavy-strict.html` (not the same body): a page like x.com's timeline, to measure what the app adds
+  to a heavy page: insertRule CSS, a virtualised list of up to 2000 cells, fetched JSON pages, counters changing;
+  `#bench` scrolls it for 20 s and puts frame times and idle time in window.__bench (heavy.js).
 - `trusted.html`: the same, plus Trusted Types.
 - `hostile.html`: the page replaces `querySelector`, `JSON.stringify`, `Array.prototype.map` and others.
 - `spa.html`: more posts arrive after a moment; "Explore" swaps the feed without a page load.
@@ -165,6 +168,20 @@ Built on the probe, toward something to use every day:
   keeps running; anything else runs at once. Undo right after Save puts the version before back (the edit stays
   in History). The mod's id and site stay as they are whatever the header says (desktop's: the file doesn't move
   when its header changes; a new @name is only its name).
+- **Getting out of a mod that wrecks a page** (Safety.swift, 11-15). Safe mode: if the app quit while in front
+  with mods running on a site, the next launch switches those off and says so (over the page and in the Mods
+  tab), to switch back on one at a time. Pause all mods: the Mods tab's ⋯, or the app icon's long-press menu.
+  A runaway page: each page's main thread is watched (Diagnostics.stallWatch: half a second of frames every five
+  seconds); busy half the time or more for 40 seconds with mods on, or its process ended twice in three
+  minutes, and the app offers to switch the site's mods off, naming the one changed most recently.
+- **Diagnostics** (Diagnostics.swift; the Mods tab's ⋯ → Send diagnostics…): with times, the pages loaded and
+  their mods, pages kept busy (how busy, the longest stall, element count), WebKit ending a page's process (the
+  tab reloads it), memory warnings, the app's own main thread blocked over 500 ms (with what it was doing), a
+  view redrawn 50 times in a second (an update loop), safe mode, mod errors, background tabs let go.
+- **Background tabs let their pages go** after 20 seconds (and at once on a memory warning), keeping the
+  address, back/forward list and picture; the page loads again when the tab is shown.
+- **Storage**: mods in Application Support/mods (one file each, without the code made from it, at most ten
+  earlier versions, written off the main thread), the report in report.json; both moved once from the settings.
 - **Import** (Import.swift). Mods as desktop TRIF exports them (helper/lib/share.js: a mod's `<site>-<mod>.js`,
   a site's folder `<site> mods`, or either zipped, as AirDrop sends a folder) from Files (⋯ → Import…, or Import
   mod… in the Mods tab), or opened in the app from the share sheet or AirDrop (Info.plist's document types:

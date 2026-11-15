@@ -35,6 +35,7 @@ const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion,
   starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds, changedShipped } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
+const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = require('./lib/browsers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash } = require('./lib/trash');
 const { runScope } = require('./lib/scope');
@@ -171,12 +172,39 @@ process.stdin.on('end', () => shutdown('stdin closed (Chrome disconnected)'));
 process.stdin.on('close', () => shutdown('stdin closed (Chrome disconnected)'));
 process.stdin.on('error', (e) => shutdown(`stdin error: ${e.message}`));
 
+// The browser that started this helper (its parent process), looked up once: it names the browser better than
+// its extension can in some (Arc, Vivaldi). Each hello's name is checked against it (nameBrowser).
+let launcher;
+launchingBrowser().then((b) => {
+  launcher = b;
+  if (b) logger.info(`started by ${b.name} (${b.exe})`);
+  if (state.hello) nameBrowser();
+}, () => { launcher = null; });
+
+/**
+ * The browser's name in state.hello, from its hello and from what started the helper. When the helper knows
+ * what started it, the extension is told the name (a `browser` message): it then names the browser so in
+ * its panel too, and keeps that name over its own guesses.
+ */
+function nameBrowser() {
+  const h = state.hello;
+  if (!h || launcher === undefined) return;
+  const name = reconcileBrowser(h, launcher);
+  if (name !== h.browser) logger.info(`the browser is ${name} (its extension said ${h.browser})`);
+  h.browser = name;
+  if (!launcher) return;
+  if (!state.stdoutOpen) return;
+  try { sendToExtension({ type: 'browser', name }); } catch (e) { logger.warn(`could not send the browser's name: ${e.message}`); }
+}
+
 function onExtensionMessage(msg) {
   if (!msg || typeof msg !== 'object') return logger.warn('ignoring non-object message from extension');
   switch (msg.type) {
     case 'hello':
       state.hello = {
         version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome',
+        // (since 0.3.1: the kind of browser, and its own version where that isn't Chromium's or Firefox's)
+        family: browserFamily(msg), browserVersion: typeof msg.browserVersion === 'string' && msg.browserVersion ? msg.browserVersion.slice(0, 40) : null,
         installId: typeof msg.installId === 'string' && msg.installId ? msg.installId : null,
         // What this extension can do beyond 0.2.4's protocol ('modsParts': mods sets in parts).
         features: Array.isArray(msg.features) ? msg.features.filter((f) => typeof f === 'string') : [],
@@ -184,7 +212,8 @@ function onExtensionMessage(msg) {
       state.helloAt = Date.now();
       // (Every mod whole after a hello: it may come from an extension that just started, with other mods.)
       state.sentMods = null;
-      logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
+      nameBrowser();
+      logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${state.hello.browserVersion || msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       sendUpdate();
       break;
@@ -222,7 +251,7 @@ function onExtensionMessage(msg) {
         const boxed = (state.mods || []).filter((m) => m.sandboxed).map((m) => m.id);
         const on = new Set(state.modsApplied.registered);
         const off = boxed.filter((id) => !on.has(id) && !(state.held && state.held[id]));
-        const who = `${state.hello?.browser || 'browser'}:${state.hello?.installId || process.pid}`;
+        const who = `${state.hello ? browserKey(state.hello) : 'browser'}:${state.hello?.installId || process.pid}`;
         // (and the sensitive sites of their own it knows of: mail.google.com's mods are its own site's, not google.com's)
         const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null);
         if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
@@ -937,10 +966,10 @@ function updateInfo(summary = update.summary(workspace(ws.home))) {
 /** Why the extension is behind the helper (a message for its panel), or null. Firefox only. */
 function extensionBehind() {
   const h = state.hello;
-  if (!h || h.browser !== 'Firefox' || !h.version) return null;
+  if (!h || browserFamily(h) !== 'firefox' || !h.version) return null;
   let older = false;
   try { older = update.compareVersions(String(h.version), VERSION) < 0; } catch { return null; }
-  return older ? `The Firefox add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
+  return older ? `The ${h.browser} add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
 }
 
 function sendUpdate(info = updateInfo()) {
@@ -1036,7 +1065,7 @@ async function report(args) {
   const text = buildReport({
     description: typeof args.description === 'string' ? args.description.slice(0, 4000) : '',
     site: typeof args.site === 'string' ? args.site : '', siteOn: !!args.siteOn,
-    browser: state.hello ? `${state.hello.browser} ${state.hello.chrome || ''}`.trim() : null,
+    browser: state.hello ? require('./lib/browsers').browserLabel(state.hello) : null,
     extensionVersion: state.hello?.version || null,
     helper: { role: state.role, connectedFor: state.helloAt ? duration(Date.now() - state.helloAt) : null },
     agents: agentList ? agentList.agents : null,
@@ -1360,7 +1389,7 @@ function onExtensionResponse(msg) {
     // A command an older extension doesn't know yet (sweep, say): say how to get the newer one.
     if (/^unknown command\b/i.test(error) && state.hello?.version && state.hello.version !== VERSION) {
       error = `the ${state.hello.browser || 'browser'} extension is version ${state.hello.version} and doesn't know \`${p.cmd}\` yet (the helper is ${VERSION})` +
-        (state.hello.browser === 'Firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : state.hello.browser === 'Safari' ? ': build and open TRIF.app from this version' : ': reload TRIF on chrome://extensions');
+        (browserFamily(state.hello) === 'firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : browserFamily(state.hello) === 'safari' ? ': build and open TRIF.app from this version' : ': reload TRIF on chrome://extensions');
     }
     reply(p.sock, { id: p.clientId, ok: false, error });
   }

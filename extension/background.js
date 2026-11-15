@@ -3,7 +3,7 @@
 // panel and the helper. See docs/PROTOCOL.md.
 
 import {
-  SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
+  SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, FAMILY, setBrowser, detectBrowser, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
@@ -38,7 +38,8 @@ const LOAD_TIMEOUT = 30000;
 // When a chat's last step read this many tokens, the chat suggests a new one (see onAgentEvent 'done')
 const LONG_CHAT_TOKENS = Number.isFinite(globalThis.__trifLongChatTokens) ? globalThis.__trifLongChatTokens : 90000;
 const LONG_CHAT_TEXT = 'This chat is getting long, which makes the agent less sharp. A new chat starts fresh; your mods stay as they are.';
-const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
+// (A getter: BROWSER can get a better name after start, from detectBrowser or the helper.)
+const notConnected = () => `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
   health: {},            // mods that break (modhealth.js): errors seen and dismissed, selectors that stopped matching
@@ -286,6 +287,26 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   await considerSensitive(sensitiveListSites(state.sensitiveSites), { tabs: true }).catch((e) => console.warn('[TRIF] sensitive sites:', errMsg(e)));
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
 ready.then(() => showFaces()); // (the toolbar's faces, for the tabs open now: faces.js)
+
+// The browser's own name and version (lib.js detectBrowser), once storage says whether this one shows a
+// side panel (Arc doesn't). The helper's name, when it sends one (it knows what started it), wins: see the
+// helper's `browser` message.
+let browserVersion = null;
+let helperBrowser = null;
+function nameBrowser() {
+  return detectBrowser({ panelInWindow: state.panelInWindow }).then(({ name, version }) => {
+    const before = BROWSER;
+    if (!helperBrowser) setBrowser(name);
+    browserVersion = version;
+    // (a name found later, Arc's: the helper hears it, and may know better)
+    if (BROWSER !== before && state.connected) { post(helloMessage(state.userScripts)); notifyPanels(); }
+  }, (e) => console.warn('[TRIF] couldn\'t tell which browser this is:', errMsg(e)));
+}
+const browserNamed = ready.then(nameBrowser);
+/** The hello to the helper: who this extension is, in which browser. */
+function helloMessage(userScripts) {
+  return { type: 'hello', version: VERSION, userScripts, chrome: CHROME, browser: BROWSER, family: FAMILY, browserVersion, installId: state.installId, features: FEATURES };
+}
 
 // Listeners must be registered synchronously at the top level of a service worker.
 chrome.runtime.onStartup.addListener(() => {
@@ -564,7 +585,7 @@ function checkUserScripts() {
     state.known = null;
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `trif doctor`) current.
-    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES });
+    post(helloMessage(now));
     if (now && !SAFARI) state.canSandbox = null; // (TRIF's world configured again: sandboxWorld)
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
@@ -806,8 +827,8 @@ function connect() {
     helperGone(reason);
     scheduleReconnect();
   });
-  // After storage is read, so the hello carries the install id.
-  ready.then(() => { if (state.port === port) post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES }); });
+  // After storage is read, so the hello carries the install id (and the browser's name: browserNamed).
+  browserNamed.then(() => { if (state.port === port) post(helloMessage(checkUserScripts())); });
 }
 
 function scheduleReconnect() {
@@ -991,6 +1012,9 @@ async function onOtherHelperMessage(msg) {
   } else if (msg.type === 'update') {
     state.update = msg.update && typeof msg.update === 'object' ? msg.update : null;
     notifyPanels();
+  } else if (msg.type === 'browser') {
+    // The helper's name for this browser, from what started it (Arc, Vivaldi): better than this one's guess.
+    if (setBrowser(msg.name) === msg.name) { helperBrowser = msg.name; notifyPanels(); }
   } else if (msg.type === 'updated') {
     // Shown by the panel after the reload that follows ("TRIF updated to …").
     await chrome.storage.local.set({ updated: { from: String(msg.from ?? ''), to: String(msg.to ?? ''), notes: String(msg.notes ?? ''), at: Date.now() } });
@@ -1004,7 +1028,7 @@ async function onOtherHelperMessage(msg) {
 
 /** Send a native `request` to the helper (the reverse of CLI page commands) and await its `response`. */
 function helperRequest(cmd, args = {}, timeout = 30000) {
-  if (!state.port) return Promise.reject(new Error(NOT_CONNECTED));
+  if (!state.port) return Promise.reject(new Error(notConnected()));
   const id = `ext-${++state.requestSeq}`;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -1017,7 +1041,7 @@ function helperRequest(cmd, args = {}, timeout = 30000) {
     } catch (e) {
       state.pending.delete(id);
       clearTimeout(timer);
-      reject(new Error(`${NOT_CONNECTED} (${errMsg(e)})`));
+      reject(new Error(`${notConnected()} (${errMsg(e)})`));
     }
   });
 }
@@ -1093,7 +1117,7 @@ const commands = {
     const ids = new Set(checkUserScripts() ? state.lastApply.registered : []);
     const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
     return {
-      userScripts: state.userScripts, chrome: CHROME, browser: BROWSER, version: VERSION,
+      userScripts: state.userScripts, chrome: CHROME, browser: BROWSER, family: FAMILY, browserVersion, version: VERSION,
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
@@ -1283,7 +1307,7 @@ const commands = {
     const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
     return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, force: !!args.force, timeout }, {
-      browser: BROWSER, allUrls: state.access.allUrls,
+      browser: BROWSER, family: FAMILY, allUrls: state.access.allUrls,
       pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
       stitch: stitchShots,
       onProbe: rememberProbe,
@@ -1998,7 +2022,7 @@ async function uiStatus() {
   const live = new Map(s.mods.map((m) => [m.id, m])); // (by id: never another mod's state)
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
-    userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
+    userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER, browserVersion,
     recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, sensitiveBlocked: s.sensitiveBlocked, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
     starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
@@ -2089,6 +2113,7 @@ function forgetPanelInWindow() {
   if (!state.panelInWindow) return;
   state.panelInWindow = false;
   chrome.storage.local.remove('panelInWindow').catch(() => {});
+  nameBrowser();
 }
 
 /** Whether a side panel in `windowId` says it's there within PANEL_OPEN_WAIT_MS (false at once if `opening` fails). */
@@ -2153,6 +2178,7 @@ async function openPanelWindow(windowId, { at, tried }) {
     if (!state.panelInWindow) {
       state.panelInWindow = true;
       chrome.storage.local.set({ panelInWindow: true }).catch(() => {});
+      nameBrowser(); // (a Chrome without Chrome's side panel: Arc)
     }
   } finally {
     panelWindowOpening.delete(windowId);

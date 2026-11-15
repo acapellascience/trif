@@ -51,18 +51,20 @@ export function copyBounds(win, screen) {
  * How to capture: 'visible' (captureVisibleTab), 'tab' (Firefox's captureTab), 'copy' (a fresh copy in
  * an unfocused window), or {error}.
  */
-export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome', copy = false, allUrls = true }) {
+export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome', family, copy = false, allUrls = true }) {
+  // (`browser` is the name the user knows, LibreWolf say; `family` what it does: lib.js FAMILY)
+  family = family || (browser === 'Firefox' ? 'firefox' : browser === 'Safari' ? 'safari' : 'chromium');
   if (captureTab && allUrls) return 'tab';
   if (showing && !full) return 'visible';
   if (!allUrls) return { error: notAllSites(browser, full ? 'To capture a full page' : "To capture a tab that isn't showing") };
   // Firefox puts captureTab in a page only if the add-on had <all_urls> when that page loaded (checked in
   // Firefox 159: granted later, it shows up in new pages and after the add-on restarts, not in the running
   // background, until Firefox suspends that idle event page and starts it again). A restart settles it.
-  if (browser === 'Firefox') {
-    return { error: 'TRIF got access to every site after Firefox started, and Firefox only lets it capture tabs in the background ' +
-      `once TRIF starts again: ask the user to quit and reopen Firefox. ${CHECK_INSTEAD}` };
+  if (family === 'firefox') {
+    return { error: `TRIF got access to every site after ${browser} started, and ${browser} only lets it capture tabs in the background ` +
+      `once TRIF starts again: ask the user to quit and reopen ${browser}. ${CHECK_INSTEAD}` };
   }
-  if (browser === 'Safari') {
+  if (family === 'safari') {
     return { error: full
       ? "Safari can only capture the visible part of a tab (no --full)"
       : "that tab isn't showing, and Safari can only capture the tab in front (TRIF doesn't switch tabs while the user is browsing); " +
@@ -151,7 +153,7 @@ const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Capture `tab`. deps: {pageCall(tabId, func, args) → result (isolated world), stitch(shots, size) → dataUrl,
- * sleep?, now?, browser, firefox?, checkUrl?(url) (throws when the copy may not show that URL: the run's
+ * sleep?, now?, browser, family?, firefox?, checkUrl?(url) (throws when the copy may not show that URL: the run's
  * scope, TRIF off there), onProbe?(windowId, open, info)}. `force`: make a copy of a one-time link anyway.
  * Returns {dataUrl, how, note, full, width?, height?, cut?}.
  */
@@ -160,7 +162,7 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
   const win = await api.windows.get(tab.windowId).catch(() => null);
   const showing = !!(tab.active && win && win.state !== 'minimized');
   const allUrls = deps.allUrls !== false;
-  const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser, copy, allUrls });
+  const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser, family: deps.family, copy, allUrls });
   if (plan.error) throw new Error(plan.error);
   if (plan === 'visible') {
     // captureVisibleTab takes a window, not a tab: the picture is of whatever tab shows there as it's taken.

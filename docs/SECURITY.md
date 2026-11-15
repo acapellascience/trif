@@ -18,7 +18,9 @@ it can't change TRIF's own files (PROTOCOL.md "Run scope", "Agent sandboxes").
 
 ## Sensitive sites (0.3)
 
-Email, banking and payments, password managers, chats with people and with other AIs (the sensitive list,
+Email, banking and payments, crypto exchanges, password managers, chats with people and with other AIs,
+files in the cloud (Google Docs and Drive, Dropbox, Box, OneDrive, SharePoint) and government accounts: tax
+notices and assessments, benefits, the sign-in services in front of them. These sites (the sensitive list,
 extension/agentsites.js, which the user can edit in Settings) get three more walls:
 
 - **The agent never sees the page.** "Agent on this site" starts at Off there: no reading, screenshots or
@@ -313,11 +315,6 @@ Still open, known, and why:
   version's lines isn't held. Closing it would ask the user each time their agent customises one of Tim's mods,
   which is what TRIF is for. This is the free tier's terms: adding Tim's mods is the first OK for what they
   can do. The panel now says "changed" beside "Tim's mod" when the file isn't a version TRIF shipped.
-- **Other tabs of a locked site** still load from other sites and follow links out (TL-4's cost was the
-  user's own posting; this one would be their own links). Agent code reaches such a tab only through a window
-  reference: the opener is now locked in full; a window found by name isn't.
-- **Same-site GETs.** A request with no body to the site itself passes the lock, so a site that changes
-  something on a GET is not covered. "Can't post or send as you" means the methods above.
 - **Replays inside the 8 weeks.** An old feed younger than 8 weeks still passes (nothing remembers the newest
   feed seen, since GitHub's cache can briefly serve the one before, and that would read as an attack). Not
   covered at all: `updates/firefox.json`, Firefox's update manifest, which Firefox reads unsigned (the add-on
@@ -347,8 +344,8 @@ Still open, known, and why:
   header would narrow it further if a mod ever needs one.
 - **A sensitive host the upgrade is still asking about** is part of its parent until the user answers, as
   before: the parent's mods and all-sites mods that reach it run there meanwhile (what the user had).
-- **The update feed has no expiry**, and the release key is written to the keychain through an argument
-  (scripts/release.js keygen). Both are the releasing Mac's to change.
+- **The release key is written to the keychain through an argument** (scripts/release.js keygen): the
+  releasing Mac's to change.
 - **A run without TRIF's sandbox** (an organization's settings, with the user's consent) works in its own
   folder like any other, but nothing stops it writing the mods folder itself; such a write is judged as an
   outside change.

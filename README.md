@@ -271,6 +271,13 @@ you're on, and sends what it reads to its provider (Anthropic for Claude Code, O
 you picked for an open model; nobody for a model on your own computer) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).
 
+## Security
+
+How TRIF keeps an agent that reads the web, and the mods it writes, from acting as you, and what's still
+open: [docs/SECURITY.md](docs/SECURITY.md). A shorter brief for reviewers, on the three kinds of mod and
+what each one guarantees: [docs/SECURITY-TIERS.md](docs/SECURITY-TIERS.md). Found a hole? Please send it
+through [timsrobot.com/report](https://timsrobot.com/report), not a public issue.
+
 ## For developers
 
 How the pieces fit together, and the full CLI, are in [docs/PROTOCOL.md](docs/PROTOCOL.md). Run the tests

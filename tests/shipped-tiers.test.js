@@ -27,6 +27,9 @@ const TIERS = {
   'www.google.com/oppish': 'boxed', 'amazon.com/simple-home': 'boxed', 'amazon.com/simple-shopping': 'boxed',
   'x.com/follow-status': 'boxed', 'x.com/rainbow-rave': 'boxed', 'x.com/profile-styler': 'boxed', 'x.com/post-styler': 'boxed',
   'x.com/style-encoder': 'boxed', 'x.com/tune-composer': 'boxed', 'timsrobot.com/skip-to-sandbox': 'boxed',
+  // (Tim's own copies from his browser, 11-14: Desaturate as a style mod; the Instagram three boxed, site-data)
+  'www.instagram.com/desaturate': 'style', 'www.instagram.com/following-only-feed': 'boxed',
+  'www.instagram.com/hide-ai-content': 'boxed', 'www.instagram.com/hide-reposts': 'boxed',
 };
 const tierOf = (h) => (h.rules ? 'style' : h.sandboxed ? 'boxed' : 'free');
 
@@ -113,7 +116,7 @@ test('0.3.0 tiers: a 0.2 workspace\'s update: unchanged copies become the new ti
     const st = S.loadPreinstalled(home);
     assert.ok(st.startOff.includes('www.google.com/oppish'), 'switched off by each browser when it first sees it');
     const changed = Object.keys(TIERS).filter((id) => id !== 'www.google.com/oppish');
-    assert.deepStrictEqual(up.updated.map((u) => u.id).sort(), [...changed.filter((id) => id !== EDITED), 'x.com/space-shooter'].sort());
+    assert.deepStrictEqual(up.updated.map((u) => u.id).sort(), [...changed.filter((id) => id !== EDITED), 'x.com/space-shooter', 'x.com/detox-timeline'].sort());
     assert.deepStrictEqual(up.waiting, [{ id: EDITED, version: parseHeader(read(EDITED)).version }]);
     for (const id of changed.filter((x) => x !== EDITED)) {
       assert.strictEqual(fs.readFileSync(path.join(ws.modsDir, `${id}.js`), 'utf8'), read(id), `${id}: the new version`);

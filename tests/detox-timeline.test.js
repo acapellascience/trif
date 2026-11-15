@@ -312,7 +312,8 @@ assert.strictEqual(outDetail[2].moduleItems.length, 1, 'more replies (even self-
 Object.assign(opts, { replies: true, links: true });
 });
 
-// Post pages: replies from people you don't follow are held back for the collapsed section.
+// Post pages: replies from people you don't follow go after the others, for the collapsed section (X's own
+// rows: they stay in its data).
 const by = (id, user, extra = {}) => {
   const entry = tweet(id, { user_id_str: user, ...extra });
   entry.content.itemContent.tweet_results.result.core = { user_results: { result: { rest_id: user, core: { screen_name: user }, relationship_perspectives: { following: user.startsWith('friend') } } } };
@@ -322,7 +323,7 @@ const convo = (n, ...tweets) => ({ entryId: `conversationthread-${n}`, content: 
 const page = (instructions) => ({ data: { threaded_conversation_with_injections_v2: { instructions } } });
 const detailURL = (focal, cursor) => `https://x.com/i/api/graphql/abc/TweetDetail?variables=${encodeURIComponent(JSON.stringify({ focalTweetId: focal, ...(cursor ? { cursor } : {}) }))}`;
 
-test("post pages: replies from people you don't follow are held back", () => {
+test("post pages: replies from people you don't follow go after the followed ones", () => {
 const first = page([{ type: 'TimelineAddEntries', entries: [
   by('500', 'author'),
   convo(1, by('501', 'stranger1'), by('502', 'friend1')),   // a stranger's reply that a friend answered: stays
@@ -335,25 +336,26 @@ const first = page([{ type: 'TimelineAddEntries', entries: [
 ] }]);
 const kept = (json) => JSON.parse(json).data.threaded_conversation_with_injections_v2.instructions[0].entries.map((e) => e.entryId);
 assert.deepStrictEqual(kept(window.__dmFilterTimeline(JSON.stringify(first), detailURL('500'))),
-  ['tweet-500', 'conversationthread-1', 'conversationthread-2', 'conversationthread-3', 'conversationthread-4', 'cursor-bottom-1'], 'threads with a followed person, you or the author stay in X\'s list');
+  ['tweet-500', 'conversationthread-1', 'conversationthread-2', 'conversationthread-3', 'conversationthread-4', 'conversationthread-5', 'cursor-bottom-1'],
+  'threads with a followed person, you or the author first; a stranger\'s after them; the ad gone');
 const held = window.__dmUnfollowed.posts['500'];
 assert.strictEqual(held.author, 'author');
-assert.deepStrictEqual(held.threads.map((t) => t.id), ['conversationthread-5']);
-// The next page of the same post adds to the section; more of a held-back thread joins it.
+assert.deepStrictEqual(held.threads, ['conversationthread-5']);
+// The next page of the same post adds to the section, its strangers after its followed; more of a stranger's
+// thread stays in X's data (it's X's own row).
 const second = page([
   { type: 'TimelineAddEntries', entries: [convo(6, by('507', 'stranger3')), convo(7, by('508', 'friend3'))] },
   { type: 'TimelineAddToModule', moduleEntryId: 'conversationthread-5', moduleItems: [{ entryId: 'x', item: by('509', 'stranger1').content }] },
 ]);
 const secondOut = JSON.parse(window.__dmFilterTimeline(JSON.stringify(second), detailURL('500', 'c1'))).data.threaded_conversation_with_injections_v2.instructions;
-assert.deepStrictEqual(secondOut[0].entries.map((e) => e.entryId), ['conversationthread-7']);
-assert.deepStrictEqual(secondOut[1].moduleItems, []);
-assert.deepStrictEqual(held.threads.map((t) => t.id), ['conversationthread-5', 'conversationthread-6']);
-assert.strictEqual(held.threads[0].tweets.length, 2);
+assert.deepStrictEqual(secondOut[0].entries.map((e) => e.entryId), ['conversationthread-7', 'conversationthread-6']);
+assert.strictEqual(secondOut[1].moduleItems.length, 1);
+assert.deepStrictEqual(held.threads, ['conversationthread-5', 'conversationthread-6']);
 // Fetching the first page again doesn't duplicate; another post gets its own list, and the first is kept.
 window.__dmFilterTimeline(JSON.stringify(first), detailURL('500'));
-assert.deepStrictEqual(held.threads.map((t) => t.id), ['conversationthread-5', 'conversationthread-6']);
+assert.deepStrictEqual(held.threads, ['conversationthread-5', 'conversationthread-6']);
 window.__dmFilterTimeline(JSON.stringify(page([{ type: 'TimelineAddEntries', entries: [by('600', 'author2'), convo(8, by('601', 'stranger4'))] }])), detailURL('600'));
-assert.deepStrictEqual(window.__dmUnfollowed.posts['600'].threads.map((t) => t.id), ['conversationthread-8']);
+assert.deepStrictEqual(window.__dmUnfollowed.posts['600'].threads, ['conversationthread-8']);
 assert.strictEqual(window.__dmUnfollowed.posts['500'].threads.length, 2);
 // The reported case: on a post's page, a stranger's reply answered by someone you follow stays in X's list;
 // and a thread holding the post being viewed is never taken out.
@@ -363,6 +365,15 @@ assert.deepStrictEqual(JSON.parse(window.__dmFilterTimeline(JSON.stringify(stran
 const holdingFocal = page([{ type: 'TimelineAddEntries', entries: [convo(11, by('801', 'stranger7'), by('802', 'stranger6'))] }]);
 assert.deepStrictEqual(JSON.parse(window.__dmFilterTimeline(JSON.stringify(holdingFocal), detailURL('802'))).data.threaded_conversation_with_injections_v2.instructions[0].entries.map((e) => e.entryId),
   ['conversationthread-11']);
+// X orders a timeline by sortIndex (highest first): the threads swap theirs too, so they show in the new
+// order, and what isn't a thread keeps its own.
+const sorted = (e, n) => ({ ...e, sortIndex: n });
+const withIndex = page([{ type: 'TimelineAddEntries', entries: [sorted(by('900', 'author9'), '99'),
+  sorted(convo(20, by('901', 'stranger5')), '30'), sorted(convo(21, by('902', 'friend5')), '20'), sorted(convo(22, by('903', 'friend6')), '10'),
+  sorted({ entryId: 'cursor-bottom-2', content: { entryType: 'TimelineTimelineCursor' } }, '5')] }]);
+const outIndex = JSON.parse(window.__dmFilterTimeline(JSON.stringify(withIndex), detailURL('900'))).data.threaded_conversation_with_injections_v2.instructions[0].entries;
+assert.deepStrictEqual(outIndex.map((e) => `${e.entryId}:${e.sortIndex}`),
+  ['tweet-900:99', 'conversationthread-21:30', 'conversationthread-22:20', 'conversationthread-20:10', 'cursor-bottom-2:5']);
 });
 
 test("feed pages that add nothing new get a placeholder so X keeps loading", () => {
@@ -443,7 +454,7 @@ for (const [key, on] of Object.entries(defaults)) assert.equal(on, false, key);
 test("the page's own UI keeps its styles", () => {
 // The page's own UI keeps its styles (they were once lost in an edit).
 const source = fs.readFileSync(MOD, 'utf8');
-for (const selector of ['#placeholder::after', 'header[role=banner] h1 a[href="/home"] > div::after', '.dm-search {', 'html[data-dm-explore]', '.dm-unfollowed {', '.dm-unfollowed:not([data-open]) .dm-threads', '.dm-reply img.av', '.dm-filters {', '.dm-menu {', '[data-dm-placeholder] article']) {
+for (const selector of ['#placeholder::after', 'header[role=banner] h1 a[href="/home"] > div::after', '.dm-search {', 'html[data-dm-explore]', '[data-dm-stranger] > *', '[data-dm-stranger-head]::before', '.dm-filters {', '.dm-menu {', '[data-dm-placeholder] article']) {
   assert.ok(source.includes(selector), `stylesheet has ${selector}`);
 }
 });

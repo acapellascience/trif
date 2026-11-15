@@ -5,7 +5,7 @@
 // @run-at      document-idle
 // @risk        1 reads profile pictures from X's image server again (at 400×400) to find style codes and songs; restyles only those profiles' pages; plays a profile's song only when you click its speaker
 // @source      trif
-// @version     3
+// @version     4
 // @boxed
 // @powers      image-variants pbs.twimg.com _normal.→_400x400. _bigger.→_400x400. _mini.→_400x400. _x96.→_400x400. _200x200.→_400x400., site-storage local:trifProfileStyler.mine*, sound, controls, local-fonts
 // ==/WebMod==
@@ -1644,6 +1644,8 @@ const LINKS = `:is([data-testid=tweetText] a, [data-testid=UserDescription] a, [
 // (PINNED: the window-sized image of a pinned rainbow, rounded up to a whole number of hue cycles each way
 // (RAVE_TILE's: 34 px across, 34 down): sized to the window exactly, its edge met the next copy mid-stripe,
 // and the rolling slid that seam across whatever was near it, the Post button on the left say)
+// the profile's verified checks: the header's, the sidebar's, and those mark() finds (data-pst-badge)
+const BADGE = ':is([data-testid=UserName] svg[data-testid=icon-verified], [data-testid=sidebarColumn] svg[data-testid=icon-verified], svg[data-pst-badge])';
 const PINNED = 'background-size: round(up, 100vw, 34px) round(up, 100vh, 34px) !important;';
 const rainbowText = (sel) => `${sel.split(/,(?![^(]*\))/).map((s) => s.trim().replace(/(::[\w-]+)?$/, ':not(#pst-never):not(:read-write)$1')).join(', ')} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
     background-image: ${RAVE_TILE} !important; ${PINNED} background-repeat: repeat !important;
@@ -1781,14 +1783,33 @@ trif.css(OWNCSS(`
      lifts this above the rainbow rules, which are lifted once) */
   /* (a solid colour of its own: the rainbow's is transparent, and an emoji drawn in "transparent" vanishes;
      colour emoji draw in their own colours whatever this is) */
-  html #react-root span[data-pst-emoji]:not(#pst-a):not(#pst-b) { color: #000 !important; -webkit-text-fill-color: #000 !important; background-image: none !important;
+  html :is(#react-root, #layers) span[data-pst-emoji]:not(#pst-a):not(#pst-b):not(#pst-c):not(#pst-d) { color: #000 !important; -webkit-text-fill-color: #000 !important; background-image: none !important;
     background-clip: border-box !important; -webkit-background-clip: border-box !important; text-shadow: none !important; animation: none !important; }
+  /* the emoji drawn again over rainbow text (overlayEmoji): overlays that take no clicks, aren't selected,
+     and show nothing but their emoji (above every rainbow rule) */
+  html :is(#react-root, #layers) span[data-pst-ov]:not(#pst-a):not(#pst-b):not(#pst-c):not(#pst-d) {
+    display: inline-block !important; position: relative !important; white-space: pre !important; overflow: visible !important;
+    pointer-events: none !important; user-select: none !important; -webkit-user-select: none !important; vertical-align: baseline !important;
+    background: none !important; text-shadow: none !important; animation: none !important; }
+  html :is(#react-root, #layers) div[data-pst-ovb]:not(#pst-a):not(#pst-b):not(#pst-c):not(#pst-d) {
+    position: absolute !important; display: block !important; margin: 0 !important; padding: 0 !important; height: auto !important;
+    white-space: inherit !important; overflow-wrap: inherit !important; word-break: inherit !important; text-align: inherit !important;
+    pointer-events: none !important; user-select: none !important; -webkit-user-select: none !important;
+    background: none !important; text-shadow: none !important; animation: none !important; }
+  /* (an overlay's pieces in the overlay's font, the text's own: not whatever font rule meets them as spans) */
+  html :is(#react-root, #layers) :is(span[data-pst-ov], div[data-pst-ovb]) span:is([data-pst-gap], [data-pst-emoji]):not(#pst-a):not(#pst-b):not(#pst-c):not(#pst-d) {
+    font-family: inherit !important; font-size: inherit !important; font-weight: inherit !important; font-style: inherit !important;
+    letter-spacing: inherit !important; word-spacing: inherit !important; line-height: inherit !important; }
+  html :is(#react-root, #layers) span[data-pst-gap]:not(#pst-a):not(#pst-b):not(#pst-c):not(#pst-d) {
+    color: transparent !important; -webkit-text-fill-color: transparent !important; background: none !important;
+    text-shadow: none !important; animation: none !important; }
   /* the badge: the profile's verified check */
-  /* (the header's check, and the sidebar's: "You might like" and the like) */
-  html[data-pst-on][data-pst-has-badge] #react-root :is([data-testid=UserName], [data-testid=sidebarColumn]) svg[data-testid=icon-verified] { color: var(--pst-badge) !important; fill: var(--pst-badge) !important; }
-  html[data-pst-on][data-pst-r-badge] #react-root :is([data-testid=UserName], [data-testid=sidebarColumn]) :has(> svg[data-testid=icon-verified]) { position: relative !important; }
-  html[data-pst-on][data-pst-r-badge] #react-root :is([data-testid=UserName], [data-testid=sidebarColumn]) svg[data-testid=icon-verified] { opacity: 0 !important; }
-  html[data-pst-on][data-pst-r-badge] #react-root :is([data-testid=UserName], [data-testid=sidebarColumn]) :has(> svg[data-testid=icon-verified])::after {
+  /* (the header's check, and the sidebar's: "You might like" and the like; and, marked data-pst-badge by
+     mark(), the owner's on their own posts and in the bar along the top: Post Styler leaves those to this) */
+  html[data-pst-on][data-pst-has-badge] #react-root ${BADGE} { color: var(--pst-badge) !important; fill: var(--pst-badge) !important; }
+  html[data-pst-on][data-pst-r-badge] #react-root :has(> ${BADGE}) { position: relative !important; }
+  html[data-pst-on][data-pst-r-badge] #react-root ${BADGE} { opacity: 0 !important; }
+  html[data-pst-on][data-pst-r-badge] #react-root :has(> ${BADGE})::after {
     content: ''; position: absolute; inset: 0; pointer-events: none; background-image: ${RAVE_TILE}; background-size: ${TILE}; background-repeat: repeat;
     animation: pst-small-roll .8s linear infinite; -webkit-mask: ${CHECK_MASK} center / contain no-repeat; mask: ${CHECK_MASK} center / contain no-repeat; }
   /* buttons: their fill and edge; their text in the page's background colour */
@@ -1949,22 +1970,94 @@ const protectEmoji = (s) => {
   st.setProperty('-webkit-background-clip', 'border-box', 'important'); st.setProperty('text-shadow', 'none', 'important');
   st.setProperty('animation', 'none', 'important'); st.setProperty('filter', 'none', 'important');
 };
-// (boxed: trif.wrap, the sandbox's way to put the page's text in pieces of the mod's, in place of the walker:
-// X's text node stays where it was, emptied, as an anchor; one wrapper over the app and its pop-ups while any
-// rainbow text is on (a hover card's own rainbow included). What the sandbox's wrap doesn't do: take its
-// pieces out again when X writes new text into the emptied node (the free version did, then wrapped it again))
-let wrapping = null;
+// Since 2026-11-14, as Post Styler does it: X's text isn't split any more (trif.wrap, splitting it into the
+// mod's pieces, froze a page outright in Post Styler: x.com/i/timeline, "Liked", 2026-11-14). The rainbow goes
+// over the whole text, emoji and all, and the emoji are drawn again on top, in an overlay of the mod's own:
+// right after each text span that's clipped to a rainbow and has an emoji in it, an inline-block
+// (data-pst-ov) pulled back over the span by its width, holding the same text in spans of its own, the
+// letters see-through (data-pst-gap), the emoji drawn as emoji (data-pst-emoji), each where it falls in X's
+// text, as the same font lays the same text out the same way. Text that wraps onto more lines: one overlay
+// (data-pst-ovb) over the block it flows in, its text as shown at the block's width. Spans Post Styler
+// already overlays (its posts and cards) are left to it. (The emoji pieces were these spans before, too.)
+const OV = 'data-trif-box-pst-ov', OVB = 'data-trif-box-pst-ovb', GAP = 'data-trif-box-pst-gap', EMO = 'data-trif-box-pst-emoji';
+const isA = (s, a) => s.attr(a) !== null;
 const EMOJI_PIECE = (part) => { const s = E.make('span'); s.setA('data-pst-emoji', ''); s.txt = part; protectEmoji(s); return s.s; };
-const wrapEmoji = () => {
-  if (wrapping) return;
-  wrapping = trif.wrap(':is(#react-root, #layers) *:not(input):not(textarea):not([data-trif-box-pst-emoji]):not([data-trif-box-ps-emoji]):not([data-trif-box-ps-txt])', EMOJI, (part) => EMOJI_PIECE(part));
+const fillOverlay = (ov, text) => {
+  EMOJI.lastIndex = 0;
+  let at = 0, m;
+  const gap = (t) => { if (!t) return; const g = page.create('span'); g.setAttr(GAP, ''); g.setText(t); ov.append(g); };
+  while ((m = EMOJI.exec(text))) {
+    gap(text.slice(at, m.index));
+    ov.append(EMOJI_PIECE(m[0]));
+    at = m.index + m[0].length;
+    if (!m[0].length) EMOJI.lastIndex++; // (never: an emoji is at least one character; but never loop on nothing)
+  }
+  gap(text.slice(at));
+  return ov;
+};
+const px = (v) => parseFloat(v) || 0;
+const blockOverlay = (block) => {
+  // (the text X's own children show: the block's innerText would count the overlay's copy too)
+  const text = block.children.filter((c) => !isA(c, OVB)).map((c) => c.innerText || '').join('');
+  const pl = px(block.style('padding-left')), pr = px(block.style('padding-right')), pt = px(block.style('padding-top'));
+  const w = Math.round((block.clientWidth - pl - pr) * 1000) / 1000;
+  const key = `${w}|${text}`;
+  const old = block.children.find((c) => isA(c, OVB));
+  if (old && old.attr(OVB) === key) return;
+  if (old) old.remove();
+  if (block.style('position') === 'static') block.style('position', 'relative'); // (the overlay's frame; moves nothing)
+  const ov = page.create('div');
+  ov.setAttr(OVB, key); ov.setAttr('aria-hidden', 'true');
+  ov.style('left', `${pl}px`); ov.style('top', `${pt}px`); ov.style('width', `${w}px`);
+  block.append(fillOverlay(ov, text));
+};
+const FONT_PROPS = ['font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch', 'letter-spacing', 'word-spacing', 'line-height', 'font-variant-ligatures', 'font-feature-settings'];
+const clipped = (s) => s.style('-webkit-background-clip') === 'text' || s.style('background-clip') === 'text';
+// pageOn: a painted profile with rainbow text, the whole app and its pop-ups; otherwise only hover and
+// people cards painted with a rainbow of their own (hoverCards: data-pst-hc-r, on any page), and every
+// other overlay goes
+const HC_R = '#react-root [data-trif-box-pst-hc-r]';
+const overlayEmoji = (pageOn) => {
+  const scope = pageOn ? ':is(#react-root, #layers)' : HC_R;
+  if (!pageOn && !page.find(HC_R)) { for (const o of page.findAll(`[${OV}], [${OVB}]`)) o.remove(); return; }
+  const blocks = new Set();
+  const SKIP = `:not([${GAP}]):not([${EMO}]):not([${OV}] *):not([${OVB}] *):not([data-trif-box-ps-gap]):not([data-trif-box-ps-emoji]):not([data-trif-box-ps-ov] *):not([data-trif-box-ps-ovb] *)`;
+  for (const s of page.findAll(`${scope} span:not(:has(*))${SKIP}`)) {
+    const next = s.next, ov = next && isA(next, OV) ? next : null;
+    const text = s.text || '';
+    EMOJI.lastIndex = 0;
+    // (Post Styler's own overlay already there: its post or card)
+    if (!EMOJI.test(text) || !clipped(s) || (next && isA(next, 'data-trif-box-ps-ov'))) { if (ov) ov.remove(); continue; }
+    const lh = parseFloat(s.style('line-height')), line = Number.isFinite(lh) ? lh : 1.4 * (parseFloat(s.style('font-size')) || 15);
+    if (s.offsetHeight >= 1.6 * line) {
+      if (ov) ov.remove();
+      const block = s.closest('div');
+      if (block && !/flex|grid/.test(block.style('display')) && !block.children.some((c) => isA(c, 'data-trif-box-ps-ovb'))) blocks.add(block);
+      continue;
+    }
+    // (its exact width, fractions too: whole pixels left the emoji a fraction off)
+    const w = Math.round(s.rect().width * 1000) / 1000;
+    if (ov && ov.attr(OV) === text && ov.inlineStyle('width') === `${w}px`) continue;
+    if (ov) ov.remove();
+    const o = page.create('span');
+    o.setAttr(OV, text); o.setAttr('aria-hidden', 'true');
+    o.style('margin-left', `-${w}px`); o.style('width', `${w}px`);
+    // (the span's own font: X sets some on the span itself, the profile header's name say, not its parent)
+    for (const p of FONT_PROPS) o.style(p, s.style(p));
+    s.after(fillOverlay(o, text));
+  }
+  for (const b of blocks) blockOverlay(b);
+  // (overlays left behind by text X changed or took away, or a block no longer holding wrapped emoji text)
+  // (and, off a painted profile, any outside the rainbow hover and people cards)
+  const outside = (o) => !pageOn && !o.closest('[data-trif-box-pst-hc-r]');
+  for (const o of page.findAll(`[${OV}]`)) { const p = o.previous; if (!p || isA(p, OV) || (p.text || '') !== o.attr(OV) || outside(o)) o.remove(); }
+  for (const o of page.findAll(`[${OVB}]`)) if (!blocks.has(o.parent) || outside(o)) o.remove();
 };
 const anyRainbowText = () => ['data-pst-r-text', 'data-pst-r-name', 'data-pst-r-handle', 'data-pst-r-links'].some((a) => root.hasA(a));
 // mark the name and handle in the profile's header, every @handle on the page, the owner's name on their
 // posts, and X's see-through bars in the column
 const mark = () => {
-  if (root.hasA('data-pst-on') && anyRainbowText()) { try { wrapEmoji(); } catch (e) { trif.warn('emoji wrap', String(e)); } }
-  else if (wrapping) { wrapping(); wrapping = null; }
+  try { overlayEmoji(root.hasA('data-pst-on') && anyRainbowText()); } catch (e) { trif.warn('emoji overlay', String(e)); }
   const owner = (profileHandle() || '').toLowerCase();
   const isHandle = (s) => /^@\w{1,15}$/.test((s.txt || '').trim());
   // every @handle by a name (posts, quoted posts, the sidebar's people): a leaf span that's just "@name"
@@ -1974,12 +2067,16 @@ const mark = () => {
   // the name in the bar along the top of the profile (its title)
   const title = DOC.one('[data-testid=primaryColumn] [data-pst-solid] h2');
   if (title && owner && !title.hasA('data-pst-name')) title.setA('data-pst-name', '');
-  // the owner's name on their posts: the name half of the post's name line, when its handle is theirs
+  // (and its check)
+  if (title && owner) for (const svg of title.all('svg[data-testid=icon-verified]:not([data-pst-badge])')) svg.setA('data-pst-badge', '');
+  // the owner's name on their posts: the name half of the post's name line, when its handle is theirs (and
+  // the check in that line: Post Styler leaves the owner's posts to this on a painted profile)
   for (const un of DOC.all('#react-root article [data-testid=User-Name]')) {
-    const first = un.first;
-    if (!first || first.hasA('data-pst-name')) continue;
     const h = [...un.all('span')].find(isHandle)?.txt.trim().slice(1).toLowerCase();
-    if (h && owner && h === owner) first.setA('data-pst-name', '');
+    if (!h || !owner || h !== owner) continue;
+    for (const svg of un.all('svg[data-testid=icon-verified]:not([data-pst-badge])')) svg.setA('data-pst-badge', '');
+    const first = un.first;
+    if (first && !first.hasA('data-pst-name')) first.setA('data-pst-name', '');
   }
   const un = DOC.one('[data-testid=primaryColumn] [data-testid=UserName]');
   if (un) {
@@ -2352,9 +2449,13 @@ toggle.listen('click', () => {
 // carries; yours, your saved choice): its background, their name, badge, @handle, bio text and links, and
 // their Follow button. (This was Post Styler's; it's here so it works without it.) A card showing several
 // people's pictures (the account switcher) isn't one person's, and is left alone.
+// People cards get the same, on any page: the sidebar's "Relevant people" and "You might like", Who to
+// follow, follower lists, search's People (UserCell), and the search box's suggestions (TypeaheadUser).
+// (These were Post Styler's; it does posts only now.)
 // The card gets data-pst-hc (whose: one rule per person sets their colours as --pst-hc-* variables),
 // data-pst-hc-has and data-pst-hc-r (which colours are set, which are rainbow); its parts are marked.
-const HC = 'html #react-root [data-testid=HoverCard][data-pst-hc]:not(#pst-hc-a):not(#pst-hc-b)';
+const HC_CARD = ':is([data-testid=HoverCard], [data-testid=UserCell], [data-testid=TypeaheadUser])';
+const HC = `html #react-root ${HC_CARD}[data-pst-hc]:not(#pst-hc-a):not(#pst-hc-b)`;
 const HC_FOLLOW = ':is([data-testid$="-follow"], [data-testid$="-unfollow"])';
 const HC_NOBTN = ':not(button *):not([role=button] *)';
 trif.css(OWNCSS(`
@@ -2364,12 +2465,22 @@ trif.css(OWNCSS(`
   ${HC}[data-pst-hc-r~=bg] :is(span, div[dir]) { text-shadow: 0 1px 3px rgb(0 0 0 / .75), 0 0 1px rgb(0 0 0 / .6) !important; }
   ${HC}[data-pst-hc-has~=text] :is(span, div[dir])${HC_NOBTN} { color: var(--pst-hc-text) !important; -webkit-text-fill-color: var(--pst-hc-text) !important; }
   ${rainbowText(`${HC}[data-pst-hc-r~=text] span${HC_NOBTN}:not([data-pst-hc-name] *):not([data-pst-hc-name]):not([data-pst-hc-handle])`)}
-  ${HC}[data-pst-hc-has~=links] [data-pst-hc-link], ${HC}[data-pst-hc-has~=links] [data-pst-hc-link] * { color: var(--pst-hc-links) !important; -webkit-text-fill-color: var(--pst-hc-links) !important; background-image: none !important; }
+  /* (name, @handle and links: :not(#pst-hc-c) lifts them above the text rule just above, which reached them
+     too and, being more specific, won: the handle showed in the text colour) */
+  ${HC}[data-pst-hc-has~=links] [data-pst-hc-link]:not(#pst-hc-c), ${HC}[data-pst-hc-has~=links] [data-pst-hc-link] *:not(#pst-hc-c) { color: var(--pst-hc-links) !important; -webkit-text-fill-color: var(--pst-hc-links) !important; background-image: none !important; }
   ${rainbowText(`${HC}[data-pst-hc-r~=links] [data-pst-hc-link], ${HC}[data-pst-hc-r~=links] [data-pst-hc-link] span`)}
-  ${HC}[data-pst-hc-has~=name] [data-pst-hc-name], ${HC}[data-pst-hc-has~=name] [data-pst-hc-name] span { color: var(--pst-hc-name) !important; -webkit-text-fill-color: var(--pst-hc-name) !important; background-image: none !important; }
+  ${HC}[data-pst-hc-has~=name] [data-pst-hc-name]:not(#pst-hc-c), ${HC}[data-pst-hc-has~=name] [data-pst-hc-name] span:not(#pst-hc-c) { color: var(--pst-hc-name) !important; -webkit-text-fill-color: var(--pst-hc-name) !important; background-image: none !important; }
   ${rainbowText(`${HC}[data-pst-hc-r~=name] [data-pst-hc-name]`)}
-  ${HC}[data-pst-hc-has~=handle] [data-pst-hc-handle], ${HC}[data-pst-hc-has~=handle] :has(> [data-pst-hc-handle]) { color: var(--pst-hc-handle) !important; -webkit-text-fill-color: var(--pst-hc-handle) !important; background-image: none !important; }
+  ${HC}[data-pst-hc-has~=handle] [data-pst-hc-handle]:not(#pst-hc-c), ${HC}[data-pst-hc-has~=handle] :has(> [data-pst-hc-handle]):not(#pst-hc-c) { color: var(--pst-hc-handle) !important; -webkit-text-fill-color: var(--pst-hc-handle) !important; background-image: none !important; }
   ${rainbowText(`${HC}[data-pst-hc-r~=handle] [data-pst-hc-handle]`)}
+  /* fonts, as on their profile: all the card's text, then the name and @handle over it (:not(#pst-hc-c)
+     lifts those above the text rule) */
+  ${HC}[data-pst-hc-has~=ftext] :is(span, time, div[dir]) { font-family: var(--pst-hc-f-text) !important; }
+  ${HC}[data-pst-hc-has~=wtext] :is(span, time, div[dir])${HC_NOBTN} { font-weight: var(--pst-hc-fw-text) !important; }
+  ${HC}[data-pst-hc-has~=fname] :is([data-pst-hc-name], [data-pst-hc-name] :not(svg, svg *)):not(#pst-hc-c) { font-family: var(--pst-hc-f-name) !important; }
+  ${HC}[data-pst-hc-has~=wname] :is([data-pst-hc-name], [data-pst-hc-name] :not(svg, svg *)):not(#pst-hc-c) { font-weight: var(--pst-hc-fw-name) !important; }
+  ${HC}[data-pst-hc-has~=fhandle] [data-pst-hc-handle]:not(#pst-hc-c) { font-family: var(--pst-hc-f-handle) !important; }
+  ${HC}[data-pst-hc-has~=whandle] [data-pst-hc-handle]:not(#pst-hc-c) { font-weight: var(--pst-hc-fw-handle) !important; }
   ${HC}[data-pst-hc-has~=badge] svg[data-testid=icon-verified], ${HC}[data-pst-hc-has~=badge] svg[data-testid=icon-verified] * { color: var(--pst-hc-badge) !important; fill: var(--pst-hc-badge) !important; }
   ${HC}[data-pst-hc-r~=badge] svg[data-testid=icon-verified] path { fill: url(#pst-rb) !important; }
   ${HC}[data-pst-hc-has~=buttons] ${HC_FOLLOW} { background-color: var(--pst-hc-buttons) !important; border-color: var(--pst-hc-buttons) !important; background-image: none !important; }
@@ -2386,9 +2497,17 @@ const hcClear = (hc) => { for (const a of ['data-pst-hc', 'data-pst-hc-has', 'da
 const hcSet = (hc, h, st) => {
   const v = [['bg', st.bg], ['name', st.name], ['badge', st.badge], ['handle', st.handle], ['text', st.text], ['links', st.links], ['buttons', st.buttons],
     ['on-buttons', isHexC(st.buttons) ? onColour(st.buttons) : null]].filter(([, c]) => isHexC(c));
-  const rule = `html #react-root [data-testid=HoverCard][data-pst-hc="${h}"] { ${v.map(([k, c]) => `--pst-hc-${k}: ${c};`).join(' ')} }`;
+  // (their fonts too, as on their profile: a family list each (fontStack), and a weight when one's chosen;
+  // keys fname/wname, fhandle/whandle, ftext/wtext in data-pst-hc-has)
+  const f = [];
+  for (const [k, font] of [['name', st.fonts?.name], ['handle', st.fonts?.handle], ['text', st.fonts?.text]]) {
+    const stack = fontStack(font), w = fontCode.norm(font)?.weight;
+    if (stack) f.push([`f-${k}`, stack, `f${k}`]);
+    if (stack && w) f.push([`fw-${k}`, String(w), `w${k}`]);
+  }
+  const rule = `html #react-root ${HC_CARD}[data-pst-hc="${h}"] { ${[...v, ...f].map(([k, c]) => `--pst-hc-${k}: ${c};`).join(' ')} }`;
   if (hcRules.get(h) !== rule) { hcRules.set(h, rule); const next = trif.css(OWNCSS([...hcRules.values()].join('\n'))); if (hcVars) hcVars.remove(); hcVars = next; }
-  const has = HC_KEYS.filter((k) => v.some(([kk]) => kk === k)).join(' ');
+  const has = [...HC_KEYS.filter((k) => v.some(([kk]) => kk === k)), ...f.map(([, , key]) => key)].join(' ');
   const r = (st.rainbow || []).filter((k) => HC_KEYS.includes(k)).join(' ');
   if (hc.getA('data-pst-hc') !== h) hc.setA('data-pst-hc', h);
   if (hc.getA('data-pst-hc-has') !== has) hc.setA('data-pst-hc-has', has);
@@ -2400,7 +2519,7 @@ const hcMark = (hc, h, box) => {
   const EMO = '[data-pst-emoji], [data-ps-emoji]';
   const nameIn = (scope) => {
     for (const s of scope.all('span')) {
-      if (s.matches(EMO) || s.closest(EMO)) continue;
+      if (s.matches(EMO) || s.closest(EMO) || s.closest('[data-pst-ov], [data-pst-ovb]')) continue; // (not the emoji overlay's copy)
       const btn = s.closest('button, [role=button]');
       if (btn && !btn.contains(box)) continue;
       if (s.kids.some((c) => !c.matches(EMO))) continue;
@@ -2426,7 +2545,7 @@ const hoverCards = () => {
   hcBusy = true;
   try {
     const me = (myHandle() || '').toLowerCase();
-    for (const hc of DOC.all('#react-root [data-testid=HoverCard]')) {
+    for (const hc of DOC.all(`#react-root ${HC_CARD}`)) {
       const boxes = hc.all('[data-testid^="UserAvatar-Container-"]');
       if (new Set(boxes.map((b) => b.dataset.testid.toLowerCase())).size !== 1) { hcClear(hc); continue; }
       const box = boxes[0];
@@ -2446,7 +2565,6 @@ const hoverCards = () => {
       if (!st) { hcClear(hc); continue; }
       hcMark(hc, h, box);
       if (st !== 'same') hcSet(hc, h, st);
-      if (hc.hasA('data-pst-hc-r')) { try { wrapEmoji(); } catch {} }
     }
   } catch (e) { trif.warn('profile styler: hover card', String(e)); }
   hcBusy = false;
@@ -2457,7 +2575,15 @@ let hcFrame = 0, hcWatched = null;
 const watchHover = () => {
   if (hcWatched) return;
   hcWatched = true;
-  trif.changes('#layers', () => { if (!hcFrame) hcFrame = requestAnimationFrame(() => { hcFrame = 0; hoverCards(); }); });
+  // (and the emoji overlays, right after, so a card's emoji are drawn as it opens; the overlays' own nodes
+  // set this off once more, finding nothing left to do)
+  trif.changes('#layers', () => {
+    if (!hcFrame) hcFrame = requestAnimationFrame(() => {
+      hcFrame = 0;
+      hoverCards();
+      try { overlayEmoji(root.hasA('data-pst-on') && anyRainbowText()); } catch (e) { trif.warn('emoji overlay', String(e)); }
+    });
+  });
 };
 
 // --- keeping up with the page (X changes pages without loading them) ----------------------------
@@ -2479,7 +2605,9 @@ const tick = async () => {
     const inherit = (root.s.attr('data-pst-inherit') !== null || CS(root).getPropertyValue('--pst-inherit').trim() === '1') && !!loadMine();
     if (!handle) {
       if (inherit) { mark(); if (lastKey !== 'site') { lastKey = 'site'; apply(mine()); } return; }
-      if (applied) apply(null); lastKey = ''; return;
+      if (applied) apply(null); lastKey = '';
+      try { overlayEmoji(false); } catch {} // (off this profile: its emoji overlays go too)
+      return;
     }
     mark();
     // your own profile: your choice, once you've made one (it stays on); otherwise what your picture carries

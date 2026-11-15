@@ -1,11 +1,11 @@
 // ==WebMod==
 // @name        Post Styler
-// @description Posts and people cards show their owners' colours
+// @description Posts show their authors' colours
 // @match       https://x.com/*
 // @run-at      document-idle
 // @risk        1 reads post authors' profile pictures from X's image server again (at 400×400) to find style codes
 // @source      trif
-// @version     3
+// @version     4
 // @boxed
 // @powers      image-variants pbs.twimg.com _normal.→_400x400. _bigger.→_400x400. _mini.→_400x400. _x96.→_400x400. _200x200.→_400x400., site-storage local:trifProfileStyler.mine:*
 // ==/WebMod==
@@ -20,9 +20,8 @@
 // in it (link cards: "Cards"; the quoted post's box: "Quoted posts"; their edges: "Lines"). Rainbow works
 // as on profiles. Buttons, side panels and the logo are page-wide things, so they stay Profile Styler's.
 // A quoted post inside keeps its own text: only its box takes the author's colours.
-// People's cards too (the sidebar's "Relevant people" and "You might like", Who to follow, follower lists,
-// search's People; hover cards; the search box's drop-down and @-mention suggestions): the card's background,
-// name, badge, @handle, bio text and links, and their Follow button in their buttons colour. And names alone:
+// Posts only: people's cards (the sidebar's lists, Who to follow, follower lists, search's People, the search
+// box's drop-down) and hover cards are Profile Styler's. And names alone, in posts:
 // the people in a notification ("Tim followed you"), and a post's "Tim reposted" line (whoever's style is
 // already known: there's no picture there to read). Not chat: X draws it in shadow roots page styles can't
 // reach.
@@ -45,7 +44,7 @@
 // (trifPostStyler.seen, .seen2), which it deleted from localStorage, are left there (deleting them would take
 // site-storage for those keys too), and the new one starts empty once.
 // Names it gives are the sandbox's: data-ps-* is data-trif-box-ps-*, and Profile Styler's emoji spans (boxed
-// too) are data-trif-box-pst-emoji.
+// too) are data-trif-box-pst-emoji. What the sandbox changes: see conversions/records/x.com__post-styler.json.
 
 const STORE = 'trifProfileStyler.mine'; // (Profile Styler's: your saved style, per account)
 // (.seen2: picture code v2 is read now, so pictures the older reader found nothing in are read again)
@@ -363,7 +362,8 @@ const FOLLOW = '[data-testid$="-follow"], [data-testid$="-unfollow"]';
 const OUT = ':not([data-trif-box-ps-quote] *)'; // (not inside the quoted post)
 const NOBTN = ':not(button *):not([role=button] *)'; // (not on X's buttons)
 const ICONS = '[role=group] svg, [data-testid=caret] svg, button[aria-label="Grok actions"] svg';
-const LINKS = '[data-testid=tweetText] a, [data-testid=tweet-text-show-more-link]';
+// (@mentions aren't links here: they take the handle style, data-trif-box-ps-at, see markMentions)
+const LINKS = '[data-testid=tweetText] a:not([data-trif-box-ps-at]), [data-testid=tweet-text-show-more-link]';
 // (never on text you can edit, :read-write: emojis there can't be wrapped, so they'd turn into rainbow blobs
 // as you type; each part of the list gets it, before any pseudo-element)
 // (pinned rainbows: Profile Styler's seamless small rainbow (3 hue cycles in 102 px: 34 px a cycle across
@@ -474,6 +474,24 @@ trif.css(`
   ${rainbowText(`${N}[data-trif-box-ps-r~=name] span:not(:has(*)):not(#trif-box-ps-b):not(#trif-box-ps-c)`)}
   html #react-root :is(article, a, ${CARDS}) span:is([data-trif-box-ps-emoji], [data-trif-box-pst-emoji]):not(#trif-box-ps-a):not(#trif-box-ps-b):not(#trif-box-ps-c):not(#trif-box-ps-d):not(#trif-box-ps-e) { color: #000 !important; -webkit-text-fill-color: #000 !important; background-image: none !important;
     background-clip: border-box !important; -webkit-background-clip: border-box !important; text-shadow: none !important; animation: none !important; }
+  /* the emoji drawn again over rainbow text (wrapEmoji): an overlay that takes no clicks, isn't selected, and
+     shows nothing but its emoji (more :not(#…)s than any rainbow rule) */
+  html #react-root :is(article, a, ${CARDS}) span[data-trif-box-ps-ov]:not(#trif-box-ps-a):not(#trif-box-ps-b):not(#trif-box-ps-c):not(#trif-box-ps-d):not(#trif-box-ps-e):not(#trif-box-ps-f) {
+    display: inline-block !important; position: relative !important; white-space: pre !important; overflow: visible !important;
+    pointer-events: none !important; user-select: none !important; -webkit-user-select: none !important; vertical-align: baseline !important;
+    background: none !important; text-shadow: none !important; animation: none !important; }
+  html #react-root :is(article, a, ${CARDS}) div[data-trif-box-ps-ovb]:not(#trif-box-ps-a):not(#trif-box-ps-b):not(#trif-box-ps-c):not(#trif-box-ps-d):not(#trif-box-ps-e):not(#trif-box-ps-f) {
+    position: absolute !important; display: block !important; margin: 0 !important; padding: 0 !important; height: auto !important;
+    white-space: inherit !important; overflow-wrap: inherit !important; word-break: inherit !important; text-align: inherit !important;
+    pointer-events: none !important; user-select: none !important; -webkit-user-select: none !important;
+    background: none !important; text-shadow: none !important; animation: none !important; }
+  /* (an overlay's pieces in the overlay's font, the text's own: not whatever font rule meets them as spans) */
+  html #react-root :is(article, a, ${CARDS}) :is(span[data-trif-box-ps-ov], div[data-trif-box-ps-ovb]) span:is([data-trif-box-ps-gap], [data-trif-box-ps-emoji]):not(#trif-box-ps-a):not(#trif-box-ps-b):not(#trif-box-ps-c):not(#trif-box-ps-d):not(#trif-box-ps-e):not(#trif-box-ps-f) {
+    font-family: inherit !important; font-size: inherit !important; font-weight: inherit !important; font-style: inherit !important;
+    letter-spacing: inherit !important; word-spacing: inherit !important; line-height: inherit !important; }
+  html #react-root :is(article, a, ${CARDS}) span[data-trif-box-ps-gap]:not(#trif-box-ps-a):not(#trif-box-ps-b):not(#trif-box-ps-c):not(#trif-box-ps-d):not(#trif-box-ps-e):not(#trif-box-ps-f) {
+    color: transparent !important; -webkit-text-fill-color: transparent !important; background: none !important;
+    text-shadow: none !important; animation: none !important; }
 `);
 // each author's colours, as variables: one rule per styled author
 let varsSheet = null;
@@ -534,10 +552,10 @@ const parts = (art) => {
 };
 const setHas = (el, list) => { const v = list.join(' '); if ((el.attr('data-trif-box-ps') || '') !== v) { if (v) el.setAttr('data-trif-box-ps', v); else el.removeAttr('data-trif-box-ps'); } };
 const setRainbow = (el, list) => { const v = list.join(' '); if ((el.attr('data-trif-box-ps-r') || '') !== v) { if (v) el.setAttr('data-trif-box-ps-r', v); else el.removeAttr('data-trif-box-ps-r'); } };
-const unstyle = (art) => { for (const a of ['data-trif-box-ps-u', 'data-trif-box-ps', 'data-trif-box-ps-r']) art.removeAttr(a); };
+const unstyle = (art) => { for (const a of ['data-trif-box-ps-u', 'data-trif-box-ps', 'data-trif-box-ps-r', 'data-trif-box-ps-wrapped']) art.removeAttr(a); };
 const styleArt = (art, h, st) => {
   setAuthor(h, st);
-  if (art.attr('data-trif-box-ps-u') !== h) art.setAttr('data-trif-box-ps-u', h);
+  if (art.attr('data-trif-box-ps-u') !== h) { art.setAttr('data-trif-box-ps-u', h); art.removeAttr('data-trif-box-ps-wrapped'); }
   const keys = ['bg', 'name', 'badge', 'handle', 'text', 'links', 'icons', 'cards', 'lines', 'quotes', 'buttons']
     .filter((k) => isHex(k === 'bg' ? st.bg : k === 'name' ? st.name : k === 'badge' ? st.badge : k === 'handle' ? st.handle : k === 'text' ? st.text
       : k === 'links' ? st.links : k === 'icons' ? st.icons : k === 'cards' ? st.cards : k === 'lines' ? st.lines : k === 'quotes' ? st.quotes : st.buttons));
@@ -551,6 +569,20 @@ const markNames = (un) => {
   if (first && !has(first, 'data-trif-box-ps-name')) first.setAttr('data-trif-box-ps-name', '');
   for (const span of un.findAll('span:not([data-trif-box-ps-handle])')) if (!span.children.length && isHandle(span)) span.setAttr('data-trif-box-ps-handle', '');
   for (const svg of un.findAll('svg[data-testid=icon-verified]:not([data-trif-box-ps-badge])')) svg.setAttr('data-trif-box-ps-badge', '');
+};
+// every other @handle in the post (the "Replying to @a and @b" line, @mentions in its text) in the author's
+// handle style too: the link is marked (data-trif-box-ps-at, so it isn't a "link" for the links colour) and
+// its text as a handle (its leaf spans, or the link itself when its text sits right in it). A quoted post's are
+// its own author's: left to the quote's pass.
+const markMentions = (scope) => {
+  const quote = scope.matches('[data-trif-box-ps-quote]');
+  for (const a of scope.findAll('a[href^="/"]')) {
+    if (!/^@\w{1,15}$/.test((a.text || '').trim()) || a.closest('[data-testid=User-Name]')) continue;
+    if (!quote && a.closest('[data-trif-box-ps-quote]')) continue;
+    if (!has(a, 'data-trif-box-ps-at')) a.setAttr('data-trif-box-ps-at', '');
+    const leaves = a.findAll('span:not(:has(*))').filter((s) => (s.text || '').trim());
+    for (const s of leaves.length ? leaves : [a]) if (!has(s, 'data-trif-box-ps-handle')) s.setAttr('data-trif-box-ps-handle', '');
+  }
 };
 
 // emojis inside rainbow text: each run in its own span (as Profile Styler does; X's own text node stays,
@@ -578,22 +610,96 @@ const piece = (match, groups) => {
 };
 // (a post's own text, not its quoted post's, unless the scope is that quoted post; not in svg, not in pieces)
 const SKIP = ':not([data-trif-box-ps-emoji]):not([data-trif-box-ps-txt]):not([data-trif-box-pst-emoji]):not(svg):not(svg *)';
-const wrapEmoji = (scope) => {
-  scope.setAttr('data-trif-box-ps-wrap', '');
-  const quote = scope.matches('[data-trif-box-ps-quote]');
-  // (the scope's own text: everything inside it but a quoted post (when the scope isn't that quoted post)
-  const sel = quote ? `[data-trif-box-ps-wrap] *${SKIP}` : `[data-trif-box-ps-wrap] *${SKIP}:not([data-trif-box-ps-quote]):not([data-trif-box-ps-quote] *)`;
-  try { trif.wrap(sel, PIECES, piece)(); } catch (e) { trif.warn('post styler: emoji', String(e)); }
-  // (loose text: whole, in a span of its own, where a span also holds elements, emoji pieces or others)
-  const loose = quote ? '[data-trif-box-ps-wrap] span:has(> *)' : '[data-trif-box-ps-wrap] span:has(> *):not([data-trif-box-ps-quote] *)';
-  try { trif.wrap(`${loose}:not([data-trif-box-ps-emoji]):not([data-trif-box-ps-txt]):not(svg *)`, /[^]*\S[^]*/, (m) => { const s = page.create('span'); s.setAttr('data-trif-box-ps-txt', ''); s.setText(m); return s; })(); } catch (e) { trif.warn('post styler: loose text', String(e)); }
-  scope.removeAttr('data-trif-box-ps-wrap');
+// Emoji in rainbow text, since 2026-11-14: the rainbow goes over the whole text, emoji and all (a rainbow
+// clipped to text turns an emoji into a rainbow blob of its shape), and the emoji are drawn again on top: right
+// after each text span with an emoji in it, an overlay of the mod's own (data-trif-box-ps-ov, an inline-block
+// pulled back over the span by its width) holds the same text in spans of its own, the letters see-through
+// (data-trif-box-ps-gap) and the emoji drawn as emoji (data-trif-box-ps-emoji), each where it falls in the
+// original, as the same font lays the same text out the same way. Nothing of X's is split or rewritten.
+// (Before, X's text was split into pieces with trif.wrap, and that froze the page outright: x.com/i/timeline,
+// "Liked", every post by "Tim 🙂⏹️🙂" with a rainbow name; even one wrap pass per post did it.)
+// Text on one line (names, handles, most short text): the overlay is an inline-block right after the span.
+// Text that wraps (a post's paragraph: X writes emoji in posts as text too): one overlay over the whole block
+// it's in (data-trif-box-ps-ovb, absolutely placed in the block's content box), holding the block's text as
+// shown (innerText) at the block's width and in its font, so it breaks into the same lines and every emoji
+// lands where it is in X's text. Only blocks laid out as text (not flex or grid, whose items don't flow).
+const OV = 'data-trif-box-ps-ov', OVB = 'data-trif-box-ps-ovb';
+const overlayFor = (s) => { const n = s.next; return n && has(n, OV) ? n : null; };
+const fillOverlay = (ov, text) => {
+  EMOJI.lastIndex = 0;
+  let at = 0, m;
+  const gap = (t) => { if (!t) return; const g = page.create('span'); g.setAttr('data-trif-box-ps-gap', ''); g.setText(t); ov.append(g); };
+  while ((m = EMOJI.exec(text))) {
+    gap(text.slice(at, m.index));
+    const e = page.create('span'); e.setAttr('data-trif-box-ps-emoji', ''); protectEmoji(e); e.setText(m[0]); ov.append(e);
+    at = m.index + m[0].length;
+    if (!m[0].length) EMOJI.lastIndex++; // (never: an emoji is at least one character; but never loop on nothing)
+  }
+  gap(text.slice(at));
+  return ov;
 };
-// (and two that stay, over every rainbow item: when X writes new text into a text node a wrap emptied (React
-// does), TRIF takes the pieces out and wraps it again with these, as the free version's tidyEmoji did)
-trif.wrap(`:is(article, a, ${CARDS})[data-trif-box-ps-r] *${SKIP}`, PIECES, piece);
-trif.wrap(`:is(article, a, ${CARDS})[data-trif-box-ps-r] span:has(> *):not([data-trif-box-ps-emoji]):not([data-trif-box-ps-txt]):not(svg *)`, /[^]*\S[^]*/,
-  (m) => { const sp = page.create('span'); sp.setAttr('data-trif-box-ps-txt', ''); sp.setText(m); return sp; });
+// (the span's own font: X sets some on the span itself, not its parent)
+const FONT_PROPS = ['font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch', 'letter-spacing', 'word-spacing', 'line-height', 'font-variant-ligatures', 'font-feature-settings'];
+const makeOverlay = (s, text, w) => {
+  const ov = page.create('span');
+  ov.setAttr(OV, text); ov.setAttr('aria-hidden', 'true');
+  ov.style('margin-left', `-${w}px`); ov.style('width', `${w}px`);
+  for (const p of FONT_PROPS) ov.style(p, s.style(p));
+  return fillOverlay(ov, text);
+};
+const px = (v) => parseFloat(v) || 0;
+const OURS = `:not([data-trif-box-ps-gap]):not([data-trif-box-ps-emoji]):not([${OV}] *):not([${OVB}] *)`;
+// a block's overlay: its text as shown, in its content box (its padding left out), at its width; the key
+// (text and width) says when X's text or the block's width changed and it's made again
+const blockOverlay = (block) => {
+  // (the text X's own children show: the block's innerText would count the overlay's copy too)
+  const text = block.children.filter((c) => !has(c, OVB)).map((c) => c.innerText || '').join('');
+  const pl = px(block.style('padding-left')), pr = px(block.style('padding-right')), pt = px(block.style('padding-top'));
+  const w = Math.round((block.clientWidth - pl - pr) * 1000) / 1000;
+  const key = `${w}|${text}`;
+  const old = block.children.find((c) => has(c, OVB));
+  if (old && old.attr(OVB) === key) return;
+  if (old) old.remove();
+  if (block.style('position') === 'static') block.style('position', 'relative'); // (the overlay's frame; moves nothing)
+  const ov = page.create('div');
+  ov.setAttr(OVB, key); ov.setAttr('aria-hidden', 'true');
+  ov.style('left', `${pl}px`); ov.style('top', `${pt}px`); ov.style('width', `${w}px`);
+  block.append(fillOverlay(ov, text));
+};
+const wrapEmoji = (scope) => {
+  const quote = scope.matches('[data-trif-box-ps-quote]');
+  const blocks = new Set();
+  for (const s of scope.findAll(`span:not(:has(*))${OURS}`)) {
+    if (!quote && s.closest('[data-trif-box-ps-quote]')) continue;
+    const text = s.text || '';
+    EMOJI.lastIndex = 0;
+    const emoji = EMOJI.test(text);
+    const lh = parseFloat(s.style('line-height')), line = Number.isFinite(lh) ? lh : 1.4 * (parseFloat(s.style('font-size')) || 15);
+    const oneLine = s.offsetHeight < 1.6 * line;
+    // (its exact width, fractions too: offsetWidth's whole pixels left the emoji a fraction off)
+    const ov = overlayFor(s);
+    if (!emoji || !oneLine) { if (ov) ov.remove(); }
+    if (emoji && !oneLine) {
+      // (wraps: the block the text flows in, if it's laid out as text)
+      const block = s.closest('div');
+      if (block && !/flex|grid/.test(block.style('display'))) blocks.add(block);
+      continue;
+    }
+    if (!emoji) continue;
+    const w = Math.round(s.rect().width * 1000) / 1000;
+    if (ov && ov.attr(OV) === text && ov.inlineStyle('width') === `${w}px`) continue;
+    if (ov) ov.remove();
+    s.after(makeOverlay(s, text, w));
+  }
+  for (const b of blocks) blockOverlay(b);
+  // (overlays left behind by text X changed or took away, or a block no longer holding wrapped emoji text)
+  for (const ov of scope.findAll(`[${OV}]`)) {
+    const p = ov.previous;
+    if (!p || p.attr(OV) !== null || (p.text || '') !== ov.attr(OV)) ov.remove();
+  }
+  for (const ov of scope.findAll(`[${OVB}]`)) if (!blocks.has(ov.parent)) ov.remove();
+};
+const dropOverlays = (scope) => { for (const ov of scope.findAll(`[${OV}], [${OVB}]`)) ov.remove(); };
 const cardParts = (cell) => {
   const boxes = cell.findAll('[data-testid^="UserAvatar-Container-"]');
   if (new Set(boxes.map((b) => b.attr('data-testid').toLowerCase())).size !== 1) {
@@ -651,7 +757,7 @@ const styleOne = (el, h, av, me) => {
   }
   if (st) styleArt(el, h, st); else if (has(el, 'data-trif-box-ps-u')) unstyle(el);
   // (any rainbow at all: its emojis wrapped, and so protected; see protectEmoji)
-  if (el.attr('data-trif-box-ps-r')) wrapEmoji(el);
+  if (el.attr('data-trif-box-ps-r')) wrapEmoji(el); else if (el.find(`[${OV}]`)) dropOverlays(el);
 };
 // a name link: just the name, in that person's name colour (or rainbow)
 const styleName = (a, h, av, me) => {
@@ -668,36 +774,61 @@ const styleName = (a, h, av, me) => {
 // the links to someone in a box that are their name (not the @handle, not their picture)
 const nameLinks = (box, h) => box.findAll('a[href]').filter((a) => a.attr('href').toLowerCase() === `/${h}`
   && !a.find('img, [data-testid^="UserAvatar-Container-"]') && !(a.text || '').trim().startsWith('@') && (a.text || '').trim());
+// On a profile Profile Styler is painting (html[data-trif-box-pst-on]), the owner's own posts, cards and name
+// links are already in their style, page-wide: they're left to it (and anything this mod had put on them taken
+// off), so the two don't both work over the same text. Everyone else's on that page still gets theirs here.
+// (the profile's handle from the address, as Profile Styler reads it)
+const NOT_PROFILE = /^(home|explore|notifications|messages|i|settings|search|compose|bookmarks|lists|communities|jobs|premium|hashtag|login|logout|signup|tos|privacy|chat|grok|account|intent|share|download)$/i;
+const paintedProfile = () => {
+  if (page.root.attr('data-trif-box-pst-on') === null) return null;
+  let path = '/';
+  try { path = new URL(page.url).pathname; } catch {}
+  const m = /^\/([A-Za-z0-9_]{1,15})(?:\/[^/]*)?\/?$/.exec(path);
+  return m && !NOT_PROFILE.test(m[1]) ? m[1].toLowerCase() : null;
+};
+// (its own overlays go too, not those of a quoted post inside it, which may be someone else's)
+const leaveToProfile = (el) => {
+  if (!has(el, 'data-trif-box-ps-u')) return;
+  unstyle(el);
+  const quote = el.matches('[data-trif-box-ps-quote]');
+  for (const ov of el.findAll(`[${OV}], [${OVB}]`)) if (quote || !ov.closest('[data-trif-box-ps-quote]')) ov.remove();
+};
 const tick = () => {
   try {
     const me = (myHandle() || '').toLowerCase();
+    const owner = paintedProfile();
     for (const art of page.findAll('#react-root article')) {
       const { av, un } = parts(art);
       if (!av || !un) continue;
       const h = (un.findAll('span').find(isHandle)?.text.trim().slice(1) || '').toLowerCase();
       if (!h) continue;
-      markNames(un);
-      styleOne(art, h, av, me);
-      // its quoted post: in the quoted author's style, when they have one
+      if (h === owner) leaveToProfile(art);
+      else {
+        markNames(un);
+        markMentions(art);
+        styleOne(art, h, av, me);
+      }
+      // its quoted post: in the quoted author's style, when they have one (and it isn't the painted
+      // profile's owner: Profile Styler's)
       for (const q of art.findAll('[data-trif-box-ps-quote]')) {
         const qav = q.find('[data-testid=Tweet-User-Avatar] img[src*="/profile_images/"]');
         const qun = q.find('[data-testid=User-Name]');
         const qh = qun && (qun.findAll('span').find(isHandle)?.text.trim().slice(1) || '').toLowerCase();
         if (!qav || !qh) continue;
+        if (qh === owner) { leaveToProfile(q); continue; }
         markNames(qun);
+        markMentions(q);
         styleOne(q, qh, qav, me);
       }
     }
-    for (const cell of page.findAll(`#react-root :is(${CARDS})`)) {
-      const { av, h } = cardParts(cell);
-      if (av) styleOne(cell, h, av, me);
-    }
+    // people cards are Profile Styler's now: anything this mod had put on one is taken off
+    for (const cell of page.findAll(`#react-root :is(${CARDS})[data-trif-box-ps-u]`)) leaveToProfile(cell);
     // notifications ("Tim followed you", "Tim and 3 others liked your post"): each pictured person's name
     for (const n of page.findAll('#react-root article[data-testid=notification]')) {
       for (const box of n.findAll('[data-testid^="UserAvatar-Container-"]')) {
         const h = /^UserAvatar-Container-(\w{1,15})$/.exec(box.attr('data-testid') || '')?.[1]?.toLowerCase();
         const av = box.find('img[src*="/profile_images/"]');
-        if (!h || !av) continue;
+        if (!h || !av || h === owner) continue;
         for (const a of nameLinks(n, h)) styleName(a, h, av, me);
       }
     }
@@ -705,7 +836,7 @@ const tick = () => {
     for (const sc of page.findAll('#react-root article [data-testid=socialContext]')) {
       const a = sc.closest('a[href]') || sc.find('a[href]');
       const h = /^\/(\w{1,15})$/.exec(a?.attr('href') || '')?.[1]?.toLowerCase();
-      if (h && (byHandle.has(h) || h === me)) styleName(a, h, null, me);
+      if (h && h !== owner && (byHandle.has(h) || h === me)) styleName(a, h, null, me);
     }
   } catch (e) { trif.warn('post styler', String(e)); }
 };

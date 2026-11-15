@@ -25,7 +25,8 @@
 // does. Only installs that run from <home>/app are updated: a git checkout updates with git.
 //
 // config.json: "autoUpdate": true installs updates without asking (off by default); "checkForUpdates":
-// false stops checking altogether. State (last check, what's available, last install) is kept in
+// false stops checking altogether. Both apply to the mods feed too (modsfeed.js: new versions of Tim's mods
+// between releases, updates/mods.json beside latest.json, checked with it). State (last check, what's available, last install) is kept in
 // <home>/update.json.
 
 const fs = require('fs');
@@ -353,7 +354,7 @@ function installedVersion(ws) {
 }
 
 module.exports = {
-  UpdateError, CHECK_EVERY_MS, FEED_MAX_AGE_MS, feedSignedAt, feedTooOld, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
+  packageJson, UpdateError, CHECK_EVERY_MS, FEED_MAX_AGE_MS, feedSignedAt, feedTooOld, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
   readState, writeState, setConfigKey, autoUpdateOn, checksOn, installable, summary, check, install, installedVersion,
   browsersSetUp,
 };

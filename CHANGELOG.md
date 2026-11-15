@@ -8,6 +8,10 @@ summary is too long.
 
 ## 0.3.1
 
+- **Edit a mod's code in the panel**: Edit in its code card, then Save. TRIF checks it first, and an edit
+  that lets the mod do more waits for your OK, like any change. Undo puts the version before back.
+- **Tim's mods get fixes between TRIF releases**, signed like TRIF's own updates. One you changed is never
+  replaced: you're offered the new version.
 - **TRIF names your browser.** Brave, Edge, Opera, Vivaldi, Arc and Chromium are no longer all called
   Chrome (nor Firefox's forks Firefox), in the panel, `trif status`, `trif doctor` and problem reports.
 - **Mods written without semicolons** no longer wait for your OK as "code TRIF can't check".

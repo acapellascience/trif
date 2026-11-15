@@ -41,7 +41,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), agentLogin: $('#agent-login'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
-  autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
+  autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), modsFeedNote: $('#mods-feed-note'), update: $('#update'),
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
@@ -4101,6 +4101,7 @@ function renderUpdateSettings(u) {
   else if (u.available) text = `TRIF ${u.current} (${u.latest} is available).`;
   else if (u.error) text = `TRIF ${u.current}. Couldn’t check for updates: ${u.error}`;
   else text = `TRIF ${u.current}${u.latest ? ', up to date' : ''}.`;
+  renderModsFeedNote(connected ? u : null);
   if (ui.updateNote.dataset.text === text) return;
   ui.updateNote.dataset.text = text;
   ui.updateNote.replaceChildren(text);
@@ -4110,6 +4111,15 @@ function renderUpdateSettings(u) {
     check.addEventListener('click', (e) => { e.preventDefault(); checkForUpdate(); });
     ui.updateNote.append(' ', check);
   }
+}
+
+// The mods feed (new versions of Tim's mods between releases, helper/lib/modsfeed.js): a quiet line under the
+// update status when its last check went wrong. Not while TRIF's own check failed too: that line says it.
+function renderModsFeedNote(u) {
+  const problem = u && !u.error && !view.updateBusy ? u.modsFeed?.problem : null;
+  const text = problem ? `Couldn’t get updates to Tim’s mods: ${problem}` : '';
+  if (ui.modsFeedNote.textContent !== text) ui.modsFeedNote.textContent = text;
+  ui.modsFeedNote.hidden = !text;
 }
 
 async function checkForUpdate() {

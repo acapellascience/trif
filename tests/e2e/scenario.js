@@ -393,6 +393,68 @@ class Scenario {
   }
 
   /**
+   * The mods feed (helper/lib/modsfeed.js) failing: a local "GitHub" serves an updates/mods.json signed with a
+   * key that isn't this build's release key (no latest.json: no TRIF update, not an error). Check now in
+   * Settings: the quiet line under the update status says why, trif doctor warns, Tim's mods are as they
+   * were. Then the feed gone (404, none published) and checks off again, as the harness has them: Check now
+   * clears the line. Hermetic: the update feed points at the local server throughout.
+   */
+  async modsFeedCheck() {
+    const http = require('http');
+    const { modsFeedBytes, signBytes } = require('../../scripts/release');
+    const { privateKey } = crypto.generateKeyPairSync('ed25519');
+    const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const files = {};
+    const feed = modsFeedBytes({ signed: new Date().toISOString(), release: '0.3.0', commit: 'a'.repeat(40), mods: {} });
+    files['/updates/mods.json'] = feed;
+    files['/updates/mods.json.sig'] = signBytes(feed, priv);
+    const server = http.createServer((req, res) => {
+      const body = files[req.url];
+      if (body === undefined) { res.writeHead(404); return res.end(); }
+      res.writeHead(200);
+      res.end(body);
+    });
+    await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const cfgFile = path.join(this.priv, 'config.json');
+    const before = fs.readFileSync(cfgFile, 'utf8');
+    const shippedBefore = SHIPPED_IDS.map((id) => { try { return fs.readFileSync(path.join(this.trif, 'sites', `${id}.js`), 'utf8'); } catch { return null; } });
+    const note = () => this.panel(`async () => { const n = document.querySelector('#mods-feed-note'); return { shown: !!n && !n.hidden && n.getClientRects().length > 0, text: n ? n.textContent : '', update: document.querySelector('#update-note').textContent, check: !!document.querySelector('#update-note a') }; }`);
+    let last = null;
+    const until = (what, ok) => waitFor(what, async () => { last = await note(); return ok(last) ? last : null; }, { timeoutMs: 20000 })
+      .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    try {
+      this.modsFeedChecked = true; // (helperLogCheck: its warning is expected)
+      fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(before), checkForUpdates: true, updateFeed: `${base}/updates/latest.json` }, null, 2) + '\n');
+      await this.panelClick('#settings-btn');
+      await until('Check now in Settings', (x) => x.check);
+      await this.panelClick('#update-note a');
+      const bad = await until('the mods feed\'s problem under the update status', (x) => x.shown && /not signed by the TRIF release key/.test(x.text));
+      if (!/^Couldn’t get updates to Tim’s mods: the mods feed is not signed by the TRIF release key/.test(bad.text)) throw new Error(`the line: ${bad.text}`);
+      if (/Couldn’t check/.test(bad.update)) throw new Error(`TRIF's own update status shows an error: ${bad.update}`);
+      await sleep(300);
+      await this.shot(this.panelCtx, 'settings-mods-feed-problem');
+      const doc = await this.cli(['doctor'], { json: true, timeoutMs: 60000 });
+      const warn = doc.json && doc.json.checks.find((c) => c.status === 'warn' && /^Tim's mods: the last check for their new versions/.test(c.title));
+      if (!warn || !/not signed by the TRIF release key/.test(warn.title)) throw new Error(`trif doctor: ${JSON.stringify(doc.json?.checks?.filter((c) => c.status !== 'ok'))}`);
+      const shippedNow = SHIPPED_IDS.map((id) => { try { return fs.readFileSync(path.join(this.trif, 'sites', `${id}.js`), 'utf8'); } catch { return null; } });
+      if (JSON.stringify(shippedNow) !== JSON.stringify(shippedBefore)) throw new Error("Tim's mods changed");
+      // gone (none published), and checks off again: Check now clears the line
+      delete files['/updates/mods.json'];
+      delete files['/updates/mods.json.sig'];
+      fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(before), updateFeed: `${base}/updates/latest.json` }, null, 2) + '\n');
+      await until('Check now again', (x) => x.check);
+      await this.panelClick('#update-note a');
+      await until('the line gone', (x) => !x.shown && !x.text);
+      await this.panelClick('#settings-btn');
+      return `"${bad.text}" under "${bad.update}"; trif doctor: "${warn.title}"; then cleared`;
+    } finally {
+      fs.writeFileSync(cfgFile, before);
+      await new Promise((ok) => server.close(ok));
+    }
+  }
+
+  /**
    * Settings → Open model → OpenRouter: a key saved (in the fake keychain) shows as "✓ Saved" with Replace
    * and Remove instead of the field; Replace brings the field back with Cancel; Remove empties the
    * keychain. The agent and provider are put back afterwards.
@@ -1327,6 +1389,7 @@ class Scenario {
     await this.narrowShots();
     await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
+    await r.check('the mods feed (new versions of Tim\'s mods): one that fails its signature changes nothing, and Settings says why under the update status, as trif doctor does; a check that works clears it', () => this.modsFeedCheck());
     await this.sweepAndScreenshotChecks(base, win);
     if (this.o.browser === 'chrome') await this.panelWindowChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
@@ -5887,6 +5950,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l) // bigModsCheck's, over the cap on purpose
       || /WARN stdout error \(EPIPE\); \w+ went away/.test(l) // (the harness quit the browser while the helper was writing to it)
       || /mod 127\.0\.0\.1\/e2e-rules-bad: .*only data:/.test(l) // rulesModCheck's, refused on purpose
+      || (this.modsFeedChecked && /WARN mods feed: the mods feed is not signed by the TRIF release key/.test(l)) // modsFeedCheck's, refused on purpose
       // orgSettingsCheck's: runs stopped for an organization's settings, the consent, a run going on without the sandbox
       || (this.orgChecked && /Codex's organization settings replace TRIF's sandbox: stopped|codex may now run under an organization's settings|Codex runs under the organization's settings, not TRIF's sandbox/.test(l));
     const skipped = lines.filter(expected).length;

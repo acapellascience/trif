@@ -2948,11 +2948,21 @@ function renderSiteTools() {
   const ok = !!site && !!view.status?.helper?.connected;
   ui.modsMore.hidden = !ok;
   if (!ok) { ui.modsMenu.hidden = true; ui.siteFilesBox.hidden = true; return; }
-  // (its folder, or its www. one: the helper exports both, lib/share.js exportSite)
-  const mine = (view.status?.mods || []).filter((m) => m.id.startsWith(`${site}/`) || m.id.startsWith(`www.${site}/`));
+  // (the site's own mods as its list has them: those in a folder of its site, on a page under it too, so
+  // docs.google.com's panel, which lists google.com's mods, exports them; not all-sites ones. lib/share.js
+  // exportSite takes these ids)
+  const mine = siteOwnMods();
   ui.exportSite.hidden = !mine.length;
-  ui.exportSite.textContent = `Export all mods for ${site}`;
+  ui.exportSite.textContent = `Export all mods for ${siteScope()}`;
   if (view.filesFor !== site) { view.filesFor = site; loadSiteFiles(); }
+}
+
+/** The mods of the panel's site (siteScope) that live in its folders: what "Export all mods" exports. */
+function siteOwnMods() {
+  const scope = siteScope();
+  if (!scope) return [];
+  const sens = sensNow();
+  return (view.status?.mods || []).filter((m) => { const f = m.id.split('/')[0]; return f !== 'all-sites' && sens.scopeOf(f.replace(/^www\./, '')) === scope; });
 }
 
 async function loadSiteFiles() {
@@ -2998,7 +3008,7 @@ ui.importFile?.addEventListener('change', async () => {
 ui.exportSite?.addEventListener('click', async () => {
   ui.modsMenu.hidden = true;
   try {
-    const r = await request({ type: 'mod.exportSite', site: view.site });
+    const r = await request({ type: 'mod.exportSite', site: siteScope(), ids: siteOwnMods().map((m) => m.id) });
     if (r?.cancelled) return;
     request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${r.where}.` }).catch(() => {});
   } catch (e) { request({ type: 'chat.note', site: view.site, text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }

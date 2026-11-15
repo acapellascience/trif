@@ -2338,7 +2338,7 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'mod.historyRestore': return helperRequest('mod.historyRestore', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 15000);
     // (ten minutes and a bit: the helper asks where first, with the system's folder chooser)
     case 'mod.export': return helperRequest('mod.export', { id: String(msg.id ?? '') }, 11 * 60 * 1000);
-    case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? '') }, 11 * 60 * 1000);
+    case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? ''), ...(Array.isArray(msg.ids) ? { ids: msg.ids.slice(0, 5000).map(String) } : {}) }, 11 * 60 * 1000);
     case 'mod.import': {
       // Import a mod (the panel's button, or a .js dropped on it): its text; the helper checks and writes it
       const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? '') }, 20000);

@@ -188,3 +188,19 @@ test('a site\'s export takes its www. folder too (sites/www.google.com for googl
   assert.deepStrictEqual(r.ids.sort(), ['google.com/calm', 'google.com/dvd', 'www.google.com/dvd']);
   assert.deepStrictEqual(fs.readdirSync(r.dir).sort(), ['calm.js', 'dvd 2.js', 'dvd.js']);
 });
+
+test('a site\'s export from a page under it: the listed ids in its folders, a subdomain\'s too (docs.google.com\'s panel is google.com\'s)', () => {
+  const home = tempDir('trif-share-sub-');
+  const ws = wsOf(home);
+  const g = ['*://*.google.com/*'];
+  writeMod(home, 'www.google.com', 'dvd.js', `${head('DVD', g)}a();\n`);
+  writeMod(home, 'maps.google.com', 'calm.js', `${head('Calm', g)}c();\n`);
+  writeMod(home, 'mail.google.com', 'mine.js', `${head('Mine', g)}m();\n`);
+  writeMod(home, 'x.com', 'other.js', `${head('Other', ['*://x.com/*'])}o();\n`);
+  const list = scanMods(ws.modsDir).mods;
+  const to = path.join(home, 'dl');
+  const r = share.exportSite(ws, list, 'google.com', { to, ids: ['www.google.com/dvd', 'maps.google.com/calm', 'x.com/other'] });
+  assert.deepStrictEqual(r.ids.sort(), ['maps.google.com/calm', 'www.google.com/dvd']); // (not x.com's, nor mail's: not listed)
+  assert.deepStrictEqual(fs.readdirSync(r.dir).sort(), ['calm.js', 'dvd.js']);
+  assert.throws(() => share.exportSite(ws, list, 'google.com', { to, ids: ['x.com/other'] }), /no mods for google\.com/);
+});

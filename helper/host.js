@@ -764,7 +764,7 @@ function agentCommand(cmd, args) {
       const site = String(args.site ?? '');
       return require('./lib/choosefolder').chooseFolder(`Where should TRIF save the mods for ${site}?`, { start: share.downloadsDir() }).then((to) => {
         if (!to) return { site, cancelled: true };
-        const r = share.exportSite(ws, state.mods, site, { to });
+        const r = share.exportSite(ws, state.mods, site, { to, ids: Array.isArray(args.ids) ? args.ids.map(String) : null });
         require('./lib/reveal').revealPath(r.dir, 'folder');
         logger.info(`exported ${r.ids.length} mod(s) of ${r.site} to ${r.dir}`);
         return { site: r.site, dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };

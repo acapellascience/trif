@@ -484,11 +484,16 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     madeRefs.length = 0;
     madeRefs.push(...alive.slice(-3000));
   };
+  // (the clickjacking guard, runtime.js clickGuard, asks this world only when it's here, and for covers only
+  // once a mod has made an element)
+  const cjHere = () => { try { D.dispatchEvent(new CustomEvent('trif:cj-here', { detail: JSON.stringify({ made: madeRefs.length > 0 }) })); } catch { /* no document */ } };
+  D.addEventListener('trif:cj-hello', cjHere, true);
+  cjHere();
   const created = {
     add(n) {
       if (createdSet.has(n)) return created;
       createdSet.add(n);
-      if (canRef && n && n.nodeType === 1) { madeRefs.push(new WeakRef(n)); if (madeRefs.length > 4000) pruneMade(); }
+      if (canRef && n && n.nodeType === 1) { madeRefs.push(new WeakRef(n)); if (madeRefs.length === 1) cjHere(); if (madeRefs.length > 4000) pruneMade(); }
       return created;
     },
     has: (n) => createdSet.has(n),

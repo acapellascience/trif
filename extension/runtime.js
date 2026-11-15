@@ -354,7 +354,7 @@ export function clickGuard(sheetOwner) {
   const FADE = 0.25; // (combined opacity under which a control counts as unseen)
   const TINY = 4; // (px: narrower or shorter than this, unseen)
   const INK_MAX = 60; // (elements looked at for anything a control shows; more: it shows something)
-  const stats = { presses: 0, checked: 0, ms: 0, maxMs: 0, deep: 0, deepMs: 0, maxDeepMs: 0, stopped: 0 };
+  const stats = { presses: 0, checked: 0, ms: 0, maxMs: 0, firstMs: null, deep: 0, deepMs: 0, maxDeepMs: 0, covers: 0, coverMs: 0, stopped: 0 };
   const stoppedList = [];
   if (W) W.guard = { stats, stopped: stoppedList };
 
@@ -522,6 +522,10 @@ export function clickGuard(sheetOwner) {
   // TRIF's sandbox world (sandbox.js), during the dispatch: undo the boxed mods' inline styles and animations on
   // the control and its ancestors (all but `keep`'s), say whose they were, and whether a mod made or moved it
   let answers = null;
+  // (whether TRIF's sandbox world is on this page, and whether a mod there made an element: it says so, and
+  // answers trif:cj-hello; without it, no event crosses to it on a press)
+  let boxes = false, made = false;
+  document.addEventListener('trif:cj-here', (e) => { boxes = true; try { if (JSON.parse(String(e.detail)).made) made = true; } catch (err) { /* not one */ } }, true);
   document.addEventListener('trif:cj-answer', (e) => { if (answers && typeof e.detail === 'string') answers.push(e.detail); }, true);
   const ask = (el, type, detail) => {
     answers = [];
@@ -534,6 +538,7 @@ export function clickGuard(sheetOwner) {
   };
   const boxOff = (el, keep) => {
     const out = { mods: [], made: null, moved: null };
+    if (!boxes) return out;
     for (const o of ask(el, 'trif:cj-off', JSON.stringify({ keep: keep || null }))) {
       if (Array.isArray(o.mods)) for (const m of o.mods) if (typeof m === 'string') out.mods.push(m);
       if (typeof o.made === 'string') out.made = o.made;
@@ -541,8 +546,8 @@ export function clickGuard(sheetOwner) {
     }
     return out;
   };
-  const boxOn = (el) => { try { el.dispatchEvent(new CustomEvent('trif:cj-on', { composed: true })); } catch (e) { /* none */ } };
-  const cover = (el, x, y) => { for (const o of ask(el, 'trif:cj-cover', JSON.stringify({ x, y }))) if (typeof o.covered === 'string') return o.covered; return null; };
+  const boxOn = (el) => { if (!boxes) return; try { el.dispatchEvent(new CustomEvent('trif:cj-on', { composed: true })); } catch (e) { /* none */ } };
+  const cover = (el, x, y) => { if (!made) return null; for (const o of ask(el, 'trif:cj-cover', JSON.stringify({ x, y }))) if (typeof o.covered === 'string') return o.covered; return null; };
   // (a mod's own element pressed: only one with a default action of the page's kind counts)
   const OWN_ACTS = /^(a|area|button|input|select|textarea|label|summary)$/;
   // Whose sheet it was, without restyling the page for each: the sheets with a rule that changes how something
@@ -626,12 +631,15 @@ export function clickGuard(sheetOwner) {
       if (!ctl.el.isConnected) return null;
       const why = unseen(ctl);
       if (!why) {
-        if (x === null || x === undefined) return null;
+        if (x === null || x === undefined || !made) return null;
+        const c0 = now();
         const mod = cover(ctl.el, x, y);
+        stats.covers++;
+        stats.coverMs += now() - c0;
         return mod ? { why: 'covered', mods: [mod], el: ctl.el } : null;
       }
       return deep(ctl, why);
-    } finally { const ms = now() - t0; stats.ms += ms; if (ms > stats.maxMs) stats.maxMs = ms; }
+    } finally { const ms = now() - t0; stats.ms += ms; if (ms > stats.maxMs) stats.maxMs = ms; if (stats.firstMs === null) stats.firstMs = ms; }
   };
 
   // ---- telling: the mod's errors (trif errors; the panel's card: background.js), once per mod and reason here
@@ -729,6 +737,7 @@ export function clickGuard(sheetOwner) {
     try { v = verdict({ el, hit: el }, ev.clientX, ev.clientY); } catch (e) { v = null; }
     if (v) { shield(el); report(v); }
   };
+  try { document.dispatchEvent(new CustomEvent('trif:cj-hello')); } catch (e) { /* none */ }
   const hard = { capture: true, passive: false };
   window.addEventListener('pointerdown', onPress, hard);
   window.addEventListener('mousedown', onPress, hard);

@@ -118,6 +118,11 @@ an app", below.
   "Add this mod?" for each mod in the reply, over the tab; nothing is added without Add it. A reply with no
   mod in it puts a green mark on the bubble; tap it to read the reply. ‹ {site} at the chat's top goes back.
   Signing in (email, Google, Apple; a window the chat opens shows as a sheet) happens in the chat's own page.
+  The toolbar stays under the open chat: the robot (the chat button) takes you back, as does ‹ {site}.
+- **The bars follow the page** (iOS 26 and later; TrifProbeApp.swift BarState): scrolling down shrinks the
+  address bar to the site's name and slides the toolbar away; scrolling up, the top of the page, a tap on the
+  small bar or a new page load brings them back. The page lies under the bars and isn't resized while they
+  move; WebKit is told what they cover (obscuredContentInsets) once they settle.
 - **Report → Share the report**, and send it to me. It names the sites you ran it on and which addresses
   the chat went to (never what was typed or said there).
 

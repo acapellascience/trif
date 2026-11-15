@@ -4,6 +4,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+import WebKit
 
 @main
 struct TrifProbeApp: App {
@@ -13,7 +14,7 @@ struct TrifProbeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(pane: model.pane, modsPanel: model.modsPanel, safety: model.browser.safety, store: model.browser.mods)
+            ContentView(pane: model.pane, modsPanel: model.modsPanel, safety: model.browser.safety, store: model.browser.mods, bars: model.bars)
                 .environmentObject(model.browser)
                 .environmentObject(model.report)
                 .tint(Color.trifGreen) // (every button and control TRIF's green, not iOS's blue: Tim, 11-14)
@@ -28,6 +29,8 @@ final class Model: ObservableObject {
     let browser: Browser
     let pane: ClaudePane
     let modsPanel: ModsPanel
+    /// The address bar and toolbar's state as the page scrolls (BarState): its own object, so only the bars redraw.
+    let bars = BarState()
 
     init() {
         let report = Report()
@@ -159,6 +162,8 @@ struct ContentView: View {
     @ObservedObject var modsPanel: ModsPanel
     @ObservedObject var safety: Safety
     @ObservedObject var store: ModStore
+    /// (not observed here: only the bars follow it, as the page scrolls)
+    let bars: BarState
     @Environment(\.scenePhase) private var phase
 
     @State private var entry = ""
@@ -202,42 +207,64 @@ struct ContentView: View {
     private var page: some View {
         GeometryReader { geo in
             ZStack {
+                // (the chat leaves the toolbar showing under it, so the chat button is where it was, to go back: Tim,
+                // 11-15, "sometimes you hit it by accident and you just wanna go back")
                 ChatScreen(pane: pane, tabName: browser.site.isEmpty ? "Tab" : browser.site)
+                    .modifier(ToolbarRoom(insets: bars.insets))
                     .zIndex(pane.shown ? 1 : 0)
                     .allowsHitTesting(pane.shown)
                     .accessibilityHidden(!pane.shown)
                 column
                     .background(Color(.systemBackground))
                     .zIndex(pane.shown ? 0 : 1)
-                    .allowsHitTesting(!pane.shown)
-                    .accessibilityHidden(pane.shown)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             .clipped()
         }
     }
 
+    // (the page reaches from under the compact address bar to the foot; the bars lie over it, the address bar
+    // growing and shrinking and the toolbar sliding away as the page scrolls (BarState), so the page is never
+    // resized while that happens: what's under the bars is told to the page once they settle. iOS 26 and later;
+    // before that the bars stay full and the page sits between them.)
     private var column: some View {
-        VStack(spacing: 0) {
-            addressBar
-            ZStack {
+        ZStack(alignment: .top) {
+            ZStack(alignment: .top) {
                 WebViewHost(webView: browser.webView).id(browser.current.id)
                 if browser.current.webView.url == nil && !browser.loading {
-                    NewTabView(history: browser.history)
+                    NewTabView(history: browser.history).modifier(BarPadding(bars: bars, top: true, bottom: true))
                 }
             }
-            // (the notes over the page's foot, not under it: the page isn't resized each time one comes and goes)
-            .overlay(alignment: .bottom) { notes }
-            if let picked = browser.picked { PickedBar(picked: picked) }
-            if let off = safety.switchedOff[browser.site] {
-                SafetyBanner(site: browser.site, off: off, open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
+            .modifier(BarPadding(bars: bars, top: !BarState.moves, bottom: !BarState.moves))
+            .padding(.top, BarState.compactHeight)
+            .accessibilityHidden(pane.shown)
+            TopBar(bars: bars, full: addressBar, compact: compactBar)
+                .accessibilityHidden(pane.shown)
+            BottomBars(bars: bars) {
+                // (the notes over the page's foot, above the bars: they come and go without moving anything)
+                notes
+            } bars: {
+                VStack(spacing: 0) {
+                    if let picked = browser.picked { PickedBar(picked: picked) }
+                    if let off = safety.switchedOff[browser.site] {
+                        SafetyBanner(site: browser.site, off: off, open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
+                    }
+                }
+            } toolbar: {
+                VStack(spacing: 0) {
+                    Divider()
+                    toolbar
+                }
+                .background(.bar)
             }
-            Divider()
-            toolbar
+            .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .onAppear { entry = browser.address; pane.follow(site: browser.site) }
+        .onAppear { entry = browser.address; pane.follow(site: browser.site); bars.attach(browser.webView) }
         .onChange(of: browser.address) { _, new in if !editing { entry = new }; pane.follow(site: browser.site) }
-        .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site) }
+        .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site); bars.attach(browser.webView) }
+        .onChange(of: browser.loading) { _, now in if now { bars.expand() } }
+        .onChange(of: editing) { _, now in bars.hold(now || pane.shown) }
+        .onChange(of: pane.shown) { _, now in bars.hold(now || editing) }
         .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
         .onChange(of: browser.hideChat) { _, _ in pane.close() }
         // (the next of a reply's mods once the Mods tab, opened for one that waits for an OK, has closed)
@@ -310,6 +337,27 @@ struct ContentView: View {
         }
     }
 
+    /// The address bar when the page has been scrolled down: the site, small; tap to bring the bars back. The chat's
+    /// robot comes along while a reply is being written or waits (the toolbar is away then).
+    private var compactBar: some View {
+        HStack(spacing: 6) {
+            if browser.webView.url?.scheme == "https" { Image(systemName: "lock.fill").font(.system(size: 9)) }
+            Text(browser.host.hasPrefix("www.") ? String(browser.host.dropFirst(4)) : browser.host.isEmpty ? "New tab" : browser.host)
+                .font(.footnote.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .trailing) {
+            if pane.activity != .idle {
+                Button { pane.open() } label: { ChatGlyph(activity: pane.activity).frame(width: 18, height: 18) }
+                    .padding(.trailing, 14)
+                    .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : "Chat, replied")
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
     private var addressBar: some View {
         HStack(spacing: 8) {
             TextField("Search or type an address", text: $entry)
@@ -331,17 +379,31 @@ struct ContentView: View {
         .padding(.vertical, 6)
     }
 
+    /// A toolbar button while the chat is open: back to the tab first, then its job there.
+    private func onTab(_ job: () -> Void) {
+        pane.close()
+        job()
+    }
+
     private var toolbar: some View {
         HStack {
-            Button { browser.back() } label: { Image(systemName: "chevron.left") }.disabled(!browser.canGoBack).accessibilityLabel("Back")
+            Button { onTab { browser.back() } } label: { Image(systemName: "chevron.left") }.disabled(!browser.canGoBack).accessibilityLabel("Back")
             Spacer()
-            Button { browser.forward() } label: { Image(systemName: "chevron.right") }.disabled(!browser.canGoForward).accessibilityLabel("Forward")
+            Button { onTab { browser.forward() } } label: { Image(systemName: "chevron.right") }.disabled(!browser.canGoForward).accessibilityLabel("Forward")
             Spacer()
-            Button { pane.open() } label: { ChatGlyph(activity: pane.activity).frame(width: 28, height: 24) }
-                .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
+            // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
+            Button { if pane.shown { pane.close() } else { pane.open() } } label: {
+                ChatGlyph(activity: pane.activity).frame(width: 24, height: 24)
+                    .padding(5)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.trifGreen.opacity(pane.shown ? 0.2 : 0)))
+                    .padding(-5)
+            }
+            .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
+            .accessibilityAddTraits(pane.shown ? .isSelected : [])
             Spacer()
-            Button { showMods = true } label: {
-                RobotGlyph(paused: store.paused).frame(width: 24, height: 24)
+            // (the mods' button is a switch, on or, with all paused, off: Tim, 11-15; the robot is the chat's now)
+            Button { onTab { showMods = true } } label: {
+                SwitchGlyph(on: !store.paused).frame(width: 30, height: 24)
                     .overlay(alignment: .topTrailing) {
                         if waitingHere > 0 {
                             Text("\(waitingHere)").font(.caption2.bold()).foregroundStyle(.black)
@@ -351,7 +413,7 @@ struct ContentView: View {
             }
             .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
             Spacer()
-            Button { browser.snapshot(); showTabs = true } label: {
+            Button { onTab { browser.snapshot(); showTabs = true } } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
                     Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))
@@ -360,27 +422,27 @@ struct ContentView: View {
             .accessibilityLabel("Tabs, \(browser.tabs.count) open")
             Spacer()
             Menu {
-                Button { browser.newTab() } label: { Label("New tab", systemImage: "plus.square.on.square") }
-                Button { showHistory = true } label: { Label("History", systemImage: "clock") }
-                Button { importing = true } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
+                Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
+                Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
                 Divider()
-                Button("Copy this page for the chat") { Task { await browser.copyOutline() } }
-                Button("Add a mod from the clipboard") { browser.offerFromClipboard() }
-                Button("Ask the phone's own model…") { question = ""; asking = true }
-                Button("Show everything hidden on this site again", role: .destructive) { Task { await browser.forgetRulesHere() } }
+                Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
+                Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
+                Button("Ask the phone's own model…") { onTab { question = ""; asking = true } }
+                Button("Show everything hidden on this site again", role: .destructive) { onTab { Task { await browser.forgetRulesHere() } } }
                 Divider()
                 Menu("The probe") {
-                    Button("Checks") { showChecks = true }
-                    Button("Report") { showReport = true }
+                    Button("Checks") { onTab { showChecks = true } }
+                    Button("Report") { onTab { showReport = true } }
                     Section("The probe's own pages") {
                         ForEach(browser.pages.pageNames, id: \.self) { name in
-                            Button(name) { browser.go(PageSchemeHandler.home + name) }
+                            Button(name) { onTab { browser.go(PageSchemeHandler.home + name) } }
                         }
-                        Button("a mod link") { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") }
+                        Button("a mod link") { onTab { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") } }
                     }
                     Section("Real sites") {
                         ForEach(["github.com", "x.com", "youtube.com", "reddit.com", "en.wikipedia.org", "nytimes.com"], id: \.self) { site in
-                            Button(site) { browser.go(site) }
+                            Button(site) { onTab { browser.go(site) } }
                         }
                     }
                 }
@@ -393,27 +455,57 @@ struct ContentView: View {
     }
 }
 
-/// The robot as the toolbar's Mods button (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head
-/// and two round eyes, in the button's colour.
+/// The robot (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head and two round eyes, in the
+/// button's colour. The toolbar's chat button (Tim, 11-15); while a reply is being written its eyes are three
+/// dots, lighting up one after another.
 struct RobotGlyph: View {
     /// All mods paused: two bars for eyes (docs/STYLE.md's paused face).
     var paused = false
+    var working = false
     var body: some View {
         GeometryReader { g in
             let s = min(g.size.width, g.size.height)
             ZStack {
                 RoundedRectangle(cornerRadius: s * 0.3, style: .continuous).stroke(lineWidth: s * 0.09)
-                HStack(spacing: s * 0.2) {
-                    if paused {
-                        RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
-                        RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
-                    } else {
-                        Circle().frame(width: s * 0.2, height: s * 0.2)
-                        Circle().frame(width: s * 0.2, height: s * 0.2)
+                if working {
+                    PhaseAnimator([0, 1, 2]) { lit in
+                        HStack(spacing: s * 0.08) {
+                            ForEach(0..<3, id: \.self) { i in Circle().frame(width: s * 0.15, height: s * 0.15).opacity(i == lit ? 1 : 0.3) }
+                        }
+                    } animation: { _ in .easeInOut(duration: 0.3) }
+                } else {
+                    HStack(spacing: s * 0.2) {
+                        if paused {
+                            RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
+                            RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
+                        } else {
+                            Circle().frame(width: s * 0.2, height: s * 0.2)
+                            Circle().frame(width: s * 0.2, height: s * 0.2)
+                        }
                     }
                 }
             }
             .frame(width: s, height: s)
+        }
+    }
+}
+
+/// A switch, as the toolbar's Mods button: on (its knob right, filled), or off with every mod paused (knob left).
+struct SwitchGlyph: View {
+    var on = true
+    var body: some View {
+        GeometryReader { g in
+            let w = g.size.width, h = min(g.size.height, w * 0.6)
+            ZStack(alignment: on ? .trailing : .leading) {
+                Capsule().stroke(lineWidth: max(1.5, h * 0.12))
+                Group {
+                    if on { Circle().fill() } else { Circle().stroke(lineWidth: max(1.5, h * 0.12)) }
+                }
+                .frame(width: h * 0.56, height: h * 0.56)
+                .padding(.horizontal, h * 0.22)
+            }
+            .frame(width: w, height: h)
+            .frame(width: w, height: g.size.height)
         }
     }
 }
@@ -657,4 +749,234 @@ extension Color {
     static let trifGreen = Color(UIColor { $0.userInterfaceStyle == .dark
         ? UIColor(red: 0x34 / 255, green: 0xd3 / 255, blue: 0x99 / 255, alpha: 1)
         : UIColor(red: 0x1f / 255, green: 0x8a / 255, blue: 0x5b / 255, alpha: 1) })
+}
+
+// MARK: the bars as the page scrolls (Tim, 11-15: "a little more dynamism … like chrome mobile")
+
+/// The address bar and the toolbar following the page's scrolling, as Chrome's and Safari's do on iPhone: scrolling
+/// down shrinks the address bar to a small line with the site (no buttons) and slides the toolbar away; scrolling up,
+/// reaching the top, a tap on the small line, or a page starting to load brings both back. They move with the finger
+/// (`progress`, 0 full to 1 compact), and settle fully one way or the other when it lets go.
+/// The page isn't resized meanwhile: it lies under the bars, and what they cover is told to it (WKWebView's
+/// obscuredContentInsets, iOS 26) once, when they've settled, so its fixed headers and footers stay clear of them.
+/// Before iOS 26 the bars stay full and the page sits between them (`moves` false).
+/// Its own object: per-frame changes redraw the two bars, not the app's main view.
+@MainActor
+final class BarState: NSObject, ObservableObject {
+    static let compactHeight: CGFloat = 26
+    static var moves: Bool { if #available(iOS 26, *) { return true } else { return false } }
+
+    @Published private(set) var progress: CGFloat = 0
+    @Published private(set) var loading = false
+    @Published private(set) var loaded: Double = 0
+    /// How much taller the full address bar is than the compact one.
+    @Published private(set) var extra: CGFloat = 30
+    /// The toolbar's height (what slides away), and the whole bottom block's (the toolbar and the bars over it).
+    @Published private(set) var toolbarHeight: CGFloat = 50
+    private var bottomHeight: CGFloat = 50
+    /// The full bars' room, for a page under them before iOS 26, and the new-tab page (BarPadding).
+    let insets = BarInsets()
+
+    private weak var webView: WKWebView?
+    private var watches: [NSKeyValueObservation] = []
+    private var lastY: CGFloat = 0
+    private var held = false
+    private var settleTask: Task<Void, Never>?
+
+    func measured(full: CGFloat) {
+        let e = max(full - BarState.compactHeight, 0)
+        guard abs(e - extra) > 0.5 else { return }
+        extra = e
+        applyInsets()
+    }
+    func measured(toolbar: CGFloat) {
+        guard abs(toolbar - toolbarHeight) > 0.5 else { return }
+        toolbarHeight = toolbar
+        insets.set(toolbar: toolbar)
+        applyInsets()
+    }
+    func measured(bottom: CGFloat) {
+        guard abs(bottom - bottomHeight) > 0.5 else { return }
+        bottomHeight = bottom
+        applyInsets()
+    }
+
+    /// Follows the shown tab's web view (a tab switch, a page loaded).
+    func attach(_ wv: WKWebView) {
+        guard wv !== webView else { return }
+        webView?.scrollView.panGestureRecognizer.removeTarget(self, action: #selector(panned(_:)))
+        webView = wv
+        let sv = wv.scrollView
+        lastY = sv.contentOffset.y
+        loading = wv.isLoading
+        loaded = wv.estimatedProgress
+        let main = { (f: @escaping @MainActor () -> Void) in if Thread.isMainThread { MainActor.assumeIsolated(f) } else { Task { @MainActor in f() } } }
+        watches = [
+            sv.observe(\.contentOffset, options: [.new]) { [weak self] sv, _ in main { self?.scrolled(sv) } },
+            wv.observe(\.estimatedProgress, options: [.new]) { [weak self] w, _ in main { self?.loaded = w.estimatedProgress } },
+            wv.observe(\.isLoading, options: [.new]) { [weak self] w, _ in main { self?.loading = w.isLoading } },
+        ]
+        sv.panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
+        settleTask?.cancel()
+        progress = 0
+        applyInsets()
+    }
+
+    /// The bars full again (a load starting, the address being typed, a tap on the small line).
+    func expand() { settle(to: 0) }
+    /// While the address is being typed, the bars stay full.
+    func hold(_ h: Bool) { held = h; if h { expand() } }
+
+    private func scrolled(_ sv: UIScrollView) {
+        let y = sv.contentOffset.y
+        defer { lastY = y }
+        guard BarState.moves, !held else { return }
+        let top = -sv.adjustedContentInset.top
+        // (a page with little or nothing to scroll keeps its bars)
+        if sv.contentSize.height < sv.bounds.height + 120 { if progress != 0 { settle(to: 0) }; return }
+        // (at the top, or pulled down past it: full)
+        if y <= top + 1 { if progress != 0 { if sv.isTracking { progress = 0 } else { settle(to: 0) } }; return }
+        // (only the person's own scrolling: not a page scrolling itself, not the bounce at the bottom)
+        guard sv.isTracking || sv.isDecelerating else { return }
+        if y >= sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom - 1 { return }
+        let p = min(max(progress + (y - lastY) / max(toolbarHeight, 44), 0), 1)
+        if p != progress { progress = p }
+        if !sv.isTracking { settleSoon() }
+    }
+
+    @objc private func panned(_ g: UIPanGestureRecognizer) {
+        if g.state == .ended || g.state == .cancelled || g.state == .failed { settleSoon() }
+    }
+
+    /// Once the finger is off and the page has stopped moving: fully one way or the other.
+    private func settleSoon() {
+        settleTask?.cancel()
+        settleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard let self, !Task.isCancelled, let sv = self.webView?.scrollView, !sv.isTracking else { return }
+            if sv.isDecelerating { self.settleSoon(); return }
+            self.settle(to: self.progress > 0.5 ? 1 : 0)
+        }
+    }
+
+    private func settle(to target: CGFloat) {
+        settleTask?.cancel()
+        if progress != target { withAnimation(.easeOut(duration: 0.22)) { progress = target } }
+        applyInsets()
+    }
+
+    /// What the settled bars cover, told to the page (only when it changes: each change lays the page out again).
+    private func applyInsets() {
+        insets.set(top: extra, bottom: bottomHeight)
+        guard let wv = webView else { return }
+        if #available(iOS 26, *) {
+            let p: CGFloat = progress >= 0.5 ? 1 : 0
+            let e = UIEdgeInsets(top: extra * (1 - p), left: 0, bottom: max(bottomHeight - toolbarHeight * p, 0), right: 0)
+            if wv.obscuredContentInsets != e { wv.obscuredContentInsets = e }
+        }
+    }
+}
+
+/// The full bars' room (changes only when a bar's size does).
+@MainActor
+final class BarInsets: ObservableObject {
+    @Published private(set) var top: CGFloat = 0
+    @Published private(set) var bottom: CGFloat = 0
+    @Published private(set) var toolbar: CGFloat = 50
+    func set(toolbar t: CGFloat) { if abs(t - toolbar) > 0.5 { toolbar = t } }
+    func set(top t: CGFloat, bottom b: CGFloat) {
+        if abs(t - top) > 0.5 { top = t }
+        if abs(b - bottom) > 0.5 { bottom = b }
+    }
+}
+
+/// Room at the foot for the toolbar (the open chat leaves it showing).
+struct ToolbarRoom: ViewModifier {
+    @ObservedObject var insets: BarInsets
+    func body(content: Content) -> some View { content.padding(.bottom, insets.toolbar) }
+}
+
+/// Room for the full bars around something that lies under them.
+struct BarPadding: ViewModifier {
+    @ObservedObject var insets: BarInsets
+    let top: Bool, bottom: Bool
+    init(bars: BarState, top: Bool, bottom: Bool) { insets = bars.insets; self.top = top; self.bottom = bottom }
+    func body(content: Content) -> some View {
+        content.padding(.top, top ? insets.top : 0).padding(.bottom, bottom ? insets.bottom : 0)
+    }
+}
+
+/// The address bar: full (the address field, reload) or, scrolled down, a small line (the site); between the two as
+/// the page moves. A thin green line under it while a page loads.
+struct TopBar<Full: View, Compact: View>: View {
+    @ObservedObject var bars: BarState
+    let full: Full
+    let compact: Compact
+
+    var body: some View {
+        let p = bars.progress
+        ZStack(alignment: .top) {
+            full
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bars.measured(full: $0) }
+                .scaleEffect(1 - 0.15 * p, anchor: .top)
+                .opacity(Double(max(0, 1 - p * 1.8)))
+                .allowsHitTesting(p < 0.5)
+                .accessibilityHidden(p >= 0.5)
+            compact
+                .frame(height: BarState.compactHeight)
+                .contentShape(Rectangle())
+                .onTapGesture { bars.expand() }
+                .opacity(Double(min(max(p * 1.8 - 0.8, 0), 1)))
+                .allowsHitTesting(p >= 0.5)
+                .accessibilityHidden(p < 0.5)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows the address bar")
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: BarState.compactHeight + bars.extra * (1 - p), alignment: .top)
+        .clipped()
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            ZStack(alignment: .leading) {
+                Divider()
+                if bars.loading {
+                    Rectangle().fill(Color.trifGreen).frame(height: 2)
+                        .scaleEffect(x: max(0.05, bars.loaded), y: 1, anchor: .leading)
+                        .animation(.easeOut(duration: 0.2), value: bars.loaded)
+                }
+            }
+        }
+    }
+}
+
+/// The foot: notes (over the page, not measured), then bars a choice needs (the point-and-hide bar, safe mode's) and
+/// the toolbar. Scrolled down, the whole foot slides down by the toolbar's height: the toolbar goes, the rest stays.
+struct BottomBars<Notes: View, Middle: View, Toolbar: View>: View {
+    @ObservedObject var bars: BarState
+    let notes: Notes
+    let middle: Middle
+    let toolbar: Toolbar
+    init(bars: BarState, @ViewBuilder notes: () -> Notes, @ViewBuilder bars middle: () -> Middle, @ViewBuilder toolbar: () -> Toolbar) {
+        self.bars = bars
+        self.notes = notes()
+        self.middle = middle()
+        self.toolbar = toolbar()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            notes
+            VStack(spacing: 0) {
+                middle
+                toolbar
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bars.measured(toolbar: $0) }
+                    .opacity(Double(1 - bars.progress))
+                    .allowsHitTesting(bars.progress < 0.5)
+                    .accessibilityHidden(bars.progress >= 0.5)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bars.measured(bottom: $0) }
+        }
+        .offset(y: bars.progress * bars.toolbarHeight)
+    }
 }

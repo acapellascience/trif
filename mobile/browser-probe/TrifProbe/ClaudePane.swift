@@ -477,20 +477,19 @@ struct ChatScreen: View {
     }
 }
 
-/// The toolbar's chat button's picture: a bubble; animated dots while a reply is being written; a small green
-/// mark when a reply with no mod in it waits to be read.
+/// The toolbar's chat button's picture: the robot (Tim, 11-15); its eyes three moving dots while a reply is being
+/// written; a small green mark when a reply with no mod in it waits to be read.
 struct ChatGlyph: View {
     let activity: ChatActivity
     var body: some View {
-        switch activity {
-        case .working:
-            Image(systemName: "ellipsis.bubble")
-                .symbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating)
-        case .replied:
-            Image(systemName: "bubble.left")
-                .overlay(alignment: .topTrailing) { Circle().fill(Color.trifGreen).frame(width: 8, height: 8).offset(x: 3, y: -1) }
-        case .idle:
-            Image(systemName: "bubble.left")
-        }
+        RobotGlyph(working: activity == .working)
+            .overlay(alignment: .topTrailing) {
+                if activity == .replied {
+                    GeometryReader { g in
+                        Circle().fill(Color.trifGreen).frame(width: g.size.width * 0.34, height: g.size.width * 0.34)
+                            .offset(x: g.size.width * 0.72, y: -g.size.width * 0.12)
+                    }
+                }
+            }
     }
 }

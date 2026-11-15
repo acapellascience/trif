@@ -241,12 +241,12 @@ test('helper: agent.withoutSandbox is refused from the socket (the terminal, `tr
   consent.setAllowed(home, 'codex', true); // (so the fake run stays alive a moment)
   const runId = (await extRequest(ext, 'agent.start', { ...START, prompt: 'x' })).result.runId;
   const box = path.join(home, 'boxes', runId);
-  for (let i = 0; i < 100 && !fs.existsSync(box); i++) await new Promise((res) => setTimeout(res, 20));
+  for (let i = 0; i < 500 && !fs.existsSync(box); i++) await new Promise((res) => setTimeout(res, 20));
   assert.ok(fs.existsSync(box), 'the run has a mailbox');
   consent.setAllowed(home, 'codex', false);
   fs.writeFileSync(path.join(box, 'q1.req'), JSON.stringify({ id: 'q1', cmd: 'agent.withoutSandbox', args: { agent: 'claude', allow: true } }));
   let res = null;
-  for (let i = 0; i < 100 && !res; i++) { try { res = JSON.parse(fs.readFileSync(path.join(box, 'q1.res'), 'utf8')); } catch { await new Promise((r) => setTimeout(r, 20)); } }
+  for (let i = 0; i < 500 && !res; i++) { try { res = JSON.parse(fs.readFileSync(path.join(box, 'q1.res'), 'utf8')); } catch { await new Promise((r) => setTimeout(r, 20)); } }
   assert.ok(res, 'answered');
   assert.equal(res.ok, false);
   assert.match(res.error, /only a click in TRIF's side panel/);

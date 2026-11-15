@@ -6,6 +6,12 @@ rest, which goes under "### More" (and on the GitHub release). It's written for 
 `node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
 summary is too long.
 
+## 0.3.1
+
+- **TRIF names your browser.** Brave, Edge, Opera, Vivaldi, Arc and Chromium are no longer all called
+  Chrome (nor Firefox's forks Firefox), in the panel, `trif status`, `trif doctor` and problem reports.
+- **Mods written without semicolons** no longer wait for your OK as "code TRIF can't check".
+
 ## 0.3.0
 
 - **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do

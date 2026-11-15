@@ -66,6 +66,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     var history: [ModVersion] = []
     /// While a change waits for the user's OK: the version that last ran, which keeps running.
     var ran: RanVersion?
+    /// What an edit (or a restore) asks about beyond what the code needs: a site its @match didn't cover before,
+    /// becoming a free mod (ModStore.changeNeeds). Kept apart from `needs`, which reading the file again remakes.
+    var extraNeeds: [ModNeed] = []
 
     struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String }
 
@@ -80,7 +83,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
 
     /// The needs not yet allowed (modfile.js waiting): what a hold is waiting for.
     var waiting: [ModNeed] {
-        needs.filter { n in
+        (needs + extraNeeds).filter { n in
             guard let ok = allowed[n.key] else { return true }
             return (n.lines ?? []).contains { !ok.contains($0) }
         }
@@ -89,7 +92,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// A change on hold: the version before runs meanwhile.
     var pending: Bool { held && ran != nil }
 
-    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, allowed, source, newOff, added, history, ran }
+    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, allowed, source, newOff, added, history, ran, extraNeeds }
 
     init(id: String, site: String, name: String, description: String, tier: String, sites: [String], matches: [String], powers: [String], code: String, script: String, world: String, at: String) {
         self.id = id; self.site = site; self.name = name; self.description = description; self.tier = tier; self.sites = sites
@@ -126,6 +129,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
         added = try c.decodeIfPresent(Date.self, forKey: .added) ?? Date()
         history = try c.decodeIfPresent([ModVersion].self, forKey: .history) ?? []
         ran = try c.decodeIfPresent(RanVersion.self, forKey: .ran)
+        extraNeeds = try c.decodeIfPresent([ModNeed].self, forKey: .extraNeeds) ?? []
     }
 }
 
@@ -188,6 +192,7 @@ final class ModStore: ObservableObject {
             m.on = old.on; m.offSites = old.offSites; m.source = old.source; m.newOff = old.newOff; m.added = old.added; m.history = old.history
             m.allowed = fromProbe ? ModStore.allow(m.needs, old.allowed) : old.allowed
             if !fromProbe, let ran = old.ran { m.ran = ran }
+            m.extraNeeds = old.extraNeeds
             out.removeAll { $0.id == m.id }
             out.append(m)
         }
@@ -318,12 +323,12 @@ final class ModStore: ObservableObject {
         if let i = mods.firstIndex(where: { $0.id == m.id }) {
             let old = mods[i]
             m.history = old.history
-            if old.code != m.code { m.history.insert(ModVersion(stamp: stamp(), at: Date(), code: old.code, source: source == "import" ? "import" : "chat"), at: 0) }
+            if old.code != m.code { m.history.insert(ModVersion(stamp: stamp(), at: Date(), code: old.code, source: ["import", "edit"].contains(source) ? source : "chat"), at: 0) }
             m.history = Array(m.history.filter { $0.at > Date().addingTimeInterval(-30 * 86400) }.prefix(30))
             m.allowed = old.allowed
             m.offSites = old.offSites
             m.added = old.added
-            if source == "import" { m.on = false; m.newOff = "update" } else { m.on = true; m.newOff = nil }
+            if source == "import" { m.on = false; m.newOff = "update" } else if source == "edit" { m.on = old.on; m.newOff = old.newOff } else { m.on = true; m.newOff = nil }
             // (the version before ran, and this one waits: it keeps running meanwhile)
             if m.held, !old.held || old.ran != nil { m.ran = old.ran ?? .init(code: old.code, script: old.script, world: old.world, at: old.at) }
             mods[i] = m
@@ -383,18 +388,77 @@ final class ModStore: ObservableObject {
         guard let ran = mods[i].ran, var back = read(ran.code, file: mods[i].file, site: mods[i].site).mod else { remove(id); return }
         let now = mods[i]
         back.on = now.on; back.offSites = now.offSites; back.allowed = now.allowed; back.source = now.source; back.added = now.added
+        back.extraNeeds = []
         back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: "undo")] + now.history
         mods[i] = back
         save()
     }
 
+    // MARK: editing (the code card's Edit)
+
+    /// An edit checked as `trif check` checks a file (modfile.js checkMod): {ok, errors: [{line, message}], lint, tier}.
+    func check(_ text: String, for m: InstalledMod) -> [String: Any] {
+        guard let c = js else { return ["ok": false, "errors": [["message": "the mod reader didn't start"]]] }
+        c.setObject(text, forKeyedSubscript: "__input" as NSString)
+        c.setObject(["file": m.file, "site": m.site], forKeyedSubscript: "__opts" as NSString)
+        let out = c.evaluateScript("JSON.stringify(__trifMods.checkMod(__input, __opts))")?.toString() ?? ""
+        return (try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]) ?? ["ok": false, "errors": [["message": c.exception?.toString() ?? "the check gave nothing back"]]]
+    }
+
+    /// What a change asks about beyond its code's needs, as held.js judges a change against the version before: a
+    /// @match for another site, when the mod can do something there (a style mod or a boxed mod without powers can't
+    /// act, wherever it runs); and becoming a free mod. Only what the user hasn't allowed for the mod waits (seeded).
+    static func changeNeeds(_ m: InstalledMod, was old: InstalledMod) -> [ModNeed] {
+        var out: [ModNeed] = []
+        if m.tier == "free" && old.tier != "free" { out.append(ModNeed(key: "tier:free", fact: "is now a free mod, so it can do anything the page can do")) }
+        if !m.needs.isEmpty && !old.everywhere {
+            let home = Site.of(old.site)
+            for p in m.matches {
+                let host = p == "<all_urls>" ? "*" : (p.range(of: "://").map { String(p[$0.upperBound...].prefix { $0 != "/" }) } ?? "")
+                let h = host.replacingOccurrences(of: "*.", with: "")
+                if host != "*", Site.host(h, isIn: home) { continue }
+                out.append(ModNeed(key: "match:\(p)", fact: "runs on \(p), outside \(home)"))
+            }
+        }
+        return out
+    }
+
+    /// What the user had allowed, plus what the version that ran already did (its sites, its tier), so a change is
+    /// asked about only for what it adds.
+    static func seeded(_ old: InstalledMod) -> [String: [String]] {
+        guard !old.held else { return old.allowed }
+        var keys = old.matches.map { ModNeed(key: "match:\($0)", fact: "") }
+        if old.tier == "free" { keys.append(ModNeed(key: "tier:free", fact: "")) }
+        return allow(keys + old.extraNeeds, old.allowed)
+    }
+
+    /// Saves an edit (checked first: a broken one is never saved). The version before goes into History ("before you
+    /// edited it"); the edit is judged as any change (held.js): if it needs an OK the version before didn't, the
+    /// version before keeps running and the approval card asks. Its id and site stay (desktop's: the file stays where
+    /// it is; a new @name is only its name). Returns the mod and the stamp of the version kept, or the check's answer.
+    func saveEdit(_ id: String, _ text: String) -> (mod: InstalledMod?, stamp: String?, check: [String: Any]) {
+        guard let old = mods.first(where: { $0.id == id }) else { return (nil, nil, ["ok": false, "errors": [["message": "that mod isn't here any more"]]]) }
+        let checked = check(text, for: old)
+        guard checked["ok"] as? Bool == true, var m = read(text, file: old.file, site: old.site).mod else { return (nil, nil, checked) }
+        guard m.code != old.code else { return (old, nil, checked) }
+        m.allowed = ModStore.seeded(old)
+        m.extraNeeds = ModStore.changeNeeds(m, was: old)
+        var kept = old
+        kept.allowed = m.allowed
+        if let i = mods.firstIndex(where: { $0.id == id }) { mods[i] = kept }
+        let saved = add(m, source: "edit")
+        return (saved, saved.history.first?.stamp, checked)
+    }
+
     /// Restore a kept version: it becomes the mod (the current one kept in History), judged again like any change.
-    func restore(_ id: String, stamp s: String) -> Bool {
+    func restore(_ id: String, stamp s: String, as source: String = "restore") -> Bool {
         guard let i = mods.firstIndex(where: { $0.id == id }), let v = mods[i].history.first(where: { $0.stamp == s }),
               var back = read(v.code, file: mods[i].file, site: mods[i].site).mod else { return false }
         let now = mods[i]
-        back.on = now.on; back.offSites = now.offSites; back.allowed = now.allowed; back.source = now.source; back.added = now.added; back.newOff = now.newOff
-        back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: "restore")] + now.history
+        back.on = now.on; back.offSites = now.offSites; back.source = now.source; back.added = now.added; back.newOff = now.newOff
+        back.allowed = ModStore.seeded(now)
+        back.extraNeeds = ModStore.changeNeeds(back, was: now)
+        back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: source)] + now.history
         if back.held, !now.held { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at) }
         mods[i] = back
         save()

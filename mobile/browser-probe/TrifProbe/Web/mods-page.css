@@ -42,3 +42,13 @@ button.switch { transform: scale(1.18); transform-origin: right center; margin-l
 dialog.approval { margin: 12px; max-height: calc(100% - 24px); width: calc(100% - 24px); font-size: 15px; }
 .approval .btn { min-height: 34px; font-size: 14.5px; }
 .cv-code { font-size: 12px; }
+/* (the code card's editor: Edit on the Code tab) */
+.cv-e-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.cv-e-tools .cv-e-save { margin-left: auto; }
+.cv-editor { display: flex; min-height: 240px; max-height: 55vh; border: 1px solid color-mix(in srgb, var(--tier, var(--accent)) 45%, var(--line)); border-radius: 8px; background: var(--code); overflow: hidden; }
+.cv-e-gutter { flex: none; padding: 8px 6px 8px 8px; overflow: hidden; white-space: pre; text-align: right; color: var(--faint); font: 12px/18px var(--mono); user-select: none; -webkit-user-select: none; border-right: 1px solid var(--line); }
+.cv-e-text { flex: 1; min-width: 0; margin: 0; padding: 8px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 12px/18px var(--mono); white-space: pre; overflow: auto; tab-size: 2; -webkit-text-size-adjust: 100%; caret-color: var(--tier, var(--accent)); }
+.cv-e-problems { margin-top: 8px; }
+.cv-e-problems p { margin: 2px 0; }
+.cv-e-problem .link-btn { font-family: var(--mono); }
+.cv-e-saved .link-btn { margin-left: 4px; }

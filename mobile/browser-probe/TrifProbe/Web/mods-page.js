@@ -557,7 +557,9 @@
       // the phone's fonts)
       const ic = el('span', 'ap-ic');
       const p = /^power:([\w-]+)/.exec(x.key);
-      const svg = p ? iconSvg(p[1] === 'migrate' ? '@migrate' : p[1]) : null;
+      // (an edit's own: another site, a new tier: line icons too, as ◎ isn't in the phone's fonts either)
+      const own = /^match:/.test(x.key) ? 'go-to' : /^tier:/.test(x.key) ? 'cpu' : null;
+      const svg = p ? iconSvg(p[1] === 'migrate' ? '@migrate' : p[1]) : own ? iconSvg(own) : null;
       if (svg) ic.append(svg); else ic.textContent = iconOf(x.key);
       ic.setAttribute('aria-hidden', 'true');
       li.append(ic, addMore(text, info.asks ? powerTerm(x.key) : null));
@@ -582,7 +584,7 @@
       P.together.hidden = false;
     }
     const fromAgent = info.by === 'chat';
-    const who = m.imported || info.by === 'import' ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || site()}.` : 'It\'s new or changed since TRIF last let it run.';
+    const who = info.by === 'edit' ? 'You edited it.' : m.imported || info.by === 'import' ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || site()}.` : 'It\'s new or changed since TRIF last let it run.';
     P.note.textContent = kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.` : who;
     P.err.hidden = true;
@@ -681,6 +683,25 @@
     hDiff.setAttribute('aria-pressed', 'false');
     const hRestore = button('Restore', 'cv-h-restore', (ev) => restoreVersion(ev.currentTarget));
     hTools.append(hDiff, hRestore);
+    // (Edit, on the Code tab: the code becomes an editor, with Undo, Redo, Cancel and Save: startEdit)
+    const eTools = el('div', 'cv-e-tools');
+    const editBtn = button('Edit', 'cv-edit', () => startEdit());
+    const eUndo = button('Undo', 'cv-e-undo', () => editUndo());
+    const eRedo = button('Redo', 'cv-e-redo', () => editRedo());
+    const eCancel = button('Cancel', 'cv-e-cancel', () => endEdit());
+    const eSave = button('Save', 'go cv-e-save', () => saveEdit());
+    eTools.append(editBtn, eUndo, eRedo, eCancel, eSave);
+    const editor = el('div', 'cv-editor');
+    editor.hidden = true;
+    const gutter = el('div', 'cv-e-gutter');
+    gutter.setAttribute('aria-hidden', 'true');
+    const area = el('textarea', 'cv-e-text');
+    for (const [k, v] of [['autocapitalize', 'off'], ['autocorrect', 'off'], ['autocomplete', 'off'], ['spellcheck', 'false'], ['wrap', 'off'], ['aria-label', 'The mod\'s code']]) area.setAttribute(k, v);
+    editor.append(gutter, area);
+    const problems = el('div', 'ap-together cv-e-problems');
+    problems.hidden = true;
+    const saved = el('p', 'ap-note cv-e-saved');
+    saved.hidden = true;
     const copy = button('Copy', 'cv-copy', () => copyCode());
     const exportBtn = button('Export', 'cv-export', () => exportMod());
     const acts = el('div', 'ap-actions');
@@ -688,11 +709,13 @@
     const historyBox = el('ul', 'cv-history-list');
     historyBox.hidden = true;
     x.addEventListener('click', () => d.close());
-    d.append(top, who, tabs, versions, errorBox, hTools, codeBox, details, historyBox, note, err, acts);
+    d.append(top, who, tabs, versions, errorBox, hTools, eTools, codeBox, editor, problems, saved, details, historyBox, note, err, acts);
+    wireEditor(area, gutter);
     d.addEventListener('close', () => setTimeout(() => renderMods(), 0));
     document.body.append(d);
     codeView.dialog = d;
-    codeView.parts = { name, where, details, detailsTab, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, note, err, copy };
+    codeView.parts = { name, where, details, detailsTab, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, note, err, copy,
+      eTools, editBtn, eUndo, eRedo, eCancel, eSave, editor, gutter, area, problems, saved };
     return codeView.parts;
   }
 
@@ -710,6 +733,7 @@
     P.versions.hidden = !m.pending;
     P.copy.textContent = 'Copy';
     P.historyBtn.disabled = !m.history;
+    P.saved.hidden = true;
     setCodeTab(tab === 'details' ? 'details' : 'code');
     codeView.error = error;
     P.errorBox.hidden = !error;
@@ -835,11 +859,11 @@
 
   const HISTORY_SOURCE = {
     chat: 'before your agent changed it in a chat', fix: 'before a fix', restore: 'before you restored an older version',
-    import: 'before an import replaced it', undo: 'before an undo',
+    import: 'before an import replaced it', undo: 'before an undo', edit: 'before you edited it',
   };
   function setCodeTab(which) {
     const P = codeView.parts;
-    P.codeTab.setAttribute('aria-selected', String(which === 'code'));
+    P.codeTab.setAttribute('aria-selected', String(which === 'code' || which === 'edit'));
     P.detailsTab.setAttribute('aria-selected', String(which === 'details'));
     P.historyBtn.setAttribute('aria-selected', String(which === 'history' || which === 'version'));
     P.historyBox.hidden = which !== 'history';
@@ -847,6 +871,14 @@
     P.codeBox.hidden = which === 'history' || which === 'details';
     P.hTools.hidden = which !== 'version';
     if (which !== 'code') P.versions.hidden = true;
+    if (codeView.editing && which !== 'edit') endEdit(true);
+    P.eTools.hidden = which !== 'code' && which !== 'edit';
+    for (const b of [P.eUndo, P.eRedo, P.eCancel, P.eSave]) b.hidden = which !== 'edit';
+    P.editBtn.hidden = which === 'edit';
+    P.editor.hidden = which !== 'edit';
+    if (which === 'edit') P.codeBox.hidden = true;
+    if (which !== 'edit') P.problems.hidden = true;
+    if (which !== 'code' && which !== 'edit') P.saved.hidden = true;
   }
   function showCodeTab() {
     const P = codeView.parts;
@@ -917,6 +949,104 @@
     const P = codeView.parts;
     P.err.hidden = true;
     try { await ask({ type: 'export', id: codeView.id }); } catch (e) { P.err.textContent = `Couldn't export: ${errText(e)}`; P.err.hidden = false; }
+  }
+
+  // ---- editing a mod's code (Tim, 11-15: on a phone there's no editor to open the file in) -----------------
+  // A plain text area (no autocorrect, capitals or smart punctuation: the keyboard's curly quotes and dashes are
+  // put back as typed), its lines numbered beside it, the system's undo plus Undo and Redo buttons. Save checks it
+  // first (the app: modfile.js checkMod, as `trif check`), says what's wrong and on which line, and saves only a mod
+  // that passes; the app judges the saved edit as any change (held.js), so one that needs an OK waits for it.
+  const SMART = { '\u2018': "'", '\u2019': "'", '\u201C': '"', '\u201D': '"', '\u2013': '--', '\u2014': '---' };
+  function wireEditor(area, gutter) {
+    const number = () => {
+      const n = area.value.split('\n').length;
+      if (gutter.childElementCount !== n) gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n');
+      gutter.scrollTop = area.scrollTop;
+    };
+    area.addEventListener('beforeinput', (e) => {
+      if (!e.data || !/[\u2018\u2019\u201C\u201D\u2013\u2014]/.test(e.data)) return;
+      e.preventDefault();
+      document.execCommand('insertText', false, e.data.replace(/[\u2018\u2019\u201C\u201D\u2013\u2014]/g, (c) => SMART[c]));
+    });
+    area.addEventListener('input', () => { number(); codeView.dirty = area.value !== codeView.text; });
+    area.addEventListener('scroll', () => { gutter.scrollTop = area.scrollTop; }, { passive: true });
+    // (a tab key on a hardware keyboard indents, as an editor does)
+    area.addEventListener('keydown', (e) => { if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); document.execCommand('insertText', false, '  '); } });
+    codeView.renumber = number;
+  }
+  function startEdit() {
+    const P = codeView.parts;
+    codeView.editing = true;
+    P.area.value = codeView.text;
+    codeView.dirty = false;
+    P.note.hidden = true;
+    P.saved.hidden = true;
+    setCodeTab('edit');
+    codeView.renumber();
+    P.area.focus();
+    P.area.setSelectionRange(0, 0);
+  }
+  function endEdit(quiet) {
+    const P = codeView.parts;
+    codeView.editing = false;
+    P.problems.hidden = true;
+    if (!quiet) { setCodeTab('code'); P.codeBox.hidden = false; }
+  }
+  function editUndo() { const P = codeView.parts; P.area.focus(); document.execCommand('undo'); codeView.renumber(); }
+  function editRedo() { const P = codeView.parts; P.area.focus(); document.execCommand('redo'); codeView.renumber(); }
+  // (a problem's line: tapped, the editor selects it)
+  function goToLine(n) {
+    const P = codeView.parts;
+    const lines = P.area.value.split('\n');
+    const start = lines.slice(0, n - 1).reduce((a, l) => a + l.length + 1, 0);
+    P.area.focus();
+    P.area.setSelectionRange(start, start + (lines[n - 1] || '').length);
+    const lh = parseFloat(getComputedStyle(P.area).lineHeight) || 18;
+    P.area.scrollTop = Math.max(0, (n - 3) * lh);
+  }
+  function showProblems(check) {
+    const P = codeView.parts;
+    const rows = [];
+    for (const e of check.errors || []) rows.push({ line: e.line, text: e.message });
+    for (const l of check.lint || []) for (const n of l.lines.slice(0, 3)) rows.push({ line: n, text: `${l.what}: ${l.why}` });
+    const head = el('p', null);
+    head.append(el('b', null, 'Not saved:'), ' TRIF found a problem in it.');
+    P.problems.replaceChildren(head, ...rows.slice(0, 8).map((r) => {
+      const p = el('p', 'cv-e-problem');
+      if (r.line) { const at = button(`Line ${r.line}`, 'link-btn', () => goToLine(r.line)); p.append(at, ' '); }
+      p.append(r.text);
+      return p;
+    }));
+    P.problems.hidden = false;
+    // (the keyboard down, so what's wrong is in view)
+    P.area.blur();
+    P.problems.scrollIntoView({ block: 'nearest' });
+  }
+  async function saveEdit() {
+    const P = codeView.parts;
+    const id = codeView.id;
+    P.eSave.disabled = true;
+    P.problems.hidden = true;
+    P.err.hidden = true;
+    try {
+      const r = await ask({ type: 'save', id, text: P.area.value });
+      if (!r.ok) { showProblems(r.check || {}); return; }
+      codeView.editing = false;
+      await loadCode('file');
+      setCodeTab('code');
+      P.codeBox.hidden = false;
+      if (!r.saved) return;
+      const undo = button('Undo', 'link-btn', async () => {
+        undo.disabled = true;
+        try {
+          await ask({ type: 'undoEdit', id, stamp: r.stamp });
+          await loadCode('file');
+          P.saved.replaceChildren('Put back the version from before your edit. Your edit is in History.');
+        } catch (e) { undo.disabled = false; P.err.textContent = errText(e); P.err.hidden = false; }
+      });
+      P.saved.replaceChildren(r.held ? 'Saved. It waits for your OK: the version before keeps running until you decide. ' : 'Saved. It runs from this page load. ', undo);
+      P.saved.hidden = false;
+    } catch (e) { P.err.textContent = errText(e); P.err.hidden = false; } finally { P.eSave.disabled = false; }
   }
 
   // ---- from the app ----------------------------------------------------------------------------------------

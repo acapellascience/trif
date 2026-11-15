@@ -116,6 +116,20 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             guard store.restore(id, stamp: d["stamp"] as? String ?? "") else { return (nil, "that version couldn't be read") }
             browser.report.log("mods", "restored a version of \(id)")
             return await done()
+        case "check":
+            guard let m = mod else { return (nil, "that mod isn't here any more") }
+            return (store.check(d["text"] as? String ?? "", for: m), nil)
+        case "save":
+            let r = store.saveEdit(id, d["text"] as? String ?? "")
+            guard let m = r.mod else { return (["ok": false, "check": r.check], nil) }
+            browser.report.log("mods", "edited \(id)\(m.held ? ", waiting for an OK" : "")")
+            if r.stamp != nil { browser.modsChanged() }
+            await refresh()
+            return (["ok": true, "saved": r.stamp != nil, "held": m.held, "stamp": r.stamp ?? ""], nil)
+        case "undoEdit":
+            guard store.restore(id, stamp: d["stamp"] as? String ?? "", as: "undo") else { return (nil, "that version isn't kept any more") }
+            browser.report.log("mods", "undid an edit of \(id)")
+            return await done()
         case "copy":
             UIPasteboard.general.string = d["text"] as? String ?? ""
             return (["ok": true], nil)

@@ -111,15 +111,17 @@ export function styleOf(mod) {
 }
 
 // (in the page, by itself: the section's CSS in a style element of its own, as a style mod's is)
-function putStyle(css) {
+// (marked with the mod's id, for TRIF's clickjacking guard: runtime.js clickGuard)
+function putStyle(css, id) {
   const style = document.createElement('style');
+  if (id) style.setAttribute('data-trif-style', String(id));
   style.textContent = css;
   const put = () => (document.head || document.documentElement).append(style);
   if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
 }
 /** The script that puts a free mod's style section CSS on the page (before the mod's code, in its registration). */
 export function styleSectionCode(id, css) {
-  return `(${putStyle.toString()})(${JSON.stringify(String(css))});\n//# sourceURL=trif-style://${scriptName(id)}.css`;
+  return `(${putStyle.toString()})(${JSON.stringify(String(css))}, ${JSON.stringify(String(id))});\n//# sourceURL=trif-style://${scriptName(id)}.css`;
 }
 
 export function modToUserScript(mod) {

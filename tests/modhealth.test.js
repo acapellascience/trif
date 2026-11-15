@@ -72,3 +72,17 @@ test('a style mod\'s selectors: hide, filter, replace\'s in, and its CSS rules; 
   assert.deepStrictEqual(r.selectorsOf({ css: '#title { color: red } .a:hover, .b::before{x:1} @media (x){ .c {y:1} } body{} @keyframes k { from {a:1} 50% {a:2} }', hide: ['.ad'], filter: [{ items: 'article' }], replace: [{ in: 'body' }, { in: '#main' }] }),
     ['.ad', 'article', '#main', '#title', '.a', '.b', '.c']);
 });
+
+test('a click the clickjacking guard stopped: kept as the mod\'s error, marked clickjack, the same fingerprint on any control', async () => {
+  const { recordErrors, openErrors } = await import('../extension/modhealth.js');
+  const health = {};
+  const mods = new Map([['x.com/a', { id: 'x.com/a', hash: 'h' }]]);
+  const e = (what) => ({ mod: 'x.com/a', kind: 'clickjack', why: 'faded', stack: '', time: 1, message: `TRIF stopped a click on the page's "${what}": this mod's style made it nearly transparent, and without the mod it shows, so the click would have landed on it unseen.` });
+  const fresh = recordErrors(health, mods, [e('<button#del> Delete')]);
+  assert.strictEqual(fresh.length, 1);
+  assert.strictEqual(fresh[0].clickjack, true);
+  assert.deepStrictEqual(recordErrors(health, mods, [e('<a#x> Log out')]), []);
+  assert.deepStrictEqual(openErrors(health, { id: 'x.com/a', hash: 'h' }).map((x) => [x.clickjack, x.count]), [[true, 2]]);
+  // (an ordinary error isn't one)
+  assert.strictEqual(recordErrors(health, mods, [{ mod: 'x.com/a', message: 'boom', stack: '', time: 2 }])[0].clickjack, undefined);
+});

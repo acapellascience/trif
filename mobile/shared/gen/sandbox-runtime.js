@@ -384,7 +384,30 @@ globalThis.__trifStartSandbox = function () {
   // over from the last callback, so a mod has its own powers and no other mod's, also after an await.
   const nodes = new WeakMap(); // stand-in -> node
   const owners = new WeakMap(); // stand-in -> the api of the mod it was made for
-  const created = new WeakSet(); // nodes a mod made (page.create, clone)
+  // nodes a mod made (page.create, clone); the elements also as weak references, newest last, for the
+  // clickjacking guard (trif:cj-cover, below), which looks for a mod's own element drawn over a page control
+  const createdSet = new WeakSet();
+  const madeRefs = [];
+  const canRef = typeof WeakRef === 'function';
+  const pruneMade = () => {
+    const alive = madeRefs.filter((r) => { const n = r.deref(); return !!n; });
+    madeRefs.length = 0;
+    madeRefs.push(...alive.slice(-3000));
+  };
+  // (the clickjacking guard, runtime.js clickGuard, asks this world only when it's here, and for covers only
+  // once a mod has made an element)
+  const cjHere = () => { try { D.dispatchEvent(new CustomEvent('trif:cj-here', { detail: JSON.stringify({ made: madeRefs.length > 0 }) })); } catch { /* no document */ } };
+  D.addEventListener('trif:cj-hello', cjHere, true);
+  cjHere();
+  const created = {
+    add(n) {
+      if (createdSet.has(n)) return created;
+      createdSet.add(n);
+      if (canRef && n && n.nodeType === 1) { madeRefs.push(new WeakRef(n)); if (madeRefs.length === 1) cjHere(); if (madeRefs.length > 4000) pruneMade(); }
+      return created;
+    },
+    has: (n) => createdSet.has(n),
+  };
   const nodeOf = (s) => { const n = s && typeof s === 'object' ? nodes.get(s) : undefined; if (!n) fail('that isn\'t an element TRIF gave you'); return n; };
   const kidOf = (k) => (typeof k === 'string' ? k : nodeOf(k));
   // What a form sends is the page's: the page's own fields stay in the form they're in (moving one into, out
@@ -1076,9 +1099,11 @@ globalThis.__trifStartSandbox = function () {
   // (at document_start there may be no <html> yet: watch for it)
   if (!D.documentElement) { const early = new MutationObserver(() => { if (D.documentElement) { early.disconnect(); if (watchers.size || texters.size || changers.size || wrappers.size || embeddedFilters.length) { ensureObserver(); for (const w of watchers) runWatcher(w, D.documentElement); for (const tx of texters) textUnder(tx, D.documentElement); for (const wr of wrappers) wrapUnder(wr, D.documentElement); } } }); early.observe(D, { childList: true }); }
 
-  const styleSheet = (text) => {
+  // (marked with the mod's id: the clickjacking guard, runtime.js clickGuard, names the mod whose sheet hid a control)
+  const styleSheet = (text, owner) => {
     const st = D.createElement('style');
     trifSheets.add(st);
+    st.setAttribute('data-trif-style', String(owner || 'a boxed mod'));
     st.textContent = text;
     (D.head || D.documentElement).append(st);
     return st;
@@ -1334,7 +1359,7 @@ globalThis.__trifStartSandbox = function () {
         shadowSend(sh);
         return harden({ remove: () => { shadowCss.delete(sh); shadowSend({ id: sh.id, remove: true }); } });
       }
-      const st = styleSheet(t);
+      const st = styleSheet(t, modId);
       return harden({ remove: () => st.remove() });
     };
     const observe = (sel, fn, opts) => {
@@ -2215,6 +2240,118 @@ globalThis.__trifStartSandbox = function () {
   // Web Animations (el.animate): keyframes and timing through the same checks as style(), and no url() at all;
   // the page's own animations readable as numbers, and changed only by the mod that made them
   const animOwner = new WeakMap(); // Animation -> the mod that made it
+  // ---- the clickjacking guard's side (runtime.js clickGuard, in the page's world, asks during its look)
+  // What boxed mods did to the page's look that a style sheet doesn't hold: inline styles (style()), animations
+  // (animate()) and moves (append, before…). trif:cj-off, dispatched on the control pressed: undo the inline
+  // styles and detach the animations on it and its ancestors (all but `keep`'s), and answer whose they were,
+  // whether a mod made the control, and whether one moved it or an ancestor; trif:cj-on: put them back. TRIF's
+  // events only: a mod can't listen for trif: names (listen, above).
+  const styledBy = new WeakMap(); // node -> Map(property -> {mod, prev, prio}): the value before a mod's first
+  const movedBy = new WeakMap(); // the page's node -> the mod that last moved it
+  const noteStyle = (node, p, mod) => {
+    let m = styledBy.get(node);
+    if (!m) { m = new Map(); styledBy.set(node, m); }
+    const had = m.get(p);
+    if (had) had.mod = mod; else m.set(p, { mod, prev: node.style.getPropertyValue(p), prio: node.style.getPropertyPriority(p) });
+  };
+  const moving = (kids) => { let m = null; for (const k of kids) { if (typeof k === 'string' || created.has(k) || !k.isConnected) continue; if (m === null) m = cur().mod; movedBy.set(k, m); } };
+  const upOf = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || null;
+  let undone = null;
+  const cjAnswer = (o) => D.dispatchEvent(new CustomEvent('trif:cj-answer', { detail: JSON.stringify(o) }));
+  const cjRestore = () => {
+    const u = undone;
+    undone = null;
+    if (!u) return;
+    for (const [n, s] of u.styles) { if (s === null) n.removeAttribute('style'); else n.setAttribute('style', s); }
+    for (const [ef, tg] of u.anims) { try { ef.target = tg; } catch { /* gone */ } }
+  };
+  D.addEventListener('trif:cj-off', (e) => {
+    cjRestore();
+    let keep = null;
+    try { const o = JSON.parse(String(e.detail)); keep = o && typeof o.keep === 'string' ? o.keep : null; } catch { keep = null; }
+    const t = e.composedPath()[0] || e.target;
+    if (!t || t.nodeType !== 1) return;
+    const mods = new Set();
+    let made = null, moved = null;
+    const styles = [], anims = [];
+    for (let n = t, i = 0; n && i < 300; n = upOf(n), i++) {
+      if (i === 0 && created.has(n)) made = madeBy.get(n) || 'a boxed mod';
+      if (!moved && movedBy.has(n)) moved = movedBy.get(n);
+      const m = styledBy.get(n);
+      if (m) {
+        let saved = false;
+        for (const [p, r] of m) {
+          if (r.mod === keep) continue;
+          if (!saved) { styles.push([n, n.getAttribute('style')]); saved = true; }
+          if (r.prev) n.style.setProperty(p, r.prev, r.prio); else n.style.removeProperty(p);
+          mods.add(r.mod);
+        }
+      }
+      if (typeof n.getAnimations === 'function') {
+        for (const a of n.getAnimations()) {
+          const who = animOwner.get(a);
+          if (!who || who === keep) continue;
+          const ef = a.effect;
+          if (ef && ef.target) { anims.push([ef, ef.target]); ef.target = null; mods.add(who); }
+        }
+      }
+    }
+    undone = { styles, anims };
+    cjAnswer({ mods: [...mods], made, moved });
+  }, true);
+  D.addEventListener('trif:cj-on', cjRestore, true);
+  // (a click the guard stopped: TRIF's background looks at the tab's mod errors now, so the panel says so)
+  let cjSent = 0;
+  D.addEventListener('trif:cj-stopped', () => { const t0 = now(); if (!send || t0 - cjSent < 2000) return; cjSent = t0; try { Promise.resolve(send({ trifSandbox: 'clickjack' })).catch(() => {}); } catch { /* no background */ } }, true);
+  // trif:cj-cover at a point: is one of the mods' own elements, with pointer-events: none, drawn there over the
+  // control (so the user sees it and the click goes through to the control)? For a moment the elements there
+  // that let clicks through take them, and the browser says what's on top; it counts when that's a mod's element
+  // with an opaque background colour (not faded) over at least half the control. Pictures and canvases don't
+  // count: they're mostly see-through (DVD Logo's bouncing copy, Space Shooter's game over the whole page), and
+  // TRIF can't tell which pixels are. Nor does a mod's element that only adds words over a control, as Oppish
+  // does. (docs/SANDBOX-TIER-NOTES.md RT-3: what's left.)
+  const colourAlpha = (c) => { if (!c || c === 'transparent') return 0; const m = /\(([^)]*)\)/.exec(c); if (!m) return 1; const sl = m[1].split('/'); const v = sl.length > 1 ? sl[1] : m[1].split(',')[3]; if (v === undefined) return 1; const f = parseFloat(v); return Number.isFinite(f) ? (String(v).trim().endsWith('%') ? f / 100 : f) : 1; };
+  D.addEventListener('trif:cj-cover', (e) => {
+    if (!madeRefs.length) return;
+    let x, y;
+    try { const o = JSON.parse(String(e.detail)); x = Number(o.x); y = Number(o.y); } catch { return; }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const t = e.composedPath()[0] || e.target;
+    if (!t || t.nodeType !== 1) return;
+    for (let n = t; n; n = upOf(n)) if (created.has(n)) return; // (a mod's own control, under its own things)
+    const forced = [];
+    let looked = 0;
+    for (let i = madeRefs.length - 1; i >= 0 && looked < 1500; i--) {
+      const n = madeRefs[i].deref();
+      if (!n || !n.isConnected) continue;
+      looked++;
+      if (n === t || n.contains(t) || t.contains(n)) continue;
+      const b = n.getBoundingClientRect();
+      if (x < b.left || x > b.right || y < b.top || y > b.bottom) continue;
+      if (getComputedStyle(n).pointerEvents !== 'none') continue;
+      forced.push([n, n.getAttribute('style')]);
+    }
+    if (!forced.length) return;
+    let top = null;
+    try {
+      for (const [n] of forced) n.style.setProperty('pointer-events', 'auto', 'important');
+      top = D.elementFromPoint(x, y);
+    } finally { for (const [n, s] of forced) { if (s === null) n.removeAttribute('style'); else n.setAttribute('style', s); } }
+    if (!top || top === t || t.contains(top) || top.contains(t) || !created.has(top)) return;
+    let o = 1, hides = false, owner = null;
+    for (let n = top; n; n = upOf(n)) {
+      const c = getComputedStyle(n);
+      o *= Number.isFinite(parseFloat(c.opacity)) ? parseFloat(c.opacity) : 1;
+      if (created.has(n)) {
+        owner = owner || madeBy.get(n) || null;
+        const r = n.getBoundingClientRect(), tb = t.getBoundingClientRect();
+        const w = Math.min(r.right, tb.right) - Math.max(r.left, tb.left), h = Math.min(r.bottom, tb.bottom) - Math.max(r.top, tb.top);
+        const covers = w > 0 && h > 0 && w * h >= 0.5 * tb.width * tb.height;
+        if (covers && colourAlpha(c.backgroundColor) >= 0.9) hides = true;
+      }
+    }
+    if (hides && o >= 0.5) cjAnswer({ covered: owner || 'a boxed mod' });
+  }, true);
   const KEYFRAME_PROP = /^(-{0,2}[a-z][a-z0-9-]*|[a-z][a-zA-Z0-9]*)$/;
   const cssValue = (v, what) => { const t = typeof v === 'number' ? String(v) : str(v, what, 2000); if (!cssOk(t) || /url\s*\(/i.test(t)) fail(`${what} loads nothing (no url())`); return t; };
   const keyframesOf = (kf) => {
@@ -2439,6 +2576,7 @@ globalThis.__trifStartSandbox = function () {
       if (value === null || value === '') { node.style.removeProperty(p); return ''; }
       const v = str(String(value), 'a style value', 10000);
       if (!cssOk(v)) fail('that style value loads from an address (only data: is allowed)');
+      noteStyle(node, p, cur().mod);
       node.style.setProperty(p, v, 'important');
       return v;
     },
@@ -2532,10 +2670,10 @@ globalThis.__trifStartSandbox = function () {
     get next() { return wrap(nodeOf(this).nextElementSibling); },
     get previous() { return wrap(nodeOf(this).previousElementSibling); },
     get created() { return created.has(nodeOf(this)); },
-    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, n.childNodes.length), 0, k.map((x) => x.textContent).join('')); n.append(...k); relabel(n); wrote(n); },
-    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), 0, k.map((x) => x.textContent).join('')); n.prepend(...k); relabel(n); wrote(n); },
-    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), 0, k.map((x) => x.textContent).join('')); n.before(...k); relabel(n.parentElement); wrote(n.parentElement); },
-    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndAfter(n), 0, k.map((x) => x.textContent).join('')); n.after(...k); relabel(n.parentElement); wrote(n.parentElement); },
+    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); moving(k); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, n.childNodes.length), 0, k.map((x) => x.textContent).join('')); n.append(...k); relabel(n); wrote(n); },
+    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); moving(k); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), 0, k.map((x) => x.textContent).join('')); n.prepend(...k); relabel(n); wrote(n); },
+    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); moving(k); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), 0, k.map((x) => x.textContent).join('')); n.before(...k); relabel(n.parentElement); wrote(n.parentElement); },
+    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); moving(k); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndAfter(n), 0, k.map((x) => x.textContent).join('')); n.after(...k); relabel(n.parentElement); wrote(n.parentElement); },
     remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), n.textContent.length, ''); relabel(n.parentElement); n.remove(); wrote(n.parentElement || n); },
     // a copy of this element and what's inside it, keeping only allowed elements and attributes (an element
     // of another kind is left out, with what's inside it; other attributes are dropped)
@@ -2688,7 +2826,7 @@ globalThis.__trifStartSandbox = function () {
     // a sheet of TRIF's, which page.styleSheets() leaves out)
     if (api.styleCss && !api.styleApplied) {
       api.styleApplied = true;
-      if (cssOk(api.styleCss) && !READS_FIELDS.test(api.styleCss)) { try { styleSheet(api.styleCss); } catch (err) { report(id, err); } } else report(id, new TypeError('TRIF sandbox: the style section\'s CSS loads from an address, or reads a field, so TRIF didn\'t apply it'));
+      if (cssOk(api.styleCss) && !READS_FIELDS.test(api.styleCss)) { try { styleSheet(api.styleCss, id); } catch (err) { report(id, err); } } else report(id, new TypeError('TRIF sandbox: the style section\'s CSS loads from an address, or reads a field, so TRIF didn\'t apply it'));
     }
     try {
       if (SANDBOX) {

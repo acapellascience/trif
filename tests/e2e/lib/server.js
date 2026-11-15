@@ -40,6 +40,34 @@ const seen = [];
 for (const id of ['wd', 'wta', 'ed2']) document.getElementById(id).addEventListener('input', () => { seen.push(id); document.getElementById('seen').textContent = seen.join(','); });
 </script>`);
 
+// The clickjacking guard (tests/e2e/scenario.js clickjackCheck; extension/runtime.js clickGuard): real buttons
+// that the hostile mods hide over a decoy, the page's own invisible file input over its styled label, a label
+// over its own hidden checkbox, and buttons honest mods restyle (their words over one, their icon over one).
+// What the page got: data-hits on <html>, as JSON.
+const CLICKJACK_PAGE = () => PAGE('TRIF e2e clickjack', `<style>
+.stage { position: relative; width: 320px; height: 56px; margin: 10px 0; }
+.decoy { position: absolute; inset: 0; background: #2a2; color: #fff; display: flex; align-items: center; justify-content: center; }
+.real { padding: 10px 18px; background: #c00; color: #fff; border: 0; transition: opacity .3s; }
+.pretty { display: inline-block; padding: 10px 18px; background: #06c; color: #fff; }
+.file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.icon-btn { background: transparent; border: 0; padding: 4px; } .ic { position: relative; display: inline-block; width: 20px; height: 20px; }
+</style>
+<h1 id="title">Clickjacking</h1>
+<div class="stage" id="s1"><div class="decoy" id="decoy1">Win a prize</div><button class="real" id="real1" type="button">Delete account</button></div>
+<div class="stage" id="s2"><div class="decoy" id="decoy2">Play</div><button class="real" id="real2" type="button">Follow</button></div>
+<div class="stage" id="s3"><button class="real" id="real3" type="button">Send money</button></div>
+<div class="stage" id="s4"><span class="pretty" id="pretty">Choose a picture</span><input class="file" id="file" type="file"></div>
+<div class="stage" id="s5"><label id="sw"><input type="checkbox" id="cb" style="position:absolute;opacity:0"><span id="swtext">Notifications</span></label></div>
+<div class="stage" id="s6"><button class="real" id="ok1" type="button">Search</button></div>
+<div class="stage" id="s7"><button class="icon-btn" id="ok2" type="button"><span class="ic"><svg viewBox="0 0 20 20" width="20" height="20"><path d="M2 2h16v16H2z"/></svg></span></button></div>
+<script>
+const hits = {};
+for (const id of ['real1', 'real2', 'real3', 'decoy1', 'decoy2', 'file', 'cb', 'ok1', 'ok2']) document.getElementById(id).addEventListener('click', (e) => {
+  hits[id] = (hits[id] || 0) + 1; document.documentElement.dataset.hits = JSON.stringify(hits); if (id === 'file') e.preventDefault();
+});
+document.documentElement.dataset.hits = '{}';
+</script>`);
+
 // Sandboxed mods (tests/e2e/scenario.js sandboxedCheck): what the page itself would notice (__hits: clicks,
 // keys, submits, messages, inline code that ran), an empty script element the page made (text written into it
 // would run), a style element, a form, links, an image, a frame; a row added later; Amazon-like results and a
@@ -493,6 +521,7 @@ async function startServers(dir) {
     if (u.pathname === '/e2e-sw.js') return send(200, 'text/javascript', SW_SCRIPT);
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
+    if (u.pathname === '/clickjack.html') return send(200, 'text/html; charset=utf-8', CLICKJACK_PAGE());
     if (u.pathname === '/wide.html') return send(200, 'text/html; charset=utf-8', WIDE_PAGE());
     if (u.pathname === '/wideb.html') return send(200, 'text/html; charset=utf-8', WIDE_B_PAGE());
     // (rewrite-requests: what the request carried, as the server got it)

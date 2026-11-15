@@ -51,7 +51,7 @@ run in, a compartment with their API and two reads (the page's data behind an el
 fields; never a password or card field), for as long as the run lasts. There the code can't send, click,
 type or navigate, so nothing is locked, the site keeps working in every tab, and the user isn't asked first.
 What it can do is what a boxed mod with no powers can: read what the page shows and change what it shows
-(so the clickjacking gap of the safe tiers applies to it too). The page's own world is still there, for
+(so what's left of the safe tiers' clickjacking gap applies to it too: disguise; RT-3). The page's own world is still there, for
 what needs the site's own code, with everything below.
 
 `trif run --page` runs the agent's JavaScript in the page, logged in. Before a side-panel run's code runs in a
@@ -202,9 +202,17 @@ allows it. A checkpoint, not a wall.
 a free mod it writes there waits ("Sensitive sites", above). A boxed or free mod's style section is judged
 as a style mod (below). A mod moving to a higher tier is a change like any other, held for what it adds.
 
-**Open, for every tier that restyles:** clickjacking (RT-3, docs/SANDBOX-TIER-NOTES.md). CSS alone can make
-a page's real control invisible and float it over a decoy, so the user's own click lands on it; no power
-check sees that, and none is claimed. Also open in the box: `sound` beside a read across mods is refused only
+**Clickjacking, for every tier that restyles (RT-3, docs/SANDBOX-TIER-NOTES.md): guarded at the press,
+partly.** CSS alone can make a page's real control invisible and float it over a decoy, so the user's own
+click lands on it; no power check sees that. Since 0.3.1 TRIF's page runtime (extension/runtime.js
+`clickGuard`) gets every trusted press before the page: if the control pressed is unseen and shows without
+the mods' styles (looked at again with TRIF's sheets disabled and boxed mods' inline styles undone for that
+moment), the press is stopped and the mod named in its errors and a card in the chat. The page's own
+invisible controls work as before. Covered: style mods, style sections, boxed mods' CSS, `style()`,
+animations and moves, a boxed mod's own opaque element over a control that lets clicks through, frames the
+mods hid. **Not covered:** disguise (a control that's visible but made to read or look like something else),
+decoys from pseudo-elements, the ways to be unseen the guard doesn't test (listed there), and free mods'
+code. Also open in the box: `sound` beside a read across mods is refused only
 when the two share a `mods` channel; the timing of media requests and which pictures load are warned side
 channels; a field in a *closed* shadow root on a plain element can't be seen from TRIF's world.
 

@@ -494,6 +494,25 @@ function breakCard(li, m) {
   li.append(acts);
 }
 
+// (the strings: docs/CLICKJACK-STRINGS.md, awaiting Tim)
+function clickjackCard(li, m) {
+  li.classList.add('break-card');
+  const acts = el('div', 'break-actions');
+  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
+  const mod = (view.status?.mods || []).find((x) => x.id === m.mod);
+  if (mod && mod.enabled === false) { li.append(' ', el('span', 'break-state', 'Turned off.')); return; }
+  const show = button('Show code', '', () => openCodeView(m.mod));
+  const off = button('Turn it off', 'go', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try { await request({ type: 'mod.enable', id: m.mod, enabled: false, tab: view.tab?.id }); refreshStatus(); } catch (x) { fail(b, x); }
+  });
+  const ignore = button('Ignore', 'text', async (e) => { const b = e.currentTarget; b.disabled = true; try { await request({ type: 'modError.dismiss', id: m.mod, fp: m.fp }); li.querySelector('.break-actions')?.remove(); } catch (x) { fail(b, x); } });
+  ignore.title = 'Don\'t flag this again for this version of the mod';
+  acts.append(off, show, ignore);
+  li.append(acts);
+}
+
 async function undoFix(id, b) {
   if (b) b.disabled = true;
   try { await request({ type: 'mod.undo', ids: [id], site: view.site, tab: view.tab?.id }); } catch (e) {
@@ -638,6 +657,8 @@ function messageNode(m) {
   // A mod that broke (background.js announceBreak): Fix it / Show error / Ignore; a fix's own new error: Undo
   // fix first; once fixed: Undo fix
   if (m.kind === 'modError') breakCard(li, m);
+  // A click TRIF's clickjacking guard stopped (background.js announceBreak): Show code, Turn it off, Ignore
+  if (m.kind === 'clickjack') clickjackCard(li, m);
   // "x.js waits for you." with "Mods your chat makes: Wait for me": Show code, Turn on
   if (m.waitMod) {
     const mod = view.status?.mods?.find?.((x) => x.id === m.waitMod);
@@ -1710,10 +1731,12 @@ function modItem(m) {
   if (Array.isArray(m.broken) && m.broken.length) {
     const errs = m.broken.filter((b) => !b.quiet);
     const first = errs[0] || m.broken[0];
-    const badge = el('button', 'tag err-badge row-tag', errs.length ? (errs.length > 1 ? `${errs.length} errors` : 'error') : 'may be broken');
+    // (a click TRIF's clickjacking guard stopped is one of these too: its own words, docs/CLICKJACK-STRINGS.md)
+    const jacked = errs.length > 0 && errs.every((b) => b.clickjack);
+    const badge = el('button', 'tag err-badge row-tag', jacked ? 'stopped a click' : errs.length ? (errs.length > 1 ? `${errs.length} errors` : 'error') : 'may be broken');
     badge.dataset.rank = '2';
     badge.type = 'button';
-    badge.title = first.quiet ? 'May be broken: nothing it looks for is on the page any more.' : `New error${first.line ? ` at line ${first.line}` : ''}: ${first.message}`;
+    badge.title = first.quiet ? 'May be broken: nothing it looks for is on the page any more.' : first.clickjack ? first.message : `New error${first.line ? ` at line ${first.line}` : ''}: ${first.message}`;
     badge.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { error: first }); });
     name.append(badge);
   }

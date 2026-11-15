@@ -235,14 +235,93 @@ make the page (or the user) act. What changed, and what each costs mods:
   forms (unless they name their form with `form=`, which moving doesn't change). Moving them within their
   form, and moving anything else, still works. *Cost*: rearranging a page's form into another form or out
   of it is refused; a mod can't add its own buttons inside a form (put them next to it).
-- **RT-3, clickjacking (medium, tier-wide).** Not changed in code (style mods can do it with CSS alone).
-  Proposal, not built: on the page's own interactive elements (`a`, `button`, `input`, `select`,
-  `textarea`, `label`, `summary`, `[role=button]`, `[onclick]`), `style()` refuses `opacity` below ~0.3,
-  `visibility: hidden`, `clip-path`, `filter` and `transform`, and refuses `position`, `top/left/right/
-  bottom` and `z-index` together with them; `hide()` (display none) stays. That stops "float the real control,
-  invisible, over a decoy" through stand-ins, cheaply; `trif.css` and style mods can still do it with a
-  selector, so the honest fix is the wording (below), plus perhaps a later check of the CSS text for
-  `opacity: 0`-like values on interactive selectors.
+- **RT-3, clickjacking (medium, tier-wide).** CSS alone can make a page's real control invisible (or move it)
+  and float it over a decoy, so the user's own click lands on it. The first proposal (`style()` refusing
+  `opacity`, `clip-path`, `transform`… on the page's controls) was dropped: it missed style mods and
+  `trif.css`, which can do the same with a selector. **Partly closed for 0.3.1 (branch clickjack-guard): a
+  guard at the press**, for every tier whose styles TRIF applies. Strings: docs/CLICKJACK-STRINGS.md.
+  - *What's built* (extension/runtime.js `clickGuard`, in the page's world, listening on the window in the
+    capture phase from document_start, so before the page's own listeners; extension/sandbox.js, the
+    `trif:cj-*` events). On a trusted press (pointerdown, mousedown, touchstart, a click with no press before
+    it, Enter or Space on a focused control) on one of the page's controls (the element hit or its nearest
+    `a[href]`, `button`, `input`, `select`, `textarea`, `label`, `summary`, frame, control role, `[onclick]`,
+    `[contenteditable]`, tab stop; else the outermost element with the pointer cursor): is it **unseen**?
+    Opacity under 0.25 multiplied up its ancestors (with `filter: opacity()`; a heavy blur or an SVG `url()`
+    filter counts as nothing), a mask that hides it (an image, or a gradient of transparent colours only),
+    under 4 px, or nothing of it showing (no text, border, background, shadow, outline, picture, field or
+    generated content, looking through up to 60 elements inside it and skipping what's faded or masked out
+    in there). Almost every press stops there (seen). If it's unseen, TRIF **looks again with the mods'
+    styles taken away**: every TRIF style element in the control's tree scopes (`data-trif-style="<mod id>"`:
+    style mods, style sections, boxed mods' `trif.css`/`hide`) and TRIF's adopted shadow sheets disabled;
+    boxed mods' `style()` values and `animate()` animations on the control and its ancestors undone by the
+    sandbox (it keeps each property's value from before the mod's first write); the transitions this starts
+    cancelled as they start, and again on the way back, so the look reads the real values and the page never
+    shows them. Unseen without the mods too: the site's own design (a file input it made invisible over its
+    own label), and the press goes on. Seen without them: the press is stopped (`preventDefault` and
+    `stopImmediatePropagation` on it and on the rest of its gesture: up, click, contextmenu, the key's
+    release) and the mod named: the owner of the one sheet with a rule that changes how something looks and
+    matches the control, an ancestor or something in it (when several, each one's styles alone are tried;
+    when none alone does it, they're named together). A boxed mod that moved the control or an ancestor is
+    named for it whatever the look without styles says (a move can't be undone for the look). Also stopped,
+    without that comparison: a press through one of a boxed mod's own elements that lets clicks through
+    (`pointer-events: none`), with an opaque background colour, not faded, over at least half the control
+    (`trif:cj-cover`: those elements take clicks for a moment and the browser says what's on top). A frame
+    (`iframe`, `embed`, `object`) the mods hid is made unclickable (`[data-trif-guard] { pointer-events: none }`)
+    when the pointer enters it, as its presses happen inside it, out of reach; the click goes to what the
+    user saw under it. Told once per mod and reason on a page: an entry in the mod's errors (`kind:
+    'clickjack'`: `trif errors`, the row's badge), and a card in the site's chat (never a fix run); a boxed
+    mod's world tells the background at once, else it's read at the next look.
+  - *Not covered*: **free mods' code** (it runs in the page, and can do anything the page can; their style
+    section is marked and judged like a style mod's, but their own code can hide a control however it likes).
+  - *What's left, plainly*:
+    - **Disguise, not hiding.** A control that's visible but made to look or read like something else: its
+      words replaced (a style mod's `replace`, a boxed mod's `setText`), its colours, generated content, a
+      mod's own words drawn over it with a see-through background (Oppish does exactly this, honestly), a
+      picture or canvas drawn over it (pictures and canvases are mostly see-through: DVD Logo's bouncing copy,
+      Space Shooter's game; TRIF can't tell which pixels are), or a mod's element with a see-through
+      background. The guard judges whether the control can be seen, not what it says.
+    - **Decoys that aren't a boxed mod's own element**: a style mod's or `trif.css`'s `::before`/`::after`,
+      or a page element moved over the control by mod CSS, with `pointer-events: none`. Only boxed mods' own
+      elements are checked as covers.
+    - **Unseen by other means**: the control coloured like what's behind it, `mix-blend-mode`, `clip`/
+      `clip-path` leaving a sliver (they also clip where it can be clicked, so only the sliver's pressable),
+      text pushed out of its box (`text-indent`), a mask sized or placed off the control, a mask gradient
+      with one opaque stop, filters other than `opacity()`, a heavy `blur()` and `url()`.
+    - **Presses it doesn't see**: keyboard focus moved into a hidden frame (Tab), touch entering a hidden
+      frame (pointerover is what shields one: tested with a mouse), Enter in a `textarea` or editor and typing
+      into a hidden field (typing isn't a press), and controls the page made of plain elements with no role,
+      tab stop, `onclick` or pointer cursor.
+    - **Closed shadow roots** are judged at their host (what's inside isn't visible from TRIF's code).
+    - **Inside other shadow trees**, inherited styles a document sheet changes during the look (a colour)
+      can start transitions there; they're cancelled with the rest (`document.getAnimations()`).
+  - *Costs* (`window.__webmods.guard.stats`): in headless Chrome on a page of 9000 elements
+    (tests/clickjack-browser.test.js), a press 0.4 to 0.7 ms on average; the second look, only for an unseen
+    control, 3 to 9 ms (the first press of a page is the slowest, its code not yet warm). In the e2e's small
+    page through the real extension: Chrome about 1.5 ms a press and 1.5 ms for the second look (max 3.8);
+    Firefox about 1.3 ms and 2.8 ms (max 9, the first; Firefox's timer counts whole milliseconds; one earlier
+    run under load measured 22 ms at most, before the guard stopped asking TRIF's sandbox world on every
+    press). No event crosses to TRIF's world on a press unless it's on the page, and the check for a mod's
+    own element over a control runs only once a mod has made one. Only presses are watched (and the pointer
+    entering a frame). The second look's side effects,
+    when a press is on an unseen control: the mods' CSS animations restart (their sheet was off for a moment),
+    the page gets `transitioncancel` for transitions the look started, and MutationObservers that watch
+    `style` attributes see a boxed mod's inline styles on the control and its ancestors undone and redone.
+    A page's own invisible control pressed twice within 2 s is looked at once.
+  - *False positives found and how they're handled*: Rainbow Rave hides X's icons (`opacity: 0`) and draws
+    its own with `::after` (the control is judged, not the element hit, and generated content counts as
+    something it shows); Oppish makes a button's text transparent and draws its own words over it (the
+    button still shows its background and border; words-only overlays aren't covers); DVD Logo and Space
+    Shooter draw pictures and a canvas over the page with `pointer-events: none` (not counted as covers);
+    Tune Composer's own controls at 0.3 to 0.4 (the threshold is 0.25; a mod's own control isn't checked
+    for covers, and a mod's own element pressed counts only when it acts the page's way: a link, a button…);
+    the site's own button fading in on hover, pressed at once (judged where its transition ends); the
+    page's own transitions, which the second look first read at their first frame (cancelled, see above; a
+    sheet making every transition `none` cost 34 ms on 9000 elements, so it's not that). The e2e presses
+    every control in view on the X and Google stand-ins with Tim's shipped mods on (Rainbow Rave, Profile
+    and Post Styler, Follow Status, Oppish, DVD Logo, the two Google style mods, Detox Timeline:
+    tests/e2e/scenario.js `clickjackShipped`, Chrome): nothing stopped. The stand-ins are small (13 controls
+    in all), so the real sites are the better test: Simple Shopping has no stand-in (its port runs on the
+    e2e's sandbox page, where nothing it does is pressed).
 - **RT-4, keystrokes (low).** `key` and `code` reach a mod only when the key wasn't pressed in something
   editable: input, textarea, select, contenteditable, or an element that may hold a field in its shadow root
   (a custom element, or one with an open shadow root). The mod still gets the type, modifiers and target.

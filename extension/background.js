@@ -682,6 +682,7 @@ const boxReloads = new Map(); // tab id -> when a boxed mod last reloaded it (go
 // tab id -> {mod, at}: a boxed mod's go-to (or reload) sent this tab to a page; the page it lands on asks once
 // (sandbox.js arrivedBy: there, other boxed mods' clicks and signals wait for the user's own click or key)
 const boxArrivals = new Map();
+const clickjackLooks = new Map(); // tab id -> when the guard's stop last had its errors read (onSandboxMessage)
 const ARRIVAL_MS = 30000;
 const markArrival = (tab, mod) => {
   const t = Date.now();
@@ -696,7 +697,7 @@ chrome.tabs.onUpdated?.addListener((tabId, info) => {
   if (info.status === 'loading') m.loading = true;
   else if (info.status === 'complete' && m.loading) boxArrivals.delete(tabId);
 });
-chrome.tabs.onRemoved?.addListener((tabId) => { boxArrivals.delete(tabId); });
+chrome.tabs.onRemoved?.addListener((tabId) => { boxArrivals.delete(tabId); clickjackLooks.delete(tabId); });
 // (Firefox has runtime.onUserScriptMessage only once its optional userScripts permission is granted, which can
 // be after this worker started: so it's listened for once user scripts are there, from sandboxWorld.)
 // (And there, a listener on `chrome.runtime`'s event, made before the grant, never heard a user script's
@@ -734,6 +735,17 @@ function onSandboxMessage(msg, sender, sendResponse) {
       const m = boxArrivals.get(tab);
       boxArrivals.delete(tab);
       return { ok: true, mod: m && Date.now() - m.at < ARRIVAL_MS ? m.mod : null };
+    }
+    // (the clickjacking guard stopped a click in this tab: its mod errors read now, so the panel says so; at most
+    // every 2 s a tab)
+    if (msg.trifSandbox === 'clickjack') {
+      const tab = sender.tab && sender.tab.id;
+      if (typeof tab !== 'number' || sender.frameId) return { ok: false };
+      const t = Date.now();
+      if (t - (clickjackLooks.get(tab) || 0) < 2000) return { ok: true };
+      clickjackLooks.set(tab, t);
+      setTimeout(() => checkTab(tab, false).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), 100);
+      return { ok: true };
     }
     if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
     // (go-to's reload: at most once in 10 seconds in a tab, whatever reloads in between)
@@ -1628,6 +1640,8 @@ async function badgeFor(tab) {
   } catch { /* the tab went */ }
 }
 
+// (awaiting Tim: docs/CLICKJACK-STRINGS.md)
+const clickjackText = (name) => `TRIF stopped a click: ${name} had hidden what you clicked, so you couldn't see what it was. The page didn't get the click. If you didn't expect this, turn ${name} off.`;
 const breakText = (name, site, quiet) => (quiet ? `${name} may be broken on ${site}: nothing it looks for is on the page any more. Want me to fix it?` : `${name} has a new error on ${site}. Want me to fix it?`);
 
 /** A new error or flag: the chat's card (once per fingerprint), or with "Fix it automatically", a fix run. */
@@ -1637,10 +1651,16 @@ async function announceBreak(f, tab) {
   if (!e || e.carded?.[f.fp] || e.dismissed?.[f.fp]) return;
   e.carded[f.fp] = true;
   saveHealthSoon();
-  if (state.onBreak === 'flag') return;
   const site = siteForUrl(tab.url || '');
   if (!site) return;
   const name = mod.name || mod.id;
+  // (a click TRIF's clickjacking guard stopped: not a bug to fix, so never a fix run; the card says what happened,
+  // whatever "When a mod breaks" says: the user's click did nothing, and they should know why)
+  if (f.clickjack) {
+    await updateChat(site, (chat) => { chat.messages.push({ role: 'trif', kind: 'clickjack', mod: mod.id, name, fp: f.fp, site, text: clickjackText(name), time: Date.now() }); });
+    return;
+  }
+  if (state.onBreak === 'flag') return;
   if (state.onBreak === 'auto' && !state.robotless && !e.fixed?.[f.fp]) { // (robotless: no agent to ask, so the card)
     const level = agentLevelOf(tab.url || '');
     if (level === 'run' || level === 'ask') {
@@ -2037,7 +2057,7 @@ async function uiStatus() {
       ...(waitsThere(m) ? { waitsThere: true } : {}),
       imported: !!m.imported,
       fixUndo: !!(state.fixes[m.id]?.fixedHash && state.fixes[m.id].fixedHash === m.hash),
-      broken: openErrors(state.health, m).map(({ fp, message, line, count, quiet }) => ({ fp, message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}) })).slice(0, 10),
+      broken: openErrors(state.health, m).map(({ fp, message, line, count, quiet, clickjack }) => ({ fp, message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}), ...(clickjack ? { clickjack: true } : {}) })).slice(0, 10),
     })),
     onBreak: state.onBreak,
     chatWait: state.chatWait, canSandbox: state.canSandbox !== false,

@@ -97,7 +97,7 @@ check needs iOS 26 on a phone with Apple Intelligence (iPhone 15 Pro or later), 
 silicon Mac that has it turned on.
 
 It starts on the plain test page (afterwards, on the tabs it had). The address bar has reload (stop while
-loading). The bar at the bottom, left to right: back, forward, **chat** (shows the pane), **Mods** (the robot;
+loading). The bar at the bottom, left to right: back, forward, **chat** (the chat, full screen), **Mods** (the robot;
 its badge counts the site's mods waiting for an OK), **tabs** (the number open), and **⋯**: New tab, History,
 Import…, the wand's items (outline, clipboard, the phone's model, forget), and **The probe** (Checks, Report,
 the test pages and a few real sites). What each of tabs, history, Mods and Import does: "The browser probe as
@@ -110,18 +110,21 @@ an app", below.
   Note what the long press fights with: text selection, the page's own long-press menus.
 - **Wand → Ask the phone's own model.** Say what bothers you; the model gets the page outline and picks a
   part; the app marks it and you confirm.
-- **Claude in a pane.** Tap the bubble. Then, by hand:
-  1. Can you sign in? Try email, then Google, then Apple. Which work? (A window Claude opens shows as a
-     sheet.) Does the chat itself work, and does it stay signed in after you quit the app?
-  2. Wand → Copy this page's outline for Claude. Paste it into the chat, and say what bothers you.
-  3. Claude should answer with a link ending `/trif-install#hide=…`. Tap it. The app should stop the link
-     and show "Add this mod?" with what it would hide. Add it.
-  4. If Claude's page won't make it a link, copy the reply and use Wand → Add a mod from the clipboard.
+- **The chat** (Claude or ChatGPT, the switch at its top). Tap the bubble: the chat opens full screen over the
+  tab, with the tab's data already in its message box (in a chat without TRIF's instructions yet: how mods are
+  written, the page's outline and a screenshot, as TRIF instruction; in one that has them: the page now, the
+  mods on it with their errors, as TRIF follow-up). Say what you want and send it yourself: the app goes back
+  to the tab at once, and the bubble's dots move while the reply is written. When it's done, the app shows
+  "Add this mod?" for each mod in the reply, over the tab; nothing is added without Add it. A reply with no
+  mod in it puts a green mark on the bubble; tap it to read the reply. ‹ {site} at the chat's top goes back.
+  Signing in (email, Google, Apple; a window the chat opens shows as a sheet) happens in the chat's own page.
 - **Report → Share the report**, and send it to me. It names the sites you ran it on and which addresses
-  Claude's pane went to (never what was typed or said there).
+  the chat went to (never what was typed or said there).
 
-The app never puts a script into Claude's pane and never reads from it. It only watches which address the
-pane is about to load, which every browser does.
+The chat runs TRIF's script (TrifProbe/Web/chat.js) in a world of its own beside the chat's page: it fills the
+message box, notices a send, watches whether a reply is still being written (Claude's stop button and its
+streaming mark; ChatGPT's stop button; else the reply unchanged for six seconds) and reads the code blocks
+written in the reply. It never presses Send and never reads the rest of the conversation.
 
 ## The browser probe as an app (branch ios-poc, 11-15)
 
@@ -210,8 +213,13 @@ time, for a headless Simulator: write the app's Documents/step.json, then
 `xcrun simctl spawn <device> notifyutil -p com.trif.probe.step` (its answer in Documents/step-out.txt). Steps:
 `{"sheet": "mods|tabs|history|chat|import|none"}`, `{"modsjs": "…"}` (in the Mods tab's page),
 `{"pagejs": "…"}`, `{"go": "…"}`, `{"newtab": "…"}`, `{"select": n}`, `{"close": n}`, `{"back": 1}`,
-`{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"status": 1}`, and for the chat pane
-`{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`.
+`{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"cancelOffer": 1}`, `{"status": 1}`, and
+for the chat `{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`, `{"chat": 1}` (shown, what
+it's doing, its address), `{"closechat": 1}`.
+
+The chat can't be signed in to in the Simulator: `-chathome http://localhost:8377/chat.html` (with
+`node mobile/serve.js`) gives it a stand-in (shared/pages/chat.html) with claude.ai's message box, send and stop
+buttons and a reply written a few words at a time, with a mod in it ("two" in the message: two mods; "no mod": none).
 Screenshots from 11-15 are in browser-probe/shots/ (not committed).
 
 ## What isn't probed, because it's known
@@ -232,6 +240,7 @@ Screenshots from 11-15 are in browser-probe/shots/ (not committed).
 ```
 node mobile/prepare.js          # remakes shared/gen/ (sandbox runtime, checks, the mod reader, the Mods tab's kit, the guide)
 TRIF_BROWSER_TESTS=1 node mobile/test/smoke.js   # the Safari probe and the browser probe's JS checks, in Chrome for Testing
+TRIF_BROWSER_TESTS=1 node mobile/test/chat.test.js   # the app's chat script against the stand-in chat: fill, send, the reply until done, its mods
 ruby mobile/browser-probe/make-project.rb   # rewrites the Xcode project (gem install xcodeproj)
 ```
 

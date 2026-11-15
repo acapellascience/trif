@@ -97,6 +97,22 @@ readers read them on the phone. Worth a phone wording, or leave.
 | The share sheet / AirDrop's "Open in" name for the app's files | TRIF mod (the document type's name, Info.plist) |
 | The "Add this mod?" sheet's free-mod warning | unchanged words, now in the panel's coral |
 
+## The chat, full screen (added 11-15, replacing the pane from the bottom)
+
+| Where | Old | New |
+|---|---|---|
+| The chat's top bar, the way back | (the pane closed with the chat button) | **‹ {site}** (**‹ Tab** on a tab with no site); accessibility: Back to {site} |
+| The chat's top bar, Start over | Start over (text) | a new-chat icon; accessibility: Start over |
+| The chat's top bar | Send page · Paste | (gone: the tab's data goes into the message box when the chat opens, and a reply's mod comes to the app by itself) |
+| The pane's grip (accessibility) | Chat height | (gone) |
+| Toolbar's chat button (accessibility) | Chat | Chat · Chat, writing a reply (animated dots on the bubble) · Chat, replied (a small green mark: a reply with no mod in it) |
+| The Add this mod? sheet, a reply with several mods (offered in turn) | — | {n} of {m} mods in the reply |
+| Status strip, a reply whose mod can't be read | — | The reply's mod can't be added: {why}. |
+| Status strip after a mod from the chat is added | Added {name}. What it did is attached in the chat's message box: send it, with what to fix, if it needs fixing. | (gone: what it did goes into the message box the next time the chat opens) · Added {name}. It runs on {sites}. (unchanged) |
+
+What's attached in the message box keeps its names: TRIF instruction (a chat without TRIF's instructions yet),
+TRIF follow-up (one that has them), TRIF screenshot, TRIF pointer.
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

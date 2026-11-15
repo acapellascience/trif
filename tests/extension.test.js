@@ -2506,7 +2506,9 @@ test('background: TRIF on for timsrobot.com registers its mods, and nothing that
     await settle(30);
     assert.ok(scriptIds(bg).includes('timsrobot.com/fireworks'));
     assert.ok(!scriptIds(bg).includes('trif-home'));
-    assert.ok(!bg.chrome.userScripts.scripts.some((x) => x.js.some((j) => String(j.code).includes('data-trif'))));
+    // (the old marker, <html data-trif="on">; TRIF's own style elements carry data-trif-style for the clickjacking
+    // guard, on pages a mod already styles, which is no mark of the page)
+    assert.ok(!bg.chrome.userScripts.scripts.some((x) => x.js.some((j) => /data-trif(?![\w-])|dataset\.trif\b/.test(String(j.code)))));
   } finally { bg.restore(); }
 });
 
@@ -3724,6 +3726,38 @@ test('background: mods that break: a new error gets a card in the site\'s chat o
     st = (await panel.ask({ type: 'status' })).result;
     assert.strictEqual(st.onBreak, 'flag');
     assert.ok(st.mods.find((m) => m.id === 'example.com/hider').broken.some((b) => b.message === 'another failure'));
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});
+
+test('background: a click the clickjacking guard stopped: a card of its own in the chat (never a fix run, even with Fix it automatically), and the mod\'s badge', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/cover', { name: 'Cover', matches: ['*://example.com/*'], hash: 'c1' })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods, onBreak: 'auto' }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const msgs = () => bg.store['chat:example.com']?.messages || [];
+  const stopped = (n) => ({ mod: 'example.com/cover', kind: 'clickjack', why: 'faded', stack: '', time: Date.now() + n, message: `TRIF stopped a click on the page's "<button> Delete ${n}": this mod's style made it nearly transparent, and without the mod it shows, so the click would have landed on it unseen.` });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.errors = [stopped(1)];
+    await load();
+    const cards = msgs().filter((m) => m.kind === 'clickjack');
+    assert.deepStrictEqual(cards.map((c) => [c.mod, c.text]), [['example.com/cover', 'TRIF stopped a click: Cover had hidden what you clicked, so you couldn\'t see what it was. The page didn\'t get the click. If you didn\'t expect this, turn Cover off.']]);
+    assert.ok(!msgs().some((m) => m.kind === 'modError'), 'not a mod error\'s card');
+    assert.ok(!msgs().some((m) => /asked your agent to fix/.test(m.text || '')), 'no fix run');
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/cover').broken.map((b) => [b.clickjack, b.count]), [[true, 1]]);
+    // (another stop on another control: the same fingerprint, no second card)
+    page.errors = [stopped(2)];
+    await load();
+    assert.strictEqual(msgs().filter((m) => m.kind === 'clickjack').length, 1);
   } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
 });
 

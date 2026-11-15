@@ -1369,6 +1369,7 @@ class Scenario {
       await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
+      await r.check('the clickjacking guard (RT-3): a style mod\'s and a boxed mod\'s real buttons made invisible over a decoy, and one under the boxed mod\'s own opaque element, are stopped (mouse and Enter) and named in trif errors and a card in the chat; the page\'s own invisible file input over its label, a label\'s hidden checkbox, and honest restyles still work; Tim\'s shipped mods trip nothing on the X and Google stand-ins (Chrome)', () => this.clickjackCheck(win));
       await r.check('an organization\'s Codex settings replace TRIF\'s sandbox (a stand-in Codex): the card; Stop stores nothing; Use Codex anyway sends it again, the chip, Settings\' line and Stop allowing', () => this.orgSettingsCheck(win));
       await r.check('not logged in (a stand-in Claude Code logged out, a stand-in Codex logged in): the notice and the gate\'s line offer Switch to Codex and Use robotless; Switch to makes Codex this site\'s agent; robotless is green with the off face (bar and toolbar) and its line in the message box\'s place; Settings\' "None (robotless)" round-trips', () => this.robotlessCheck(win));
     }
@@ -3537,6 +3538,145 @@ process.exitCode = 1;
       return `${Object.keys(R).length + Object.keys(RB || {}).length} outcomes as each fix says (${Object.keys(R).filter((k) => /\(refused\)$/.test(k)).length} refused); ${Object.keys(want).length} effects seen from the page`;
     } finally {
       for (const id of ids) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
+    }
+  }
+
+  // ---- the clickjacking guard (extension/runtime.js clickGuard; docs/SANDBOX-TIER-NOTES.md RT-3)
+
+  async clickjackCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const head = (name, tier) => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/clickjack.html*\n// ${tier}\n// ==/WebMod==\n`;
+    const files = {
+      // the style mod: #real1 invisible, over its decoy; and a rule on the page's own label beside its file input
+      'e2e-cj-style': head('E2E clickjack style', '@style') + JSON.stringify({ css: '#real1 { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; opacity: 0; } .pretty { border-radius: 8px; }' }) + '\n',
+      // the boxed mod: #real2 hidden by style(), #real3 under its own opaque element that lets clicks through; and
+      // two honest restyles: its words over #ok1 (Oppish's way), #ok2's icon hidden and its own drawn (Rainbow Rave's)
+      'e2e-cj-box': head('E2E clickjack box', '@boxed') + `await trif.ready;
+const r2 = page.find('#real2');
+for (const [k, v] of [['position', 'absolute'], ['inset', '0'], ['width', '100%'], ['height', '100%'], ['z-index', '5'], ['opacity', '0.02']]) r2.style(k, v);
+const cover = page.create('div');
+cover.setText('Win a prize');
+for (const [k, v] of [['position', 'absolute'], ['inset', '0'], ['background', 'rgb(34, 170, 34)'], ['color', '#fff'], ['pointer-events', 'none'], ['z-index', '9']]) cover.style(k, v);
+page.find('#s3').append(cover);
+const ok1 = page.find('#ok1');
+ok1.style('color', 'transparent');
+const words = page.create('span');
+words.setText('Sepearch');
+for (const [k, v] of [['position', 'absolute'], ['left', '0'], ['top', '0'], ['width', '100px'], ['height', '40px'], ['pointer-events', 'none'], ['color', '#fff']]) words.style(k, v);
+ok1.after(words);
+trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(45deg, red, blue); }');
+`,
+    };
+    const ids = Object.keys(files).map((n) => `${site}/${n}`);
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const main = (fn) => this.ext(`async (tabId) => { const r = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: ${fn} }); return r[0].result; }`, [win.tabId]);
+    const out = [];
+    try {
+      for (const [n, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${n}.js`), text);
+      const enabled = new Set();
+      await waitFor('both registered', async () => {
+        const st = await status();
+        // (switched on once TRIF lists them: mods from outside the chat may start off)
+        for (const id of ids) if (!enabled.has(id) && st.includes(id)) { enabled.add(id); await this.cli(['enable', id]); }
+        return new RegExp(`${site}/e2e-cj-style\\s+registered`).test(st) && new RegExp(`${site}/e2e-cj-box\\s+registered \\(boxed`).test(st) ? st : null;
+      }, { timeoutMs: 25000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/clickjack.html`]);
+      const ctx = await this.d.findPage((u) => u.includes('/clickjack.html'), { timeoutMs: 10000 });
+      await waitFor('the mods applied', () => main(`() => getComputedStyle(document.getElementById('real1')).opacity === '0' && document.getElementById('real2').style.opacity === '0.02' && document.querySelectorAll('#s3 div').length === 1 && !!window.__webmods && !!window.__webmods.guard`), { timeoutMs: 15000, intervalMs: 300 });
+      await sleep(300);
+      for (const sel of ['#real1', '#real2', '#real3', '#file', '#swtext', '#ok1']) await this.d.click(ctx, sel);
+      // (#ok2: on its hidden icon, where the press lands)
+      const at = await main(`() => { const b = document.querySelector('#ok2 svg').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; }`);
+      await this.d.click(ctx, '#ok2 .ic');
+      // the keyboard: Enter on the hidden #real2, focused
+      await main(`() => { document.getElementById('real2').focus(); return true; }`);
+      await this.d.key(ctx, 'Enter');
+      await sleep(400);
+      const hits = JSON.parse(await main(`() => document.documentElement.dataset.hits`));
+      const checked = await main(`() => document.getElementById('cb').checked`);
+      const guard = await main(`() => ({ stats: window.__webmods.guard.stats, stopped: window.__webmods.guard.stopped })`);
+      fs.writeFileSync(this.r.file(`clickjack-${this.o.browser}.json`), JSON.stringify({ hits, checked, guard, at }, null, 2));
+      const problems = [];
+      for (const id of ['real1', 'real2', 'real3', 'decoy1', 'decoy2']) if (hits[id]) problems.push(`${id} got ${hits[id]} click(s)`);
+      for (const id of ['file', 'cb', 'ok1', 'ok2']) if (hits[id] !== 1) problems.push(`${id} got ${hits[id] || 0} clicks, want 1`);
+      if (!checked) problems.push('the checkbox didn\'t check');
+      const errs = await this.cli(['errors', '--url', site], { json: true });
+      const cj = (errs.json || []).filter((e) => e.kind === 'clickjack').map((e) => `${e.mod} ${e.why}`).sort();
+      const wantCj = [`${site}/e2e-cj-box covered`, `${site}/e2e-cj-box faded`, `${site}/e2e-cj-style faded`];
+      if (JSON.stringify(cj) !== JSON.stringify(wantCj)) problems.push(`trif errors: ${JSON.stringify(cj)}, want ${JSON.stringify(wantCj)}`);
+      // the panel says so: the card (the boxed mod's world tells the background at once)
+      const card = await waitFor('the clickjack card in the chat', () => this.panel(`async () => { const li = [...document.querySelectorAll('#messages li.msg')].filter((l) => /^TRIF stopped a click/.test(l.textContent)); return li.length ? li.map((l) => l.textContent.slice(0, 160)) : null; }`), { timeoutMs: 20000, intervalMs: 500 }).catch((e) => { problems.push(`no card: ${e.message}`); return []; });
+      await this.shot(this.panelCtx, 'clickjack-card');
+      if (problems.length) throw new Error(problems.join('; '));
+      const s = guard.stats;
+      out.push(`stopped ${s.stopped} presses (${cj.join(', ')}), ${card.length} card(s); allowed the file input, label, honest restyles; a press ${(s.ms / Math.max(1, s.checked)).toFixed(2)} ms on average (max ${s.maxMs.toFixed(1)}), the second look ${s.deep ? (s.deepMs / s.deep).toFixed(1) : 0} ms (max ${s.maxDeepMs.toFixed(1)})`);
+    } finally {
+      for (const n of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${n}.js`)); } catch { /* gone */ } }
+    }
+    // Tim's shipped mods (Chrome: they run boxed there), switched on and allowed, on the X and Google stand-ins:
+    // a press (the right button: no click's action) on every control there trips nothing
+    if (this.o.browser === 'chrome') out.push(await this.clickjackShipped(win));
+    return out.join('; ');
+  }
+
+  async clickjackShipped(win) {
+    const ids = ['x.com/rainbow-rave', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/follow-status', 'www.google.com/oppish', 'www.google.com/dvd-logo', 'www.google.com/hide-extra-sections', 'www.google.com/hide-ai-in-results'];
+    const { tlsPort } = this.o.servers;
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => (st.split('\n').find((l) => l.includes(id)) || '').trim();
+    const turned = [];
+    const seen = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `https://x.com:${tlsPort}/home`]);
+      await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000).catch(() => {});
+      for (const id of ids) {
+        const st = await status();
+        if (/registered/.test(line(st, id)) && !/\boff\b/i.test(line(st, id))) continue;
+        const on = await this.cli(['enable', id]);
+        if (on.status === 0) turned.push(id);
+      }
+      await waitFor('the shipped mods allowed and registered', async () => {
+        const st = await status();
+        if (ids.every((id) => /registered/.test(line(st, id)))) return true;
+        if (await this.approvalState()) await this.d.click(this.panelCtx, '#approval .ap-allow').catch(() => {});
+        else {
+          const held = ids.find((id) => /HELD/.test(line(st, id)));
+          if (held) await this.panel(`async () => { document.querySelector('li[data-mod="${held}"] .tag.on-hold')?.click(); return true; }`).catch(() => {});
+        }
+        return null;
+      }, { timeoutMs: 45000, intervalMs: 1000 }).catch(async (e) => { throw new Error(`${e.message}: ${(await status()).split('\n').filter((l) => ids.some((id) => l.includes(id))).map((l) => l.trim()).join(' | ')}`); });
+      const pages = [`https://x.com:${tlsPort}/home`, `https://x.com:${tlsPort}/e2e_pics`, `https://www.google.com:${tlsPort}/search?q=trif`, `https://www.google.com:${tlsPort}/`];
+      for (const url of pages) {
+        await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+        const ctx = await this.d.findPage((u) => u === url, { timeoutMs: 10000 });
+        await sleep(2500);
+        // (every control in view, its centre where nothing else is on top: at most 60)
+        const points = await this.d.eval(ctx, `async () => {
+          const out = [];
+          for (const el of document.querySelectorAll('a[href], button, input:not([type=hidden]), [role=button], [role=link], [role=tab], label, summary, [tabindex]')) {
+            const b = el.getBoundingClientRect();
+            if (b.width < 2 || b.height < 2 || b.bottom < 0 || b.top > innerHeight || b.right < 0 || b.left > innerWidth) continue;
+            const x = b.x + b.width / 2, y = b.y + b.height / 2;
+            const hit = document.elementFromPoint(x, y);
+            if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) continue;
+            out.push([x, y]);
+            if (out.length >= 60) break;
+          }
+          return out;
+        }`);
+        for (const [x, y] of points) await this.d.rightPress(ctx, x, y);
+        await sleep(300);
+        const g = await this.d.eval(ctx, `async () => window.__webmods && window.__webmods.guard ? { stats: window.__webmods.guard.stats, stopped: window.__webmods.guard.stopped } : null`);
+        if (!g) throw new Error(`${url}: no guard there`);
+        seen.push(`${new URL(url).host}${new URL(url).pathname}: ${points.length} pressed, ${g.stats.checked} looked at, ${g.stats.deep} twice (max ${g.stats.maxMs.toFixed(1)} ms)`);
+        if (g.stats.stopped) throw new Error(`${url}: the guard stopped ${g.stats.stopped}: ${JSON.stringify(g.stopped)}`);
+      }
+      return `shipped mods: ${seen.join('; ')}`;
+    } finally {
+      for (const id of turned) await this.cli(['disable', id]).catch(() => {});
+      await this.ext(`async (ids) => { const s = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}; for (const id of ids) delete s[id]; await chrome.storage.local.set({ sandboxSettings: s }); }`, [ids]).catch(() => {});
     }
   }
 

@@ -226,6 +226,17 @@ class FirefoxDriver {
     await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
   }
 
+  /** A trusted right-button press and release at (x, y): what a press does, without a click's action. */
+  async rightPress(ctx, x, y) {
+    await this.bidi.send('input.performActions', {
+      context: ctx,
+      actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: [
+        { type: 'pointerMove', x: Math.round(x), y: Math.round(y) }, { type: 'pointerDown', button: 2 }, { type: 'pointerUp', button: 2 },
+      ] }],
+    });
+    await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
+  }
+
   /** A trusted press of `key` ('Escape') in the page `ctx`. */
   /** The page's prefers-color-scheme: not offered over BiDi here (the screenshots in both themes are Chrome's). */
   async colorScheme() { return false; }

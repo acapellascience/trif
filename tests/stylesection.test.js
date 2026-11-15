@@ -147,13 +147,14 @@ test('style section, adversarial: the free mod\'s own script has no trace of it 
   // run them as the page would, in order
   const win = { trif: { log() {}, warn() {}, error() {} }, __webmods: { current: null, errors: [] } };
   const head = { children: [], append(...k) { this.children.push(...k); } };
-  win.document = { documentElement: head, head, currentScript: null, createElement: (tag) => ({ tag }), addEventListener() {} };
+  win.document = { documentElement: head, head, currentScript: null, createElement: (tag) => ({ tag, setAttribute(k, v) { this[k] = v; } }), addEventListener() {} };
   win.window = win;
   const ctx = vm.createContext(win);
   for (const code of reg.js.map((j) => j.code)) vm.runInContext(code, ctx);
   assert.deepStrictEqual(win.__webmods.errors, []);
   assert.strictEqual(head.children.length, 1);
   assert.match(head.children[0].textContent, /MARKER-CSS/);
+  assert.strictEqual(head.children[0]['data-trif-style'], m.id, 'marked as the mod\'s, for the clickjacking guard');
   assert.deepStrictEqual({ ...win.values }, { size: 16, accent: '#1d9bf0', marks: true, layout: 'grid' });
   assert.strictEqual(win.frozen, true);
   assert.strictEqual(win.logged, 'function', 'the rest of trif is the page\'s');

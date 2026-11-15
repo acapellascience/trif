@@ -654,7 +654,7 @@ const handlers = {
       const c = await modsFeed.check(ctx.ws, { force: true });
       let applied = { updated: [], waiting: [] };
       try { applied = modsFeed.apply(ctx.ws); } catch (e) { c.error = c.error || e.message; }
-      mods = { error: c.error || null, available: c.available || [], skipped: c.skipped || [], ...applied };
+      mods = { error: c.error || null, available: c.available || [], skipped: c.skipped || [], failed: c.failed || [], ...applied };
     }
     if (ctx.json) return printJson(mods ? { ...s, mods } : s);
     if (s.error) out(`TRIF ${s.current}: couldn't check for updates (${s.error})`);
@@ -666,6 +666,7 @@ const handlers = {
     if (mods) {
       const vers = (m) => `${m.id} (version ${m.version})`;
       if (mods.error) out(`Tim's mods: couldn't check the mods feed (${mods.error})`);
+      for (const f of mods.failed) out(`Tim's mods: couldn't use ${f.id} version ${f.version} from the mods feed (${f.why})`);
       if (mods.updated.length) out(`Tim's mods updated (switched off until the user turns them on): ${mods.updated.map(vers).join(', ')}`);
       if (mods.waiting.length) out(`Tim's mods with a new version waiting (the side panel offers it, or trif mod-update): ${mods.waiting.map(vers).join(', ')}`);
     }

@@ -412,7 +412,7 @@ the mods folder: it copies the run's changes over as they're saved (and the mods
 a mod is the run's when it's what the helper copied for it. When the run ends, the copy is synced once more
 and removed; what a leftover process writes there goes nowhere. docs/STAGING.md has the design.
 
-## The mods feed (0.3)
+## The mods feed (0.3.1)
 
 Tim's mods (the mods TRIF ships) can get a new version between releases, from a second signed feed beside
 the TRIF one: `updates/mods.json` + `.sig` on main, signed with the same release key (helper/lib/modsfeed.js;
@@ -441,12 +441,26 @@ That's code running on that mod's site, so it gets the TRIF feed's protections a
   plus what the user allowed, so a feed version that can send, act, load or run on a site its release didn't
   waits for the user's OK (a release's own update doesn't ask).
 
+- **Not silent when it fails.** A feed that can't be fetched, isn't signed, isn't a mods feed or is too old,
+  and a file that isn't the signed one, change nothing (what was kept stays), and the reason is kept: Settings
+  shows it quietly under TRIF's own update status, and `trif doctor` warns. So a feed that's blocked or
+  tampered with in transit doesn't quietly keep users on a broken version without anyone seeing why.
+- **The update settings.** Checked with TRIF's own update check (at most every 20 hours), never with
+  config.json `"checkForUpdates": false`.
+
 What it can't do: update TRIF itself, change settings, holds or allowed powers, touch a mod the user wrote or
 changed, or put a mod on a site. Its threat model is the TRIF feed's (same key, same host, same expiry; the
-key never leaves the maintainer's keychain), with less at stake: whoever holds the key could ship a whole
-TRIF through latest.json. What it adds is a smaller step for the maintainer, so a mod's fix doesn't wait
-for a release; the holds keep that step from widening what a mod does without the user's OK. As with the TRIF
-feed, a replay inside the 8 weeks still passes, but it can only offer a version the user already passed.
+key never leaves the maintainer's keychain).
+
+**A stolen release key.** Whoever has it can do through the mods feed only what they could already do through
+latest.json, and less: latest.json can ship a whole TRIF, while the mods feed can only put a new version of one
+of Tim's mods on the sites the user already has it for. And the holds still apply to it: a version that can
+send, act, load, or run on a site the released one doesn't, waits for the user's OK, and a copy the user
+changed is only offered. (Through latest.json, a new TRIF could change the holds themselves; that's the key's
+real risk, and why it stays in the keychain.) What the mods feed adds is a smaller step for the maintainer, so
+a mod's fix doesn't wait for a release; the holds keep that step from widening what a mod does without the
+user's OK. As with the TRIF feed, a replay inside the 8 weeks still passes, but it can only offer a version
+the user already passed.
 
 ## The prompt
 

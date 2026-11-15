@@ -40,9 +40,11 @@
 //   <home>/.mods-feed/mods.json, mods.json.sig   the last feed that verified, as it came
 //   <home>/.mods-feed/sites/<site>/<mod>.js        its files for this TRIF, each checked
 //   <home>/.mods-feed/delivered.json               {id: [sha1 of every version this feed brought]}
-//   <home>/.mods-feed/state.json                   {checkedAt, error, signedAt, available, skipped}
+//   <home>/.mods-feed/state.json                   {checkedAt, error, signedAt, available, skipped, failed}
 // It's checked with TRIF's own update check (host.js checkForUpdate; `trif update`), at most every 20 hours,
-// and not at all with config.json "checkForUpdates": false.
+// and not at all with config.json "checkForUpdates": false. A check that fails isn't silent, and changes
+// nothing: the reason is kept (state.json), the panel shows it quietly in Settings under TRIF's own update
+// status, and `trif doctor` lists it (status()). No pop-ups.
 
 const fs = require('fs');
 const path = require('path');
@@ -250,7 +252,9 @@ async function check(ws, { force = false, now = Date.now(), fetch = update.fetch
   if (!url) return { ...s, error: null, available: [] };
   if (!update.checksOn(ws) && !force) return s;
   if (!force && s.checkedAt && now - s.checkedAt < update.CHECK_EVERY_MS && !s.error) return s;
-  const next = { checkedAt: now, error: null, signedAt: null, available: [], skipped: [] };
+  // (`failed`: entries whose file couldn't be fetched or isn't the signed one; `skipped` also has the
+  // entries that just aren't for this TRIF, which is no problem)
+  const next = { checkedAt: now, error: null, signedAt: null, available: [], skipped: [], failed: [] };
   try {
     let bytes, sig;
     try {
@@ -275,9 +279,10 @@ async function check(ws, { force = false, now = Date.now(), fetch = update.fetch
         try { have = fs.readFileSync(dest); } catch { /* not yet */ }
         if (!have || fileProblem(have, e)) {
           let buf;
-          try { buf = await fetch(fileUrl(url, feed.commit, e.id), { maxBytes: e.size, timeoutMs: 60000 }); } catch (x) { next.skipped.push({ id: e.id, version: e.version, why: x.message }); continue; }
+          const fail = (why) => { const f = { id: e.id, version: e.version, why }; next.skipped.push(f); next.failed.push(f); };
+          try { buf = await fetch(fileUrl(url, feed.commit, e.id), { maxBytes: e.size, timeoutMs: 60000 }); } catch (x) { fail(x.message); continue; }
           const why = fileProblem(buf, e);
-          if (why) { next.skipped.push({ id: e.id, version: e.version, why: `${why}; not using it` }); continue; }
+          if (why) { fail(`${why}; not using it`); continue; }
           writeAtomic(dest, buf);
           have = buf;
         }
@@ -298,6 +303,23 @@ async function check(ws, { force = false, now = Date.now(), fetch = update.fetch
   }
   try { writeAtomic(stateFile(ws.home), JSON.stringify(next, null, 2) + '\n'); } catch { /* checked again next time */ }
   return next;
+}
+
+/**
+ * What went wrong with the last check of the mods feed, for the panel (Settings, beside TRIF's own update
+ * status: host.js updateInfo) and `trif doctor`: {checkedAt, problem}, `problem` a sentence or null. A feed
+ * that couldn't be fetched, isn't signed by the release key or is too old is a problem; so is a file that
+ * couldn't be fetched or isn't the signed one. An entry that's just not for this TRIF (older, for a newer
+ * TRIF, a mod it doesn't ship) isn't. null when nothing's checked: no feed for this build, or config.json
+ * "checkForUpdates": false (what was found before then may be long out of date).
+ */
+function status(ws, pkg = update.packageJson()) {
+  if (!modsFeedUrl(ws, pkg) || !update.checksOn(ws)) return null;
+  const s = readState(ws.home);
+  const failed = Array.isArray(s.failed) ? s.failed.filter((f) => f && typeof f.id === 'string') : [];
+  let problem = typeof s.error === 'string' && s.error ? s.error : null;
+  if (!problem && failed.length) problem = failed.map((f) => `${f.id} version ${f.version}: ${f.why}`).join('; ');
+  return { checkedAt: Number.isFinite(s.checkedAt) ? s.checkedAt : null, problem };
 }
 
 /**
@@ -338,5 +360,5 @@ function releasedBaseline(home, id, code, examplesDir = require('./preinstalled'
 
 module.exports = {
   KIND, DIR, FILE_MAX, ModsFeedError, newer, modsFeedUrl, fileUrl, verifyModsFeed, select, cached, check, apply, delivered,
-  releasedBaseline, readState, cachedFile, feedFile,
+  releasedBaseline, readState, status, cachedFile, feedFile,
 };

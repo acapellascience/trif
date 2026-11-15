@@ -6,6 +6,11 @@ rest, which goes under "### More" (and on the GitHub release). It's written for 
 `node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
 summary is too long.
 
+## 0.3.1
+
+- **Tim's mods get fixes between TRIF releases**, signed like TRIF's own updates. One you changed is never
+  replaced: you're offered the new version.
+
 ## 0.3.0
 
 - **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do

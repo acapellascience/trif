@@ -368,6 +368,13 @@ async function doctor(opts = {}) {
     for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, advice[p.limit] || 'check the file');
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
   }
+  // The mods feed (new versions of Tim's mods between releases, lib/modsfeed.js): its last check's problem.
+  let feed = null;
+  try { feed = require('./modsfeed').status(ws); } catch { /* not checked */ }
+  if (feed && feed.problem) {
+    add('warn', `Tim's mods: the last check for their new versions (the mods feed${feed.checkedAt ? `, ${new Date(feed.checkedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''}) failed: ${feed.problem}`,
+      "nothing changed because of it; it's checked again with TRIF's update check (trif update checks now)");
+  }
 
   // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside
   // what its sandbox can read, and the run itself shows one works.

@@ -347,6 +347,51 @@ test('checks follow the update settings: not with checkForUpdates false, at most
   assert.equal(server.hits.length, n + 2, 'again, the file already kept');
 });
 
+test('a check that fails isn\'t silent: the reason is kept for Settings and trif doctor, and goes once one works', async () => {
+  const w = world('1', { autoUpdate: true });
+  const problem = () => F.status(w.ws)?.problem ?? null;
+  assert.equal(problem(), null, 'not checked yet');
+  // not signed by the release key
+  await publish(w, { [ID]: mod('2') }, { priv: keys().priv });
+  await w.check();
+  assert.match(problem(), /not signed by the TRIF release key/);
+  assert.equal(typeof F.status(w.ws).checkedAt, 'number');
+  // too old
+  await publish(w, { [ID]: mod('2') }, { signed: new Date(Date.now() - 9 * 7 * 24 * 3600 * 1000).toISOString() });
+  await w.check();
+  assert.match(problem(), /more than 8 weeks ago/);
+  // can't be fetched at all
+  const gone = await serve({});
+  w.ws.config.modsFeed = `${gone.base.replace(/:\d+$/, ':1')}/updates/mods.json`;
+  await w.check();
+  assert.match(problem(), /couldn't fetch/);
+  // a file that isn't the signed one
+  await publish(w, { [ID]: mod('2') }, { tamper: { [ID]: mod('2').replace('calm', 'evil') } });
+  await w.check();
+  assert.match(problem(), new RegExp(`${ID} version 2: the download's checksum doesn't match the signed feed`));
+  // an entry that just isn't for this TRIF is no problem
+  await publish(w, { [ID]: mod('2') }, { minTrif: '0.9.0' });
+  await w.check();
+  assert.equal(problem(), null);
+  // none published (404) is no problem either
+  w.ws.config.modsFeed = `${gone.base}/updates/mods.json`;
+  await w.check();
+  assert.equal(problem(), null);
+  // one that works clears it
+  await publish(w, { [ID]: mod('2') }, { priv: keys().priv });
+  await w.check();
+  assert.ok(problem());
+  await publish(w, { [ID]: mod('2') });
+  await w.check();
+  assert.equal(problem(), null);
+  // with checkForUpdates false nothing is shown (what was found then may be long out of date)
+  await publish(w, { [ID]: mod('3') }, { priv: keys().priv });
+  await w.check();
+  assert.ok(problem());
+  w.ws.config.checkForUpdates = false;
+  assert.equal(F.status(w.ws), null);
+});
+
 // ---------------------------------------------------------------- release.js
 
 function gitRepo() {
@@ -429,4 +474,11 @@ test('host: the update check (the panel\'s Check now) checks the mods feed too',
   await waitFor(() => server.hits.includes('/updates/mods.json.sig'), { message: 'the mods feed fetched' });
   await waitFor(() => /mods feed: the mods feed is not signed/.test(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8')), { message: 'logged' });
   assert.match(fs.readFileSync(path.join(home, '.mods-feed', 'state.json'), 'utf8'), /not signed/);
+  // the panel is told (Settings shows it under TRIF's own update status), with no error of TRIF's own
+  const u = await ext.next((m) => m.type === 'update' && m.update?.modsFeed?.problem, { timeout: 10000 });
+  assert.match(u.update.modsFeed.problem, /not signed by the TRIF release key/);
+  assert.equal(u.update.error, null, 'no latest.json there is no error');
+  // and trif doctor lists it
+  const r = await runCli(['doctor'], { home, timeout: 60000 });
+  assert.match(r.stdout, /warn {2}Tim's mods: the last check for their new versions \(the mods feed, [\d-]+ [\d:]+ UTC\) failed: the mods feed is not signed by the TRIF release key/);
 });

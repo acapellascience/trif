@@ -786,7 +786,11 @@ on the main branch; both are read from raw.githubusercontent.com for the repo in
   (`raw.githubusercontent.com/<repo>/<commit>/examples/sites/<id>.js`) and checked against its sha256, size
   and `@version`. Only ids this TRIF ships, newer than its own and needing at most this TRIF (`minTrif`); the
   user's copies get them as they get a release's (preinstalled.js updateShippedMods), an unchanged one only
-  with `autoUpdate`. Checked with latest.json (and by `trif update`); config.json `modsFeed` overrides where.
+  with `autoUpdate`. Checked with latest.json, on its schedule (and by `trif update`), never with
+  `checkForUpdates: false`; config.json `modsFeed` overrides where. A check that fails (not fetched, not
+  signed, not a mods feed, too old, or a file that isn't the signed one) changes nothing and keeps its
+  reason in `<home>/.mods-feed/state.json`: the Summary's `modsFeed.problem` (Settings shows it under the
+  update status) and `trif doctor` (a warning). None published (HTTP 404) isn't a problem.
   Written by `node scripts/release.js mods-feed`, empty at each release, signed again by `refresh-feed`.
 - `updates/firefox.json` for Firefox: its update manifest (`addons[id].updates[{version, update_link,
   update_hash}]`). The Firefox build's `browser_specific_settings.gecko.update_url` points at it, so
@@ -807,7 +811,9 @@ running from `<home>/app` update themselves; a git checkout says to use git. con
 `checkForUpdates: false` stops the checks.
 
 `Summary = {current, latest, available, notes, published, checkedAt, error, auto, checks, source,
-canInstall, why, lastInstalled, installing}`.
+canInstall, why, lastInstalled, installing, modsFeed}`; `modsFeed` (0.3.1) is `{checkedAt, problem}` for the
+mods feed's last check (`problem` a sentence, or null), or null when it isn't checked. The helper sends the
+Summary again once the mods feed's check is done.
 
 Helper commands (from the extension, or the CLI over the socket; never from inside an agent run):
 `update.check {force}` → Summary; `update.install` → `{from, to, notes}`; `update.setAuto {on}` → Summary;

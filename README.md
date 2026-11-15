@@ -214,6 +214,13 @@ click the gear, then **Check for Updates**. From a terminal: `~/.trif/bin/trif u
 Updates are signed: TRIF installs only versions signed with its release key, so a copy from anywhere
 else is refused.
 
+Tim's mods can also get fixes between TRIF releases, checked along with TRIF's updates and signed the same
+way. With **Install updates automatically** on, a mod you haven't changed gets the new version (marked
+"updated", switched off until you turn it on); otherwise its row offers **Use the new version**. A mod you
+changed is never replaced, and a new version that can do more than the one TRIF shipped waits for your OK.
+If the check fails, Settings says why under the update status. `"checkForUpdates": false` in config.json
+stops both checks.
+
 ## If something's wrong
 
 ```sh

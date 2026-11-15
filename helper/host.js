@@ -928,6 +928,8 @@ let updateTimers = [];
 
 function updateInfo(summary = update.summary(workspace(ws.home))) {
   const info = { ...summary, installing: state.installing };
+  // (and what went wrong with the mods feed's last check, if anything: Settings shows it under this)
+  try { info.modsFeed = modsFeed.status(workspace(ws.home)); } catch (e) { logger.warn(`mods feed: ${e.message}`); }
   // The Firefox add-on updates on Firefox's schedule, so after an update it can lag behind the helper.
   // Its panel (old or new) shows an available update with `why`, so that's how it's told.
   const behind = extensionBehind();
@@ -979,6 +981,7 @@ async function checkModsFeed(force) {
     if (updated.length || waiting.length) scheduleSync('mods feed');
   } finally {
     modsFeedBusy = false;
+    sendUpdate(); // (the panel's Settings: what went wrong, or that nothing did now)
   }
 }
 

@@ -7,7 +7,8 @@
 //   node mobile/serve.js [port]        (default 8377)
 //
 // /trif-install is the address a "mod link" would have, and /trif-probe-canary is what the network checks
-// ask for: each request for it is printed, so a blocked one is the one that never shows up here.
+// ask for: each request for it is printed, so a blocked one is the one that never shows up here. chat.html (and
+// /chat/<id>) is a stand-in chat for the browser probe's chat in the Simulator (TrifProbe's -chathome).
 
 const fs = require('fs');
 const http = require('http');
@@ -28,6 +29,8 @@ function handler(log = console.log) {
       return res.end('canary');
     }
     if (name === 'trif-install') name = 'install.html';
+    // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)
+    if (/^chat\/[\w-]+$/.test(name)) name = 'chat.html';
     if (name === '') {
       const list = Object.keys(headers).map((f) => `<li><a href="${f}">${f}</a>${headers[f]['Content-Security-Policy'] ? ' (strict policy)' : ''}</li>`).join('');
       res.writeHead(200, { 'Content-Type': TYPES['.html'] });

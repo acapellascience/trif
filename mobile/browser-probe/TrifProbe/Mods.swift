@@ -528,6 +528,8 @@ struct ModOfferView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
+                        // (a reply with several mods: offered in turn)
+                        if let place = browser.offerPlace { Text("\(place.n) of \(place.of) mods in the reply").font(.caption).foregroundStyle(.secondary) }
                         Text(mod.name).font(.headline)
                         Text(mod.tierName).font(.caption.bold()).foregroundStyle(mod.colour)
                         if !mod.description.isEmpty { Text(mod.description).font(.subheadline).foregroundStyle(.secondary) }

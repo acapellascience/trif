@@ -36,10 +36,9 @@ final class Model: ObservableObject {
         self.browser = browser
         self.pane = ClaudePane(report: report, browser: browser)
         self.modsPanel = ModsPanel(browser: browser)
-        // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
+        // (Point TRIF at this: the chat opens, with the tab's data and then the part pointed at in its message box)
         let pane = self.pane
-        browser.chatFill = { text, png, pdf in await pane.fill(text, png: png, pdf: pdf, as: "TRIF follow-up.txt") }
-        browser.chatPoint = { text, png in await pane.fill(text, png: png, picture: "TRIF pointer.png", as: "TRIF pointer.txt") }
+        browser.chatPoint = { text, png in pane.open { await pane.fill(text, png: png, picture: "TRIF pointer.png", as: "TRIF pointer.txt") } }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments
@@ -137,6 +136,8 @@ extension Model {
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
+        if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
+        if step["closechat"] != nil { Model.pane?.close() }
         if let p = step["pause"] as? Bool { browser.pauseAll(p) }
         if step["acceptOffer"] != nil, let o = browser.safety.offer { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged() }
         // ({"panego": "…"}: the chat pane loads an address; {"pane": 1}: its scrolling and size; {"panejs": "…"}: in its page)
@@ -154,7 +155,7 @@ extension Model {
 struct ContentView: View {
     @EnvironmentObject var browser: Browser
     @EnvironmentObject var report: Report
-    let pane: ClaudePane
+    @ObservedObject var pane: ClaudePane
     @ObservedObject var modsPanel: ModsPanel
     @ObservedObject var safety: Safety
     @ObservedObject var store: ModStore
@@ -163,49 +164,13 @@ struct ContentView: View {
     @State private var entry = ""
     @State private var showChecks = false
     @State private var showReport = false
-    @State private var showClaude = false
     @State private var showTabs = false
     @State private var showHistory = false
     @State private var showMods = false
     @State private var importing = false
-    /// The chat pane's height, dragged by the grip on its top edge (Tim, 11-14); kept. 0: half the screen.
-    @AppStorage("paneHeight") private var paneHeight: Double = 0
-    @GestureState private var paneDrag: CGFloat = 0
     @State private var asking = false
     @State private var question = ""
     @FocusState private var editing: Bool
-
-    /// The pane's height now: what was dragged, plus the drag going on, kept to between 200 points and all but
-    /// 160 of the screen, and to what's left above the keyboard while it's up (the app's height then: `room`), so
-    /// the pane and a field in it stay in view (Tim, 11-15, signing in on an iPhone SE).
-    @State private var room: CGFloat = UIScreen.main.bounds.height
-    /// The keyboard is up for a field in the chat pane: the pane takes all the room above it but the address bar
-    /// (the toolbar steps aside, as Safari's does), so the field and what's around it stay in view.
-    @State private var typingInPane = false
-    private var paneNow: CGFloat {
-        if typingInPane { return max(min(room - 80, UIScreen.main.bounds.height - 120), 160) }
-        let screen = UIScreen.main.bounds.height
-        let base = paneHeight > 0 ? CGFloat(paneHeight) : screen * 0.5
-        return max(min(max(base - paneDrag, 200), screen - 160, room - 170), 120)
-    }
-
-    /// The grip on the pane's top edge: drag up for a taller chat, down for more page.
-    private var paneGrip: some View {
-        ZStack {
-            Rectangle().fill(Color(.systemBackground)).frame(height: 14)
-            Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 36, height: 5)
-        }
-        .overlay(alignment: .top) { Divider() }
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
-            .updating($paneDrag) { v, s, _ in s = v.translation.height }
-            .onEnded { v in
-                let screen = UIScreen.main.bounds.height
-                let base = paneHeight > 0 ? CGFloat(paneHeight) : screen * 0.5
-                paneHeight = Double(min(max(base - v.translation.height, 200), screen - 160))
-            })
-        .accessibilityLabel("Chat height")
-    }
 
     /// Mods waiting for the user's OK on this site (the Mods button's badge, as the panel's waiting badge).
     private var waitingHere: Int {
@@ -229,17 +194,26 @@ struct ContentView: View {
         }
     }
 
-    // (the room is the space the app is offered, read by a GeometryReader around everything: before 11-15 it was
-    // read from the column's own size, and while the keyboard was up for the chat the pane was sized from it, so a
-    // taller pane made a taller column made a taller pane: a layout that never settled, the app at 50% CPU, then
-    // ended by iOS. Tim's iPhone SE, 11-15)
+    // (the room is the space the app is offered, read by a GeometryReader around everything, and nothing in it is
+    // sized from what's inside it: before 11-15 a chat pane was sized from the column, which grew with the pane, a
+    // layout that never settled while the keyboard was up (the app at 50% CPU, then ended by iOS: Tim's iPhone SE).
+    // The chat is full screen now, one layer, the tab the other; the chat's layer is always there, behind the tab
+    // while hidden, so its page keeps running and a reply goes on being written and watched.)
     private var page: some View {
         GeometryReader { geo in
-            column
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                .clipped()
-                .onAppear { room = geo.size.height }
-                .onChange(of: geo.size.height) { _, h in if abs(h - room) > 0.5 { room = h } }
+            ZStack {
+                ChatScreen(pane: pane, tabName: browser.site.isEmpty ? "Tab" : browser.site)
+                    .zIndex(pane.shown ? 1 : 0)
+                    .allowsHitTesting(pane.shown)
+                    .accessibilityHidden(!pane.shown)
+                column
+                    .background(Color(.systemBackground))
+                    .zIndex(pane.shown ? 0 : 1)
+                    .allowsHitTesting(!pane.shown)
+                    .accessibilityHidden(pane.shown)
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .clipped()
         }
     }
 
@@ -253,14 +227,6 @@ struct ContentView: View {
                 }
             }
             if let picked = browser.picked { PickedBar(picked: picked) }
-            if showClaude {
-                paneGrip
-                ClaudePaneView(pane: pane, addPasted: { browser.offer(text: $0) }, sendPage: {
-                    showClaude = true
-                    // (with a screenshot of what's on the screen: Tim, 11-14)
-                    Task { if let t = await browser.pageForChat() { let shot = await browser.settledScreenshot().png; await pane.fill(t, png: shot, as: "TRIF instruction.txt") } }
-                }).frame(height: paneNow)
-            }
             if let h = browser.lastHide {
                 HStack {
                     Text("Hidden: \(h.selector)").font(.footnote.monospaced()).lineLimit(1).truncationMode(.middle)
@@ -284,21 +250,16 @@ struct ContentView: View {
                 .padding(.vertical, 6)
                 .background(Color(.secondarySystemBackground))
             }
-            if !typingInPane {
-                Divider()
-                toolbar
-            }
+            Divider()
+            toolbar
         }
         .onAppear { entry = browser.address; pane.follow(site: browser.site) }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            typingInPane = showClaude && pane.webView.holdsFirstResponder
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in typingInPane = false }
         .onChange(of: browser.address) { _, new in if !editing { entry = new }; pane.follow(site: browser.site) }
         .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site) }
-        .onChange(of: browser.wantsChat) { _, want in if want { showClaude = true; browser.wantsChat = false } }
-        .onChange(of: browser.hideChat) { _, _ in showClaude = false; typingInPane = false }
-        .onChange(of: showMods) { _, open in if !open { browser.holdFromChat = false } }
+        .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
+        .onChange(of: browser.hideChat) { _, _ in pane.close() }
+        // (the next of a reply's mods once the Mods tab, opened for one that waits for an OK, has closed)
+        .onChange(of: showMods) { _, open in if !open { browser.holdFromChat = false; nextOfferSoon() } }
         .onChange(of: modsPanel.wantsClose) { _, want in if want { showMods = false; modsPanel.wantsClose = false } }
         .onChange(of: browser.wantsMods) { _, want in if want { showMods = true; browser.wantsMods = false } }
         .onChange(of: browser.wantsAddress) { _, want in if want { entry = ""; editing = true; browser.wantsAddress = false } }
@@ -307,9 +268,9 @@ struct ContentView: View {
             case "mods": showMods = true
             case "tabs": browser.snapshot(); showTabs = true
             case "history": showHistory = true
-            case "chat": showClaude = true
+            case "chat": pane.open()
             case "import": importing = true
-            case "none": showMods = false; showTabs = false; showHistory = false; showClaude = false; showChecks = false; showReport = false
+            case "none": showMods = false; showTabs = false; showHistory = false; pane.close(); showChecks = false; showReport = false
             default: break
             }
             browser.wantsSheet = ""
@@ -328,13 +289,22 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large], selection: .constant(.large))
         }
         .sheet(item: $browser.modLink) { link in ModLinkView(link: link).environmentObject(browser) }
-        .sheet(item: $browser.modOffer) { mod in ModOfferView(mod: mod).environmentObject(browser) }
+        .sheet(item: $browser.modOffer, onDismiss: nextOfferSoon) { mod in ModOfferView(mod: mod).environmentObject(browser) }
         .alert("What bothers you on this page?", isPresented: $asking) {
             TextField("the cookie notice", text: $question)
             Button("Ask the phone") { let q = question; Task { await browser.askPhone(q) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The phone's own model gets the page's outline and your words, and picks a part. Nothing leaves the phone.")
+        }
+    }
+
+    /// A reply's next mod, a moment after a sheet has gone (one sheet can't open while another is closing), unless the
+    /// Mods tab has opened meanwhile (a mod just added that waits for an OK): then once it closes.
+    private func nextOfferSoon() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if !showMods { browser.nextOffer() }
         }
     }
 
@@ -365,7 +335,8 @@ struct ContentView: View {
             Spacer()
             Button { browser.forward() } label: { Image(systemName: "chevron.right") }.disabled(!browser.canGoForward).accessibilityLabel("Forward")
             Spacer()
-            Button { showClaude.toggle() } label: { Image(systemName: showClaude ? "bubble.left.fill" : "bubble.left") }.accessibilityLabel("Chat")
+            Button { pane.open() } label: { ChatGlyph(activity: pane.activity).frame(width: 28, height: 24) }
+                .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             Spacer()
             Button { showMods = true } label: {
                 RobotGlyph(paused: store.paused).frame(width: 24, height: 24)
@@ -418,11 +389,6 @@ struct ContentView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
     }
-}
-
-extension UIView {
-    /// Whether this view, or one inside it, has the keyboard's focus (a web view's field is a view inside it).
-    var holdsFirstResponder: Bool { isFirstResponder || subviews.contains { $0.holdsFirstResponder } }
 }
 
 /// The robot as the toolbar's Mods button (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head

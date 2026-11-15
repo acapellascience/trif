@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stand-in chat</title>
+<!--
+  A stand-in for claude.ai, for the iPhone app's chat in the Simulator (where neither chat can be signed in to):
+  the app with `-chathome http://localhost:8377/chat.html` (node mobile/serve.js) uses it for Claude and ChatGPT.
+  It has what TRIF's Web/chat.js looks for on claude.ai: a ProseMirror message box that takes pasted files as
+  tiles ([data-testid=file-thumbnail]), a "Send message" button, the person's messages ([data-testid=user-message]),
+  a reply ([data-is-streaming], .font-claude-response) written a few words at a time with a "Stop response"
+  button meanwhile, and the address changing to /chat/<id> after the first send, as Claude's does.
+  The reply: a style mod for the page named in what was attached or said (its first address), in a code block; two mods
+  if the message says "two"; no mod at all if it says "no mod". `?slow` writes it more slowly; `?nostop` has no stop button or streaming mark (a chat
+  that changed its page: TRIF's fallback, the reply unchanged for a few seconds).
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #262624; --fg: #f0eee6; --line: #45433f; --tile: #383733; --you: #30302d; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 16px/1.45 -apple-system, system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--line); }
+  #log { flex: 1; overflow-y: auto; padding: 12px 14px; }
+  [data-testid="user-message"] { background: var(--you); border-radius: 14px; padding: 10px 12px; margin: 10px 0 10px 40px; white-space: pre-wrap; }
+  .font-claude-response { margin: 10px 0; }
+  pre { background: #1e1e1e; color: #e6e6e6; padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+  .sent-file { display: inline-block; font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--tile); margin: 0 6px 6px 0; }
+  .composer { border-top: 1px solid var(--line); padding: 8px 10px 12px; }
+  .tiles:empty { display: none; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  [data-testid="file-thumbnail"] { display: inline-flex; align-items: center; gap: 6px; background: var(--tile); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+  [data-testid="file-thumbnail"] button { border: 0; background: none; color: inherit; font-size: 15px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  .ProseMirror { flex: 1; min-height: 24px; max-height: 140px; overflow-y: auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; outline: none; white-space: pre-wrap; }
+  .ProseMirror:empty::before { content: "Reply to the stand-in…"; opacity: 0.5; }
+  .row button { width: 40px; height: 40px; border-radius: 10px; border: 0; background: #c96442; color: white; font-size: 18px; }
+  .row button:disabled { opacity: 0.4; }
+</style>
+</head>
+<body>
+<header>Stand-in chat</header>
+<div id="log"></div>
+<div class="composer">
+  <div class="tiles"></div>
+  <div class="row">
+    <div class="ProseMirror" contenteditable="true"></div>
+    <button type="button" aria-label="Send message" disabled>↑</button>
+  </div>
+</div>
+<script>
+(() => {
+  const log = document.getElementById('log');
+  const tiles = document.querySelector('.tiles');
+  const ed = document.querySelector('.ProseMirror');
+  const row = document.querySelector('.row');
+  let send = row.querySelector('button');
+  const files = [];
+  const slow = location.search.includes('slow');
+  const nostop = location.search.includes('nostop');
+
+  const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length); };
+  ed.addEventListener('input', refresh);
+  ed.addEventListener('paste', (e) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    e.preventDefault();
+    const list = [...dt.files];
+    if (list.length) {
+      for (const f of list) {
+        const entry = { name: f.name, text: '' };
+        files.push(entry);
+        if (f.type.startsWith('text/')) f.text().then((t) => { entry.text = t; });
+        const tile = document.createElement('div');
+        tile.setAttribute('data-testid', 'file-thumbnail');
+        const label = document.createElement('span');
+        label.textContent = f.name;
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.setAttribute('aria-label', `Remove ${f.name}`);
+        x.textContent = '×';
+        x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); });
+        tile.append(label, x);
+        tiles.append(tile);
+      }
+    } else {
+      document.execCommand('insertText', false, dt.getData('text/plain'));
+    }
+    refresh();
+  });
+  ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
+  row.addEventListener('click', (e) => { if (e.target.closest('button[aria-label="Send message"]')) go(); });
+
+  const modFor = (origin, name, body) => `// ==WebMod==
+// @name        ${name}
+// @description Made by the stand-in chat
+// @match       ${origin}/*
+// @style
+// ==/WebMod==
+${JSON.stringify(body, null, 2)}`;
+
+  function go() {
+    const text = ed.textContent.trim();
+    if (!text && !files.length) return;
+    const attached = files.map((f) => f.text).join('\n');
+    const msg = document.createElement('div');
+    msg.setAttribute('data-testid', 'user-message');
+    for (const f of files) { const s = document.createElement('span'); s.className = 'sent-file'; s.textContent = f.name; msg.append(s, document.createElement('br')); }
+    msg.append(text);
+    log.append(msg);
+    ed.textContent = '';
+    files.length = 0;
+    tiles.textContent = '';
+    if (!location.pathname.startsWith('/chat/')) history.pushState({}, '', `/chat/${Math.random().toString(36).slice(2, 10)}`);
+    const origin = (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
+    let parts;
+    if (/no mod/i.test(text)) parts = [['p', 'Which part of the page do you mean? Point TRIF at it and send me that.']];
+    else {
+      parts = [['p', 'Here is a style mod that does that. It only changes how the page looks.'],
+        ['pre', modFor(origin, 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }', hide: ['#promo-banner', '.feed-item.promoted'] })]];
+      if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', { hide: ['.cookie-consent'] })]);
+      parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
+    }
+    reply(parts);
+  }
+
+  function reply(parts) {
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    stop.setAttribute('aria-label', 'Stop response');
+    stop.textContent = '■';
+    if (!nostop) send.replaceWith(stop);
+    else send.disabled = true;
+    const box = document.createElement('div');
+    box.className = 'font-claude-response';
+    if (!nostop) box.setAttribute('data-is-streaming', 'true');
+    log.append(box);
+    const steps = [];
+    for (const [tag, t] of parts) {
+      const words = t.split(/(?<=\s)/);
+      let into = null; // (not box.lastElementChild: TRIF puts its Add to TRIF button after a code block)
+      steps.push(() => { const n = document.createElement(tag); into = n; if (tag === 'pre') { into = document.createElement('code'); n.append(into); } box.append(n); });
+      for (let i = 0; i < words.length; i += tag === 'pre' ? 6 : 2) {
+        const chunk = words.slice(i, i + (tag === 'pre' ? 6 : 2)).join('');
+        steps.push(() => { into.append(chunk); });
+      }
+    }
+    const each = slow ? 220 : 90;
+    let i = 0;
+    const tick = () => {
+      if (i < steps.length) { steps[i++](); log.scrollTop = log.scrollHeight; setTimeout(tick, each); return; }
+      if (nostop) { refresh(); return; }
+      box.setAttribute('data-is-streaming', 'false');
+      send = document.createElement('button');
+      send.type = 'button';
+      send.setAttribute('aria-label', 'Send message');
+      send.textContent = '↑';
+      stop.replaceWith(send);
+      refresh();
+    };
+    setTimeout(tick, 600);
+  }
+})();
+</script>
+</body>
+</html>

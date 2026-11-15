@@ -1,12 +1,14 @@
-// TRIF in the chat pane (proof of concept, branch ios-poc; Tim, 11-13): a small mod for claude.ai and
+// TRIF in the chat (proof of concept, branch ios-poc; Tim, 11-13 and 11-15): a small mod for claude.ai and
 // chatgpt.com, run in a world of its own beside their page (ClaudePane.chatWorld), so their code can't reach
-// it. It does two things and nothing else:
+// it. What it does, and nothing else:
 //   - an "Add to TRIF" button under each code block that holds a whole mod file (==WebMod== … ==/WebMod==):
 //     a tap hands the block's text to the app, which shows its Add this mod? sheet;
-//   - a mod just written in a reply, handed to the app by itself once it's finished (watch, below);
-//   - fill(text, png): puts text (and a picture) into the message box, as a paste, for the person to send.
-// It never sends a message, never reads the conversation except a code block's text when its button is
-// tapped, and keeps nothing.
+//   - fill(text, png): puts text (and a picture) into the message box, as a paste, for the person to send;
+//   - the person's send (the send button, or Return in the message box) told to the app, which goes back to
+//     the tab; then the reply watched until it's done, and the mod files in it (code blocks that weren't there
+//     before the send) handed to the app, which asks Add this mod? about each (Tim, 11-15).
+// It never sends a message, never reads the conversation except code blocks and whether a reply is still
+// being written, and keeps nothing.
 (() => {
   if (globalThis.__trifChat) return;
   const post = (m) => { try { return window.webkit.messageHandlers.trif.postMessage(m); } catch (e) { return null; } };
@@ -47,7 +49,9 @@
   async function fill(text, png, name, pdf, picture) {
     // (a chat that has only just loaded isn't ready for a paste: its page finished, then a moment)
     if (document.readyState !== 'complete') { await new Promise((r) => addEventListener('load', r, { once: true })); await wait(800); }
-    const ed = editor();
+    // (a chat that has only just loaded draws its message box a moment later: up to 10 s)
+    let ed = editor();
+    for (let i = 0; !ed && i < 50; i++) { await wait(200); ed = editor(); }
     if (!ed) return 'no message box';
     ed.focus();
     const said = [];
@@ -113,10 +117,13 @@
       if (label && tile.getAttribute('data-trif-chip') !== label) tile.setAttribute('data-trif-chip', label);
       else if (!label && tile.hasAttribute('data-trif-chip')) tile.removeAttribute('data-trif-chip');
     }
+    // (no button while a reply is being written: a mod's header comes before its code, so a button then would
+    // hand over half a mod)
+    if (replying()) return;
     for (const pre of document.querySelectorAll('pre')) {
-      const t = pre.innerText || '';
-      if (!t.includes('==WebMod==') || !t.includes('==/WebMod==')) continue;
       if (pre.nextElementSibling && pre.nextElementSibling.classList.contains('trif-add')) continue;
+      const t = pre.textContent || '';
+      if (!t.includes('==WebMod==') || !t.includes('==/WebMod==')) continue;
       const b = document.createElement('button');
       b.className = 'trif-add';
       b.type = 'button';
@@ -187,30 +194,186 @@
     }`;
   (document.head || document.documentElement).append(style);
 
-  // A mod Claude or ChatGPT has just finished writing, handed to the app by itself (Tim, 11-14: finding the
-  // code block between what a chat says before and after it is the fiddly part). Only a block seen being
-  // written while the pane watched (an old conversation's mods are left alone), once it has stopped changing
-  // and the reply has stopped; a revised mod under the same header is offered again. Keyed by the header, not
-  // the element: a chat may redraw its code block when the reply ends.
-  const live = new Map();
-  const replying = () => !!document.querySelector('button[aria-label="Stop response"], button[aria-label="Stop streaming"], button[data-testid="stop-button"]');
-  function watch() {
-    const now = Date.now();
-    const last = new Map();
-    for (const pre of document.querySelectorAll('pre')) {
-      const t = pre.innerText || '';
-      const end = t.search(/==\/WebMod==/);
-      if (t.indexOf('==WebMod==') === -1 || end === -1) continue;
-      last.set(t.slice(0, end), t);
+  // The send, and the reply after it (Tim, 11-15: "the moment you hit send, trif pops you back over to your
+  // tab … when claude is done, TRIF just goes and gets the code").
+  //   Sent: a tap on the send button, Return in the message box, or the composer's form submitted, and then,
+  //   within 2.5 s, the page showing it went: a new message of the person's, a stop button, or the message box
+  //   emptied. (Return that only made a new line, or a send the page refused, isn't a send.)
+  //   Still working: Claude's stop button ("Stop response") or its reply marked data-is-streaming="true";
+  //   ChatGPT's stop button (data-testid="stop-button", "Stop streaming"). Done: that's gone, and the last reply
+  //   hasn't changed for 1.2 s. If neither was ever seen (a chat that changed its page), done is the last reply
+  //   unchanged for 6 s with the message box there and no stop button.
+  //   Watched with a MutationObserver, its checks at most every half second and once more after the page goes
+  //   quiet; it stops when the reply is done (or after 15 minutes).
+  const STOP = 'button[aria-label="Stop response"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[data-testid="stop-button"], [data-is-streaming="true"]';
+  const SEND = 'button[data-testid="send-button"], #composer-submit-button, button[aria-label="Send message"], button[aria-label="Send prompt"], button[aria-label="Send"], button[data-testid="chat-input-send"]';
+  const USER = '[data-testid="user-message"], [data-message-author-role="user"]';
+  const REPLY = '[data-is-streaming], .font-claude-response, [data-message-author-role="assistant"]';
+  const replying = () => !!document.querySelector(STOP);
+
+  /** The message box's surroundings (where what's attached shows): its widest ancestor, up to eight levels, that
+   *  holds none of the conversation's messages. */
+  function composerBox() {
+    const ed = editor();
+    if (!ed) return null;
+    let n = ed;
+    for (let i = 0; i < 8; i++) {
+      const p = n.parentElement;
+      if (!p || p === document.body || p === document.documentElement || p.querySelector(USER) || p.querySelector(REPLY)) break;
+      n = p;
     }
-    for (const [key, t] of last) {
-      const st = live.get(key);
-      if (!st) { live.set(key, { text: t, grew: false, at: now, offered: false }); continue; }
-      if (st.text !== t) { st.text = t; st.grew = true; st.at = now; st.offered = false; continue; }
-      if (st.grew && !st.offered && now - st.at > 1500 && !replying()) { st.offered = true; post({ type: 'mod', text: t, auto: true }); }
-    }
+    return n;
   }
-  setInterval(watch, 700);
+  function composerText() {
+    const ed = editor();
+    return ed ? String(ed.localName === 'textarea' ? ed.value : ed.textContent || '').trim() : '';
+  }
+  /** What's in the message box now: its text, and the names of what's attached. */
+  function composer() {
+    const box = composerBox();
+    const names = box ? [...box.querySelectorAll(TILES)].filter((t) => !t.querySelector(TILES))
+      .map((t) => `${t.textContent || ''} ${t.getAttribute('data-trif-chip') || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`) : [];
+    return { text: composerText(), names };
+  }
+
+  /** The mod files in code blocks: [{ key: its header, text }], in page order. */
+  function modBlocks(onlyAfter) {
+    const out = [];
+    for (const pre of document.querySelectorAll('pre')) {
+      if (onlyAfter && !(onlyAfter.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      const raw = pre.textContent || '';
+      const end = raw.search(/==\/WebMod==/);
+      if (raw.indexOf('==WebMod==') === -1 || end === -1) continue;
+      out.push({ key: raw.slice(0, end), raw, pre });
+    }
+    return out;
+  }
+  /** What tells a reply is still changing: the last reply's text (or, without one, how much text the page has). */
+  function signature() {
+    const all = document.querySelectorAll(REPLY);
+    const last = all[all.length - 1];
+    return last ? `${all.length}:${last.textContent || ''}` : `page:${document.body ? document.body.textContent.length : 0}`;
+  }
+
+  let sending = false;
+  let watch = null;
+  let last = null; // after a reply: { seen: the mod files known, path } (a mod that turns up late is still offered)
+  function maybeSent(how) {
+    if (sending || watch) return;
+    const c = composer();
+    if (!c.text && !c.names.length) return;
+    const withInstructions = c.names.some((n) => n.includes('TRIF instruction')) || c.text.includes('--- How TRIF mods are written ---');
+    const users = document.querySelectorAll(USER).length;
+    const seen = new Set(modBlocks().map((b) => b.raw));
+    sending = true;
+    const t0 = Date.now();
+    const check = () => {
+      const now = composer();
+      const went = document.querySelectorAll(USER).length > users || replying() || (!now.text && !now.names.length);
+      if (went) {
+        sending = false;
+        post({ type: 'sent', how, withInstructions });
+        startWatch(seen);
+      } else if (Date.now() - t0 > 2500) sending = false;
+      else setTimeout(check, 150);
+    };
+    setTimeout(check, 100);
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest && e.target.closest(SEND);
+    if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') maybeSent('button');
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    const ed = editor();
+    if (ed && (ed === e.target || ed.contains(e.target))) maybeSent('return');
+  }, true);
+  document.addEventListener('submit', (e) => { const ed = editor(); if (ed && e.target && e.target.contains && e.target.contains(ed)) maybeSent('form'); }, true);
+
+  function startWatch(seen) {
+    stopWatch();
+    const w = { seen, saw: false, sig: null, at: Date.now(), started: Date.now(), timer: 0, queued: false, mo: null };
+    watch = w;
+    w.mo = new MutationObserver(() => {
+      if (w.queued) return;
+      w.queued = true;
+      setTimeout(() => { w.queued = false; settle(w); }, 500);
+    });
+    w.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-is-streaming', 'aria-label', 'disabled'] });
+    settle(w);
+  }
+  function stopWatch() {
+    if (!watch) return;
+    watch.mo.disconnect();
+    clearTimeout(watch.timer);
+    watch = null;
+  }
+  function settle(w) {
+    if (watch !== w) return;
+    clearTimeout(w.timer);
+    const now = Date.now();
+    const busy = replying();
+    if (busy) w.saw = true;
+    const sig = signature();
+    if (sig !== w.sig) { w.sig = sig; w.at = now; }
+    const quiet = now - w.at;
+    const done = !busy && !!editor() && (w.saw ? quiet >= 1200 : quiet >= 6000);
+    if (done) return finish(w, w.saw ? 'done' : 'quiet');
+    if (now - w.started > 15 * 60000) return finish(w, 'timed out');
+    // (one more look once the page has gone quiet: nothing else wakes this up when nothing changes)
+    w.timer = setTimeout(() => settle(w), !busy && w.saw ? 1300 : busy ? 4000 : 6100);
+  }
+  /** The reply's done: the mod files that weren't there before the send, the latest of each (by its header). */
+  function finish(w, why) {
+    stopWatch();
+    const byKey = new Map();
+    for (const b of modBlocks()) if (!w.seen.has(b.raw)) byKey.set(b.key, b);
+    const mods = [...byKey.values()].map((b) => (b.pre.querySelector('code') || b.pre).innerText || b.raw);
+    for (const b of modBlocks()) w.seen.add(b.raw);
+    last = { seen: w.seen, path: location.pathname };
+    post({ type: 'done', why, mods, stop: w.saw });
+  }
+  /** After a reply, a mod file that turns up later on the same conversation (a chat that paused, a revised block). */
+  let lateSig = '';
+  let lateTimer = 0;
+  function late() {
+    if (!last || watch || sending || replying() || location.pathname !== last.path) return;
+    const fresh = modBlocks().filter((b) => !last.seen.has(b.raw));
+    const sig = fresh.map((b) => b.raw).join('\n');
+    // (offered once it's the same on two looks, the second a moment later even if nothing else changes)
+    if (!fresh.length || sig !== lateSig) { lateSig = sig; if (fresh.length) { clearTimeout(lateTimer); lateTimer = setTimeout(late, 1500); } return; }
+    lateSig = '';
+    const byKey = new Map();
+    for (const b of fresh) { byKey.set(b.key, b); last.seen.add(b.raw); }
+    post({ type: 'done', why: 'late', mods: [...byKey.values()].map((b) => (b.pre.querySelector('code') || b.pre).innerText || b.raw), stop: false });
+  }
+
+  /** Whether this conversation already has TRIF's instructions in it (sent before, outside the message box). */
+  function hasContext() {
+    const count = (t) => (t.match(/TRIF instruction|--- How TRIF mods are written ---/g) || []).length;
+    const box = composerBox();
+    return count(document.body ? document.body.textContent || '' : '') > count(box ? box.textContent || '' : '');
+  }
+  /** For the app: is there a message box, is anything in it, does the chat have TRIF's instructions, is it replying. */
+  function state() {
+    const c = composer();
+    return JSON.stringify({ editor: !!editor(), has: !!(c.text || c.names.length), context: hasContext(), working: replying() || !!watch });
+  }
+  /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
+  function resume() {
+    const users = document.querySelectorAll(USER);
+    const lastUser = users[users.length - 1];
+    const seen = new Set(modBlocks().filter((b) => !lastUser || !(lastUser.compareDocumentPosition(b.pre) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.raw));
+    startWatch(seen);
+    return 'watching';
+  }
+  /** Opened at the reply: the person's last message at the top, the reply under it. */
+  function showReply() {
+    const users = document.querySelectorAll(USER);
+    const lastUser = users[users.length - 1];
+    if (lastUser) lastUser.scrollIntoView({ block: 'start' });
+    return lastUser ? 'shown' : 'no message';
+  }
 
   // The reply kept in view (Tim, 11-14): after a send, Claude scrolls the new message to the top of the
   // conversation, with room below it for the reply; in a pane this short that left only the empty room in view,
@@ -232,7 +395,6 @@
     const box = sc.getBoundingClientRect(), r = last.getBoundingClientRect();
     if (r.height > 0 && r.bottom < box.top + 24) sc.scrollTop -= box.top + box.height * 0.6 - r.bottom;
   }
-  setInterval(reveal, 700);
 
   /** (development) Where things are: each scrolling element, the last message, the window. */
   function metrics() {
@@ -247,7 +409,9 @@
   }
 
   let queued = false;
-  new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); }, 400); } })
+  // (one observer for the buttons, the pills, keeping the reply in view and a mod that turns up late: at most
+  // every 400 ms, only when the page changes)
+  new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); reveal(); late(); }, 400); } })
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   mark();
 
@@ -263,5 +427,5 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump };
+  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply };
 })();

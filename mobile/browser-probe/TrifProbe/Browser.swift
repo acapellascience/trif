@@ -61,11 +61,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var lastHide: HideRule?
     /// Everywhere on <site>: its matches outlined on the page, waiting for Hide them.
     @Published var previewing = false
-    /// Set when something asks for the chat pane to open (Point TRIF at this); the app opens it.
+    /// Set when something asks for the chat to open; the app opens it.
     @Published var wantsChat = false
-    /// Counts the times a mod came in and the chat pane should get out of the way, so the page with the mod shows
-    /// (Tim, 11-15: "when the code is pasted, just hide the claude window"). The pane keeps its conversation.
+    /// Counts the times a mod came in and the chat should get out of the way, so the page with the mod shows
+    /// (Tim, 11-15: "when the code is pasted, just hide the claude window"). The chat keeps its conversation.
     @Published var hideChat = 0
+    /// The mods of a reply waiting for their Add this mod? (one sheet at a time), and where the one shown is in them.
+    private var offerQueue: [InstalledMod] = []
+    @Published private(set) var offerPlace: (n: Int, of: Int)?
+    private var offerBatch = 0, offerShown = 0
+    /// The last mod added from the chat, for what the chat is told next (feedbackForChat).
+    private var lastAdded: (id: String, name: String)?
     @Published var modLink: ModLink?
     /// Whole mods (Mods.swift): those kept, and one from the clipboard waiting for an OK.
     let mods = ModStore()
@@ -310,8 +316,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             Task { @MainActor in try? await Task.sleep(nanoseconds: 700_000_000); self.wantsMods = true }
         } else if source != "import" {
             status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
-            Task { await reportToChat(added) }
         }
+        if source == "chat" { lastAdded = (added.id, added.name) }
     }
 
     /// After any change to the mods: the scripts every page gets are made again, and the page reloads to run them.
@@ -346,7 +352,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         mods.approve(id)
         report.log("mods", "allowed \(id)")
         modsChanged()
-        if let m = mods.mods.first(where: { $0.id == id }), m.source == "chat", mods.isOn(m, site: site) { Task { await reportToChat(m) } }
     }
 
     // MARK: running JavaScript
@@ -465,17 +470,36 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A mod link, or a bare selector, on the clipboard (what a chat gives when it can't make a link).
     func offerFromClipboard() { offer(text: UIPasteboard.general.string) }
 
-    /// A mod a chat has just finished writing (Web/chat.js): offered by itself, unless that very mod is already
-    /// added or another offer is up.
-    func offerFromChat(_ text: String) {
-        guard modOffer == nil, modLink == nil else { return }
+    /// The mod files in a reply that's just done (Web/chat.js): each read (off the main thread), and offered in turn
+    /// with the Add this mod? sheet, over the tab; nothing is added without its Add it. Leaves out one already added
+    /// as it is. Returns how many are offered (none: the chat button shows the reply waiting instead).
+    func offerFromChat(_ texts: [String]) async -> Int {
         let here = host
-        Task { @MainActor in
-            let r = await mods.readNamedInBackground(text, here: here)
-            guard let m = r.mod, modOffer == nil, modLink == nil else { return }
-            if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) { return }
-            modOffer = m
+        var found: [InstalledMod] = []
+        var why: String?
+        for t in texts {
+            let r = await mods.readNamedInBackground(t, here: here)
+            guard let m = r.mod else { why = why ?? r.error ?? "no reason given"; continue }
+            if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) || offerQueue.contains(where: { $0.id == m.id && $0.code == m.code }) { continue }
+            found.removeAll { $0.id == m.id }
+            found.append(m)
         }
+        if found.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
+        guard !found.isEmpty else { return 0 }
+        if offerQueue.isEmpty && modOffer == nil { offerBatch = 0; offerShown = 0 }
+        offerQueue += found
+        offerBatch += found.count
+        nextOffer()
+        return found.count
+    }
+
+    /// The next of a reply's mods, once no other sheet is up (the app calls it again as each one closes).
+    func nextOffer() {
+        guard modOffer == nil, modLink == nil else { return }
+        guard !offerQueue.isEmpty else { offerPlace = nil; return }
+        offerShown += 1
+        offerPlace = offerBatch > 1 ? (offerShown, offerBatch) : nil
+        modOffer = offerQueue.removeFirst()
     }
 
     /// What was pasted (iOS's own Paste button hands it over without asking): a whole mod, a mod link, or a selector.
@@ -612,7 +636,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         ```
         """
         report.log("pointed", "\(host): \(p.selector)\(crop == nil ? "" : ", with a picture")")
-        wantsChat = true
         await cancelPick()
         await point(text, crop)
     }
@@ -663,8 +686,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// The page's parts and sizes when it was last sent to the chat, to say afterwards what a mod did.
     private var baseline: (host: String, layout: String)?
-    /// Puts text (and a screenshot) into the chat's message box: the pane's fill, set by the app.
-    var chatFill: ((String, Data?, Data?) async -> Void)?
 
     /// What the chat gets for this page: how TRIF mods are written, then its outline. Notes its layout.
     func pageForChat() async -> String? {
@@ -739,12 +760,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return out
     }
 
-    /// After a mod is added: once the page has loaded again, what changed (from the layout sent to the chat),
-    /// the mod's errors and a screenshot, into the chat's message box for the person to send.
-    func reportToChat(_ m: InstalledMod) async {
-        guard let fill = chatFill else { return }
+    /// What a chat that already has TRIF's instructions gets when it's opened again (Tim, 11-15: "the feedback
+    /// data if it's not [a new chat]"): the page as it is now (a screenshot and its outline), what disappeared
+    /// or shrank since it was last sent, the mods running here with their code and errors, and the things hidden.
+    /// (Agent-facing words.)
+    func feedbackForChat() async -> (text: String, png: Data?)? {
+        // (once a page that's loading has finished: just after a mod is added, it's reloading)
         for _ in 0..<40 where loading { try? await Task.sleep(nanoseconds: 250_000_000) }
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard let o = await outline() else { return nil }
+        let page = webView.url?.absoluteString ?? host
         var lines: [String] = []
         if let b = baseline, b.host == host, let r = (await call("return JSON.stringify(globalThis.__trifKit.compare(JSON.parse(before)));", ["before": b.layout], in: Browser.trifWorld)).text,
            let changed = Browser.parse(r) as? [[String: Any]] {
@@ -753,17 +777,22 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                 lines.append("- \(c["what"] as? String ?? "changed"): \(c["sel"] as? String ?? "?")\(text) (was \(c["was"] as? String ?? "?"), now \(c["now"] as? String ?? "gone"))")
             }
         }
-        let errors = await modErrors([m])
-        var text = "I added your mod \"\(m.name)\" and reloaded \(webView.url?.absoluteString ?? host). Here's the page now: a screenshot of what's on the screen, and the whole page as a PDF, are attached.\n"
-        text += lines.isEmpty ? "\nNothing that was on the page before disappeared or shrank.\n" : "\nWhat disappeared or shrank, of what was on the page when I sent it to you:\n\(lines.joined(separator: "\n"))\n(I reloaded the page, so anything that opens when I type or click, like a menu or search suggestions, is closed now: some of these may be closed, not gone.)\n"
-        text += errors.isEmpty ? "\nThe mod has had no errors so far; some code only runs once I type or click, so its errors would come later: they'll be in the next page I send you.\n" : "\nThe mod's errors:\n\(errors.prefix(10).map { "- \($0)" }.joined(separator: "\n"))\n"
-        text += await alreadyHere(except: m.id)
-        text += "\nIf that isn't what I asked for, fix the mod and give me the whole file again. Work from what I've attached; don't open the page in a browser or another tool."
+        if let l = (await call("return JSON.stringify(globalThis.__trifKit.layout());", in: Browser.trifWorld)).text { baseline = (host, l) }
+        let on = mods.running(on: webView.url?.absoluteString ?? "")
+        var text = "Here's \(page) in TRIF now: a screenshot of what's on the screen is attached, and the page's outline is below."
+        if let a = lastAdded, on.contains(where: { $0.id == a.id }) { text += " I added your mod \"\(a.name)\"; the page was reloaded with it."; lastAdded = nil }
+        text += "\n"
+        if !lines.isEmpty {
+            text += "\nWhat disappeared or shrank since I last sent you this page:\n\(lines.joined(separator: "\n"))\n(The page may have been reloaded since, so anything that opens when I type or click, like a menu, is closed now: some of these may be closed, not gone.)\n"
+        }
+        let here = await alreadyHere()
+        text += here.isEmpty ? "\nNo TRIF mods are running on this page, and nothing on it is hidden.\n" : here
+        text += "\nI'll say what I want changed. As before: reply with the whole mod file in one code block, nothing to fill in; to change a mod above, give back its whole file with the same @name. Work from what I've attached; don't open the page in a browser or another tool.\n"
+        text += "\n--- The page now: \(page) ---\n\(o.text)\n"
         let (shot, blank) = await settledScreenshot()
-        if blank { text += "\n\n(The screenshot looked blank even after waiting: the page may not have finished drawing.)" }
-        let whole = await fullPage()
-        await fill(text, shot, whole)
-        status = "Added \(m.name). What it did is attached in the chat's message box: send it, with what to fix, if it needs fixing."
+        if blank { text += "\n(The screenshot looked blank even after waiting: the page may not have finished drawing.)" }
+        report.log("outline", "\(host): the follow-up, \(text.count) characters")
+        return (text, shot)
     }
 
     /// A screenshot of the page once it has finished (Tim, 11-14: look before sending): loaded, the pictures on

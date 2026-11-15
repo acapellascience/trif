@@ -1,0 +1,44 @@
+/* The Mods tab on the phone (mods.html): the desktop panel's own styles (sidepanel.css, switch.css) do the
+   rows, the tiers, the cards; this is what a phone needs on top: the page scrolls, things are a little larger to
+   touch, the cards fit the screen. */
+html { -webkit-text-size-adjust: 100%; }
+body { overflow: auto; display: block; height: auto; min-height: 100%; font-size: 15px; -webkit-tap-highlight-color: transparent; }
+.phone-mods { padding: 4px 16px calc(28px + env(safe-area-inset-bottom)); }
+.mod-list { max-height: none; overflow: visible; }
+.mod-list li { padding: 11px 0; }
+.mod-list li.mod-group { padding-top: 18px; }
+.mod-group-name { font-size: 13px; }
+.mod-group-note { font-size: 13px; }
+.mod-desc { font-size: 13.5px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mod-row > .mod-tools { width: 58px; }
+.mod-row > .mod-tools .icon-btn { width: 26px; height: 30px; }
+.mod-row > .mod-tools .mod-code svg { width: 17px; height: 17px; }
+.mod-row > .mod-tools .mod-delete svg { width: 18px; height: 18px; }
+.mod-ic svg { width: 17px; height: 17px; }
+.mod-icons { padding: 3px 4px; }
+.mod-grip { display: none !important; }
+.mod-row { grid-template-columns: 0 minmax(0, 1fr) auto; column-gap: 8px; }
+.gs-btn { min-height: 30px; padding: 0 10px; }
+button.switch { transform: scale(1.18); transform-origin: right center; margin-left: 6px; }
+.tag { font-size: 12px; }
+.mods-empty { color: var(--muted); margin: 18px 0; }
+.mods-tools { margin: 22px 0 0; }
+.mods-tools .btn { font-size: 14px; }
+.undo-note { margin: 14px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--raised); font-size: 14px; }
+.hidden-box { margin-top: 22px; }
+.hidden-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.hidden-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.hidden-list code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hidden-list .link-btn { flex: none; }
+.mod-err { font-size: 13px; }
+/* (a tap on a row's icons: each icon's few words, as the desktop panel's hover has them, and Details) */
+.icon-tip { position: fixed; z-index: 50; max-width: calc(100vw - 32px); padding: 10px 12px; border-radius: 10px; background: var(--surface);
+  border: 1px solid var(--line); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); font-size: 14px; }
+.icon-tip ul { list-style: none; margin: 0; padding: 0; }
+.icon-tip li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.icon-tip svg { width: 17px; height: 17px; flex: none; color: var(--muted); }
+.icon-tip .link-btn { margin-top: 6px; }
+/* (the cards: the whole screen's width, scrolling inside) */
+dialog.approval { margin: 12px; max-height: calc(100% - 24px); width: calc(100% - 24px); font-size: 15px; }
+.approval .btn { min-height: 34px; font-size: 14.5px; }
+.cv-code { font-size: 12px; }

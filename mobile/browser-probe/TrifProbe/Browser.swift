@@ -1,4 +1,4 @@
-// The probe's browser: one web view, with three places code can run beside a page.
+// The probe's browser: its tabs (Tabs.swift), each a web view, with three places code can run beside a page.
 //   the page's own world   where a free mod would run, and where the page can change everything
 //   TRIF's world ("trif")  the kit (mobile/shared/kit.js), the start script, and the only way to the app
 //   the box ("trif-box")   where SES locks the language down and boxed mods would run
@@ -43,6 +43,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var title = ""
     @Published var loading = false
     @Published var canGoBack = false
+    @Published var canGoForward = false
+    /// The tabs, and the one shown (Tabs.swift). Everything below that says `webView` means the shown tab's.
+    @Published private(set) var tabs: [Tab] = []
+    @Published private(set) var current: Tab!
+    /// The pages visited, in every tab (History.swift).
+    let history = HistoryStore()
+    /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
+    @Published var wantsMods = false
     @Published var status = ""
     @Published var picked: Picked?
     /// The last thing hidden, while it can be undone (the status strip's Undo: Tim, 11-14, hid a whole page).
@@ -56,8 +64,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     let mods = ModStore()
     @Published var modOffer: InstalledMod?
     @Published var running = false
+    /// Counts the shown tab's finished loads (and tab switches), for what follows the page (the Mods tab).
+    @Published var pageChanged = 0
 
-    let webView: WKWebView
+    var webView: WKWebView { current.webView }
+    /// The one configuration every tab's web view is made from: the same scripts (the kit, the hide rules, the
+    /// mods), the same message handler, the probe's pages, and the app's one cookie store.
+    private let config: WKWebViewConfiguration
     let pages: PageSchemeHandler
     let report: Report
 
@@ -71,24 +84,126 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         config.setURLSchemeHandler(pages, forURLScheme: PageSchemeHandler.scheme)
         config.applicationNameForUserAgent = Browser.safariSuffix
         config.allowsInlineMediaPlayback = true
-        webView = WKWebView(frame: .zero, configuration: config)
+        self.config = config
         super.init()
 
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
-        webView.allowsLinkPreview = false
-        webView.isInspectable = true
-        webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: Browser.trifWorld, name: "trif")
+        config.userContentController.addScriptMessageHandler(self, contentWorld: Browser.trifWorld, name: "trif")
         installScripts()
+        restoreTabs()
+    }
 
+    // MARK: tabs
+
+    /// A web view for a tab: from the shared configuration, or (a page opening a window) the one WebKit hands over.
+    private func makeTab(configuration: WKWebViewConfiguration? = nil, id: UUID = UUID(), title: String = "", url: URL? = nil) -> Tab {
+        let wv = WKWebView(frame: .zero, configuration: configuration ?? config)
+        wv.navigationDelegate = self
+        wv.uiDelegate = self
+        wv.allowsBackForwardNavigationGestures = true
+        wv.allowsLinkPreview = false
+        wv.isInspectable = true
         let press = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
         press.minimumPressDuration = 0.45
         press.delegate = self
-        webView.addGestureRecognizer(press)
-
-        go(PageSchemeHandler.home + "plain.html")
+        wv.addGestureRecognizer(press)
+        let tab = Tab(id: id, webView: wv, title: title, url: url)
+        // (an address or title that changes without a page load, as a single-page site's do: the tab and History follow)
+        tab.watches = [
+            wv.observe(\.url, options: [.new]) { [weak self, weak tab] w, _ in Task { @MainActor in
+                guard let self, let tab, let u = w.url else { return }
+                tab.url = u
+                if tab === self.current { self.address = u.absoluteString; self.canGoBack = w.canGoBack; self.canGoForward = w.canGoForward }
+                if !w.isLoading { self.history.visit(u, title: w.title ?? "") }
+            } },
+            wv.observe(\.title, options: [.new]) { [weak self, weak tab] w, _ in Task { @MainActor in
+                guard let self, let tab else { return }
+                tab.title = w.title ?? ""
+                if tab === self.current { self.title = tab.title }
+                self.history.retitle(w.url, tab.title)
+            } },
+        ]
+        return tab
     }
+
+    private func restoreTabs() {
+        if let saved = SavedTabs.load(), !saved.tabs.isEmpty {
+            tabs = saved.tabs.map { s in
+                let t = makeTab(id: s.id, title: s.title, url: nil)
+                t.savedState = s.state
+                t.savedURL = s.url.flatMap(URL.init(string:))
+                return t
+            }
+            select(tabs.first { $0.id == saved.selected } ?? tabs[tabs.count - 1])
+        } else {
+            let t = makeTab()
+            tabs = [t]
+            select(t)
+            go(PageSchemeHandler.home + "plain.html")
+        }
+    }
+
+    /// Keeps the tabs (and each one's back/forward list) for the next launch.
+    func saveTabs() {
+        let list = tabs.map { t in
+            SavedTabs.One(id: t.id, url: (t.webView.url ?? t.savedURL)?.absoluteString, title: t.title,
+                          state: t.started ? (t.webView.interactionState as? Data) : t.savedState)
+        }
+        SavedTabs(tabs: list, selected: current?.id).save()
+    }
+
+    /// Shows a tab: the first time, what was kept of it is loaded (its back/forward list, else its address).
+    func select(_ tab: Tab) {
+        if let was = current, was !== tab { snapshot(was) }
+        current = tab
+        picked = nil; previewing = false; lastHide = nil; status = ""
+        if !tab.started {
+            tab.started = true
+            if let state = tab.savedState { tab.webView.interactionState = state }
+            else if let u = tab.savedURL { tab.webView.load(URLRequest(url: u)) }
+            tab.savedState = nil
+        }
+        address = tab.webView.url?.absoluteString ?? tab.savedURL?.absoluteString ?? ""
+        title = tab.webView.title ?? tab.title
+        loading = tab.webView.isLoading
+        canGoBack = tab.webView.canGoBack
+        canGoForward = tab.webView.canGoForward
+        pageChanged += 1
+        saveTabs()
+    }
+
+    /// A new tab after the one shown: empty (the address bar's), or at an address.
+    func newTab(_ address: String? = nil) {
+        let t = makeTab()
+        t.started = true
+        let at = (tabs.firstIndex { $0 === current } ?? tabs.count - 1) + 1
+        tabs.insert(t, at: at)
+        select(t)
+        if let address { go(address) } else { wantsAddress = true }
+    }
+
+    func close(_ tab: Tab) {
+        guard let i = tabs.firstIndex(where: { $0 === tab }) else { return }
+        tab.webView.stopLoading()
+        tabs.remove(at: i)
+        if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
+        if tab === current { select(tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
+    }
+
+    /// The tab's picture for the switcher.
+    func snapshot(_ tab: Tab? = nil) {
+        let t = tab ?? current!
+        guard t.webView.url != nil, t.webView.window != nil else { return }
+        let cfg = WKSnapshotConfiguration()
+        cfg.snapshotWidth = 300
+        t.webView.takeSnapshot(with: cfg) { image, _ in if let image { t.snapshot = image } }
+    }
+
+    /// Set when a new tab wants its address typed; the app focuses the address bar.
+    @Published var wantsAddress = false
+    /// (development) a sheet to open (-open): mods, tabs, history or chat.
+    @Published var wantsSheet = ""
+    /// The site of the page shown, as the chat pane and the Mods tab group sites (Mods.swift Site.of).
+    var site: String { Site.of(host) }
 
     // MARK: resources and scripts
 
@@ -102,7 +217,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// The scripts every page gets at its start. Put in again whenever the hide rules change: the rules are
     /// part of the start script's own text, so a page never waits for them.
     func installScripts() {
-        let ucc = webView.configuration.userContentController
+        let ucc = config.userContentController
         ucc.removeAllUserScripts()
         let kit = Browser.resource("kit", "js")
         let startOwn = Browser.resource("start-own", "js") + "(\(report.rulesJSON()));"
@@ -115,18 +230,34 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     // MARK: whole mods
 
-    func addMod(_ m: InstalledMod) {
-        mods.add(m)
-        report.log("mods", "added \(m.tierName.lowercased()) \(m.id) for \(m.sites.joined(separator: ", "))")
-        installScripts()
-        reload()
-        status = "Added \(m.name). It runs on \(m.sites.joined(separator: ", "))."
-        Task { await reportToChat(m) }
+    /// A mod the user added (from the chat or the clipboard: its Add it), or imported. One that needs an OK waits
+    /// for it, with TRIF's approval card in the Mods tab, and doesn't run until then.
+    func addMod(_ m: InstalledMod, source: String = "chat") {
+        let added = mods.add(m, source: source)
+        report.log("mods", "added \(added.tierName.lowercased()) \(added.id) (\(source))\(added.held ? ", waiting for an OK" : "")")
+        modsChanged()
+        if added.held {
+            status = "\(added.name) waits for your OK."
+            wantsMods = true
+        } else if source != "import" {
+            status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
+            Task { await reportToChat(added) }
+        }
     }
 
-    func removeMod(_ m: InstalledMod) { mods.remove(m); installScripts(); reload() }
+    /// After any change to the mods: the scripts every page gets are made again, and the page reloads to run them.
+    func modsChanged(reload again: Bool = true) {
+        installScripts()
+        if again { keepStatus = true; reload() }
+    }
 
-    func toggleMod(_ m: InstalledMod) { mods.toggle(m); installScripts(); reload() }
+    /// Allow, on the approval card: it runs from this reload; one the chat made gets its follow-up, as when added.
+    func approveMod(_ id: String) {
+        mods.approve(id)
+        report.log("mods", "allowed \(id)")
+        modsChanged()
+        if let m = mods.mods.first(where: { $0.id == id }), m.source == "chat", mods.isOn(m, site: site) { Task { await reportToChat(m) } }
+    }
 
     // MARK: running JavaScript
 
@@ -196,6 +327,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func reload() { picked = nil; webView.reload() }
     func back() { picked = nil; webView.goBack() }
+    func forward() { picked = nil; webView.goForward() }
 
     var host: String { webView.url?.host ?? "" }
 
@@ -247,7 +379,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// added or another offer is up.
     func offerFromChat(_ text: String) {
         guard modOffer == nil, modLink == nil else { return }
-        let r = mods.read(text)
+        let r = mods.readNamed(text, here: host)
         guard let m = r.mod else { return }
         if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) { return }
         modOffer = m
@@ -261,7 +393,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         // (a whole mod: a chat's reply with a ==WebMod== file in it, or the file)
         if text.contains("==WebMod==") {
-            let r = mods.read(text)
+            let r = mods.readNamed(text, here: host)
             if let m = r.mod { modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
             return
         }
@@ -492,16 +624,21 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// Errors these mods have had on the page since it loaded: a boxed mod's (the sandbox's list, refusals
     /// included), a free mod's (what it threw). Each starts with the mod's name.
     func modErrors(_ list: [InstalledMod]) async -> [String] {
-        var out: [String] = []
-        let names = Dictionary(list.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let byId = await modErrorsById(list)
+        return list.flatMap { m in (byId[m.id] ?? []).map { "\(m.name): \($0)" } }
+    }
+
+    /// The same, by mod: each one's messages.
+    func modErrorsById(_ list: [InstalledMod]) async -> [String: [String]] {
+        var out: [String: [String]] = [:]
         let boxed = list.filter { $0.world == "box" }.map(\.id)
         if !boxed.isEmpty, let t = (await call("return JSON.stringify(globalThis.__trifSandbox ? globalThis.__trifSandbox.errors.filter((e) => ids.includes(e.mod)).map((e) => [e.mod, e.message]) : []);", ["ids": boxed], in: Browser.boxWorld)).text,
            let rows = Browser.parse(t) as? [[String]] {
-            out += rows.compactMap { $0.count == 2 ? "\(names[$0[0]] ?? $0[0]): \($0[1])" : nil }
+            for r in rows where r.count == 2 { out[r[0], default: []].append(r[1]) }
         }
         let free = list.filter { $0.world == "page" }
         if !free.isEmpty, let t = (await call("return JSON.stringify(window.__trifModErrors || []);", in: .page)).text, let rows = Browser.parse(t) as? [String] {
-            for r in rows { if let m = free.first(where: { r.hasPrefix("\($0.id):") }) { out.append("\(m.name):\(r.dropFirst(m.id.count + 1))") } }
+            for r in rows { if let m = free.first(where: { r.hasPrefix("\($0.id):") }) { out[m.id, default: []].append(String(r.dropFirst(m.id.count + 1)).trimmingCharacters(in: .whitespaces)) } }
         }
         return out
     }
@@ -682,42 +819,70 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return ["http", "https", "about", "blob", "data", PageSchemeHandler.scheme].contains(scheme) ? .allow : .cancel
     }
 
+    private func tab(of webView: WKWebView) -> Tab? { tabs.first { $0.webView === webView } }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        tab(of: webView)?.loading = true
+        guard webView === self.webView else { return }
         loading = true
-        status = ""
+        // (a reload the app made to run changed mods keeps what the status strip says about the change)
+        if keepStatus { keepStatus = false } else { status = "" }
     }
+    private var keepStatus = false
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        tab(of: webView)?.url = webView.url
+        guard webView === self.webView else { return }
         address = webView.url?.absoluteString ?? ""
+        canGoBack = webView.canGoBack
+        canGoForward = webView.canGoForward
         picked = nil
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let t = tab(of: webView) { t.loading = false; t.title = webView.title ?? t.title }
+        history.visit(webView.url, title: webView.title ?? "")
+        saveTabs()
+        guard webView === self.webView else { return }
         loading = false
         title = webView.title ?? ""
         address = webView.url?.absoluteString ?? ""
         canGoBack = webView.canGoBack
+        canGoForward = webView.canGoForward
+        pageChanged += 1
         resumeLoadWaiters()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        tab(of: webView)?.loading = false
+        guard webView === self.webView else { return }
         loading = false
         status = error.localizedDescription
         resumeLoadWaiters()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        tab(of: webView)?.loading = false
+        guard webView === self.webView else { return }
         loading = false
         if (error as NSError).code != NSURLErrorCancelled { status = error.localizedDescription }
         resumeLoadWaiters()
     }
 
-    /// A link that wants a new window opens here instead.
+    /// A link or page that opens a window: a new tab after this one (made from the configuration WebKit hands over,
+    /// so the page that opened it can still talk to it, as a sign-in window needs).
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url {
-            if let link = Browser.modLink(url, source: "the page") { offer(link) } else { webView.load(navigationAction.request) }
-        }
-        return nil
+        if let url = navigationAction.request.url, let link = Browser.modLink(url, source: "the page") { offer(link); return nil }
+        let t = makeTab(configuration: configuration)
+        t.started = true
+        let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.count - 1) + 1
+        tabs.insert(t, at: at)
+        select(t)
+        return t.webView
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        if let t = tab(of: webView) { close(t) }
     }
 
     /// No menu of the system's on a long press: the long press is the probe's.

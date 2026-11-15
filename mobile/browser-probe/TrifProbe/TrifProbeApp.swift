@@ -2,6 +2,7 @@
 // Not TRIF. See mobile/README.md for what each part is for and what to send back.
 
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 @main
@@ -10,7 +11,7 @@ struct TrifProbeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(pane: model.pane)
+            ContentView(pane: model.pane, modsPanel: model.modsPanel)
                 .environmentObject(model.browser)
                 .environmentObject(model.report)
                 .tint(Color.trifGreen) // (every button and control TRIF's green, not iOS's blue: Tim, 11-14)
@@ -24,6 +25,7 @@ final class Model: ObservableObject {
     let report: Report
     let browser: Browser
     let pane: ClaudePane
+    let modsPanel: ModsPanel
 
     init() {
         let report = Report()
@@ -31,6 +33,7 @@ final class Model: ObservableObject {
         self.report = report
         self.browser = browser
         self.pane = ClaudePane(report: report, browser: browser)
+        self.modsPanel = ModsPanel(browser: browser)
         // (a mod added: what it did, into the chat's message box: Browser.reportToChat)
         let pane = self.pane
         browser.chatFill = { text, png, pdf in await pane.fill(text, png: png, pdf: pdf, as: "TRIF follow-up.txt") }
@@ -50,6 +53,31 @@ final class Model: ObservableObject {
                 }
                 report.log("autorun", "done: \(pages.joined(separator: ","))")
             }
+        }
+        // (development) `-import /path/a.zip,/path/b.js`: those files imported as if opened from Files or AirDrop
+        // (Import.swift), for the Simulator, where AirDrop can't be tried.
+        if let i = args.firstIndex(of: "-import"), i + 1 < args.count {
+            let paths = args[i + 1].split(separator: ",").map { URL(fileURLWithPath: String($0)) }
+            Task { @MainActor in try? await Task.sleep(nanoseconds: 1_500_000_000); browser.importFiles(paths) }
+        }
+        // (development) steps, one at a time, for driving the app in the Simulator without touching it: write
+        // Documents/step.json, then `xcrun simctl spawn <device> notifyutil -p com.trif.probe.step`. What a step's
+        // script returns goes to Documents/step-out.txt. Steps: {"sheet": "mods|tabs|history|chat|none"},
+        // {"modsjs": "…"} (in the Mods tab's page), {"pagejs": "…"} (in the shown tab's page), {"go": "…"},
+        // {"newtab": "…"}, {"select": n}, {"close": n}, {"back": true}.
+        let panel = self.modsPanel
+        Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
+                                        "com.trif.probe.step" as CFString, nil, .deliverImmediately)
+        // (development) `-go address`: the shown tab goes there at start.
+        if let i = args.firstIndex(of: "-go"), i + 1 < args.count {
+            let to = args[i + 1]
+            Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); browser.go(to) }
+        }
+        // (development) `-open sheet`: a sheet open at start (mods, tabs, history), for screenshots in the Simulator.
+        if let i = args.firstIndex(of: "-open"), i + 1 < args.count {
+            let which = args[i + 1]
+            Task { @MainActor in try? await Task.sleep(nanoseconds: 2_500_000_000); browser.wantsSheet = which }
         }
         // (development) `-dumpchat`: the chat's message box and what's around it, ten seconds after start, to
         // Documents/chat-dom.html (ClaudePane.dumpComposer).
@@ -78,19 +106,53 @@ final class Model: ObservableObject {
     }
 }
 
+extension Model {
+    static var stepRunner: (() -> Void)?
+
+    static func runStep(browser: Browser, panel: ModsPanel) async {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let data = try? Data(contentsOf: docs.appendingPathComponent("step.json")),
+              let step = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        var out = "ok"
+        if let s = step["sheet"] as? String { browser.wantsSheet = s }
+        if let js = step["modsjs"] as? String {
+            do { out = "\(try await panel.webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
+        }
+        if let js = step["pagejs"] as? String {
+            let r = await browser.call(js, in: .page)
+            out = r.text ?? "error: \(r.error ?? "?")"
+        }
+        if let u = step["go"] as? String { browser.go(u) }
+        if let u = step["newtab"] as? String { browser.newTab(u.isEmpty ? nil : u) }
+        if let n = step["select"] as? Int, n < browser.tabs.count { browser.select(browser.tabs[n]) }
+        if let n = step["close"] as? Int, n < browser.tabs.count { browser.close(browser.tabs[n]) }
+        if step["back"] != nil { browser.back() }
+        if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
+        if let t = step["offer"] as? String { browser.offer(text: t) }
+        if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
+        if step["status"] != nil { out = browser.status }
+        try? out.write(to: docs.appendingPathComponent("step-out.txt"), atomically: true, encoding: .utf8)
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var browser: Browser
     @EnvironmentObject var report: Report
     let pane: ClaudePane
+    @ObservedObject var modsPanel: ModsPanel
+    @Environment(\.scenePhase) private var phase
 
     @State private var entry = ""
     @State private var showChecks = false
     @State private var showReport = false
     @State private var showClaude = false
+    @State private var showTabs = false
+    @State private var showHistory = false
+    @State private var showMods = false
+    @State private var importing = false
     /// The chat pane's height, dragged by the grip on its top edge (Tim, 11-14); kept. 0: half the screen.
     @AppStorage("paneHeight") private var paneHeight: Double = 0
     @GestureState private var paneDrag: CGFloat = 0
-    @State private var showMods = false
     @State private var asking = false
     @State private var question = ""
     @FocusState private var editing: Bool
@@ -121,10 +183,20 @@ struct ContentView: View {
         .accessibilityLabel("Chat height")
     }
 
+    /// Mods waiting for the user's OK on this site (the Mods button's badge, as the panel's waiting badge).
+    private var waitingHere: Int {
+        browser.mods.mods.filter { $0.held && ($0.everywhere || Site.of($0.site) == browser.site || $0.sites.contains { Site.of($0) == browser.site }) }.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             addressBar
-            WebViewHost(webView: browser.webView)
+            ZStack {
+                WebViewHost(webView: browser.webView).id(browser.current.id)
+                if browser.current.webView.url == nil && !browser.loading {
+                    NewTabView(history: browser.history)
+                }
+            }
             if let picked = browser.picked { PickedBar(picked: picked) }
             if showClaude {
                 paneGrip
@@ -145,23 +217,52 @@ struct ContentView: View {
                 .background(Color(.secondarySystemBackground))
             }
             if !browser.status.isEmpty {
-                Text(browser.status)
-                    .font(.footnote)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground))
+                HStack(alignment: .top) {
+                    Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+                    Button { browser.status = "" } label: { Image(systemName: "xmark").font(.caption) }
+                        .accessibilityLabel("Dismiss")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(.secondarySystemBackground))
             }
             Divider()
             toolbar
         }
-        .onChange(of: browser.address) { _, new in if !editing { entry = new } }
+        .onAppear { entry = browser.address; pane.follow(site: browser.site) }
+        .onChange(of: browser.address) { _, new in if !editing { entry = new }; pane.follow(site: browser.site) }
+        .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site) }
         .onChange(of: browser.wantsChat) { _, want in if want { showClaude = true; browser.wantsChat = false } }
+        .onChange(of: browser.wantsMods) { _, want in if want { showMods = true; browser.wantsMods = false } }
+        .onChange(of: browser.wantsAddress) { _, want in if want { entry = ""; editing = true; browser.wantsAddress = false } }
+        .onChange(of: browser.wantsSheet) { _, which in
+            switch which {
+            case "mods": showMods = true
+            case "tabs": browser.snapshot(); showTabs = true
+            case "history": showHistory = true
+            case "chat": showClaude = true
+            case "import": importing = true
+            case "none": showMods = false; showTabs = false; showHistory = false; showClaude = false; showChecks = false; showReport = false
+            default: break
+            }
+            browser.wantsSheet = ""
+        }
+        .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
+        .onChange(of: phase) { _, p in if p != .active { browser.saveTabs(); browser.history.saveNow() } }
+        .onOpenURL { url in if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) } }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { browser.importFiles(urls) }
+        }
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
+        .sheet(isPresented: $showTabs) { TabsView().environmentObject(browser) }
+        .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
+        .sheet(isPresented: $showMods) {
+            ModsPanelView(panel: modsPanel).environmentObject(browser)
+                .presentationDetents([.medium, .large], selection: .constant(.large))
+        }
         .sheet(item: $browser.modLink) { link in ModLinkView(link: link).environmentObject(browser) }
         .sheet(item: $browser.modOffer) { mod in ModOfferView(mod: mod).environmentObject(browser) }
-        .sheet(isPresented: $showMods) { ModsListView(store: browser.mods, report: report).environmentObject(browser) }
         .alert("What bothers you on this page?", isPresented: $asking) {
             TextField("the cookie notice", text: $question)
             Button("Ask the phone") { let q = question; Task { await browser.askPhone(q) } }
@@ -173,14 +274,20 @@ struct ContentView: View {
 
     private var addressBar: some View {
         HStack(spacing: 8) {
-            TextField("Address", text: $entry)
+            TextField("Search or type an address", text: $entry)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($editing)
+                .submitLabel(.go)
                 .onSubmit { browser.go(entry) }
-            if browser.loading { ProgressView() }
+            if browser.loading {
+                Button { browser.webView.stopLoading() } label: { Image(systemName: "xmark") }.accessibilityLabel("Stop")
+            } else {
+                Button { browser.reload() } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Reload")
+                    .disabled(browser.webView.url == nil)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -188,41 +295,80 @@ struct ContentView: View {
 
     private var toolbar: some View {
         HStack {
-            Button { browser.back() } label: { Image(systemName: "chevron.left") }.disabled(!browser.canGoBack)
+            Button { browser.back() } label: { Image(systemName: "chevron.left") }.disabled(!browser.canGoBack).accessibilityLabel("Back")
             Spacer()
-            Button { browser.reload() } label: { Image(systemName: "arrow.clockwise") }
+            Button { browser.forward() } label: { Image(systemName: "chevron.right") }.disabled(!browser.canGoForward).accessibilityLabel("Forward")
+            Spacer()
+            Button { showClaude.toggle() } label: { Image(systemName: showClaude ? "bubble.left.fill" : "bubble.left") }.accessibilityLabel("Chat")
+            Spacer()
+            Button { showMods = true } label: {
+                RobotGlyph().frame(width: 24, height: 24)
+                    .overlay(alignment: .topTrailing) {
+                        if waitingHere > 0 {
+                            Text("\(waitingHere)").font(.caption2.bold()).foregroundStyle(.black)
+                                .padding(.horizontal, 4).background(Capsule().fill(Color.trifYellow)).offset(x: 8, y: -6)
+                        }
+                    }
+            }
+            .accessibilityLabel(waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
+            Spacer()
+            Button { browser.snapshot(); showTabs = true } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
+                    Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .accessibilityLabel("Tabs, \(browser.tabs.count) open")
             Spacer()
             Menu {
-                Section("The probe's own pages") {
-                    ForEach(browser.pages.pageNames, id: \.self) { name in
-                        Button(name) { browser.go(PageSchemeHandler.home + name) }
-                    }
-                    Button("a mod link") { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") }
-                }
-                Section("Real sites") {
-                    ForEach(["github.com", "x.com", "youtube.com", "reddit.com", "en.wikipedia.org", "nytimes.com"], id: \.self) { site in
-                        Button(site) { browser.go(site) }
-                    }
-                }
-            } label: { Image(systemName: "list.bullet") }
-            Spacer()
-            Button { showChecks = true } label: { Image(systemName: "checklist") }
-            Spacer()
-            Menu {
+                Button { browser.newTab() } label: { Label("New tab", systemImage: "plus.square.on.square") }
+                Button { showHistory = true } label: { Label("History", systemImage: "clock") }
+                Button { importing = true } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                Divider()
                 Button("Copy this page for the chat") { Task { await browser.copyOutline() } }
                 Button("Add a mod from the clipboard") { browser.offerFromClipboard() }
-                Button("Your mods") { showMods = true }
                 Button("Ask the phone's own model…") { question = ""; asking = true }
                 Button("Show everything hidden on this site again", role: .destructive) { Task { await browser.forgetRulesHere() } }
-            } label: { Image(systemName: "wand.and.stars") }
-            Spacer()
-            Button { showClaude.toggle() } label: { Image(systemName: showClaude ? "bubble.left.fill" : "bubble.left") }
-            Spacer()
-            Button { showReport = true } label: { Image(systemName: "square.and.arrow.up") }
+                Divider()
+                Menu("The probe") {
+                    Button("Checks") { showChecks = true }
+                    Button("Report") { showReport = true }
+                    Section("The probe's own pages") {
+                        ForEach(browser.pages.pageNames, id: \.self) { name in
+                            Button(name) { browser.go(PageSchemeHandler.home + name) }
+                        }
+                        Button("a mod link") { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") }
+                    }
+                    Section("Real sites") {
+                        ForEach(["github.com", "x.com", "youtube.com", "reddit.com", "en.wikipedia.org", "nytimes.com"], id: \.self) { site in
+                            Button(site) { browser.go(site) }
+                        }
+                    }
+                }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .accessibilityLabel("More")
         }
         .font(.title3)
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
+    }
+}
+
+/// The robot as the toolbar's Mods button (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head
+/// and two round eyes, in the button's colour.
+struct RobotGlyph: View {
+    var body: some View {
+        GeometryReader { g in
+            let s = min(g.size.width, g.size.height)
+            ZStack {
+                RoundedRectangle(cornerRadius: s * 0.3, style: .continuous).stroke(lineWidth: s * 0.09)
+                HStack(spacing: s * 0.2) {
+                    Circle().frame(width: s * 0.2, height: s * 0.2)
+                    Circle().frame(width: s * 0.2, height: s * 0.2)
+                }
+            }
+            .frame(width: s, height: s)
+        }
     }
 }
 
@@ -427,6 +573,13 @@ struct ReportView: View {
 }
 
 extension Color {
+    /// The panel's yellow and coral (--led-yellow, --led-coral): boxed mods and free mods.
+    static let trifYellow = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(red: 0xe8 / 255, green: 0xc5 / 255, blue: 0x47 / 255, alpha: 1)
+        : UIColor(red: 0x9a / 255, green: 0x73 / 255, blue: 0x00 / 255, alpha: 1) })
+    static let trifCoral = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(red: 0xf0 / 255, green: 0x86 / 255, blue: 0x6a / 255, alpha: 1)
+        : UIColor(red: 0xc2 / 255, green: 0x51 / 255, blue: 0x2d / 255, alpha: 1) })
     /// TRIF's green, as the panel has it (--led-green): the robot's own on dark, a darker one on light, so
     /// text in it stays readable.
     static let trifGreen = Color(UIColor { $0.userInterfaceStyle == .dark

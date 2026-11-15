@@ -25,6 +25,17 @@
 		CE1C45F5A5572E195C50703E /* ClaudePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0E11AB5DA626CF90F0DBC6A /* ClaudePane.swift */; };
 		E88EAFB79BF3818C80300BB0 /* Report.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAF31393ED658C32DF90132B /* Report.swift */; };
 		FA8B849F0EDF4996DCE7F94D /* Mods.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE824E1A29585E6DA63DE65 /* Mods.swift */; };
+		1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50952D10E0015A131982D938 /* Tabs.swift */; };
+		ECF9AC8198F8D474EE8E0A97 /* History.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4AB4F92AE50452752EADEC /* History.swift */; };
+		83C9CC277679A1522C7BFBA3 /* ModsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */; };
+		0EF94AA25682CDCF85352992 /* Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903BBCA66CB348FEA79D82F4 /* Import.swift */; };
+		B7F7A78E2063372A6C3DBEDA /* mods.html in Resources */ = {isa = PBXBuildFile; fileRef = 22B988337DDCC367969E0FE6 /* mods.html */; };
+		F35D29FE9EAE39CBCE16471E /* mods-page.js in Resources */ = {isa = PBXBuildFile; fileRef = 9526F4091350361C7E46F708 /* mods-page.js */; };
+		28EAA961AB24934B42B02715 /* mods-page.css in Resources */ = {isa = PBXBuildFile; fileRef = D6514E135D112DD05D6B9F94 /* mods-page.css */; };
+		4206EC0D673279D34CB31867 /* panel-kit.js in Resources */ = {isa = PBXBuildFile; fileRef = 196B0CD9E4AA8F552805DCC7 /* panel-kit.js */; };
+		1E813C508DF4C8DECF355AB3 /* sidepanel.css in Resources */ = {isa = PBXBuildFile; fileRef = F3AE0E965F44D6509BCBAEFA /* sidepanel.css */; };
+		043D2B26F4CBFC81026002AE /* switch.css in Resources */ = {isa = PBXBuildFile; fileRef = 004A90B030B6D40CBFD9BFB1 /* switch.css */; };
+		64CAEA4CF2EA4789ECADED2E /* style-mirror.js in Resources */ = {isa = PBXBuildFile; fileRef = 70D950EDA7F1B22C717ECA41 /* style-mirror.js */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +58,17 @@
 		F0E11AB5DA626CF90F0DBC6A /* ClaudePane.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudePane.swift; sourceTree = "<group>"; };
 		F1BAF62AC50245BCF5ECE0A9 /* TrifProbeApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrifProbeApp.swift; sourceTree = "<group>"; };
 		FD05AECBA179D94C3E3B0BEF /* TrifProbe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TrifProbe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		50952D10E0015A131982D938 /* Tabs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Tabs.swift"; sourceTree = "<group>"; };
+		7F4AB4F92AE50452752EADEC /* History.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "History.swift"; sourceTree = "<group>"; };
+		8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModsPanel.swift"; sourceTree = "<group>"; };
+		903BBCA66CB348FEA79D82F4 /* Import.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Import.swift"; sourceTree = "<group>"; };
+		22B988337DDCC367969E0FE6 /* mods.html */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.html; path = "mods.html"; sourceTree = "<group>"; };
+		9526F4091350361C7E46F708 /* mods-page.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = "mods-page.js"; sourceTree = "<group>"; };
+		D6514E135D112DD05D6B9F94 /* mods-page.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; path = "mods-page.css"; sourceTree = "<group>"; };
+		196B0CD9E4AA8F552805DCC7 /* panel-kit.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; name = "panel-kit.js"; path = "../shared/gen/panel-kit.js"; sourceTree = "<group>"; };
+		F3AE0E965F44D6509BCBAEFA /* sidepanel.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; name = "sidepanel.css"; path = "../../extension/sidepanel.css"; sourceTree = "<group>"; };
+		004A90B030B6D40CBFD9BFB1 /* switch.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; name = "switch.css"; path = "../../extension/switch.css"; sourceTree = "<group>"; };
+		70D950EDA7F1B22C717ECA41 /* style-mirror.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = "style-mirror.js"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +103,10 @@
 		7F92DC7021E05AA5A0BB90F4 /* Web */ = {
 			isa = PBXGroup;
 			children = (
+				70D950EDA7F1B22C717ECA41 /* style-mirror.js */,
+				D6514E135D112DD05D6B9F94 /* mods-page.css */,
+				9526F4091350361C7E46F708 /* mods-page.js */,
+				22B988337DDCC367969E0FE6 /* mods.html */,
 				29CF97A92F672EEB375D02B9 /* start-own.js */,
 				B410339C0BE962E0C942C43E /* chat.js */,
 				E312BD6E2475815E36C63107 /* start-page.js */,
@@ -92,6 +118,9 @@
 		9D58C528C16A0F0B14F9746D /* Shared (from the repository) */ = {
 			isa = PBXGroup;
 			children = (
+				004A90B030B6D40CBFD9BFB1 /* switch.css */,
+				F3AE0E965F44D6509BCBAEFA /* sidepanel.css */,
+				196B0CD9E4AA8F552805DCC7 /* panel-kit.js */,
 				901B721F27019757A750630C /* kit.js */,
 				0A12BEDEC58A35DA53AE569B /* sandbox-runtime.js */,
 				1FD4645E79F7F18C7685F439 /* mod-guide.txt */,
@@ -113,6 +142,10 @@
 		D2A8835F18F122DCE368FB7D /* TrifProbe */ = {
 			isa = PBXGroup;
 			children = (
+				903BBCA66CB348FEA79D82F4 /* Import.swift */,
+				8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */,
+				7F4AB4F92AE50452752EADEC /* History.swift */,
+				50952D10E0015A131982D938 /* Tabs.swift */,
 				C92814A95137C3CC4B0A8C2F /* Browser.swift */,
 				A67596316AFDF35B8CF90704 /* Checks.swift */,
 				F0E11AB5DA626CF90F0DBC6A /* ClaudePane.swift */,
@@ -181,6 +214,13 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				64CAEA4CF2EA4789ECADED2E /* style-mirror.js in Resources */,
+				043D2B26F4CBFC81026002AE /* switch.css in Resources */,
+				1E813C508DF4C8DECF355AB3 /* sidepanel.css in Resources */,
+				4206EC0D673279D34CB31867 /* panel-kit.js in Resources */,
+				28EAA961AB24934B42B02715 /* mods-page.css in Resources */,
+				F35D29FE9EAE39CBCE16471E /* mods-page.js in Resources */,
+				B7F7A78E2063372A6C3DBEDA /* mods.html in Resources */,
 				1C17BC0B5A6D8672C0959C5C /* start-own.js in Resources */,
 				D8F519A0F55D42F8360FDF5A /* chat.js in Resources */,
 				3AE3D94B4CB20B1F2756BBBC /* start-page.js in Resources */,
@@ -201,6 +241,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0EF94AA25682CDCF85352992 /* Import.swift in Sources */,
+				83C9CC277679A1522C7BFBA3 /* ModsPanel.swift in Sources */,
+				ECF9AC8198F8D474EE8E0A97 /* History.swift in Sources */,
+				1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */,
 				066931474CC5139D68D2F470 /* Browser.swift in Sources */,
 				17237858CB0A046A273784DC /* Checks.swift in Sources */,
 				CE1C45F5A5572E195C50703E /* ClaudePane.swift in Sources */,
@@ -224,6 +268,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TrifProbe/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TRIF Probe";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -311,6 +356,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TrifProbe/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TRIF Probe";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

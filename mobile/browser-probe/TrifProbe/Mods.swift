@@ -1,34 +1,163 @@
-// Whole mods, from a chat (proof of concept, branch ios-poc): a mod file Claude or ChatGPT wrote, copied from
-// its reply, read here (shared/gen/mods.js in JavaScriptCore: TRIF's style rules and the mod's header), shown
-// for an OK, then kept and run on every page its @match covers, each tier in its own world as on desktop:
-// a style mod's rules in TRIF's world, a boxed mod in the box (SES), a free mod in the page.
-// Not yet: the code reading and holds, powers granted one by one, settings, a style section.
+// The mods the app keeps (branch ios-poc): each one read the way the helper reads it (shared/gen/mods.js in
+// JavaScriptCore: helper/lib/mods.js buildMod, the style rules, a boxed mod's powers and a free mod's code reading),
+// run in its tier's world as on desktop (a style mod's rules in TRIF's world, a boxed mod in the box with SES and
+// TRIF's sandbox runtime, a free mod in the page's own world), and held, as on desktop (helper/lib/held.js), while
+// it can do something the user hasn't allowed: a boxed mod's powers and their combinations, what TRIF found a free
+// mod's code can do. A held mod never runs; a change waiting for an OK leaves the version before running.
+// The Mods tab (ModsPanel.swift, Web/mods.html) shows and changes all of this.
 
 import SwiftUI
 import JavaScriptCore
 import WebKit
+import CryptoKit
+
+/// What a mod needs allowed before it runs (held.js needsOf): a power, a combination, a finding; `lines`, the
+/// hashes of the lines of code that use it (a free mod's), so a later version is asked about again only for those.
+struct ModNeed: Codable, Equatable {
+    var key: String
+    var fact: String
+    var power: String?
+    var lines: [String]?
+}
+
+struct PowerFact: Codable, Equatable { var power: String; var fact: String }
+struct ModRisk: Codable, Equatable { var tier: Int; var why: String? }
+
+/// A version kept before a change (the code card's History): its text, when, and what replaced it.
+struct ModVersion: Codable, Equatable, Identifiable {
+    var stamp: String
+    var at: Date
+    var code: String
+    /// chat, import, restore, undo (as desktop's history sources)
+    var source: String
+    var id: String { stamp }
+}
 
 struct InstalledMod: Codable, Identifiable, Equatable {
-    var id: String
+    var id: String              // site/name, as desktop's ids
+    var site: String            // the folder it's kept under: a host, or all-sites
     var name: String
     var description: String
     var tier: String            // style, boxed or free
     var sites: [String]
+    var matches: [String]
+    var excludes: [String] = []
     var powers: [String]
-    var code: String            // the file as the chat wrote it
+    var powerArgs: [String: [String]] = [:]
+    var facts: [PowerFact] = []
+    var warnings: [String] = []
+    var risk: ModRisk?
+    var hash: String = ""
+    var needs: [ModNeed] = []
+    var code: String            // the file
     var script: String          // what runs: the mod behind a check of the page's address
     var world: String           // trif, box or page
     var at: String              // start or end
     var on: Bool = true
+    /// Sites it's switched off on (a mod for several sites: its switch is the site's, as desktop's offSites).
+    var offSites: [String] = []
+    /// What the user allowed it: {need key: [line hashes]} (allowed.json's shape).
+    var allowed: [String: [String]] = [:]
+    /// How it came: chat, import, link, pasted.
+    var source: String = "chat"
+    /// Why it's off and marked: import (new) or update (updated), until it's switched on.
+    var newOff: String?
+    var added: Date = Date()
+    var history: [ModVersion] = []
+    /// While a change waits for the user's OK: the version that last ran, which keeps running.
+    var ran: RanVersion?
+
+    struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String }
 
     var tierName: String { tier == "style" ? "Style mod" : tier == "boxed" ? "Boxed mod" : "Free mod" }
-    var colour: Color { tier == "style" ? .green : tier == "boxed" ? .yellow : .orange }
+    /// The tier's colour, as the panel's (sidepanel.css --led-green, --led-yellow, --led-coral).
+    var colour: Color { tier == "style" ? .trifGreen : tier == "boxed" ? .trifYellow : .trifCoral }
+    var everywhere: Bool { site == "all-sites" }
+    /// Its file's name, as desktop keeps it (sites/<site>/<name>.js): read again, it keeps its id.
+    var file: String { "\(id.split(separator: "/").last ?? "mod").js" }
+    /// A mod for several sites (or every site) has a switch per site (desktop's isMultiSite).
+    var multiSite: Bool { everywhere || Set(sites.map(Site.of)).count > 1 }
+
+    /// The needs not yet allowed (modfile.js waiting): what a hold is waiting for.
+    var waiting: [ModNeed] {
+        needs.filter { n in
+            guard let ok = allowed[n.key] else { return true }
+            return (n.lines ?? []).contains { !ok.contains($0) }
+        }
+    }
+    var held: Bool { !waiting.isEmpty }
+    /// A change on hold: the version before runs meanwhile.
+    var pending: Bool { held && ran != nil }
+
+    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, allowed, source, newOff, added, history, ran }
+
+    init(id: String, site: String, name: String, description: String, tier: String, sites: [String], matches: [String], powers: [String], code: String, script: String, world: String, at: String) {
+        self.id = id; self.site = site; self.name = name; self.description = description; self.tier = tier; self.sites = sites
+        self.matches = matches; self.powers = powers; self.code = code; self.script = script; self.world = world; self.at = at
+    }
+
+    // (every field but the first few optional: mods kept by the proof of concept read in, then read again)
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        code = try c.decode(String.self, forKey: .code)
+        site = try c.decodeIfPresent(String.self, forKey: .site) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        tier = try c.decodeIfPresent(String.self, forKey: .tier) ?? "free"
+        sites = try c.decodeIfPresent([String].self, forKey: .sites) ?? []
+        matches = try c.decodeIfPresent([String].self, forKey: .matches) ?? []
+        excludes = try c.decodeIfPresent([String].self, forKey: .excludes) ?? []
+        powers = try c.decodeIfPresent([String].self, forKey: .powers) ?? []
+        powerArgs = try c.decodeIfPresent([String: [String]].self, forKey: .powerArgs) ?? [:]
+        facts = try c.decodeIfPresent([PowerFact].self, forKey: .facts) ?? []
+        warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
+        risk = try c.decodeIfPresent(ModRisk.self, forKey: .risk)
+        hash = try c.decodeIfPresent(String.self, forKey: .hash) ?? ""
+        needs = try c.decodeIfPresent([ModNeed].self, forKey: .needs) ?? []
+        script = try c.decodeIfPresent(String.self, forKey: .script) ?? ""
+        world = try c.decodeIfPresent(String.self, forKey: .world) ?? "page"
+        at = try c.decodeIfPresent(String.self, forKey: .at) ?? "end"
+        on = try c.decodeIfPresent(Bool.self, forKey: .on) ?? true
+        offSites = try c.decodeIfPresent([String].self, forKey: .offSites) ?? []
+        allowed = try c.decodeIfPresent([String: [String]].self, forKey: .allowed) ?? [:]
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "chat"
+        newOff = try c.decodeIfPresent(String.self, forKey: .newOff)
+        added = try c.decodeIfPresent(Date.self, forKey: .added) ?? Date()
+        history = try c.decodeIfPresent([ModVersion].self, forKey: .history) ?? []
+        ran = try c.decodeIfPresent(RanVersion.self, forKey: .ran)
+    }
+}
+
+/// Sites as the panel groups them: a host's registrable domain (en.wikipedia.org → wikipedia.org).
+enum Site {
+    private static let twoPart: Set<String> = ["co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
+                                               "com.br", "com.mx", "co.in", "co.kr", "com.cn", "com.tw", "com.hk", "co.za", "com.sg", "com.tr", "com.ar", "qc.ca"]
+    static func of(_ host: String) -> String {
+        let h = host.lowercased().replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+        if h.isEmpty || h == "all-sites" || h.allSatisfy({ $0.isNumber || $0 == "." }) || !h.contains(".") { return h }
+        let parts = h.split(separator: ".").map(String.init)
+        guard parts.count > 2 else { return h }
+        let last2 = parts.suffix(2).joined(separator: ".")
+        return twoPart.contains(last2) ? parts.suffix(3).joined(separator: ".") : last2
+    }
+    /// Whether `host` is `site` or under it.
+    static func host(_ host: String, isIn site: String) -> Bool {
+        let h = host.lowercased().replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+        return h == site || h.hasSuffix("." + site)
+    }
 }
 
 @MainActor
 final class ModStore: ObservableObject {
     @Published private(set) var mods: [InstalledMod] = []
+    /// The tiers switched off on a site (the Mods tab's On / Off on each tier): site → [style, boxed, free].
+    @Published private(set) var groupsOff: [String: [String]] = [:]
+    /// The last mod deleted, for Undo (this launch only).
+    @Published private(set) var lastDeleted: InstalledMod?
     private let key = "installedMods"
+    private let groupsKey = "groupsOff"
+    private let readerKey = "modReader"
     private lazy var js: JSContext? = {
         let c = JSContext()
         c?.evaluateScript(Browser.resource("mods", "js"))
@@ -37,67 +166,243 @@ final class ModStore: ObservableObject {
 
     init() {
         if let data = UserDefaults.standard.data(forKey: key), let list = try? JSONDecoder().decode([InstalledMod].self, from: data) { mods = list }
+        if let g = UserDefaults.standard.dictionary(forKey: groupsKey) as? [String: [String]] { groupsOff = g }
+        rereadIfNeeded()
     }
 
     private func save() {
         if let data = try? JSONEncoder().encode(mods) { UserDefaults.standard.set(data, forKey: key) }
+        UserDefaults.standard.set(groupsOff, forKey: groupsKey)
     }
 
-    /// A mod file, or a chat's reply with one in it: the mod, ready to add, or why it can't be.
-    func read(_ text: String) -> (mod: InstalledMod?, error: String?) {
+    /// The reader's own version (mods.js's text): when the app brings a new one, every mod is read again from its
+    /// file, so what runs is what this version makes of it. The proof of concept's mods (ids without a site) are
+    /// read in as allowed for what they can do: the user added each from its "Add this mod?" sheet.
+    private func rereadIfNeeded() {
+        let version = SHA256.hash(data: Data(Browser.resource("mods", "js").utf8)).map { String(format: "%02x", $0) }.joined()
+        guard UserDefaults.standard.string(forKey: readerKey) != version else { return }
+        var out: [InstalledMod] = []
+        for old in mods {
+            let fromProbe = !old.id.contains("/")
+            guard var m = read(old.code, file: fromProbe ? "" : old.file, site: fromProbe ? "" : old.site).mod else { out.append(old); continue }
+            m.on = old.on; m.offSites = old.offSites; m.source = old.source; m.newOff = old.newOff; m.added = old.added; m.history = old.history
+            m.allowed = fromProbe ? ModStore.allow(m.needs, old.allowed) : old.allowed
+            if !fromProbe, let ran = old.ran { m.ran = ran }
+            out.removeAll { $0.id == m.id }
+            out.append(m)
+        }
+        mods = out
+        UserDefaults.standard.set(version, forKey: readerKey)
+        save()
+    }
+
+    // MARK: reading
+
+    /// A mod file, or a chat's reply with one in it: the mod, ready to add, or why it can't be. `file`: the file's
+    /// name, when it came as one; `here`: the page's host (a mod for several sites is kept under it, if it's one).
+    func read(_ text: String, file: String = "", site: String = "", here: String = "") -> (mod: InstalledMod?, error: String?) {
         guard let c = js else { return (nil, "the mod reader didn't start") }
         c.setObject(text, forKeyedSubscript: "__input" as NSString)
-        let out = c.evaluateScript("JSON.stringify((function () { const f = __trifMods.findMod(__input); return f ? __trifMods.parseMod(f) : { error: 'there is no mod file (a ==WebMod== header) in it' }; })())")?.toString() ?? ""
-        guard let d = try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any] else { return (nil, "the mod reader gave nothing back: \(c.exception?.toString() ?? out)") }
+        c.setObject(["file": file, "site": site, "here": here], forKeyedSubscript: "__opts" as NSString)
+        let out = c.evaluateScript("JSON.stringify((function () { const f = __trifMods.findMod(__input); return f ? __trifMods.readMod(f, __opts) : { error: 'there is no mod file (a ==WebMod== header) in it' }; })())")?.toString() ?? ""
+        guard let data = out.data(using: .utf8), let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return (nil, "the mod reader gave nothing back: \(c.exception?.toString() ?? out)") }
         if let error = d["error"] as? String { return (nil, error) }
         let s = { (k: String) in d[k] as? String ?? "" }
         let a = { (k: String) in d[k] as? [String] ?? [] }
-        return (InstalledMod(id: s("id"), name: s("name"), description: s("description"), tier: s("tier"), sites: a("sites"), powers: a("powers"),
-                             code: s("code"), script: s("script"), world: s("world"), at: s("at")), nil)
+        var m = InstalledMod(id: s("id"), site: s("site"), name: s("name"), description: s("description"), tier: s("tier"), sites: a("sites"), matches: a("matches"),
+                             powers: a("powers"), code: s("code"), script: s("script"), world: s("world"), at: s("at"))
+        m.excludes = a("excludes")
+        m.hash = s("hash")
+        m.powerArgs = d["powerArgs"] as? [String: [String]] ?? [:]
+        if let info = d["powerInfo"] as? [String: Any] {
+            m.facts = (info["facts"] as? [[String: Any]] ?? []).map { PowerFact(power: $0["power"] as? String ?? "", fact: $0["fact"] as? String ?? "") }
+            m.warnings = info["warnings"] as? [String] ?? []
+        }
+        if let r = d["risk"] as? [String: Any], let t = r["tier"] as? Int { m.risk = ModRisk(tier: t, why: r["why"] as? String) }
+        m.needs = (d["needs"] as? [[String: Any]] ?? []).map { ModNeed(key: $0["key"] as? String ?? "", fact: $0["fact"] as? String ?? "", power: $0["power"] as? String, lines: $0["lines"] as? [String]) }
+        return (m, nil)
     }
 
-    /// The mods switched on whose @match covers this address.
-    func running(on url: String) -> [InstalledMod] {
+    /// A mod from a chat or the clipboard: as `read`, and when one kept here has its @name and site (the chat's
+    /// new version of it: "the same @name replaces that mod"), under that one's id, whatever its file is called.
+    func readNamed(_ text: String, here: String) -> (mod: InstalledMod?, error: String?) {
+        let r = read(text, here: here)
+        guard let m = r.mod, !mods.contains(where: { $0.id == m.id }),
+              let same = mods.first(where: { $0.name == m.name && $0.site == m.site }) else { return r }
+        return read(text, file: same.file, site: same.site, here: here)
+    }
+
+    /// What changed from one text to another, as desktop's "See differences" shows it (helper/lib/diff.js).
+    func diff(_ before: String, _ after: String) -> [[String: String]] {
         guard let c = js else { return [] }
-        return mods.filter(\.on).filter { m in
-            c.setObject(m.code, forKeyedSubscript: "__code" as NSString)
-            c.setObject(url, forKeyedSubscript: "__url" as NSString)
-            return c.evaluateScript("(function () { const p = __trifMods.parseMod(__code); return !p.error && __trifMods.matchesUrl(__url, p.matches); })()")?.toBool() ?? false
+        c.setObject(before, forKeyedSubscript: "__a" as NSString)
+        c.setObject(after, forKeyedSubscript: "__b" as NSString)
+        let out = c.evaluateScript("JSON.stringify(__trifMods.lineDiff(__a, __b))")?.toString() ?? "[]"
+        return (try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [[String: String]]) ?? []
+    }
+
+    /// Whether a mod's @match (and @exclude) covers an address.
+    func applies(_ m: InstalledMod, to url: String) -> Bool {
+        guard let c = js else { return false }
+        c.setObject(url, forKeyedSubscript: "__url" as NSString)
+        c.setObject(m.matches, forKeyedSubscript: "__m" as NSString)
+        c.setObject(m.excludes, forKeyedSubscript: "__x" as NSString)
+        return c.evaluateScript("__trifMods.appliesTo(__url, __m, __x)")?.toBool() ?? false
+    }
+
+    static func allow(_ needs: [ModNeed], _ allowed: [String: [String]]) -> [String: [String]] {
+        var out = allowed
+        for n in needs { out[n.key] = Array(Set((out[n.key] ?? []) + (n.lines ?? []))).sorted() }
+        return out
+    }
+
+    // MARK: what runs
+
+    func groupOff(_ tier: String, on site: String) -> Bool { (groupsOff[site] ?? []).contains(tier) }
+
+    /// Whether a mod is switched on (for a site: its switch there).
+    func isOn(_ m: InstalledMod, site: String?) -> Bool {
+        guard m.on else { return false }
+        guard let site, !site.isEmpty else { return true }
+        return !(m.multiSite && m.offSites.contains(site))
+    }
+
+    /// The mods switched on, not held (a change on hold: its version before), whose @match covers this address.
+    func running(on url: String) -> [InstalledMod] {
+        let site = Site.of(URL(string: url)?.host ?? "")
+        return mods.filter { m in
+            guard m.on, !(m.held && m.ran == nil), !groupOff(m.tier, on: site), !(m.multiSite && m.offSites.contains(site)) else { return false }
+            return applies(m, to: url)
         }
     }
 
-    /// Adds a mod, or replaces the one with its name.
-    func add(_ m: InstalledMod) {
-        if let i = mods.firstIndex(where: { $0.id == m.id }) { mods[i] = m } else { mods.append(m) }
-        save()
-    }
-
-    func remove(_ m: InstalledMod) { mods.removeAll { $0.id == m.id }; save() }
-
-    func toggle(_ m: InstalledMod) {
-        guard let i = mods.firstIndex(where: { $0.id == m.id }) else { return }
-        mods[i].on.toggle()
-        save()
-    }
-
-    /// The scripts the mods that are on add to every page (each checks the page's address itself): SES and
-    /// TRIF's sandbox runtime first in the box world when any boxed mod is on.
+    /// The scripts every page gets for the mods: SES and TRIF's sandbox runtime first in the box world when a boxed
+    /// mod may run, then each mod that's on and not held (a change on hold: the version before), behind a check of
+    /// the sites it's switched off on, and the sites whose tier is off.
     func userScripts() -> [WKUserScript] {
-        let on = mods.filter(\.on)
+        var list: [(InstalledMod, String, String, String)] = []
+        for m in mods where m.on {
+            if m.held { if let r = m.ran { list.append((m, r.script, r.world, r.at)) }; continue }
+            list.append((m, m.script, m.world, m.at))
+        }
         var out: [WKUserScript] = []
-        if on.contains(where: { $0.world == "box" }) {
+        // (first in each world with a mod: a style element the page's policy refuses still applies: Web/style-mirror.js)
+        let mirror = Browser.resource("style-mirror", "js")
+        if list.contains(where: { $0.2 == "trif" }) { out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld)) }
+        if list.contains(where: { $0.2 == "box" }) {
+            out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
             out.append(WKUserScript(source: Browser.resource("ses.umd.min", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
             out.append(WKUserScript(source: Browser.resource("sandbox-runtime", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
         }
-        for m in on {
-            let world: WKContentWorld = m.world == "box" ? Browser.boxWorld : m.world == "page" ? .page : Browser.trifWorld
-            out.append(WKUserScript(source: m.script, injectionTime: m.at == "start" ? .atDocumentStart : .atDocumentEnd, forMainFrameOnly: true, in: world))
+        for (m, script, world, at) in list {
+            let off = (m.multiSite ? m.offSites : []) + groupsOff.filter { $0.value.contains(m.tier) }.map(\.key)
+            let source = off.isEmpty ? script : "(function () { const h = location.hostname.replace(/^www\\./, ''); if (\(Browser.jsonText(Array(Set(off)).sorted())).some((s) => h === s || h.endsWith('.' + s))) return;\n\(script)\n})();"
+            let w: WKContentWorld = world == "box" ? Browser.boxWorld : world == "page" ? .page : Browser.trifWorld
+            out.append(WKUserScript(source: source, injectionTime: at == "start" ? .atDocumentStart : .atDocumentEnd, forMainFrameOnly: true, in: w))
         }
         return out
     }
+
+    // MARK: changes
+
+    private func stamp() -> String { String(Int(Date().timeIntervalSince1970 * 1000)) }
+
+    /// Adds a mod, or a new version of the one with its id (the one before kept in its history). `source`: chat,
+    /// import, link or pasted. One from a chat (the user tapped Add it) is on; an import starts off, marked new
+    /// (updated, if it replaces one), as on desktop. A new version that needs an OK the one before didn't: the
+    /// one before keeps running until the user decides.
+    @discardableResult
+    func add(_ new: InstalledMod, source: String) -> InstalledMod {
+        var m = new
+        m.source = source
+        if let i = mods.firstIndex(where: { $0.id == m.id }) {
+            let old = mods[i]
+            m.history = old.history
+            if old.code != m.code { m.history.insert(ModVersion(stamp: stamp(), at: Date(), code: old.code, source: source == "import" ? "import" : "chat"), at: 0) }
+            m.history = Array(m.history.filter { $0.at > Date().addingTimeInterval(-30 * 86400) }.prefix(30))
+            m.allowed = old.allowed
+            m.offSites = old.offSites
+            m.added = old.added
+            if source == "import" { m.on = false; m.newOff = "update" } else { m.on = true; m.newOff = nil }
+            // (the version before ran, and this one waits: it keeps running meanwhile)
+            if m.held, !old.held || old.ran != nil { m.ran = old.ran ?? .init(code: old.code, script: old.script, world: old.world, at: old.at) }
+            mods[i] = m
+        } else {
+            if source == "import" { m.on = false; m.newOff = "import" }
+            mods.append(m)
+        }
+        save()
+        return m
+    }
+
+    func remove(_ id: String) {
+        guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
+        lastDeleted = mods.remove(at: i)
+        save()
+    }
+
+    func undoDelete() {
+        guard let m = lastDeleted else { return }
+        if !mods.contains(where: { $0.id == m.id }) { mods.append(m) }
+        lastDeleted = nil
+        save()
+    }
+
+    /// A mod's switch: the whole mod, or (a mod for several sites) its switch on one site.
+    func setOn(_ id: String, _ on: Bool, site: String?) {
+        guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
+        if let site, !site.isEmpty, mods[i].multiSite {
+            mods[i].offSites.removeAll { $0 == site }
+            if !on { mods[i].offSites.append(site) } else if !mods[i].on { mods[i].on = true }
+        } else {
+            mods[i].on = on
+        }
+        if on { mods[i].newOff = nil }
+        save()
+    }
+
+    func setGroup(_ tier: String, on: Bool, site: String) {
+        var list = groupsOff[site] ?? []
+        list.removeAll { $0 == tier }
+        if !on { list.append(tier) }
+        groupsOff[site] = list.isEmpty ? nil : list
+        save()
+    }
+
+    /// Allow: what it waits for is allowed for it (a later version that needs nothing more runs without asking).
+    func approve(_ id: String) {
+        guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
+        mods[i].allowed = ModStore.allow(mods[i].waiting, mods[i].allowed)
+        mods[i].ran = nil
+        save()
+    }
+
+    /// Don't allow a change on hold: the version before is back (this one kept in its history). A new mod: deleted.
+    func reject(_ id: String) {
+        guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
+        guard let ran = mods[i].ran, var back = read(ran.code, file: mods[i].file, site: mods[i].site).mod else { remove(id); return }
+        let now = mods[i]
+        back.on = now.on; back.offSites = now.offSites; back.allowed = now.allowed; back.source = now.source; back.added = now.added
+        back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: "undo")] + now.history
+        mods[i] = back
+        save()
+    }
+
+    /// Restore a kept version: it becomes the mod (the current one kept in History), judged again like any change.
+    func restore(_ id: String, stamp s: String) -> Bool {
+        guard let i = mods.firstIndex(where: { $0.id == id }), let v = mods[i].history.first(where: { $0.stamp == s }),
+              var back = read(v.code, file: mods[i].file, site: mods[i].site).mod else { return false }
+        let now = mods[i]
+        back.on = now.on; back.offSites = now.offSites; back.allowed = now.allowed; back.source = now.source; back.added = now.added; back.newOff = now.newOff
+        back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: "restore")] + now.history
+        if back.held, !now.held { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at) }
+        mods[i] = back
+        save()
+        return true
+    }
 }
 
-/// A mod from the clipboard: what it is and does, before it runs.
+/// A mod from the chat or the clipboard: what it is and does, before it's added.
 struct ModOfferView: View {
     @EnvironmentObject var browser: Browser
     @Environment(\.dismiss) private var dismiss
@@ -116,7 +421,7 @@ struct ModOfferView: View {
                 Section("Runs on") { Text(mod.sites.joined(separator: ", ")).font(.footnote.monospaced()) }
                 if !mod.powers.isEmpty { Section("Asks for these powers") { Text(mod.powers.joined(separator: ", ")).font(.footnote.monospaced()) } }
                 if mod.tier == "free" {
-                    Section { Text("A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.").font(.footnote).foregroundStyle(.orange) }
+                    Section { Text("A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.").font(.footnote).foregroundStyle(Color.trifCoral) }
                 }
                 Section("Its code") {
                     ScrollView(.horizontal) { Text(mod.code).font(.caption2.monospaced()).textSelection(.enabled) }.frame(maxHeight: 260)
@@ -127,43 +432,6 @@ struct ModOfferView: View {
                 }
             }
             .navigationTitle("Add this mod?")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-/// The mods the app keeps: each on or off, or gone.
-struct ModsListView: View {
-    @EnvironmentObject var browser: Browser
-    @ObservedObject var store: ModStore
-    @ObservedObject var report: Report
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if store.mods.isEmpty { Text("No mods yet. Ask Claude or ChatGPT for one, copy its reply, then Add a mod from the clipboard.").foregroundStyle(.secondary) }
-                ForEach(store.mods) { m in
-                    HStack {
-                        Rectangle().fill(m.colour).frame(width: 3)
-                        VStack(alignment: .leading) {
-                            Text(m.name)
-                            Text("\(m.tierName) · \(m.sites.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(get: { m.on }, set: { _ in browser.toggleMod(m) })).labelsHidden().tint(m.colour)
-                    }
-                }
-                .onDelete { idx in for i in idx { browser.removeMod(store.mods[i]) } }
-                // (each thing hidden by pointing, by site: swipe to show it again)
-                ForEach(Array(Set(report.rules.map(\.host))).sorted(), id: \.self) { host in
-                    Section("Hidden on \(host)") {
-                        let list = report.rules.filter { $0.host == host }
-                        ForEach(list) { r in Text(r.selector).font(.caption.monospaced()).lineLimit(2) }
-                            .onDelete { idx in let gone = idx.map { list[$0] }; Task { for r in gone { await browser.unhide(r) } } }
-                    }
-                }
-            }
-            .navigationTitle("Your mods")
             .navigationBarTitleDisplayMode(.inline)
         }
     }

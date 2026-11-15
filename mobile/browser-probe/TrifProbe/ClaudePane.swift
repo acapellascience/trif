@@ -71,31 +71,45 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
 
     private var urlWatch: NSKeyValueObservation?
-    private func lastKey(_ s: ChatService) -> String { "lastChat.\(s.rawValue)" }
-    /// A conversation's address (claude.ai/chat/…, chatgpt.com/c/…), kept for its chat; nothing else is.
+    /// The site the pane's conversation is for: the shown tab's (follow). Each site keeps its own conversation,
+    /// so switching tabs, or going to another site, brings that site's chat back (Tim, 11-15: the chat follows the tab).
+    @Published private(set) var site = ""
+    private func lastKey(_ s: ChatService, _ site: String) -> String { site.isEmpty ? "lastChat.\(s.rawValue)" : "lastChat.\(s.rawValue).\(site)" }
+    /// A conversation's address (claude.ai/chat/…, chatgpt.com/c/…), kept for its chat and site; nothing else is.
     private func remember(_ url: URL?) {
         guard let url, let home = URL(string: service.home), url.host == home.host,
               url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
         c?.fragment = nil
-        if let s = c?.url?.absoluteString { UserDefaults.standard.set(s, forKey: lastKey(service)) }
+        if let s = c?.url?.absoluteString { UserDefaults.standard.set(s, forKey: lastKey(service, site)) }
     }
-    /// Where the pane opens: the conversation it was last on, else a new one.
+    /// Where the pane opens: the site's conversation, else a new one.
     private var resumeURL: URL? {
-        UserDefaults.standard.string(forKey: lastKey(service)).flatMap(URL.init(string:)) ?? URL(string: service.home)
+        UserDefaults.standard.string(forKey: lastKey(service, site)).flatMap(URL.init(string:)) ?? URL(string: service.home)
     }
 
-    /// Loads Claude the first time the pane is shown (not before: the probe is useful without it).
+    /// Loads the chat the first time the pane is shown (not before: the browser is useful without it).
     func start() {
         guard !started, let url = resumeURL else { return }
         started = true
         webView.load(URLRequest(url: url))
     }
 
-    /// Start over: a new conversation (and the one kept forgotten).
+    /// The shown tab's site changed (another tab, or another site in it): the pane goes to that site's
+    /// conversation (a new one if it has none), once it's been started; otherwise it starts there.
+    func follow(site new: String) {
+        guard new != site else { return }
+        site = new
+        guard started, let url = resumeURL else { return }
+        if webView.url?.absoluteString.hasPrefix(url.absoluteString) == true { return }
+        report.log("claude", "\(service.rawValue): the chat for \(new.isEmpty ? "no site" : new)")
+        webView.load(URLRequest(url: url))
+    }
+
+    /// Start over: a new conversation for this site (and the one kept forgotten).
     func home() {
-        UserDefaults.standard.removeObject(forKey: lastKey(service))
+        UserDefaults.standard.removeObject(forKey: lastKey(service, site))
         if let url = URL(string: service.home) { webView.load(URLRequest(url: url)) }
     }
 

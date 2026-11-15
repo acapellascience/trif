@@ -357,7 +357,7 @@
   /** For the app: is there a message box, is anything in it, does the chat have TRIF's instructions, is it replying. */
   function state() {
     const c = composer();
-    return JSON.stringify({ editor: !!editor(), has: !!(c.text || c.names.length), context: hasContext(), working: replying() || !!watch });
+    return JSON.stringify({ editor: !!editor(), has: !!(c.text || c.names.length), context: hasContext(), working: replying() || !!watch, replying: replying() });
   }
   /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
   function resume() {

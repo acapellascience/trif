@@ -12,7 +12,7 @@
   a reply ([data-is-streaming], .font-claude-response) written a few words at a time with a "Stop response"
   button meanwhile, and the address changing to /chat/<id> after the first send, as Claude's does.
   The reply: a style mod for the page named in what was attached or said (its first address), in a code block; two mods
-  if the message says "two"; no mod at all if it says "no mod". `?slow` writes it more slowly; `?nostop` has no stop button or streaming mark (a chat
+  if the message says "two"; no mod at all if it says "no mod"; "wait 90" makes it take about 90 seconds. `?slow` writes it more slowly; `?nostop` has no stop button or streaming mark (a chat
   that changed its page: TRIF's fallback, the reply unchanged for a few seconds).
 -->
 <style>
@@ -121,10 +121,10 @@ ${JSON.stringify(body, null, 2)}`;
       if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', { hide: ['.cookie-consent'] })]);
       parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
     }
-    reply(parts);
+    reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0));
   }
 
-  function reply(parts) {
+  function reply(parts, seconds) {
     const stop = document.createElement('button');
     stop.type = 'button';
     stop.setAttribute('aria-label', 'Stop response');
@@ -145,7 +145,8 @@ ${JSON.stringify(body, null, 2)}`;
         steps.push(() => { into.append(chunk); });
       }
     }
-    const each = slow ? 220 : 90;
+    // ("wait N" in the message: the reply takes about N seconds, written a little at a time)
+    const each = seconds ? Math.max(90, (seconds * 1000) / steps.length) : slow ? 220 : 90;
     let i = 0;
     const tick = () => {
       if (i < steps.length) { steps[i++](); log.scrollTop = log.scrollHeight; setTimeout(tick, each); return; }

@@ -472,8 +472,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// The mod files in a reply that's just done (Web/chat.js): each read (off the main thread), and offered in turn
     /// with the Add this mod? sheet, over the tab; nothing is added without its Add it. Leaves out one already added
-    /// as it is. Returns how many are offered (none: the chat button shows the reply waiting instead).
-    func offerFromChat(_ texts: [String]) async -> Int {
+    /// as it is. Returns those offered (none: the chat button shows the reply waiting instead).
+    @discardableResult
+    func offerFromChat(_ texts: [String]) async -> [InstalledMod] {
         let here = host
         var found: [InstalledMod] = []
         var why: String?
@@ -485,12 +486,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             found.append(m)
         }
         if found.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
-        guard !found.isEmpty else { return 0 }
+        guard !found.isEmpty else { return [] }
         if offerQueue.isEmpty && modOffer == nil { offerBatch = 0; offerShown = 0 }
         offerQueue += found
         offerBatch += found.count
         nextOffer()
-        return found.count
+        return found
     }
 
     /// The next of a reply's mods, once no other sheet is up (the app calls it again as each one closes).

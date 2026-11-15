@@ -13,6 +13,7 @@
 
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @MainActor
 final class Safety: ObservableObject {
@@ -133,8 +134,28 @@ extension ModStore {
 
 /// The app's icon's long-press menu: Pause all mods (Info.plist's UIApplicationShortcutItems), handled here as the
 /// scene starts or is brought back by it.
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static let pauseShortcut = "com.timsrobot.trifprobe.pause"
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    /// A tap on a reply's notification (ClaudePane): told to the chat once the app's parts are there.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let info = response.notification.request.content.userInfo
+        await MainActor.run {
+            // (a launch from the notification: the app's parts start a moment after this)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                NotificationCenter.default.post(name: .trifNotificationTapped, object: nil, userInfo: info)
+            }
+        }
+    }
+
+    /// In front, the app shows the reply itself: no banner.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions { [] }
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         if options.shortcutItem?.type == AppDelegate.pauseShortcut { ModStore.pauseFromShortcut() }
         let c = UISceneConfiguration(name: nil, sessionRole: session.role)
@@ -153,6 +174,8 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
 extension Notification.Name {
     /// Pause all mods came from outside the app's views (the icon's menu): the browser runs no mods from now.
     static let trifPauseAll = Notification.Name("trifPauseAll")
+    /// A reply's notification was tapped (ClaudePane.notificationTapped).
+    static let trifNotificationTapped = Notification.Name("trifNotificationTapped")
 }
 
 extension ModStore {

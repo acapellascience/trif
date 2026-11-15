@@ -131,6 +131,20 @@ TRIF follow-up (one that has them), TRIF screenshot, TRIF pointer.
 | The chat, full screen | covered the toolbar | the toolbar stays under it; back and forward only close the chat (back to the page as it was), the other buttons go back to the tab and do their job there |
 | Toolbar, back and forward while the chat is open (accessibility) | Back · Forward | Back to {site} (Back to Tab on a tab with no site), as the chat's own ‹ {site} |
 
+## Notifications when a reply is done in the background (added 11-15)
+
+Asked for at the first send (iOS's own question; the app adds no words to it). Posted only while the app is in the
+background, within the ~30 s iOS gives it there.
+
+| When | Title | Body |
+|---|---|---|
+| The reply has one mod | Your mod is ready | {mod's name} for {site}: tap to add it. |
+| Several mods | Your mods are ready | {n} mods for {site}: tap to add them. |
+| No mod | Claude replied (ChatGPT replied) | On {site}: tap to read the reply. |
+| iOS's background time ran out first (quiet: no sound or banner, only in the list; removed when the app opens) | Still writing | Claude is still writing for {site}. Open TRIF to get your mod when it's done. |
+
+A tap opens the app on the tab the message was sent from, with Add this mod? (or the chat at the reply).
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

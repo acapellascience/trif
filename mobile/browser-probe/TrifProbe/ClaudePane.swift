@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import UserNotifications
 import WebKit
 
 /// Which chat the pane shows: Claude, or ChatGPT (Codex on the web works on code repositories, not on a page
@@ -89,6 +90,17 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.isInspectable = true
+        // (in the background while a reply is being written: ReplyInBackground below)
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.wentToBackground() }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cameBack() }
+        }
+        NotificationCenter.default.addObserver(forName: .trifNotificationTapped, object: nil, queue: .main) { [weak self] n in
+            let info = n.userInfo ?? [:]
+            MainActor.assumeIsolated { self?.notificationTapped(info) }
+        }
         // (the conversation the pane is on, kept, so the app reopens it: Tim, 11-14)
         urlWatch = webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             let url = wv.url
@@ -302,6 +314,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if d["withInstructions"] as? Bool == true { if let conv = conversation { noteContext(conv) } else { contextNext = true } }
             activity = .working
             workingSince = Date()
+            sentTab = browser?.current.id
+            askToNotify()
             if shown { close() } else { blur() }
             let since = workingSince
             // (a reply that never says it's done, a page that went away: the dots stop after 16 minutes)
@@ -315,12 +329,137 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             report.log("claude", "\(service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")), \(texts.count) mod file(s) in it")
             let late = d["why"] as? String == "late"
             guard activity == .working || late else { return }
-            guard let browser else { activity = .idle; return }
+            guard let browser else { activity = .idle; endBackground(); return }
             Task { @MainActor in
                 let offered = await browser.offerFromChat(texts)
-                if late { if offered > 0, self.activity == .replied { self.activity = .idle }; return }
-                self.activity = offered > 0 || self.shown ? .idle : .replied
+                // (the app in the background: a notification says so, then iOS's background time is given back)
+                if UIApplication.shared.applicationState == .background { self.notifyDone(offered) } // (not inactive: an alert of the system's over the app)
+                self.endBackground()
+                if late { if !offered.isEmpty, self.activity == .replied { self.activity = .idle }; return }
+                self.activity = !offered.isEmpty || self.shown ? .idle : .replied
             }
+        default: break
+        }
+    }
+
+    // MARK: a reply in the background (Tim, 11-15: "a notification when a new mod is ready")
+    // An app in the background runs only while it holds background time from iOS (about 30 seconds since iOS 13;
+    // a swiped-away app runs nothing), and TRIF has no server to notice a reply for it. So: going to the background
+    // while a reply is being written, the app asks for that time, the chat keeps watching the reply, and when it's
+    // done a local notification says so. If the time runs out first, it's given back (iOS ends an app that keeps
+    // it) with a quiet notification, and the reply is read when the app comes back.
+
+    private var bgTask: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundSince: Date?
+    /// The tab the person was on when they sent: a notification's tap goes back to it.
+    private var sentTab: UUID?
+    static let replyNote = "trif.reply"
+    static let stillNote = "trif.reply.still"
+
+    /// Notifications asked for once, at the first send (not at launch). Refused: nothing else changes.
+    private func askToNotify() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            center.requestAuthorization(options: [.alert, .sound]) { ok, _ in
+                Task { @MainActor in Diagnostics.shared.log("notify", "notifications \(ok ? "allowed" : "not allowed")") }
+            }
+        }
+    }
+
+    private func wentToBackground() {
+        backgroundSince = Date()
+        guard activity == .working, bgTask == .invalid else { return }
+        let start = Date()
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "TRIF: a reply being written") { [weak self] in
+            // (iOS calls this on the main thread just before the time is up: the time is given back here, at once)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Diagnostics.shared.log("background", "iOS's background time ran out after \(Int(Date().timeIntervalSince(start))) s, the reply still being written")
+                if self.activity == .working { self.notifyStillWriting() }
+                self.endBackground()
+            }
+        }
+        // (the time iOS gives is known only once the app is in the background)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, self.bgTask != .invalid else { return }
+            let left = UIApplication.shared.backgroundTimeRemaining
+            Diagnostics.shared.log("background", "a reply is being written: background time asked for, \(left > 100_000 ? "no limit given yet" : "\(Int(left)) s left")")
+        }
+    }
+
+    private func endBackground() {
+        guard bgTask != .invalid else { return }
+        let t = bgTask
+        bgTask = .invalid
+        if let since = backgroundSince, UIApplication.shared.applicationState != .active {
+            Diagnostics.shared.log("background", "background time given back after \(Int(Date().timeIntervalSince(since))) s in the background")
+        }
+        UIApplication.shared.endBackgroundTask(t)
+    }
+
+    /// Back in front: the quiet "still writing" note goes, and a reply that ended while the app was stopped is read.
+    private func cameBack() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [ClaudePane.stillNote])
+        let away = backgroundSince.map { Date().timeIntervalSince($0) } ?? 0
+        backgroundSince = nil
+        endBackground()
+        guard activity == .working else { return }
+        // (after a while away iOS will have stopped the chat's page: its reply may have been cut off mid-stream, or
+        // finished on the chat's side without the page hearing. If, a moment after coming back, nothing is being
+        // written, the conversation is loaded again and the reply read from it (chat.js resume). A page iOS ended
+        // is loaded again anyway: webViewWebContentProcessDidTerminate.)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.activity == .working, away > 20, self.conversation != nil else { return }
+            let st = (Browser.parse(await self.chatJS("state()")) as? [String: Any]) ?? [:]
+            if st["replying"] as? Bool == true { return }
+            Diagnostics.shared.log("background", "back after \(Int(away)) s; the reply isn't being written any more: its conversation loaded again to read it")
+            self.webView.reload()
+        }
+    }
+
+    private func notify(_ title: String, _ body: String, id: String, kind: String, quiet: Bool = false) {
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = body
+        c.userInfo = ["kind": kind, "tab": sentTab?.uuidString ?? ""]
+        if quiet { c.interruptionLevel = .passive } else { c.sound = .default }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
+    }
+
+    private var noteSite: String { site.isEmpty ? (browser?.site ?? "") : site }
+
+    private func notifyDone(_ offered: [InstalledMod]) {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [ClaudePane.stillNote])
+        let place = noteSite.isEmpty ? "" : " for \(noteSite)"
+        if offered.count == 1 {
+            notify("Your mod is ready", "\(offered[0].name)\(place): tap to add it.", id: ClaudePane.replyNote, kind: "mod")
+        } else if offered.count > 1 {
+            notify("Your mods are ready", "\(offered.count) mods\(place): tap to add them.", id: ClaudePane.replyNote, kind: "mod")
+        } else {
+            notify("\(service.rawValue) replied", noteSite.isEmpty ? "Tap to read the reply." : "On \(noteSite): tap to read the reply.", id: ClaudePane.replyNote, kind: "replied")
+        }
+        Diagnostics.shared.log("notify", "the reply's notification: \(offered.count) mod(s)")
+    }
+
+    private func notifyStillWriting() {
+        notify("Still writing", "\(service.rawValue) is still writing\(noteSite.isEmpty ? "" : " for \(noteSite)"). Open TRIF to get your mod when it's done.", id: ClaudePane.stillNote, kind: "working", quiet: true)
+    }
+
+    /// A tap on one of these notifications: the tab it was sent from; then its mod's Add this mod? (already waiting
+    /// for the app to be in front), or the chat at the reply.
+    private func notificationTapped(_ info: [AnyHashable: Any]) {
+        guard let browser else { return }
+        if let id = (info["tab"] as? String).flatMap(UUID.init(uuidString:)), let tab = browser.tabs.first(where: { $0.id == id }), tab !== browser.current {
+            browser.select(tab)
+        }
+        switch info["kind"] as? String {
+        case "replied": open()
+        case "mod":
+            // (the app was ended meanwhile, so the mod isn't waiting any more: the chat, whose reply has its Add to TRIF)
+            if browser.modOffer == nil { open() }
         default: break
         }
     }

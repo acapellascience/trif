@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		060F96FDA720E9F20A571D12 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD414BE0D298FB88CE3CB250 /* Assets.xcassets */; };
 		066931474CC5139D68D2F470 /* Browser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C92814A95137C3CC4B0A8C2F /* Browser.swift */; };
 		17237858CB0A046A273784DC /* Checks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67596316AFDF35B8CF90704 /* Checks.swift */; };
 		1C17BC0B5A6D8672C0959C5C /* start-own.js in Resources */ = {isa = PBXBuildFile; fileRef = 29CF97A92F672EEB375D02B9 /* start-own.js */; };
@@ -41,6 +42,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		CD414BE0D298FB88CE3CB250 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0A12BEDEC58A35DA53AE569B /* sandbox-runtime.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "sandbox-runtime.js"; path = "../shared/gen/sandbox-runtime.js"; sourceTree = "<group>"; };
 		1FD4645E79F7F18C7685F439 /* mod-guide.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "mod-guide.txt"; path = "../shared/gen/mod-guide.txt"; sourceTree = "<group>"; };
 		2F3DB6397438BF2558AD37B0 /* mods.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "mods.js"; path = "../shared/gen/mods.js"; sourceTree = "<group>"; };
@@ -146,6 +148,7 @@
 		D2A8835F18F122DCE368FB7D /* TrifProbe */ = {
 			isa = PBXGroup;
 			children = (
+				CD414BE0D298FB88CE3CB250 /* Assets.xcassets */,
 				B902F38A16EA7EBFE6E4A39A /* Safety.swift */,
 				809D0434EE3725AC20065A9B /* Diagnostics.swift */,
 				903BBCA66CB348FEA79D82F4 /* Import.swift */,
@@ -220,6 +223,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				060F96FDA720E9F20A571D12 /* Assets.xcassets in Resources */,
 				64CAEA4CF2EA4789ECADED2E /* style-mirror.js in Resources */,
 				043D2B26F4CBFC81026002AE /* switch.css in Resources */,
 				1E813C508DF4C8DECF355AB3 /* sidepanel.css in Resources */,
@@ -270,7 +274,7 @@
 		13A9D3EB5603011C8B0CD53D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -358,7 +362,7 @@
 		4D0542A89A5F8221D442C469 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

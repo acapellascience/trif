@@ -35,6 +35,7 @@
 //   $TRIF_HOME/seen.json     mod id -> {hash, code?, lines: {key: [line hash]}}: the version TRIF last let run
 //                            (`code`: its codeHash, for a mod with a style section), and its lines that use a
 //                            power (a change is judged on what it adds to those)
+//   $TRIF_HOME/edits.json    mod id -> {hash, free, matches, at}: a change the user saved in the code card (editNeeds)
 //   $TRIF_HOME/.ran/<site>/<mod>.js  that version's text: while a change to the mod waits, it's what runs
 //                            (lastRun), and "Don't allow" puts it back
 // A held entry lasts while that version of the mod is there; an edit makes it be worked out again.
@@ -152,6 +153,40 @@ function shippedSiteNeeds(mod, shipped) {
     return !!h && base.some((b) => b && (b.wild ? h.host === b.host || h.host.endsWith(`.${b.host}`) : !h.wild && h.host === b.host));
   };
   return (mod.matches || []).filter((p) => !covered(p)).map((p) => ({ key: `match:${p}`, fact: `runs on ${p}, where Tim's version of this mod doesn't` }));
+}
+
+// The user's edits in the side panel's code card (lib/edit.js), in $TRIF_HOME/edits.json: mod id -> {hash (the
+// edit's), free, matches (the version before's: the one TRIF last let run), at}. Judged as any change (by power and
+// line), and as the iPhone app judges an edit: becoming a free mod asks, and so does a @match for a site the
+// version before didn't run on, while the mod can do something there (a style mod, or a boxed mod without powers,
+// can't act wherever it runs). What the user allowed before (allowed.json) doesn't ask again.
+function editsFile(home) { return path.join(home, 'edits.json'); }
+const loadEdits = (home) => loadJson(editsFile(home));
+/** Mark the change about to be written to a mod as the user's edit (`hash`: the edited mod's, `was`: the version before, or null). */
+function recordEdit(home, id, hash, was) {
+  const all = loadEdits(home);
+  all[id] = { hash, free: !!was && !was.rules && !was.sandboxed, matches: was && Array.isArray(was.matches) ? was.matches : [], at: Date.now() };
+  saveJson(editsFile(home), all);
+}
+const FREE_NOW = 'is now a free mod, so it can do anything the page can do';
+function editNeeds(mod, edit) {
+  if (!edit) return [];
+  const out = [];
+  if (!mod.rules && !mod.sandboxed && !edit.free) out.push({ key: 'tier:free', fact: FREE_NOW });
+  if (!powersFor(mod).some((p) => !isSoft(p.key))) return out;
+  const allSites = mod.site === 'all-sites';
+  const base = [...(Array.isArray(edit.matches) ? edit.matches : []), ...(allSites ? [] : require('./mods').defaultMatches(mod.site))];
+  if (base.some(everywhere)) return out;
+  const hosts = base.map(patternHost).filter(Boolean);
+  const covered = (p) => {
+    if (base.includes(p)) return true;
+    const h = !everywhere(p) && patternHost(p);
+    return !!h && hosts.some((b) => (b.wild ? h.host === b.host || h.host.endsWith(`.${b.host}`) : !h.wild && h.host === b.host));
+  };
+  for (const p of mod.matches || []) {
+    if (!covered(p)) out.push({ key: `match:${p}`, fact: allSites ? `runs on ${p}, where the version before didn't` : `runs on ${p}, outside ${mod.site}` });
+  }
+  return out;
 }
 
 // The text a hold or review shows: TRIF's own words, one fact per line.
@@ -295,6 +330,8 @@ function updateHeld(ws, mods, scopes) {
   const doneSwitching = (id) => { if (switched[id]) { delete switched[id]; switchedChanged = true; } };
   let seen = loadSeen(ws.home);
   let seenChanged = false;
+  const edits = loadEdits(ws.home);
+  let editsChanged = false;
   // (the lines of every version that ran, kept together: an undo back to one of them isn't new)
   const record = (m) => {
     const was = seen && typeof seen[m.id] === 'object' && seen[m.id] && seen[m.id].lines ? seen[m.id].lines : {};
@@ -335,6 +372,8 @@ function updateHeld(ws, mods, scopes) {
     const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId, agentLevel: held[m.id].agentLevel || null } : null);
     if (switched[m.id] && isOff(m.id)) { doneSwitching(m.id); if (held[m.id] && held[m.id].by === 'switch') { delete held[m.id]; changed = true; } }
     const forced = !!switched[m.id];
+    // (the user's edit in the code card, as it was saved: lib/edit.js)
+    const edit = !run && edits[m.id] && edits[m.id].hash === m.hash ? edits[m.id] : null;
     if (!run && !forced && seenHash(seen[m.id]) === m.hash) {
       if (typeof seen[m.id] === 'string') { seen[m.id] = record(m); seenChanged = true; saveRan(ws.home, m); } // (recorded before lines were)
       else if (!fs.existsSync(ranFile(ws.home, m.id))) saveRan(ws.home, m);
@@ -357,6 +396,8 @@ function updateHeld(ws, mods, scopes) {
         .map((n) => described(n, ok));
       // (one of Tim's mods, changed to run on a site its shipped version doesn't, while it can do something)
       for (const n of shippedSiteNeeds(m, shipped)) if (!needs.some((x) => x.key === n.key) && !isAllowed(n, ok, true)) needs.push(n);
+      // (the user's edit: a site the version before didn't run on, or becoming a free mod)
+      for (const n of editNeeds(m, edit)) if (!needs.some((x) => x.key === n.key) && !isAllowed(n, ok, true)) needs.push(n);
       // (and, where its powers add a holding power to what its site's boxed mods together are approved for, the
       // site's new union: sitecombos.js; approving it approves that for the site)
       needs = needs.concat(sites.siteNeeds(m, mods, { allowed, isOff, splits }));
@@ -368,7 +409,8 @@ function updateHeld(ws, mods, scopes) {
     if (needs.length && same && JSON.stringify(held[m.id].needs || []) === JSON.stringify(needs.map((n) => n.key))) continue;
     if (needs.length) {
       // (by 'switch': the very version that ran, switched on, adding what its site hasn't approved)
-      const by = run ? 'agent' : forced && seenHash(seen[m.id]) === m.hash ? 'switch' : 'outside';
+      // (by 'edit': the user's own, in the code card)
+      const by = run ? 'agent' : forced && seenHash(seen[m.id]) === m.hash ? 'switch' : edit ? 'edit' : 'outside';
       held[m.id] = {
         hash: m.hash, ...(m.codeHash ? { codeHash: m.codeHash } : {}), site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by, at: same ? held[m.id].at : Date.now(),
         ...(run && run.agentLevel === 'off' ? { agentLevel: 'off' } : {}),
@@ -387,8 +429,16 @@ function updateHeld(ws, mods, scopes) {
   for (const id of Object.keys(held)) if (!ids.has(id)) { delete held[id]; changed = true; }
   for (const id of Object.keys(seen)) if (!ids.has(id)) { delete seen[id]; seenChanged = true; try { fs.unlinkSync(ranFile(ws.home, id)); } catch { /* none */ } }
   for (const id of Object.keys(switched)) if (!ids.has(id)) doneSwitching(id);
+  // (an edit that's gone or been changed since: done with. A minute's grace, for another browser's helper that syncs
+  // between the edit's mark and its file: edit.js writes the mark first)
+  const byId = new Map(mods.map((m) => [m.id, m]));
+  for (const [id, e] of Object.entries(edits)) {
+    const m = byId.get(id);
+    if (!m || (m.hash !== e.hash && Date.now() - (Number(e.at) || 0) > 60000)) { delete edits[id]; editsChanged = true; }
+  }
   if (changed) saveHeld(ws.home, held);
   if (seenChanged) saveJson(seenFile(ws.home), seen);
+  if (editsChanged) saveJson(editsFile(ws.home), edits);
   if (switchedChanged) { try { sites.saveSwitchedOn(ws.home, switched); } catch { /* next time */ } }
   return held;
 }
@@ -515,5 +565,5 @@ function heldOnError(ws, mods, before, error) {
 module.exports = {
   heldOnError, everywhere, codeOf, shippedVersion, shippedSiteNeeds,
   loadHeld, saveHeld, updateHeld, approveHeld, rejectHeld, lastRun, heldFile, allowedFile, seenFile, holdReason,
-  needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys,
+  needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys, recordEdit, loadEdits, editNeeds, editsFile,
 };

@@ -2362,6 +2362,16 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'mod.historyCode': return helperRequest('mod.historyCode', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 10000);
     case 'mod.historyDiff': return helperRequest('mod.historyDiff', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 15000);
     case 'mod.historyRestore': return helperRequest('mod.historyRestore', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? '') }, 15000);
+    // The code card's Edit: the helper checks the text and writes the mod's file (helper/lib/edit.js), only if it's
+    // still the version the edit started from (`base`). The side panel's alone: a click there.
+    case 'mod.save': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('mod.save', { id: String(msg.id ?? ''), text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), base: String(msg.base ?? '') }, 20000);
+    }
+    case 'mod.undoEdit': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('mod.undoEdit', { id: String(msg.id ?? ''), stamp: String(msg.stamp ?? ''), hash: String(msg.hash ?? '') }, 15000);
+    }
     // (ten minutes and a bit: the helper asks where first, with the system's folder chooser)
     case 'mod.export': return helperRequest('mod.export', { id: String(msg.id ?? '') }, 11 * 60 * 1000);
     case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? ''), ...(Array.isArray(msg.ids) ? { ids: msg.ids.slice(0, 5000).map(String) } : {}) }, 11 * 60 * 1000);

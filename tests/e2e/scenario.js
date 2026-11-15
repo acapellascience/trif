@@ -1351,6 +1351,7 @@ class Scenario {
       await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty; the boxed mods of a site of its own are approved as that site ("Your inbox.x.com mods can:" on its card), apart from x.com\'s', () => this.sensitiveCheck(win));
       await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
+      await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
       await r.check('mod rows: the light, the name, one chip by its level (hover says what, a click opens the code card), one line of description, the controls', () => this.modRowsCheck(win));
       await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
@@ -4377,6 +4378,136 @@ process.exitCode = 1;
       try { fs.unlinkSync(styleFile); } catch { /* gone */ }
       try { fs.unlinkSync(longFile); } catch { /* gone */ }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+    }
+  }
+
+  // ---- the code card's Edit (sidepanel.js "Editing a mod's code", helper/lib/edit.js): edit, Save, Undo, held, broken
+  async codeEditCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const id = `${site}/e2e-edit`;
+    const file = path.join(this.trif, 'sites', site, 'e2e-edit.js');
+    const v1 = "// ==WebMod==\n// @name E2E edit\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eEdit = 'v1';\n";
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const ed = () => this.panel(`async () => {
+      const d = document.getElementById('code-view');
+      if (!d || !d.open) return null;
+      const a = d.querySelector('.cv-e-text'), shown = (s) => { const b = d.querySelector(s); return !!b && !b.hidden && b.getClientRects().length > 0; };
+      return { editing: shown('.cv-e-box'), value: a.value, start: a.selectionStart, end: a.selectionEnd, numbers: d.querySelector('.cv-e-gutter').textContent.trim().split(String.fromCharCode(10)).length,
+        undo: shown('.cv-e-undo') && !d.querySelector('.cv-e-undo').disabled, redo: shown('.cv-e-redo') && !d.querySelector('.cv-e-redo').disabled, save: shown('.cv-e-save'), cancel: shown('.cv-e-cancel'), edit: shown('.cv-edit'), copy: shown('.cv-copy'),
+        border: getComputedStyle(d.querySelector('.cv-e-box')).borderTopColor, tier: getComputedStyle(d).getPropertyValue('--tier').trim(), font: getComputedStyle(a).fontFamily,
+        problems: shown('.cv-e-problems') ? d.querySelector('.cv-e-problems').textContent : '', lines: [...d.querySelectorAll('.cv-e-line')].map((b) => b.textContent),
+        saved: shown('.cv-e-saved') ? d.querySelector('.cv-e-saved').textContent : '', code: shown('.cv-code') ? [...d.querySelectorAll('.cv-code .l')].map((l) => l.textContent).join(String.fromCharCode(10)) : null,
+        err: d.querySelector('.ap-err').hidden ? '' : d.querySelector('.ap-err').textContent, versions: shown('.cv-versions'), scrolls: d.scrollHeight > d.clientHeight + 1 };
+    }`);
+    // (a change as an input event, where typing it out would be long)
+    const put = (from, to) => this.panel(`async (from, to) => { const a = document.querySelector('#code-view .cv-e-text'); const i = a.value.indexOf(from); a.focus(); a.setRangeText(to, i, i + from.length, 'end'); a.dispatchEvent(new InputEvent('input', { inputType: 'insertReplacementText', bubbles: true })); return a.value; }`, [from, to]);
+    const look = async () => (await this.cli(['run', '--tab', String(win.tabId), 'document.documentElement.dataset.e2eEdit || null'], { timeoutMs: 20000 })).stdout.trim().replace(/^"|"$/g, '');
+    let n = 0;
+    const runs = (want) => waitFor(`the page running ${want}`, async () => { await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=edit-${++n}`]); await sleep(1200); return (await look()) === want || null; }, { timeoutMs: 25000, intervalMs: 300 });
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const problems = [];
+    const done = [];
+    const open = async () => {
+      for (let i = 0; i < 4; i++) {
+        await this.dismissApproval();
+        await this.panelClick(`li[data-mod="${id}"] .mod-code`);
+        if (await waitFor('the code card', async () => { const c = await ed(); return c && c.code !== null && c.code.length ? c : null; }, { timeoutMs: 4000 }).catch(() => null)) return;
+      }
+      throw new Error('the code card didn\'t open');
+    };
+    const editOn = async () => {
+      await waitFor('Edit enabled', () => this.panel(`async () => { const b = document.querySelector('#code-view .cv-edit'); return b && !b.hidden && !b.disabled || null; }`), { timeoutMs: 8000 });
+      await this.d.click(this.panelCtx, '#code-view .cv-edit');
+      return waitFor('the editor', async () => { const c = await ed(); return c && c.editing ? c : null; }, { timeoutMs: 8000 });
+    };
+    const save = async (what) => { await this.d.click(this.panelCtx, '#code-view .cv-e-save'); return waitFor(what, async () => { const c = await ed(); return c && (c.saved || c.problems) ? c : null; }, { timeoutMs: 15000 }); };
+    try {
+      fs.writeFileSync(file, v1);
+      await waitFor('the mod registered', async () => /e2e-edit\s+registered/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await runs('v1');
+      await waitFor('its row', () => this.panel(`async () => !!document.querySelector('li[data-mod="${id}"] .mod-code') || null`), { timeoutMs: 15000 });
+      // 1. Edit: the code in an editor (monospace, numbered, in the free tier's colour), Undo/Redo/Cancel/Save
+      await open();
+      let c = await editOn();
+      if (c.value !== v1 || c.numbers !== v1.split('\n').length || c.undo || c.redo || !c.save || !c.cancel || c.edit || c.copy || !/mono|Menlo|Consolas/i.test(c.font) || c.scrolls) problems.push(`the editor: ${JSON.stringify({ ...c, value: c.value.slice(0, 80) })}`);
+      // typed, with real keys: 'v2' for 'v1' (select the 1, type 2), Tab indents; Undo and Redo step through it
+      await this.panel(`async () => { const a = document.querySelector('#code-view .cv-e-text'); const i = a.value.indexOf("'v1'") + 2; a.focus(); a.setSelectionRange(i, i + 1); return true; }`);
+      await this.d.key(this.panelCtx, '2');
+      await this.panel(`async () => { const a = document.querySelector('#code-view .cv-e-text'); const i = a.value.lastIndexOf('document.'); a.focus(); a.setSelectionRange(i, i); return true; }`);
+      await this.d.key(this.panelCtx, 'Tab');
+      c = await ed();
+      const typed = v1.replace("'v1'", "'v2'").replace('\ndocument.', '\n  document.');
+      if (c.value !== typed || !c.undo) problems.push(`typed: ${JSON.stringify(c.value)} (undo ${c.undo})`);
+      await this.d.click(this.panelCtx, '#code-view .cv-e-undo');
+      const undone = (await ed()).value;
+      await this.d.click(this.panelCtx, '#code-view .cv-e-redo');
+      c = await ed();
+      if (undone !== v1.replace("'v1'", "'v2'") || c.value !== typed) problems.push(`Undo/Redo: ${JSON.stringify([undone, c.value])}`);
+      await themes('edit-editor');
+      // 2. Save: runs from the next page load, the version before in History; Undo puts it back
+      c = await save('saved');
+      if (c.saved !== 'Saved. It runs from the next page load. Undo' || c.editing || c.code !== typed) problems.push(`saved: ${JSON.stringify(c)}`);
+      if (fs.readFileSync(file, 'utf8') !== typed) problems.push('the file isn\'t the edit');
+      await themes('edit-saved');
+      await runs('v2');
+      done.push('typed, Tab, Undo and Redo; saved, it ran');
+      await this.d.click(this.panelCtx, '#code-view .cv-e-undo-save');
+      c = await waitFor('undone', async () => { const x = await ed(); return x && /^Put back/.test(x.saved) ? x : null; }, { timeoutMs: 10000 }).catch(() => ed());
+      if (c.saved !== 'Put back the version from before your edit. Your edit is in History.' || fs.readFileSync(file, 'utf8') !== v1) problems.push(`Undo after Save: ${JSON.stringify(c.saved)}, the file ${JSON.stringify(fs.readFileSync(file, 'utf8'))}`);
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-history');
+      const hist = await waitFor('History', () => this.panel(`async () => { const l = [...document.querySelectorAll('#code-view .cv-history-list li[data-stamp]')]; return l.length >= 2 ? l.map((x) => x.querySelector('.cv-h-from').textContent) : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!hist || hist[0] !== 'before an undo' || hist[1] !== 'before you edited it') problems.push(`History: ${JSON.stringify(hist)}`);
+      await runs('v1');
+      done.push(`Undo put it back (History: ${hist && hist.slice(0, 2).join(', ')})`);
+      // 3. broken: not saved, each problem on its line (a click selects it), the file as it was
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-code');
+      await editOn();
+      await put("= 'v1';", '= ;');
+      c = await save('the problems');
+      if (!/^Not saved: TRIF found a problem in it\./.test(c.problems) || JSON.stringify(c.lines) !== '["Line 5"]' || !c.editing) problems.push(`broken: ${JSON.stringify(c)}`);
+      await this.d.click(this.panelCtx, '#code-view .cv-e-line');
+      c = await ed();
+      const line5 = c.value.split('\n').slice(0, 4).join('\n').length + 1;
+      if (c.start !== line5 || c.value.slice(c.start, c.end) !== 'document.documentElement.dataset.e2eEdit = ;') problems.push(`Line 5 selected: ${JSON.stringify(c.value.slice(c.start, c.end))}`);
+      if (fs.readFileSync(file, 'utf8') !== v1) problems.push('the broken edit was written');
+      await themes('edit-not-saved');
+      done.push('broken: not saved, Line 5 selected it');
+      // 4. a line that sends: saved, it waits for the user's OK, the version before running; the card: "You edited it."
+      await put('= ;', "= 'v3';\nfetch('/e2e-edit-v3', { method: 'POST' });");
+      c = await save('saved, waiting');
+      if (c.saved !== 'Saved. It waits for your OK: the version before keeps running until you decide. Undo' || !c.versions) problems.push(`held: ${JSON.stringify({ saved: c.saved, versions: c.versions, problems: c.problems })}`);
+      const st = await waitFor('the change waiting', async () => { const x = await status(); return /e2e-edit\s+CHANGE WAITING/.test(x) ? x : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => '');
+      if (!st) problems.push('trif status doesn\'t say the change waits');
+      await themes('edit-waits');
+      await runs('v1');
+      if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-edit-v3'))) problems.push('the waiting edit ran');
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`);
+      const card = await this.approvalFor(id).catch((e) => { problems.push(`its card: ${e.message}`); return null; });
+      if (card && (!/^You edited it\. The version before keeps running until you decide\./.test(card.note) || !card.items.some((x) => /send/.test(x)))) problems.push(`the approval card: ${JSON.stringify(card)}`);
+      if (card) {
+        await themes('edit-approval');
+        await this.d.click(this.panelCtx, '#approval .ap-allow');
+        await runs('v3');
+        await waitFor('its POST', () => this.o.servers.requests.some((q) => q.url.startsWith('/e2e-edit-v3')) || null, { timeoutMs: 8000 }).catch(() => problems.push('the allowed edit didn\'t send'));
+      }
+      done.push(`a line that sends waited ("${card ? card.note.split('.')[0] : '?'}"), Allow ran it`);
+      // 5. changed meanwhile (another editor, an agent): not saved, the other change kept
+      await open();
+      await editOn();
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8') + '// from elsewhere\n');
+      await put("'v3'", "'v4'");
+      c = await save('the conflict');
+      if (!/^Not saved: the mod’s file changed since you started editing\./.test(c.problems) || !/from elsewhere/.test(fs.readFileSync(file, 'utf8')) || /'v4'/.test(fs.readFileSync(file, 'utf8'))) problems.push(`changed meanwhile: ${JSON.stringify(c.problems)}`);
+      await this.d.click(this.panelCtx, '#code-view .cv-e-cancel');
+      c = await waitFor('the code again', async () => { const x = await ed(); return x && !x.editing && x.code && /from elsewhere/.test(x.code) ? x : null; }, { timeoutMs: 8000 }).catch(() => null);
+      if (!c) problems.push('Cancel didn\'t show the new version');
+      done.push('changed meanwhile: not saved; Cancel showed the new version');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return done.join('; ');
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
+      await this.panel(`async () => { for (const id of ['code-view', 'approval']) { const d = document.getElementById(id); if (d && d.open) d.close(); } return true; }`).catch(() => {});
     }
   }
 

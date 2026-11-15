@@ -1828,6 +1828,11 @@ test('instructions: saved and read through the helper, never from a run; claude 
     const k = await sockRequest(ext.sock, { id: 'k', cmd, args: { key: 'evil-key-0123456789', provider: 'custom' }, token: call.env.TRIF_RUN_TOKEN });
     assert.match(k.error, /isn't available inside an agent run/, cmd);
   }
+  // Nor an edit from the code card (helper/lib/edit.js): only the user saves one there.
+  for (const cmd of ['mod.save', 'mod.undoEdit']) {
+    const k = await sockRequest(ext.sock, { id: 'v', cmd, args: { id: 'example.com/x', text: '// evil', base: 'x', stamp: 'x', hash: 'x' }, token: call.env.TRIF_RUN_TOKEN });
+    assert.match(k.error, /isn't available inside an agent run/, cmd);
+  }
   // Nor Tim's mods: only the user adds them (or chooses none), and nothing lands on disk.
   for (const cmd of ['shipped.install', 'shipped.none']) {
     const k = await sockRequest(ext.sock, { id: 's', cmd, args: { sites: ['x.com'] }, token: call.env.TRIF_RUN_TOKEN });

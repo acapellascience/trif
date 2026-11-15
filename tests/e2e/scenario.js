@@ -298,6 +298,7 @@ class Scenario {
         site: q('#site')?.textContent || '',
         gate: !q('#gate').hidden,
         gateTitle: q('#gate-title')?.textContent || '',
+        gateWhy: q('#gate-why')?.hidden === false ? q('#gate-why').textContent : '',
         gateText: q('#gate-btn')?.textContent || '',
         links: q('#gate-links')?.hidden === false
           ? [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent + ' (' + a.title + ')') : [],
@@ -439,6 +440,16 @@ class Scenario {
 
   // ---- Tim's mods, site by site (helper/lib/preinstalled.js)
 
+  /** Upgrading: the sites the old setup added (SITES_ON, and timsrobot.com where the old release shipped its mods). */
+  upgradeAdded() {
+    return starterSites().filter((s) => SITES_ON.includes(s) || (this.oldShipped && this.oldShipped.has(s)));
+  }
+
+  /** The setup page's words for upgradeAdded(). */
+  upgradeAddedText() {
+    return this.upgradeAdded().includes('timsrobot.com') ? 'Google, X, Amazon, Instagram and timsrobot.com' : 'Google, X, Amazon and Instagram';
+  }
+
   /** The sites preinstalled.json says were added. */
   addedSites() {
     const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
@@ -472,8 +483,8 @@ class Scenario {
         const x = await this.waitSetup('Tim\'s mods ticked', (st) => st.steps[3] === 'done');
         const st = await this.starterStepState();
         const added = this.addedSites();
-        if (added.join() !== SITES_ON.join()) throw new Error(`added: ${added.join(', ')}`);
-        if (st.state !== 'Google, X, Amazon and Instagram') throw new Error(`the step says: ${st.state}`);
+        if (added.join() !== this.upgradeAdded().join()) throw new Error(`added: ${added.join(', ')}`);
+        if (st.state !== this.upgradeAddedText()) throw new Error(`the step says: ${st.state}`);
         return `ticked already: ${st.state} (${x.steps.join(',')})`;
       }
       await this.waitSetup('Tim\'s mods open', (st) => st.steps[3] === 'now');
@@ -636,6 +647,11 @@ class Scenario {
   async starterLinkCheck(win) {
     const r = this.r;
     const L = LINK_SITE[this.o.kind];
+    if (this.oldShipped && this.oldShipped.has(L.site)) {
+      // (the old release shipped them and its setup added them: there's nothing to offer)
+      this.r.note(`${L.name}: the old release's setup already added Tim's mods there, so no "Add Tim's mods" link to test`);
+      return;
+    }
     await r.check(`a site's panel: "Add Tim's mods for ${L.name}" adds them`, async () => {
       const url = `https://${L.host}:${this.o.servers.tlsPort}/`;
       const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
@@ -715,22 +731,33 @@ class Scenario {
       if (s.status !== 0) throw new Error(`setup exited ${s.status}:\n${s.out.split('\n').slice(-15).join('\n')}`);
     } else {
       const oldPkg = I.unpack(o.oldTgz, path.join(this.work, 'oldpkg'));
-      const s0 = I.runSetup(oldPkg, this.home, ['--browser', I.oldBrowserArg(oldPkg, browserArg)]);
+      // (the sites the old release shipped Tim's mods for: 0.2.5 to 0.2.7 had timsrobot.com's too, so its setup added them)
+      const oldSites = path.join(oldPkg, 'examples', 'sites');
+      this.oldShipped = new Set(fs.existsSync(oldSites) ? fs.readdirSync(oldSites).map((d) => siteOf(`${d}/x`)) : []);
+      // (a 0.2.x setup adds Tim's mods only when asked, the setup page asking site by site: --examples, as a
+      // user who added them all; earlier setups added them anyway)
+      const asksExamples = /OPTIONAL_VALUE_FLAGS[^\n]*--examples/.test(fs.readFileSync(path.join(oldPkg, 'helper', 'cli.js'), 'utf8'));
+      const s0 = I.runSetup(oldPkg, this.home, ['--browser', I.oldBrowserArg(oldPkg, browserArg), ...(asksExamples ? ['--examples'] : [])]);
       this.r.log(s0.out);
       if (s0.status !== 0) throw new Error(`the old release's setup exited ${s0.status}:\n${s0.out.split('\n').slice(-15).join('\n')}`);
-      const legacy = path.join(this.home, '.webmods');
-      if (!fs.existsSync(path.join(legacy, 'sites'))) throw new Error(`the old setup made no ${legacy}/sites`);
+      // (0.1.x kept everything in ~/.webmods, and its updater ran the new setup with --home ~/.webmods; 0.2.x
+      // already has ~/.trif, and its updater runs the new package's `setup --copy --no-link --home ~/.trif`:
+      // helper/lib/update.js install. Both are tested, 0.2.x being where most users come from.)
+      const oldVersion = (I.readJson(path.join(oldPkg, 'package.json')) || {}).version || '0.0.0';
+      const from02 = !/^0\.[01]\./.test(oldVersion);
+      const legacy = from02 ? this.trif : path.join(this.home, '.webmods');
+      if (!fs.existsSync(path.join(legacy, 'sites'))) throw new Error(`the old setup (${oldVersion}) made no ${legacy}/sites`);
       // The user's own mod, and an edit to a shipped one, before upgrading.
       fs.mkdirSync(path.join(legacy, 'sites', '127.0.0.1'), { recursive: true });
       fs.writeFileSync(path.join(legacy, 'sites', '127.0.0.1', 'e2e-user.js'), USER_MOD);
       const shipped = path.join(legacy, 'sites', 'x.com', 'rainbow-rave.js');
       fs.appendFileSync(shipped, '\n// e2e: the user changed this shipped mod\n');
       this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/rainbow-rave'));
-      // The way a 0.1.x helper's updater runs the new version's setup (--home ~/.webmods).
-      const s = I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
+      // The way the old helper's updater runs the new version's setup.
+      const s = from02 ? I.runSetup(pkg, this.home, ['--home', legacy]) : I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
       this.r.log(s.out);
       if (s.status !== 0) throw new Error(`setup exited ${s.status}:\n${s.out.split('\n').slice(-15).join('\n')}`);
-      await this.r.check('upgrade: ~/.webmods moved to ~/.trif, link left behind', () => {
+      if (!from02) await this.r.check('upgrade: ~/.webmods moved to ~/.trif, link left behind', () => {
         const st = fs.lstatSync(legacy);
         if (!st.isSymbolicLink()) throw new Error('~/.webmods is not a link');
         if (fs.realpathSync(legacy) !== fs.realpathSync(this.trif)) throw new Error(`~/.webmods points at ${fs.readlinkSync(legacy)}`);
@@ -753,6 +780,20 @@ class Scenario {
         if (!rec || !rec.pending) throw new Error(`no pending update recorded: ${JSON.stringify(rec)}`);
         if (!/new version waiting/.test(s.out)) throw new Error('setup didn\'t say a new version is waiting');
         return `pending version ${rec.pending.version}`;
+      });
+      // 0.3.0 ships most of Tim's mods as style or boxed mods: a copy the user never changed comes back as the
+      // new one (setup's updateShippedMods), in its new tier.
+      if (from02) await this.r.check('upgrade: Tim\'s unchanged mods come back in their new tier', () => {
+        const moved = [];
+        for (const id of ['www.google.com/dvd-logo', 'www.google.com/hide-extra-sections', 'amazon.com/simple-shopping', 'x.com/follow-status']) {
+          const mine = path.join(this.trif, 'sites', `${id}.js`), next = path.join(pkg, 'examples', 'sites', `${id}.js`), old = path.join(oldPkg, 'examples', 'sites', `${id}.js`);
+          if (!fs.existsSync(mine) || !fs.existsSync(old) || !fs.existsSync(next)) continue;
+          const t = fs.readFileSync(mine, 'utf8');
+          if (!/^\/\/\s*@(boxed|style|rules)\b/m.test(fs.readFileSync(next, 'utf8'))) continue; // (still free in this package)
+          if (t !== fs.readFileSync(next, 'utf8')) throw new Error(`${id} isn't the new version`);
+          moved.push(id);
+        }
+        return moved.length ? moved.join(', ') : 'none of them installed by the old setup';
       });
       // The shipped mods 0.2.0 folded into others (preinstalled.js RETIRED), unchanged here: in the trash.
       const retired = RETIRED.filter((x) => fs.existsSync(path.join(oldPkg, 'examples', 'sites', `${x.id}.js`)));
@@ -866,7 +907,7 @@ class Scenario {
       // (Upgrading, Tim's mods are there already and TRIF has every site: those steps are ticked.)
       const later = this.o.kind === 'upgrade' ? 'done' : 'later';
       const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${later},later,later`);
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,Google, X, Amazon and Instagram' : 'connected,done')) throw new Error(JSON.stringify(x));
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? `connected,done,${this.upgradeAddedText()}` : 'connected,done')) throw new Error(JSON.stringify(x));
       // (no Site permissions step any more: TRIF asks for each site's permission when it's turned on there)
       if (await this.ext(`async () => !!document.querySelector('#step-sites, #mode-permissive, #mode-restrictive')`)) throw new Error('the setup page still has a site-permissions step');
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
@@ -1142,7 +1183,7 @@ class Scenario {
       await d.click(this.panelCtx, '#gate-block');
       const p = await this.waitPanel('the red panel', (x) => x.gate && x.gateTitle === 'The robot is blocked on 127.0.0.1');
       const wantLinks = ['Disconnect from 127.0.0.1 (Disable browser permissions)']; // (blocked keeps Disconnect, not Block)
-      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks)) throw new Error(`the gate: ${JSON.stringify(p)}`);
+      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks) || p.gateWhy) throw new Error(`the gate: ${JSON.stringify(p)}`);
       // (blocked: no power button in the bar; Unblock is the way back)
       await this.waitBar('the blocked gate\'s bar', GATE_BAR_SHUT);
       // blocked: red with a red cross, in the toolbar for this tab, in the bar and on the gate
@@ -1290,6 +1331,9 @@ class Scenario {
     if (this.o.browser === 'chrome') await this.panelWindowChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
+    await r.check('DVD Logo, a boxed mod TRIF ships: switched on, it runs in the sandbox without a hold, and its copy of the logo bounces', () => this.dvdCheck(win));
+    // (Chrome: Firefox's test profile resolves every host here, and runs no boxed mods)
+    if (this.o.browser === 'chrome') await r.check('X\'s real profile pictures: Profile Styler, Post Styler and Tune Composer, boxed and allowed, read their pixels from X\'s image server (shown at 200×200 and already at 400×400), under X\'s CSP', () => this.xPicturesCheck(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
@@ -1405,6 +1449,133 @@ class Scenario {
     const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
     if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
     return out.join('; ');
+  }
+
+  // DVD Logo, one of Tim's mods that ships boxed (0.3.0): switched on, it runs in TRIF's sandbox, unheld (its
+  // shipped version is what's allowed), and its copy of the logo bounces on the Google home stand-in.
+  /**
+   * Tim, 11-14: the converted Profile Styler and Tune Composer couldn't read his X profile picture. Here the
+   * shipped mods, switched on and allowed in the panel's card, on a stand-in profile page whose pictures are X's
+   * own logo from X's real image server, under X's CSP: each reads the 400×400 copy's pixels (no "could not
+   * read" in trif logs; Tune Composer's From picture says the picture has no tune, not that it couldn't read
+   * it). Decoding a code from a picture is the conversion cases' (fixtures); this is the real server's part.
+   * Needs the internet: without it, skipped.
+   */
+  async xPicturesCheck(win) {
+    const ids = ['x.com/profile-styler', 'x.com/post-styler', 'x.com/tune-composer'];
+    const PIC = 'https://pbs.twimg.com/profile_images/1683899100922511378/5lY42eHs_400x400.jpg';
+    try {
+      const r = await fetch(PIC, { method: 'HEAD', signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return { status: 'skip', detail: `X's image server answered ${r.status} for the test picture` };
+    } catch (e) { return { status: 'skip', detail: `X's image server can't be reached from here (${e.message})` }; }
+    const d = this.d;
+    const base = `https://x.com:${this.o.servers.tlsPort}/e2e_pics`;
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const done = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, base]);
+      await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000);
+      for (const id of ids) {
+        const on = await this.cli(['enable', id]);
+        if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+        done.push(id);
+      }
+      // (each asks for its powers: allowed in the panel's card, as a user would; one card may hold several)
+      const registered = (st) => ids.every((id) => new RegExp(`${id.replace('.', '\\.')}\\s+registered \\(boxed`).test(st));
+      await waitFor('the three allowed and registered', async () => {
+        const st = await status();
+        if (registered(st)) return true;
+        if (await this.approvalState()) await this.d.click(this.panelCtx, '#approval .ap-allow').catch(() => {});
+        else {
+          const held = ids.find((id) => new RegExp(`${id.replace('.', '\\.')}\\s+HELD`).test(st));
+          if (held) await this.panel(`async () => { document.querySelector('li[data-mod="${held}"] .tag.on-hold')?.click(); return true; }`).catch(() => {});
+        }
+        return null;
+      }, { timeoutMs: 45000, intervalMs: 1000 }).catch(async (e) => {
+        throw new Error(`${e.message}: ${(await status()).split('\n').filter((l) => ids.some((id) => l.includes(id))).map((l) => l.trim()).join(' | ')}`);
+      });
+      const out = [];
+      for (const size of ['200x200', '400x400']) {
+        const url = size === '400x400' ? `${base}?s=400` : base;
+        await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+        const ctx = await d.findPage((u) => u === url);
+        // the stylers: the 400×400 copy loaded (theirs, with CORS) and read without a word in trif logs
+        const loaded = await waitFor(`the 400×400 copy loaded (${size})`, () => d.eval(ctx, `async () => performance.getEntriesByType('resource').filter((r) => /5lY42eHs_400x400/.test(r.name)).length || null`), { timeoutMs: 15000 })
+          .catch(() => 0);
+        await sleep(1500);
+        // Tune Composer: the corner ♪, then From picture
+        await d.eval(ctx, `async () => { document.querySelector('[aria-label="Tune Composer"]').click(); return true; }`);
+        const said = await waitFor(`Tune Composer's From picture (${size})`, () => d.eval(ctx, `async () => {
+          const b = document.querySelector('[title^="Load the tune from the profile picture"]');
+          if (!b) return null;
+          if (!window.__e2eFromPic) { window.__e2eFromPic = 1; b.click(); return null; }
+          const s = document.querySelector('[class~=trif-box-tcp-status]');
+          return s && /picture/.test(s.textContent) ? s.textContent : null;
+        }`), { timeoutMs: 15000 }).catch((e) => `(${e.message})`);
+        const logs = (await this.cli(['logs', '--tab', String(win.tabId)], { timeoutMs: 20000 })).stdout;
+        const bad = logs.split('\n').filter((l) => /could not read|no 400×400 copy|can't be read|SecurityError|tainted/i.test(l));
+        const errs = await this.cli(['errors', '--tab', String(win.tabId)], { json: true });
+        await this.shot(ctx, `x-pictures-${size}`);
+        if (!loaded) throw new Error(`${size}: the 400×400 copy was never loaded`);
+        if (bad.length) throw new Error(`${size}: trif logs: ${bad.join(' | ')}`);
+        if (!/has no tune in it/.test(said)) throw new Error(`${size}: Tune Composer said: ${said}`);
+        if (errs.json && errs.json.length) throw new Error(`${size}: mod errors: ${JSON.stringify(errs.json).slice(0, 400)}`);
+        out.push(`${size}: copy loaded, read; Tune Composer: "${said}"`);
+      }
+      // Post Styler remembers what it read (no code in X's logo: 0), and only what it read (11-14: .seen3 kept a
+      // picture it couldn't read as one without a code, for good)
+      const seen = await waitFor('Post Styler\'s memory of the picture', async () => {
+        const all = await this.ext(`async () => (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}`);
+        const v = all['x.com/post-styler'] && all['x.com/post-styler']['x.com'] && all['x.com/post-styler']['x.com']['trifPostStyler.seen4'];
+        return v ? JSON.parse(v) : null;
+      }, { timeoutMs: 8000 }).catch(() => null);
+      if (!seen || seen[PIC] !== 0) throw new Error(`Post Styler's memory: ${JSON.stringify(seen)}`);
+      return `${out.join('; ')}; Post Styler remembers it as read, no code`;
+    } finally {
+      for (const id of done) await this.cli(['disable', id]).catch(() => {});
+      // (their settings gone again: the boxed mods check counts every mod's)
+      await this.ext(`async (ids) => { const s = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}; for (const id of ids) delete s[id]; await chrome.storage.local.set({ sandboxSettings: s }); }`, [ids]).catch(() => {});
+    }
+  }
+
+  async dvdCheck(win) {
+    const d = this.d;
+    const id = 'www.google.com/dvd-logo';
+    const on = await this.cli(['enable', id]);
+    if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+    const url = `https://www.google.com:${this.o.servers.tlsPort}/`;
+    // (in front: a background tab gets no animation frames)
+    const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
+    try {
+      const ctx = await d.findPage((u) => u === url);
+      const look = `async () => {
+        const box = [...document.querySelectorAll('body > div[aria-hidden="true"]')].find((e) => e.style.position === 'fixed' && /translate/.test(e.style.transform));
+        const logo = document.querySelector('img.lnXdpd');
+        return box ? { at: box.style.transform, logo: logo && logo.style.visibility, clicks: box.style.pointerEvents } : null;
+      }`;
+      let first;
+      try {
+        first = await waitFor('the bouncing logo', () => d.eval(ctx, look), { timeoutMs: 15000 });
+      } catch (e) {
+        await this.shot(ctx, 'google-dvd');
+        const st = await this.cli(['status']);
+        throw new Error(`${e.message}; trif status: ${(st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || 'no dvd-logo line').trim()}`);
+      }
+      let later;
+      try {
+        later = await waitFor('the logo to move', async () => { const s = await d.eval(ctx, look); return s && s.at !== first.at ? s : null; }, { timeoutMs: 8000 });
+      } finally { await this.shot(ctx, 'google-dvd'); }
+      if (first.logo !== 'hidden' || first.clicks !== 'none') throw new Error(`the logo ${first.logo}, the copy's pointer-events ${first.clicks}`);
+      const st = await this.cli(['status']);
+      const line = (st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || '').trim();
+      if (!/registered \(boxed/.test(line)) throw new Error(`trif status: ${line || 'no dvd-logo line'}`);
+      const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
+      if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
+      return `${line}; ${first.at} -> ${later.at}, the logo hidden in place`;
+    } finally {
+      await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
+      await this.cli(['disable', id]).catch(() => {});
+    }
   }
 
   // ---- --guidance: the same requests with the AGENTS.md from main and the one in this checkout, with
@@ -1836,7 +2007,8 @@ class Scenario {
         // (a running mod's tier colour: its row's stripe; the list's opacity, dimmed while mods can't run; the X eyes)
         // Monochrome (Tim, 11-13): on the robot-off screens (the gate, blocked included, and the landing page),
         // in a state, what's coloured (links, buttons, the line, the title when blocked, the dot, the robot) is
-        // the state's colour, the robot's (--switch-on)
+        // the state's colour, the robot's (--switch-on). The power button counts only when on: off, it's grey
+        // (--muted) in every state, and a gate the browser has access to shows it (an upgrade's, from all sites)
         state: colour('var(--switch-on)'),
         mono: (() => {
           const out = [];
@@ -1845,7 +2017,7 @@ class Scenario {
           for (const e of document.querySelectorAll('a, .link-btn, .file-link, #notice .title, #paused .title, .problem-line, body.site-blocked .gate-title')) if (vis(e)) out.push([name(e), getComputedStyle(e).color]);
           for (const e of document.querySelectorAll('.btn.primary, .btn.go')) if (vis(e)) out.push([name(e), getComputedStyle(e).backgroundColor]);
           if (q('#dot').getClientRects().length) out.push(['the dot', getComputedStyle(q('#dot')).backgroundColor]);
-          for (const [n, e, prop] of [['the robot', q('#bar-robot .rim'), 'fill'], ['the power button', q('#site-switch'), 'color']]) if (e && (e.closest('button') || e).getClientRects().length) out.push([n, getComputedStyle(e)[prop]]);
+          for (const [n, e, prop] of [['the robot', q('#bar-robot .rim'), 'fill'], ['the power button', q('#site-switch[aria-checked="true"]'), 'color']]) if (e && (e.closest('button') || e).getClientRects().length) out.push([n, getComputedStyle(e)[prop]]);
           return out;
         })(),
         stripe: (() => { const li = q('#mod-list li[data-mod][data-group]:not(.off)'); return li ? getComputedStyle(li, '::before').backgroundColor : null; })(),
@@ -2077,6 +2249,9 @@ class Scenario {
   async mergeChecks() {
     const r = this.r;
     const d = this.d;
+    // (the panel back on x.com: the checks before may have left it elsewhere, Chrome's panel window ones)
+    await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]).catch(() => {});
+    await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000).catch(() => {});
     const chatKey = 'chat:x.com';
     const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [chatKey]);
     const file = path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js');
@@ -3184,7 +3359,7 @@ process.exitCode = 1;
       for (const [k, v] of Object.entries(N || {})) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
       if (!N || Object.keys(N).length < 14) problems.push(`the undeclared mod's results: ${JSON.stringify(N)}`);
       const exact = { 'B3 the site\'s key, read and changed': 'ok: v1 v2 s1 c1', 'B3 the keys it may see': 'ok: e2e-wide-key', 'B3 its old settings, brought over once': 'ok: {"zoom":3}',
-        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
+        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B10 a picture already the size asked for, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
         'B6 a link the page shows, with a parameter taken out': 'ok: /wideb.html?a=1' };
       for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]} (wanted ${v})`);
       const reqs = this.o.servers.requests.map((q) => q.url);
@@ -3785,7 +3960,7 @@ process.exitCode = 1;
     const view = () => this.panel(`async () => {
       const q = (s) => document.querySelector(s);
       const list = q('#mod-list');
-      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent,
+      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent, gateWhy: q('#gate-why').hidden ? '' : q('#gate-why').textContent,
         red: document.body.classList.contains('site-blocked'), links: q('#gate-links').hidden ? [] : [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent),
         note: q('#agent-site-note').hidden ? '' : q('#agent-site-note').textContent, level: q('#agent-level').dataset.level || '',
         words: q('#agent-level .agent-level-text').textContent, wordsShown: getComputedStyle(q('#agent-level .agent-level-text')).display !== 'none',
@@ -3815,6 +3990,7 @@ process.exitCode = 1;
       await go(at('mail.x.com', '/inbox'));
       const blocked = await waitFor('the blocked screen', async () => { const v = await view(); return v.site === 'mail.x.com' && v.gate && v.red ? v : null; }, { timeoutMs: 15000 });
       if (blocked.gateTitle !== 'The robot is blocked on mail.x.com' || blocked.gateBtn !== 'Unblock') problems.push(`the blocked screen: ${JSON.stringify(blocked)}`);
+      if (blocked.gateWhy !== 'TRIF blocks itself from running on sensitive sites by default.') problems.push(`the sensitive site's line: "${blocked.gateWhy}"`);
       if (blocked.links.some((l) => /Disconnect/.test(l))) problems.push(`Disconnect offered, though its access is x.com's: ${blocked.links}`);
       await themes('sensitive-blocked');
       const refused = await this.cli(['text', '--url', 'mail.x.com']);

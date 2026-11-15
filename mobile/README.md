@@ -9,7 +9,7 @@ checks, lets you try the "point at it" idea by hand, and makes a report you send
 | **Browser probe** | What could TRIF do as its own browser app? | `browser-probe/` |
 
 Nothing here has been run on a Mac or a phone. The Safari probe's code and every JavaScript check have been
-run in Chromium (`node mobile/test/smoke.js`). The Swift has only been checked for syntax: expect to fix a
+run in Chromium (`TRIF_BROWSER_TESTS=1 node mobile/test/smoke.js`, in Chrome for Testing). The Swift has only been checked for syntax: expect to fix a
 compile error or two in Xcode, and send them to me.
 
 ## What the answers decide
@@ -134,7 +134,7 @@ pane is about to load, which every browser does.
 
 ```
 node mobile/prepare.js          # remakes shared/gen/ from extension/sandbox.js and browser-probe/checks.js
-node mobile/test/smoke.js       # the Safari probe and the browser probe's JS checks, in Chromium
+TRIF_BROWSER_TESTS=1 node mobile/test/smoke.js   # the Safari probe and the browser probe's JS checks, in Chrome for Testing
 ruby mobile/browser-probe/make-project.rb   # rewrites the Xcode project (gem install xcodeproj)
 ```
 

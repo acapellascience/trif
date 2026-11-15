@@ -135,7 +135,10 @@ style mod's old name, `@rules`, still works):
 ```
 
 - `css`: any CSS that changes how things look. Nothing that loads from an address: `url()` only with
-  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings.
+  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings. To recolour,
+  set `background-color`, not the `background` shorthand: the shorthand also sets `background-image` to
+  none, which wipes out every picture the page draws as a background (thumbnails, avatars, icons), and a
+  mod can't put them back.
 - `hide`: selectors to hide (`display: none !important`, including elements that appear later).
 - `replace`: `{ in?, find, with, regex?, caseless? }`: text to replace inside the elements `in` matches
   (default the whole page). `with` is plain text. Patterns are capped and can't nest repeats.
@@ -267,7 +270,10 @@ It runs in one of two places:
   the page's own data behind an element (`el.pageData('props.post')`). It can read the page and change
   what it shows; it can't send, click, type or navigate, so nothing is paused and the user isn't asked.
   There's no `document` or `window` there (they read as undefined). **Use this for looking around: almost
-  everything you run is that.**
+  everything you run is that.** While a run lasts, the page's boxed mods can't do what its reads would make
+  risky beside them (load other picture sizes, play sound, …): their logs say so with a warning naming your
+  run, and it's not a bug in the mod. So don't wait inside a run (`await new Promise(r => setTimeout(r, 4000))`):
+  `trif reload`, then run again.
 - **The page's own world** (`--page`; what you get from a terminal without a flag): `document`, `window`,
   the site's own code and state, its mods' hooks. In a side-panel chat this locks the whole site, in every
   tab (no posting, no other sites), until the tab reloads, and may ask the user first ("Side-panel runs", below): keep it for

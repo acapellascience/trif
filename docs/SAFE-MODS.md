@@ -133,7 +133,7 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 
 1. **Rules tier**: schema, runtime support, `trif check` for it, AGENTS.md "prefer rules"; move the
    CSS-only and pure-hiding mods (shipped ones first) to it. No browser questions; immediate win. *(Built;
-   moving the shipped mods: not yet.)*
+   the shipped mods moved in 0.3.0: AI Banisher and Just Results are style mods, ten more are boxed, and so is Oppish, new.)*
 2. **Spike the sandbox** in Chrome: one world, the guards, the hostile-mod e2e. Answer the CSP and
    performance questions. *(Done: branches sandbox-spike, sandbox-standin.)*
 3. **`trif.filterResponse`**, then move the data filters. *(Not built.)*

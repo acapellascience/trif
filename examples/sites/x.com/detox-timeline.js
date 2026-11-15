@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // @source      webmods
-// @version     3
+// @version     4
 // ==/WebMod==
 
 /*
@@ -44,9 +44,9 @@
  * - Profiles lose their "Who to follow" blocks and ads (the profile timelines' data is cleaned the
  *   same way as post pages'); nothing else on them is filtered.
  * - Replies, followed first. Reply threads with anyone you follow in them (or you, or the post's
- *   author) stay in X's list. The rest are taken out of the data and shown below it in a collapsed
- *   "Replies from people you don't follow" section rendered by this script (X's virtualised list can't
- *   take a section of its own); clicking one opens it as a post page.
+ *   author) come first. The rest are moved after them in the data and folded into a collapsed
+ *   "Replies from people you don't follow" section: still X's own rows (reply, repost, like…), emptied
+ *   until you open it, with the header drawn on the first of them.
  *
  * Debugging: `webmods run 'window.__dmFilterStats'` shows, for the last 20 timeline responses, what the
  * filter saw, kept and why it dropped the rest.
@@ -202,8 +202,9 @@
     if (!content?.itemContent) return true;   // cursors and the like stay
     return !isJunk(content, home) && keep([content]);
   });
-  // ---- Replies from people you don't follow, held back from a post page's data (see below).
-  // Kept per post: going back to a post shows X's cached copy, without asking for its data again.
+  // ---- Replies from people you don't follow, moved below the others in a post page's data (see below).
+  // Kept per post (the threads' entry ids): going back to a post shows X's cached copy, without asking
+  // for its data again.
   const unfollowed = { posts: {}, version: 0 };
   const heldFor = (focal) => (unfollowed.posts[focal] ||= { author: null, threads: [] });
   const me = () => (String(document.cookie || '').match(/(?:^|;\s*)twid=u%3D(\d+)/) || [])[1];
@@ -224,27 +225,30 @@
       if (focalEntry) post.author = authorOf(tweetIn(focalEntry.content)) || post.author;
     }
     currentAuthor = post.author;
+    // (sortIndex: digits, compared as numbers, highest first)
+    const higherFirst = (a, b) => (a.length !== b.length ? b.length - a.length : a < b ? 1 : a > b ? -1 : 0);
     for (const instruction of instructions) {
-      if (Array.isArray(instruction.entries)) {
-        instruction.entries = instruction.entries.filter((entry) => {
-          if (!/^conversationthread-/.test(entry.entryId || '')) return true;
-          // Stays in X's list if anyone in it is someone you follow (or you, or the post's author): a
-          // stranger's reply that someone you follow answered belongs with the followed replies, and
-          // taking it out of X's data would also leave X without that conversation when you open it.
-          const tweets = (entry.content?.items || []).map((i) => tweetIn(i.item)).filter(Boolean);
-          if (!tweets.length || tweets.some(isFollowed) || tweets.some((t) => (t.rest_id || t.legacy?.id_str) === focal)) return true;
-          const thread = { id: entry.entryId, tweets };
-          const i = post.threads.findIndex((t) => t.id === entry.entryId);   // fetched again: replace
-          if (i >= 0) post.threads[i] = thread; else post.threads.push(thread);
-          return false;
-        });
+      if (!Array.isArray(instruction.entries)) continue;
+      const threads = instruction.entries.filter((e) => /^conversationthread-/.test(e.entryId || ''));
+      // A thread counts as followed if anyone in it is someone you follow (or you, or the post's author):
+      // a stranger's reply that someone you follow answered belongs with the followed replies.
+      const strangers = threads.filter((entry) => {
+        const tweets = (entry.content?.items || []).map((i) => tweetIn(i.item)).filter(Boolean);
+        return tweets.length && !tweets.some(isFollowed) && !tweets.some((t) => (t.rest_id || t.legacy?.id_str) === focal);
+      });
+      if (!strangers.length) continue;
+      for (const s of strangers) if (!post.threads.includes(s.entryId)) post.threads.push(s.entryId);
+      // They stay in X's data, so X draws them as real posts (reply, repost, like, its menus), just after
+      // this page's followed threads: the threads swap places, followed first, and swap sortIndex too (X
+      // orders a timeline by it, highest first), so cursors and the rest keep their places.
+      const ordered = [...threads.filter((t) => !strangers.includes(t)), ...strangers];
+      const slots = threads.map((e) => e.sortIndex);
+      if (slots.every((s) => typeof s === 'string' && /^\d+$/.test(s))) {
+        slots.sort(higherFirst);
+        ordered.forEach((e, i) => { e.sortIndex = slots[i]; });
       }
-      // More of a held-back thread: add it to the section instead.
-      const held = post.threads.find((t) => t.id === instruction.moduleEntryId);
-      if (held && Array.isArray(instruction.moduleItems)) {
-        held.tweets.push(...instruction.moduleItems.map((i) => tweetIn(i.item)).filter(Boolean));
-        instruction.moduleItems = [];
-      }
+      let k = 0;
+      instruction.entries = instruction.entries.map((e) => (threads.includes(e) ? ordered[k++] : e));
     }
     unfollowed.version++;
   };
@@ -543,24 +547,13 @@
     [data-dm-tabs] { display: flex !important; flex-direction: row !important; align-items: center !important; }
     [data-dm-tabs] > nav { flex: 0 0 auto !important; order: 1; }
     [data-dm-tabs] > .dm-filters { order: 2; }
-    /* Above X's rows: pulled up under the last reply, it sits where X's empty, invisible end rows are. */
-    .dm-unfollowed { position: relative; z-index: 1; border-top: 1px solid rgba(128, 128, 128, .3); font: 15px/1.35 TwitterChirp, -apple-system, system-ui, sans-serif; }
-    .dm-unfollowed > button { all: unset; box-sizing: border-box; width: 100%; padding: 16px; cursor: pointer; color: rgb(29, 155, 240); display: flex; gap: 8px; align-items: center; }
-    .dm-unfollowed > button:hover { background: rgba(128, 128, 128, .08); }
-    .dm-unfollowed .chev { display: inline-block; transition: transform .15s; }
-    .dm-unfollowed[data-open] .chev { transform: rotate(90deg); }
-    .dm-unfollowed:not([data-open]) .dm-threads { display: none; }
-    .dm-thread { border-top: 1px solid rgba(128, 128, 128, .3); }
-    .dm-reply { display: flex; gap: 10px; padding: 12px 16px; cursor: pointer; }
-    .dm-reply:hover { background: rgba(128, 128, 128, .06); }
-    .dm-reply + .dm-reply { padding-top: 4px; }
-    .dm-reply img.av { width: 40px; height: 40px; border-radius: 50%; flex: none; }
-    .dm-reply .body { min-width: 0; flex: 1; }
-    .dm-reply .who { color: rgb(113, 118, 123); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .dm-reply .who b { color: var(--dm-fg, inherit); }
-    .dm-reply .text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
-    .dm-reply .media { display: flex; gap: 4px; margin-top: 8px; }
-    .dm-reply .media img { max-height: 120px; max-width: 45%; border-radius: 12px; object-fit: cover; }
+    /* Replies from people you don't follow: X's own rows (see showUnfollowed), emptied until you open the
+       section (X re-measures rows, so they take no space), with the section's header drawn on the first one. */
+    html:not([data-dm-strangers-open]) [data-dm-stranger] > * { display: none !important; }
+    [data-dm-stranger-head]::before { content: attr(data-dm-label); display: block; padding: 16px; cursor: pointer;
+      color: rgb(29, 155, 240); border-top: 1px solid rgba(128, 128, 128, .3); border-bottom: 1px solid rgba(128, 128, 128, .3);
+      font: 15px/20px TwitterChirp, -apple-system, system-ui, sans-serif; }
+    html:not([data-dm-strangers-open]) [data-dm-stranger-head]:hover::before { background: rgba(128, 128, 128, .08); }
     .dm-filters { margin-left: auto; align-self: stretch; display: flex; min-height: 53px; }
     .dm-filters > button { all: unset; display: flex; align-items: center; gap: 4px; padding: 0 16px; cursor: pointer;
       font: 700 15px/20px TwitterChirp, -apple-system, system-ui, sans-serif; color: var(--dm-fg); }
@@ -578,89 +571,58 @@
   (document.head || document.documentElement).append(style);
 
   // ---- The "Replies from people you don't follow" section under a post's replies.
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const ago = (date) => {
-    const s = (Date.now() - new Date(date)) / 1000;
-    return s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 86400 ? `${Math.round(s / 3600)}h`
-      : new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  };
-  const replyText = (tweet) => {
-    const legacy = tweet.legacy || {};
-    let text = tweet.note_tweet?.note_tweet_results?.result?.text || legacy.full_text || '';
-    const range = legacy.display_text_range;
-    if (!tweet.note_tweet && Array.isArray(range)) text = [...text].slice(range[0], range[1]).join('');
-    text = text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    for (const u of legacy.entities?.urls || []) if (u.url) text = text.split(u.url).join(u.display_url || u.expanded_url || '');
-    return text;
-  };
-  const renderReply = (tweet) => {
-    const user = tweet.core?.user_results?.result || {};
-    const name = user.core?.name || user.legacy?.name || '';
-    const handle = user.core?.screen_name || user.legacy?.screen_name || '';
-    const avatar = user.avatar?.image_url || user.legacy?.profile_image_url_https || '';
-    const media = (tweet.legacy?.extended_entities?.media || []).map((m) => m.media_url_https).filter((u) => /^https:/.test(u || ''));
-    const href = `/${encodeURIComponent(handle || 'i')}/status/${encodeURIComponent(tweet.rest_id || tweet.legacy?.id_str || '')}`;
-    return `<div class="dm-reply" data-href="${esc(href)}">` +
-      (avatar ? `<img class="av" src="${esc(avatar.replace('_normal.', '_bigger.'))}" alt="">` : '') +
-      `<div class="body"><div class="who"><b>${esc(name)}</b> @${esc(handle)} · ${esc(ago(tweet.legacy?.created_at))}</div>` +
-      `<div class="text">${esc(replyText(tweet))}</div>` +
-      (media.length ? `<div class="media">${media.slice(0, 4).map((u) => `<img src="${esc(u)}?name=small" alt="">`).join('')}</div>` : '') +
-      `</div></div>`;
-  };
-  // Opens a post through X's own router (no reload), falling back to a normal navigation.
-  const openPost = (href) => {
-    history.pushState({}, '', href);
-    dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-    setTimeout(() => { if (location.pathname === href && !document.querySelector('[data-testid=primaryColumn] article')) location.assign(href); }, 1500);
-  };
-  let rendered = { focal: null, version: -1 };
+  // Those replies are X's own rows (moved below the others in the data: holdBackUnfollowed), so they keep
+  // everything X gives a reply: reply, repost, like, bookmark, share, its menu, opening the post. Their
+  // rows are marked here (data-dm-stranger, by entry id, as X recycles rows) and emptied while the section
+  // is closed; the first one also draws the section's header (data-dm-stranger-head, a ::before), which
+  // opens and closes it. (Before, they were taken out of X's data and redrawn as plain text, without any
+  // of X's buttons.)
+  const strangersOpen = new Set();   // the posts whose section you opened
+  const rowTop = (cell) => parseFloat((cell.style.transform.match(/translateY\(([-\d.]+)px\)/) || [])[1]);
   const showUnfollowed = () => {
+    document.querySelector('.dm-unfollowed')?.remove();   // (the old section, from a copy still in memory)
     const focal = (location.pathname.match(/\/status\/(\d+)/) || [])[1];
     const threads = focal ? unfollowed.posts[focal]?.threads || [] : [];
-    let box = document.querySelector('.dm-unfollowed');
-    if (!threads.length) { box?.remove(); return; }
-    const section = document.querySelector('[data-testid=primaryColumn] section');
-    if (!section) return;
-    if (!box || box.previousElementSibling !== section) {
-      box?.remove();
-      box = document.createElement('div');
-      box.className = 'dm-unfollowed';
-      box.innerHTML = '<button type="button"><span class="chev">›</span><span class="label"></span></button><div class="dm-threads"></div>';
-      box.firstChild.addEventListener('click', () => box.toggleAttribute('data-open'));
-      box.addEventListener('click', (e) => {
-        const reply = e.target.closest('.dm-reply');
-        if (reply) { e.preventDefault(); e.stopPropagation(); openPost(reply.dataset.href); }
-      });
-      section.after(box);
-      rendered = { focal: null, version: -1 };
-    }
-    // X keeps the reply list taller than its replies (a fixed minimum height and an empty cell at
-    // the end). When that end cell is on screen (the list is virtualised, so it may not be), pull
-    // the section up to just under the last reply, unless more replies are still loading.
-    const list = section.querySelector('div[style*="min-height"]');
-    let pull = 0;
-    if (list) {
-      const top = list.getBoundingClientRect().top;
-      const cells = [...list.children].map((c) => ({ c, bottom: c.getBoundingClientRect().bottom - top }));
-      const end = cells.reduce((a, b) => (b.bottom > (a?.bottom ?? -1) ? b : a), null);
-      // The last row with anything in it (a reply, or one of X's buttons such as "Show more replies").
-      const lastContent = Math.max(0, ...cells.filter(({ c }) => c.querySelector('article, [role=button], button') || c.innerText.trim())
-        .map(({ bottom }) => bottom));
-      if (end && !end.c.querySelector('article, [role=progressbar], [role=button], button') && !end.c.innerText.trim() && lastContent > 0) {
-        pull = Math.max(0, list.getBoundingClientRect().height - lastContent);
+    const open = !!focal && strangersOpen.has(focal);
+    const root = document.documentElement;
+    if (open !== root.hasAttribute('data-dm-strangers-open')) root.toggleAttribute('data-dm-strangers-open', open);
+    if (!threads.length) {
+      for (const cell of document.querySelectorAll('[data-dm-stranger], [data-dm-stranger-head]')) {
+        cell.removeAttribute('data-dm-stranger');
+        cell.removeAttribute('data-dm-stranger-head');
       }
+      return;
     }
-    box.style.marginTop = pull ? `-${Math.round(pull)}px` : '';
-    // X colours text per element, so pick the theme's text colour from its background.
-    const [r, g, b] = (getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [255, 255, 255]).map(Number);
-    box.style.color = r * 0.3 + g * 0.59 + b * 0.11 < 128 ? 'rgb(231, 233, 234)' : 'rgb(15, 20, 25)';
-    if (rendered.focal === focal && rendered.version === unfollowed.version) return;
-    rendered = { focal, version: unfollowed.version };
+    const list = document.querySelector('[data-testid=primaryColumn] section [data-testid=cellInnerDiv]')?.parentElement;
+    if (!list) return;
     const count = threads.length;
-    box.querySelector('.label').textContent = `${count} ${count === 1 ? 'reply' : 'replies'} from people you don’t follow`;
-    box.querySelector('.dm-threads').innerHTML = threads
-      .map((t) => `<div class="dm-thread">${t.tweets.map(renderReply).join('')}</div>`).join('');
+    const label = `${open ? '⌄' : '›'}  ${count} ${count === 1 ? 'reply' : 'replies'} from people you don’t follow`;
+    // The header goes on the top row of the first such thread (when X has it on the page), so it doesn't
+    // jump to another row as you scroll.
+    let head = null, headTop = Infinity;
+    for (const cell of list.children) {
+      const id = entryOf(cell)?.entryId || '';
+      const which = id ? threads.findIndex((t) => id === t || id.startsWith(`${t}-`)) : -1;
+      const mine = which >= 0;
+      if (mine !== cell.hasAttribute('data-dm-stranger')) cell.toggleAttribute('data-dm-stranger', mine);
+      if (which === 0) { const top = rowTop(cell); if (!(top >= headTop)) { headTop = top; head = cell; } }
+    }
+    for (const cell of list.querySelectorAll(':scope > [data-dm-stranger-head]')) if (cell !== head) cell.removeAttribute('data-dm-stranger-head');
+    if (head) {
+      if (!head.hasAttribute('data-dm-stranger-head')) head.setAttribute('data-dm-stranger-head', '');
+      if (head.dataset.dmLabel !== label) head.dataset.dmLabel = label;
+    }
   };
+  // A click on the header (the row itself, not the post in it) opens or closes the section.
+  document.addEventListener('click', (e) => {
+    const head = e.target?.closest?.('[data-dm-stranger-head]');
+    if (!head || e.target !== head) return;
+    const focal = (location.pathname.match(/\/status\/(\d+)/) || [])[1];
+    if (!focal) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (strangersOpen.has(focal)) strangersOpen.delete(focal); else strangersOpen.add(focal);
+    showUnfollowed();
+  }, true);
 
   // ---- The Filters menu, at the right of the tab bar, styled like X's Following menu.
   const CHEVRON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.543 8.96l1.414-1.42L12 14.59l7.043-7.05 1.414 1.42L12 17.41 3.543 8.96z"/></svg>';

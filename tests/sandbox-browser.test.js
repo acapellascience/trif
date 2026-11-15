@@ -3,7 +3,8 @@
 // DOM, so it can't say whether the runtime still starts once the language is locked down, or whether a
 // stand-in still works on a real element. This loads vendor/ses.umd.min.js and the runtime into a page (the
 // page's own world, not TRIF's user script world: the same code, without the world's wall around it) and runs
-// a few mods. Needs a Chromium that Playwright can start (skipped without one). The escapes are the e2e's
+// a few mods. Runs in headless Chrome for Testing (tests/cdp-page.js), with TRIF_BROWSER_TESTS=1 or in CI; skipped
+// otherwise, and where there's none. The escapes are the e2e's
 // (tests/e2e/fixtures/sandbox-hostile.js); this is "does it run, and are the review's fixes there".
 
 const test = require('node:test');
@@ -13,8 +14,9 @@ const http = require('http');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-let chromium = null;
-try { ({ chromium } = require('playwright')); } catch { /* none here: skipped */ }
+const { browserTestsSkip, launch } = require('./cdp-page');
+
+const skip = browserTestsSkip();
 
 const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 <button id="more" type="button">Show more replies</button>
@@ -24,7 +26,7 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 <script>window.clicks = { more: 0, del: 0 }; for (const id of ['more', 'del']) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });</script>
 </body></html>`;
 
-test('the sandbox runtime under real SES, in Chromium: mods run, stand-ins are their mod\'s, CSS and clicks are checked', { skip: chromium ? false : 'no Playwright Chromium here' }, async () => {
+test('the sandbox runtime under real SES, in Chromium: mods run, stand-ins are their mod\'s, CSS and clicks are checked', { skip }, async () => {
   const sb = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'sandbox.js')).href);
   const ses = fs.readFileSync(path.join(__dirname, '..', 'extension', sb.SES_FILE), 'utf8');
   const hits = [];
@@ -33,7 +35,7 @@ test('the sandbox runtime under real SES, in Chromium: mods run, stand-ins are t
   const base = `http://127.0.0.1:${server.address().port}`;
   let browser;
   try {
-    browser = await chromium.launch();
+    browser = await launch();
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', (e) => pageErrors.push(String(e.message)));
@@ -128,7 +130,7 @@ const PAGE2 = `<!doctype html><html><head><title>t2</title></head><body>
 </body></html>`;
 const GIF = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
 
-test('under real SES: a mod\'s stand-ins work in its callbacks and after an await, and trif.* takes them there', { skip: chromium ? false : 'no Playwright Chromium here' }, async () => {
+test('under real SES: a mod\'s stand-ins work in its callbacks and after an await, and trif.* takes them there', { skip }, async () => {
   const sb = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'sandbox.js')).href);
   const rt = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'runtime.js')).href);
   const ses = fs.readFileSync(path.join(__dirname, '..', 'extension', sb.SES_FILE), 'utf8');
@@ -137,7 +139,7 @@ test('under real SES: a mod\'s stand-ins work in its callbacks and after an awai
   const base = `http://127.0.0.1:${server.address().port}`;
   let browser;
   try {
-    browser = await chromium.launch({ args: ['--mute-audio'] });
+    browser = await launch();
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', (e) => pageErrors.push(String(e.message)));
@@ -205,14 +207,14 @@ trif.observe('#main-entry', (cur) => {
   }
 });`;
 
-test('under real SES: a stand-in from one observe callback, kept after its element is detached, works in a later one', { skip: chromium ? false : 'no Playwright Chromium here' }, async () => {
+test('under real SES: a stand-in from one observe callback, kept after its element is detached, works in a later one', { skip }, async () => {
   const sb = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'sandbox.js')).href);
   const ses = fs.readFileSync(path.join(__dirname, '..', 'extension', sb.SES_FILE), 'utf8');
   const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(PAGE3); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   let browser;
   try {
-    browser = await chromium.launch({ args: ['--mute-audio'] });
+    browser = await launch();
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', (e) => pageErrors.push(String(e.message)));

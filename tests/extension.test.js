@@ -3204,19 +3204,19 @@ test('background: a new user\'s sensitive sites start blocked, each a site of it
     const panel = bg.connectPanel();
     let st = (await panel.ask({ type: 'status' })).result;
     // (its own mods: a question, as it has some)
-    assert.deepStrictEqual(st.sensitive.pending.map((p) => [p.host, p.parent, p.why, p.mods, p.allSites]), [['mail.google.com', 'google.com', 'email', ['google.com/dark'], ['all-sites/big']]]);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com').map((p) => [p.host, p.parent, p.why, p.mods, p.allSites]), [['mail.google.com', 'google.com', 'email', ['google.com/dark'], ['all-sites/big']]]);
     // Until answered, as before: google.com's mods still reach it
     assert.ok(!bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark').excludeMatches.length);
     // Block it
     let r = await panel.ask({ type: 'sensitive.answer', host: 'mail.google.com', choice: 'block' });
     assert.strictEqual(r.ok, true, r.error);
     st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual(st.sensitive.pending, []);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com'), []); // (Docs and Drive are asked about too: their own question)
     assert.ok(st.blockedSites.includes('mail.google.com'));
     assert.ok(st.sensitive.splits.includes('mail.google.com'));
     const dark = bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark');
-    assert.deepStrictEqual(dark.excludeMatches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'google.com\'s mod skips mail.google.com');
-    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === lib.RUNTIME_ID).excludeMatches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'and so does TRIF\'s runtime');
+    assert.ok(['*://*.mail.google.com/*', '*://mail.google.com/*'].every((x) => dark.excludeMatches.includes(x)), 'google.com\'s mod skips mail.google.com');
+    assert.ok(['*://*.mail.google.com/*', '*://mail.google.com/*'].every((x) => bg.chrome.userScripts.scripts.find((y) => y.id === lib.RUNTIME_ID).excludeMatches.includes(x)), 'and so does TRIF\'s runtime');
     assert.ok(!scriptIds(bg).includes('mail.google.com/calm'));
     assert.strictEqual((await bg.native.call('text', { tab: 7 })).error, lib.siteRefusal('mail.google.com', 'blocked'));
     assert.ok((await bg.native.call('text', { tab: 5 })).ok !== false || true);
@@ -3241,7 +3241,7 @@ test('background: on upgrade a sensitive host the user\'s mods reach is asked ab
     await settle(40);
     const panel = bg.connectPanel();
     let st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual(st.sensitive.pending.map((p) => [p.host, p.mods]), [['mail.google.com', ['google.com/dark', 'google.com/quiet']]]);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com').map((p) => [p.host, p.mods]), [['mail.google.com', ['google.com/dark', 'google.com/quiet']]]);
     assert.ok(!st.blockedSites.includes('mail.google.com'));
     // (seen before: the copies would be new mods, which start off)
     bg.native.emit({ type: 'mods', mods });
@@ -3258,7 +3258,7 @@ test('background: on upgrade a sensitive host the user\'s mods reach is asked ab
     assert.strictEqual(r.ok, true, r.error);
     await settle(30);
     st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual(st.sensitive.pending, []);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com'), []); // (Docs and Drive are asked about too: their own question)
     assert.ok(st.sitesOn.includes('mail.google.com') && st.sitesOn.includes('google.com'), 'both on');
     assert.ok(!bg.store.disabled['mail.google.com/dark'], 'the copy of a mod that was on is on');
     assert.strictEqual(bg.store.disabled['mail.google.com/quiet'], true, 'the copy of one that was off is off');

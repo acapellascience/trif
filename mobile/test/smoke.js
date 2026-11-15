@@ -5,32 +5,44 @@
 // hides it again on the next load. What Safari on an iPhone answers is the thing the probe is for; this
 // only says the probe's own code works.
 //
-//   node mobile/test/smoke.js      (npm test finds it too; skipped where Playwright has no Chromium)
+//   TRIF_BROWSER_TESTS=1 node mobile/test/smoke.js
+//
+// npm test finds it too. It runs in headless Chrome for Testing (tests/cdp-page.js), only with
+// TRIF_BROWSER_TESTS=1 or in CI; skipped otherwise, and where there's none.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
-const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { handler } = require('../serve');
+const { browserTestsSkip, launch } = require('../../tests/cdp-page');
 
-let chromium = null;
-try { ({ chromium } = require('playwright')); } catch { /* none here: skipped */ }
+// What Playwright's locators gave this test, in the page: the first match's text or value once it's there,
+// how many match, and whether it shows (a box with a size, and not visibility: hidden).
+const textOf = (pg, sel) => pg.waitForFunction((s) => { const el = document.querySelector(s); return el ? [el.textContent] : null; }, sel).then(([t]) => t);
+const valueOf = (pg, sel) => pg.waitForFunction((s) => { const el = document.querySelector(s); return el ? [el.value] : null; }, sel).then(([v]) => v);
+const countOf = (pg, sel) => pg.evaluate((s) => document.querySelectorAll(s).length, sel);
+const isVisible = (pg, sel) => pg.evaluate((s) => {
+  const el = document.querySelector(s);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+}, sel);
 
-test('the mobile probes: the Safari probe\'s extension and the browser probe\'s checks run, in Chromium', { skip: chromium ? false : 'no Playwright Chromium here', timeout: 170000 }, async () => {
+test('the mobile probes: the Safari probe\'s extension and the browser probe\'s checks run, in Chromium', { skip: browserTestsSkip(), timeout: 170000 }, async () => {
   execFileSync(process.execPath, [path.join(__dirname, '..', 'prepare.js'), '--check'], { stdio: 'inherit' });
   const ext = execFileSync(process.execPath, [path.join(__dirname, '..', 'safari-probe', 'build.js'), '--chrome']).toString().trim();
   const canary = [];
   const server = http.createServer(handler((line) => canary.push(line)));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-probe-'));
-  const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`] });
+  let browser;
   try {
-    const sw = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-    const page = await context.newPage();
+    browser = await launch({ extension: ext });
+    const sw = await browser.serviceWorker();
+    const page = await browser.newPage();
     const answers = {};
     for (const name of ['plain', 'strict', 'trusted', 'hostile', 'spa']) {
       await page.goto(`${base}/${name}.html`);
@@ -56,7 +68,7 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     assert.ok(canary.length > 0, 'the canary was asked for');
 
     // The box checks' own code, where eval is allowed (the plain page's own world): they say yes there.
-    const fresh = await context.newPage();
+    const fresh = await browser.newPage();
     await fresh.goto(`${base}/plain.html`);
     const gen = path.join(ext, 'gen');
     await fresh.addScriptTag({ path: path.join(gen, 'ses.umd.min.js') });
@@ -75,10 +87,9 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     await page.goto(`${base}/plain.html`);
     await page.waitForTimeout(300);
     await sw.evaluate(async (url) => { const [tab] = await chrome.tabs.query({ url }); await chrome.tabs.sendMessage(tab.id, { type: 'pick' }); }, `${base}/plain.html`);
-    await page.locator('article.promoted h2').click();
+    await page.click('article.promoted h2');
     assert.equal(await page.evaluate(() => window.__clicked), undefined);
-    const bar = page.locator('trif-probe-bar');
-    assert.equal(await bar.count(), 1);
+    assert.equal(await countOf(page, 'trif-probe-bar'), 1);
     // (the bar's root is closed, so it's pressed by where it is)
     const picked = await sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
@@ -91,7 +102,7 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     await sw.evaluate((host) => saveRule(host, { selector: 'article[data-testid="promoted-post"]', how: 'test id', matches: 1, text: '', at: Date.now() }), '127.0.0.1');
     await page.reload();
     await page.waitForTimeout(400);
-    assert.equal(await page.locator('article.promoted').isVisible(), false, 'hidden again after a reload');
+    assert.equal(await isVisible(page, 'article.promoted'), false, 'hidden again after a reload');
     const rec = await sw.evaluate(async (url) => { const [tab] = await chrome.tabs.query({ url }); const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => globalThis.__trifProbeStart }); return r[0].result; }, `${base}/plain.html`);
     console.log(`reload: ${JSON.stringify(rec)}`);
     assert.equal(rec.rules, 1);
@@ -99,7 +110,7 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     // the same on the strict page (same host, so the same rule)
     await page.goto(`${base}/strict.html`);
     await page.waitForTimeout(400);
-    assert.equal(await page.locator('article.promoted').isVisible(), false, 'hidden on the strict page too');
+    assert.equal(await isVisible(page, 'article.promoted'), false, 'hidden on the strict page too');
 
     // the kit names things the way the notes say: build-tool classes fall back to position
     const names = await sw.evaluate(async (url) => {
@@ -121,7 +132,7 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     // checks about worlds being apart say no, and the rest have to answer.
     const checks = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'gen', 'browser-checks.json'), 'utf8'));
     const web = path.join(__dirname, '..', 'browser-probe', 'TrifProbe', 'Web');
-    const app = await context.newPage();
+    const app = await browser.newPage();
     await app.addInitScript({ content: `${fs.readFileSync(path.join(__dirname, '..', 'shared', 'kit.js'), 'utf8')}\n${fs.readFileSync(path.join(web, 'start-own.js'), 'utf8')}({});\n${fs.readFileSync(path.join(web, 'start-page.js'), 'utf8')}\nwindow.webkit = { messageHandlers: { trif: { postMessage: async (m) => ({ ok: true, received: (m.pad || '').length }) } } };` });
     await app.goto(`${base}/plain.html`);
     let boxed = false;
@@ -138,25 +149,24 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     }
     console.log(`app checks: ${Object.entries(got).map(([k, v]) => `${k}=${v}`).join(' ')}`);
     for (const id of ['worlds.clean', 'page.eval', 'own.eval', 'timing.own', 'timing.page', 'messaging', 'styles.own', 'kit', 'box.start', 'box.compartment', 'box.run', 'box.confined', 'box.mod']) assert.equal(got[id], 'yes', `app ${id}`);
-    assert.equal(await app.locator('#out').textContent(), 'a boxed mod wrote this');
+    assert.equal(await textOf(app, '#out'), 'a boxed mod wrote this');
     await app.close();
 
     // the report page and the popup load without errors
     const id = new URL(sw.url()).host;
     const errors = [];
     for (const file of ['report.html', 'popup.html']) {
-      const p = await context.newPage();
+      const p = await browser.newPage();
       p.on('pageerror', (e) => errors.push(`${file}: ${e.message}`));
       await p.goto(`chrome-extension://${id}/${file}`);
       await p.waitForTimeout(400);
-      if (file === 'report.html') { const json = JSON.parse(await p.locator('#json').inputValue()); assert.equal(json.probe, 'safari'); assert.ok(json.runs.length >= 5); }
+      if (file === 'report.html') { const json = JSON.parse(await valueOf(p, '#json')); assert.equal(json.probe, 'safari'); assert.ok(json.runs.length >= 5); }
       await p.close();
     }
     assert.deepEqual(errors, []);
     console.log('\nsmoke: ok');
   } finally {
-    await context.close();
+    if (browser) await browser.close();
     server.close(); server.closeAllConnections(); // (Chrome keeps a connection open: without this the test process never exits)
-    fs.rmSync(profile, { recursive: true, force: true });
   }
 });

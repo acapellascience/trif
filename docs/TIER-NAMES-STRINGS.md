@@ -7,7 +7,8 @@ agents) read changed: stored values, message types, identifiers and file formats
 page, so nobody's switches move. Headers: `@style` and `@boxed` are new; `@rules` and `@sandboxed` work
 for good. Flags: `--style` and `--boxed` are new; `--rules` and `--sandboxed` still work.
 
-**Awaiting Tim's OK**: the two group lines marked ⚑ (they replace "can't send, click or load anything",
+**Superseded** (no longer in the code; the group lines are now the shortened ones below, and the tier lines
+Tim approved on 2026-11-13/14 in the code and approval cards): the two group lines marked ⚑ (they replace "can't send, click or load anything",
 which the red team showed overstated).
 
 ## Side panel

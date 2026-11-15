@@ -206,6 +206,22 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
       assert.throws(() => p.partnersOk(api('me', powers, false, [act]), act), /while another boxed mod here/, `${act} beside ${other}, only ${act} approved`);
     }
   }
+  // beside an agent's one-off run (`trif run` in the box, read powers BOX_RUN_POWERS): still refused, saying
+  // it's the run, while it lasts; a warning in the mod's logs, never one of its errors (no "new error" card)
+  {
+    const reported = [], logged = [];
+    const q = vm.runInNewContext(`const pageWide = ${JSON.stringify(require('../helper/lib/sitecombos').PAGE_WIDE)}; const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const channels = new Map(), apis = new Map(); const store = { logs: [] }; const MAX_LOGS = 500; const nativeConsole = { warn() {} };
+${src.slice(from, to)}
+({ partnersOk, inPlay, apis, set: (r, l) => { report = r; push = l; } })`.replace('const fail', 'let report, push; const fail'));
+    q.set((mod, e) => reported.push([mod, e.message]), (list, x) => logged.push([x.mod, x.level, x.args[0]]));
+    q.apis.set('run/r1', api('run/r1', ['page-data', 'read-drafts']));
+    q.inPlay.add('page-data'); q.inPlay.add('read-drafts');
+    for (let i = 0; i < 2; i++) assert.throws(() => q.partnersOk(api('x.com/profile-styler', ['image-variants']), 'image-variants'), /loading other sizes of the page's pictures is off on this page while an agent's trif run \(in the box\) is reading it with the read-drafts power; it's back when the run ends/);
+    assert.deepEqual(reported, [], 'not one of the mod\'s errors');
+    assert.deepEqual(logged.map((x) => x.slice(0, 2)), [['x.com/profile-styler', 'warn']], 'a warning in its logs, once');
+    q.apis.delete('run/r1'); q.inPlay.clear();
+    assert.doesNotThrow(() => q.partnersOk(api('x.com/profile-styler', ['image-variants']), 'image-variants'), 'back when the run ends');
+  }
   // F4: edit-uploads as a read, by the mods handed a picture, not by every mod with the power
   for (const act of ['write-drafts', 'click', 'media', 'page-events', 'image-variants', 'preload', 'site-storage', 'block-events', 'embeds']) {
     const p = page();

@@ -29,7 +29,11 @@ Every user- and agent-facing string the per-site agent setting adds, exact (all 
   Mail, Proton, iCloud; PayPal, the Stripe dashboard, Wise, Revolut, Monzo, N26, Chase, Wells Fargo, Citi,
   Capital One, Amex, Schwab, Fidelity, Vanguard, HSBC, Barclays, TD, RBC, BMO, CIBC, Tangerine, Desjardins,
   any host with "bank" in a label (`*bank*`) and the `.bank` domain; 1Password, Bitwarden, LastPass,
-  Dashlane; Discord, WhatsApp Web; ChatGPT, OpenAI, Claude.ai. Editable in Settings (the user's list
+  Dashlane; Discord, WhatsApp Web; ChatGPT, OpenAI, Claude.ai; Google Docs and Drive, Dropbox, Box,
+  OneDrive, SharePoint ("your files"); Coinbase, Binance, Kraken, Gemini, Crypto.com, Bitstamp, Bitfinex,
+  KuCoin, OKX, Bybit, Blockchain.com, Shakepay, Robinhood ("a crypto exchange"), Wealthsimple; the CRA,
+  GCKey, Service Canada's accounts, Revenu Québec, the IRS, SSA, Login.gov, ID.me, GOV.UK One Login, HMRC
+  and the Government Gateway, myGov, the ATO, IRD, RealMe ("a government account"). Editable in Settings (the user's list
   replaces TRIF's; "Use TRIF's list" brings it back).
 - The agent sees its site's level in the side panel's context, in AGENTS.md ("Agent on this site"), and in
   every refused command.

@@ -78,7 +78,9 @@ test('which mods run on a sensitive site: only its own, and they run only there;
   const mod = (id, matches) => ({ id, matches, hash: 'h' });
   const parent = L.limitToSites(mod('google.com/dark', ['*://*.google.com/*']), on, m);
   assert.deepEqual(parent.matches, ['*://*.google.com/*']);
-  assert.deepEqual(parent.excludes, ['*://*.mail.google.com/*', '*://mail.google.com/*']);
+  // (google.com's sites apart: Gmail, Docs and Drive)
+  const apart = ['*://*.docs.google.com/*', '*://*.drive.google.com/*', '*://*.mail.google.com/*', '*://docs.google.com/*', '*://drive.google.com/*', '*://mail.google.com/*'];
+  assert.deepEqual(parent.excludes, apart);
   assert.match(parent.hash, /\|apart:/, 'it re-registers when the sites apart change');
   assert.equal(L.limitToSites(mod('google.com/gmail', ['*://mail.google.com/*']), on, m), null, 'a parent\'s mod for the host: nowhere');
   const own = L.limitToSites(mod('mail.google.com/calm', ['*://*.google.com/*', '*://www.google.com/*']), on, m);
@@ -86,14 +88,14 @@ test('which mods run on a sensitive site: only its own, and they run only there;
   assert.equal(own.excludes, undefined);
   const all = L.limitToSites(mod('all-sites/big', ['*://*/*']), on, m);
   assert.deepEqual(all.usedSites, ['google.com', 'x.com'], 'all-sites mods skip sensitive sites (paypal.com too)');
-  assert.deepEqual(all.excludes, ['*://*.mail.google.com/*', '*://mail.google.com/*']);
+  assert.deepEqual(all.excludes, apart);
   assert.ok(L.limitToSites(mod('paypal.com/a', ['*://*.paypal.com/*']), on, m), 'a sensitive registrable domain\'s own mod');
   assert.equal(L.limitToSites(mod('x.com/pp', ['*://*.x.com/*', '*://paypal.com/*']), ['paypal.com'], m), null, 'another site\'s mod naming it: not there');
   // only mail.google.com on: google.com's mods don't run anywhere, its own do
   assert.equal(L.limitToSites(mod('google.com/dark', ['*://*.google.com/*']), ['mail.google.com'], m), null);
   // the runtime skips the sites apart no registered mod runs on
-  assert.deepEqual(L.runtimeExcludes([parent, all], [], m), ['*://*.mail.google.com/*', '*://mail.google.com/*']);
-  assert.deepEqual(L.runtimeExcludes([parent, own], [], m), []);
+  assert.deepEqual(L.runtimeExcludes([parent, all], [], m), apart);
+  assert.deepEqual(L.runtimeExcludes([parent, own], [], m), apart.filter((x) => !x.includes('mail.')));
   assert.deepEqual(L.runtimeExcludes([parent], []), []);
   // a run's code meeting a site apart (lib.js pageGuard, as the page runs it)
   const guard = (href, ...a) => { const g = globalThis.location; globalThis.location = { href }; try { return L.pageGuard(...a); } finally { globalThis.location = g; } };
@@ -113,8 +115,11 @@ test('the upgrade\'s plan: a new user\'s sensitive sites are blocked; one the us
   // TRIF on for google.com, one of its mods reaching mail.google.com: asked, with the parent's mods that match it
   const mods = [mod('google.com/dark', ['*://*.google.com/*']), mod('google.com/maps', ['*://maps.google.com/*']), mod('www.google.com/x', ['*://www.google.com/*', '*://mail.google.com/inbox/*']), mod('all-sites/big', ['<all_urls>'])];
   p = L.sensitivePlan({ hosts, mods, sitesOn: ['google.com'] });
-  assert.deepEqual(p.ask, [{ host: 'mail.google.com', parent: 'google.com', why: 'email', mods: ['google.com/dark', 'www.google.com/x'], allSites: ['all-sites/big'] }]);
+  assert.deepEqual(p.ask.filter((x) => x.host === 'mail.google.com'), [{ host: 'mail.google.com', parent: 'google.com', why: 'email', mods: ['google.com/dark', 'www.google.com/x'], allSites: ['all-sites/big'] }]);
+  assert.deepEqual(p.ask.filter((x) => x.host !== 'mail.google.com').map((x) => [x.host, x.why, x.mods]), [['docs.google.com', 'your files', ['google.com/dark']], ['drive.google.com', 'your files', ['google.com/dark']]]);
   assert.ok(!p.block.includes('mail.google.com') && p.done.includes('mail.google.com'));
+  // (another site apart's mods aren't the parent's: Gmail's own isn't offered to Docs)
+  assert.deepEqual(L.sensitivePlan({ hosts, mods: [...mods, mod('mail.google.com/calm', ['*://*.google.com/*'])], sitesOn: ['google.com'] }).ask.find((x) => x.host === 'docs.google.com').mods, ['google.com/dark']);
   // the parent off, or its only reaching mod switched off: nothing reaches it, so blocked
   assert.ok(L.sensitivePlan({ hosts, mods, sitesOn: [] }).block.includes('mail.google.com'));
   assert.ok(L.sensitivePlan({ hosts, mods: [mods[0]], disabled: { 'google.com/dark': true }, sitesOn: ['google.com'] }).block.includes('mail.google.com'));

@@ -1113,7 +1113,9 @@ class Runs {
       done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, ...(Number.isFinite(d.contextTokens) ? { contextTokens: d.contextTokens } : {}), sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
-        const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
+        // (without the agent's own notices that say nothing about why it stopped: adapter.stderrNoise)
+        const noise = run.adapter.stderrNoise;
+        const tail = run.stderr.trim().split('\n').filter((l) => !(noise && noise.test(l))).slice(-12).join('\n').trim().slice(-2000);
         // (A message, or a whole error event: util.js loginError.)
         const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;

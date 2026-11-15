@@ -10,6 +10,8 @@ summary is too long.
 
 - **Edit a mod's code in the panel**: Edit in its code card, then Save. TRIF checks it first, and an edit
   that lets the mod do more waits for your OK, like any change. Undo puts the version before back.
+- **A click on something a mod hid is stopped.** If a style or boxed mod makes a button or link invisible
+  and you click where it is, TRIF stops the click and tells you which mod did it.
 - **Tim's mods get fixes between TRIF releases**, signed like TRIF's own updates. One you changed is never
   replaced: you're offered the new version.
 - **TRIF names your browser.** Brave, Edge, Opera, Vivaldi, Arc and Chromium are no longer all called

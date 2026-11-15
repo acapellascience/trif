@@ -1044,7 +1044,7 @@ const handlers = {
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : held[m.id].by === 'edit' ? 'the user edited it in the side panel\'s code card' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (broken.has(m.id)) out(`  ${brokenText(broken.get(m.id))}`);
       if (m.description) out(`  ${m.description}`);

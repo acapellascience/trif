@@ -537,7 +537,7 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none', 'sensitive.split']);
+  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
@@ -805,7 +805,27 @@ function agentCommand(cmd, args) {
         if (before === null) throw new Error(`${id} has no earlier version that ran`);
         text = before;
       }
-      return { id, code: text.slice(0, CAP), truncated: text.length > CAP, file: path.basename(String(m.file || `${id.split('/')[1]}.js`)) };
+      // (`base`: the file's version, which the code card's Save sends back: lib/edit.js)
+      return { id, code: text.slice(0, CAP), truncated: text.length > CAP, file: path.basename(String(m.file || `${id.split('/')[1]}.js`)),
+        ...(args.version === 'ran' ? {} : { base: require('./lib/edit').fileHash(text) }) };
+    }
+    // The code card's Edit (lib/edit.js): Save checks the text as `trif check` does and writes it only if nothing's
+    // wrong and the file is still the version the edit started from (`base`); the version before goes into the
+    // mod's history; the sync right after judges the change (held.js: the user's edit). Not from a run.
+    case 'mod.save': {
+      const r = require('./lib/edit').saveEdit(workspace(ws.home), { id: String(args.id ?? ''), text: args.text, base: args.base });
+      if (!r.saved) return r;
+      syncMods('edit', false);
+      const h = state.held[r.id];
+      logger.info(`saved an edit of ${r.id}${h ? `, waiting for the user's OK (${(h.needs || []).join(', ')})` : ''}`);
+      return { ...r, held: !!h, pending: (state.pending || []).includes(r.id) };
+    }
+    // Undo right after Save: the version before back, if the file is still the edit
+    case 'mod.undoEdit': {
+      const r = require('./lib/edit').undoEdit(workspace(ws.home), { id: String(args.id ?? ''), stamp: String(args.stamp ?? ''), hash: args.hash });
+      logger.info(`undid the edit of ${r.id} (its version from ${r.restored} is back)`);
+      syncMods('undo edit', false);
+      return r;
     }
     case 'mod.reveal': {
       // The code viewer's "Show in Finder" / "Open in editor", `trif reveal`: the mod's own file, found by

@@ -55,6 +55,15 @@ the mod*, as on the mod-error card). Once the mod is off: **Turned off.** in pla
 | inkless | left nothing of it showing (no text, border, background or picture) | |
 | covered | covered it with one of the mod's own elements, which lets clicks through to it | |
 
+## Proposed CHANGELOG line (0.3.1; not in CHANGELOG.md yet)
+
+> - **A click on something a mod hid is stopped.** If a style or boxed mod makes a button or link invisible
+>   and you click where it is, TRIF stops the click and tells you which mod did it.
+
+| | OK? |
+|---|---|
+| the line | |
+
 ## Agent-only (not for approval)
 
 `window.__webmods.guard` (stats: presses, checks, ms; the last 50 stops), the `kind: 'clickjack'` and `why`

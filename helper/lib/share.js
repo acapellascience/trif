@@ -69,15 +69,22 @@ function exportMod(ws, list, id, { to = null, env = process.env } = {}) {
 }
 
 /** Every mod of a site, copied into a folder "<site> mods" in the downloads folder (or `to`): {site, dir, ids}. */
-function exportSite(ws, list, site, { to = null, env = process.env } = {}) {
+function exportSite(ws, list, site, { to = null, ids: only = null, env = process.env } = {}) {
   const s = checkSite(site);
-  const ids = (list || []).filter((m) => m.id.startsWith(`${s}/`) && m.id.split('/').length === 2).map((m) => m.id);
+  // (the site's folder, and its www. one: a site's mods can be kept under either, sites/www.google.com/
+  // for google.com: Tim, 11-14, had none to export there)
+  // (`only`: the mods the panel lists as this site's, on a page under it (docs.google.com's panel is
+  // google.com's): those of them in a folder under the site, so a subdomain's folder comes too)
+  const under = (m) => { const f = m.id.split('/')[0].replace(/^www\./, ''); return f === s || f.endsWith(`.${s}`); };
+  const ids = (list || []).filter((m) => m.id.split('/').length === 2 && (Array.isArray(only)
+    ? only.includes(m.id) && under(m)
+    : m.id.startsWith(`${s}/`) || m.id.startsWith(`www.${s}/`))).map((m) => m.id);
   if (!ids.length) throw new ShareError(`no mods for ${s}`);
   const parent = to ? path.resolve(String(to)) : downloadsDir(env);
   fs.mkdirSync(parent, { recursive: true });
   const dir = path.join(parent, freeName(parent, `${s} mods`));
   fs.mkdirSync(dir);
-  for (const id of ids) fs.copyFileSync(modFile(ws.modsDir, list, id), path.join(dir, `${id.split('/')[1]}.js`));
+  for (const id of ids) fs.copyFileSync(modFile(ws.modsDir, list, id), path.join(dir, freeName(dir, `${id.split('/')[1]}.js`)));
   return { site: s, dir, ids };
 }
 

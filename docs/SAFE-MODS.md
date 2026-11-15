@@ -133,7 +133,7 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 
 1. **Rules tier**: schema, runtime support, `trif check` for it, AGENTS.md "prefer rules"; move the
    CSS-only and pure-hiding mods (shipped ones first) to it. No browser questions; immediate win. *(Built;
-   moving the shipped mods: not yet.)*
+   the shipped mods moved in 0.3.0: AI Banisher and Just Results are style mods, ten more are boxed, and so is Oppish, new.)*
 2. **Spike the sandbox** in Chrome: one world, the guards, the hostile-mod e2e. Answer the CSP and
    performance questions. *(Done: branches sandbox-spike, sandbox-standin.)*
 3. **`trif.filterResponse`**, then move the data filters. *(Not built.)*
@@ -464,8 +464,8 @@ shows.
 (`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's
 approval dialog lists them in the red box, the strongest first, one line each ("Together, it …"; the same
 sentence once), `trif status` as "together, it …". A mod with more than three powers gets, instead, Tim's
-general warning (key `power:together:many:<its powers>`, so the exact set): "Mods with many powers can act
-in unspecific or powerful ways. Treat this with caution." Its combinations are still needs (without lines),
+general warning (key `power:together:many:<its powers>`, so the exact set): "Mods with many powers could act
+in surprising ways. Treat them with caution." Its combinations are still needs (without lines),
 so a later version with fewer powers doesn't ask again for what the user allowed.
 
 **Across mods: the page-wide rules** (extension/sandbox.js `ACT_PARTNERS`, `clickOk`, `signalOk`). Boxed

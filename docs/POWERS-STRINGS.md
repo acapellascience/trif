@@ -2,7 +2,7 @@
 
 **Approved by Tim, 2026-11-10.**
 
-Every user-facing string the powers add, exact, **all awaiting Tim's OK**. The hold sentences are the
+Every user-facing string the powers add, exact (all approved: see above). The hold sentences are the
 sketch's (docs/POWERS.md); a hold stores each as a fact after "it" (as the classifier's facts are), so the
 panel shows "It <fact>." and `trif status` "it <fact>".
 
@@ -127,8 +127,8 @@ and `trif check` as **together, it {warning}**. Which combinations carry which: 
 7. **could pass what it reads to the site a video or sound comes from, by how it plays it** (a read + media)
 8. **could turn what it reads into sounds that a device nearby could pick up** (a read + sound)
 
-More than three powers, in place of the lines (Tim's words): **Mods with many powers can act in unspecific
-or powerful ways. Treat this with caution.**
+More than three powers, in place of the lines (Tim's words, 11-13): **Mods with many powers could act in
+surprising ways. Treat them with caution.**
 
 The reasons for "no added risk" are in the table and docs/POWER-COMBINATIONS.md (developer-facing, not shown
 in the panel).

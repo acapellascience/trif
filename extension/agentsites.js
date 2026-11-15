@@ -29,6 +29,18 @@ export const SENSITIVE_DEFAULT = [
   ['bitwarden.com', 'a password manager'], ['lastpass.com', 'a password manager'], ['dashlane.com', 'a password manager'],
   ['discord.com', 'your messages'], ['web.whatsapp.com', 'your messages'],
   ['chatgpt.com', 'your chats with another AI'], ['openai.com', 'your chats with another AI'], ['claude.ai', 'your chats with another AI'],
+  ['docs.google.com', 'your files'], ['drive.google.com', 'your files'], ['dropbox.com', 'your files'], ['box.com', 'your files'],
+  ['onedrive.live.com', 'your files'], ['sharepoint.com', 'your files'],
+  ['coinbase.com', 'a crypto exchange'], ['binance.com', 'a crypto exchange'], ['binance.us', 'a crypto exchange'], ['kraken.com', 'a crypto exchange'],
+  ['gemini.com', 'a crypto exchange'], ['crypto.com', 'a crypto exchange'], ['bitstamp.net', 'a crypto exchange'], ['bitfinex.com', 'a crypto exchange'],
+  ['kucoin.com', 'a crypto exchange'], ['okx.com', 'a crypto exchange'], ['bybit.com', 'a crypto exchange'], ['blockchain.com', 'a crypto exchange'],
+  ['shakepay.com', 'a crypto exchange'], ['robinhood.com', 'a crypto exchange'], ['wealthsimple.com', 'banking'],
+  // (government accounts: tax notices and assessments, benefits, the sign-in services in front of them)
+  ['cra-arc.gc.ca', 'a government account'], ['clegc-gckey.gc.ca', 'a government account'], ['services.gc.ca', 'a government account'],
+  ['revenuquebec.ca', 'a government account'], ['irs.gov', 'a government account'], ['ssa.gov', 'a government account'],
+  ['login.gov', 'a government account'], ['id.me', 'a government account'], ['account.gov.uk', 'a government account'],
+  ['tax.service.gov.uk', 'a government account'], ['access.service.gov.uk', 'a government account'], ['my.gov.au', 'a government account'],
+  ['ato.gov.au', 'a government account'], ['ird.govt.nz', 'a government account'], ['realme.govt.nz', 'a government account'],
 ];
 
 /** A host as the setting names it: lower case, without a leading www. */

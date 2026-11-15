@@ -277,7 +277,8 @@ function workspaceLinks(ws, realMods, deniedTarget) {
 // helper reads: the terms' table that `trif explain` reads, extension/explain.json, and the page-wide rules
 // sitecombos.js loads at start, extension/pagewide.js) and the examples (`trif install-example`): not the
 // whole package folder, which in a git checkout holds .git, keys and build output. tests/runcode.test.js
-// fails when the helper reads another extension file that isn't here.
+// fails when the helper reads another extension file that isn't here; tests/run-sandbox.test.js when a
+// real `trif` command in a real run's sandbox can't read a file it needs.
 const CODE_ITEMS = ['helper', 'package.json', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'examples'];
 function trifCode(root = path.join(__dirname, '..', '..')) {
   return CODE_ITEMS.map((n) => path.join(root, n)).filter((p) => fs.existsSync(p)).map(realOrResolved);
@@ -1112,7 +1113,9 @@ class Runs {
       done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, ...(Number.isFinite(d.contextTokens) ? { contextTokens: d.contextTokens } : {}), sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
-        const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
+        // (without the agent's own notices that say nothing about why it stopped: adapter.stderrNoise)
+        const noise = run.adapter.stderrNoise;
+        const tail = run.stderr.trim().split('\n').filter((l) => !(noise && noise.test(l))).slice(-12).join('\n').trim().slice(-2000);
         // (A message, or a whole error event: util.js loginError.)
         const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;

@@ -50,8 +50,8 @@ test('every face\'s files exist, are render-icon.js\'s, and the normal one is th
   }
   // the panel names the gate's files that exist
   const panel = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
-  assert.match(panel, /icons\/robot-shaded-\$\{state === 'blocked' \? 'blocked' : state === 'disconnected' \? 'disconnected' : `off\$\{red \? '-red' : loggedOut \? '-yellow' : ''\}`\}\.svg/);
-  for (const n of ['robot-shaded-blocked.svg', 'robot-shaded-disconnected.svg', 'robot-shaded-off.svg', 'robot-shaded-off-red.svg', 'robot-shaded-off-yellow.svg']) assert.ok(R.GATE_SHADED[n], n);
+  assert.match(panel, /icons\/robot-shaded-\$\{state === 'blocked' \? 'blocked' : state === 'disconnected' \? 'disconnected' : `off\$\{red \? '-coral' : loggedOut \? '-yellow' : ''\}`\}\.svg/);
+  for (const n of ['robot-shaded-blocked.svg', 'robot-shaded-disconnected.svg', 'robot-shaded-off.svg', 'robot-shaded-off-coral.svg', 'robot-shaded-off-yellow.svg']) assert.ok(R.GATE_SHADED[n], n);
 });
 
 test('one colour per face: the frame and the features alike (STYLE.md)', () => {
@@ -75,7 +75,12 @@ test('one colour per face: the frame and the features alike (STYLE.md)', () => {
   assert.match(css, /\.bar-robot\[data-face="paused"\] \.face \{ fill: light-dark\(#f4f4f5, #18181a\); \}/);
   assert.match(css, /\.bar-robot \.cross \{ display: none; stroke: var\(--switch-on\);/);
   assert.match(css, /body:is\(\.blocked, \.needs-login\) \.bar-robot :is\(\.eye, \.pause\) \{ fill: var\(--switch-on\); \}/);
-  assert.match(css, /\[data-face="login"\] \.eye \{ fill: none; stroke: var\(--switch-on\);/);
+  // logged out and the helper away: X eyes in the frame's colour; user scripts off: the cross (Tim, 11-13)
+  assert.match(css, /\.bar-robot \.xeyes \{ display: none; stroke: var\(--switch-on\);/);
+  assert.match(css, /\.bar-robot:is\(\[data-face="login"\], \[data-face="helper"\], \[data-face="scripts"\]\) \.eye \{ display: none; \}/);
+  assert.match(css, /\.bar-robot:is\(\[data-face="login"\], \[data-face="helper"\]\) \.xeyes \{ display: inline; \}/);
+  assert.match(css, /\.bar-robot\[data-face="scripts"\] \.cross \{ display: inline; \}/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.html'), 'utf8'), /<g class="xeyes">(<line [^>]+\/>){4}<\/g>/);
   assert.doesNotMatch(css, /#ffc2bc|#fbe3a6/, 'no tinted features left');
 });
 

@@ -4,10 +4,11 @@
 // extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, the same robot with a pause sign for
 // eyes, all white (frame and bars) into robot-paused-white-<size>.png (the toolbar icon of a tab TRIF has
 // paused posting in, background.js and tablock.js), the robot's other faces (FACES: off, a blank face;
-// blocked, red with a red cross; logged out, yellow with hollow eyes) into robot-<face>-<size>.png, and
+// blocked, red with a red cross; logged out, yellow with hollow eyes: the panel's own has X eyes) into robot-<face>-<size>.png, and
 // writes the same shapes to
-// store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg (and in red,
-// robot-shaded-red.svg, for when TRIF can't run mods), and the gate's shaded robots (robot-shaded-off*.svg,
+// store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg (and in coral for
+// when TRIF is missing a part: robot-shaded-scripts.svg, a cross, robot-shaded-helper.svg, X eyes; and
+// robot-shaded-red.svg, coral with eyes, for the site's frozen demo panel), and the gate's shaded robots (robot-shaded-off*.svg,
 // robot-shaded-blocked.svg). No dependencies: shapes are superellipses, PNGs are written by hand.
 // The robot is always one colour: its frame and its features share the state's colour (docs/STYLE.md;
 // the usual robot's rim and mint eyes are both TRIF green).
@@ -44,8 +45,8 @@ const CROSS16 = ['#....#', '##..##', '.####.', '.####.', '##..##', '#....#'];
 const RING = { 32: 7, 48: 5.25, 128: 6 };
 const RING16 = { cols: [4, 9], rows: 6, cells: ['###', '#.#', '#.#', '###'] };
 // The faces in the toolbar: one colour each, frame and features alike. Red and yellow are the side panel's
-// (--bad and --warn on dark).
-const RED = [0xff, 0x7b, 0x70], YELLOW = [0xe8, 0xb0, 0x4a], GREY = [0xa1, 0xa1, 0xa8];
+// (--blocked and --led-yellow on dark: Tim, 11-13).
+const RED = [0xff, 0x4f, 0x4f], YELLOW = [0xe8, 0xc5, 0x47], GREY = [0xa1, 0xa1, 0xa8];
 // Disconnected: a broken link (two chain-link halves pulled apart, Material's link_off without its slash,
 // which would read as blocked). At 16 px a pattern on whole pixels (LINK16, 10 x 5 from column 3, row 6);
 // bigger, the same halves as smooth strokes (LINK: each half a C round a centre, its top and bottom running
@@ -63,12 +64,13 @@ const FACES = {
 // 128 px icon keeps it for the Web Store and chrome://extensions.
 const FULL_BLEED_MAX = 48;
 // The shaded robot's colours: the rim's gradient (top left to bottom right), the eyes' (centre to edge),
-// and the eyes' glow (r g b, 0 to 1). Green as usual; red when the helper isn't connected or user scripts
-// are off (the side panel's --bad).
+// and the eyes' glow (r g b, 0 to 1). Green as usual; coral (the side panel's --led-coral) when the helper
+// isn't connected or user scripts are off; red (--blocked) on a blocked site; yellow (--led-yellow) logged out.
 const SHADED = {
   green: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6] },
-  red: { rim: ['#ff8a80', '#c4372d'], eye: ['#ffd0cb', '#e5484d'], glow: [1, 0.45, 0.42] },
-  yellow: { rim: ['#f6cf6e', '#b7791f'], eye: ['#fde9b8', '#e8b04a'], glow: [0.91, 0.69, 0.29] },
+  coral: { rim: ['#f7a58c', '#c2512d'], eye: ['#fdd5c8', '#f0866a'], glow: [0.94, 0.53, 0.42] },
+  red: { rim: ['#ff7a70', '#c81e1e'], eye: ['#ffc9c4', '#ff4f4f'], glow: [1, 0.31, 0.31] },
+  yellow: { rim: ['#f3dc7e', '#9a7300'], eye: ['#fbefc0', '#e8c547'], glow: [0.91, 0.77, 0.28] },
   grey: { rim: ['#c8c8ce', '#7c7c82'], eye: ['#e4e4e8', '#a1a1a8'], glow: [0.63, 0.63, 0.66] },
 };
 
@@ -191,9 +193,11 @@ function shadedSvg({ rim, eye, glow } = SHADED.green, face = 'eyes') {
     `    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b"/><feColorMatrix in="b" type="matrix" values="${glow.map((c) => `0 0 0 0 ${c}`).join('  ')}  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`,
     '  </defs>',
     `  <polygon points="${shape(cx, cy, mid, mid, n)}" fill="#18181a" stroke="url(#r)" stroke-width="${outer - inner}" stroke-linejoin="round"/>`,
-    // (the face: eyes as usual; none (off); or a cross (blocked), in the rim's own gradient: one colour)
+    // (the face: eyes as usual; none (off); a cross (blocked, user scripts off); X eyes (the helper away); or a
+    // broken link (disconnected), in the rim's own gradient: one colour)
     face === 'eyes' ? `  <g filter="url(#h)">${EYES.xs.map((ex) => `<polygon points="${shape(ex, EYES.cy, EYES.a, EYES.b, EYES.n)}" fill="url(#e)"/>`).join('')}</g>`
       : face === 'cross' ? `  <g filter="url(#h)" stroke="url(#r)" stroke-width="${CROSS.w * 2}" stroke-linecap="round"><line x1="${CROSS.from}" y1="${CROSS.from}" x2="${CROSS.to}" y2="${CROSS.to}"/><line x1="${CROSS.to}" y1="${CROSS.from}" x2="${CROSS.from}" y2="${CROSS.to}"/></g>`
+      : face === 'xeyes' ? `  <g filter="url(#h)" stroke="url(#r)" stroke-width="${CROSS.w * 1.5}" stroke-linecap="round">${EYES.xs.map((ex) => `<line x1="${ex - 8}" y1="${EYES.cy - 8}" x2="${ex + 8}" y2="${EYES.cy + 8}"/><line x1="${ex + 8}" y1="${EYES.cy - 8}" x2="${ex - 8}" y2="${EYES.cy + 8}"/>`).join('')}</g>`
       : face === 'link' ? `  <g filter="url(#h)" stroke="url(#r)" stroke-width="${LINK.w * 2}" stroke-linecap="round" fill="none">${[1, -1].map((m) => { const X = (v) => (m > 0 ? v : 128 - v); return `<path d="M${X(LINK.end)} ${LINK.cy - LINK.r} H${X(LINK.cx)} A${LINK.r} ${LINK.r} 0 0 ${m > 0 ? 0 : 1} ${X(LINK.cx)} ${LINK.cy + LINK.r} H${X(LINK.end)}"/><line x1="${X(LINK.stub[0])}" y1="${LINK.cy}" x2="${X(LINK.stub[1])}" y2="${LINK.cy}"/>`; }).join('')}</g>`
       : null,
     '</svg>',
@@ -296,7 +300,7 @@ function renderFace(face, size) { return render(size, undefined, faceSampler(fac
 const GATE_SHADED = {
   'robot-shaded-off.svg': [SHADED.green, 'none'],
   'robot-shaded-off-yellow.svg': [SHADED.yellow, 'none'],
-  'robot-shaded-off-red.svg': [SHADED.red, 'none'],
+  'robot-shaded-off-coral.svg': [SHADED.coral, 'none'],
   'robot-shaded-blocked.svg': [SHADED.red, 'cross'],
   'robot-shaded-disconnected.svg': [SHADED.grey, 'link'],
 };
@@ -325,7 +329,11 @@ if (require.main === module) {
   if (!process.argv[2]) {
     fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE);
     fs.writeFileSync(SHADED_FILE, shadedSvg()); console.log(SHADED_FILE);
-    fs.writeFileSync(SHADED_RED_FILE, shadedSvg(SHADED.red)); console.log(SHADED_RED_FILE);
+    fs.writeFileSync(SHADED_RED_FILE, shadedSvg(SHADED.coral)); console.log(SHADED_RED_FILE);
+    for (const [name, face] of [['robot-shaded-scripts.svg', 'cross'], ['robot-shaded-helper.svg', 'xeyes']]) {
+      const file = path.join(path.dirname(SHADED_FILE), name);
+      fs.writeFileSync(file, shadedSvg(SHADED.coral, face)); console.log(file);
+    }
     for (const [name, [colours, face]] of Object.entries(GATE_SHADED)) {
       const file = path.join(path.dirname(SHADED_FILE), name);
       fs.writeFileSync(file, shadedSvg(colours, face)); console.log(file);

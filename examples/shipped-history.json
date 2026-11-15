@@ -8,12 +8,14 @@
     "6c536dfec92e237be07676a898ec164587e25711",
     "1f86f68e570a782f0578a2688d6f911d4d9fb375",
     "2c1b0091dc097de07eb640a6bd6da8ff63f5a0f8",
-    "1331c8716ade7dda3d893763bb4e7decccdc9808"
+    "1331c8716ade7dda3d893763bb4e7decccdc9808",
+    "a5a61204e418578d63d9198e547ac2d43ede3b2a"
   ],
   "amazon.com/simple-shopping": [
     "abe0bc7f4451b53f2a078d2a2e3c0276ee290aaf",
     "a8dbfd6a318fee21d82647387d10c4e6878a327e",
-    "055ab8926a8d47afcea86757637e1ee25042b996"
+    "055ab8926a8d47afcea86757637e1ee25042b996",
+    "1b9e76ce911706d2b6b73e371e2624ef3cf0b190"
   ],
   "timsrobot.com/checklist": [
     "a7ab64ff35dd90203af61e4270ccc154b4de8132"
@@ -85,7 +87,8 @@
     "812ea17ae3ea659b1ce0254d2be3474a09ace6a4",
     "3b7deb43090edc9cd53aa7b41133f88cec3fb451",
     "631e34fe29ae0d0d3634199e790b334f88353978",
-    "f760adc3c9e211cb1235301f5d0b496739095bbb"
+    "f760adc3c9e211cb1235301f5d0b496739095bbb",
+    "ffb5e911f169e41c22c790978021c3d4a750417d"
   ],
   "timsrobot.com/space-shooter": [
     "0294ddce661b7e50fd1f84b9deed05552e080809"
@@ -120,14 +123,16 @@
   ],
   "www.google.com/dvd-logo": [
     "4d455db6ae5fb5280fa74f75cc4173c0800cd40d",
-    "0553bd09efc1f3ea4285ddd32d178f78ff2e21f1"
+    "0553bd09efc1f3ea4285ddd32d178f78ff2e21f1",
+    "cff3207fb78a9d2341da07c06d48c9f46a6908c3"
   ],
   "www.google.com/hide-ai-in-results": [
     "ca98e4800a4e65b7334a879f55e77e263d76ad52",
     "c43e175d8266433152936758498577cf549f9ec4",
     "88ea43111aa413bab4e3dc6186822d37bb857f5a",
     "ef0141451b1f803724f3d3243ca6a1a587ddce08",
-    "bffcc1ed31b1abcfc16c17c73dcd6200c8de8dc9"
+    "bffcc1ed31b1abcfc16c17c73dcd6200c8de8dc9",
+    "de9dac239ffbdeed7ae33ccdac7f090031752f12"
   ],
   "www.google.com/hide-ai-mode": [
     "eec9b362dce4588e0fe0d0930c012b32f66127fc",
@@ -137,11 +142,15 @@
     "85720e4467151e6b13f61efd9a008090e59da5ad",
     "f77918919903cce37d27f82ebb0fe2c9a46cfe8f",
     "64e8e54f05bbe28d7d0241ec2696ab197b1b863d",
-    "7cc2a17c4ccecffa2c097a7301ce1d58631694c6"
+    "7cc2a17c4ccecffa2c097a7301ce1d58631694c6",
+    "e1d8faeb7d9ff627e5eba8c455975a6ac325c704"
   ],
   "www.google.com/hide-sponsored": [
     "810cf044eb22b832e7c7d610b0c5cd52cbd608a7",
     "fabc539970300a43dcc09b59e37e11a66f211e34"
+  ],
+  "www.google.com/oppish": [
+    "59327ca88f71445e2380a8c32276a28a234e015e"
   ],
   "www.google.com/rainbow-rave": [
     "25be915320c797a08b9c3cd86951039ee63be754",
@@ -196,7 +205,8 @@
   "x.com/follow-status": [
     "ff41bd36d6f1e1aef7b131fffd63490809d7918f",
     "5336270225637d4a9dedc35b42a91494961333bf",
-    "1ae63c9a15ae6fe2da747ba2da852be211ddb56e"
+    "1ae63c9a15ae6fe2da747ba2da852be211ddb56e",
+    "f50626f42bb2639c805147527085a5c4818644ac"
   ],
   "x.com/plain-x": [
     "b1acf27f42fd30d34c2102e1c9657a878b1f26cb",
@@ -217,14 +227,16 @@
     "608a883e3c78b9a826f52f05c2266fa33d96c6a7",
     "4eb98245bd1c37d7179f17540b4f544ac0bc5c5f",
     "8e7ac5f7fe175f0b8984a713142bdaf78ee31501",
-    "7a9b1f14807ea46215c745b0d8c536d02c59357b"
+    "7a9b1f14807ea46215c745b0d8c536d02c59357b",
+    "39e8c2972d41d75faf096703e2c41d80daf1ee55"
   ],
   "x.com/profile-styler": [
     "fd77a07b99aae4c0c89c8ddcf3aaef4ea2d85000",
     "1f76bb623430dade2fded8b82fd656b202f2f703",
     "704c0b39f2c3b1fffc912f81280857ad796e5c54",
     "cbd585ed083b11f9e0ce4d51ac486f5a3dfae20c",
-    "ba47beab2219dba5b147e25657a24ba3be49e245"
+    "ba47beab2219dba5b147e25657a24ba3be49e245",
+    "ef4f76812bb0be277cfe89810c564ed2ad544f34"
   ],
   "x.com/punk-fonts": [
     "6b07d068f0f3632933133a3b8fb8d6657778160b",
@@ -238,7 +250,8 @@
     "87160c99ace91a8cd278d3dadda9e0cba552b8e6",
     "1f9ed2b603c2ca801cd4e47382f35b4926fe3c45",
     "b9a49fe56dff2ee3f55fe5f6b6eb9aa674297767",
-    "8c293ea5735bd464650182602b167bafe07a9303"
+    "8c293ea5735bd464650182602b167bafe07a9303",
+    "74ae1aaca7875c87a8d569d1bdb8aa9d8dfcd54c"
   ],
   "x.com/space-shooter": [
     "5c3b015549b83bed66db4867571de8901b7f7e08",
@@ -247,13 +260,16 @@
     "6dd5850f21eafcc3dcd4e5214ac42cae231c8726",
     "869262f396971e2a25cb46daff2682b0b1e5f8cf",
     "6a6a95d3efe2603f88863fcca2c17692a0febe04",
-    "6d33d08d5afa168fb9f13d9a8211ab3fdfb30a1d"
+    "6d33d08d5afa168fb9f13d9a8211ab3fdfb30a1d",
+    "5207a0ed6395d5f155be5d2b1a2050bd6b089ca9"
   ],
   "x.com/style-encoder": [
     "8018433dae970b77e838dc0abffb71a5437cc7f8",
-    "1f761463e29fdeffe0acb9f8b825b1156a7b60fd"
+    "1f761463e29fdeffe0acb9f8b825b1156a7b60fd",
+    "bad57aa852341d3a6ab07a5a0460a64b7a1c86ca"
   ],
   "x.com/tune-composer": [
-    "5aae8598372228900533598307cbcc139fcbebab"
+    "5aae8598372228900533598307cbcc139fcbebab",
+    "f5bdaf5717693adf44d1373f390d5e502411c1a2"
   ]
 }

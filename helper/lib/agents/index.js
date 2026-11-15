@@ -53,7 +53,7 @@ function detect(adapter, ws, opts = {}) {
   const d = adapter.detect({ dirs: searchDirs(ws), env: agentEnv(ws), version: opts.version !== false });
   return {
     id: adapter.id, name: adapter.name, path: d.path, available: !!d.available, version: d.version || null, note: d.note || adapter.note || '',
-    canLogin: !!adapter.login, loginFix: adapter.loginFix || '',
+    canLogin: !!adapter.login, canLogout: !!adapter.logout, loginFix: adapter.loginFix || '',
     ...(Array.isArray(adapter.efforts) ? { efforts: adapter.efforts } : {}),
     ...(adapter.experimental ? { experimental: true } : {}),
   };
@@ -104,7 +104,7 @@ function loginStatus(adapter, ws, file, { fresh = false } = {}) {
     if (keys.AGENT_KEYS[adapter.id]) {
       try {
         const h = await keys.hasAgentKey(adapter.id, { config: ws.config });
-        if (h.stored) value = { loggedIn: true, detail: h.source === 'keyring' ? 'API key in the keyring' : 'API key in config.json' };
+        if (h.stored) value = { loggedIn: true, key: true, detail: h.source === 'keyring' ? 'API key in the keyring' : 'API key in config.json' };
       } catch { /* the agent's own login, below */ }
     }
     if (!value) {
@@ -132,8 +132,29 @@ async function listAgentsWithLogin(ws, opts = {}) {
     const st = a.available ? await loginStatus(getAdapter(a.id), ws, a.path) : null;
     a.loggedIn = st ? st.loggedIn : null;
     if (st && st.expired) a.loginExpired = true;
+    if (st && st.key) a.loginByKey = true; // (a saved API key: nothing for Log out to do)
   }));
   return r;
+}
+
+/**
+ * Settings' Log out: the agent's own logout command (claude auth logout, codex logout), which logs it out
+ * everywhere on this computer, the terminal included. Resolves {ok: true}; rejects with what it said.
+ */
+async function logout(id, ws) {
+  const adapter = getAdapter(id);
+  if (!adapter || !adapter.logout) throw new Error(`${adapter ? adapter.name : id || 'that agent'} has no log out here`);
+  const d = detect(adapter, ws, { version: false });
+  if (!d.available || !d.path) throw new Error(`${adapter.name} isn't installed`);
+  const cwd = fs.existsSync(ws.home) ? ws.home : undefined;
+  const r = await capture(d.path, adapter.logout.args, { env: agentEnv(ws), cwd, timeout: 20000 });
+  loginFailed.delete(adapter.id);
+  forgetLoginStatus(adapter.id);
+  if (r.error || r.status !== 0) {
+    const said = String(r.stderr || r.stdout || (r.error && r.error.message) || '').trim().split('\n').pop();
+    throw new Error(`${adapter.name} couldn't log out${said ? `: ${said}` : ''}`);
+  }
+  return { ok: true };
 }
 
 // The models an agent offers ({models: [{id, name, description}], default, custom, error, note}),
@@ -221,5 +242,5 @@ const CLAUDE_SETTINGS = {
 
 module.exports = {
   ADAPTERS, getAdapter, defaultDirs, recordedPath, searchDirs, agentEnv, detect, listAgents,
-  listAgentsWithLogin, loginStatus, forgetLoginStatus, noteLoginFailed, noteLoginWorked, LOGIN_CACHE_MS, agentModels, MODELS_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
+  listAgentsWithLogin, loginStatus, logout, forgetLoginStatus, noteLoginFailed, noteLoginWorked, LOGIN_CACHE_MS, agentModels, MODELS_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
 };

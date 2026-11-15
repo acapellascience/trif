@@ -1,7 +1,8 @@
 # TRIF's three mod tiers: what each one guarantees, and how far to trust it
 
-A brief for outside reviewers. Branch `powers` of https://github.com/acapellascience/trif (the 0.3.0 line;
-not yet on main or in a release). Paths below are relative to the repo root. The longer design notes are
+A brief for outside reviewers. It describes TRIF 0.3.0, on `main` of https://github.com/acapellascience/trif
+(the last release, 0.2.7, has none of the three tiers; brought up to date 2026-11-15). Paths below are
+relative to the repo root. The longer design notes are
 docs/SAFE-MODS.md (tiers, guards, powers, combinations), docs/SECURITY.md (the agent, the tab lock, the
 code reading) and docs/POWERS.md.
 
@@ -90,8 +91,9 @@ the acting mod didn't itself ask for (extension/sandbox.js `ACT_PARTNERS`).
 
 **Known gaps and limits, plainly:**
 - Clickjacking (RT-3), as for style mods.
-- Not enforced across mods: `sound` beside a read (a listening device near the user could pick it up;
-  warned for a single mod only).
+- `sound` beside a read (a listening device near the user could pick it up) is warned for a single mod,
+  and refused across mods only when the sound mod and the reading mod share a `mods` channel. Otherwise it
+  isn't enforced across mods: it would stop every sound mod beside any hotkey mod.
 - Residual channels that exist by design and are warned: timing of the page's media requests (`media` +
   a read), which of the page's pictures load (`image-variants`/`preload` + a read).
 - A field inside a *closed* shadow root on a plain element can't be detected from TRIF's world, so keys
@@ -102,16 +104,18 @@ the acting mod didn't itself ask for (extension/sandbox.js `ACT_PARTNERS`).
   element an id, or draw from the page's canvas).
 
 **How it's been tested and reviewed:**
-- Hostile e2e in real headless Chrome and Firefox: tests/e2e/fixtures/sandbox-hostile.js (181 escape
+- Hostile e2e in real headless Chrome and Firefox: tests/e2e/fixtures/sandbox-hostile.js (188 escape
   attempts) and sandbox-wide.js (the 0.3 widening); each must be refused, the test server must see no leak
   address, and the page's own listeners must notice nothing. Run by tests/e2e/scenario.js
   (`sandboxedCheck`, `powersCheck`…). Unit tests: tests/sandbox.test.js, tests/combinations.test.js.
 - Two red-team rounds by an AI model with no context but the branch and docs (findings RT-1 to RT-10, all
-  fixed except RT-3). An audit of sandbox.js (AU-1 to AU-9, all fixed). Both by AI models; no human
-  security review yet.
-- **Not yet reviewed by anyone else:** the 0.3 widening (36 additions to the base box and 9 new powers,
-  2026-11-11), which only its builder's own hostile tests have exercised. That's the most useful place to
-  look.
+  fixed except RT-3). An audit of sandbox.js (AU-1 to AU-9, all fixed). A review of main (0.2.7 plus the
+  0.3 work, November 2026): the walls that didn't hold, now closed, are in docs/SECURITY.md "Review fixes",
+  with one test each in tests/hardening.test.js; it also found gaps in the power combinations (F1 to F12;
+  F1 to F10 and F12 fixed in code, commit 3ad148e). All by AI models; no human security review yet.
+- **The 0.3 widening** (36 additions to the base box and 9 new powers, 2026-11-11) has had that review of
+  its combinations, but no attack of its own beyond its builder's hostile tests. That's the most useful place
+  to look.
 
 **Code:** extension/sandbox.js (the world, stand-ins, guards, page-wide rules), helper/lib/boxpowers.js
 (header parsing), helper/lib/sandboxlint.js (`trif check`), helper/lib/combinations.js, extension/vendor
@@ -138,12 +142,14 @@ The walls are elsewhere (next section) and in the two safe tiers.
 ## Around the tiers: the agent itself
 
 Not a mod tier, but the reason the tiers matter. The side-panel agent works for one site: its shell runs in
-an OS sandbox with no network and no writes outside that site's mods folder. JavaScript it runs live in a
-tab (`trif run`) locks the tab first (extension/tablock.js): browser-enforced declarativeNetRequest rules
+an OS sandbox with no network and no writes outside that site's mods folder. Code it runs in a tab goes, by
+default, into TRIF's box (`trif run`): the boxed mods' sandbox, able to read the page and change what it
+shows, and nothing else, so nothing is locked; while it runs, the page's boxed mods can't do what its reads
+would make risky beside them. JavaScript it runs in the page itself (`trif run --page`) locks the tab first (extension/tablock.js): browser-enforced declarativeNetRequest rules
 block every state-changing request, every WebSocket, and any load or navigation to a site the page hadn't
 already used, on every tab of that site, until a new document; leftovers in cache and service workers are
-checked and cleared. Per-site "Agent on this site: Off / Look / Run code", sensitive sites (email, banks,
-password managers…) off by default. docs/SECURITY.md and docs/TABLOCK-AUDIT.md (TL-1 to TL-7).
+checked and cleared. Per-site "Agent on this site: Off / Look / Run code"; sensitive sites (email, banks and
+crypto exchanges, password managers, chats, files in the cloud, government accounts) off by default. docs/SECURITY.md and docs/TABLOCK-AUDIT.md (TL-1 to TL-7).
 
 Known limit: a terminal agent (outside the side panel) has the user's shell and could approve its own
 mods; only the side panel's sandbox enforces that it can't. Some company-managed agents (enterprise

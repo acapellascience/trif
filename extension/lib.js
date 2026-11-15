@@ -1209,7 +1209,8 @@ export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [
       if (!force) { if (!(sitesOn.includes(host) || own.length)) out.block.push(host); out.done.push(host); }
       continue;
     }
-    const parentMods = mods.filter((m) => folder(m) !== 'all-sites' && scopeFor(folder(m)) === parent && !hostInScope(folder(m), host) && reaches(m));
+    // (the parent's own: not another site apart's under it, mail.google.com's for docs.google.com, which run only there)
+    const parentMods = mods.filter((m) => folder(m) !== 'all-sites' && scopeFor(folder(m)) === parent && !hostInScope(folder(m), host) && !sensitiveHit(folder(m), list) && reaches(m));
     const allSites = mods.filter((m) => folder(m) === 'all-sites' && reaches(m));
     const reached = own.length > 0 || (sitesOn.includes(parent) && (parentMods.some(on) || allSites.some(on)));
     if (reached || force) out.ask.push({ host, parent, why: sensitiveHit(host, list)?.why || '', mods: parentMods.map((m) => m.id), allSites: allSites.filter(on).map((m) => m.id) });

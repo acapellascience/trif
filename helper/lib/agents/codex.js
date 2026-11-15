@@ -247,6 +247,8 @@ const adapter = {
   // No side panel login: `codex login` finishes through a localhost callback server (port 1455) or a
   // device code, not a code pasted back on stdin, and it's untested here. The panel shows loginFix.
   login: null,
+  // Settings' Log out (agents/index.js logout): Codex's stored credentials, the terminal's too.
+  logout: { args: ['logout'] },
 };
 
 // A run that failed for want of a login (util.js isLoginFailure). Not with a saved API key (state.apiKey),

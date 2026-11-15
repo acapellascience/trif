@@ -575,7 +575,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'detox-timeline.js')));
   // A new workspace gets the merged Google mods, never the ones folded into them (preinstalled.js RETIRED).
-  assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js']);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js', 'oppish.js']);
   assert.ok(!loadPreinstalled(home3).offered.some((id) => /hide-ai-mode|hide-sponsored/.test(id)));
   assert.doesNotMatch(res.stdout, /is now part of/);
   // A later setup (an update) keeps them coming, without --examples, and says nothing about choosing.

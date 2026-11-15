@@ -42,10 +42,11 @@ test('every term has its four layers, once', () => {
   for (const g of groups) assert.ok(X.TERMS.some((t) => t.group === g), `group ${g} is empty`);
 });
 
-test('no explanation is over four sentences', () => {
+test('no explanation is over four sentences (the tiers\' are cards of their own: eight)', () => {
   for (const t of X.TERMS) {
     const n = sentences(t.explanation).length;
-    assert.ok(n >= 1 && n <= 4, `${key(t)}: ${n} sentences: ${t.explanation}`);
+    const most = t.group === 'tiers' ? 8 : 4; // (Tim, 11-13: a tier's "i" opens a card, in paragraphs)
+    assert.ok(n >= 1 && n <= most, `${key(t)}: ${n} sentences: ${t.explanation}`);
   }
 });
 
@@ -153,12 +154,13 @@ test('"more": what comes after the line, never a placeholder, for every term the
   P.setExplain(X.TABLE);
 });
 
-test('the panel uses "more" and "less" only, from explain.js', () => {
+test('the panel\'s "i" in place of "more" (More / Less for screen readers), and the tiers\' cards, from explain.js', () => {
   const js = read('extension/sidepanel.js');
   assert.match(js, /from '\.\/explain\.js'/);
   assert.match(js, /await loadExplain\(\)/);
-  assert.match(js, /el\('button', 'more-btn', 'more'\)/);
-  assert.match(js, /'less' : 'more'|'more' : 'less'/);
+  assert.match(js, /el\('button', 'more-btn'\);\n\s*btn\.type = 'button';\n\s*btn\.append\(iconSvg\('info'\)\)/);
+  assert.match(js, /box\.hidden \? 'More' : 'Less'/);
+  assert.match(js, /function openTierCard\(/);
   // (the cards scroll up and down only)
   const css = read('extension/sidepanel.css');
   assert.match(css, /\.approval \{[^}]*overflow-y: auto; overflow-x: hidden;/);

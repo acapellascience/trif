@@ -151,6 +151,7 @@ document.addEventListener('e2e-wide-undeclared', () => __signals.push('undeclare
 <p><a id="yt" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5">a video</a> <a id="shown-q" href="/wideb.html?a=1&b=2">a link with a query</a></p>
 <input id="file" type="file" accept="image/*"> <video id="vid" muted width="10" height="10"></video>
 <div style="height: 4000px"></div><img id="lazy" src="/e2e-wide.png?lazy=1" loading="lazy" width="4" height="4" alt="">
+<img id="pimg-big" src="/e2e-big.png" width="4" height="4" alt="">
 <script>
 window.__api = async () => (await fetch('/e2e-rw/E2eOp?mode=loud&variables=' + encodeURIComponent(JSON.stringify({ flag: true, other: 1 })), { method: 'POST', body: JSON.stringify({ operationName: 'E2eOp', variables: { flag: true } }) })).text();
 window.__xhr = () => new Promise((res) => { const x = new XMLHttpRequest(); x.open('POST', '/e2e-rw/E2eOp'); x.onload = () => res(x.responseText); x.send(JSON.stringify({ variables: { flag: true } })); });
@@ -389,7 +390,10 @@ const GOOGLE_SEARCH_BOX = `
   <button type="button" jsname="B6rgad" data-e2e="hide-ai-mode-button">AI Mode</button>
   <button type="submit" data-e2e="keep-search-button">Google Search</button></form>
 <div jsslot data-e2e="hide-ai-promo-slot"><div><promo-middle-slot>Try Gemini, Google's AI</promo-middle-slot></div></div>`;
-const GOOGLE_HOME = () => PAGE('Google (TRIF e2e stand-in)', `<div id="logo" data-e2e="keep-logo">Google</div>${GOOGLE_SEARCH_BOX}`);
+// (and the logo as an <img class=lnXdpd>, for DVD Logo: a picture from elsewhere, so it bounces a copy)
+const GOOGLE_LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='272' height='92'%3E%3Crect width='272' height='92' rx='20' fill='%234285f4'/%3E%3C/svg%3E";
+const GOOGLE_HOME = () => PAGE('Google (TRIF e2e stand-in)', `<div id="logo" data-e2e="keep-logo">Google</div>
+<img class="lnXdpd" alt="Google" width="272" height="92" src="${GOOGLE_LOGO}" data-e2e="keep-logo-img">${GOOGLE_SEARCH_BOX}`);
 const GOOGLE_RESULTS = () => PAGE('trif - Google Search (TRIF e2e stand-in)', `
 ${GOOGLE_SEARCH_BOX}
 <div role="list">
@@ -438,6 +442,21 @@ self.addEventListener('message', (e) => {
 });
 `;
 
+// X's own logo, as X's image server has it (public, stable), and the parts of X's CSP that apply to a page
+// with mods on it (fetched from x.com, 11-14)
+const X_PIC = 'https://pbs.twimg.com/profile_images/1683899100922511378/5lY42eHs';
+const X_CSP = "default-src 'self'; img-src 'self' https://*.twimg.com data: blob:; style-src 'self' 'unsafe-inline' https://*.twimg.com; " +
+  "script-src 'self' 'nonce-e2e' 'wasm-unsafe-eval'; script-src-attr 'none'; font-src 'self' https://*.twimg.com data:; " +
+  "media-src 'self' https://*.twimg.com blob: data:; connect-src 'self' https://*.twimg.com; worker-src 'self' blob:";
+const X_PICS_PAGE = (size) => `<!doctype html><html><head><meta charset="utf-8"><title>Pics (@e2e_pics) / X</title></head><body>
+<div id="react-root"><main><div data-testid="primaryColumn">
+<a href="/e2e_pics/photo"><img alt="" src="${X_PIC}_${size}.jpg" width="134" height="134"></a>
+<div data-testid="UserName"><span>Pics</span> <span>@e2e_pics</span></div>
+<article data-testid="tweet"><div data-testid="Tweet-User-Avatar"><img alt="" src="${X_PIC}_normal.jpg" width="40" height="40"></div>
+<div data-testid="User-Name"><a href="/e2e_pics"><span>Pics</span></a> <a href="/e2e_pics"><span>@e2e_pics</span></a></div>
+<div data-testid="tweetText"><span>A post with X's real picture</span></div><div role="group"><span>3</span></div></article>
+</div></main></div></body></html>`;
+
 /** Starts both servers. Returns {port, tlsPort, requests, timeline, close()}. */
 async function startServers(dir) {
   const requests = []; // {host, url, method, time}
@@ -451,6 +470,13 @@ async function startServers(dir) {
       if (u.pathname.startsWith('/i/api/graphql/')) return send(200, 'application/json', JSON.stringify(tl.body));
       if (u.pathname === '/home' || u.pathname === '/') return send(200, 'text/html; charset=utf-8', X_PAGE());
       if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+      // A stand-in profile page whose pictures are X's own logo from X's real image server (scenario.js
+      // xPicturesCheck), under X's own rules for pictures, styles and scripts (its CSP, 11-14); ?s=400: the
+      // profile's picture already at 400×400, as X shows some
+      if (u.pathname === '/e2e_pics') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': X_CSP });
+        return res.end(X_PICS_PAGE(u.searchParams.get('s') === '400' ? '400x400' : '200x200'));
+      }
       // (another host's picture, with no CORS headers: sandboxFixesCheck's image variant)
       if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
       return send(404, 'text/plain', 'not found');
@@ -485,6 +511,8 @@ document.getElementById('cc').addEventListener('click', () => d.setAttribute('da
 document.addEventListener('combo-ping', (e) => d.setAttribute('data-pings', JSON.stringify([...JSON.parse(d.getAttribute('data-pings')), e.detail])));
 </script>`));
     if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
+    // (a picture already the size powers-b.js's header asks for: B10's same-address variant)
+    if (u.pathname === '/e2e-big.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
     if (u.pathname === '/fixes.html') return send(200, 'text/html; charset=utf-8', FIXES_PAGE(tls.address().port));
     // (site-data: an address and the same address with a parameter out; JSON spaced as no serializer writes it)
     if (u.pathname === '/e2e-fix-urls') return send(200, 'application/json', JSON.stringify({ long: 'https://127.0.0.1/watch?v=1&si=e2e', short: 'https://127.0.0.1/watch?v=1' }));

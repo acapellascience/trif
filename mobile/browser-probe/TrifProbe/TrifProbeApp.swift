@@ -379,6 +379,9 @@ struct ContentView: View {
         .padding(.vertical, 6)
     }
 
+    /// Back and forward's accessibility label while the chat is open (as the chat's own ‹ {site}).
+    private var backToTab: String { "Back to \(browser.site.isEmpty ? "Tab" : browser.site)" }
+
     /// A toolbar button while the chat is open: back to the tab first, then its job there.
     private func onTab(_ job: () -> Void) {
         pane.close()
@@ -387,9 +390,15 @@ struct ContentView: View {
 
     private var toolbar: some View {
         HStack {
-            Button { onTab { browser.back() } } label: { Image(systemName: "chevron.left") }.disabled(!browser.canGoBack).accessibilityLabel("Back")
+            // (with the chat open, back and forward only close it, back to the page as it was: Tim, 11-15, "that's
+            // the behaviour people will expect")
+            Button { if pane.shown { pane.close() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
+                .disabled(!pane.shown && !browser.canGoBack)
+                .accessibilityLabel(pane.shown ? backToTab : "Back")
             Spacer()
-            Button { onTab { browser.forward() } } label: { Image(systemName: "chevron.right") }.disabled(!browser.canGoForward).accessibilityLabel("Forward")
+            Button { if pane.shown { pane.close() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
+                .disabled(!pane.shown && !browser.canGoForward)
+                .accessibilityLabel(pane.shown ? backToTab : "Forward")
             Spacer()
             // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
             Button { if pane.shown { pane.close() } else { pane.open() } } label: {

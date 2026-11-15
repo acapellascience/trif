@@ -37,7 +37,7 @@ test('the chat script: fill, the send, the reply watched until done, its mods ha
     await page.addScriptTag({ content: CHAT });
 
     // A new chat: no instructions in it, nothing in the box. The instructions go in as an attached file.
-    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, has: false, context: false, working: false });
+    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, has: false, context: false, working: false, replying: false });
     const said = await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null),
       "I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…");
     assert.match(said, /text attached/);

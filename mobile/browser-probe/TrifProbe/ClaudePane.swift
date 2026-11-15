@@ -186,8 +186,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// Loads an address in the chat, marked as loading at once (a fill waits for it: waitForPage).
     private func go(_ url: URL) {
         loading = true
+        requested = url
         webView.load(URLRequest(url: url))
     }
+    /// The address last asked for: the conversation the chat is about to show, before it has loaded.
+    private var requested: URL?
 
     /// Loads the chat the first time it's opened (not before: the browser is useful without it).
     func start() {
@@ -223,10 +226,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         start()
         shown = true
         report.log("claude", "\(service.rawValue): opened\(was == .idle ? "" : " (\(was.rawValue))")")
+        // (the tab's data starts being gathered now, while the chat's page gets ready: 11-15)
+        let ready = was == .idle && !already ? prepare() : nil
         queue { [weak self] in
             guard let self else { return }
             if was == .replied { _ = await self.chatJS("showReply()") }
-            else if was == .idle, !already { await self.fillContext() }
+            else if let ready { await self.fillContext(ready) }
             if let extra { await self.waitForPage(); await extra() }
         }
     }
@@ -250,7 +255,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         activity = .idle
         guard let url = URL(string: service.home) else { return }
         go(url)
-        queue { [weak self] in await self?.fillContext() }
+        guard let ready = prepare() else { return }
+        queue { [weak self] in await self?.fillContext(ready) }
     }
 
     /// The things put into the message box, one after another (a fill waits for the one before).
@@ -272,12 +278,49 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         try? await webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.\(call) : null;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) as? String
     }
 
+    /// The conversation an address is (kept without query or fragment), or nil for a new chat.
+    private static func conversation(of url: URL?) -> String? {
+        guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return nil }
+        var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        c?.query = nil
+        c?.fragment = nil
+        return c?.url?.absoluteString
+    }
+
+    /// The tab's data being gathered for the message box, started when the chat button is pressed.
+    struct Prepared {
+        let followUp: Bool
+        let conv: String?
+        let text: Task<String?, Never>
+        let shot: Task<Data?, Never>
+        let watch: Stopwatch
+    }
+    /// The conversation it'll be for is the one the chat is showing or loading: a follow-up if TRIF's instructions
+    /// are already in it, else the instructions. The text and the screenshot are gathered side by side.
+    private func prepare() -> Prepared? {
+        guard let browser else { return nil }
+        let conv = ClaudePane.conversation(of: loading ? requested : webView.url)
+        let followUp = conv.map(hasContext) ?? false
+        let sw = Stopwatch("\(followUp ? "the follow-up" : "the instructions") for \(browser.host.isEmpty ? "a new tab" : browser.host)")
+        let shot = Task { @MainActor in await browser.quickScreenshot() }
+        let text = Task { @MainActor in followUp ? await browser.feedbackForChat(conv: conv, sw) : await browser.pageForChat(conv: conv, sw) }
+        return Prepared(followUp: followUp, conv: conv, text: text, shot: shot, watch: sw)
+    }
+
+    /// "Adding the page…" over the chat while the tab's data goes into its box.
+    @Published private(set) var adding = false
+
     /// The tab's data into the message box (Tim, 11-15: "full instructions if it's a new chat, the feedback data
     /// if it's not"): in a conversation without TRIF's instructions, how mods are written and the page
-    /// (Browser.pageForChat, as TRIF instruction.txt, with a screenshot); in one that has them, the page as it is
-    /// now, the mods on it and their errors (Browser.feedbackForChat, as TRIF follow-up.txt). Nothing when the
-    /// message box isn't there (signed out) or already has something in it. The person sends it themselves.
-    private func fillContext() async {
+    /// (Browser.pageForChat, as TRIF instruction.txt); in one that has them, the page as it is now, what changed,
+    /// the mods on it (the code only of those the chat hasn't seen) and their errors (Browser.feedbackForChat, as
+    /// TRIF follow-up.txt). The text goes in first, the screenshot when it's ready (11-15: it all took 10 to 15 s on
+    /// Instagram). Nothing when the message box isn't there (signed out) or already has something in it. The
+    /// person sends it themselves.
+    private func fillContext(_ ready: Prepared) async {
+        let sw = ready.watch
+        adding = true
+        defer { adding = false }
         await waitForPage()
         // (the message box a moment after the page has loaded: chat.js fill waits for it too)
         var st: [String: Any] = [:]
@@ -286,18 +329,28 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if st["editor"] as? Bool == true { break }
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
+        sw.lap("the chat ready")
         guard st["editor"] as? Bool == true else { report.log("claude", "\(service.rawValue): no message box (signed out?), nothing filled"); return }
         if st["has"] as? Bool == true { report.log("claude", "\(service.rawValue): the message box already has something in it: left as it is"); return }
         if st["working"] as? Bool == true { return }
         guard let browser, shown || activity == .idle else { return }
         let conv = conversation
         if st["context"] as? Bool == true, let conv { noteContext(conv) }
-        if let conv, hasContext(conv) {
-            if let f = await browser.feedbackForChat() { await fill(f.text, png: f.png, as: "TRIF follow-up.txt") }
-        } else if let t = await browser.pageForChat() {
-            let shot = await browser.settledScreenshot().png
-            await fill(t, png: shot, as: "TRIF instruction.txt")
+        // (the conversation turned out to have the instructions after all, seen on its page: the follow-up instead)
+        let followUp = conv.map(hasContext) ?? false
+        var text = await ready.text.value
+        if followUp && !ready.followUp { text = await browser.feedbackForChat(conv: conv, sw) }
+        if let text {
+            await fill(text, as: followUp ? "TRIF follow-up.txt" : "TRIF instruction.txt")
+            sw.lap("text into the message box")
         }
+        if let shot = await ready.shot.value {
+            await fill("", png: shot, picture: "TRIF screenshot.jpg")
+            sw.lap("screenshot into the message box", "\(shot.count / 1000) kB JPEG")
+        }
+        await browser.noteBaseline()
+        sw.lap("the page's layout, for next time")
+        sw.done()
     }
 
     /// From Web/chat.js: an Add to TRIF tap; the person's send; a reply done, with the mod files in it.
@@ -332,6 +385,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             guard let browser else { activity = .idle; endBackground(); return }
             Task { @MainActor in
                 let offered = await browser.offerFromChat(texts)
+                if let conv = self.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
                 // (the app in the background: a notification says so, then iOS's background time is given back)
                 if UIApplication.shared.applicationState == .background { self.notifyDone(offered) } // (not inactive: an alert of the system's over the app)
                 self.endBackground()
@@ -496,7 +550,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         site = tabSite
         guard let url = resumeURL else { return }
         go(url)
-        if shown { queue { [weak self] in await self?.fillContext() } }
+        if shown, let ready = prepare() { queue { [weak self] in await self?.fillContext(ready) } }
     }
 
     /// Where the pane went, without what the address carries after ? (sign-in steps put secrets there).
@@ -598,6 +652,19 @@ struct ChatScreen: View {
             .padding(.vertical, 8)
             Divider()
             WebViewHost(webView: pane.webView)
+                .overlay(alignment: .top) {
+                    if pane.adding {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Adding the page…").font(.footnote)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(.regularMaterial))
+                        .padding(.top, 8)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                    }
+                }
         }
         .background(Color(.systemBackground))
         .sheet(isPresented: Binding(get: { pane.popup != nil }, set: { if !$0 { pane.popup = nil } })) {

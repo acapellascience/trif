@@ -149,28 +149,34 @@
   /**
    * The page as a short outline: what's on it and what each part could be called. Lines of
    * "<indent><name> <w>x<h> “first words”", repeated siblings folded to one line with a count, stopping at
-   * maxChars. Meant to fit a paste to Claude, or an on-device model's few thousand tokens.
+   * maxChars. Meant to fit a paste to Claude, or an on-device model's few thousand tokens. And stopping after
+   * `budgetMs` (a big page, Instagram's, took seconds to walk on an iPhone SE: 11-15): `partial` then says so.
    */
-  function outline(maxChars = 6000) {
+  function outline(maxChars = 6000, budgetMs = Infinity) {
     const lines = [`${D.title || '(no title)'} | ${location.hostname}${location.pathname}`];
     let used = lines[0].length;
+    const t0 = performance.now();
+    let late = false;
+    const over = () => late || (late = performance.now() - t0 > budgetMs);
     const vw = innerWidth, vh = innerHeight;
     const LANDMARK = /^(header|nav|main|aside|footer|section|article|form|dialog|h[1-6]|video|iframe|table|ul|ol)$/;
     const nameOf = (el) => { const n = namesOf(el)[0]; return n[1] === 'tag' && el.localName === 'div' ? null : n[0]; };
     const big = (r) => r.width * r.height > vw * vh * 0.04;
     const walk = (el, depth) => {
-      if (used >= maxChars || depth > 9) return;
+      if (used >= maxChars || depth > 9 || over()) return;
       const kids = [...el.children].filter((c) => !/^(script|style|link|meta|noscript|template|svg|path|br)$/.test(c.localName));
       const seen = new Map();
       for (const c of kids) {
-        if (used >= maxChars) return;
+        if (used >= maxChars || over()) return;
         const r = c.getBoundingClientRect();
         if (r.width < 8 || r.height < 8) { continue; }
         const cs = getComputedStyle(c);
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
         const pinned = cs.position === 'fixed' || cs.position === 'sticky';
-        const name = nameOf(c);
-        const worth = pinned || LANDMARK.test(c.localName) || c.hasAttribute('role') || (name && big(r)) || c.localName.includes('-');
+        // (a name is worked out only for an element that could earn a line: naming is the costly part)
+        const landmark = pinned || LANDMARK.test(c.localName) || c.hasAttribute('role') || c.localName.includes('-');
+        const name = landmark || big(r) ? nameOf(c) : null;
+        const worth = landmark || (name && big(r));
         if (!worth) { walk(c, depth); continue; }
         const key = name || c.localName;
         if (seen.has(key)) { seen.get(key).n++; continue; }
@@ -185,7 +191,7 @@
     };
     if (D.body) walk(D.body, 0);
     const text = lines.join('\n').slice(0, maxChars);
-    return { text, chars: text.length, lines: lines.length, tokens: Math.ceil(text.length / 3.6), cut: used >= maxChars };
+    return { text, chars: text.length, lines: lines.length, tokens: Math.ceil(text.length / 3.6), cut: used >= maxChars, partial: late, ms: Math.round(performance.now() - t0) };
   }
 
   // ---- pointing ------------------------------------------------------------------------------------
@@ -249,12 +255,13 @@
    * The page's parts and their sizes, for telling a chat what its mod did (proof of concept): the outline's
    * kind of elements, plus every field and search box, each by a selector that finds it again. At most `max`.
    */
-  function layout(max = 300) {
+  function layout(max = 300, budgetMs = Infinity) {
     const out = [];
     const seen = new Set();
+    const t0 = performance.now();
     const LANDMARK = /^(header|nav|main|aside|footer|section|article|form|dialog|h[1-6]|video|iframe|table|ul|ol|input|textarea|select|button)$/;
     for (const el of D.querySelectorAll('body *')) {
-      if (out.length >= max) break;
+      if (out.length >= max || performance.now() - t0 > budgetMs) break;
       if (/^(script|style|link|meta|noscript|template|svg|path|br)$/.test(el.localName)) continue;
       const worth = LANDMARK.test(el.localName) || el.hasAttribute('role') || el.id || el.hasAttribute('data-testid') || el.hasAttribute('aria-label');
       if (!worth) continue;
@@ -272,9 +279,11 @@
   }
 
   /** What became of `before` (layout()): the parts now gone, hidden or shrunk to almost nothing. */
-  function compare(before) {
+  function compare(before, budgetMs = Infinity) {
     const changed = [];
+    const t0 = performance.now();
     for (const b of before || []) {
+      if (performance.now() - t0 > budgetMs) break;
       let el = null;
       try { el = D.querySelector(b.sel); } catch (e) { continue; }
       let what = null, now = '';

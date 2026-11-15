@@ -58,7 +58,7 @@
     if (png) {
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
-      dt.items.add(new File([bytes], picture || 'TRIF screenshot.png', { type: 'image/png' }));
+      dt.items.add(new File([bytes], picture || 'TRIF screenshot.png', { type: /\.jpe?g$/i.test(picture || '') ? 'image/jpeg' : 'image/png' }));
       said.push(paste(ed, dt) ? 'picture pasted' : 'picture not taken');
       await wait(300);
     }

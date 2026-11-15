@@ -668,17 +668,21 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     // MARK: the outline, and asking the phone's own model
 
-    func outline(_ maxChars: Int = 6000) async -> (text: String, chars: Int, tokens: Int)? {
-        let result = await call("return JSON.stringify(globalThis.__trifKit.outline(max));", ["max": maxChars], in: Browser.trifWorld)
-        guard let o = Browser.parse(result.text) as? [String: Any], let text = o["text"] as? String else {
+    /// `budgetMs`: the walk stops after that long (a big page's whole walk took seconds on an iPhone SE), and the
+    /// outline then says it's partial (agent-facing words).
+    func outline(_ maxChars: Int = 6000, budgetMs: Int = 300) async -> (text: String, chars: Int, tokens: Int)? {
+        let result = await call("return JSON.stringify(globalThis.__trifKit.outline(max, budget));", ["max": maxChars, "budget": budgetMs], in: Browser.trifWorld)
+        guard let o = Browser.parse(result.text) as? [String: Any], var text = o["text"] as? String else {
             status = "No outline: \(result.error ?? "the page has no kit")"
             return nil
         }
+        if o["partial"] as? Bool == true { text += "\n(Partial: the page is big, so TRIF stopped outlining it after \(budgetMs) ms. The screenshot shows what's on the screen.)" }
         return (text, o["chars"] as? Int ?? text.count, o["tokens"] as? Int ?? 0)
     }
 
     func copyOutline() async {
         guard let request = await pageForChat() else { return }
+        await noteBaseline()
         UIPasteboard.general.string = request
         status = "Copied: the page and how to write a mod for it. Paste it into the chat and say what you want changed; then copy the reply and Add a mod from the clipboard."
     }
@@ -689,13 +693,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     private var baseline: (host: String, layout: String)?
 
     /// What the chat gets for this page: how TRIF mods are written, then its outline. Notes its layout.
-    func pageForChat() async -> String? {
+    func pageForChat(conv: String? = nil, _ sw: Stopwatch? = nil) async -> String? {
         guard let o = await outline() else { return nil }
-        if let l = (await call("return JSON.stringify(globalThis.__trifKit.layout());", in: Browser.trifWorld)).text { baseline = (host, l) }
+        sw?.lap("outline", "\(o.chars) chars")
         // (agent-facing words: what TRIF mods are and how to hand one over, then the page)
         let page = webView.url
         let origin = page.map { "\($0.scheme ?? "https")://\($0.host ?? "")" } ?? "https://\(host)"
-        let here = await alreadyHere()
+        let here = await alreadyHere(conv: conv)
+        sw?.lap("mods and their errors")
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
@@ -718,7 +723,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// `except`: a mod left out (the one a follow-up is about, whose code the chat wrote).
     /// (Tim, 11-14: a theme mod's `background: … !important` hid Wikipedia's thumbnails; the chat, without the
     /// theme's code, patched over it with a free mod instead of fixing the theme.)
-    func alreadyHere(except: String? = nil) async -> String {
+    /// `conv`: the conversation it's for. A mod whose code that conversation already has (sent before, or written
+    /// in it) is named, not given again (11-15: only what changed since the last send).
+    func alreadyHere(except: String? = nil, conv: String? = nil) async -> String {
         let here = webView.url?.absoluteString ?? ""
         let on = mods.running(on: here)
         let others = on.filter { $0.id != except }
@@ -728,7 +735,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         var t = "\n--- \(except == nil ? "Already changing this page (build on these)" : "Also changing this page") ---\n"
         if !others.isEmpty {
             t += "Mods switched on here. To change one, give back its whole file with the same @name (it replaces that mod); a new @name adds a mod beside them. If one of them is what's in the way, fix that one rather than adding a mod that works around it.\n"
-            for m in others { t += "\n### \(m.name) (\(m.tierName.lowercased()))\n```js\n\(m.code)\n```\n" }
+            for m in others {
+                if let conv, chatHas(m, conv) { t += "\n### \(m.name) (\(m.tierName.lowercased())): unchanged since you last saw its code in this chat\n"; continue }
+                t += "\n### \(m.name) (\(m.tierName.lowercased()))\n```js\n\(m.code)\n```\n"
+                if let conv { noteChatHas(m.code, conv) }
+            }
         }
         if !errors.isEmpty {
             t += "\nErrors from mods on this page since it loaded (some only happen once I type or click):\n\(errors.prefix(15).map { "- \($0)" }.joined(separator: "\n"))\n"
@@ -738,6 +749,22 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         return t
     }
+
+    /// The page's parts and sizes now, to say next time what disappeared since (once the chat has its text: it
+    /// isn't needed for this one).
+    func noteBaseline() async {
+        if let l = (await call("return JSON.stringify(globalThis.__trifKit.layout(300, 250));", in: Browser.trifWorld)).text { baseline = (host, l) }
+    }
+
+    /// The mods' code each conversation has (by a hash of the code): sent to it, or written in it.
+    private var codeInChat: [String: Set<Int>] = [:]
+    nonisolated static func codeHash(_ code: String) -> Int {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in code.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return Int(truncatingIfNeeded: h)
+    }
+    func chatHas(_ m: InstalledMod, _ conv: String) -> Bool { codeInChat[conv]?.contains(Browser.codeHash(m.code)) == true }
+    func noteChatHas(_ code: String, _ conv: String) { codeInChat[conv, default: []].insert(Browser.codeHash(code)) }
 
     /// Errors these mods have had on the page since it loaded: a boxed mod's (the sandbox's list, refusals
     /// included), a free mod's (what it threw). Each starts with the mod's name.
@@ -765,20 +792,23 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// data if it's not [a new chat]"): the page as it is now (a screenshot and its outline), what disappeared
     /// or shrank since it was last sent, the mods running here with their code and errors, and the things hidden.
     /// (Agent-facing words.)
-    func feedbackForChat() async -> (text: String, png: Data?)? {
-        // (once a page that's loading has finished: just after a mod is added, it's reloading)
-        for _ in 0..<40 where loading { try? await Task.sleep(nanoseconds: 250_000_000) }
+    func feedbackForChat(conv: String? = nil, _ sw: Stopwatch? = nil) async -> String? {
+        // (a page still loading, just after a mod was added say: a second at most, then what's there; this used to
+        // wait up to 10 s, and a page that never stops loading, Instagram's, always took them)
+        for _ in 0..<5 where loading { try? await Task.sleep(nanoseconds: 200_000_000) }
+        sw?.lap("waited for the page to load")
         guard let o = await outline() else { return nil }
+        sw?.lap("outline", "\(o.chars) chars")
         let page = webView.url?.absoluteString ?? host
         var lines: [String] = []
-        if let b = baseline, b.host == host, let r = (await call("return JSON.stringify(globalThis.__trifKit.compare(JSON.parse(before)));", ["before": b.layout], in: Browser.trifWorld)).text,
+        if let b = baseline, b.host == host, let r = (await call("return JSON.stringify(globalThis.__trifKit.compare(JSON.parse(before), 200));", ["before": b.layout], in: Browser.trifWorld)).text,
            let changed = Browser.parse(r) as? [[String: Any]] {
             for c in changed.prefix(25) {
                 let text = (c["text"] as? String).map { $0.isEmpty ? "" : " “\($0)”" } ?? ""
                 lines.append("- \(c["what"] as? String ?? "changed"): \(c["sel"] as? String ?? "?")\(text) (was \(c["was"] as? String ?? "?"), now \(c["now"] as? String ?? "gone"))")
             }
         }
-        if let l = (await call("return JSON.stringify(globalThis.__trifKit.layout());", in: Browser.trifWorld)).text { baseline = (host, l) }
+        sw?.lap("what changed since last sent")
         let on = mods.running(on: webView.url?.absoluteString ?? "")
         var text = "Here's \(page) in TRIF now: a screenshot of what's on the screen is attached, and the page's outline is below."
         if let a = lastAdded, on.contains(where: { $0.id == a.id }) { text += " I added your mod \"\(a.name)\"; the page was reloaded with it."; lastAdded = nil }
@@ -786,14 +816,30 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if !lines.isEmpty {
             text += "\nWhat disappeared or shrank since I last sent you this page:\n\(lines.joined(separator: "\n"))\n(The page may have been reloaded since, so anything that opens when I type or click, like a menu, is closed now: some of these may be closed, not gone.)\n"
         }
-        let here = await alreadyHere()
+        let here = await alreadyHere(conv: conv)
+        sw?.lap("mods and their errors", "\(on.count) mods")
         text += here.isEmpty ? "\nNo TRIF mods are running on this page, and nothing on it is hidden.\n" : here
         text += "\nI'll say what I want changed. As before: reply with the whole mod file in one code block, nothing to fill in; to change a mod above, give back its whole file with the same @name. Work from what I've attached; don't open the page in a browser or another tool.\n"
         text += "\n--- The page now: \(page) ---\n\(o.text)\n"
-        let (shot, blank) = await settledScreenshot()
-        if blank { text += "\n(The screenshot looked blank even after waiting: the page may not have finished drawing.)" }
         report.log("outline", "\(host): the follow-up, \(text.count) characters")
-        return (text, shot)
+        return text
+    }
+
+    /// What's on the screen of the tab, quickly (11-15: a settled, full-resolution PNG took 6 s on a busy page): one
+    /// snapshot as it is now, at most 2x and the screen's width, as a JPEG, made off the main thread.
+    func quickScreenshot() async -> Data? {
+        guard webView.url != nil else { return nil }
+        let cfg = WKSnapshotConfiguration()
+        cfg.afterScreenUpdates = false
+        let wv = webView
+        let image: UIImage? = await Browser.within(3, nil) { await withCheckedContinuation { c in wv.takeSnapshot(with: cfg) { img, _ in c.resume(returning: img) } } }
+        guard let image else { return nil }
+        return await Task.detached(priority: .userInitiated) { () -> Data? in
+            let f = UIGraphicsImageRendererFormat()
+            f.scale = min(image.scale, 2)
+            f.opaque = true
+            return UIGraphicsImageRenderer(size: image.size, format: f).image { _ in image.draw(at: .zero) }.jpegData(compressionQuality: 0.6)
+        }.value
     }
 
     /// A screenshot of the page once it has finished (Tim, 11-14: look before sending): loaded, the pictures on

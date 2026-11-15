@@ -165,3 +165,24 @@ final class Diagnostics {
     })();
     """
 }
+
+/// The steps of one job and how long each took, logged to the diagnostics as one line (Tim, 11-15: the chat's
+/// follow-up took 10 to 15 s on Instagram; these are the numbers from his phone).
+@MainActor
+final class Stopwatch {
+    let name: String
+    private let start = Date()
+    private var last = Date()
+    private var laps: [String] = []
+    init(_ name: String) { self.name = name }
+    /// The step just finished, with anything worth saying about it (a size).
+    func lap(_ step: String, _ note: String = "") {
+        let now = Date()
+        laps.append("\(step) \(Int(now.timeIntervalSince(last) * 1000)) ms\(note.isEmpty ? "" : " (\(note))")")
+        last = now
+    }
+    var elapsedMs: Int { Int(Date().timeIntervalSince(start) * 1000) }
+    func done(_ note: String = "") {
+        Diagnostics.shared.log("timing", "\(name): \(laps.joined(separator: ", ")); \(elapsedMs) ms in all\(note.isEmpty ? "" : " (\(note))")")
+    }
+}

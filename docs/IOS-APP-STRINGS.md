@@ -145,6 +145,13 @@ background, within the ~30 s iOS gives it there.
 
 A tap opens the app on the tab the message was sent from, with Add this mod? (or the chat at the reply).
 
+## The chat's message box filling faster (added 11-15)
+
+| Where | Old | New |
+|---|---|---|
+| Over the chat while the tab's data goes into its box (a moment; it was 10 to 15 s on Instagram) | — | Adding the page… |
+| The screenshot attached in the message box | TRIF screenshot.png | TRIF screenshot.jpg |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

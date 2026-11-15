@@ -1,10 +1,11 @@
 {
-  "version": "0.2.7",
-  "published": "2026-11-12",
-  "notes": "- **Songs in profile pictures.** Tune Composer (new, off to start) makes little NES-style tunes, in any\n  time signature. Style Encoder puts yours in your profile picture, and Profile Styler plays a profile's\n  song from a speaker button.\n- **Styles survive X's JPEGs**, and carry three fonts: for your name, your handle and all other text.\n- **Post Styler** shows posts in their authors' colours and fonts.\n- **Detox Timeline** also tidies profiles' Reposts and Subscriptions tabs.\n\n### More\n\n- Pictures styled before still read. Older Profile Stylers ignore the new code instead of misreading it.\n- A tune in 4/4 plays in older Profile Stylers too; other time signatures need this version.\n- The speaker never starts by itself, and stops when you leave the profile.",
+  "version": "0.3.0",
+  "published": "2026-11-15",
+  "signed": "2026-11-15T07:01:39.760Z",
+  "notes": "- **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do only what you allow; free mods can do anything. Most of Tim's mods are now style or boxed.\n- **TRIF asks for each site**, not every site at once. Block a site to keep TRIF away; sensitive sites, like email and banking, start blocked.\n- **Safer agents.** A mod that can post or send for you waits for your OK, and a tab your agent ran code in can't post as you until it reloads.\n- **Mods from outside your chat start off**, Tim's too, until you turn them on.\n- **Every mod's code and history**, with Restore; export, import, and mods that break offer a fix.\n\n[All of what's new in 0.3.0](https://github.com/acapellascience/trif/releases/tag/v0.3.0)",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.7/timsrobot-0.2.7.tgz",
-    "sha256": "8d0d30135788b5687a798ec9857e54fdb3ef8a7ce23257443f7eb6af60194854",
-    "size": 2124788
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.3.0/timsrobot-0.3.0.tgz",
+    "sha256": "f4dacf736d725214b6dfdc2bf7d2c9872ffb0b38547a8f2260cf49369b92179e",
+    "size": 2572834
   }
 }

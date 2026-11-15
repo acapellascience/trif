@@ -83,3 +83,47 @@ test('the Mods tab’s shared pieces load as one plain script', () => {
   const icons = P.modIcons({ sandboxed: true, powers: ['keys', 'sound'] }, 'x.com');
   assert.deepEqual(icons.map((i) => i.key), ['keys', 'sound', 'noticeable'].filter((k) => k !== 'noticeable' || P.modLevel({ sandboxed: true, powers: ['keys', 'sound'] })));
 });
+
+test('an edit is checked as trif check checks a file, with the line of what is wrong', () => {
+  const M = reader();
+  // (a syntax error's line is JavaScriptCore's to give: the phone has it; here only the message is sure)
+  const bad = M.checkMod(header(['@name A', '@match https://x.com/*'], 'const a = 1;\nconst b = ;'), {});
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors[0].message, /Unexpected token|Unexpected/);
+  const json = M.checkMod(header(['@name A', '@match https://x.com/*', '@style'], '{\n "css": "a{}",\n "hide": [".x",]\n}'), {});
+  assert.equal(json.ok, false);
+  assert.equal(json.errors[0].line, 8);
+  assert.match(json.errors[0].message, /^the rules aren't valid JSON/);
+  const css = M.checkMod(header(['@name A', '@match https://x.com/*', '@style'], '{"css": "a { background: url(https://e.x/a.png) }"}'), {});
+  assert.equal(css.ok, false);
+  assert.equal(css.errors[0].line, 6);
+  const power = M.checkMod(header(['@name A', '@match https://x.com/*', '@boxed', '@powers nope'], 'trif.hide(".a")'), {});
+  assert.equal(power.errors[0].line, 5);
+  const lint = M.checkMod(header(['@name A', '@match https://x.com/*', '@boxed'], 'trif.hide(".a");\ndocument.querySelector("b").click();'), {});
+  assert.equal(lint.ok, false);
+  assert.deepEqual([...new Set(lint.lint.flatMap((l) => l.lines))], [7]);
+  assert.equal(M.checkMod(header(['@name A', '@match https://x.com/*', '@boxed'], 'trif.hide(".a");'), {}).ok, true);
+  assert.equal(M.checkMod('const a = 1;', {}).errors[0].line, 1);
+  assert.equal(M.jsonErrorLine('{\n "a": 1\n "b": 2\n}'), 3);
+  assert.equal(M.jsonErrorLine('{"a": [1, 2]}'), null);
+});
+
+test('a saved edit waits only for what it adds: a power, or a line that uses one', () => {
+  const M = reader();
+  const v1 = M.readMod(header(['@name Sender', '@match https://x.com/*'], "fetch('/a');\ndocument.title = 'x';"), {});
+  const allowed = M.allow(v1.needs, {});
+  // (an edit elsewhere in it: runs)
+  const v2 = M.readMod(header(['@name Sender', '@match https://x.com/*'], "fetch('/a');\ndocument.title = 'y';"), {});
+  assert.equal(M.waiting(v2.needs, allowed).length, 0);
+  // (a new line that sends: asks)
+  const v3 = M.readMod(header(['@name Sender', '@match https://x.com/*'], "fetch('/a');\nfetch('/b');"), {});
+  assert.deepEqual(M.waiting(v3.needs, allowed).map((n) => n.key), ['sends']);
+  // (a boxed mod given a power: asks for it; the same powers again: doesn't)
+  const b1 = M.readMod(header(['@name Box', '@match https://x.com/*', '@boxed'], 'trif.hide(".a");'), {});
+  const b2 = M.readMod(header(['@name Box', '@match https://x.com/*', '@boxed', '@powers keys'], 'trif.hide(".a");'), {});
+  assert.deepEqual(M.waiting(b2.needs, M.allow(b1.needs, {})).map((n) => n.key), ['power:keys']);
+  const b3 = M.readMod(header(['@name Box', '@match https://x.com/*', '@boxed', '@powers keys'], 'trif.hide(".b");'), {});
+  assert.equal(M.waiting(b3.needs, M.allow(b2.needs, {})).length, 0);
+  // (its id stays its file's when its @name changes: the app reads an edit with the file's name)
+  assert.equal(M.readMod(header(['@name Renamed', '@match https://x.com/*', '@boxed'], 'trif.hide(".a");'), { file: 'box.js', site: 'x.com' }).id, 'x.com/box');
+});

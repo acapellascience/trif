@@ -34,11 +34,11 @@ function checksFile() {
 // mods.js: what the app needs to take a whole mod file: the helper's own reading of it (helper/lib/mods.js
 // buildMod: the header, the hash, a style section, a boxed mod's powers and their values), TRIF's style rules
 // (rules.js), what a boxed mod's powers need allowing (boxpowers.js, combinations.js) and what TRIF's reading of
-// a free mod's code finds (powers.js), each file as it is, in a small CommonJS bundle with stand-ins for the
+// a free mod's code finds (powers.js), what the sandbox would refuse in a boxed mod (sandboxlint.js), each file as it is, in a small CommonJS bundle with stand-ins for the
 // Node built-ins they name but don't use here; then mobile/shared/modfile.js, which makes each mod's ready code
 // for its world, as globalThis.__trifMods. The app runs it in JavaScriptCore.
 const MODS_OUT = path.join(__dirname, 'shared', 'gen', 'mods.js');
-const HELPER_LIBS = ['rules', 'combinations', 'boxpowers', 'powers', 'mods', 'stylesection', 'framing', 'pathcheck', 'scope', 'diff'];
+const HELPER_LIBS = ['rules', 'combinations', 'boxpowers', 'powers', 'mods', 'stylesection', 'framing', 'pathcheck', 'scope', 'diff', 'sandboxlint'];
 function modsFile() {
   const libs = HELPER_LIBS.map((n) => `${JSON.stringify(`./${n}`)}: function (module, exports, require) {\n${fs.readFileSync(path.join(ROOT, 'helper', 'lib', `${n}.js`), 'utf8')}\n}`);
   const shims = fs.readFileSync(path.join(__dirname, 'shared', 'node-shims.js'), 'utf8');

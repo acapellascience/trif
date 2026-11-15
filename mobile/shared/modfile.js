@@ -129,6 +129,118 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
   };
 }
 
+// ---- checking an edit before it's saved (the code card's Edit: what `trif check` would say) -------------------
+
+// Where a syntax error is: JavaScriptCore (the phone's engine) puts the line on the error; others don't, and then
+// the error has no line. Each wrap adds lines of its own, so the offset is measured once with an error on a known line.
+function errorLine(e) { return e && typeof e.line === 'number' ? e.line : null; }
+const wrapAsync = (c) => `return (async function () {\n${c}\n})`;
+let offsets = null;
+function measure() {
+  if (offsets) return offsets;
+  const probe = (fn) => { try { fn(); } catch (e) { return e; } return null; };
+  const js = probe(() => new Function(wrapAsync('\n\n;=')));
+  const jl = errorLine(js);
+  offsets = { js: jl === null ? null : jl - 3 };
+  return offsets;
+}
+
+// The line of the first thing JSON.parse would stop at (JavaScriptCore's JSON errors say what, not where): a small
+// reader that follows JSON's grammar and counts lines. null when it finds nothing wrong.
+function jsonErrorLine(text) {
+  const t = String(text);
+  let i = 0;
+  const fail = () => { throw new Error(String(t.slice(0, i).split('\n').length)); };
+  const ws = () => { while (i < t.length && /\s/.test(t[i])) i++; };
+  const lit = (w) => { if (t.startsWith(w, i)) i += w.length; else fail(); };
+  const str = () => {
+    i++;
+    while (i < t.length && t[i] !== '"') {
+      if (t[i] === '\n') fail();
+      if (t[i] === '\\') { i++; if (!/["\\/bfnrtu]/.test(t[i] || '')) fail(); }
+      i++;
+    }
+    if (t[i] !== '"') fail();
+    i++;
+  };
+  const value = () => {
+    ws();
+    const c = t[i];
+    if (c === '{') {
+      i++; ws();
+      if (t[i] === '}') { i++; return; }
+      for (;;) { ws(); if (t[i] !== '"') fail(); str(); ws(); if (t[i] !== ':') fail(); i++; value(); ws(); if (t[i] === ',') { i++; continue; } if (t[i] === '}') { i++; return; } fail(); }
+    }
+    if (c === '[') {
+      i++; ws();
+      if (t[i] === ']') { i++; return; }
+      for (;;) { value(); ws(); if (t[i] === ',') { i++; continue; } if (t[i] === ']') { i++; return; } fail(); }
+    }
+    if (c === '"') return str();
+    if (c === 't') return lit('true');
+    if (c === 'f') return lit('false');
+    if (c === 'n') return lit('null');
+    const m = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/.exec(t.slice(i));
+    if (!m || !m[0]) fail();
+    i += m[0].length;
+  };
+  try { value(); ws(); if (i < t.length) fail(); return null; } catch (e) { return Number(e.message) || null; }
+}
+
+// The header line an error is about: the @key it names, or the one a power's error comes from.
+function headerLine(lines, message) {
+  const m = String(message);
+  const key = /@([\w-]+)/.exec(m);
+  const want = key ? key[1] : /power/.test(m) ? 'powers' : /match/.test(m) ? 'match' : null;
+  if (!want) return null;
+  const i = lines.findIndex((l) => new RegExp(`^\\s*//\\s*@${want}\\b`, 'i').test(l));
+  return i === -1 ? null : i + 1;
+}
+
+/**
+ * An edit, checked as `trif check` checks a file (helper/cli.js check): its header, a style mod's rules and CSS, the
+ * code's syntax, and for a boxed mod what the sandbox would refuse (sandboxlint.js). {ok, errors: [{line, message}],
+ * lint: [{what, why, lines}], tier}. Nothing is kept: the app saves only an edit that's ok.
+ */
+function checkMod(text, opts = {}) {
+  const raw = String(text ?? '').replace(/^\uFEFF/, '');
+  const lines = raw.split('\n');
+  const errors = [];
+  let header;
+  try { header = helperMods.parseHeader(raw); } catch (e) { errors.push({ line: null, message: String((e && e.message) || e) }); return { ok: false, errors, lint: [] }; }
+  if (!header.hasHeader) return { ok: false, errors: [{ line: 1, message: 'this file has no // ==WebMod== header, so it isn\'t a mod TRIF can read' }], lint: [] };
+  const end = lines.findIndex((l) => /^\s*\/\/\s*==\/WebMod==\s*$/i.test(l));
+  const r = readMod(raw, opts);
+  const tier = r.error ? (header.rules ? 'style' : header.sandboxed ? 'boxed' : 'free') : r.tier;
+  if (r.error) {
+    let line = headerLine(lines.slice(0, end + 1), r.error);
+    // (a style mod's JSON: where JSON.parse stopped, in the file's lines; its comment lines kept as blank lines)
+    if (header.rules && /valid JSON/.test(r.error)) {
+      const body = lines.slice(end + 1).map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n').replace(/^(\s*)\(/, '$1 ').replace(/\)\s*;?\s*$/, '');
+      const at = jsonErrorLine(body);
+      if (at !== null) line = end + 1 + at;
+    }
+    // (a rule's problem names its key, "css" or "hide": the line where that key is)
+    const plain = r.error.replace(/^this mod's header has a problem: /, '');
+    const key = /^"([\w-]+)"/.exec(plain);
+    if (line === null && key) { const i = lines.findIndex((l, n) => n > end && l.includes(`"${key[1]}"`)); if (i !== -1) line = i + 1; }
+    // (readMod says "this mod's header has a problem" for everything buildMod refuses: only a header line is one)
+    const inHeader = line !== null && line <= end + 1;
+    errors.push({ line, message: inHeader ? r.error : plain });
+    return { ok: false, errors, lint: [], tier };
+  }
+  if (tier === 'style') return { ok: true, errors, lint: [], tier };
+  // (free and boxed mods run inside an async function: a top-level await or return is fine)
+  try { new Function(wrapAsync(raw)); } catch (e) {
+    const at = errorLine(e);
+    const off = measure().js;
+    errors.push({ line: at === null || off === null ? null : at - off, message: String((e && e.message) || e) });
+    return { ok: false, errors, lint: [], tier };
+  }
+  const lint = tier === 'boxed' ? require('./sandboxlint').sandboxLint(raw, { powers: r.powers }) : [];
+  return { ok: !lint.length, errors, lint, tier };
+}
+
 /** The first mod file in a chat's reply: a ```js block holding ==WebMod==, or the text itself. */
 function findMod(text) {
   const t = String(text);
@@ -140,4 +252,4 @@ function findMod(text) {
 // (the probe's earlier name for readMod)
 const parseMod = (text, opts) => readMod(text, opts);
 
-const api = { readMod, parseMod, findMod, matchesUrl, appliesTo, needsOf, waiting, allow, lineDiff, nameOf, siteFor };
+const api = { readMod, parseMod, findMod, checkMod, jsonErrorLine, matchesUrl, appliesTo, needsOf, waiting, allow, lineDiff, nameOf, siteFor };

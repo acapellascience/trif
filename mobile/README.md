@@ -154,6 +154,17 @@ Built on the probe, toward something to use every day:
   script in before the page's own, whatever the page's policy: the probe's timing.page check). A free mod that
   should have started on a page and didn't says it can't run there on iPhone. The proof of concept's mods are
   read again into this, as allowed (each was added from its own Add this mod? sheet).
+- **Editing a mod** (the code card's Code tab: Edit; mods-page.js, ModStore.saveEdit). A plain editor (no
+  autocorrect, capitals or smart punctuation: curly quotes and dashes the keyboard makes are put back as typed),
+  numbered lines, the system's undo plus Undo and Redo buttons, Cancel and Save. Save checks it first as `trif
+  check` does (modfile.js checkMod: the header, a style mod's rules and CSS, the syntax, and for a boxed mod what
+  the sandbox would refuse, sandboxlint.js) and saves nothing broken: it says what's wrong, with a tappable line.
+  A saved edit is any change: the version before goes into History ("before you edited it"), and it's judged as
+  held.js judges a change, the user's own edit included: a new power, a new line using one, a @match for another
+  site (while the mod can do something there), or becoming a free mod waits for an OK while the version before
+  keeps running; anything else runs at once. Undo right after Save puts the version before back (the edit stays
+  in History). The mod's id and site stay as they are whatever the header says (desktop's: the file doesn't move
+  when its header changes; a new @name is only its name).
 - **Import** (Import.swift). Mods as desktop TRIF exports them (helper/lib/share.js: a mod's `<site>-<mod>.js`,
   a site's folder `<site> mods`, or either zipped, as AirDrop sends a folder) from Files (⋯ → Import…, or Import
   mod… in the Mods tab), or opened in the app from the share sheet or AirDrop (Info.plist's document types:

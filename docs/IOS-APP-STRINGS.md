@@ -53,6 +53,21 @@ New or changed:
 The mod switches' tooltips still say "click" (they come from extension/modswitch.js, shared with desktop): screen
 readers read them on the phone. Worth a phone wording, or leave.
 
+## Editing a mod's code (the code card's Code tab; added 11-15)
+
+| Where | New |
+|---|---|
+| Code tab's button | Edit |
+| While editing | Undo · Redo · Cancel · Save |
+| Save refused | **Not saved:** TRIF found a problem in it. — then up to eight lines, each **Line {n}** (tap: the editor selects that line) and what's wrong, in `trif check`'s own words (helper and sandbox lint, as agents see them) |
+| Saved, runs | Saved. It runs from this page load. **Undo** |
+| Saved, needs an OK | Saved. It waits for your OK: the version before keeps running until you decide. **Undo** |
+| After Undo | Put back the version from before your edit. Your edit is in History. |
+| History, a version an edit replaced | before you edited it |
+| The approval card's note for an edit | You edited it. (then desktop's "The version before keeps running until you decide.") |
+| An edit's own holds, on the card | runs on {pattern}, outside {site} (desktop's held.js words) · is now a free mod, so it can do anything the page can do (new) |
+| Editor (accessibility) | The mod's code (desktop's) |
+
 ## Adding and importing
 
 | Where | New |

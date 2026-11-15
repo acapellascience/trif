@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, setBrowser, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
@@ -191,6 +191,8 @@ async function refreshStatus() {
   try {
     const wasConnected = !!view.status?.helper?.connected;
     view.status = await request({ type: 'status' });
+    // (the background's name for the browser, which it may have learned since this panel opened)
+    if (view.status?.browser) setBrowser(view.status.browser);
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
     // Storage stopped working: switches can't be read from it, so they come with the status.
     if (view.status.storageBroken) {
@@ -3942,7 +3944,7 @@ async function openReport() {
   } catch (e) {
     // Without the helper: what the panel knows, which is when a report matters most.
     const s = view.status;
-    text = `TRIF problem report\n\nTRIF        ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
+    text = `TRIF problem report\n\nTRIF        ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.browserVersion || s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
   }
   openTab({ url: reportLink(url, text, view.site || '') });
 }

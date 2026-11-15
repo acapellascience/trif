@@ -4,7 +4,7 @@
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, hasSiteAccess, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, hasSiteAccess, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND, setBrowser } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
@@ -344,12 +344,14 @@ function tryStep(s) {
 function render(s) {
   const wasConnected = !!last?.helper.connected;
   last = s;
+  // (the background's name for the browser, which it may have learned since this page loaded)
+  if (s.browser && s.browser !== BROWSER) { setBrowser(s.browser); scriptsWords(); }
   if (s.helper.connected && (!wasConnected || !agents)) loadAgents();
   if (!s.helper.connected) agents = null;
   renderSteps();
   renderMods();
   const rec = s.recording.length ? ` · recording requests on ${s.recording.join(', ')}` : '';
-  $('#footer').textContent = `TRIF ${s.version} · ${BROWSER} ${s.chrome}${rec}`;
+  $('#footer').textContent = `TRIF ${s.version} · ${BROWSER} ${s.browserVersion || s.chrome}${rec}`;
 }
 
 let labelSeq = 0;
@@ -502,13 +504,17 @@ async function refresh() {
   }
 }
 
-// Step 3's words: Chrome has a switch per extension (pictured); Firefox asks in a prompt.
-$('#step-scripts .why').textContent = FIREFOX
-  ? 'Mods are scripts that run on websites, and Firefox asks before an add-on runs them.'
-  : 'Mods are scripts that run on websites, and Chrome asks you to allow that for each extension that runs them. One switch:';
-$('#step-scripts .chrome-row').hidden = FIREFOX;
-$('#settings').textContent = FIREFOX ? 'Allow user scripts' : 'Open TRIF’s Chrome settings';
-$('#step-scripts .wait').textContent = FIREFOX ? 'Waiting for your OK: click Allow when Firefox asks.' : 'Waiting for the switch. Come back to this tab when it’s on.';
+// Step 3's words: Chrome has a switch per extension (pictured); Firefox asks in a prompt. (Again when the
+// browser's name turns out better: Brave, Edge…)
+function scriptsWords() {
+  $('#step-scripts .why').textContent = FIREFOX
+    ? `Mods are scripts that run on websites, and ${BROWSER} asks before an add-on runs them.`
+    : `Mods are scripts that run on websites, and ${BROWSER} asks you to allow that for each extension that runs them. One switch:`;
+  $('#step-scripts .chrome-row').hidden = FIREFOX;
+  $('#settings').textContent = FIREFOX ? 'Allow user scripts' : `Open TRIF’s ${BROWSER} settings`;
+  $('#step-scripts .wait').textContent = FIREFOX ? `Waiting for your OK: click Allow when ${BROWSER} asks.` : 'Waiting for the switch. Come back to this tab when it’s on.';
+}
+scriptsWords();
 $('#settings').addEventListener('click', () => {
   // Firefox grants userScripts only through this prompt, which must open from the click itself.
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refresh, 300), () => {});

@@ -14,6 +14,7 @@ const { realish, isInside, badName } = require('./lib/pathcheck');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
+const { browserFamily, browserLabel } = require('./lib/browsers');
 const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
@@ -327,12 +328,12 @@ const handlers = {
     if (!ext) {
       lines.push('extension     connected, but it has not said hello yet');
     } else {
-      const firefox = ext.browser === 'Firefox';
-      lines.push(`extension     v${ext.version} on ${ext.browser || 'Chrome'} ${ext.chrome}`);
+      const firefox = browserFamily(ext) === 'firefox';
+      lines.push(`extension     v${ext.version} on ${browserLabel(ext)}`);
       lines.push(ext.userScripts
         ? 'user scripts  on'
         : firefox
-          ? 'user scripts  OFF: mods can\'t run. Fix: click the TRIF toolbar button in Firefox, then "Allow user scripts"'
+          ? `user scripts  OFF: mods can't run. Fix: click the TRIF toolbar button in ${ext.browser || 'Firefox'}, then "Allow user scripts"`
           : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);

@@ -11,7 +11,24 @@ export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdo
 // The Firefox build (scripts/build-extension.js firefox) runs the same code; these cover the differences.
 export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
 export const SAFARI = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('safari-web-extension:');
-export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
+// (Before BROWSER, which uses them at once.) What a browser name may be: a short word or two (what a brand or a Firefox fork calls itself is data).
+export const BROWSER_NAME_RE = /^[A-Za-z][\w .+-]{0,39}$/;
+// navigator.userAgentData.brands: each Chromium browser lists Chromium, a made-up "Not A Brand" (GREASE,
+// in any spelling) and usually its own brand; these name the ones TRIF knows.
+const BRANDS = [['Microsoft Edge', 'Edge'], ['Opera GX', 'Opera GX'], ['Opera Air', 'Opera Air'], ['Opera', 'Opera'], ['Brave', 'Brave'], ['Vivaldi', 'Vivaldi'], ['Google Chrome', 'Chrome']];
+const isGrease = (b) => /not.?a.?brand/i.test(b) || /[^\w .-]/.test(b);
+// The kind of browser: what the code does differently. The browser's name (BROWSER) is what the user sees.
+export const FAMILY = FIREFOX ? 'firefox' : SAFARI ? 'safari' : 'chromium';
+// The browser's own name: Brave, Edge, Opera, Vivaldi, Arc, Chromium, Chrome; Firefox (or a fork's name);
+// Safari. Worked out at once from what's known without waiting (browserFromSignals), then better by
+// detectBrowser (its answers that take a moment) and by the helper, which knows what started it: whoever
+// learns a better name calls setBrowser, and every module importing BROWSER sees the new one.
+export let BROWSER = browserFromSignals({ brands: globalThis.navigator?.userAgentData?.brands, userAgent: globalThis.navigator?.userAgent });
+/** Use `name` as the browser's name from now on (a name from detectBrowser, the helper or the status). */
+export function setBrowser(name) {
+  if (typeof name === 'string' && BROWSER_NAME_RE.test(name)) BROWSER = name;
+  return BROWSER;
+}
 // What the browser calls TRIF's panel: Chrome's side panel, Firefox's sidebar, Safari's window.
 export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
@@ -541,7 +558,7 @@ export function selectTab(tabs, focusedWindowId, args = {}) {
   }
   // A run works on its site's tab even when the user has moved to another one.
   const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active) || (scope ? tabs[0] : null);
-  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : 'no active tab (is a Chrome window open?)');
+  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : `no active tab (is a ${BROWSER} window open?)`);
   return t;
 }
 
@@ -1686,6 +1703,83 @@ export function filterRequests(entries, { filter, limit } = {}) {
 /** Exponential reconnect delay: 1 s, 2 s, 4 s … capped at 30 s. */
 export function nextBackoff(prev) {
   return prev ? Math.min(prev * 2, 30000) : 1000;
+}
+
+// ---- which browser this is ------------------------------------------------------------------------
+
+
+/**
+ * The browser's name from what's known about it (each optional):
+ *   family: 'chromium' | 'firefox' | 'safari' (FAMILY);
+ *   brands: navigator.userAgentData.brands ([{brand, version}]);
+ *   userAgent: navigator.userAgent, only read when there are no brands (a Chromium too old for them);
+ *   brave: navigator.brave.isBrave() said yes; vivaldi: Vivaldi's own tab fields are there (vivaldiTabs);
+ *   panelInWindow: Chrome's side panel doesn't show here (background.js): a Chrome that has none is Arc;
+ *   firefoxName: runtime.getBrowserInfo().name (Firefox, LibreWolf, Waterfox, Floorp, Zen…).
+ */
+export function browserFromSignals({ family = FAMILY, brands, userAgent = '', brave = false, vivaldi = false, panelInWindow = false, firefoxName } = {}) {
+  if (family === 'safari') return 'Safari';
+  if (family === 'firefox') return typeof firefoxName === 'string' && BROWSER_NAME_RE.test(firefoxName.trim()) ? firefoxName.trim() : 'Firefox';
+  if (brave) return 'Brave';
+  if (vivaldi) return 'Vivaldi';
+  const names = Array.isArray(brands) ? brands.map((b) => (b && typeof b.brand === 'string' ? b.brand.trim() : '')).filter(Boolean) : [];
+  let name;
+  if (names.length) {
+    name = BRANDS.find(([brand]) => names.includes(brand))?.[1]
+      // (a brand TRIF doesn't know yet: its own name, as it gives it)
+      || names.find((b) => b !== 'Chromium' && !isGrease(b) && BROWSER_NAME_RE.test(b))
+      || (names.includes('Chromium') ? 'Chromium' : 'Chrome');
+  } else {
+    // No brands to go by: the user-agent string's own tokens, else Chrome as before.
+    const ua = String(userAgent || '');
+    name = /\bEdg\//.test(ua) ? 'Edge' : /\bOPR\//.test(ua) ? 'Opera' : /\bVivaldi\//.test(ua) ? 'Vivaldi' : /\bChromium\//.test(ua) ? 'Chromium' : 'Chrome';
+  }
+  return (name === 'Chrome' || name === 'Chromium') && panelInWindow ? 'Arc' : name;
+}
+
+/** The version of brand `name` in a fullVersionList (navigator.userAgentData's high-entropy values), or null. */
+export function brandVersion(fullVersionList, name) {
+  const brand = { Edge: 'Microsoft Edge', Chrome: 'Google Chrome', Arc: 'Google Chrome' }[name] || name;
+  const hit = Array.isArray(fullVersionList) ? fullVersionList.find((b) => b && b.brand === brand) : null;
+  return hit && typeof hit.version === 'string' && /^[\d.]{1,40}$/.test(hit.version) ? hit.version : null;
+}
+
+/** Whether Vivaldi's tab fields (`vivExtData`, or `extData` before) are on any tab: Vivaldi says it's Chrome otherwise. */
+export function vivaldiTabs(tabs) {
+  return Array.isArray(tabs) && tabs.some((t) => t && typeof t === 'object' && ('vivExtData' in t || 'extData' in t));
+}
+
+// A browser's answer that doesn't come within this long counts as none.
+const SIGNAL_MS = 1000;
+// `ask` is called here: one that throws at once counts as none too.
+const soon = (ask) => {
+  let timer;
+  const answer = new Promise((resolve) => resolve(ask())).catch(() => undefined);
+  return Promise.race([answer, new Promise((r) => { timer = setTimeout(r, SIGNAL_MS); })]).finally(() => clearTimeout(timer));
+};
+
+/**
+ * {name, version}: the browser's name (browserFromSignals) with the signals that take a moment, and its own
+ * version where it has one (Opera's or Edge's, not Chromium's; a Firefox fork's), else null. Each signal
+ * that fails or doesn't answer is left out. opts: { family, nav (navigator), api (chrome), ff (Firefox's
+ * `browser`), panelInWindow }.
+ */
+export async function detectBrowser({ family = FAMILY, nav = globalThis.navigator, api = globalThis.chrome, ff = globalThis.browser, panelInWindow = false } = {}) {
+  if (family === 'safari') return { name: 'Safari', version: null };
+  if (family === 'firefox') {
+    const runtime = ff?.runtime?.getBrowserInfo ? ff.runtime : api?.runtime;
+    const info = await soon(() => runtime?.getBrowserInfo?.());
+    const name = browserFromSignals({ family, firefoxName: info?.name });
+    return { name, version: name !== 'Firefox' && typeof info?.version === 'string' && /^[\w.-]{1,40}$/.test(info.version) ? info.version : null };
+  }
+  const uaData = nav?.userAgentData;
+  const [brave, tabs, high] = await Promise.all([
+    soon(() => (typeof nav?.brave?.isBrave === 'function' ? nav.brave.isBrave() : false)),
+    soon(() => api?.tabs?.query?.({})),
+    soon(() => uaData?.getHighEntropyValues?.(['fullVersionList'])),
+  ]);
+  const name = browserFromSignals({ family, brands: uaData?.brands, userAgent: nav?.userAgent, brave: brave === true, vivaldi: vivaldiTabs(tabs), panelInWindow });
+  return { name, version: brandVersion(high?.fullVersionList, name) };
 }
 
 export function chromeVersion(userAgent) {

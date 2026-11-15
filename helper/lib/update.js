@@ -24,6 +24,13 @@
 // and runs its own `trif setup --copy`, which swaps it into <home>/app the same way a first install
 // does. Only installs that run from <home>/app are updated: a git checkout updates with git.
 //
+// What an update updates: the helper, AGENTS.md and the rest of <home>/app, whose extension/ folder is the
+// one Chrome loads unpacked from (the browser then reloads it: host.js reloadExtension). The Chrome Web
+// Store's TRIF isn't in there: Chrome updates that extension itself, from the store, after Google's review
+// of each version, so for a while it can be a version behind the helper (host.js extensionBehind says so in
+// its panel, `trif doctor` too). Nothing here may say the store's extension updated. (Firefox's add-on
+// likewise updates from its own feed, updates/firefox.json.)
+//
 // config.json: "autoUpdate": true installs updates without asking (off by default); "checkForUpdates":
 // false stops checking altogether. State (last check, what's available, last install) is kept in
 // <home>/update.json.
@@ -347,6 +354,16 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
   }
 }
 
+/**
+ * After an install, for the connected extensions' kinds (helper ping: 'unpacked', 'store', 'other'): what
+ * to say about a Web Store extension, which this didn't update, or null.
+ */
+function storeNote(kinds = []) {
+  return kinds.includes('store')
+    ? "The extension from the Chrome Web Store isn't updated here: Chrome updates it by itself once Google has reviewed the new version, usually within a day or two."
+    : null;
+}
+
 /** The version now installed in <home>/app (another helper, or `npx timsrobot setup`, may have updated it). */
 function installedVersion(ws) {
   return packageJson(ws.appDir).version || null;
@@ -354,6 +371,6 @@ function installedVersion(ws) {
 
 module.exports = {
   UpdateError, CHECK_EVERY_MS, FEED_MAX_AGE_MS, feedSignedAt, feedTooOld, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
-  readState, writeState, setConfigKey, autoUpdateOn, checksOn, installable, summary, check, install, installedVersion,
+  readState, writeState, setConfigKey, autoUpdateOn, checksOn, installable, summary, check, install, installedVersion, storeNote,
   browsersSetUp,
 };

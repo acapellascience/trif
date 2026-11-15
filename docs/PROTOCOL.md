@@ -78,6 +78,26 @@ extension ID: this dev ID, the Chrome Web Store ID (unknown until the first uplo
 `STORE_EXTENSION_IDS` in `helper/lib/paths.js`), and any extra IDs in `config.json` (private folder)
 `"extensionIds": [...]`. (The private key lives in `.keys/`, gitignored; it's only needed to pack a .crx.)
 
+The store ID's one place is `STORE_EXTENSION_ID` in `helper/lib/paths.js` ('' until the first upload), with
+`STORE_LISTED` (false until the listing is public): only with both do setup, doctor and the site point people
+at the listing (`storeListingUrl()`); until then they say Load unpacked.
+
+**Which TRIF is talking.** Chrome starts the host with the caller's origin as its first argument; the helper
+reads the ID from it (`callerExtensionId`) and its kind (`extensionKind`: `unpacked` for the dev ID, `store`,
+`other` for config.json's), never from the extension's own word. After the hello it sends
+`{type:"identity", id, kind, others:[{id, kind}]}` (every other TRIF ID it accepts), shows `extension.id` and
+`extension.kind` in `ping`, and words updates by it (`update.extensionUpdates`: `helper`, `store` or
+`browser`; a store extension older than the helper gets `extensionBehind`, as Firefox's add-on does).
+
+**Two TRIFs in one profile** (extension/twins.js): an extension with `others` sends each of those IDs
+`chrome.runtime.sendMessage(id, {type:"trif.twin", version, kind, ready, sites})` (where it runs mods; `ready`:
+connected, user scripts on, not paused) and answers the same message from them (`onMessageExternal`, only from
+IDs the helper named). The `unpacked` one leaves every site a ready non-unpacked twin runs mods on to it (its
+mods register on `onSites()` less those). Each tells its helper `{type:"twins", others:[{id, version, ready}],
+standingDown}`, which `ping` shows as `twins` and `trif doctor` warns about. Older extensions ignore
+`identity`; an unpacked one older than 0.3.1 doesn't answer, so doctor also warns when both kinds are connected
+in one browser.
+
 ```
 "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvrM00irPxw843QWA7797u9U1QLvK2M9cHdfoblqrEGec2aA++jHrJMdStaXa19U5R+K+aI8atnfwq4FLGDNid11AcgBavxUgtOGU7cXIXDX8MVdbfBVdMl4oMcfOVH1QJW6z0X5CzavJ5+F4HQj2dOQ8gMEBqjrB0k8rGD7G+93Tj7ewODVcYclNqZJUEfnGbz+TIbHh98F6KkwIvbJF3ng3Uh/6Qq7lXgPa6sGvRTIHGTJ0tD7xeJ7sWteE/3f8jzs6pKyYJyBqxoPYciim2LtzgxF+BHFe7c8CBFRflRTG0ofwblJwcRNhqMFYIwsxZes7QVd1c/ul/xdk2uOu9wIDAQAB"
 ```

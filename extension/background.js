@@ -22,6 +22,7 @@ import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createTabLocks, leakGuard } from './tablock.js';
 import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS } from './agentsites.js';
+import { TWIN_MESSAGE, normalizeIdentity, twinState, readTwin, cededSites, twinNotice } from './twins.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -86,6 +87,8 @@ const state = {
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
   starter: null,         // Tim's mods, site by site, from the helper (helper/lib/preinstalled.js starterOffer): {chosen, sites: [{site, name, choice, suggested, mods}]}
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
+  identity: null,        // {id, kind, others}: which TRIF this is and the other TRIF IDs, from the helper (persisted: twins.js)
+  twins: [],             // the other TRIFs in this profile that answered: [{id, kind, version, ready, sites}] (persisted)
   applied: {},           // script id → hash last registered (persisted)
   known: null,           // the script ids the last sync left registered (syncUserScripts `known`); null: ask the browser
   lastApply: { registered: [], errors: [] },
@@ -271,6 +274,8 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
     state.sitesOn = sitesInUse(state.mods, state.disabled, chats);
     await save({ sitesOn: state.sitesOn }).catch((e) => console.warn('[TRIF]', errMsg(e)));
   }
+  state.identity = normalizeIdentity(s.identity);
+  state.twins = Array.isArray(s.twins) ? s.twins.map((t) => readTwin(state.identity, t?.id, { ...t, type: TWIN_MESSAGE })).filter(Boolean) : [];
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
   if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[TRIF]', errMsg(e)));
   storedModsState = modsStorageState(s);
@@ -286,6 +291,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   await considerSensitive(sensitiveListSites(state.sensitiveSites), { tabs: true }).catch((e) => console.warn('[TRIF] sensitive sites:', errMsg(e)));
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
 ready.then(() => showFaces()); // (the toolbar's faces, for the tabs open now: faces.js)
+ready.then(() => findTwinsSoon()); // (another TRIF in this profile: is it still there? twins.js)
 
 // Listeners must be registered synchronously at the top level of a service worker.
 chrome.runtime.onStartup.addListener(() => {
@@ -296,6 +302,17 @@ chrome.runtime.onInstalled.addListener((details) => {
   setPanelBehavior();
   ready.then(() => serial(applyMods)).catch(() => {});
   if (details.reason === 'install') openOnboarding().catch(() => {});
+});
+// Another TRIF in this profile telling about itself (twins.js): answered only for the IDs the helper named.
+chrome.runtime.onMessageExternal?.addListener((msg, sender, sendResponse) => {
+  if (msg?.type !== TWIN_MESSAGE) return false;
+  ready.then(async () => {
+    const twin = readTwin(state.identity, sender?.id, msg);
+    if (!twin) return sendResponse(null);
+    sendResponse(myTwinState());
+    await setTwins([...state.twins.filter((t) => t.id !== twin.id), twin]);
+  }).catch(() => sendResponse(null));
+  return true;
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
@@ -592,7 +609,7 @@ async function applyModsNow() {
       // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       // (a change the chat made that waits for the user: the version before runs)
       mods: state.mods.map((m) => state.chatWaiting[m.id]?.old || m), runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, groupsOff: state.groupsOff, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known, sensitive: sens(),
+      offSites: state.offSites, groupsOff: state.groupsOff, recording: state.recording, sitesOn: state.paused ? [] : runningSites(), known: state.known, sensitive: sens(),
     });
     state.applied = res.applied;
     state.known = res.known;
@@ -770,6 +787,54 @@ function reportApplied(res) {
   try { splits = sens().splits; } catch { /* none yet */ }
   post({ type: 'modsApplied', registered: res.registered, errors: res.errors, splits });
   notifyPanels();
+  findTwinsSoon(); // (where this TRIF runs mods may have changed: the other TRIF in this profile hears it)
+}
+
+// ---- another TRIF in this profile (twins.js) -------------------------------------------------------
+// The unpacked TRIF and the Web Store's, both installed: each tells the other where it runs mods; the
+// unpacked one leaves those sites to the store's (cededSites), so no mod runs twice.
+
+/** The sites this TRIF runs mods on: the sites it's on for, less those it leaves to the store's TRIF. */
+function runningSites() {
+  const ceded = new Set(cededSites(state.identity, state.twins));
+  return ceded.size ? onSites().filter((s) => !ceded.has(s)) : onSites();
+}
+
+function myTwinState() {
+  return twinState({ version: VERSION, kind: state.identity?.kind, connected: state.connected, userScripts: state.userScripts, paused: state.paused, sites: runningSites() });
+}
+
+/** Keep `twins` (the ones that answered), re-applying mods when the sites left to them changed. */
+async function setTwins(twins) {
+  const before = JSON.stringify(cededSites(state.identity, state.twins));
+  const was = JSON.stringify(state.twins);
+  state.twins = twins;
+  if (JSON.stringify(twins) === was) return;
+  await save({ twins }).catch(() => {});
+  post({ type: 'twins', others: twins.map(({ id, version, ready }) => ({ id, version, ready })), standingDown: cededSites(state.identity, twins).length > 0 });
+  if (JSON.stringify(cededSites(state.identity, twins)) !== before) {
+    log('info', twins.length ? `another TRIF in this profile runs mods on ${cededSites(state.identity, twins).join(', ') || 'no site yet'}; this one leaves those sites to it` : 'no other TRIF in this profile now');
+    serial(applyMods).then(reportApplied, () => {});
+  } else notifyPanels();
+}
+
+/** Ask the other TRIF IDs the helper named whether they're installed here, telling them about this one. */
+let twinsTimer = null;
+let twinsAt = 0;
+async function findTwins() {
+  clearTimeout(twinsTimer);
+  twinsTimer = null;
+  twinsAt = Date.now();
+  const others = state.identity?.others || [];
+  if (!others.length || typeof chrome.runtime.sendMessage !== 'function') return setTwins([]);
+  const mine = myTwinState();
+  const answers = await Promise.all(others.map((o) => chrome.runtime.sendMessage(o.id, mine)
+    .then((r) => readTwin(state.identity, o.id, r), () => null)));
+  return setTwins(answers.filter(Boolean));
+}
+function findTwinsSoon() {
+  if (!state.identity?.others?.length || twinsTimer) return;
+  twinsTimer = setTimeout(() => { findTwins().catch((e) => log('warn', `looking for another TRIF: ${errMsg(e)}`)); }, 500);
 }
 
 function requireUserScripts() {
@@ -988,6 +1053,14 @@ async function onOtherHelperMessage(msg) {
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'the helper reported an error'));
   } else if (msg.type === 'agentEvent') {
     await onAgentEvent(msg.runId, msg.event);
+  } else if (msg.type === 'identity') {
+    // Which TRIF this is, and the other TRIF IDs (helper/host.js sendIdentity): look for one in this profile.
+    const identity = normalizeIdentity(msg);
+    if (JSON.stringify(identity) !== JSON.stringify(state.identity)) {
+      state.identity = identity;
+      await save({ identity }).catch(() => {});
+    }
+    await findTwins();
   } else if (msg.type === 'update') {
     state.update = msg.update && typeof msg.update === 'object' ? msg.update : null;
     notifyPanels();
@@ -1993,6 +2066,7 @@ async function uiStatus() {
     lastPanelCheck = Date.now();
     lastFocusedNormalWindow(chrome).then((w) => (w ? chrome.tabs.query({ active: true, windowId: w.id }) : [])).then(([t]) => t && checkTab(t.id, false)).catch(() => {});
   }
+  if (state.identity?.others?.length && Date.now() - twinsAt > 30000) findTwinsSoon();
   const s = await commands.status();
   const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
   const live = new Map(s.mods.map((m) => [m.id, m])); // (by id: never another mod's state)
@@ -2001,6 +2075,7 @@ async function uiStatus() {
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
     recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, sensitiveBlocked: s.sensitiveBlocked, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
     starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
+    kind: state.identity?.kind || null, twin: twinNotice(state.identity, state.twins),
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),

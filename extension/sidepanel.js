@@ -44,7 +44,7 @@ const ui = {
   autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
-  notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
+  notice: $('#notice'), twin: $('#twin'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   noSandbox: $('#no-sandbox'),
@@ -738,6 +738,7 @@ function render() {
   renderFaces(problem, agentInfo);
   renderPausedAll();
   renderNotice({ helperOk, agentInfo, anyAgent });
+  renderTwin();
   renderUpdate();
   renderMods();
   renderStarter();
@@ -3805,6 +3806,38 @@ ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); save
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
 mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-oss'); loadModels('codex-oss', true); }, changed: () => render() });
 
+// ---- TRIF installed twice -----------------------------------------------------------------------
+// The unpacked TRIF and the Web Store's in one profile (background.js, twins.js): the unpacked one runs
+// mods only where the store's doesn't yet. Both panels say to remove the unpacked one.
+
+function renderTwin() {
+  const n = ui.twin;
+  const t = view.status?.twin || null;
+  const key = JSON.stringify(t);
+  if (n.dataset.key === key) return;
+  n.dataset.key = key;
+  n.hidden = !t;
+  if (!t) { n.replaceChildren(); return; }
+  const actions = el('p', 'actions');
+  let text;
+  if (t.me === 'unpacked') {
+    text = 'You also have TRIF from the Chrome Web Store. It runs your mods on the sites you’ve turned on there, and this copy (loaded unpacked) runs them on the rest. Turn your sites on there, then remove this copy.';
+    actions.append(button('Remove this copy', 'primary', removeThisCopy));
+  } else {
+    text = t.otherRunning
+      ? 'TRIF is also loaded unpacked in Chrome. It runs your mods on the sites you haven’t turned on here yet. Once they’re on here, remove it.'
+      : 'TRIF is also loaded unpacked in Chrome. It doesn’t run any mods now: remove it.';
+    actions.append(button('Show it', 'primary', () => openTab({ url: `chrome://extensions/?id=${t.other}` })));
+  }
+  n.replaceChildren(el('p', 'title', 'TRIF is installed twice'), el('p', null, text), actions);
+}
+
+function removeThisCopy() {
+  // (Chrome asks first; without chrome.management, its extensions page)
+  if (typeof chrome.management?.uninstallSelf === 'function') chrome.management.uninstallSelf({ showConfirmDialog: true }).catch(() => {});
+  else openTab({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+}
+
 // ---- updates ------------------------------------------------------------------------------------
 // The helper checks for a newer TRIF (helper/lib/update.js) and its summary rides on the status. The
 // panel offers it (Update installs it, then the extension reloads onto it), says so after the reload, and
@@ -3836,7 +3869,10 @@ function renderUpdate() {
     if (!u.canInstall && u.why) parts.push(el('p', 'note', u.why));
   } else if (done) {
     n.classList.add('ok');
-    parts.push(el('p', 'title', `TRIF updated to ${done.to}`));
+    // (from the Web Store, the extension updates on the store's schedule: only the helper did here)
+    const store = u?.extensionUpdates === 'store';
+    parts.push(el('p', 'title', store ? `TRIF’s helper updated to ${done.to}` : `TRIF updated to ${done.to}`));
+    if (store && view.status?.version !== done.to) parts.push(el('p', 'note', 'The extension itself updates from the Chrome Web Store.'));
     const actions = el('p', 'actions');
     if (done.notes) actions.append(notesToggle(n, done.notes));
     actions.append(button('OK', null, () => request({ type: 'update.dismiss' }).catch(() => {})));
@@ -3868,6 +3904,8 @@ function renderUpdateSettings(u) {
   else if (u.available) text = `TRIF ${u.current} (${u.latest} is available).`;
   else if (u.error) text = `TRIF ${u.current}. Couldn’t check for updates: ${u.error}`;
   else text = `TRIF ${u.current}${u.latest ? ', up to date' : ''}.`;
+  // (Update installs the helper; the Web Store's extension updates on the store's schedule)
+  if (connected && u?.extensionUpdates === 'store') text += ' The extension updates from the Chrome Web Store.';
   if (ui.updateNote.dataset.text === text) return;
   ui.updateNote.dataset.text = text;
   ui.updateNote.replaceChildren(text);

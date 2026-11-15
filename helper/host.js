@@ -19,7 +19,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { envVar } = require('./lib/env');
-const { workspace, VERSION, examplesDir } = require('./lib/paths');
+const { workspace, VERSION, examplesDir, callerExtensionId, extensionKind, extensionIds, DEV_EXTENSION_ID } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
@@ -54,6 +54,11 @@ const ws = workspace();
 ws.ownSock = ownSock(ws.home);
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
 const logger = createLogger(ws.log, { stderr: true });
+// Which extension started this helper: Chrome passes its origin as the first argument
+// (chrome-extension://<id>/; Firefox passes the manifest's path, the Safari bridge nothing). 'unpacked'
+// (the dev ID), 'store' (the Web Store's) or 'other' (config.json extensionIds); null when not Chrome's.
+const CALLER_ID = callerExtensionId(process.argv[2]);
+const CALLER_KIND = extensionKind(CALLER_ID);
 
 // Protect the native messaging channel: anything that tries to print goes to the log instead.
 console.log = (...a) => logger.info(...a);
@@ -84,6 +89,7 @@ const state = {
   held: {}, // mod id -> held entry (see lib/held.js)
   review: {}, // mod id -> {facts, needs, claim}: what a mod the user has can do that they haven't seen (lib/held.js)
   updates: {}, // mod id -> new shipped version waiting (see lib/preinstalled.js pendingUpdates)
+  twins: null, // another TRIF in the same browser profile, as the extension found it ('twins' message)
   lastSignature: null,
   lastFingerprint: null,
   modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
@@ -180,13 +186,28 @@ function onExtensionMessage(msg) {
         installId: typeof msg.installId === 'string' && msg.installId ? msg.installId : null,
         // What this extension can do beyond 0.2.4's protocol ('modsParts': mods sets in parts).
         features: Array.isArray(msg.features) ? msg.features.filter((f) => typeof f === 'string') : [],
+        // (which TRIF it is: from Chrome's own argument, not from anything the extension says)
+        id: CALLER_ID, kind: CALLER_KIND,
       };
       state.helloAt = Date.now();
       // (Every mod whole after a hello: it may come from an extension that just started, with other mods.)
       state.sentMods = null;
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
+      sendIdentity();
       sendUpdate();
+      break;
+    case 'twins':
+      // Another TRIF in the same browser profile (the extension asked the other IDs: background.js
+      // findTwins): the unpacked one stands down while the store's runs. Shown by trif doctor.
+      state.twins = {
+        others: (Array.isArray(msg.others) ? msg.others : []).filter((o) => o && typeof o.id === 'string').slice(0, 4)
+          .map((o) => ({ id: o.id, kind: extensionKind(o.id) || 'other', version: typeof o.version === 'string' ? o.version.slice(0, 20) : null })),
+        standingDown: !!msg.standingDown,
+        at: Date.now(),
+      };
+      if (!state.twins.others.length) state.twins = null;
+      logger.info(state.twins ? `another TRIF in this browser profile: ${state.twins.others.map((o) => `${o.kind} ${o.id} ${o.version || ''}`).join(', ')}${msg.standingDown ? '; this one stands down' : ''}` : 'no other TRIF in this browser profile now');
       break;
     case 'requestWaiting':
       onRequestWaiting(msg);
@@ -927,20 +948,39 @@ let updateTimers = [];
 
 function updateInfo(summary = update.summary(workspace(ws.home))) {
   const info = { ...summary, installing: state.installing };
-  // The Firefox add-on updates on Firefox's schedule, so after an update it can lag behind the helper.
-  // Its panel (old or new) shows an available update with `why`, so that's how it's told.
+  // Where the extension's own updates come from: with the helper ('helper': the unpacked one in
+  // <home>/app, or a checkout's), or on the browser's schedule ('store': Chrome Web Store; 'browser':
+  // Firefox's add-on feed). Panels from before 0.3.1 ignore it; the panel words Update and its after-note
+  // by it (sidepanel.js renderUpdate), so a store user isn't told the extension updated.
+  info.extensionUpdates = CALLER_KIND === 'store' ? 'store' : state.hello?.browser === 'Firefox' ? 'browser' : 'helper';
+  // The Firefox add-on and the Web Store extension update on their own schedule (the store's after Google's
+  // review), so after an update they can lag behind the helper. The panel (old or new) shows an available
+  // update with `why`, so that's how it's told.
   const behind = extensionBehind();
   if (behind && !info.available && !info.installing) Object.assign(info, { available: true, latest: VERSION, canInstall: false, why: behind, extensionBehind: true });
   return info;
 }
 
-/** Why the extension is behind the helper (a message for its panel), or null. Firefox only. */
+/** Why the extension is behind the helper (a message for its panel), or null. Firefox and the Web Store's. */
 function extensionBehind() {
   const h = state.hello;
-  if (!h || h.browser !== 'Firefox' || !h.version) return null;
+  if (!h || !h.version || (h.browser !== 'Firefox' && CALLER_KIND !== 'store')) return null;
   let older = false;
   try { older = update.compareVersions(String(h.version), VERSION) < 0; } catch { return null; }
-  return older ? `The Firefox add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
+  if (!older) return null;
+  return h.browser === 'Firefox'
+    ? `The Firefox add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.`
+    : `The extension is still ${h.version} (the helper is ${VERSION}). Chrome updates it from the Chrome Web Store by itself, usually within a day or two of a release.`;
+}
+
+/**
+ * Tells the extension which TRIF it is and the other TRIF IDs (dev, Web Store, config.json's), so it can
+ * look for another one in the same profile (background.js findTwins). Older extensions ignore it.
+ */
+function sendIdentity() {
+  if (!state.stdoutOpen || !CALLER_ID) return;
+  const others = extensionIds(workspace(ws.home).config).ids.filter((id) => id !== CALLER_ID).map((id) => ({ id, kind: extensionKind(id) }));
+  try { sendToExtension({ type: 'identity', id: CALLER_ID, kind: CALLER_KIND, others }); } catch (e) { logger.warn(`could not send identity: ${e.message}`); }
 }
 
 function sendUpdate(info = updateInfo()) {
@@ -1238,6 +1278,7 @@ function helperInfo() {
     startedAt: state.startedAt,
     connected: state.stdoutOpen,
     extension: state.hello ? { ...state.hello, at: state.helloAt } : null,
+    twins: state.twins,
     mods: state.mods.map((m) => m.id),
     modErrors: state.modErrors,
     modWarnings: state.modWarnings,
@@ -1360,7 +1401,8 @@ function onExtensionResponse(msg) {
     // A command an older extension doesn't know yet (sweep, say): say how to get the newer one.
     if (/^unknown command\b/i.test(error) && state.hello?.version && state.hello.version !== VERSION) {
       error = `the ${state.hello.browser || 'browser'} extension is version ${state.hello.version} and doesn't know \`${p.cmd}\` yet (the helper is ${VERSION})` +
-        (state.hello.browser === 'Firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : state.hello.browser === 'Safari' ? ': build and open TRIF.app from this version' : ': reload TRIF on chrome://extensions');
+        (state.hello.browser === 'Firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : state.hello.browser === 'Safari' ? ': build and open TRIF.app from this version'
+          : CALLER_KIND === 'store' ? ': Chrome updates it from the Chrome Web Store by itself, usually within a day or two of a release' : ': reload TRIF on chrome://extensions');
     }
     reply(p.sock, { id: p.clientId, ok: false, error });
   }

@@ -13,7 +13,20 @@ const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
 const { isExecutable } = require('./setup');
 const { firefoxAddonUrl } = require('./update');
 
+// The extension's page in Chrome: the connected one's (the helper knows its ID from Chrome), else the
+// unpacked one's, which every install had before the Web Store (both IDs: paths.js).
 const EXT_URL = `chrome://extensions/?id=${P.EXTENSION_ID}`;
+const extUrl = (ext) => (ext && ext.id ? `chrome://extensions/?id=${ext.id}` : EXT_URL);
+const KIND_WORDS = { store: 'from the Chrome Web Store', unpacked: 'loaded unpacked', other: 'loaded unpacked, a test build' };
+
+/**
+ * How to install the Chrome extension: from the Web Store once it's listed (paths.js storeListingUrl), with
+ * Load unpacked as the other way; until then (and always from a checkout) Load unpacked.
+ */
+function installHow(extensionDir, { store = P.storeListingUrl(), checkout = P.isGitCheckout() } = {}) {
+  const unpacked = `Load unpacked from ${extensionDir}; its ID must be ${P.EXTENSION_ID}`;
+  return store && !checkout ? `from the Chrome Web Store, ${store} (or ${unpacked})` : unpacked;
+}
 
 function parseWrapper(text) {
   const m = text.match(/exec\s+"((?:[^"\\]|\\.)*)"\s+"((?:[^"\\]|\\.)*)"/);
@@ -69,8 +82,8 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  * Chrome's, the usual case.
  * browsers: { chromium: [labels], firefox, safari, extensionDir } -> lines
  */
-function helperDownFix({ chromium = [], firefox = false, safari = false, extensionDir }) {
-  const loadUnpacked = `Load unpacked from ${extensionDir}; its ID must be ${P.EXTENSION_ID}`;
+function helperDownFix({ chromium = [], firefox = false, safari = false, extensionDir, store, checkout }) {
+  const loadUnpacked = installHow(extensionDir, { store, checkout });
   const several = (chromium.length ? 1 : 0) + (firefox ? 1 : 0) + (safari ? 1 : 0) > 1;
   if (several) {
     return [
@@ -104,6 +117,51 @@ function helperDownFix({ chromium = [], firefox = false, safari = false, extensi
     '  means the manifest is missing or wrong (fix the manifest checks above, then reload the extension);',
     '  "Native host has exited" means the helper crashed: see the log below.',
   ];
+}
+
+/**
+ * The Web Store's TRIF beside the helper: installed twice (the extension found the other one: helper
+ * host.js 'twins'), and an extension older than the helper (the store updates it after Google's review,
+ * the helper updates from TRIF's own feed). [{status, title, fix}]
+ */
+function storeChecks(info) {
+  const out = [];
+  const ext = info.extension || {};
+  const twins = (info.twins && info.twins.others) || [];
+  const unpacked = ext.kind === 'unpacked' ? { id: ext.id, me: true } : twins.find((t) => t.kind === 'unpacked');
+  const store = ext.kind === 'unpacked' ? twins.find((t) => t.kind !== 'unpacked') : ext.kind ? ext : null;
+  if (twins.length && unpacked && store) {
+    out.push({ status: 'warn',
+      title: `TRIF is installed twice in this ${ext.browser || 'Chrome'} profile: from the Chrome Web Store and loaded unpacked${info.twins.standingDown ? ' (the unpacked one leaves the sites the Web Store\'s runs mods on to it)' : ''}`,
+      fix: `turn your sites on in the Web Store's TRIF (its side panel), then remove the unpacked one: open chrome://extensions/?id=${unpacked.id} and click Remove` });
+  }
+  if (ext.kind === 'store' && ext.version && info.helper) {
+    let older = false;
+    try { older = require('./update').compareVersions(String(ext.version), String(info.helper)) < 0; } catch { older = false; }
+    if (older) {
+      out.push({ status: 'info', title: `the extension is v${ext.version} and the helper v${info.helper}: Chrome updates the extension from the Chrome Web Store by itself, usually within a day or two of a release`,
+        fix: "until it does, anything new in this release that needs the new extension waits (the helper's side works with the older one)" });
+    }
+  }
+  return out;
+}
+
+/**
+ * The unpacked TRIF and the Web Store's both connected in the same browser while neither has said it
+ * found the other: an unpacked one from before 0.3.1 can't answer. Separate profiles are fine, so it's
+ * a warning that says "if". {title, fix} or null.
+ */
+function bothKindsConnected(info, others) {
+  if (info.twins) return null;
+  const all = [info, ...others.map((h) => h.info)].filter((i) => i && i.extension && i.extension.kind);
+  const browser = (i) => i.extension.browser || 'Chrome';
+  const unpacked = all.find((i) => i.extension.kind === 'unpacked');
+  const store = unpacked && all.find((i) => i.extension.kind !== 'unpacked' && browser(i) === browser(unpacked));
+  if (!store) return null;
+  return {
+    title: `${browser(unpacked)} has the unpacked TRIF (v${unpacked.extension.version}) and the Web Store's (v${store.extension.version}) connected: if they're in the same profile, both run your mods`,
+    fix: `remove the unpacked one in that profile: open chrome://extensions/?id=${unpacked.extension.id} and click Remove (turn your sites on in the Web Store's TRIF first)`,
+  };
 }
 
 /** Whether something accepts connections on 127.0.0.1:port. */
@@ -337,10 +395,12 @@ async function doctor(opts = {}) {
       add('fail', 'the helper is running but the extension never said hello', `reload the extension at ${EXT_URL} (or restart Chrome) and run trif doctor again; check ${ws.log}`);
     } else {
       const firefox = info.extension.browser === 'Firefox';
-      add('ok', `extension v${info.extension.version} on ${info.extension.browser || 'Chrome'} ${info.extension.chrome}`);
+      const kind = KIND_WORDS[info.extension.kind];
+      add('ok', `extension v${info.extension.version} on ${info.extension.browser || 'Chrome'} ${info.extension.chrome}${kind ? ` (${kind})` : ''}`);
       if (info.extension.userScripts) add('ok', firefox ? 'user scripts are allowed' : '"Allow User Scripts" is on');
       else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', 'click the TRIF toolbar button in Firefox, then "Allow user scripts", then reload your tabs');
-      else add('fail', '"Allow User Scripts" is OFF, so mods can\'t run', `open ${EXT_URL}, turn on "Allow User Scripts", then reload your tabs`);
+      else add('fail', '"Allow User Scripts" is OFF, so mods can\'t run', `open ${extUrl(info.extension)}, turn on "Allow User Scripts", then reload your tabs`);
+      for (const c of storeChecks(info)) add(c.status, c.title, c.fix);
     }
     for (const e of (info.modsApplied && info.modsApplied.errors) || []) {
       add('fail', `extension couldn't register ${e.id}: ${e.error}`, 'fix the mod\'s @match/@exclude patterns (see AGENTS.md)');
@@ -348,6 +408,8 @@ async function doctor(opts = {}) {
     // Each connected browser has its own helper; `trif` uses this one unless told --browser.
     const others = envVar('RUN_TOKEN') ? [] : (await listHelpers(ws.home)).filter((h) => h.pid !== info.pid);
     if (others.length) add('ok', `also connected: ${others.map(describeHelper).join(', ')}`, 'trif commands go to the default browser; add --browser <name|pid> to use another');
+    const both = bothKindsConnected(info, others);
+    if (both) add('warn', both.title, both.fix);
   }
 
   // Mods
@@ -361,7 +423,9 @@ async function doctor(opts = {}) {
     mod: `make the mod smaller: keep sounds, pictures and other big data out of its code (a mod can be up to ${mb(MAX_MOD_BYTES)})`,
     total: `remove mods you don't use, or make big ones smaller: all of them together can be up to ${mb(MAX_MODS_BYTES)}`,
     extension: info?.extension?.browser === 'Firefox' ? 'update the add-on: about:addons, the gear, Check for Updates'
-      : info?.extension?.browser === 'Safari' ? 'build and open TRIF.app from this version' : `update the extension: reload TRIF on ${EXT_URL}`,
+      : info?.extension?.browser === 'Safari' ? 'build and open TRIF.app from this version'
+        : info?.extension?.kind === 'store' ? 'wait for Chrome to update TRIF from the Chrome Web Store (it does by itself, usually within a day or two of a release)'
+          : `update the extension: reload TRIF on ${extUrl(info?.extension)}`,
   };
   if (fs.existsSync(ws.modsDir)) {
     if (!modProblems.length) add('ok', `${plural(mods.length, 'mod')} in ${ws.modsDir}`);
@@ -442,4 +506,4 @@ function formatDoctor({ ok, checks }) {
   return out.join('\n');
 }
 
-module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript, helperDownFix };
+module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript, helperDownFix, installHow, storeChecks, bothKindsConnected };

@@ -22,9 +22,36 @@ const HOST_NAME = 'com.webmods.helper';
 // Every TRIF extension ID the native host must accept (its manifest's allowed_origins).
 // The unpacked/dev build: fixed by the "key" in extension/manifest.json.
 const DEV_EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
-// >>> Chrome Web Store ID(s): unknown until the first upload. Add the listing's ID here once it exists,
-// >>> then ship a release so `trif setup` writes it into every native host manifest.
-const STORE_EXTENSION_IDS = [];
+// >>> The Chrome Web Store ID: unknown until the first upload ('' until then). Put the item's ID here (the
+// >>> dashboard shows it as soon as the draft exists), then ship a release so `trif setup` writes it into
+// >>> every native host manifest: without that, a store-installed TRIF can't reach the helper. Ship it
+// >>> while the item is in review, so the reviewer's `npx timsrobot setup` already accepts it.
+const STORE_EXTENSION_ID = '';
+// >>> Whether the listing is public: setup, doctor, the README's link (timsrobot.com/chrome) and the site
+// >>> send people to the store only once this is true (an item in review is a dead link for everyone else).
+// >>> Until then they say Load unpacked, as before. Flip it in the release after the listing goes live.
+const STORE_LISTED = false;
+const isExtensionId = (id) => typeof id === 'string' && /^[a-p]{32}$/.test(id);
+const STORE_EXTENSION_IDS = isExtensionId(STORE_EXTENSION_ID) ? [STORE_EXTENSION_ID] : [];
+/** The listing's page, once it's public (STORE_LISTED and a valid STORE_EXTENSION_ID), else null. */
+function storeListingUrl({ id = STORE_EXTENSION_IDS[0], listed = STORE_LISTED } = {}) {
+  return listed && isExtensionId(id) ? `https://chromewebstore.google.com/detail/${id}` : null;
+}
+/**
+ * Which TRIF an extension ID is: 'unpacked' (the dev ID: Load unpacked, from ~/.trif/app/extension or a
+ * checkout), 'store' (the Chrome Web Store's), 'other' (any other ID, e.g. config.json extensionIds: a
+ * store build loaded unpacked to test it), or null (not an ID).
+ */
+function extensionKind(id, storeIds = STORE_EXTENSION_IDS) {
+  if (!isExtensionId(id)) return null;
+  if (id === DEV_EXTENSION_ID) return 'unpacked';
+  return storeIds.includes(id) ? 'store' : 'other';
+}
+/** The extension ID in a native host's first argument ("chrome-extension://<id>/"), or null. */
+function callerExtensionId(arg) {
+  const m = /^chrome-extension:\/\/([a-p]{32})\/?$/.exec(String(arg || ''));
+  return m ? m[1] : null;
+}
 // Users can add more in config.json: { "extensionIds": ["<32 letters a-p>", ...] } (see extensionIds()).
 // Firefox identifies the add-on by the ID in its manifest (scripts/build-extension.js firefox), and native
 // host manifests for Firefox list it in allowed_extensions. (Both IDs date from before the rename and must
@@ -220,7 +247,8 @@ function examplesDir() {
 
 module.exports = {
   NAME, FULL_NAME, CLI_NAME, LEGACY_CLI_NAME, HOME_DIR_NAME, LEGACY_HOME_DIR_NAME, legacyHome, currentDefaultHome, isDefaultHome,
-  HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
+  HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_ID, STORE_EXTENSION_IDS, STORE_LISTED, storeListingUrl, extensionKind,
+  callerExtensionId, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
   HOST_JS, CLI_JS, APP_DIR_NAME, VERSION,
   expandHome, defaultHome, resolveHome, readConfig, workspace, examplesDir, isGitCheckout, extensionIds, extensionOrigins,
   PRIVATE_FILES, defaultPrivateDir, privateDir, privateDirInfo, configFile,

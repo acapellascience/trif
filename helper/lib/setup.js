@@ -360,8 +360,13 @@ function recordPath(home, pathValue, modsDir = null) {
  * when it can't: the printed steps say how to get there. Returns {command, opened}.
  * (run, exists, platform, home: for tests, which must never open the real Chrome.)
  */
-function openChromeExtensions({ run = require('child_process').spawnSync, exists = fs.existsSync, platform = process.platform, home = os.homedir() } = {}) {
-  const command = ['open', ['-a', 'Google Chrome', 'chrome://extensions']];
+function openChromeExtensions(deps = {}) {
+  return openInChrome('chrome://extensions', deps);
+}
+
+/** Opens `url` in Google Chrome (macOS, when Chrome is installed): chrome://extensions, or the Web Store listing. */
+function openInChrome(url, { run = require('child_process').spawnSync, exists = fs.existsSync, platform = process.platform, home = os.homedir() } = {}) {
+  const command = ['open', ['-a', 'Google Chrome', url]];
   if (platform !== 'darwin') return { command, opened: false };
   const installed = ['/Applications/Google Chrome.app', path.join(home, 'Applications', 'Google Chrome.app')].some((a) => exists(a));
   if (!installed) return { command, opened: false };
@@ -743,11 +748,28 @@ function setup(opts = {}) {
     sayThen();
     return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
   }
+  // From the Chrome Web Store once it's listed (paths.js STORE_LISTED); a checkout loads its own folder
+  // (that's the code being worked on), and the store's TRIF updates itself, not from this folder.
+  const store = mode === 'link' ? null : (opts.storeUrl !== undefined ? opts.storeUrl : P.storeListingUrl());
+  if (store) {
+    const opened = !!opts.reveal && targets.some((t) => t.key === 'chrome') && (opts.openInChrome || openInChrome)(store).opened;
+    note(`  1. Install the extension from the Chrome Web Store${opened ? ' (it just opened in Chrome)' : ''}: click "Add to Chrome".`);
+    note(`       ${store}`);
+    note('     Already have TRIF loaded unpacked? Install this one too, turn your sites on in it, then remove');
+    note('     the unpacked one (its side panel says when). Or, to keep loading it unpacked: on chrome://extensions,');
+    note(`     turn on "Developer mode", click "Load unpacked" and choose ${extensionDir}`);
+    note('  2. Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens,');
+    note('     or "Details" on TRIF in chrome://extensions.');
+    note(`  3. Check everything with: ${trif} doctor`);
+    firefoxAndSafariAside();
+    sayThen();
+    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif, store };
+  }
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
   const revealed = !!opts.reveal && revealFolder(extensionDir);
   const openedChrome = revealed && targets.some((t) => t.key === 'chrome') && openChromeExtensions().opened;
-  note('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
+  note(`  1. Install the extension. ${mode === 'link' ? 'From a checkout, load it' : 'Until TRIF is on the Chrome Web Store, load it'} unpacked:`);
   if (revealed) {
     note(openedChrome
       ? '     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right),'
@@ -764,25 +786,30 @@ function setup(opts = {}) {
   note('  2. Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens,');
   note('     or "Details" on TRIF in chrome://extensions.');
   note(`  3. Check everything with: ${trif} doctor`);
-  if (targets.some((t) => t.firefox)) {
-    if (xpiUrl) {
-      note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open this');
-      note('     link in Firefox to install the TRIF add-on:');
-      note(`       ${xpiUrl}`);
-      note('     Then click "Allow user scripts" on the TRIF tab Firefox opens.');
-    } else {
-      note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open the');
-      note('     signed TRIF add-on (.xpi) in Firefox to install it, and click "Allow user scripts" on the TRIF');
-      note('     tab it opens.');
-    }
-  }
-  if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
+  firefoxAndSafariAside();
   sayThen();
 
-  return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
+  return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif, store: null };
+
+  // (After Chrome's steps: Firefox's and Safari's, for the ones set up too.)
+  function firefoxAndSafariAside() {
+    if (targets.some((t) => t.firefox)) {
+      if (xpiUrl) {
+        note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open this');
+        note('     link in Firefox to install the TRIF add-on:');
+        note(`       ${xpiUrl}`);
+        note('     Then click "Allow user scripts" on the TRIF tab Firefox opens.');
+      } else {
+        note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open the');
+        note('     signed TRIF add-on (.xpi) in Firefox to install it, and click "Allow user scripts" on the TRIF');
+        note('     tab it opens.');
+      }
+    }
+    if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
+  }
 }
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
+  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions, openInChrome,
 };

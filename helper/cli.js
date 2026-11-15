@@ -293,7 +293,7 @@ const handlers = {
       const onInt = () => stop();
       process.on('SIGINT', onInt);
       try {
-        const res = await waitForBrowser({ targets: r.targets, print: out, probe: () => probe(r.ws.home), trif: r.trif, onStop: (fn) => { stop = fn; } });
+        const res = await waitForBrowser({ targets: r.targets, store: !!r.store, print: out, probe: () => probe(r.ws.home), trif: r.trif, onStop: (fn) => { stop = fn; } });
         if (res === 'skipped') out('\nSkipped the wait: the steps above still work.');
       } finally {
         process.removeListener('SIGINT', onInt);
@@ -333,7 +333,7 @@ const handlers = {
         ? 'user scripts  on'
         : firefox
           ? 'user scripts  OFF: mods can\'t run. Fix: click the TRIF toolbar button in Firefox, then "Allow user scripts"'
-          : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
+          : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${(info.extension && info.extension.id) || P.EXTENSION_ID} and turn on "Allow User Scripts"`);
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
     if (others.length) lines.push(`also          ${others.map(describeHelper).join(', ')}; pick one with --browser <name|pid>`);
@@ -641,6 +641,10 @@ const handlers = {
       const r = await update.install(ctx.ws);
       if (ctx.json) return printJson({ updated: true, from: r.from, to: r.to, notes: r.notes, warning: r.warning });
       out(`updated TRIF ${r.from} -> ${r.to}. A running browser switches to it within a minute.`);
+      // (the Web Store's extension isn't in <home>/app: only its helper updated, update.js storeNote)
+      const kinds = (await listHelpers(ctx.ws.home).catch(() => [])).map((h) => h.info.extension && h.info.extension.kind);
+      const note = update.storeNote(kinds);
+      if (note) out(note);
       if (r.warning) out(`warning: ${r.warning}\nRun \`trif setup\` to finish setting up, or \`trif doctor\` to see what's wrong.`);
       if (r.notes) out(`\n${r.notes}`);
       return;

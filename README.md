@@ -50,13 +50,24 @@ unless you're working on TRIF.
    ```
 
    npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
-   live in `~/.trif/sites`) and connects it to Chrome. It's safe to run again. On a Mac it then shows the
-   extension folder in Finder and opens `chrome://extensions` in Chrome, and waits, saying as each of
-   the next steps gets done (Ctrl-C skips that).
+   live in `~/.trif/sites`) and connects it to Chrome. It's safe to run again. On a Mac it then opens
+   TRIF's page on the Chrome Web Store in Chrome (or, to load it unpacked, shows the extension folder in
+   Finder and opens `chrome://extensions`), and waits, saying as each of the next steps gets done (Ctrl-C
+   skips that).
 
-2. **Add the extension to Chrome.** On `chrome://extensions`, turn on **Developer mode** (top right),
-   then drag the `extension` folder from the Finder window onto the page. (Or click **Load unpacked**,
-   press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
+2. **Add the extension to Chrome** from the Chrome Web Store:
+   [Add TRIF to Chrome](https://timsrobot.com/chrome). (Until the listing is public, that link comes
+   back here: load it unpacked, below.)
+
+   <a id="load-it-unpacked"></a>**Or load it unpacked** (from a checkout, or if you'd rather): on
+   `chrome://extensions`, turn on **Developer mode** (top right), then drag the `extension` folder from
+   the Finder window onto the page. (Or click **Load unpacked**, press ⌘⇧G and paste: setup put the
+   folder's path, `~/.trif/app/extension`, on your clipboard.) TRIF's updates update this one too.
+
+   **Moving from the unpacked TRIF to the Web Store's:** install the Web Store's, turn your sites on in
+   its side panel, then remove the unpacked one. While you have both, the unpacked one leaves the sites
+   the Web Store's runs mods on to it, so nothing runs twice, and both side panels say what's left to do.
+   (Each keeps its own switches and chats: Chrome keeps every extension's apart.)
 
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
    settings** and turn on **Allow User Scripts**.
@@ -206,7 +217,10 @@ Keychain (without showing it).
 
 When a new version is out, the TRIF panel says so: click **Update** to install it, or **What's new**
 to read what changed first. In Settings, **Install updates automatically** lets it update by itself when
-no chat is running (it's off unless you turn it on). Firefox updates the add-on itself, like any other
+no chat is running (it's off unless you turn it on). That updates the helper and, if you loaded the
+extension unpacked, the extension too. The Chrome Web Store's extension updates from the store, by
+itself, once Google has reviewed the new version (usually within a day or two), so for a while it can be
+a version behind the helper; the panel says so. Firefox updates the add-on itself, like any other
 add-on, about once a day; if the panel says the add-on is older than the rest of TRIF, open about:addons,
 click the gear, then **Check for Updates**. From a terminal: `~/.trif/bin/trif update` (or
 `update --install`).

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIF probe: a heavy timeline</title>
+<script nonce="probe">document.documentElement.setAttribute('data-page-ran', String(performance.now())); window.__probePage = 'heavy';
+// (what the page's own first script finds: a free mod at document-start has already patched fetch and XHR, as Detox Timeline needs)
+window.__firstLook = { fetchPatched: !/\[native code\]/.test(String(window.fetch)), xhrPatched: !/\[native code\]/.test(String(XMLHttpRequest.prototype.open)), at: performance.now() };</script>
+<script nonce="probe" src="heavy.js" defer></script>
+</head>
+<body>
+</body>
+</html>

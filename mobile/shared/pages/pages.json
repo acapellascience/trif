@@ -8,5 +8,11 @@
   },
   "hostile.html": {},
   "spa.html": {},
-  "install.html": {}
+  "install.html": {},
+  "heavy.html": {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'nonce-probe'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'"
+  },
+  "heavy-strict.html": {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'nonce-probe'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'"
+  }
 }

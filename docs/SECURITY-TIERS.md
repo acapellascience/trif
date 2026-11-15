@@ -19,7 +19,7 @@ unseen.
 
 | tier | header | runs as | the guarantee | what it rests on | how strong |
 |---|---|---|---|---|---|
-| Style mod | `// @style` (old: `@rules`) | data, executed by TRIF: CSS plus declarative hide/restyle/replace-text/filter rules | can't send, click, type or navigate; its CSS loads nothing | there is no code; CSS checked for anything that loads | strong (small surface), except clickjacking |
+| Style mod | `// @style` (old: `@rules`) | data, executed by TRIF: CSS plus declarative hide/restyle/replace-text/filter rules | can't send, click, type or navigate; its CSS loads nothing | there is no code; CSS checked for anything that loads | strong (small surface); clickjacking by hiding guarded, by disguise not |
 | Boxed mod | `// @boxed` (old: `@sandboxed`) | JavaScript in an SES Compartment in a separate user-script world, with frozen stand-ins for elements | can't send, click, type, navigate, read typed text or change form submission, unless the header names a power the user approved | the world's CSP, SES lockdown, an allowlist of operations on stand-ins, one design rule (below) | argued and adversarially tested, not proven |
 | Free mod | none | JavaScript in the page's own world, with everything the page has | none at run time; the mod waits for the user's OK if TRIF's reading of its code finds it can act | a static reading of the code (helper/lib/powers.js) and a hold (helper/lib/held.js) | a checkpoint for honest code and lazy attacks, not a boundary |
 
@@ -41,9 +41,19 @@ and an unquoted `url()` is one token. Before the November review it read a strin
 took `/*` inside a `url()` for a comment, so CSS could sit where the check saw a string or a comment and the
 browser saw rules; tests/css-browser.test.js runs every allowed case in a real browser.
 
-**Known gap: clickjacking (RT-3, open, tier-wide).** CSS can make a real control invisible and float it over
-a decoy, so the user's own click lands on it. Not closed in code; the panel's wording doesn't claim
-otherwise. A partial fix for boxed mods' `style()` is proposed in docs/SANDBOX-TIER-NOTES.md, not built.
+**Clickjacking (RT-3, tier-wide): guarded at the press, partly.** CSS can make a real control invisible and
+float it over a decoy, so the user's own click lands on it. Since 0.3.1 (branch clickjack-guard), a guard in
+TRIF's page runtime (extension/runtime.js `clickGuard`) sees every trusted press first: when the control
+pressed is unseen (faded, masked, a few pixels small, or showing nothing) and it shows with the mods' styles
+taken away for that moment, the press is stopped and the mod named (its errors, a card in the chat). The
+site's own invisible controls are left alone, as the comparison is with the page without mods. It covers
+style mods, style sections, and boxed mods' `trif.css`, shadow CSS, `style()` and animations, plus a boxed
+mod's own opaque element laid over a control with clicks passing through, and frames. What's left, plainly:
+**disguise** (a control visible but reading or looking like something else: its words replaced, generated
+content, a mod's words or a picture drawn over it), decoys from pseudo-elements, camouflage and other ways
+to be unseen the guard doesn't test, keyboard focus into a hidden frame, and **free mods' code**, which runs
+in the page and can do anything. The full list, the costs (about 0.4 ms a press) and the false positives
+found: docs/SANDBOX-TIER-NOTES.md RT-3.
 
 **Code:** helper/lib/rules.js (format and the CSS check), extension/lib.js (the runtime), helper/lib/mods.js
 (headers).
@@ -90,7 +100,8 @@ them is handled at run time: the sandbox tracks every boxed mod's powers on the 
 the acting mod didn't itself ask for (extension/sandbox.js `ACT_PARTNERS`).
 
 **Known gaps and limits, plainly:**
-- Clickjacking (RT-3), as for style mods.
+- Clickjacking (RT-3), as for style mods: hiding a control is guarded at the press (including `style()`,
+  animations, moves and the mod's own opaque elements over a control); disguise isn't.
 - `sound` beside a read (a listening device near the user could pick it up) is warned for a single mod,
   and refused across mods only when the sound mod and the reading mod share a `mods` channel. Otherwise it
   isn't enforced across mods: it would stop every sound mod beside any hotkey mod.
@@ -109,7 +120,7 @@ the acting mod didn't itself ask for (extension/sandbox.js `ACT_PARTNERS`).
   address, and the page's own listeners must notice nothing. Run by tests/e2e/scenario.js
   (`sandboxedCheck`, `powersCheck`…). Unit tests: tests/sandbox.test.js, tests/combinations.test.js.
 - Two red-team rounds by an AI model with no context but the branch and docs (findings RT-1 to RT-10, all
-  fixed except RT-3). An audit of sandbox.js (AU-1 to AU-9, all fixed). A review of main (0.2.7 plus the
+  fixed except RT-3, which is partly: guarded at the press, not for disguise). An audit of sandbox.js (AU-1 to AU-9, all fixed). A review of main (0.2.7 plus the
   0.3 work, November 2026): the walls that didn't hold, now closed, are in docs/SECURITY.md "Review fixes",
   with one test each in tests/hardening.test.js; it also found gaps in the power combinations (F1 to F12;
   F1 to F10 and F12 fixed in code, commit 3ad148e). All by AI models; no human security review yet.

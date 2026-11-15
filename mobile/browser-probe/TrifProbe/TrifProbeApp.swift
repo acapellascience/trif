@@ -7,11 +7,13 @@ import UIKit
 
 @main
 struct TrifProbeApp: App {
+    // (the app icon's long-press menu, Pause all mods: Safety.swift)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = Model()
 
     var body: some Scene {
         WindowGroup {
-            ContentView(pane: model.pane, modsPanel: model.modsPanel)
+            ContentView(pane: model.pane, modsPanel: model.modsPanel, safety: model.browser.safety, store: model.browser.mods)
                 .environmentObject(model.browser)
                 .environmentObject(model.report)
                 .tint(Color.trifGreen) // (every button and control TRIF's green, not iOS's blue: Tim, 11-14)
@@ -131,8 +133,12 @@ extension Model {
         if step["back"] != nil { browser.back() }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
+        if step["cancelOffer"] != nil { browser.modOffer = nil }
+        if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
+        if let p = step["pause"] as? Bool { browser.pauseAll(p) }
+        if step["acceptOffer"] != nil, let o = browser.safety.offer { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged() }
         // ({"panego": "…"}: the chat pane loads an address; {"pane": 1}: its scrolling and size; {"panejs": "…"}: in its page)
         if let u = step["panego"] as? String, let url = URL(string: u) { Model.pane?.webView.load(URLRequest(url: url)) }
         if step["pane"] != nil, let sv = Model.pane?.webView.scrollView {
@@ -150,6 +156,8 @@ struct ContentView: View {
     @EnvironmentObject var report: Report
     let pane: ClaudePane
     @ObservedObject var modsPanel: ModsPanel
+    @ObservedObject var safety: Safety
+    @ObservedObject var store: ModStore
     @Environment(\.scenePhase) private var phase
 
     @State private var entry = ""
@@ -175,7 +183,7 @@ struct ContentView: View {
     /// (the toolbar steps aside, as Safari's does), so the field and what's around it stay in view.
     @State private var typingInPane = false
     private var paneNow: CGFloat {
-        if typingInPane { return max(room - 60, 160) }
+        if typingInPane { return max(min(room - 80, UIScreen.main.bounds.height - 120), 160) }
         let screen = UIScreen.main.bounds.height
         let base = paneHeight > 0 ? CGFloat(paneHeight) : screen * 0.5
         return max(min(max(base - paneDrag, 200), screen - 160, room - 170), 120)
@@ -205,6 +213,37 @@ struct ContentView: View {
     }
 
     var body: some View {
+        let _ = Diagnostics.shared.bodyRan("the browser's main view")
+        page
+        .onChange(of: phase) { _, p in
+            // (safe mode: the record is unclean only while the app is in front)
+            browser.safety.active(p == .active)
+            if p != .active { browser.saveTabs(); browser.history.saveNow() }
+        }
+        .alert(item: $safety.offer) { o in
+            let name = o.likely.flatMap { id in browser.mods.mods.first { $0.id == id }?.name }
+            return Alert(title: Text("\(o.site) keeps this iPhone busy"),
+                         message: Text(o.why == "ended" ? "Its page stopped twice in three minutes while mods ran on it. Switch them off?" : "Its page has been busy most of the time for 40 seconds while mods ran on it. Switch them off?\(name.map { " \($0) changed most recently." } ?? "")"),
+                         primaryButton: .destructive(Text("Switch off its mods")) { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged() },
+                         secondaryButton: .cancel(Text("Not now")) { browser.safety.offer = nil })
+        }
+    }
+
+    // (the room is the space the app is offered, read by a GeometryReader around everything: before 11-15 it was
+    // read from the column's own size, and while the keyboard was up for the chat the pane was sized from it, so a
+    // taller pane made a taller column made a taller pane: a layout that never settled, the app at 50% CPU, then
+    // ended by iOS. Tim's iPhone SE, 11-15)
+    private var page: some View {
+        GeometryReader { geo in
+            column
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                .clipped()
+                .onAppear { room = geo.size.height }
+                .onChange(of: geo.size.height) { _, h in if abs(h - room) > 0.5 { room = h } }
+        }
+    }
+
+    private var column: some View {
         VStack(spacing: 0) {
             addressBar
             ZStack {
@@ -232,6 +271,9 @@ struct ContentView: View {
                 .padding(.vertical, 6)
                 .background(Color(.secondarySystemBackground))
             }
+            if let off = safety.switchedOff[browser.site] {
+                SafetyBanner(site: browser.site, off: off, open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
+            }
             if !browser.status.isEmpty {
                 HStack(alignment: .top) {
                     Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
@@ -247,7 +289,6 @@ struct ContentView: View {
                 toolbar
             }
         }
-        .background(GeometryReader { g in Color.clear.onAppear { room = g.size.height }.onChange(of: g.size.height) { _, h in room = h } })
         .onAppear { entry = browser.address; pane.follow(site: browser.site) }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             typingInPane = showClaude && pane.webView.holdsFirstResponder
@@ -274,7 +315,6 @@ struct ContentView: View {
             browser.wantsSheet = ""
         }
         .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
-        .onChange(of: phase) { _, p in if p != .active { browser.saveTabs(); browser.history.saveNow() } }
         .onOpenURL { url in if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { browser.importFiles(urls) }
@@ -328,7 +368,7 @@ struct ContentView: View {
             Button { showClaude.toggle() } label: { Image(systemName: showClaude ? "bubble.left.fill" : "bubble.left") }.accessibilityLabel("Chat")
             Spacer()
             Button { showMods = true } label: {
-                RobotGlyph().frame(width: 24, height: 24)
+                RobotGlyph(paused: store.paused).frame(width: 24, height: 24)
                     .overlay(alignment: .topTrailing) {
                         if waitingHere > 0 {
                             Text("\(waitingHere)").font(.caption2.bold()).foregroundStyle(.black)
@@ -336,7 +376,7 @@ struct ContentView: View {
                         }
                     }
             }
-            .accessibilityLabel(waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
+            .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
             Spacer()
             Button { browser.snapshot(); showTabs = true } label: {
                 ZStack {
@@ -388,14 +428,21 @@ extension UIView {
 /// The robot as the toolbar's Mods button (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head
 /// and two round eyes, in the button's colour.
 struct RobotGlyph: View {
+    /// All mods paused: two bars for eyes (docs/STYLE.md's paused face).
+    var paused = false
     var body: some View {
         GeometryReader { g in
             let s = min(g.size.width, g.size.height)
             ZStack {
                 RoundedRectangle(cornerRadius: s * 0.3, style: .continuous).stroke(lineWidth: s * 0.09)
                 HStack(spacing: s * 0.2) {
-                    Circle().frame(width: s * 0.2, height: s * 0.2)
-                    Circle().frame(width: s * 0.2, height: s * 0.2)
+                    if paused {
+                        RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
+                        RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
+                    } else {
+                        Circle().frame(width: s * 0.2, height: s * 0.2)
+                        Circle().frame(width: s * 0.2, height: s * 0.2)
+                    }
                 }
             }
             .frame(width: s, height: s)

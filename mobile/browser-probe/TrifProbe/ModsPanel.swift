@@ -52,20 +52,33 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         navigationAction.request.url?.isFileURL == true ? .allow : .cancel
     }
 
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Diagnostics.shared.log("ended", "WebKit ended the Mods tab's page process; loading it again.")
+        ready = false
+        webView.reload()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         ready = true
         Task { await refresh() }
     }
 
     /// Sends the page what it shows: the site's mods, as the panel's status has them.
+    /// First what the app knows (at once), then what the page says (which mods started there, their errors), when it
+    /// answers: a page busy with its own work (x.com scrolling) answers late, and the tab stayed blank meanwhile
+    /// (Tim, 11-15: about five seconds). The page's part has two seconds; past that the tab keeps what it showed.
     func refresh(openingApproval: String? = nil) async {
         guard ready, let browser else { return }
-        let state = await browser.modsState()
-        let json = Browser.jsonText(state)
         let open = openingApproval ?? openApproval
         openApproval = nil
+        await send(browser.modsState(askPage: false), open: open)
+        let full: [String: Any]? = await Browser.within(2, nil) { await browser.modsState(askPage: true) }
+        if let full { await send(full, open: nil) } else { Diagnostics.shared.log("slow", "the Mods tab asked \(Diagnostics.place(browser.webView.url)) which mods started there, and it didn't answer within 2 s") }
+    }
+
+    private func send(_ state: [String: Any], open: String?) async {
         _ = try? await webView.callAsyncJavaScript("window.trifRender && window.trifRender(JSON.parse(state), open || null); return 'ok';",
-                                                   arguments: ["state": json, "open": open ?? ""], in: nil, contentWorld: .page)
+                                                   arguments: ["state": Browser.jsonText(state), "open": open ?? ""], in: nil, contentWorld: .page)
     }
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
@@ -86,10 +99,13 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         }
         switch type {
         case "state":
-            return (Browser.jsonText(await browser.modsState()), nil)
+            // (from the app's own store at once: never waits for the page, which may be busy or gone. Tim, 11-15:
+            // on x.com the tab showed nothing at all, as this waited on the page)
+            return (Browser.jsonText(await browser.modsState(askPage: false)), nil)
         case "enable":
             let on = d["enabled"] as? Bool ?? false
             store.setOn(id, on, site: d["site"] as? String)
+            if on { browser.safety.forget(id) }
             browser.report.log("mods", "\(id) switched \(on ? "on" : "off")\((d["site"] as? String).map { " on \($0)" } ?? "")")
             return await done()
         case "group":
@@ -98,8 +114,17 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             return await done()
         case "delete":
             store.remove(id)
+            browser.safety.forget(id)
             browser.report.log("mods", "deleted \(id)")
             return await done()
+        case "resume":
+            browser.pauseAll(false)
+            await refresh()
+            return (["ok": true], nil)
+        case "dismissOff":
+            browser.safety.dismiss(site: browser.site)
+            await refresh()
+            return (["ok": true], nil)
         case "undoDelete":
             store.undoDelete()
             return await done()
@@ -203,6 +228,14 @@ struct ModsPanelView: View {
                                 Task { _ = await panel.handle(["type": "exportSite"]) }
                             }
                             .disabled(!browser.mods.mods.contains { $0.site == browser.site || Site.host($0.site, isIn: browser.site) })
+                            Divider()
+                            // (Safety.swift: no mod runs anywhere until Resume)
+                            Button(browser.mods.paused ? "Resume mods" : "Pause all mods") {
+                                browser.pauseAll(!browser.mods.paused)
+                                Task { await panel.refresh() }
+                            }
+                            // (Diagnostics.swift: what went wrong lately, with times, as a file to send)
+                            Button("Send diagnostics…") { if let f = Diagnostics.shared.file() { panel.share = ShareFiles(urls: [f]) } }
                         } label: { Image(systemName: "ellipsis.circle") }
                         .accessibilityLabel("More")
                     }
@@ -229,14 +262,23 @@ extension Browser {
 
     /// What the Mods tab shows for the shown tab's site, in the shape the desktop panel's status has its mods:
     /// every mod for the site (its domain, or every site), whether it started on this page, its errors here, its hold.
-    func modsState() async -> [String: Any] {
+    /// `askPage`: ask the page which mods started and their errors (else the last answer for this page is used).
+    func modsState(askPage: Bool) async -> [String: Any] {
         let url = webView.url?.absoluteString ?? ""
         let site = self.site
         let listed = mods.mods.filter { m in
             m.everywhere || Site.of(m.site) == site || m.sites.contains { Site.of($0) == site } || (!url.isEmpty && mods.applies(m, to: url))
         }
-        let ran = url.isEmpty ? [] : await ranHere()
-        let errors = await modErrorsById(listed)
+        let ran: Set<String>, errors: [String: [String]]
+        let pageKnown = askPage || lastPageAnswer?.url == url
+        if askPage {
+            ran = url.isEmpty ? [] : await ranHere()
+            errors = await modErrorsById(listed)
+            lastPageAnswer = (url, ran, errors)
+            for (id, list) in errors where !list.isEmpty {  Diagnostics.shared.logOnce("mod error", "\(id) on \(Diagnostics.place(webView.url)): \(list.prefix(3).joined(separator: " | "))") }
+        } else if let last = lastPageAnswer, last.url == url {
+            ran = last.ran; errors = last.errors
+        } else { ran = []; errors = [:] }
         let rows: [[String: Any]] = listed.map { m in
             let applies = !url.isEmpty && mods.applies(m, to: url)
             let on = mods.isOn(m, site: site)
@@ -256,7 +298,7 @@ extension Browser {
                                                          "by": m.source, "site": m.site, "hash": m.hash]
             }
             // (a free mod that should have started here and didn't: the page's own world wouldn't run it)
-            if m.tier == "free", on, !tierOff, !m.held, applies, !loading, !ran.contains(m.id) { row["cant"] = true }
+            if pageKnown, m.tier == "free", on, !tierOff, !m.held, applies, !loading, !ran.contains(m.id) { row["cant"] = true }
             return row
         }
         let tiers = ["style": "rules", "boxed": "sandboxed", "free": "page"]
@@ -266,6 +308,8 @@ extension Browser {
             "groupsOff": (mods.groupsOff[site] ?? []).compactMap { tiers[$0] },
             "hidden": report.rules.filter { $0.host == host }.map { ["id": $0.id.uuidString, "selector": $0.selector] },
             "deleted": mods.lastDeleted?.name ?? NSNull(),
+            "paused": mods.paused,
+            "switchedOff": safety.switchedOff[site].map { ["why": $0.why, "ids": $0.ids] } ?? NSNull(),
         ]
     }
 }

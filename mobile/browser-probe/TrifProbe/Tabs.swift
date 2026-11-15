@@ -8,7 +8,9 @@ import WebKit
 @MainActor
 final class Tab: ObservableObject, Identifiable {
     let id: UUID
-    let webView: WKWebView
+    /// Its web view: made again when the tab comes back after being let go in the background (Browser.discard).
+    private(set) var webView: WKWebView
+    func replaceWebView(_ wv: WKWebView) { webView = wv }
     @Published var title: String
     @Published var url: URL?
     @Published var loading = false

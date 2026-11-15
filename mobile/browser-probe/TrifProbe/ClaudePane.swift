@@ -90,13 +90,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// Scrolling on for a page taller (or wider) than the pane; off, and back at the top, for one that fits (the
     /// chats, which scroll inside themselves).
+    /// (decided a moment after the page's size stops changing, and with a margin each way, so a page whose height
+    /// follows the pane's, as the chats' do while the keyboard comes and goes, can't flip it back and forth on every
+    /// layout: 11-15, an update loop on Tim's phone was looked for here too)
+    private var fitTask: Task<Void, Never>?
     private func fitScrolling() {
-        let sv = webView.scrollView
-        let on = ClaudePane.scrolls(sv)
-        guard sv.isScrollEnabled != on else { return }
-        sv.isScrollEnabled = on
-        sv.bounces = on
-        if !on { sv.setContentOffset(.zero, animated: false) }
+        fitTask?.cancel()
+        fitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self else { return }
+            let sv = self.webView.scrollView
+            let over = max(sv.contentSize.height - sv.bounds.height, sv.contentSize.width - sv.bounds.width)
+            let on = sv.isScrollEnabled ? over > 1 : over > 24
+            guard sv.isScrollEnabled != on else { return }
+            sv.isScrollEnabled = on
+            sv.bounces = on
+            if !on, sv.contentOffset != .zero { sv.setContentOffset(.zero, animated: false) }
+        }
     }
     /// The site the pane's conversation is for: the shown tab's (follow). Each site keeps its own conversation,
     /// so switching tabs, or going to another site, brings that site's chat back (Tim, 11-15: the chat follows the tab).
@@ -233,6 +243,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         child.isInspectable = true
         popup = child
         return child
+    }
+
+    /// The chat's page process ended (memory): loaded again, and noted in the diagnostics log.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Diagnostics.shared.log("ended", "WebKit ended the chat pane's page process at \(Diagnostics.place(webView.url)); loading it again.")
+        if webView.url != nil { webView.reload() }
     }
 
     func webViewDidClose(_ webView: WKWebView) {

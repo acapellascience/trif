@@ -49,6 +49,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published private(set) var current: Tab!
     /// The pages visited, in every tab (History.swift).
     let history = HistoryStore()
+    /// What the shown page last said about its mods (ModsPanel: the Mods tab shows it at once, then asks again).
+    var lastPageAnswer: (url: String, ran: Set<String>, errors: [String: [String]])?
     /// A hold that came from the chat opened the Mods tab: it closes again once that's decided.
     var holdFromChat = false
     /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
@@ -67,6 +69,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var modLink: ModLink?
     /// Whole mods (Mods.swift): those kept, and one from the clipboard waiting for an OK.
     let mods = ModStore()
+    /// Safe mode, Pause all, a runaway page (Safety.swift).
+    private(set) var safety: Safety!
     @Published var modOffer: InstalledMod?
     @Published var running = false
     /// Counts the shown tab's finished loads (and tab switches), for what follows the page (the Mods tab).
@@ -93,6 +97,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         super.init()
 
         config.userContentController.addScriptMessageHandler(self, contentWorld: Browser.trifWorld, name: "trif")
+        // (before any page: a launch after the app quit in front starts with those sites' mods switched off)
+        safety = Safety(store: mods)
+        NotificationCenter.default.addObserver(forName: .trifPauseAll, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pauseAll(true) }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.memoryWarning() }
+        }
         installScripts()
         restoreTabs()
     }
@@ -101,7 +113,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// A web view for a tab: from the shared configuration, or (a page opening a window) the one WebKit hands over.
     private func makeTab(configuration: WKWebViewConfiguration? = nil, id: UUID = UUID(), title: String = "", url: URL? = nil) -> Tab {
-        let wv = WKWebView(frame: .zero, configuration: configuration ?? config)
+        let tab = Tab(id: id, webView: WKWebView(frame: .zero, configuration: configuration ?? config), title: title, url: url)
+        attach(tab)
+        return tab
+    }
+
+    /// Sets up a tab's web view: the app as its delegate, the long press, and watching its address and title.
+    private func attach(_ tab: Tab) {
+        let wv = tab.webView
         wv.navigationDelegate = self
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
@@ -111,7 +130,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         press.minimumPressDuration = 0.45
         press.delegate = self
         wv.addGestureRecognizer(press)
-        let tab = Tab(id: id, webView: wv, title: title, url: url)
         // (an address or title that changes without a page load, as a single-page site's do: the tab and History follow)
         tab.watches = [
             wv.observe(\.url, options: [.new]) { [weak self, weak tab] w, _ in Task { @MainActor in
@@ -127,7 +145,42 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                 self.history.retitle(w.url, tab.title)
             } },
         ]
-        return tab
+    }
+
+    /// A tab in the background lets its page go after a while (and at once when iOS warns of low memory): its address,
+    /// back/forward list and picture are kept, and the page loads again when the tab is shown. A page left running
+    /// behind kept using the phone (Tim, 11-15: an x.com tab with a busy mod, while he read Wikipedia).
+    private var letGo: [UUID: Task<Void, Never>] = [:]
+    private static let backgroundSeconds: UInt64 = 20
+    private func letGoLater(_ tab: Tab) {
+        letGo[tab.id]?.cancel()
+        letGo[tab.id] = Task { @MainActor [weak self, weak tab] in
+            try? await Task.sleep(nanoseconds: Browser.backgroundSeconds * 1_000_000_000)
+            guard !Task.isCancelled, let self, let tab else { return }
+            self.discard(tab)
+        }
+    }
+
+    func discard(_ tab: Tab) {
+        guard tab !== current, tab.started, tab.webView.url != nil else { return }
+        tab.savedState = tab.webView.interactionState as? Data
+        tab.savedURL = tab.webView.url
+        tab.watches = []
+        let old = tab.webView
+        old.stopLoading()
+        old.navigationDelegate = nil
+        old.uiDelegate = nil
+        old.removeFromSuperview()
+        tab.replaceWebView(WKWebView(frame: .zero, configuration: config))
+        attach(tab)
+        tab.started = false
+        Diagnostics.shared.log("tab", "let go of a background tab's page (\(Diagnostics.place(tab.savedURL))); it loads again when shown")
+        noteRunning()
+    }
+
+    /// iOS warns the app of low memory: every background tab lets its page go now.
+    func memoryWarning() {
+        for t in tabs where t !== current { letGo[t.id]?.cancel(); discard(t) }
     }
 
     private func restoreTabs() {
@@ -158,7 +211,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// Shows a tab: the first time, what was kept of it is loaded (its back/forward list, else its address).
     func select(_ tab: Tab) {
-        if let was = current, was !== tab { snapshot(was) }
+        defer { noteRunning() }
+        letGo[tab.id]?.cancel()
+        if let was = current, was !== tab { snapshot(was); letGoLater(was) }
         current = tab
         picked = nil; previewing = false; lastHide = nil; status = ""
         if !tab.started {
@@ -224,6 +279,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func installScripts() {
         let ucc = config.userContentController
         ucc.removeAllUserScripts()
+        // (development) `-bare`: nothing of the app's in any page, to measure a page without it
+        if ProcessInfo.processInfo.arguments.contains("-bare") { return }
+        ucc.addUserScript(WKUserScript(source: Diagnostics.stallWatch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
         let kit = Browser.resource("kit", "js")
         let startOwn = Browser.resource("start-own", "js") + "(\(report.rulesJSON()));"
         let startPage = Browser.resource("start-page", "js")
@@ -238,6 +296,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A mod the user added (from the chat or the clipboard: its Add it), or imported. One that needs an OK waits
     /// for it, with TRIF's approval card in the Mods tab, and doesn't run until then.
     func addMod(_ m: InstalledMod, source: String = "chat") {
+        Diagnostics.shared.mark("adding \(m.id) (\(source))")
         hideChat += 1
         let added = mods.add(m, source: source)
         report.log("mods", "added \(added.tierName.lowercased()) \(added.id) (\(source))\(added.held ? ", waiting for an OK" : "")")
@@ -257,8 +316,29 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// After any change to the mods: the scripts every page gets are made again, and the page reloads to run them.
     func modsChanged(reload again: Bool = true) {
+        Diagnostics.shared.mark("making the pages' scripts again after a change to the mods")
         installScripts()
         if again { keepStatus = true; reload() }
+        noteRunning()
+    }
+
+    /// Pause all mods, or resume them: every page loads again without (or with) them.
+    func pauseAll(_ p: Bool) {
+        if mods.paused != p { mods.setPaused(p) }
+        installScripts()
+        for t in tabs where t.started && t.webView.url != nil { t.webView.reload() }
+        noteRunning()
+    }
+
+    /// Which mods are running in the tabs, by site, for safe mode (Safety.running).
+    func noteRunning() {
+        var bySite: [String: [String]] = [:]
+        for t in tabs where t.started {
+            guard let u = t.webView.url else { continue }
+            let ids = mods.running(on: u.absoluteString).map(\.id)
+            if !ids.isEmpty { bySite[Site.of(u.host ?? ""), default: []] += ids }
+        }
+        safety.running(bySite.mapValues { Array(Set($0)).sorted() })
     }
 
     /// Allow, on the approval card: it runs from this reload; one the chat made gets its follow-up, as when added.
@@ -389,10 +469,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// added or another offer is up.
     func offerFromChat(_ text: String) {
         guard modOffer == nil, modLink == nil else { return }
-        let r = mods.readNamed(text, here: host)
-        guard let m = r.mod else { return }
-        if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) { return }
-        modOffer = m
+        let here = host
+        Task { @MainActor in
+            let r = await mods.readNamedInBackground(text, here: here)
+            guard let m = r.mod, modOffer == nil, modLink == nil else { return }
+            if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) { return }
+            modOffer = m
+        }
     }
 
     /// What was pasted (iOS's own Paste button hands it over without asking): a whole mod, a mod link, or a selector.
@@ -403,8 +486,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         // (a whole mod: a chat's reply with a ==WebMod== file in it, or the file)
         if text.contains("==WebMod==") {
-            let r = mods.readNamed(text, here: host)
-            if let m = r.mod { modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
+            let here = host
+            Task { @MainActor in
+                let r = await mods.readNamedInBackground(text, here: here)
+                if let m = r.mod { modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
+            }
             return
         }
         let words = text.components(separatedBy: .whitespacesAndNewlines)
@@ -591,7 +677,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
-        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Its @match must cover \(origin)/*. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
+        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
 
         A screenshot of what I see is attached. If I attach TRIF pointer files, those are the parts of the page I mean. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 
@@ -747,19 +833,29 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// shrinks a tall picture until it can't be read, a PDF keeps its detail. Not when it's over 10 MB (an
     /// endless feed).
     func fullPage() async -> Data? {
+        // (not for a page more than twelve screens tall, an endless feed say: its PDF is big to make and to hold, and
+        // a chat reads the screenshot anyway. 11-15: the app's memory grew by 600 MB on Tim's phone)
+        let tall = Double((await call("return String(document.documentElement.scrollHeight);", in: Browser.trifWorld)).text ?? "") ?? 0
+        if tall > Double(max(webView.bounds.height, 500)) * 12 {
+            report.log("claude", "no whole-page PDF: the page is \(Int(tall)) px tall")
+            return nil
+        }
         guard let data = await Browser.within(15, nil, { try? await self.webView.pdf(configuration: WKPDFConfiguration()) }) else {
             report.log("claude", "no whole-page PDF (failed or over 15 seconds)")
             return nil
         }
         // (WebKit makes it one page as tall as the page, which a chat would shrink like a tall picture: cut into
         // pages a screen high, still drawn, not pictures, so its text stays sharp and readable)
-        let paged = Browser.pages(of: data, height: max(webView.bounds.height, 600)) ?? data
+        // (cut into pages off the main thread: a long page's PDF drawn page by page held the app up)
+        let height = max(webView.bounds.height, 600)
+        Diagnostics.shared.mark("cutting the page's PDF into pages")
+        let paged = await Task.detached(priority: .userInitiated) { Browser.pages(of: data, height: height) ?? data }.value
         if paged.count > 10_000_000 { report.log("claude", "the whole-page PDF is \(paged.count / 1_000_000) MB, so not attached"); return nil }
         return paged
     }
 
     /// A one-page PDF cut into pages `height` high, top first.
-    static func pages(of pdf: Data, height: CGFloat) -> Data? {
+    nonisolated static func pages(of pdf: Data, height: CGFloat) -> Data? {
         guard let doc = PDFDocument(data: pdf), doc.pageCount == 1, let page = doc.page(at: 0) else { return nil }
         let box = page.bounds(for: .mediaBox)
         guard box.height > height * 1.2 else { return nil }
@@ -783,9 +879,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// What's on the screen of the page, as PNG.
     func screenshot() async -> Data? {
-        await withCheckedContinuation { c in
-            webView.takeSnapshot(with: nil) { image, _ in c.resume(returning: image?.pngData()) }
+        let image: UIImage? = await withCheckedContinuation { c in
+            webView.takeSnapshot(with: nil) { image, _ in c.resume(returning: image) }
         }
+        guard let image else { return nil }
+        // (the PNG made off the main thread)
+        return await Task.detached(priority: .userInitiated) { image.pngData() }.value
     }
 
     func askPhone(_ question: String) async {
@@ -811,6 +910,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             return (["ok": true, "received": (body["pad"] as? String ?? "").count], nil)
         case "load":
             report.log("load", body["rec"] as? String ?? "")
+            return (["ok": true], nil)
+        case "stalls":
+            let busy = (body["busy"] as? NSNumber)?.intValue ?? 0, longest = (body["longest"] as? NSNumber)?.intValue ?? 0
+            let url = message.webView?.url
+            let running = mods.running(on: url?.absoluteString ?? "")
+            Diagnostics.shared.log("busy", "\(Diagnostics.place(url)): its main thread was busy \(busy)% of the last 10 s (longest stall \(longest) ms), \((body["elements"] as? NSNumber)?.intValue ?? 0) elements, \(running.map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
+            safety.busy(site: Site.of(url?.host ?? ""), percent: busy, mods: running)
             return (["ok": true], nil)
         default:
             return (nil, "unknown message")
@@ -850,9 +956,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Diagnostics.shared.log("page", "\(Diagnostics.place(webView.url)) loaded, with \(mods.running(on: webView.url?.absoluteString ?? "").map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
         if let t = tab(of: webView) { t.loading = false; t.title = webView.title ?? t.title }
         history.visit(webView.url, title: webView.title ?? "")
         saveTabs()
+        noteRunning()
         guard webView === self.webView else { return }
         loading = false
         title = webView.title ?? ""
@@ -889,6 +997,18 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         tabs.insert(t, at: at)
         select(t)
         return t.webView
+    }
+
+    /// WebKit ended a page's process (memory, most often: a long timeline): the page goes black. The tab loads it
+    /// again, and the diagnostics log says so, with the mods that were running there.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        let url = webView.url
+        let on = mods.running(on: url?.absoluteString ?? "").map(\.id)
+        Diagnostics.shared.log("ended", "WebKit ended the page's process (a black page) at \(Diagnostics.place(url)), \(webView === self.webView ? "the tab shown" : "a tab behind"), with \(on.isEmpty ? "no mods" : on.joined(separator: ", ")); \(Diagnostics.freeMB()) MB left for the app. Loading it again.")
+        report.log("load", "process ended: \(Diagnostics.place(url))")
+        if webView === self.webView { status = "This page stopped (iPhone ended it, often for memory), so it was loaded again." }
+        safety.ended(site: Site.of(url?.host ?? ""), mods: mods.running(on: url?.absoluteString ?? ""))
+        if url != nil { webView.reload() }
     }
 
     func webViewDidClose(_ webView: WKWebView) {

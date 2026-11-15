@@ -373,6 +373,9 @@
 
   function renderMods() {
     const st = view.state;
+    // ("Loading mods…" until the app's list has come: the list is never shown empty while it's on its way)
+    $('mods-loading').hidden = !!st;
+    if (!st) return;
     const mods = GROUPS.flatMap((g) => (st?.mods || []).filter((m) => modGroup(m) === g));
     if (view.foldFor !== st?.site) { view.foldFor = st?.site; view.foldOpen = false; }
     // (the ones whose @match doesn't cover this page fold into one line at the bottom, as on desktop)
@@ -1050,8 +1053,30 @@
   }
 
   // ---- from the app ----------------------------------------------------------------------------------------
+  // Pause all, and mods TRIF switched off (safe mode, a runaway page): what happened, and the way back (Safety.swift)
+  function renderSafety(st) {
+    const box = $('safety-note');
+    const parts = [];
+    if (st.paused) {
+      const p = el('p');
+      p.append(el('b', null, 'All mods are paused:'), ' none runs on any site.');
+      parts.push(p, button('Resume mods', 'go', () => ask({ type: 'resume' })));
+    } else if (st.switchedOff && st.switchedOff.ids.length) {
+      const names = st.switchedOff.ids.map((id) => (st.mods.find((m) => m.id === id) || {}).name || id).join(', ');
+      const why = st.switchedOff.why === 'quit' ? `The app quit while these were running on ${st.site}, so TRIF switched them off:`
+        : st.switchedOff.why === 'ended' ? `The page on ${st.site} stopped twice while these ran, so TRIF switched them off:`
+          : `These kept this iPhone busy on ${st.site}, so TRIF switched them off:`;
+      const p = el('p');
+      p.append(why, ' ', el('b', null, names), '. Switch each back on to try it.');
+      parts.push(p, button('OK', '', () => ask({ type: 'dismissOff' })));
+    }
+    box.replaceChildren(...parts);
+    box.hidden = !parts.length;
+  }
+
   window.trifRender = (state, openId) => {
     view.state = state;
+    renderSafety(state);
     renderMods();
     showUndo(state.deleted ? `Deleted ${state.deleted}.` : '', true);
     if (codeView.dialog?.open && codeView.id) {
@@ -1060,5 +1085,6 @@
     }
     if (openId) openApproval(openId);
   };
-  ask({ type: 'state' }).then((t) => window.trifRender(JSON.parse(t))).catch(() => {});
+  // (the app sends the state when this page has loaded, and on every change; this asks too, in case that came first)
+  ask({ type: 'state' }).then((t) => { if (!view.state) window.trifRender(JSON.parse(t)); }).catch(() => {});
 })();

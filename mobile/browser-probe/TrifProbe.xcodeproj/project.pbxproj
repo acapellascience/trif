@@ -36,6 +36,8 @@
 		1E813C508DF4C8DECF355AB3 /* sidepanel.css in Resources */ = {isa = PBXBuildFile; fileRef = F3AE0E965F44D6509BCBAEFA /* sidepanel.css */; };
 		043D2B26F4CBFC81026002AE /* switch.css in Resources */ = {isa = PBXBuildFile; fileRef = 004A90B030B6D40CBFD9BFB1 /* switch.css */; };
 		64CAEA4CF2EA4789ECADED2E /* style-mirror.js in Resources */ = {isa = PBXBuildFile; fileRef = 70D950EDA7F1B22C717ECA41 /* style-mirror.js */; };
+		C745CF5C2816FC7A7ADA364B /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809D0434EE3725AC20065A9B /* Diagnostics.swift */; };
+		68DC99A004C2984C53DC84B5 /* Safety.swift in Sources */ = {isa = PBXBuildFile; fileRef = B902F38A16EA7EBFE6E4A39A /* Safety.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -69,6 +71,8 @@
 		F3AE0E965F44D6509BCBAEFA /* sidepanel.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; name = "sidepanel.css"; path = "../../extension/sidepanel.css"; sourceTree = "<group>"; };
 		004A90B030B6D40CBFD9BFB1 /* switch.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; name = "switch.css"; path = "../../extension/switch.css"; sourceTree = "<group>"; };
 		70D950EDA7F1B22C717ECA41 /* style-mirror.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = "style-mirror.js"; sourceTree = "<group>"; };
+		809D0434EE3725AC20065A9B /* Diagnostics.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Diagnostics.swift"; sourceTree = "<group>"; };
+		B902F38A16EA7EBFE6E4A39A /* Safety.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Safety.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -142,6 +146,8 @@
 		D2A8835F18F122DCE368FB7D /* TrifProbe */ = {
 			isa = PBXGroup;
 			children = (
+				B902F38A16EA7EBFE6E4A39A /* Safety.swift */,
+				809D0434EE3725AC20065A9B /* Diagnostics.swift */,
 				903BBCA66CB348FEA79D82F4 /* Import.swift */,
 				8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */,
 				7F4AB4F92AE50452752EADEC /* History.swift */,
@@ -241,6 +247,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				68DC99A004C2984C53DC84B5 /* Safety.swift in Sources */,
+				C745CF5C2816FC7A7ADA364B /* Diagnostics.swift in Sources */,
 				0EF94AA25682CDCF85352992 /* Import.swift in Sources */,
 				83C9CC277679A1522C7BFBA3 /* ModsPanel.swift in Sources */,
 				ECF9AC8198F8D474EE8E0A97 /* History.swift in Sources */,

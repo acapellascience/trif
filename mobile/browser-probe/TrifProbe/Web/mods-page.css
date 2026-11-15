@@ -42,6 +42,10 @@ button.switch { transform: scale(1.18); transform-origin: right center; margin-l
 dialog.approval { margin: 12px; max-height: calc(100% - 24px); width: calc(100% - 24px); font-size: 15px; }
 .approval .btn { min-height: 34px; font-size: 14.5px; }
 .cv-code { font-size: 12px; }
+/* (Pause all, safe mode: a note over the list) */
+.safety-note { margin: 10px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line); }
+.safety-note p { margin: 0 0 6px; }
+.safety-note .btn { margin-top: 2px; }
 /* (the code card's editor: Edit on the Code tab) */
 .cv-e-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .cv-e-tools .cv-e-save { margin-left: auto; }

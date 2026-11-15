@@ -22,6 +22,17 @@
 			</array>
 		</dict>
 	</array>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.timsrobot.trifprobe.pause</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Pause all mods</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypePause</string>
+		</dict>
+	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 </dict>

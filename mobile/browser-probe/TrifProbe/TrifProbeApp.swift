@@ -256,6 +256,9 @@ struct ContentView: View {
         .onChange(of: browser.address) { _, new in if !editing { entry = new }; pane.follow(site: browser.site) }
         .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site) }
         .onChange(of: browser.wantsChat) { _, want in if want { showClaude = true; browser.wantsChat = false } }
+        .onChange(of: browser.hideChat) { _, _ in showClaude = false; typingInPane = false }
+        .onChange(of: showMods) { _, open in if !open { browser.holdFromChat = false } }
+        .onChange(of: modsPanel.wantsClose) { _, want in if want { showMods = false; modsPanel.wantsClose = false } }
         .onChange(of: browser.wantsMods) { _, want in if want { showMods = true; browser.wantsMods = false } }
         .onChange(of: browser.wantsAddress) { _, want in if want { entry = ""; editing = true; browser.wantsAddress = false } }
         .onChange(of: browser.wantsSheet) { _, which in
@@ -475,6 +478,7 @@ struct ModLinkView: View {
                             dismiss()
                         }
                         Button("Add it") {
+                            browser.hideChat += 1
                             let selectors = link.hide
                             Task { for s in selectors { await browser.hide(s, how: "given", from: "a mod link") } }
                             dismiss()

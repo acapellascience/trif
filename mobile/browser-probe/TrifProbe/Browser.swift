@@ -49,6 +49,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published private(set) var current: Tab!
     /// The pages visited, in every tab (History.swift).
     let history = HistoryStore()
+    /// A hold that came from the chat opened the Mods tab: it closes again once that's decided.
+    var holdFromChat = false
     /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
     @Published var wantsMods = false
     @Published var status = ""
@@ -59,6 +61,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var previewing = false
     /// Set when something asks for the chat pane to open (Point TRIF at this); the app opens it.
     @Published var wantsChat = false
+    /// Counts the times a mod came in and the chat pane should get out of the way, so the page with the mod shows
+    /// (Tim, 11-15: "when the code is pasted, just hide the claude window"). The pane keeps its conversation.
+    @Published var hideChat = 0
     @Published var modLink: ModLink?
     /// Whole mods (Mods.swift): those kept, and one from the clipboard waiting for an OK.
     let mods = ModStore()
@@ -233,12 +238,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A mod the user added (from the chat or the clipboard: its Add it), or imported. One that needs an OK waits
     /// for it, with TRIF's approval card in the Mods tab, and doesn't run until then.
     func addMod(_ m: InstalledMod, source: String = "chat") {
+        hideChat += 1
         let added = mods.add(m, source: source)
         report.log("mods", "added \(added.tierName.lowercased()) \(added.id) (\(source))\(added.held ? ", waiting for an OK" : "")")
         modsChanged()
         if added.held {
             status = "\(added.name) waits for your OK."
-            wantsMods = true
+            // (the approval card over the page instead of the chat: what there is to do now; after Allow, or Don't
+            // allow, the Mods tab steps aside again and the page shows: ModsPanel.closeAfterDecision)
+            holdFromChat = source != "import"
+            // (after the Add this mod? sheet has gone: one sheet can't open while another is closing)
+            Task { @MainActor in try? await Task.sleep(nanoseconds: 700_000_000); self.wantsMods = true }
         } else if source != "import" {
             status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
             Task { await reportToChat(added) }

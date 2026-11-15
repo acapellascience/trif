@@ -16,6 +16,17 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     /// Set by the page's Import mod… (the app shows the file picker) and Export (the share sheet).
     @Published var wantsImport = false
     @Published var share: ShareFiles?
+    /// Set when the tab should close by itself: a hold that came from the chat, now decided (Browser.holdFromChat).
+    @Published var wantsClose = false
+
+    /// After Allow or Don't allow: if the tab was opened for a hold from the chat and nothing else on the site
+    /// waits, it closes, so the page (reloaded with the mod) shows.
+    private func closeIfDecided() {
+        guard let browser, browser.holdFromChat else { return }
+        let site = browser.site
+        let waiting = browser.mods.mods.contains { $0.held && ($0.everywhere || Site.of($0.site) == site || $0.sites.contains { Site.of($0) == site }) }
+        if !waiting { browser.holdFromChat = false; wantsClose = true }
+    }
     /// The approval card to open when the page is next shown (a mod just added that waits).
     var openApproval: String?
 
@@ -95,11 +106,14 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "approve":
             browser.approveMod(id)
             await refresh()
+            closeIfDecided()
             return (["ok": true], nil)
         case "reject":
             store.reject(id)
             browser.report.log("mods", "didn't allow \(id)")
-            return await done()
+            let r = await done()
+            closeIfDecided()
+            return r
         case "code":
             guard let m = mod else { return (nil, "that mod isn't here any more") }
             return (["code": d["version"] as? String == "ran" ? (m.ran?.code ?? m.code) : m.code], nil)

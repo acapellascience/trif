@@ -8,15 +8,23 @@ summary is too long.
 
 ## 0.3.1
 
-- **Edit a mod's code in the panel**: Edit in its code card, then Save. TRIF checks it first, and an edit
-  that lets the mod do more waits for your OK, like any change. Undo puts the version before back.
-- **A click on something a mod hid is stopped.** If a style or boxed mod makes a button or link invisible
-  and you click where it is, TRIF stops the click and tells you which mod did it.
-- **Tim's mods get fixes between TRIF releases**, signed like TRIF's own updates. One you changed is never
-  replaced: you're offered the new version.
-- **TRIF names your browser.** Brave, Edge, Opera, Vivaldi, Arc and Chromium are no longer all called
-  Chrome (nor Firefox's forks Firefox), in the panel, `trif status`, `trif doctor` and problem reports.
-- **Mods written without semicolons** no longer wait for your OK as "code TRIF can't check".
+- **Edit a mod's code in the panel.** TRIF checks it before saving; an edit that lets the mod do more
+  waits for your OK.
+- **A click on something a mod hid is stopped**, and TRIF says which mod did it.
+- **Tim's mods get fixes between releases**, signed like TRIF's updates. One you changed is never replaced.
+- **TRIF names your browser**: Brave, Edge, Opera, Vivaldi and Arc aren't all called Chrome any more.
+- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
+
+### More
+
+- The code card's Edit has Undo and Redo, shows the line of anything that stops a save, and never
+  overwrites a change made meanwhile in another editor or by your agent. Undo after saving puts the
+  version before back; History keeps it too.
+- The click guard covers style mods and boxed mods: when you press a button or link that a mod's styles
+  made invisible or moved, the press doesn't reach the page. A control the site itself made invisible
+  still works. The mod's row says "stopped a click".
+- If the fixes for Tim's mods can't be fetched or checked, Settings says why, and so does `trif doctor`.
+- Firefox's forks are named too, in the panel, `trif status`, `trif doctor` and problem reports.
 
 ## 0.3.0
 

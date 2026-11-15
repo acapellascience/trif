@@ -533,7 +533,7 @@ async function release(version, { dryRun, skipTests }) {
     spawnSync('git', ['clean', '-fq', '--', 'updates'], { cwd: ROOT }); // a first release's new ones gone
     fail('not published; the version bump and feeds were rolled back (the built files are still in dist/release)');
   }
-  sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY]);
+  sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY, 'README.md']); // (README: its install steps name the version)
   sh('git', ['commit', '-m', `Release ${version}`]);
   sh('git', ['tag', '-a', `v${version}`, '-m', `TRIF ${version}`]);
   const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);

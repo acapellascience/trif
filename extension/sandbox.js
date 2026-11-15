@@ -597,6 +597,16 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     if (!refusedOnce.has(k)) { refusedOnce.add(k); report(api.mod, err); }
     throw err;
   };
+  // (beside an agent's one-off run (`trif run` in the box: its read powers, BOX_RUN_POWERS, end with it): the
+  // act is off only while the run lasts, so it's no error of the mod's. Said in its logs, as a warning, never
+  // in its errors, where the panel would offer to fix the mod; and once per run and act)
+  const isRun = (id) => String(id).startsWith('run/');
+  const refuseForRun = (api, act, runId, p) => {
+    const err = new TypeError(`TRIF sandbox: ${PARTNER_WHY[act][0]} is off on this page while an agent's trif run (in the box) is reading it with the ${p} power; it's back when the run ends. The mod isn't broken: keep trif runs short (no waiting inside one) while the page's boxed mods work`);
+    const k = `${api.mod}\n${act}\n${runId}`;
+    if (!refusedOnce.has(k)) { refusedOnce.add(k); try { push(store.logs, { mod: api.mod, level: 'warn', args: [err.message], time: Date.now() }, MAX_LOGS); nativeConsole.warn.call(console, '[TRIF]', api.mod, err.message); } catch { /* as it is */ } }
+    throw err;
+  };
   const LIFT = () => '(the user\'s OK for this site\'s mods together lifts it: TRIF asks when a mod that adds it is new, changed or switched on)';
   const partnersOk = (api, act) => {
     for (const p of ACT_PARTNERS[act]) {
@@ -606,7 +616,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
         continue;
       }
       if (!inPlay.has(p)) continue;
-      for (const o of apis.values()) if (o.mod !== api.mod && o.combo.has(p) && !crossOk(api, o.mod, act, p)) refuse(api, act, `${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
+      for (const o of apis.values()) if (o.mod !== api.mod && o.combo.has(p) && !crossOk(api, o.mod, act, p)) { if (isRun(o.mod)) refuseForRun(api, act, o.mod, p); refuse(api, act, `${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`); }
     }
   };
   // (sound: not beside every read on the page (that would stop every sound mod beside any hotkey mod:
@@ -623,7 +633,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       if (api.combo.has(p)) continue;
       for (const id of peers) {
         const o = apis.get(id);
-        if ((p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) && !crossOk(api, id, 'sound', p)) refuse(api, 'sound', `${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} ${LIFT('sound', p)}`);
+        if ((p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) && !crossOk(api, id, 'sound', p)) if (isRun(id)) refuseForRun(api, 'sound', id, p); else refuse(api, 'sound', `${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} ${LIFT('sound', p)}`);
       }
     }
   };

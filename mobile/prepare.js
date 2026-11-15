@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Writes the two files in mobile/shared/gen that are made from other files:
+// Writes the files in mobile/shared/gen that are made from other files (mods.js and panel-kit.js: below):
 //
 // - sandbox-runtime.js: TRIF's sandbox runtime (extension/sandbox.js) as one file that defines
 //   globalThis.__trifStartSandbox and doesn't start it, so a probe can start it inside a try and report why
@@ -31,15 +31,44 @@ function checksFile() {
   return `${JSON.stringify(checks.map((c) => ({ id: c.id, group: c.group, title: c.title, steps: c.steps.map(([world, fn]) => ({ world, body: stepBody(fn) })) })), null, 1)}\n`;
 }
 
-// mods.js: what the app needs to take a whole mod file (proof of concept, branch ios-poc): TRIF's style
-// rules (helper/lib/rules.js, as it is), a header reader and @match patterns, as globalThis.__trifMods. The
-// app runs it in JavaScriptCore when a mod is added, and puts each mod's ready code in the right world.
+// mods.js: what the app needs to take a whole mod file: the helper's own reading of it (helper/lib/mods.js
+// buildMod: the header, the hash, a style section, a boxed mod's powers and their values), TRIF's style rules
+// (rules.js), what a boxed mod's powers need allowing (boxpowers.js, combinations.js) and what TRIF's reading of
+// a free mod's code finds (powers.js), each file as it is, in a small CommonJS bundle with stand-ins for the
+// Node built-ins they name but don't use here; then mobile/shared/modfile.js, which makes each mod's ready code
+// for its world, as globalThis.__trifMods. The app runs it in JavaScriptCore.
 const MODS_OUT = path.join(__dirname, 'shared', 'gen', 'mods.js');
+const HELPER_LIBS = ['rules', 'combinations', 'boxpowers', 'powers', 'mods', 'stylesection', 'framing', 'pathcheck', 'scope', 'diff'];
 function modsFile() {
-  const rules = fs.readFileSync(path.join(ROOT, 'helper', 'lib', 'rules.js'), 'utf8');
+  const libs = HELPER_LIBS.map((n) => `${JSON.stringify(`./${n}`)}: function (module, exports, require) {\n${fs.readFileSync(path.join(ROOT, 'helper', 'lib', `${n}.js`), 'utf8')}\n}`);
+  const shims = fs.readFileSync(path.join(__dirname, 'shared', 'node-shims.js'), 'utf8');
   const own = fs.readFileSync(path.join(__dirname, 'shared', 'modfile.js'), 'utf8');
-  return `// Made by mobile/prepare.js from helper/lib/rules.js and mobile/shared/modfile.js: don't edit.\n` +
-    `globalThis.__trifMods = (function () {\nconst module = { exports: {} };\n${rules}\nconst rules = module.exports;\n${own}\nreturn api;\n})();\n`;
+  return `// Made by mobile/prepare.js from helper/lib/{${HELPER_LIBS.join(',')}}.js, mobile/shared/node-shims.js and mobile/shared/modfile.js: don't edit.\n` +
+    `globalThis.__trifMods = (function () {\n'use strict';\n${shims}\nconst SOURCES = {\n${libs.join(',\n')}\n};\n` +
+    'const cache = {};\nfunction require(name) {\n  if (BUILTINS[name]) return BUILTINS[name];\n  const key = name.replace(/\\.js$/, \'\');\n  if (cache[key]) return cache[key].exports;\n  if (!SOURCES[key]) throw new Error(`the app has no ${name}`);\n  const module = { exports: {} };\n  cache[key] = module;\n  SOURCES[key](module, module.exports, require);\n  return module.exports;\n}\n' +
+    `${own}\nreturn api;\n})();\n`;
+}
+
+// panel-kit.js: what the Mods tab (TrifProbe/Web/mods.html) shares with the desktop side panel, as it is: the row
+// icons (extension/icons.js), how noticeable a mod is and its icons' words (modlevel.js), the explanations
+// behind each "i" (explain.js with explain.json), the switch (modswitch.js) and the robot's outline from the
+// panel's bar (sidepanel.html), as one plain script (their exports made top-level declarations).
+const KIT_OUT = path.join(__dirname, 'shared', 'gen', 'panel-kit.js');
+function kitFile() {
+  const plain = (file) => fs.readFileSync(path.join(ROOT, 'extension', file), 'utf8')
+    .replace(/^import .*$/gm, '')
+    .replace(/^export (const|function|async function|let) /gm, '$1 ')
+    .replace(/import\.meta\.url/g, 'location.href');
+  const html = fs.readFileSync(path.join(ROOT, 'extension', 'sidepanel.html'), 'utf8');
+  const bar = /<button id="bar-robot"[^>]*>\s*<svg[^>]*>([\s\S]*?)<\/svg>/.exec(html);
+  if (!bar) throw new Error('sidepanel.html: no #bar-robot svg');
+  const robot = [...bar[1].matchAll(/<polygon class="(rim|face|eye)" points="([^"]+)"\/>/g)].map((m) => ({ cls: m[1], points: m[2] }));
+  if (!robot.some((p) => p.cls === 'rim') || robot.filter((p) => p.cls === 'eye').length !== 2) throw new Error('sidepanel.html: the robot has no rim or eyes');
+  const explain = JSON.parse(fs.readFileSync(path.join(ROOT, 'extension', 'explain.json'), 'utf8'));
+  return `// Made by mobile/prepare.js from extension/{icons,modlevel,explain,modswitch}.js, explain.json and sidepanel.html's robot: don't edit.\n` +
+    `(function () {\n${['icons.js', 'modlevel.js', 'explain.js', 'modswitch.js'].map(plain).join('\n')}\n` +
+    `setExplain(${JSON.stringify(explain)});\nconst ROBOT = ${JSON.stringify(robot)};\n` +
+    'globalThis.__trifPanel = { ICONS, iconSvg, modIcons, modLevel, levelWords, ICON_LABELS, term, moreText, warningByLine, modSwitch, setSwitch, syncSwitches, shownEnabled, switchError, onSwitchChange, ROBOT };\n})();\n';
 }
 
 // mod-guide.txt: what the chat is told about writing a mod, with the page's outline (the copy for Claude):
@@ -56,7 +85,7 @@ function guideFile() {
 }
 
 async function main() {
-  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [GUIDE_OUT, guideFile()]];
+  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()]];
   for (const [file, text] of files) {
     if (process.argv.includes('--check')) {
       if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) { console.error(`${path.relative(ROOT, file)} is out of date: run node mobile/prepare.js`); process.exit(1); }
@@ -69,4 +98,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { runtimeFile, checksFile, stepBody, OUT, CHECKS_OUT };
+module.exports = { runtimeFile, checksFile, modsFile, kitFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT };

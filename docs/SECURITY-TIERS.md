@@ -52,7 +52,7 @@ mod's own opaque element laid over a control with clicks passing through, and fr
 **disguise** (a control visible but reading or looking like something else: its words replaced, generated
 content, a mod's words or a picture drawn over it), decoys from pseudo-elements, camouflage and other ways
 to be unseen the guard doesn't test, keyboard focus into a hidden frame, and **free mods' code**, which runs
-in the page and can do anything. The full list, the costs (about 0.4 ms a press) and the false positives
+in the page and can do anything. The full list, the costs (about 0.5 to 1.5 ms a press) and the false positives
 found: docs/SANDBOX-TIER-NOTES.md RT-3.
 
 **Code:** helper/lib/rules.js (format and the CSS check), extension/lib.js (the runtime), helper/lib/mods.js

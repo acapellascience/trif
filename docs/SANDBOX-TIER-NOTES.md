@@ -294,9 +294,15 @@ make the page (or the user) act. What changed, and what each costs mods:
     - **Closed shadow roots** are judged at their host (what's inside isn't visible from TRIF's code).
     - **Inside other shadow trees**, inherited styles a document sheet changes during the look (a colour)
       can start transitions there; they're cancelled with the rest (`document.getAnimations()`).
-  - *Costs*: measured in headless Chrome on a page of 9000 elements (tests/clickjack-browser.test.js): a
-    press about 0.4 ms on average (5–9 ms at most, the first); the second look, only for an unseen control,
-    3–7 ms. Only presses are watched (and the pointer entering a frame). The second look's side effects,
+  - *Costs* (`window.__webmods.guard.stats`): in headless Chrome on a page of 9000 elements
+    (tests/clickjack-browser.test.js), a press 0.4 to 0.7 ms on average; the second look, only for an unseen
+    control, 3 to 9 ms (the first press of a page is the slowest, its code not yet warm). In the e2e's small
+    page through the real extension: Chrome about 1.5 ms a press and 1.5 ms for the second look (max 3.8);
+    Firefox about 1.3 ms and 2.8 ms (max 9, the first; Firefox's timer counts whole milliseconds; one earlier
+    run under load measured 22 ms at most, before the guard stopped asking TRIF's sandbox world on every
+    press). No event crosses to TRIF's world on a press unless it's on the page, and the check for a mod's
+    own element over a control runs only once a mod has made one. Only presses are watched (and the pointer
+    entering a frame). The second look's side effects,
     when a press is on an unseen control: the mods' CSS animations restart (their sheet was off for a moment),
     the page gets `transitioncancel` for transitions the look started, and MutationObservers that watch
     `style` attributes see a boxed mod's inline styles on the control and its ancestors undone and redone.
@@ -311,8 +317,11 @@ make the page (or the user) act. What changed, and what each costs mods:
     the site's own button fading in on hover, pressed at once (judged where its transition ends); the
     page's own transitions, which the second look first read at their first frame (cancelled, see above; a
     sheet making every transition `none` cost 34 ms on 9000 elements, so it's not that). The e2e presses
-    every control on the X and Google stand-ins with Tim's shipped mods on (tests/e2e/scenario.js
-    `clickjackShipped`): nothing stopped.
+    every control in view on the X and Google stand-ins with Tim's shipped mods on (Rainbow Rave, Profile
+    and Post Styler, Follow Status, Oppish, DVD Logo, the two Google style mods, Detox Timeline:
+    tests/e2e/scenario.js `clickjackShipped`, Chrome): nothing stopped. The stand-ins are small (13 controls
+    in all), so the real sites are the better test: Simple Shopping has no stand-in (its port runs on the
+    e2e's sandbox page, where nothing it does is pressed).
 - **RT-4, keystrokes (low).** `key` and `code` reach a mod only when the key wasn't pressed in something
   editable: input, textarea, select, contenteditable, or an element that may hold a field in its shadow root
   (a custom element, or one with an open shadow root). The mod still gets the type, modifiers and target.

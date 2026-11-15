@@ -1,11 +1,11 @@
 # TRIF privacy policy
 
-Last updated: November 4, 2026
+Last updated: November 15, 2026 (TRIF 0.3.0)
 
 Tim's Robot Internet Fixer (TRIF, called WebMods before version 0.2.0) is a browser extension (for
 Chrome, Firefox and Safari) that runs website customizations ("mods") written by **your own coding
-agent** (for example Claude Code or OpenAI Codex) on your own computer. This policy explains what the
-extension does with your data. In short, **TRIF collects nothing.** The only thing that ever reaches
+agent** (for example Claude Code or OpenAI Codex) on your own computer, or mods you add yourself. This
+policy explains what the extension and its helper do with your data. In short, **TRIF collects nothing.** The only thing that ever reaches
 its developer, Tim Blais, is a problem report, and only when you fill in the report form and press Send.
 
 ## Who handles your data
@@ -29,11 +29,17 @@ from your agent's own traffic (below), the only network traffic TRIF causes is:
   from GitHub (`raw.githubusercontent.com`), and downloads the new version from GitHub when you choose
   to install it. GitHub sees an ordinary download request (your IP address and "trif/<version>");
   nothing about your mods, pages or chats is sent. You can turn the checks off with `"checkForUpdates":
-  false` in TRIF's `config.json` (`~/Library/Application Support/TRIF/config.json` on a Mac). In
-  Firefox, the browser itself checks a similar public file on GitHub for new versions of the add-on, as
-  it does for any add-on.
+  false` in TRIF's `config.json` (`~/Library/Application Support/TRIF/config.json` on a Mac). If you
+  installed the extension from the Chrome Web Store, Chrome updates it from there, as it does for any
+  extension (Google's terms apply to that). In Firefox, the browser itself checks a similar public file
+  on GitHub for new versions of the add-on, as it does for any add-on.
 - **Pages you're already on.** In Chrome, a screenshot of a tab you're not looking at loads that page
   again (see the table below). Nothing goes anywhere the page wouldn't go by itself.
+- **Mods do what their code does.** A mod runs on the sites it's for, like the page's own scripts. Style
+  mods and boxed mods can't send anything anywhere (TRIF's box stops them, unless you allow a power that
+  says otherwise); a free mod can do whatever the page could, and TRIF asks before running a new or changed
+  one whose code it finds can send or act. Tim's mods (below) only load things from the site they're on:
+  Profile Styler, for one, loads people's profile pictures again from X's own image server.
 - **Problem reports, only when you send one.** "Report a problem" opens the report form at
   timsrobot.com/report with details from TRIF filled in: version numbers, setup checks, the mods for
   the site you're on, and recent errors, with your name, email addresses and full page addresses removed.
@@ -48,14 +54,19 @@ from your agent's own traffic (below), the only network traffic TRIF causes is:
 
 | Data | When | Where it goes |
 |---|---|---|
-| **Your mods** (JavaScript files, with the sites each one runs on) | Always | Read from a folder on your computer (`~/.trif/sites/`) by the helper. The extension keeps a copy in the browser's local extension storage so mods work before the helper connects. |
+| **Your mods** (JavaScript files, with the sites each one runs on) | Always | Read from a folder on your computer (`~/.trif/sites/`) by the helper. The extension keeps a copy in the browser's local extension storage so mods work before the helper connects. The helper keeps each mod's earlier versions (for Undo and Restore) in `~/.trif/history/` and deleted mods in `~/.trif/trash/`, each for 30 days. **Export** writes a mod to a folder you choose; nothing else leaves the folder unless you send it somewhere. |
+| **Tim's mods** (mods the developer wrote, for X, Google, Amazon and Instagram) | Only the sites you tick | They come with the helper, not the extension, and none is on your computer until you choose its site. Each starts switched off until you turn it on, and an updated one starts off again. They're files in your mods folder like your own: read, change or delete them. |
+| **Files you drop on the panel** | When you drop one | Saved in that site's mods folder (`~/.trif/sites/<site>/files/`) for your agent to use, which can send them to its AI provider like anything else it reads. Delete them there. |
 | **Tab addresses and titles** | When the side panel is open, and when your agent asks | The side panel uses them to show the mods and chat for the current site. Your agent gets them when it lists tabs or targets one. |
-| **Page content**: visible text, screenshots, the result of scripts the agent runs on the page, and errors or log messages from mods | Only when your agent asks, while working on a request from you, and only on sites you turned TRIF on for | Passed through the helper to your agent. Screenshots are saved in TRIF's private folder (below), one folder per site, and deleted after 30 days. In Firefox a screenshot can be of a tab you're not looking at. In Chrome, for a tab you're not looking at, your agent can ask for a copy of the page: TRIF loads the page again, with your cookies (so signed in as you), in a window of its own that shows for a moment at the edge of your screen, captures it and closes it; it refuses addresses that look like one-time links (sign-in, confirm, unsubscribe). |
+| **Page content**: visible text, screenshots, the result of scripts the agent runs on the page, and errors or log messages from mods | Only when your agent asks, while working on a request from you, and only on sites you turned TRIF on for and where you let your agent look (each site's "Agent" setting: Off, Look, Ask first or Run code; sensitive sites such as email, banking and password managers start blocked) | Passed through the helper to your agent. Screenshots are saved in TRIF's private folder (below), one folder per site, and deleted after 30 days. In Firefox a screenshot can be of a tab you're not looking at. In Chrome, a screenshot is of the tab you're looking at, after you click TRIF's toolbar button there. Only if you've given TRIF access to every site (in Chrome's settings for it; TRIF itself asks site by site), for a tab you're not looking at your agent can ask for a copy of the page: TRIF loads the page again, with your cookies (so signed in as you), in a window of its own that shows for a moment at the edge of your screen, captures it and closes it; it refuses addresses that look like one-time links (sign-in, confirm, unsubscribe). |
 | **Recorded network requests** (address, method, status, request body and response text) | Only on sites where you or your agent turn recording on. It's off by default. | Kept in the page's memory and cleared on every reload. Passed to your agent when it asks. These can include sensitive data such as login tokens, so turn recording on only where you need it. |
 | **Your chat messages** in the side panel, and your agent's replies | When you use the side panel | Your messages go through the helper to your agent. The chat history for each site is saved in the browser's local extension storage. The helper keeps a record of each of the last 50 agent runs (what the agent saw and said) in its private folder. |
-| **Settings**: chosen agent and model (for each site's chat), which mods you switched off, which sites TRIF is on for and which are being recorded | When you change them | The browser's local extension storage. The helper's own settings, including open-model choices (provider, model, server address; never the key), are in `config.json` in its private folder. |
+| **Errors from mods** (messages and line numbers, when a mod breaks) | When a mod on a page breaks | The browser's local extension storage, so the mod's row can say it broke. They go to your agent only when you ask it to fix the mod. |
+| **Settings**: chosen agent and model (for each site's chat), which mods you switched off, which sites TRIF is on for, blocked, or being recorded, what your agent may do on each site, and the powers you allowed boxed mods | When you change them | The browser's local extension storage. The helper's own settings, including open-model choices (provider, model, server address; never the key), are in `config.json` in its private folder; the mods you allowed to send or act, in `~/.trif/allowed.json`. |
+| **Another TRIF in the same browser** (the one loaded unpacked and the Chrome Web Store's, while you move from one to the other) | While both are installed | Each tells the other, inside the browser, which sites it runs mods on, so no mod runs twice. Nothing leaves the browser. |
 
-TRIF doesn't use browser sync storage, cookies, or any remote storage.
+TRIF doesn't use browser sync storage, cookies, or any remote storage. **Robotless mode** (Settings in the
+side panel) runs your mods with no agent at all: then nothing goes to any AI provider.
 
 **The private folder.** The helper keeps its settings, logs, agent run records and screenshots in
 `~/Library/Application Support/TRIF` on a Mac (`~/.local/state/trif` on Linux), outside the folder your
@@ -120,7 +131,9 @@ deleted. The form counts signups from your IP address the same way the report fo
 Everything stays on your computer until you delete it:
 
 - **Chat history:** use "New chat" in the side panel to clear a site's conversation.
-- **Mods:** switch them off in the side panel, or delete the files in `~/.trif/sites/`.
+- **Mods:** switch them off in the side panel, or delete the files in `~/.trif/sites/` (earlier versions
+  in `~/.trif/history/` and deleted ones in `~/.trif/trash/` go by themselves after 30 days, or delete
+  those folders).
 - **Everything the extension stored:** remove the extension from your browser. That deletes its local
   storage and all registered mods.
 - **Helper files** (`~/.trif/`, your mods; and the private folder, `~/Library/Application Support/TRIF/`

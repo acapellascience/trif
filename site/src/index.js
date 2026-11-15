@@ -12,7 +12,7 @@
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
-import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage, PRIVACY, SUPPORT, CHROME_INSTALL } from './pages.js';
 import { FAVICON_SVG } from './favicon.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
@@ -244,6 +244,11 @@ export default {
     if (pathname === '/report.js') return script(REPORT_JS);
     if (pathname === '/windows' || pathname === '/windows/') return html(pageWith(WINDOWS, searchParams.get('mods')), 200, undefined, FORM_PAGE);
     if (pathname === '/windows.js') return script(WINDOWS_JS);
+    // What the Chrome Web Store listing links to, and the README's install link (to the listing once it's
+    // public: pages.js CHROME_INSTALL).
+    if (pathname === '/privacy' || pathname === '/privacy/') return html(pageWith(PRIVACY, searchParams.get('mods')));
+    if (pathname === '/support' || pathname === '/support/') return html(pageWith(SUPPORT, searchParams.get('mods')));
+    if (pathname === '/chrome' || pathname === '/chrome/') return new Response(null, { status: 302, headers: { Location: CHROME_INSTALL, 'Cache-Control': 'public, max-age=300' } });
     // The icons and the link preview card (pages.js HEAD_TAGS).
     if (pathname === '/favicon.svg') return respond(FAVICON_SVG, 'image/svg+xml', 200, CACHE);
     if (pathname === '/favicon.ico') return extensionFile(request, env, 'icons/robot-32.png');

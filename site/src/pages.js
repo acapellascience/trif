@@ -1,3 +1,5 @@
+import { PRIVACY_HTML, PRIVACY_TITLE, PRIVACY_UPDATED, STORE_URL } from './pages-data.js';
+
 // The pages timsrobot.com serves. Plain HTML and a few small scripts (the report and waitlist forms', and the
 // home page's demo tab: demo.js); nothing loaded from anywhere else.
 
@@ -88,6 +90,9 @@ export const ROBOT_SVG = `<svg class="robot" aria-hidden="true" xmlns="http://ww
 
 
 const REPO = 'https://github.com/acapellascience/trif';
+// Where Chrome's extension comes from: the Web Store listing once it's public (helper/lib/paths.js
+// STORE_LISTED, via build-pages.js), else the README's Load unpacked steps. /chrome redirects there.
+export const CHROME_INSTALL = STORE_URL || `${REPO}#install`;
 
 // The home page: the robot, the name and what it does, two links, what you need. Wider than the form.
 const HOME_STYLE = `
@@ -195,7 +200,7 @@ export function homePage({ head = '', tail = '' } = {}) {
   <h1>Tim's Robot Internet Fixer</h1>
   <p class="tagline">Fix any website with your own coding agent.</p>
   <p class="small">Free and open source. In beta, for Mac.</p>
-  <p class="links"><a class="btn" href="${REPO}#install" target="_blank" rel="noopener">Get it</a><a class="btn plain" href="${REPO}" target="_blank" rel="noopener">GitHub</a></p>
+  <p class="links">${STORE_URL ? `<a class="btn" href="${STORE_URL}" target="_blank" rel="noopener">Add to Chrome</a>` : `<a class="btn" href="${REPO}#install" target="_blank" rel="noopener">Get it</a>`}<a class="btn plain" href="${REPO}" target="_blank" rel="noopener">GitHub</a></p>
 </section>
 <section class="two">
   <div>
@@ -214,7 +219,7 @@ export function homePage({ head = '', tail = '' } = {}) {
 </section>`, {
     style: HOME_STYLE + DEMO_STYLE,
     head,
-    after: `\n<footer><a href="/notes/the-internet-is-bad" title="the internet is bad but now we can fix it">TIIBBNWCFI</a><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="/report" target="_blank" rel="noopener">Report a problem</a><a href="/windows" target="_blank" rel="noopener">Windows</a><a href="${REPO}/blob/main/store/PRIVACY.md" target="_blank" rel="noopener">Privacy</a></footer>` +
+    after: `\n<footer><a href="/notes/the-internet-is-bad" title="the internet is bad but now we can fix it">TIIBBNWCFI</a><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="/report" target="_blank" rel="noopener">Report a problem</a><a href="/windows" target="_blank" rel="noopener">Windows</a><a href="/support">Support</a><a href="/privacy">Privacy</a></footer>` +
       '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/space.js" defer></script>\n<script src="/demo.js" defer></script>' + tail,
   }).replace('<main>', '<main class="home">');
 }
@@ -356,3 +361,55 @@ export const WINDOWS_JS = `(() => {
   });
 })();
 `;
+
+// The privacy policy (store/PRIVACY.md, made into HTML by build-pages.js) and the support page: what the
+// Chrome Web Store listing links to, so they must load (and say what TRIF does: store/REVIEW_RISKS.md).
+const DOC_STYLE = `
+main.doc { max-width: 760px; }
+.doc h2 { font-size: 20px; margin: 32px 0 8px; letter-spacing: -0.01em; }
+.doc h3 { font-size: 16px; margin: 24px 0 6px; }
+.doc p, .doc li { color: var(--fg); }
+.doc ul, .doc ol { padding-left: 22px; display: grid; gap: 6px; }
+.doc .table { overflow-x: auto; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; }
+.doc table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.doc th, .doc td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.doc tr:last-child td { border-bottom: 0; }
+.doc th { background: var(--card); }
+.doc code { background: var(--card); border: 1px solid var(--line); padding: 0 4px; border-radius: 4px; overflow-wrap: anywhere; }
+.doc nav { margin: 0 0 24px; font-size: 14px; }
+.doc nav a { color: var(--muted); }
+`;
+
+const DOC_NAV = '<nav><a href="/">Tim\'s Robot Internet Fixer</a></nav>';
+
+export const PRIVACY = page(`Privacy policy · TRIF`, `
+${DOC_NAV}
+<h1>${PRIVACY_TITLE.replace(/^TRIF privacy policy$/, 'Privacy policy')}</h1>
+<p class="lead">Last updated: ${PRIVACY_UPDATED}</p>
+${PRIVACY_HTML}`, { style: DOC_STYLE }).replace('<main>', '<main class="doc">');
+
+export const SUPPORT = page('Support · TRIF', `
+${DOC_NAV}
+<h1>Support</h1>
+<p class="lead">Help with Tim's Robot Internet Fixer.</p>
+<h2>Installing</h2>
+<ol>
+  <li>${STORE_URL ? `Add TRIF to Chrome from the <a href="${STORE_URL}">Chrome Web Store</a>.` : `Add TRIF to Chrome: the <a href="${REPO}#install">install steps</a> say how.`}</li>
+  <li>Install the helper, the small program on your computer that TRIF talks to. In a terminal (it needs Node 18 or newer): <code>npx timsrobot setup</code></li>
+  <li>On the TRIF setup tab, turn on <b>Allow User Scripts</b>, then open any website and click the TRIF icon.</li>
+</ol>
+<p>Firefox, Safari and Linux: see the <a href="${REPO}#install">install steps</a>.</p>
+<h2>If something's wrong</h2>
+<ul>
+  <li>In a terminal, <code>trif doctor</code> checks every part of TRIF and says how to fix what isn't working.</li>
+  <li>The side panel says "The TRIF helper isn't connected": run <code>npx timsrobot setup</code> again, then restart Chrome.</li>
+  <li>Mods don't run: turn on <b>Allow User Scripts</b> for TRIF on its page in <code>chrome://extensions</code>, and turn TRIF on for the site in its side panel.</li>
+  <li>TRIF is installed twice (loaded unpacked and from the Chrome Web Store): turn your sites on in the Web Store's TRIF, then remove the other one. Its side panel says when.</li>
+</ul>
+<h2>Asking for help</h2>
+<ul>
+  <li><b>Report a problem</b> in the side panel, or the <a href="/report">report form</a>: it goes to Tim, and you see everything it includes before you send it.</li>
+  <li>Email <a href="mailto:reports@timsrobot.com">reports@timsrobot.com</a>.</li>
+  <li>Bugs and ideas on <a href="${REPO}/issues">GitHub</a>.</li>
+</ul>
+<p>What TRIF does with your data: the <a href="/privacy">privacy policy</a>.</p>`, { style: DOC_STYLE }).replace('<main>', '<main class="doc">');

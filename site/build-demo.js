@@ -99,6 +99,9 @@ export function writeDemoModule() {
 // Worker's files (stage-assets.js: the side panel's files and the notes' pictures and videos) into site/.assets/.
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   console.log(writeDemoModule() ? `wrote ${path.relative(process.cwd(), OUT)}` : 'up to date');
+  // (and the pages made from the repo's other files: the privacy policy, the Web Store link: build-pages.js)
+  const pages = await import('./build-pages.js');
+  console.log(pages.writePagesModule() ? `wrote ${path.relative(process.cwd(), pages.OUT)}` : 'pages up to date');
   if (process.argv.includes('--stage')) {
     const { stageAssets, STAGE } = await import('./stage-assets.js');
     console.log(`staged ${stageAssets()} files into ${path.relative(process.cwd(), STAGE)}`);

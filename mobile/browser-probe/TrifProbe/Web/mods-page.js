@@ -428,11 +428,24 @@
   }
 
   // ---- Undo after a delete --------------------------------------------------------------------------------
+  // (it goes by itself, as the app's notes do (Tim, 11-15): after 5 s with Undo, 2 s without, fading out; a tap
+  // sends it sooner)
+  let undoTimer = 0;
+  function hideUndo() {
+    clearTimeout(undoTimer);
+    if (ui.undo.hidden) return;
+    ui.undo.classList.add('fading');
+    undoTimer = setTimeout(() => { ui.undo.hidden = true; ui.undo.classList.remove('fading'); }, 300);
+  }
   function showUndo(text, undo) {
+    clearTimeout(undoTimer);
+    ui.undo.classList.remove('fading');
     ui.undoText.textContent = text;
     $('undo-btn').hidden = !undo;
     ui.undo.hidden = !text;
+    if (text) undoTimer = setTimeout(hideUndo, undo ? 5000 : 2000);
   }
+  ui.undo.addEventListener('click', (e) => { if (!e.target.closest('#undo-btn')) hideUndo(); });
   $('undo-btn').addEventListener('click', async () => { try { await ask({ type: 'undoDelete' }); } catch { /* gone */ } });
   $('import-mod').addEventListener('click', () => ask({ type: 'import' }));
 

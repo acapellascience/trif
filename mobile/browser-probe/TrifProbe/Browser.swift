@@ -1000,19 +1000,24 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         resumeLoadWaiters()
     }
 
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        tab(of: webView)?.loading = false
-        guard webView === self.webView else { return }
-        loading = false
-        status = error.localizedDescription
-        resumeLoadWaiters()
+    /// A load that was stopped, not one that failed: cancelled (NSURLErrorCancelled, -999: another navigation
+    /// replaced it, or the page stopped its own loading, as amazon.com's does) or interrupted (WebKit's "Frame load
+    /// interrupted", 102). A browser shows nothing for these (Tim, 11-15, saw "URL error -999" on amazon.com).
+    nonisolated static func stoppedNotFailed(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return (ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled) || (ns.domain == WKError.errorDomain && ns.code == 102)
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        tab(of: webView)?.loading = false
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(webView, error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(webView, error) }
+
+    /// A load ended without finishing. Loading is what the web view says now (a cancelled load's replacement may
+    /// already be under way, so not simply false); real failures (offline, an unknown host, a certificate) show.
+    private func failed(_ webView: WKWebView, _ error: Error) {
+        tab(of: webView)?.loading = webView.isLoading
         guard webView === self.webView else { return }
-        loading = false
-        if (error as NSError).code != NSURLErrorCancelled { status = error.localizedDescription }
+        loading = webView.isLoading
+        if !Browser.stoppedNotFailed(error) { status = error.localizedDescription }
         resumeLoadWaiters()
     }
 

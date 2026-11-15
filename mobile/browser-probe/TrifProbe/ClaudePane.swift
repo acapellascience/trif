@@ -391,13 +391,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if webView === self.webView { loading = false }
-        report.log("claude", "failed: \(error.localizedDescription)")
+        if webView === self.webView { loading = webView.isLoading }
+        if !Browser.stoppedNotFailed(error) { report.log("claude", "failed: \(error.localizedDescription)") }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if webView === self.webView { loading = false }
-        if (error as NSError).code != NSURLErrorCancelled { report.log("claude", "failed to load: \(error.localizedDescription)") }
+        if webView === self.webView { loading = webView.isLoading }
+        if !Browser.stoppedNotFailed(error) { report.log("claude", "failed to load: \(error.localizedDescription)") }
     }
 
     /// A window Claude's page opens (signing in with Google or Apple does): a second web view made from the

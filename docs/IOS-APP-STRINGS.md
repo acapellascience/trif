@@ -113,6 +113,14 @@ readers read them on the phone. Worth a phone wording, or leave.
 What's attached in the message box keeps its names: TRIF instruction (a chat without TRIF's instructions yet),
 TRIF follow-up (one that has them), TRIF screenshot, TRIF pointer.
 
+## Notes that go by themselves (added 11-15)
+
+| Where | Old | New |
+|---|---|---|
+| The notes at the foot of the page (status, Hidden: … Undo) | a × to close each (accessibility: Dismiss) | no ×: each fades out after 2 s, or 5 s with Undo; a tap sends it sooner (10 s with VoiceOver on). No new words |
+| The Mods tab's note (Deleted {name}. Undo · Couldn't switch …) | stayed until the next change | the same: 5 s with Undo, 2 s without |
+| Status strip, a load that was cancelled or interrupted (another navigation replaced it, the page stopped itself: amazon.com) | The operation couldn't be completed. (NSURLErrorDomain error -999.) | (nothing, as in Safari); real failures (offline, an unknown host, a certificate) still show |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

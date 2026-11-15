@@ -226,29 +226,11 @@ struct ContentView: View {
                     NewTabView(history: browser.history)
                 }
             }
+            // (the notes over the page's foot, not under it: the page isn't resized each time one comes and goes)
+            .overlay(alignment: .bottom) { notes }
             if let picked = browser.picked { PickedBar(picked: picked) }
-            if let h = browser.lastHide {
-                HStack {
-                    Text("Hidden: \(h.selector)").font(.footnote.monospaced()).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Undo") { Task { await browser.unhide(h) } }.font(.footnote.bold())
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color(.secondarySystemBackground))
-            }
             if let off = safety.switchedOff[browser.site] {
                 SafetyBanner(site: browser.site, off: off, open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
-            }
-            if !browser.status.isEmpty {
-                HStack(alignment: .top) {
-                    Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
-                    Button { browser.status = "" } label: { Image(systemName: "xmark").font(.caption) }
-                        .accessibilityLabel("Dismiss")
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color(.secondarySystemBackground))
             }
             Divider()
             toolbar
@@ -296,6 +278,26 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The phone's own model gets the page's outline and your words, and picks a part. Nothing leaves the phone.")
+        }
+    }
+
+    /// The small notes at the foot of the page (Tim, 11-15: closing each by hand was annoying): each goes by itself,
+    /// fading out, after 2 seconds, or 5 when it has a button (Undo); a tap sends it sooner. What they report
+    /// that matters stays where it already is (a mod's errors on its row and in diagnostics).
+    private var notes: some View {
+        VStack(spacing: 0) {
+            if let h = browser.lastHide {
+                HStack {
+                    Text("Hidden: \(h.selector)").font(.footnote.monospaced()).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("Undo") { Task { await browser.unhide(h) } }.font(.footnote.bold())
+                }
+                .modifier(NoteStyle(seconds: 5, key: h.id.uuidString) { if browser.lastHide?.id == h.id { browser.lastHide = nil } })
+            }
+            if !browser.status.isEmpty {
+                Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+                    .modifier(NoteStyle(seconds: 2, key: browser.status) { browser.status = "" })
+            }
         }
     }
 
@@ -413,6 +415,31 @@ struct RobotGlyph: View {
             }
             .frame(width: s, height: s)
         }
+    }
+}
+
+/// A note at the foot of the page: its look, and its going by itself `seconds` after it shows (or after its text
+/// changes: `key`), fading out; a tap sends it at once. (With VoiceOver on it stays 10 seconds, to be read.)
+struct NoteStyle: ViewModifier {
+    let seconds: Double
+    let key: String
+    let dismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground))
+            .overlay(alignment: .top) { Divider() }
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeOut(duration: 0.3)) { dismiss() } }
+            .transition(.opacity)
+            .task(id: key) {
+                let wait = UIAccessibility.isVoiceOverRunning ? max(seconds, 10) : seconds
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.3)) { dismiss() }
+            }
     }
 }
 

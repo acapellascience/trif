@@ -25,6 +25,7 @@ button.switch { transform: scale(1.18); transform-origin: right center; margin-l
 .mods-tools { margin: 22px 0 0; }
 .mods-tools .btn { font-size: 14px; }
 .undo-note { margin: 14px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--raised); font-size: 14px; }
+.undo-note.fading { opacity: 0; transition: opacity 0.3s ease-out; }
 .hidden-box { margin-top: 22px; }
 .hidden-list { list-style: none; margin: 6px 0 0; padding: 0; }
 .hidden-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }

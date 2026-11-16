@@ -1,10 +1,15 @@
-// trif-fence.exe: runs one command inside a Windows AppContainer made for it (a PROTOTYPE of a fence for
-// side-panel agent runs' commands on Windows: docs/WINDOWS.md "The sandbox"). Nothing in TRIF uses it yet.
+// trif-fence.exe: runs a command inside a Windows AppContainer made for one side-panel agent run
+// (docs/WINDOWS.md "The sandbox"; helper/lib/win/fence.js builds it and writes its specs).
 //
-//   trif-fence.exe run <spec.json>     run the spec's command inside the container; exits with its status
-//   trif-fence.exe sid <name>          print the container's SID (making its profile if need be)
-//   trif-fence.exe delete <name>       delete the container's profile
-//   trif-fence.exe sddl <folder>       print a folder's access list (for the tests)
+//   trif-fence.exe prepare <spec.json>          make the run's container and give it its entries on the
+//                                               run's folders (before the agent starts)
+//   trif-fence.exe exec <spec.json> -- <args…>  run a program inside the container: its folder and whole
+//                                               environment from the spec, its arguments as given here
+//                                               (each handed on as it is: no shell reads them); exits
+//                                               with its status. Changes no entries
+//   trif-fence.exe cleanup <spec.json>          take the run's entries out again and delete its container
+//   trif-fence.exe run <spec.json>              all three at once, for the spec's "command" (the tests)
+//   trif-fence.exe sid <name> | sddl <folder> | delete <name>      (the tests)
 //
 // The spec (JSON, UTF-8):
 //   name        the AppContainer profile's name, one per run ("trif.run.<id>"): its SID is the run's own
@@ -12,25 +17,25 @@
 //               (TRIF's code, node)
 //   capabilities  more capability names, Windows' own (an lpac needs "registryRead" for node to start)
 //   lpac        true: a less-privileged AppContainer (no ALL APPLICATION PACKAGES: what Windows lets
-//               every packaged app read, most of HKCU included, is closed too)
-//   grant       [{path, rights: "r"|"rw"|"stat", to: "run"|"capability", inherit: true|false}]
-//               access-control entries added before the command starts ("stat": read attributes only,
-//               this folder only, for programs that look at every folder on a path)
-//   grant       ... rights "r+mkdir": read, and make folders in it (not files); inherit "only": the entry
-//               is for what's inside the folder, not the folder itself
+//               every packaged app read is closed too)
+//   grant       [{path, rights: "r"|"rw"|"r+mkdir"|"stat", to: "run"|"capability", inherit: true|false|
+//               "only", optional: true}]  access-control entries. "r+mkdir": read, and make folders in
+//               it (not files); inherit "only": for what's inside the folder, not the folder itself;
+//               "optional": a path that can't be changed (not the user's own, like C:\Program Files) is
+//               left as it is
 //   readonly    [path]  folders inside a writable one that the run may only read (another site's mods):
 //               the folder stops inheriting, the run's entries on it are taken out, and it gets a read
 //               entry of its own. (Not a deny entry: Windows ignores deny entries that name an
 //               AppContainer, seen on windows-latest: the run wrote the folder all the same.)
-//   revoke      true: when the command has ended, take the run's entries out again and delete the profile
 //   cwd, env    the command's folder and its whole environment ({NAME: value}; none: this program's)
-//   command     the command line, as CreateProcess takes it
+//   command     (run) the command line, as CreateProcess takes it
+//   revoke      (run) true: cleanup afterwards
 //   job         true (default): the command and everything it starts are in one job, ended with it; no
 //               clipboard, no other programs' windows
 //
-// No capabilities but the made-up one: no network at all (no internetClient, no privateNetwork, and
-// loopback is closed to AppContainers), and no file or registry key that doesn't name the container, the
-// capability or (unless lpac) ALL APPLICATION PACKAGES.
+// No capabilities but those named: no network at all (no internetClient, no privateNetwork, and
+// loopback is closed to AppContainers), and no file, pipe or credential that doesn't name the container
+// or the capability.
 //
 // Built with the C# compiler every Windows has (.NET Framework 4's csc.exe: C# 5, so no newer syntax):
 //   %WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /o+ /r:System.Web.Extensions.dll /out:trif-fence.exe fence.cs
@@ -191,46 +196,81 @@ static class Fence {
     return Marshal.StringToHGlobalUni(b.ToString());
   }
 
-  static int Run(string specFile) {
+  static Dictionary<string, object> Load(string specFile) {
     JavaScriptSerializer json = new JavaScriptSerializer();
     json.MaxJsonLength = 16 * 1024 * 1024;
     Dictionary<string, object> spec = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(specFile, Encoding.UTF8));
-    string name = Str(spec, "name", null), command = Str(spec, "command", null), capName = Str(spec, "capability", null);
-    if (name == null || command == null) return Fail("the spec needs a name and a command");
-    bool lpac = Bool(spec, "lpac", false), revoke = Bool(spec, "revoke", false), job = Bool(spec, "job", true);
+    if (Str(spec, "name", null) == null) throw new Exception("the spec needs a name");
+    return spec;
+  }
 
-    IntPtr sid = ContainerSid(name);
-    SecurityIdentifier run = new SecurityIdentifier(sid);
-    IntPtr capSid = capName != null ? CapabilitySid(capName) : IntPtr.Zero;
-    SecurityIdentifier cap = capName != null ? new SecurityIdentifier(capSid) : null;
-    List<IntPtr> capSids = new List<IntPtr>();
-    if (capSid != IntPtr.Zero) capSids.Add(capSid);
-    object more;
-    if (spec.TryGetValue("capabilities", out more) && more != null) { foreach (object o in (IEnumerable)more) capSids.Add(CapabilitySid(Convert.ToString(o))); }
+  static IEnumerable<string> Strings(Dictionary<string, object> d, string k) {
+    object v;
+    if (!d.TryGetValue(k, out v) || v == null) yield break;
+    foreach (object o in (IEnumerable)v) yield return Convert.ToString(o);
+  }
 
-    List<object[]> mine = new List<object[]>(); // the run's own entries, to take out again
+  // The run's entries on its folders (and the capability's on what every run reads).
+  static void Prepare(Dictionary<string, object> spec) {
+    SecurityIdentifier run = new SecurityIdentifier(ContainerSid(Str(spec, "name", null)));
+    string capName = Str(spec, "capability", null);
+    SecurityIdentifier cap = capName != null ? new SecurityIdentifier(CapabilitySid(capName)) : null;
     foreach (Dictionary<string, object> g in List(spec, "grant")) {
       bool toCap = Str(g, "to", "run") == "capability";
-      if (toCap && cap == null) return Fail("a grant to the capability, but the spec names none");
+      if (toCap && cap == null) throw new Exception("a grant to the capability, but the spec names none");
       string rights = Str(g, "rights", "r");
       bool only = Str(g, "inherit", "") == "only";
       bool inherit = only || (rights != "stat" && Bool(g, "inherit", true));
-      Acl(Str(g, "path", ""), toCap ? cap : run, Rights(rights), inherit, only, AccessControlType.Allow, false);
-      if (!toCap) mine.Add(new object[] { Str(g, "path", ""), Rights(rights), inherit, AccessControlType.Allow });
+      try { Acl(Str(g, "path", ""), toCap ? cap : run, Rights(rights), inherit, only, AccessControlType.Allow, false); }
+      catch (Exception) { if (!Bool(g, "optional", false)) throw; }
     }
-    object ro;
-    if (spec.TryGetValue("readonly", out ro) && ro != null) {
-      foreach (object o in (IEnumerable)ro) {
-        ReadOnly(Convert.ToString(o), run);
-        mine.Add(new object[] { Convert.ToString(o), FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize, true, AccessControlType.Allow });
+    foreach (string p in Strings(spec, "readonly")) ReadOnly(p, run);
+  }
+
+  // Every entry that names the run, off the folders the spec gave it; then its container's profile.
+  static void Cleanup(Dictionary<string, object> spec) {
+    string name = Str(spec, "name", null);
+    IntPtr sid;
+    if (DeriveAppContainerSidFromAppContainerName(name, out sid) == 0) {
+      SecurityIdentifier run = new SecurityIdentifier(sid);
+      List<string> paths = new List<string>(Strings(spec, "readonly"));
+      foreach (Dictionary<string, object> g in List(spec, "grant")) { if (Str(g, "to", "run") != "capability") paths.Add(Str(g, "path", "")); }
+      foreach (string p in paths) {
+        try {
+          if (Directory.Exists(p)) { DirectoryInfo d = new DirectoryInfo(p); DirectorySecurity s = d.GetAccessControl(AccessControlSections.Access); s.PurgeAccessRules(run); d.SetAccessControl(s); }
+          else if (File.Exists(p)) { FileInfo f = new FileInfo(p); FileSecurity s = f.GetAccessControl(AccessControlSections.Access); s.PurgeAccessRules(run); f.SetAccessControl(s); }
+        } catch (Exception) { /* the folder went with the run */ }
       }
     }
-    foreach (Dictionary<string, object> g in List(spec, "deny")) {
-      Acl(Str(g, "path", ""), run, Rights(Str(g, "rights", "w")), true, AccessControlType.Deny, false);
-      mine.Add(new object[] { Str(g, "path", ""), Rights(Str(g, "rights", "w")), true, AccessControlType.Deny });
-    }
+    DeleteAppContainerProfile(name);
+  }
 
-    // The attribute list: the container (with the made-up capability), and for lpac the opt-out of ALL
+  // One argument as CreateProcess's command line carries it (what CommandLineToArgvW reads back).
+  static string Quote(string a) {
+    if (a.Length > 0 && a.IndexOfAny(new char[] { ' ', '\t', '\n', '\v', '"' }) < 0) return a;
+    StringBuilder b = new StringBuilder("\"");
+    int slashes = 0;
+    foreach (char c in a) {
+      if (c == '\\') { slashes++; continue; }
+      if (c == '"') { b.Append('\\', slashes * 2 + 1); b.Append('"'); }
+      else { b.Append('\\', slashes); b.Append(c); }
+      slashes = 0;
+    }
+    b.Append('\\', slashes * 2);
+    b.Append('"');
+    return b.ToString();
+  }
+
+  // Starts `command` inside the spec's container and waits for it: its exit status.
+  static int Launch(Dictionary<string, object> spec, string command) {
+    bool lpac = Bool(spec, "lpac", false), job = Bool(spec, "job", true);
+    IntPtr sid = ContainerSid(Str(spec, "name", null));
+    List<IntPtr> capSids = new List<IntPtr>();
+    string capName = Str(spec, "capability", null);
+    if (capName != null) capSids.Add(CapabilitySid(capName));
+    foreach (string c in Strings(spec, "capabilities")) capSids.Add(CapabilitySid(c));
+
+    // The attribute list: the container (with its capabilities), and for lpac the opt-out of ALL
     // APPLICATION PACKAGES.
     IntPtr capsArray = IntPtr.Zero;
     SECURITY_CAPABILITIES sc = new SECURITY_CAPABILITIES();
@@ -253,9 +293,8 @@ static class Fence {
     IntPtr list = Marshal.AllocHGlobal(size);
     if (!InitializeProcThreadAttributeList(list, attrs, 0, ref size)) throw new Win32Exception(Marshal.GetLastWin32Error(), "InitializeProcThreadAttributeList");
     if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, scPtr, (IntPtr)Marshal.SizeOf(typeof(SECURITY_CAPABILITIES)), IntPtr.Zero, IntPtr.Zero)) throw new Win32Exception(Marshal.GetLastWin32Error(), "UpdateProcThreadAttribute (container)");
-    IntPtr optOut = IntPtr.Zero;
     if (lpac) {
-      optOut = Marshal.AllocHGlobal(4);
+      IntPtr optOut = Marshal.AllocHGlobal(4);
       Marshal.WriteInt32(optOut, 1); // PROCESS_CREATION_ALL_APPLICATION_PACKAGES_OPT_OUT
       if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY, optOut, (IntPtr)4, IntPtr.Zero, IntPtr.Zero)) throw new Win32Exception(Marshal.GetLastWin32Error(), "UpdateProcThreadAttribute (lpac)");
     }
@@ -307,21 +346,33 @@ static class Fence {
     } finally {
       if (hJob != IntPtr.Zero) CloseHandle(hJob); // whatever the command left running ends here
       DeleteProcThreadAttributeList(list);
-      if (revoke) {
-        foreach (object[] m in mine) { try { Acl((string)m[0], run, (FileSystemRights)m[1], (bool)m[2], (AccessControlType)m[3], true); } catch (Exception) { /* the folder went with the run */ } }
-        DeleteAppContainerProfile(name);
-      }
     }
     return exit;
+  }
+
+  static int Run(string specFile) {
+    Dictionary<string, object> spec = Load(specFile);
+    string command = Str(spec, "command", null);
+    if (command == null) return Fail("the spec needs a command");
+    Prepare(spec);
+    try { return Launch(spec, command); }
+    finally { if (Bool(spec, "revoke", false)) Cleanup(spec); }
   }
 
   static int Main(string[] args) {
     try {
       if (args.Length == 2 && args[0] == "run") return Run(args[1]);
+      if (args.Length == 2 && args[0] == "prepare") { Prepare(Load(args[1])); return 0; }
+      if (args.Length == 2 && args[0] == "cleanup") { Cleanup(Load(args[1])); return 0; }
+      if (args.Length >= 4 && args[0] == "exec" && args[2] == "--") {
+        StringBuilder cmd = new StringBuilder();
+        for (int i = 3; i < args.Length; i++) { if (i > 3) cmd.Append(' '); cmd.Append(Quote(args[i])); }
+        return Launch(Load(args[1]), cmd.ToString());
+      }
       if (args.Length == 2 && args[0] == "sid") { Console.WriteLine(new SecurityIdentifier(ContainerSid(args[1])).Value); return 0; }
       if (args.Length == 2 && args[0] == "sddl") { Console.WriteLine(new DirectoryInfo(args[1]).GetAccessControl(AccessControlSections.Access).GetSecurityDescriptorSddlForm(AccessControlSections.Access)); return 0; }
       if (args.Length == 2 && args[0] == "delete") { int hr = DeleteAppContainerProfile(args[1]); return hr == 0 ? 0 : Fail("0x" + hr.ToString("x8")); }
-      return Fail("usage: trif-fence run <spec.json> | sid <name> | delete <name>");
+      return Fail("usage: trif-fence prepare|cleanup|run <spec.json> | exec <spec.json> -- <program> <args…>");
     } catch (Exception e) {
       return Fail(e.Message);
     }

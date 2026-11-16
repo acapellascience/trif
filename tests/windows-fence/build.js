@@ -1,5 +1,6 @@
 'use strict';
-// Builds trif-fence.exe from fence.cs with the C# compiler every Windows has (.NET Framework 4's csc.exe).
+// Builds trif-fence.exe from the helper's fence.cs (helper/lib/win/) with the C# compiler every Windows has
+// (.NET Framework 4's csc.exe), as helper/lib/win/fence.js does on a user's computer; and spy.exe.
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -11,7 +12,7 @@ function build(dir) {
   const exe = path.join(dir, 'trif-fence.exe');
   fs.mkdirSync(dir, { recursive: true });
   const t = Date.now();
-  const r = spawnSync(csc, ['/nologo', '/o+', '/r:System.Web.Extensions.dll', `/out:${exe}`, path.join(__dirname, 'fence.cs')], { encoding: 'utf8' });
+  const r = spawnSync(csc, ['/nologo', '/o+', '/r:System.Web.Extensions.dll', `/out:${exe}`, path.join(__dirname, '..', '..', 'helper', 'lib', 'win', 'fence.cs')], { encoding: 'utf8' });
   if (r.status !== 0 || !fs.existsSync(exe)) throw new Error(`csc failed:\n${r.stdout}\n${r.stderr}`);
   console.log(`built ${exe} with ${csc} in ${Date.now() - t} ms (${fs.statSync(exe).size} bytes)`);
   return exe;

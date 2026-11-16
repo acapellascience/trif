@@ -279,6 +279,9 @@ async function codexTools(base) {
   const box = path.join(base, 'cxt', 'box');
   fs.mkdirSync(path.join(box, 'tmp'), { recursive: true });
   const outside = put(path.join(base, 'cxt', 'home', 'secret.txt'), 'CANARY outside');
+  // (a real one-pixel PNG elsewhere in the home folder: can Codex's own image tool read it?)
+  const outsideImage = path.join(base, 'cxt', 'home', 'photo.png');
+  fs.writeFileSync(outsideImage, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
   const codexHome = path.join(base, 'cxt', 'codex-home');
   fs.mkdirSync(codexHome, { recursive: true });
   const env = { ...process.env, CODEX_HOME: codexHome };
@@ -286,6 +289,12 @@ async function codexTools(base) {
   const c = codexAdapter.command({ bin, prompt: 'hi', readable: [work], writable: [path.join(work, 'sites'), box], readOnly: [path.join(work, 'sites', 'y.com')], denied: [path.join(base, 'cxt', 'home')], tmp: path.join(box, 'tmp') });
   const trifConfig = [];
   for (let i = 0; i < c.args.length; i++) if (c.args[i] === '-c') trifConfig.push('-c', c.args[i + 1]);
+  // TRIF's profile can't be used on Windows (seen: Codex's sandbox there can't keep a command from reading,
+  // so it refuses a profile that says to and no session starts). Without it, and read-only instead:
+  const noProfile = [];
+  for (let i = 0; i < trifConfig.length; i += 2) if (!/^(default_permissions|permissions)=/.test(trifConfig[i + 1])) noProfile.push('-c', trifConfig[i + 1]);
+  const readOnly = [...noProfile, '-c', 'sandbox_mode="read-only"'];
+  const off = (...names) => names.flatMap((n) => ['-c', `features.${n}=false`]);
   const mcp = ['-c', `mcp_servers.trif={ command = ${toml(process.execPath)}, args = [${toml(path.join(__dirname, 'mcp-echo.js'))}, "-"] }`];
   const all = (runTool(bin, ['features', 'list'], { env }).stdout || '').split(/\r?\n/).map((l) => l.trim().split(/\s+/)).filter((p) => p.length >= 3);
   console.log(`features on by default: ${all.filter((p) => p[p.length - 1] === 'true').map((p) => p[0]).join(', ')}`);
@@ -298,12 +307,15 @@ async function codexTools(base) {
     for (const item of input.filter((x) => x.type === 'additional_tools')) for (const ns of item.tools || []) for (const t of ns.tools || [ns]) tools.push(t);
     return { tools, web: /web_search/.test(r.stdout) };
   };
+  const noShell = off('shell_tool', 'unified_exec', 'unified_exec_tty', 'shell_snapshot');
+  const bare = off('shell_tool', 'unified_exec', 'unified_exec_tty', 'shell_snapshot', 'view_image', 'code_mode_host', 'code_mode_host_grpc', 'multi_agent', 'goals', 'sleep_tool', 'skill_search', 'workspace_dependencies', 'worktrees', 'in_app_chat', 'realtime_conversation', 'collaboration_modes', 'steer', 'guardian_approval', 'mentions_v2');
   const variants = [
-    ['as TRIF starts it today', trifConfig],
-    ['features.shell_tool=false', [...trifConfig, '-c', 'features.shell_tool=false']],
-    ['shell_tool=false, the trif MCP server', [...trifConfig, '-c', 'features.shell_tool=false', ...mcp]],
-    ['shell_tool=false, MCP, and every switch that might take the rest away', [...trifConfig, '-c', 'features.shell_tool=false', ...mcp,
-      ...['features.code_mode_host=false', 'features.sleep_tool=false', 'features.goals=false', 'features.multi_agent=false', 'features.collab=false', 'features.apply_patch_tool=false', 'include_apply_patch_tool=false', 'tools.view_image=false', 'features.view_image_tool=false', 'features.unified_exec=false', 'features.request_user_input=false'].flatMap((x) => ['-c', x])]],
+    ['as TRIF starts it today (its profile)', trifConfig],
+    ['read-only, nothing else changed', readOnly],
+    ['read-only, shell_tool=false', [...readOnly, ...off('shell_tool')]],
+    ['read-only, the shell\'s features all off', [...readOnly, ...noShell]],
+    ['read-only, the shell off, the trif MCP server', [...readOnly, ...noShell, ...mcp]],
+    ['read-only, MCP, and every feature that gives a tool off', [...readOnly, ...bare, ...mcp]],
   ];
   let trifTool = null;
   for (const [label, config] of variants) {
@@ -326,18 +338,21 @@ async function codexTools(base) {
     { custom: { name: 'apply_patch', input: patch('sites/y.com/planted.js', '// planted in another site') } },
     { custom: { name: 'apply_patch', input: patch(path.join(base, 'cxt', 'home', 'planted.txt'), 'planted outside') } },
     { run: `type "${outside}"` },
+    { call: { name: 'view_image', arguments: { path: outsideImage } } },
     { say: 'done' },
   ];
   for (const [label, extra] of [
-    ['no shell, MCP, TRIF\'s profile, Codex\'s sandbox as it comes', []],
-    ['the same, windows.sandbox="unelevated"', ['-c', 'windows.sandbox="unelevated"']],
+    ['read-only, the shell off, MCP', [...readOnly, ...noShell]],
+    ['read-only, MCP, every feature that gives a tool off', [...readOnly, ...bare]],
+    ['workspace-write (not read-only), the shell off, MCP: what apply_patch may write', [...noProfile, '-c', 'sandbox_mode="workspace-write"', ...noShell]],
   ]) {
     const api = await startFakeModelServer({ script: steps.map((x) => ({ ...x })), models: ['standin'] });
-    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...trifConfig, '-c', 'features.shell_tool=false', ...mcp, ...extra,
+    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...mcp,
       '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses" }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
     const r = runTool(bin, args, { env, cwd: work, input: 'do the steps', timeout: 180000 });
     console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
     const asked = steps.filter((x) => !x.say).map((x) => (x.call ? `${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `apply_patch ${x.custom.input.split('\n')[1]}` : `shell: ${x.run}`));
+    console.log(`  tools offered to the model: ${[...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.map((t) => t && (t.name || t.type))))].join(', ')}`);
     const outs = api.toolOutputs();
     console.log(asked.map((q, i) => `  asked   ${q.slice(0, 200)}\n  got     ${String(outs[i] === undefined ? '(no result)' : outs[i]).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n'));
     const events = r.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);

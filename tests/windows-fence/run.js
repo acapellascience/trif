@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-// A prototype fence for side-panel agent runs' commands on Windows, tried for real (docs/WINDOWS.md "The
-// sandbox"). Windows only; run by .github/workflows/windows.yml on a windows-latest runner. Nothing in
-// TRIF uses the fence yet: this builds it (fence.cs, with the C# compiler Windows ships), lays out a
-// scratch copy of what a run sees, runs probe.js inside the fence, and checks every attempt against what
-// TRIF's sandbox guarantees on a Mac (docs/PROTOCOL.md "Run scope"):
+// The fence for side-panel agent runs on Windows (helper/lib/win/fence.js, fence.cs), attacked for real
+// (docs/WINDOWS.md "The sandbox"). Windows only; run by .github/workflows/windows-fence.yml on a
+// windows-latest runner. It builds the launcher as the helper does, lays out a scratch copy of what a run
+// sees, gives it the spec the helper gives a run (fence.js specFor: nothing added for the test, whose own
+// programs sit in the run's mailbox), runs probe.js inside, and checks every attempt against what TRIF's
+// sandbox guarantees on a Mac (docs/PROTOCOL.md "Run scope"):
 //
 //   reads     the run's working folder (its copy of the workspace), TRIF's code and node; nothing else
 //             in the home folder, no other user's files
@@ -14,8 +15,9 @@
 //   private   TRIF's private folder (settings, logs, other sites' screenshots): no reads, no writes
 //   others    another run's mailbox and working folder; other programs' command lines; the clipboard
 //
-// Twice: as a plain AppContainer and as a less-privileged one (lpac). Prints a table; exits 1 when an
-// attempt marked `deny` got through or one marked `allow` didn't (the `info` rows only inform).
+// Twice: with the helper's spec as it is (a less-privileged AppContainer with registryRead), and as a plain
+// AppContainer (the reserve). Prints a table; exits 1 when an attempt marked `deny` got through or one
+// marked `allow` didn't (the `info` rows only inform).
 //
 // It makes AppContainer profiles and access-control entries on its own scratch folder, writes one value
 // under HKCU\Software\TRIF-fence-test, a file in the user's profile folder, and the clipboard, and removes
@@ -35,13 +37,13 @@ if (process.env.GITHUB_ACTIONS !== 'true' && !process.argv.includes('--yes-this-
 }
 
 const REPO = path.resolve(__dirname, '..', '..');
+const { buildSpy } = require('./build');
+const fenceLib = require(path.join(REPO, 'helper', 'lib', 'win', 'fence'));
 const SYSROOT = process.env.SystemRoot || 'C:\\Windows';
 const sys = (n) => path.join(SYSROOT, 'System32', n);
 const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
 const rand = (n = 6) => crypto.randomBytes(n).toString('hex');
 let failed = 0;
-
-const { build, buildSpy } = require('./build');
 
 function fence(exe, spec, { timeout = 240000 } = {}) {
   const file = path.join(os.tmpdir(), `trif-fence-spec-${rand()}.json`);
@@ -58,7 +60,12 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   console.log(spawnSync(sys('cmd.exe'), ['/d', '/c', 'ver'], { encoding: 'utf8' }).stdout.trim());
   // (who runs this: an administrator, as GitHub's runner account is, or an ordinary user)
   console.log(`run by ${os.userInfo().username}; administrator: ${/S-1-5-32-544.*Enabled group/.test(spawnSync(sys('whoami.exe'), ['/groups', '/fo', 'csv', '/nh'], { encoding: 'utf8' }).stdout.split(/\r?\n/).filter((l) => l.includes('S-1-5-32-544')).join(' ')) ? 'yes' : 'no'}`);
-  const exe = build(path.join(base, 'bin'));
+  // The launcher, built as the helper builds it (into <home>\bin, by Windows' own C# compiler).
+  const t0 = Date.now();
+  const built = fenceLib.launcher({ home: base, bin: path.join(base, 'bin') }, { env: { ...process.env, TRIF_FENCE_BIN: '' } });
+  if (built.error) throw new Error(built.error);
+  const exe = built.file;
+  console.log(`built ${exe} in ${Date.now() - t0} ms (${fs.statSync(exe).size} bytes)`);
 
   // ---- what a run sees, as on a user's computer: everything inside the user's profile folder
   const CANARY = `CANARY-${rand(8)}`;
@@ -89,13 +96,18 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   // TRIF's code as setup --copy leaves it (what runs.js trifCode lists), and node as nvm or Volta has it
   const app = path.join(base, 'app');
   for (const item of ['helper', 'package.json', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'examples']) fs.cpSync(path.join(REPO, item), path.join(app, item), { recursive: true });
-  fs.cpSync(__dirname, path.join(app, 'fence-test'), { recursive: true });
   const nodeDir = path.join(base, 'node');
   fs.mkdirSync(nodeDir);
   fs.copyFileSync(process.execPath, path.join(nodeDir, 'node.exe'));
   const node = path.join(nodeDir, 'node.exe');
-  const probe = path.join(app, 'fence-test', 'probe.js');
-  const spy = buildSpy(path.join(app, 'fence-test'));
+  // The test's own programs go in the run's mailbox, which the run may read and write: the spec stays the
+  // helper's own.
+  const probe = path.join(box, 'probe.js');
+  const hello = path.join(box, 'hello.js');
+  fs.copyFileSync(path.join(__dirname, 'probe.js'), probe);
+  fs.copyFileSync(path.join(__dirname, 'hello.js'), hello);
+  const spy = buildSpy(box);
+  const framing = path.join(app, 'helper', 'lib', 'framing.js');
 
   // ---- things outside the files: servers, a pipe as the helper makes it, another program, the registry
   let tcpHits = 0;
@@ -226,8 +238,8 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'node starts a child (cmd /c echo), in the job', g: 'shells', expect: 'info', direct: `"${node}" -e "const r=require('child_process').spawnSync(process.env.ComSpec,['/d','/c','echo','node-child-ok'],{encoding:'utf8',timeout:8000});console.log(r.status,r.stdout,r.error&&r.error.code)"`, through: (r) => r.stdout.includes('node-child-ok') },
     { id: 'node starts a child, without the job', g: 'shells', expect: 'info', job: false, direct: `"${node}" -e "const r=require('child_process').spawnSync(process.env.ComSpec,['/d','/c','echo','node-child-ok'],{encoding:'utf8',timeout:8000});console.log(r.status,r.stdout,r.error&&r.error.code)"`, through: (r) => r.stdout.includes('node-child-ok') },
     { id: 'cmd.exe starts a child, without the job', g: 'shells', expect: 'info', job: false, direct: `"${sys('cmd.exe')}" /d /c "${sys('cmd.exe')}" /d /c echo grandchild-ok`, through: (r) => r.stdout.includes('grandchild-ok') },
-    { id: 'trif.cmd-like: cmd.exe starts node with a script', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c ""${node}" --preserve-symlinks --preserve-symlinks-main "${path.join(app, 'fence-test', 'hello.js')}""`, through: (r) => r.stdout.includes('script-ok') },
-    { id: 'TRIF\'s CLI (trif help)', g: 'shells', expect: 'allow', direct: `"${node}" --preserve-symlinks --preserve-symlinks-main "${path.join(app, 'helper', 'cli.js')}" help`, through: (r) => r.status === 0 && /trif/i.test(r.stdout) },
+    { id: 'trif.cmd-like: cmd.exe starts node with a script', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c ""${node}" --preserve-symlinks --preserve-symlinks-main "${hello}" "${framing}""`, through: (r) => r.stdout.includes('script-ok') },
+    { id: 'TRIF\'s CLI (trif help)', g: 'shells', expect: 'allow', direct: `${NODE} "${path.join(app, 'helper', 'cli.js')}" help`, through: (r) => r.status === 0 && /trif/i.test(r.stdout) },
     { id: 'node from C:\\Program Files\\nodejs starts', g: 'shells', expect: 'info', direct: '"C:\\Program Files\\nodejs\\node.exe" -p process.version', through: (r) => r.status === 0 && /^v\d/.test(r.stdout.trim()) },
     { id: 'the environment it has', g: 'shells', expect: 'info', op: 'env' },
     { id: 'who it is (whoami /groups)', g: 'shells', expect: 'info', direct: `"${sys('whoami.exe')}" /groups /fo csv /nh`, through: (r) => r.status === 0, long: true },
@@ -241,64 +253,42 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   // the rest are tried by probe.js, one process inside the fence)
   fs.writeFileSync(cfgFile, JSON.stringify({ ops: ops.filter((o) => !o.direct), out: outFile }));
 
-  const envInside = {
-    SystemRoot: SYSROOT, SystemDrive: process.env.SystemDrive || 'C:', windir: SYSROOT, ComSpec: sys('cmd.exe'),
-    PATHEXT: '.COM;.EXE;.BAT;.CMD', PATH: `${nodeDir};${path.join(SYSROOT, 'System32')}`,
-    TEMP: path.join(box, 'tmp'), TMP: path.join(box, 'tmp'), USERPROFILE: stage, APPDATA: path.join(box, 'tmp'), LOCALAPPDATA: path.join(box, 'tmp'),
-    TRIF_RUN_BOX: box,
+  // The spec the helper gives a run (fence.js specFor), for this layout. `plain`: the reserve, a plain
+  // AppContainer in place of the less-privileged one.
+  const code = ['helper', 'package.json', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'examples'].map((n) => path.join(app, n));
+  const limits = { workspace: stage, modsDir: path.join(stage, 'sites'), box, tmp: path.join(box, 'tmp'), screenshots: shots,
+    lockedDirs: [{ rel: path.join('sites', 'y.com'), literal: path.join(stage, 'sites', 'y.com'), real: path.join(stage, 'sites', 'y.com'), link: false }] };
+  const specFor = (mode, { command = null, name, revoke = false, job = true } = {}) => {
+    const spec = fenceLib.specFor({ runId: name, limits, code, node, runEnv: { TRIF_RUN_BOX: box } });
+    if (mode === 'appcontainer') { spec.lpac = false; spec.capabilities = []; spec.capability = `${spec.capability}.plain`; }
+    return { ...spec, ...(command ? { command } : {}), revoke, job };
   };
-  // Folders on the way to what the run may read, inside the profile folder (the user's own to change):
-  // "read attributes" alone, for programs that look at every folder on a path (node, for a script's real path).
-  const onTheWay = () => {
-    const stop = path.resolve(os.homedir(), '..').toLowerCase();
-    const set = new Set();
-    for (const p of [app, nodeDir, stage, box, shots]) {
-      for (let d = path.dirname(p); d.toLowerCase() !== stop && d.toLowerCase().startsWith(stop) && path.dirname(d) !== d; d = path.dirname(d)) set.add(d);
-    }
-    return [...set];
-  };
-  const specFor = (mode, { stat = false, flags = [], command = null, name = `trif.run.${rand()}`, revoke = true } = {}) => ({
-    // (a capability name per mode and for the "on the way" entries, which stay: so each try starts clean)
-    name, capability: `trifRunCode.${mode}${stat ? '.stat' : ''}`, lpac: mode !== 'appcontainer', revoke, cwd: stage, env: envInside,
-    ...(mode === 'lpac+registryRead' ? { capabilities: ['registryRead'] } : {}),
-    grant: [
-      { path: app, rights: 'r', to: 'capability' },
-      { path: nodeDir, rights: 'r', to: 'capability' },
-      { path: stage, rights: 'r' },
-      // sites/: folders may be made in it (a new site's); what's inside is the run's to change...
-      { path: path.join(stage, 'sites'), rights: 'r+mkdir', inherit: false },
-      { path: path.join(stage, 'sites'), rights: 'rw', inherit: 'only' },
-      { path: box, rights: 'rw' },
-      { path: shots, rights: 'rw' },
-      ...(stat ? onTheWay().map((p) => ({ path: p, rights: 'stat', to: 'capability' })) : []),
-    ],
-    // ...but for the folders of other sites that are there when it starts: read only
-    readonly: [path.join(stage, 'sites', 'y.com')],
-    command: command || `"${node}" ${flags.join(' ')} "${probe}" "${cfgFile}"`,
-  });
+  const NODE = `"${node}" ${fenceLib.NODE_FLAGS.join(' ')}`;
 
   const results = {};
-  for (const mode of ['appcontainer', 'lpac', 'lpac+registryRead']) {
-    console.log(`\n================ ${mode === 'appcontainer' ? 'AppContainer' : mode === 'lpac' ? 'less-privileged AppContainer (lpac)' : 'lpac with Windows\' registryRead capability'}`);
+  for (const mode of ['trif', 'appcontainer']) {
+    console.log(`\n================ ${mode === 'trif' ? 'the helper\'s spec: a less-privileged AppContainer with registryRead' : 'the reserve: a plain AppContainer'}`);
     fs.rmSync(outFile, { force: true });
-    // How node has to be started for a script inside the profile folder to load.
-    const hello = fence(exe, specFor(mode, { command: `"${node}" -p "'node-ok ' + process.version"` }));
-    console.log(`node -p inside: ${hello.status === 0 ? hello.stdout.trim() : `FAILED status ${hello.status} ${hello.stderr.trim().slice(0, 300)}`} (${hello.ms} ms)`);
-    let how = null;
-    for (const v of [{ label: 'as it is', flags: [], stat: false }, { label: 'with --preserve-symlinks --preserve-symlinks-main', flags: ['--preserve-symlinks', '--preserve-symlinks-main'], stat: false }]) {
-      const r = fence(exe, specFor(mode, { ...v, command: `"${node}" ${v.flags.join(' ')} "${path.join(app, 'fence-test', 'hello.js')}"` }));
-      const ok = r.status === 0 && r.stdout.includes('script-ok');
-      console.log(`a script in the profile folder, ${v.label}: ${ok ? 'runs' : `doesn't (${(r.stderr.trim().split(/\r?\n/).find((l) => /Error|EPERM|EACCES/.test(l)) || r.stderr.trim().slice(0, 200) || `exit ${r.status}`)})`} (${r.ms} ms)`);
-      if (ok && !how) how = v;
+    const name = `${mode}${rand()}`;
+    const specFile = path.join(base, `spec-${mode}.json`);
+    fs.writeFileSync(specFile, JSON.stringify(specFor(mode, { name })));
+    // prepare, then programs started inside with exec, as a run's are
+    const prep = spawnSync(exe, ['prepare', specFile], { encoding: 'utf8', timeout: 60000 });
+    if (prep.status !== 0) { console.log(`FAIL  prepare: ${prep.stdout}${prep.stderr}`); failed++; continue; }
+    const exec = (argv, timeout = 60000) => { const t = Date.now(); const x = spawnSync(exe, ['exec', specFile, '--', ...argv], { encoding: 'utf8', timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }); return { status: x.status, stdout: String(x.stdout || ''), stderr: String(x.stderr || ''), error: x.error, ms: Date.now() - t }; };
+    const helloOut = exec([node, '-p', "'node-ok ' + process.version"]);
+    console.log(`node -p inside: ${helloOut.status === 0 ? helloOut.stdout.trim() : `FAILED status ${helloOut.status} ${helloOut.stderr.trim().slice(0, 300)}`} (${helloOut.ms} ms)`);
+    for (const [label, flags] of [['as it is', []], [`with ${fenceLib.NODE_FLAGS.join(' ')}`, fenceLib.NODE_FLAGS]]) {
+      const x = exec([node, ...flags, hello, framing]);
+      console.log(`a script in the profile folder, ${label}: ${x.status === 0 && x.stdout.includes('script-ok') ? 'runs' : `doesn't (${(x.stderr.trim().split(/\r?\n/).find((l) => /Error|EPERM|EACCES/.test(l)) || x.stderr.trim().slice(0, 200) || `exit ${x.status}`)})`} (${x.ms} ms)`);
     }
-    if (!how) {
-      if (mode === 'lpac') console.log('info  node doesn\'t start in an lpac without registryRead (Winsock can\'t read its settings): not a candidate');
-      else { console.log('FAIL  node can\'t run a script inside the fence at all'); failed++; }
-      continue;
-    }
-    console.log(`using: ${how.label}`);
-    const name = `trif.run.${rand()}`;
-    const r = fence(exe, specFor(mode, { ...how, name, revoke: false }));
+    // an argument with everything in it reaches the program as it is (the launcher's own quoting)
+    const odd = ['a b', 'q"uote', 'back\\slash\\', 'tr\\"icky', '', '%PATH%', '^&|<>', 'ünï 用户'];
+    const echoed = exec([node, '-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...odd]);
+    const same = (() => { try { return JSON.stringify(JSON.parse(echoed.stdout)) === JSON.stringify(odd); } catch { return false; } })();
+    console.log(`  ${same ? 'PASS' : 'FAIL'} (outside)  exec hands each argument on as it is${same ? '' : `: ${echoed.stdout.slice(0, 300)} ${echoed.stderr.slice(0, 200)}`}`);
+    if (!same) failed++;
+    const r = exec([node, ...fenceLib.NODE_FLAGS, probe, cfgFile], 240000);
     const m = /FENCE-PROBE (\{.*\})/.exec(r.stdout);
     let got = null;
     if (m) got = JSON.parse(m[1]);
@@ -309,14 +299,14 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     }
     results[mode] = got;
     for (const o of ops.filter((x) => x.direct)) {
-      const d = fence(exe, { ...specFor(mode, { ...how, name, revoke: false, command: o.direct }), ...(o.job === false ? { job: false } : {}) }, { timeout: 40000 });
+      const d = fence(exe, specFor(mode, { name, command: o.direct, job: o.job !== false }), { timeout: 40000 });
       const hung = d.status === null;
       let through = false;
       try { through = !hung && !!o.through(d); } catch { /* not through */ }
       got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().replace(/\s+/g, ' ').split(CANARY).join('CANARY').slice(0, o.keep || 90)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
     }
     console.log(`the probe ran in ${r.ms} ms\n`);
-    if (mode === 'appcontainer') {
+    if (mode === 'trif') {
       // (so a refusal below means the fence: outside it the same small program gets each of these)
       const out = (args) => String(spawnSync(spy, args, { encoding: 'utf8', timeout: 30000 }).stdout || '').trim().replace(/\s+/g, ' ').split(CANARY).join('CANARY').slice(0, 200);
       console.log(`  outside the fence, for comparison: clipboard: ${out(['clip'])} | command line: ${out(['cmdline', String(other.pid)])} | memory: ${out(['open', String(other.pid)])} | credential: ${out(['cred', credTarget]).split(CRED_SECRET.replace(CANARY, 'CANARY')).join('CANARY-credential')}\n`);
@@ -351,15 +341,15 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       for (let i = 0; i < 20 && alive; i++) { try { process.kill(left, 0); await new Promise((res) => setTimeout(res, 100)); } catch { alive = false; } }
       check(!alive, `the process it left behind (pid ${left}) ended with the command`);
     } else console.log('  info (outside)  it couldn\'t leave a process behind');
-    // (a last launch with `revoke`: the run's entries leave its folders and its profile is deleted)
-    const sid = String(spawnSync(exe, ['sid', name], { encoding: 'utf8' }).stdout || '').trim();
+    // (cleanup, as when a run ends: the run's entries leave its folders and its profile is deleted)
+    const sid = String(spawnSync(exe, ['sid', fenceLib.containerName(name)], { encoding: 'utf8' }).stdout || '').trim();
     const sddl = () => [stage, path.join(stage, 'sites'), box].map((d) => String(spawnSync(exe, ['sddl', d], { encoding: 'utf8' }).stdout || '')).join('\n');
     const before = sddl();
-    const last = fence(exe, specFor(mode, { ...how, name, revoke: true, command: `"${node}" -p 1` }), { timeout: 40000 });
+    const last = spawnSync(exe, ['cleanup', specFile], { encoding: 'utf8', timeout: 60000 });
     const acl = sddl();
     check(!!sid && before.includes(sid), `while it runs, its working folder's access list names the run (${sid.slice(0, 24)}…)`);
     check(!!sid && !acl.includes(sid), 'afterwards its entries are gone from its working folder');
-    if (!before.includes(sid) || acl.includes(sid)) console.log(`        last launch: exit ${last.status} ${last.stderr.trim().slice(0, 300)}\n        before: ${before.trim().slice(0, 700)}\n        after:  ${acl.trim().slice(0, 700)}`);
+    if (!before.includes(sid) || acl.includes(sid)) console.log(`        cleanup: exit ${last.status} ${String(last.stderr).trim().slice(0, 300)}\n        before: ${before.trim().slice(0, 700)}\n        after:  ${acl.trim().slice(0, 700)}`);
     spawnSync(sys('reg.exe'), ['delete', REG_KEY, '/v', 'fromInside', '/f']);
     // (put back what the allowed writes changed, for the next mode)
     for (const f of [path.join(stage, 'sites', 'x.com', 'new.js'), path.join(box, 'req-1.json'), path.join(box, 'tmp', 't.txt'), path.join(shots, 'a.png'), leftPid, path.join(box, 'hl'), path.join(box, 'sl')]) fs.rmSync(f, { force: true });

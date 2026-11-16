@@ -354,40 +354,66 @@ async function codexTools(base) {
       if (x.name === 'exec') console.log(`    exec can call: ${[...String(x.description || '').matchAll(/^### `([\w]+)`/gm)].map((m) => m[1]).join(', ') || JSON.stringify(x).slice(0, 600)}`);
     }
   }
-  // Real runs, the stand-in model asking for each thing in turn.
+  // Real runs, the stand-in model asking for each thing in turn. Under two model names: one Codex doesn't
+  // know (it falls back to a small set of tools, called directly) and Codex's own default (the tools a real
+  // chat gets: seen above with `debug prompt-input`, everything behind `exec`).
   const { startFakeModelServer } = require(path.join(REPO, 'tests', 'fake-model-server'));
   const patch = (file, text) => `*** Begin Patch\n*** Add File: ${file}\n+${text}\n*** End Patch\n`;
-  const steps = [
-    { call: { name: trifTool || 'mcp__trif__trif', arguments: { args: ['status'] } } },
+  const outsidePlant = path.join(base, 'cxt', 'home', 'planted.txt');
+  const js = (body) => `try { ${body} } catch (e) { text('THREW ' + String((e && e.message) || e).slice(0, 400)); }`;
+  const viaExec = (expr) => js(`const r = await ${expr}; text('RESULT ' + String(typeof r === 'string' ? r : JSON.stringify(r)).slice(0, 400));`);
+  const direct = [
+    { call: { namespace: 'mcp__trif', name: 'trif', arguments: { args: ['status'] } } },
+    { call: { name: 'trif', arguments: { args: ['status'] } } },
+    { call: { name: 'mcp__trif__trif', arguments: { args: ['status'] } } },
     { custom: { name: 'apply_patch', input: patch('sites/x.com/new.js', '// new') } },
-    { custom: { name: 'apply_patch', input: patch('held.json.planted', 'planted in the workspace root') } },
-    { custom: { name: 'apply_patch', input: patch('sites/y.com/planted.js', '// planted in another site') } },
-    { custom: { name: 'apply_patch', input: patch(path.join(base, 'cxt', 'home', 'planted.txt'), 'planted outside') } },
-    { run: `type "${outside}"` },
+    { custom: { name: 'apply_patch', input: patch(outsidePlant, 'planted outside') } },
     { call: { name: 'view_image', arguments: { path: outsideImage } } },
-    { say: 'done' },
+    { run: `type "${outside}"` },
   ];
-  for (const [label, extra, withMcp] of [
-    ['read-only, the shell off, no MCP server (does a run start at all?)', [...readOnly, ...noShell], false],
-    ['read-only, the shell off, MCP', [...readOnly, ...noShell], true],
-    ['no sandbox at all (danger-full-access), the shell off, MCP: only to see whether the sandbox is what waits', [...noProfile, '-c', 'sandbox_mode="danger-full-access"', ...noShell], true],
+  const throughExec = [
+    { custom: { name: 'exec', input: js(`text('TOOLS ' + ALL_TOOLS.map((t) => t.name).join(', '));`) } },
+    { custom: { name: 'exec', input: js(`text('IN THE ISOLATE fetch ' + typeof fetch + ', require ' + typeof require + ', process ' + typeof process + ', Deno ' + typeof Deno + ', WebSocket ' + typeof WebSocket + ', import of node:fs ' + (await import('node:fs').then(() => 'WORKED', (e) => 'refused: ' + String(e && e.message).slice(0, 80))));`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.mcp__trif__trif({ args: ['status'] })`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.apply_patch(${JSON.stringify(patch('sites/x.com/new.js', '// new'))})`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.apply_patch(${JSON.stringify(patch('held.json.planted', 'planted in the workspace root'))})`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.apply_patch(${JSON.stringify(patch('sites/y.com/planted.js', '// planted in another site'))})`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.apply_patch(${JSON.stringify(patch(outsidePlant, 'planted outside'))})`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.view_image({ path: ${JSON.stringify(outsideImage)} })`) } },
+    { custom: { name: 'exec', input: viaExec(`tools.exec_command({ cmd: ${JSON.stringify(`type "${outside}"`)} })`) } },
+    ...direct,
+  ];
+  const viewOff = off('view_image');
+  const unknown = 'standin';
+  for (const [label, extra, model, script] of [
+    ['a model name Codex doesn\'t know; read-only, the shell and view_image off, MCP', [...readOnly, ...noShell, ...viewOff], unknown, direct],
+    ['Codex\'s default model; read-only, the shell and view_image off, MCP', [...readOnly, ...noShell, ...viewOff], null, throughExec],
+    ['Codex\'s default model; workspace-write (to see where its own apply_patch may write), the shell and view_image off, MCP', [...noProfile, '-c', 'sandbox_mode="workspace-write"', ...noShell, ...viewOff], null, throughExec],
   ]) {
-    const api = await startFakeModelServer({ script: steps.map((x) => ({ ...x })), models: ['standin'] });
-    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...(withMcp ? mcp : []),
-      '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses", supports_websockets = false, request_max_retries = 1, stream_max_retries = 1 }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
+    const steps = [...script.map((x) => ({ ...x })), { say: 'done' }];
+    const api = await startFakeModelServer({ script: steps, models: [unknown] });
+    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...mcp,
+      '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses", supports_websockets = false, request_max_retries = 1, stream_max_retries = 1 }`, '-c', 'model_provider="standin"', ...(model ? ['-m', model] : []), '-'];
     const t0 = Date.now();
-    const r = await runToolAsync(bin, args, { env: { ...env, RUST_LOG: 'info' }, cwd: work, input: 'do the steps', timeout: 150000 });
-    console.log(`  (${Math.round((Date.now() - t0) / 1000)} s)`);
-    console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
-    const asked = steps.filter((x) => !x.say).map((x) => (x.call ? `${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `apply_patch ${x.custom.input.split('\n')[1]}` : `shell: ${x.run}`));
-    console.log(`  tools offered to the model: ${[...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.map((t) => t && (t.name || t.type))))].join(', ')}`);
+    const r = await runToolAsync(bin, args, { env, cwd: work, input: 'do the steps', timeout: 150000 });
+    const posts = api.requests.filter((q) => q.body && Array.isArray(q.body.tools));
+    console.log(`\n>>> ${label}: exit ${r.status}${r.error ? ` (${r.error})` : ''} after ${Math.round((Date.now() - t0) / 1000)} s; requests to the stand-in: ${api.requests.length}; the model it named: ${[...new Set(posts.map((q) => q.body.model))].join(', ')}`);
+    const offered = new Map();
+    for (const q of posts) for (const t of q.body.tools) if (t) offered.set(t.name || t.type, Array.isArray(t.tools) ? `${t.name}{${t.tools.map((n) => n && n.name).join(', ')}}` : `${t.name || t.type}`);
+    console.log(`  tools offered to the model: ${[...offered.values()].join(', ')}`);
+    const ns = posts.flatMap((q) => q.body.tools).find((t) => t && Array.isArray(t.tools) && /trif/.test(String(t.name)));
+    if (ns) console.log(`  the MCP tool as offered: ${JSON.stringify(ns).slice(0, 500)}`);
+    const ex = posts.flatMap((q) => q.body.tools).find((t) => t && t.name === 'exec');
+    if (ex) console.log(`  exec says it can call: ${[...String(ex.description || '').matchAll(/^### `([\w]+)`/gm)].map((m) => m[1]).join(', ')}`);
     const outs = api.toolOutputs();
-    console.log(asked.map((q, i) => `  asked   ${q.slice(0, 200)}\n  got     ${String(outs[i] === undefined ? '(no result)' : outs[i]).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n'));
+    const said = (x) => (x.call ? `${x.call.namespace ? `${x.call.namespace} / ` : ''}${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `${x.custom.name}: ${x.custom.name === 'exec' ? x.custom.input.replace(/^try \{ /, '').replace(/\\n/g, ' ') : x.custom.input.split('\n')[1]}` : `shell: ${x.run}`);
+    console.log(script.map((x, i) => `  asked   ${said(x).slice(0, 170)}\n  got     ${String(outs[i] === undefined ? '(no result)' : outs[i]).replace(/\s+/g, ' ').slice(0, 420)}`).join('\n'));
     const events = r.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-    show('what Codex reported', events.filter((e) => e.type === 'item.completed' || e.type === 'error' || e.type === 'turn.failed').map((e) => JSON.stringify(e.item || e).slice(0, 260)).join('\n'), 3500);
-    if (r.stderr.trim()) show('stderr (its last lines)', r.stderr.split(/\r?\n/).filter((l) => l.trim()).slice(-25).map((l) => l.slice(0, 260)).join('\n'), 6000);
-    console.log(`  afterwards: sites/x.com: ${fs.readdirSync(path.join(work, 'sites', 'x.com')).join(', ')}; sites/y.com: ${fs.readdirSync(path.join(work, 'sites', 'y.com')).join(', ')}; planted in the root: ${fs.existsSync(path.join(work, 'held.json.planted'))}; planted outside: ${fs.existsSync(path.join(base, 'cxt', 'home', 'planted.txt'))}`);
-    for (const f of [path.join(work, 'sites', 'x.com', 'new.js'), path.join(work, 'held.json.planted'), path.join(work, 'sites', 'y.com', 'planted.js'), path.join(base, 'cxt', 'home', 'planted.txt')]) fs.rmSync(f, { force: true });
+    show('what Codex reported (errors and its last word)', events.filter((e) => e.type === 'error' || e.type === 'turn.failed' || (e.type === 'item.completed' && e.item && /error|agent_message/.test(e.item.type))).map((e) => JSON.stringify(e.item || e).slice(0, 260)).join('\n'), 1500);
+    if (r.status !== 0 || api.requests.length < steps.length) show('stderr (its last lines)', r.stderr.split(/\r?\n/).filter((l) => l.trim()).slice(-8).map((l) => l.slice(0, 240)).join('\n'), 2000);
+    const planted = [path.join(work, 'sites', 'x.com', 'new.js'), path.join(work, 'held.json.planted'), path.join(work, 'sites', 'y.com', 'planted.js'), outsidePlant];
+    console.log(`  afterwards, written: ${planted.filter((f) => fs.existsSync(f)).map((f) => path.relative(path.join(base, 'cxt'), f)).join(', ') || 'nothing'}`);
+    for (const f of planted) fs.rmSync(f, { force: true });
     await api.close();
   }
 }

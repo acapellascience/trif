@@ -49,7 +49,7 @@ iPhone side (needs ios-poc free):
 - `tests/phone-link-client.js`: the stand-in phone (`PhoneClient.connect`, `request`, `next`, `raw`,
   `firstMessage`), for step 10 to grow. `tests/phone-link-server.test.js`: 13 tests pass locally, three runs in a
   row (7 s each); the store and noise tests still pass (36).
-- CI: see below.
+- CI green for 8a04fa2 on the second attempt (one unrelated browser test flaked on the first): see CI below.
 
 ## Earlier rounds
 
@@ -61,6 +61,9 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 3, 8a04fa2: success on the second attempt, https://github.com/acapellascience/trif/actions/runs/43965527256
+  (attempt 1: 873 passed, 1 failed, the clickjacking guard's timing check again, this time "the second look:
+  19.40 ms at most"; all 13 server tests passed in both attempts; `gh run rerun <id> --failed` cleared it)
 - Round 2, 7dcd239: success on the second attempt, https://github.com/acapellascience/trif/actions/runs/43961575804
   (attempt 1 failed on two browser tests this branch's work doesn't touch: the clickjacking guard's timing check,
   "a press: 5.58 ms on average", and the phone view's "desktop mods never run in the phone view", `window.__ask is
@@ -139,6 +142,8 @@ nowhere; the name passed as one argument whatever characters it has. Optionally 
   in the adapter's `agent.start` beside the API engines.
 - macOS's firewall, when the user has it on, may ask "accept incoming connections?" for `node` the first time the
   listener binds. Step 4 should bind only when the link is on, and step 9's strings may need a line about it.
+- The clickjacking guard's timing check (`tests/clickjack-browser.test.js`) has now flaked in CI in rounds 2 and
+  3, on runs that don't touch it: not this branch's to fix, worth a mention to Tim (main has the same test).
 - CI takes about 9 minutes. If it fails on browser tests only (not `phone-link-*`), look at the names with
   `gh run view <id> --log-failed | grep "not ok"` and rerun with `gh run rerun <id> --failed` before digging.
 - Commits end with the Co-Authored-By line the loop prompt gives (Tim's rule), by path, never `-a`.

@@ -322,7 +322,8 @@ document.querySelector('#banner')?.remove();`);
   assert.equal(m.file, path.join(home, 'sites', 'example.com', 'banner.js'));
 
   await ext.waitForSocket();
-  assert.equal(fs.statSync(ext.sock).mode & 0o777, 0o600);
+  // (Windows: a named pipe, not a file with a mode; who may write to it: helper/lib/win/pipes.js)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(ext.sock).mode & 0o777, 0o600);
   const ping = await sockRequest(ext.sock, { id: 'p1', cmd: 'ping', args: {} });
   assert.equal(ping.id, 'p1');
   assert.equal(ping.ok, true);

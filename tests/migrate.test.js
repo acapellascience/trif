@@ -282,7 +282,7 @@ test('migratePrivate: settings, key, logs, run logs and screenshots leave the wo
   assert.equal(read(path.join(priv, 'screenshots', 'x.com', 'a.png')), 'PNG');
   assert.equal(read(path.join(priv, 'old-webmods-2026-11-01-120000', 'config.json')), '{"env":{"OPENAI_API_KEY":"sk-old"}}\n');
   for (const f of ['sites/x.com/mine.js', 'held.json', 'instructions.md', 'old-webmods-2026-11-01-120000/sites/x.com/b.js']) assert.ok(fs.existsSync(path.join(ws, f)), f);
-  assert.equal(fs.statSync(priv).mode & 0o777, 0o700);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(priv).mode & 0o777, 0o700); // (Windows: no modes)
   assert.match(r.notes.join('\n'), /moved TRIF's private files/);
   // Again: nothing to do.
   const again = migratePrivate(ws, { privateDir: priv });

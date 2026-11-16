@@ -77,7 +77,7 @@ test('host: serves its own helper-<pid>.sock (0600) next to helper.sock, and rem
   const ext = startHost(home);
   await ext.waitForSocket();
   await ext.waitForSocket(5000, 'own');
-  assert.equal(fs.statSync(ext.ownSock).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(ext.ownSock).mode & 0o777, 0o600); // (Windows: a pipe)
   const own = await sockRequest(ext.ownSock, { id: 1, cmd: 'ping' });
   assert.equal(own.result.pid, ext.child.pid);
   assert.equal(own.result.sock, ext.ownSock);

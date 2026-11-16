@@ -106,7 +106,7 @@ Settings → Extensions and delete the old WebMods app.
 
 ### Windows
 
-TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome and Firefox: run `npx trif setup` in a terminal (PowerShell or Command Prompt), then follow its next steps
+TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome and Firefox: run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps
 (the extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH:
 open a new terminal afterwards to use `trif`.
 

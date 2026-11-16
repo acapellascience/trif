@@ -57,9 +57,46 @@ async function claudeCode(base) {
   // handed, then runs it.
   const prefix = path.join(base, 'prefix.sh');
   fs.writeFileSync(prefix, `#!/bin/sh\n{ printf 'ARGC %s\\n' "$#"; i=0; for a in "$@"; do i=$((i+1)); printf 'ARG%s <<%s>>\\n' "$i" "$a"; done; printf 'CWD %s\\n' "$(pwd)"; printf 'SHELL0 %s\\n' "$0"; } >> '${log.replace(/\\/g, '/')}'\neval "$@"\n`);
-  for (const [label, extraEnv, script] of [
-    ['no prefix: which shell runs a command', {}, [{ bash: 'echo "shell: $0 $BASH_VERSION"; uname -s; pwd; echo "comspec=$COMSPEC"' }, { say: 'done' }]],
-    ['with CLAUDE_CODE_SHELL_PREFIX', { CLAUDE_CODE_SHELL_PREFIX: prefix.replace(/\\/g, '/') }, [{ bash: 'echo prefixed-ok && pwd' }, { bash: 'cd sites && ls' }, { say: 'done' }]],
+  // What Claude Code's own file tools do with TRIF's rules on Windows (they run outside any fence, on a Mac
+  // too: only its permission rules hold them): a secret elsewhere in the home folder, by several spellings.
+  const CANARY = `CANARY-${rand(8)}`;
+  const outside = path.join(base, 'home', 'secret.txt');
+  put(outside, `${CANARY} home`);
+  put(path.join(work, 'held.json'), '{}');
+  try { fs.symlinkSync(path.join(base, 'home'), path.join(work, 'sites', 'x.com', 'j'), 'junction'); } catch (e) { console.log(`(no junction: ${e.message})`); }
+  const short = (() => { // the 8.3 spelling of the secret's path, if this volume has one
+    const r = spawnSync(sys('cmd.exe'), ['/d', '/c', `for %I in ("${outside}") do @echo %~sI`], { encoding: 'utf8', windowsVerbatimArguments: true });
+    return String(r.stdout || '').trim() || outside;
+  })();
+  console.log(`secret: ${outside}\n8.3 spelling: ${short}`);
+  const mcpLog = path.join(base, 'mcp.log');
+  const mcpConfig = path.join(base, 'mcp.json');
+  fs.writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { trif: { command: process.execPath, args: [path.join(__dirname, 'mcp-echo.js'), mcpLog] } } }));
+  const fileRules = ['--allowedTools', 'Read(./**)', 'Edit(./sites/**)'];
+  for (const [label, extraEnv, script, extraArgs] of [
+    ['no prefix: which shell runs a command', {}, [{ bash: 'echo shell-ok; uname -s; pwd' }, { say: 'done' }], ['--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(uname:*)', 'Bash(pwd:*)']],
+    ['with CLAUDE_CODE_SHELL_PREFIX', { CLAUDE_CODE_SHELL_PREFIX: prefix.replace(/\\/g, '/') }, [{ bash: 'echo prefixed-ok && pwd' }, { bash: 'cd sites && ls' }, { say: 'done' }], ['--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(pwd:*)']],
+    ['a command outside the allowed ones, and tricks in an allowed one', {}, [{ bash: `type "${outside}"` }, { bash: `cat "${outside.replace(/\\/g, '/')}"` }, { bash: `ls $(cat "${outside.replace(/\\/g, '/')}")` }, { bash: `ls; cat "${outside.replace(/\\/g, '/')}"` }, { bash: `ls > "${path.join(base, 'home', 'planted.txt').replace(/\\/g, '/')}"` }, { bash: `ls "${path.join(base, 'home').replace(/\\/g, '/')}"` }, { say: 'done' }], ['--allowedTools', 'Bash(cd:*)', 'Bash(ls:*)']],
+    ['its file tools, with Read(./**) and Edit(./sites/**) alone', {}, [
+      { tool: 'Read', input: { file_path: path.join(work, 'AGENTS.md') } },
+      { tool: 'Read', input: { file_path: outside } },
+      { tool: 'Read', input: { file_path: short } },
+      { tool: 'Read', input: { file_path: outside.toUpperCase() } },
+      { tool: 'Read', input: { file_path: outside.replace(/\\/g, '/') } },
+      { tool: 'Read', input: { file_path: `\\\\?\\${outside}` } },
+      { tool: 'Read', input: { file_path: path.join(work, 'sites', 'x.com', 'j', 'secret.txt') } },
+      { tool: 'Read', input: { file_path: `${path.join(work, 'sites')}\\..\\..\\home\\secret.txt` } },
+      { tool: 'Glob', input: { pattern: '**/secret.txt', path: path.join(base, 'home') } },
+      { tool: 'Grep', input: { pattern: 'CANARY', path: path.join(base, 'home'), output_mode: 'content' } },
+      { tool: 'Grep', input: { pattern: 'CANARY', path: path.join(work, 'sites'), output_mode: 'content' } },
+      { tool: 'Write', input: { file_path: path.join(work, 'sites', 'x.com', 'new.js'), content: '// new' } },
+      { tool: 'Write', input: { file_path: path.join(work, 'held.json'), content: '{"planted":1}' } },
+      { tool: 'Write', input: { file_path: `${path.join(work, 'sites', 'x.com')}\\..\\..\\held.json`, content: '{"planted":2}' } },
+      { tool: 'Write', input: { file_path: path.join(work, 'SITES', 'X.COM', 'upper.js'), content: '// upper' } },
+      { tool: 'Write', input: { file_path: path.join(work, 'sites', 'x.com', 'j', 'planted.txt'), content: 'planted' } },
+      { tool: 'Write', input: { file_path: path.join(base, 'home', 'planted2.txt'), content: 'planted' } },
+      { say: 'done' }], fileRules],
+    ['no Bash at all; TRIF\'s commands as an MCP tool', {}, [{ tool: 'mcp__trif__trif', input: { args: ['status', '--json'] } }, { bash: 'echo should-not-run' }, { say: 'done' }], ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__trif__trif', '--tools', 'Read,Edit,Write,Glob,Grep']],
   ]) {
     const api = await startFakeAnthropic({ script });
     const cfg = path.join(base, `claude-config-${rand()}`);
@@ -67,7 +104,7 @@ async function claudeCode(base) {
     const env = { ...process.env, ANTHROPIC_BASE_URL: api.url, ANTHROPIC_API_KEY: 'trif-stand-in-key', CLAUDE_CONFIG_DIR: cfg, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...extraEnv };
     for (const k of Object.keys(env)) if (/^(CLAUDECODE|CLAUDE_CODE_ENTRYPOINT)$/.test(k)) delete env[k];
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
-      '--tools', 'Read,Edit,Write,Glob,Grep,Bash', '--disable-slash-commands', '--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(uname:*)', 'Bash(pwd:*)', '--model', 'claude-haiku-stand-in'];
+      ...(extraArgs.includes('--tools') ? [] : ['--tools', 'Read,Edit,Write,Glob,Grep,Bash']), '--disable-slash-commands', ...extraArgs, '--model', 'claude-haiku-stand-in'];
     const r = await new Promise((resolve) => {
       const viaCmd = /\.(cmd|bat)$/i.test(bin);
       const child = viaCmd ? spawn(process.env.ComSpec || sys('cmd.exe'), ['/d', '/s', '/c', `""${bin}" ${args.map((a) => (/[\s()*:,]/.test(a) ? `"${a}"` : a)).join(' ')}"`], { cwd: work, env, windowsVerbatimArguments: true })
@@ -85,13 +122,17 @@ async function claudeCode(base) {
     const init = r.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     const sysInit = init.find((m) => m.type === 'system' && m.subtype === 'init');
     if (sysInit) console.log(`tools offered: ${(sysInit.tools || []).join(', ')}\ncwd: ${sysInit.cwd}; permissionMode: ${sysInit.permissionMode}; version: ${sysInit.claude_code_version || ''}`);
-    show('tool results the model got', api.toolResults().join('\n----\n'));
+    const results = api.toolResults();
+    const asked = script.filter((x) => x.bash !== undefined || x.tool !== undefined).map((x) => (x.bash !== undefined ? `Bash: ${x.bash}` : `${x.tool}: ${JSON.stringify(x.input)}`));
+    console.log(asked.map((q, i) => `  asked   ${q.slice(0, 300)}\n  got     ${String(results[i] === undefined ? '(no result)' : results[i]).replace(/\s+/g, ' ').slice(0, 300)}${String(results[i] || '').includes('CANARY') ? '   <== THE CANARY' : ''}`).join('\n'));
     const result = init.find((m) => m.type === 'result');
     if (result) show('result', JSON.stringify({ subtype: result.subtype, is_error: result.is_error, result: String(result.result || '').slice(0, 300), denials: result.permission_denials }));
     else show('stdout (no result line)', r.stdout.slice(-1500));
     if (r.stderr.trim()) show('stderr', r.stderr.slice(-1500));
     await api.close();
   }
+  console.log(`afterwards: held.json = ${fs.readFileSync(path.join(work, 'held.json'), 'utf8')}; planted outside: ${['planted.txt', 'planted2.txt'].filter((n) => fs.existsSync(path.join(base, 'home', n))).join(', ') || 'nothing'}; sites/x.com: ${fs.readdirSync(path.join(work, 'sites', 'x.com')).join(', ')}`);
+  show('the MCP server\'s log', fs.existsSync(mcpLog) ? fs.readFileSync(mcpLog, 'utf8') : '(never started)', 2500);
   show('what the prefix program was handed (prefix.log)', fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '(nothing: the prefix was never run)', 6000);
 }
 
@@ -163,8 +204,8 @@ async function codex(base) {
   for (const kind of ['unelevated', 'elevated', 'mxc']) {
     console.log(`\n>>> windows.sandbox = "${kind}"`);
     if (kind === 'elevated') {
-      const s = runTool(bin, ['sandbox', 'setup', '--elevated'], { env, timeout: 240000 });
-      show('codex sandbox setup --elevated', `exit ${s.status}\n${s.stdout}\n${s.stderr}`, 2000);
+      const s = runTool(bin, ['sandbox', 'setup', '--elevated', '--current-user'], { env, timeout: 240000 });
+      show('codex sandbox setup --elevated --current-user', `exit ${s.status}\n${s.stdout}\n${s.stderr}`, 2000);
     }
     const args = ['-c', `windows.sandbox="${kind}"`, '-c', 'default_permissions="trif-run"', '-c', permissions, 'sandbox', '-P', 'trif-run', '-C', stage, '--', process.execPath, probe, cfgFile];
     const r = runTool(bin, args, { env, cwd: stage });

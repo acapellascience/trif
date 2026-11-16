@@ -44,7 +44,10 @@ const OPS = {
   junction: (o) => { fs.symlinkSync(o.target, o.path, 'junction'); return { ok: true, made: true, got: fs.readFileSync(path.join(o.path, o.file), 'utf8').slice(0, 60) }; },
   tcp: (o) => connect({ host: o.host, port: o.port }),
   pipe: (o) => connect(o.name),
-  dns: (o) => new Promise((resolve) => dns.lookup(o.host, (e, addr) => resolve(e ? { ok: false, why: short(e) } : { ok: true, got: addr }))),
+  dns: (o) => new Promise((resolve) => {
+    dns.lookup(o.host, (e, addr) => resolve(e ? { ok: false, why: short(e) } : { ok: true, got: addr }));
+    setTimeout(() => resolve({ ok: false, why: 'no answer within 8 s' }), 8000);
+  }),
   udp: (o) => new Promise((resolve) => {
     const s = dgram.createSocket('udp4');
     s.on('error', (e) => { try { s.close(); } catch { /* closed */ } resolve({ ok: false, why: short(e) }); });
@@ -88,5 +91,6 @@ const OPS = {
     // (as it goes, where the fence lets it write: what was tried is known even if a later attempt hangs)
     if (cfg.out) { try { fs.writeFileSync(cfg.out, JSON.stringify(out)); } catch { /* not writable */ } }
   }
-  process.stdout.write(`\nFENCE-PROBE ${JSON.stringify(out)}\n`);
+  // (and out at once: a lookup still waiting for an answer that won't come would keep this process going)
+  process.stdout.write(`\nFENCE-PROBE ${JSON.stringify(out)}\n`, () => process.exit(0));
 })();

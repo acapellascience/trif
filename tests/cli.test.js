@@ -467,7 +467,7 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   for (const d of ['sites', 'bin']) assert.ok(fs.statSync(path.join(ws, d)).isDirectory(), d);
   assert.ok(!fs.existsSync(path.join(ws, 'screenshots')), 'screenshots are kept in the private folder');
   assert.ok(fs.statSync(path.join(privDir(ws), 'screenshots')).isDirectory());
-  assert.equal(fs.statSync(privDir(ws)).mode & 0o777, 0o700);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(privDir(ws)).mode & 0o777, 0o700); // (Windows: no modes)
   assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
   // the how-to half, beside it (read on demand, not pulled into every message by CLAUDE.md)

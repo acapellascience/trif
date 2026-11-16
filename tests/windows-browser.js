@@ -17,8 +17,9 @@
 //
 // It writes to the real HKEY_CURRENT_USER, so it refuses to run anywhere but GitHub Actions on Windows,
 // unless given --yes-this-computer. Options: --headful (a window, not headless), --unicode (the scratch
-// profile folder has a space, letters outside ASCII and a % in its name). Prints PASS/FAIL per check;
-// exits 1 if anything failed.
+// profile folder has a space, letters outside ASCII and a % in its name), --browser edge|brave with --bin
+// <its program> (another Chromium browser, set up as `trif setup --browser <it>` does: its own registry
+// key). Prints PASS/FAIL per check; exits 1 if anything failed.
 
 const fs = require('fs');
 const os = require('os');
@@ -28,7 +29,18 @@ const { spawn, spawnSync } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
-const HOST_KEYS = ['HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webmods.helper', 'HKCU\\Software\\Chromium\\NativeMessagingHosts\\com.webmods.helper'];
+const HOST = 'NativeMessagingHosts\\com.webmods.helper';
+const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
+const BROWSER = arg('--browser') || 'chrome';
+// What setup is asked for, the keys it then leaves (removed at the end), and doctor's line for the browser.
+const KINDS = {
+  chrome: { setup: 'chrome,chromium', keys: [`HKCU\\Software\\Google\\Chrome\\${HOST}`, `HKCU\\Software\\Chromium\\${HOST}`], doctor: /^ok {4}Google Chrome: native host manifest$/m, says: /Chrom/i },
+  edge: { setup: 'edge', keys: [`HKCU\\Software\\Microsoft\\Edge\\${HOST}`], doctor: /^ok {4}Microsoft Edge: native host manifest$/m, says: /Edge/i },
+  brave: { setup: 'brave', keys: [`HKCU\\Software\\BraveSoftware\\Brave-Browser\\${HOST}`, `HKCU\\Software\\Google\\Chrome\\${HOST}`], doctor: /^ok {4}Brave: native host manifest$/m, says: /Brave/i },
+};
+const KIND = KINDS[BROWSER];
+if (!KIND) { console.error(`windows-browser: --browser ${Object.keys(KINDS).join('|')}`); process.exit(2); }
+const HOST_KEYS = KIND.keys;
 
 if (process.platform !== 'win32') { console.error('windows-browser: Windows only'); process.exit(2); }
 if (process.env.GITHUB_ACTIONS !== 'true' && !process.argv.includes('--yes-this-computer')) {
@@ -100,8 +112,10 @@ class Cdp {
 }
 
 (async () => {
-  const chromeBin = process.env.TRIF_E2E_CHROME;
-  if (!check(!!chromeBin && fs.existsSync(chromeBin), `Chrome for Testing at TRIF_E2E_CHROME (${chromeBin || 'not set'})`)) process.exit(1);
+  const chromeBin = arg('--bin') || process.env.TRIF_E2E_CHROME;
+  if (!check(!!chromeBin && fs.existsSync(chromeBin), `the browser (${BROWSER}): ${chromeBin || 'TRIF_E2E_CHROME not set'}`)) process.exit(1);
+  // (before anything is set up: none of the keys this run will leave is there from something else)
+  for (const key of HOST_KEYS) reg(['delete', key, '/f']);
 
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-browser-')));
   const profile = path.join(base, UNICODE ? 'Zoë 用户 100%' : 'Test User');
@@ -115,12 +129,18 @@ class Cdp {
   console.log(`profile ${profile}${HEADFUL ? ' (headful)' : ''}`);
 
   // 1. setup, as a user runs it (PATH left alone: --no-link)
-  const s = spawnSync(process.execPath, [path.join(REPO, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--browser', 'chrome,chromium'], { env, encoding: 'utf8', timeout: 300000 });
-  if (!check(s.status === 0, 'setup --copy --no-link --browser chrome,chromium exits 0', `${s.stdout}\n${s.stderr}`)) process.exit(1);
+  const s = spawnSync(process.execPath, [path.join(REPO, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--browser', KIND.setup], { env, encoding: 'utf8', timeout: 300000 });
+  if (!check(s.status === 0, `setup --copy --no-link --browser ${KIND.setup} exits 0`, `${s.stdout}\n${s.stderr}`)) process.exit(1);
   const extensionDir = path.join(home, 'app', 'extension');
   const cmd = path.join(home, 'bin', 'trif.cmd');
   check(fs.existsSync(path.join(extensionDir, 'manifest.json')), `the extension folder setup names: ${extensionDir}`);
   check(!fs.existsSync(path.join(home, 'helper.pipe')), 'no helper yet');
+  // --drop-key N: one of the keys setup wrote is taken away again, to see which one the browser reads.
+  if (arg('--drop-key') !== null) {
+    const dropped = HOST_KEYS[Number(arg('--drop-key'))];
+    reg(['delete', dropped, '/f']);
+    console.log(`      (removed ${dropped}; left: ${HOST_KEYS.filter((k) => k !== dropped && reg(['query', k, '/ve']).status === 0).join(', ') || 'none'})`);
+  }
 
   // 2. the browser, with the unpacked extension
   const userDataDir = path.join(base, 'chrome-profile');
@@ -171,12 +191,12 @@ class Cdp {
       const x = st.j.helper.extension;
       console.log(`      hello: ${JSON.stringify(x)}`);
       check(x.version === version, `the extension that said hello is this one (${x.version})`, `expected ${version}`);
-      check(/Chrom/i.test(String(x.browser || '')), `it says which browser it's in (${x.browser})`);
+      check(KIND.says.test(String(x.browser || '')), `it says which browser it's in (${x.browser})`);
       check(st.j.extension && !st.j.error, 'a page command goes helper -> extension -> helper (status asks the extension for its tabs)', JSON.stringify(st.j).slice(0, 600));
     }
     const doc = await runCmd(cmd, ['doctor'], env);
     console.log(doc.stdout);
-    for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, /^ok {4}Google Chrome: native host manifest$/m, /^ok {4}helper running/m, /^ok {4}extension v\S+ on /m]) {
+    for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, KIND.doctor, /^ok {4}helper running/m, /^ok {4}extension v\S+ on /m]) {
       check(want.test(doc.stdout), `trif doctor: ${want}`);
     }
     const hlog = tail(path.join(privateDir, 'helper.log'), 200);

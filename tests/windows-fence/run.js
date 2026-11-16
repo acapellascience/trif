@@ -53,7 +53,7 @@ function build(base) {
   return exe;
 }
 
-function fence(exe, spec, { timeout = 420000 } = {}) {
+function fence(exe, spec, { timeout = 240000 } = {}) {
   const file = path.join(os.tmpdir(), `trif-fence-spec-${rand()}.json`);
   fs.writeFileSync(file, JSON.stringify(spec));
   const t = Date.now();

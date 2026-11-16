@@ -73,6 +73,28 @@ jobs:
       - name: Browser check, in a profile folder with letters outside ASCII
         if: always() && matrix.node != 18
         run: node tests/windows-browser.js --unicode
+      # Edge is on the runner; whether it takes --load-extension is what this finds out (never failing).
+      - name: (information) the same with Microsoft Edge, through Edge's own registry key
+        if: always() && matrix.node != 18
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $edge) { Write-Output "no Edge here"; exit 0 }
+          node tests/windows-browser.js --browser edge --bin "$edge"
+      - name: (information) the same with Brave, through Brave's own registry key
+        if: always() && matrix.node != 18
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install brave -y --no-progress | Select-Object -Last 3
+          $brave = @("$env:ProgramFiles\BraveSoftware\Brave-Browser\Application\brave.exe", "${env:ProgramFiles(x86)}\BraveSoftware\Brave-Browser\Application\brave.exe", "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\Application\brave.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $brave) { Write-Output "no Brave here"; exit 0 }
+          Write-Output "=== with Brave's own key alone"
+          node tests/windows-browser.js --browser brave --bin "$brave" --drop-key 1
+          Write-Output "=== with Chrome's key alone"
+          node tests/windows-browser.js --browser brave --bin "$brave" --drop-key 0
+          exit 0
       # For now, to see what's left: the tests marked macOS/Linux only, run anyway. Never fails the job.
       - name: (information) the macOS/Linux-only tests, run on Windows
         if: always() && matrix.node != 18

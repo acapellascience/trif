@@ -17,7 +17,10 @@
   const describe = (el) => {
     const r = el.getBoundingClientRect();
     const id = (el.getAttribute('data-testid') && `[data-testid=${el.getAttribute('data-testid')}]`) || (el.id && `#${el.id}`) || (el.getAttribute('aria-label') && `[aria-label="${clip(el.getAttribute('aria-label'), 40)}"]`) || '';
-    return `${el.tagName.toLowerCase()}${id} ${Math.round(r.width)}x${Math.round(r.height)} "${clip(el.innerText || el.textContent, 50)}"`;
+    const on = showing(el);
+    // (a hidden element's innerText runs its lines together: its text nodes, spaced, instead)
+    const text = on ? el.innerText : [el, ...el.querySelectorAll('*')].map((x) => [...x.childNodes].filter((c) => c.nodeType === 3).map((c) => c.data.trim()).join(' ')).filter(Boolean).join(' ');
+    return `${el.tagName.toLowerCase()}${id} ${on ? `${Math.round(r.width)}x${Math.round(r.height)}` : '(hidden)'} "${clip(text, 50)}"`;
   };
   const selectorsOf = /*SELECTORS_OF*/;
 
@@ -50,8 +53,8 @@
   async function style(rules) {
     const spec = normalize(rules);
     const id = `trif-try-${Date.now().toString(36)}-${tries.length + 1}`;
-    const t = { id, spec, hidden: new Map(), texts: new Map(), observers: [], sheet: null, before: {}, dead: false, warnings: [] };
-    for (const sel of spec.hide) { const els = all(sel); t.before[sel] = Array.isArray(els) ? els.filter(showing).length : null; }
+    const t = { id, spec, hidden: new Map(), texts: new Map(), observers: [], sheet: null, before: {}, samples: {}, matched: {}, dead: false, warnings: [] };
+    for (const sel of spec.hide) { const els = all(sel); t.before[sel] = Array.isArray(els) ? els.filter(showing).length : null; t.samples[sel] = Array.isArray(els) ? els.slice(0, SAMPLES).map(describe) : []; t.matched[sel] = Array.isArray(els) ? els.length : 0; }
     const __t = {
       hid: (el) => { if (!t.dead && !t.hidden.has(el)) t.hidden.set(el, [el.style.getPropertyValue('display'), el.style.getPropertyPriority('display')]); },
       txt: (n) => { if (!t.dead && !t.texts.has(n)) t.texts.set(n, n.data); },
@@ -91,7 +94,7 @@
       for (const sel of t.spec.hide) {
         const els = all(sel);
         if (!Array.isArray(els)) { out.hide.push({ selector: sel, error: els.error }); continue; }
-        out.hide.push({ selector: sel, matches: els.length, wereShowing: t.before[sel], samples: els.slice(0, SAMPLES).map(describe) });
+        out.hide.push({ selector: sel, matches: els.length, wereShowing: t.before[sel], samplesBefore: t.samples[sel], ...(els.length !== t.matched[sel] ? { samplesNow: els.slice(0, SAMPLES).map(describe) } : {}) });
       }
       for (const f of t.spec.filter) {
         const items = all(f.items);

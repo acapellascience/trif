@@ -636,36 +636,35 @@ struct ContentView: View {
 
 }
 
-/// TRIF's robot, exactly the side panel's (Tim, 11-16): its own polygons and colours (RobotShape.swift, made by
-/// mobile/prepare.js from extension/sidepanel.html's #bar-robot), filled as the panel fills them: the rim in TRIF's
-/// green, the face dark, the eyes mint. Writing a reply: three dots in the eyes' colour moving across the face.
-/// All mods paused: the panel's paused face, two bars.
+/// TRIF's robot as a toolbar glyph (Tim, 11-16): TRIF's own shapes, the side panel's squircle (RobotShape.swift,
+/// made by mobile/prepare.js from extension/sidepanel.html's #bar-robot: the line midway between its rim and face) and
+/// its eyes, drawn as the other glyphs are: an outline in the button's tint, the same line width as the switch beside
+/// it, the eyes filled. Writing a reply: three moving dots for eyes; all mods paused: the panel's two bars.
 struct RobotGlyph: View {
     var paused = false
     var working = false
-    private static func colour(_ c: (Int, Int, Int)) -> Color { Color(red: Double(c.0) / 255, green: Double(c.1) / 255, blue: Double(c.2) / 255) }
-    private static let rim = colour(RobotShape.rimColour), face = colour(RobotShape.faceColour), eye = colour(RobotShape.eyeColour)
+    /// The squircle's middle line: halfway between the rim's outer edge and the face's.
+    static let outline: [(Double, Double)] = zip(RobotShape.rim, RobotShape.face).map { (($0.0 + $1.0) / 2, ($0.1 + $1.1) / 2) }
     var body: some View {
         GeometryReader { g in
-            let s = min(g.size.width, g.size.height)
+            let s = min(g.size.width, g.size.height), k = s / 128
             ZStack {
-                RobotPolygon(points: RobotShape.rim).fill(RobotGlyph.rim)
-                RobotPolygon(points: RobotShape.face).fill(paused ? Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0x18 / 255, green: 0x18 / 255, blue: 0x1a / 255, alpha: 1) : UIColor(red: 0xf4 / 255, green: 0xf4 / 255, blue: 0xf5 / 255, alpha: 1) }) : RobotGlyph.face)
+                RobotPolygon(points: RobotGlyph.outline).stroke(style: StrokeStyle(lineWidth: max(1.5, s * 0.09), lineJoin: .round))
                 if paused {
                     ForEach(0..<RobotShape.pause.count, id: \.self) { i in
-                        let r = RobotShape.pause[i], k = s / 128
-                        RoundedRectangle(cornerRadius: r.4 * k).fill(RobotGlyph.rim)
+                        let r = RobotShape.pause[i]
+                        RoundedRectangle(cornerRadius: r.4 * k)
                             .frame(width: r.2 * k, height: r.3 * k)
                             .position(x: (r.0 + r.2 / 2) * k, y: (r.1 + r.3 / 2) * k)
                     }
                 } else if working {
                     PhaseAnimator([0, 1, 2]) { lit in
-                        HStack(spacing: s * 0.07) {
-                            ForEach(0..<3, id: \.self) { i in Circle().fill(RobotGlyph.eye).frame(width: s * 0.15, height: s * 0.15).opacity(i == lit ? 1 : 0.35) }
+                        HStack(spacing: s * 0.08) {
+                            ForEach(0..<3, id: \.self) { i in Circle().frame(width: s * 0.15, height: s * 0.15).opacity(i == lit ? 1 : 0.3) }
                         }
                     } animation: { _ in .easeInOut(duration: 0.3) }
                 } else {
-                    ForEach(0..<RobotShape.eyes.count, id: \.self) { i in RobotPolygon(points: RobotShape.eyes[i]).fill(RobotGlyph.eye) }
+                    ForEach(0..<RobotShape.eyes.count, id: \.self) { i in RobotPolygon(points: RobotShape.eyes[i]).fill() }
                 }
             }
             .frame(width: s, height: s)

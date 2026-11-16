@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const { EventEmitter } = require('events');
 const keyring = require('../keyring');
 const { privateDir } = require('../paths');
@@ -47,9 +48,19 @@ function cleanName(name, fallback) {
   return Array.from(s).slice(0, NAME_MAX).join('').trim() || fallback;
 }
 
-/** This computer's name for the QR code and the handshake (the host name without ".local"). */
-function computerName() {
-  return cleanName(os.hostname().replace(/\.(local|lan|home)$/i, ''), 'Computer');
+/** The Mac's own name (System Settings, General, About), as its other Bonjour records give it. */
+function macName() {
+  return execFileSync('/usr/sbin/scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+}
+
+/**
+ * This computer's name for the QR code, the handshake and the Bonjour record: the Mac's own name, else the
+ * host name without ".local".
+ */
+function computerName({ platform = process.platform, read = macName } = {}) {
+  let name = '';
+  if (platform === 'darwin') { try { name = read(); } catch { name = ''; } }
+  return cleanName(name, '') || cleanName(os.hostname().replace(/\.(local|lan|home)$/i, ''), 'Computer');
 }
 
 const time = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);

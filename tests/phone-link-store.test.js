@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { tempDir } = require('./fake-extension');
 const { makeFakeKeychain } = require('./fake-keychain');
-const { Store, FILE, SERVICE, ACCOUNT, WINDOW_MS, MAX_TRIES, cleanName, parse } = require('../helper/lib/phonelink/store');
+const { Store, FILE, SERVICE, ACCOUNT, WINDOW_MS, MAX_TRIES, cleanName, computerName, parse } = require('../helper/lib/phonelink/store');
 const { generateKeyPair, publicFromPrivate, keyId, Handshake } = require('../helper/lib/phonelink/noise');
 
 const cleanups = [];
@@ -370,4 +370,15 @@ test('with the noise handshake: the store\'s keys answer a phone that pairs, and
   const second = JSON.parse(phone.readMessage(computer.writeMessage(Buffer.from(JSON.stringify({ v: 1, name: store.name, paired: true })))).toString('utf8'));
   assert.deepEqual(second, { v: 1, name: 'Tim’s MacBook', paired: true });
   assert.equal(store.isPaired(phoneKeys.publicKey).name, 'Tim’s iPhone');
+});
+
+test("the computer's name: the Mac's own, else the host name", () => {
+  const host = cleanName(require('os').hostname().replace(/\.(local|lan|home)$/i, ''), 'Computer');
+  assert.equal(computerName({ platform: 'darwin', read: () => 'Tim’s MacBook Pro\n' }), 'Tim’s MacBook Pro');
+  assert.equal(computerName({ platform: 'darwin', read: () => { throw new Error('no scutil'); } }), host);
+  assert.equal(computerName({ platform: 'darwin', read: () => ' \n' }), host);
+  let asked = 0;
+  assert.equal(computerName({ platform: 'linux', read: () => { asked++; return 'A Mac'; } }), host);
+  assert.equal(asked, 0);
+  assert.ok(computerName().length > 0);
 });

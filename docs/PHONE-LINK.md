@@ -175,6 +175,15 @@ The listener binds all interfaces (IPv4 and IPv6). The app browses `_trif._tcp` 
 record whose `id` is its paired computer's, and connects. iOS asks for the Local Network permission the first
 time (`NSLocalNetworkUsageDescription`, `NSBonjourServices: _trif._tcp` in Info.plist).
 
+The announcer (`lib/phonelink/bonjour.js`) follows the listener: no listener, no child. The name is the Mac's
+own (`scutil --get ComputerName`; the host name if that fails), cut to 63 bytes, and always one argument (no
+shell). A child that dies is started again after a pause that grows (1 s, 2 s … 30 s). If `dns-sd` can't be
+started, the listener still answers but the phone can't find it: `announcer.status().error` is `missing`, for
+the panel to show. A helper that is killed outright (SIGKILL, a crash of the browser's whole process tree) can
+leave its `dns-sd` behind, announcing a port nobody answers, until the next logout. So the app treats a refused
+connection as "not this record" and tries any other record with its computer's `id` before it says the computer
+wasn't found.
+
 The record tells the Wi-Fi that this computer runs TRIF with the link on, and its name, as the Mac's own records
 (file sharing, AirPlay) tell its name already. It never carries the key itself.
 

@@ -15,10 +15,12 @@ Computer side:
       with `tests/fake-keychain.js`
 - [x] 4. `server.js`: the listener (none while off; silent refusal of unpaired, removed, garbage, late), sessions,
       `hello`/`ping`. Tests on 127.0.0.1, a random port. `tests/phone-link-client.js` (the stand-in phone) begun
-- [ ] 5. `bonjour.js`: `dns-sd -R` while the listener is up (a stand-in binary in tests, `TRIF_DNS_SD`)
-- [ ] 6. Remote runs: `remote.js` and the `remote` mark in `runs.js` (site forced to `phone~<host>`, page copy and
-      screenshot into the run's screenshots folder, context, page commands refused), events numbered, kept
-      results, `run.resume`/`run.ack`, `run.result`
+- [x] 5. `bonjour.js`: `dns-sd -R` while the listener is up (a stand-in binary in tests, `TRIF_DNS_SD`)
+- [ ] 6a. The `remote` mark in `runs.js`: a run started for a phone (site forced to `phone~<host>`, the phone's
+      page copy and screenshot into the run's screenshots folder, context, page commands refused), with the
+      stand-in model; the folder limit proven (nothing written outside `sites/phone~<host>/`)
+- [ ] 6b. `remote.js`: `run.start` over a session, events numbered, kept results, `run.resume`/`run.ack`,
+      `run.result`, kept results deleted when the phone is removed
 - [ ] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
 - [ ] 8. `host.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
 - [ ] 9. Desktop panel: Connect a phone (QR encoder in the extension, the list, Remove, the switch), strings
@@ -35,24 +37,27 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 3, 2026-11-16)
+## Done this round (round 4, 2026-11-16)
 
-- Built step 4: `helper/lib/phonelink/server.js` (class `Server`, class `Session`). It follows the store's
-  `'change'`: a listener only while `status().listen` and the key is there; sessions of removed phones, and
-  everything when the link goes off, are closed. Not wired into host.js yet (step 8), so nothing listens for real.
-- Refusals write nothing: garbage, a browser's GET, silence, a slow drip, an unpaired key, a wrong secret, a bad
-  payload, the ninth connection. Five wrong secrets close the window and, with nobody paired, the listener.
-- Three rules the server settles, now in PHONE-LINK.md section 4 ("When a connection becomes a session"): a
-  session counts only once its first transport message decrypts (a replayed first message never becomes one and
-  can't touch the real phone's session); one session per phone, the newest proven one; a 2-minute idle limit
-  (the app pings every 30 s). None weakens section 2.
-- `tests/phone-link-client.js`: the stand-in phone (`PhoneClient.connect`, `request`, `next`, `raw`,
-  `firstMessage`), for step 10 to grow. `tests/phone-link-server.test.js`: 13 tests pass locally, three runs in a
-  row (7 s each); the store and noise tests still pass (36).
-- CI green for 8a04fa2 on the second attempt (one unrelated browser test flaked on the first): see CI below.
+- Built step 5: `helper/lib/phonelink/bonjour.js` (class `Announcer`). One `dns-sd -R "<name>" _trif._tcp local
+  <port> v=1 id=<id>` child while the listener is up, none otherwise; it follows the server's `'listening'` and
+  `'stopped'` and the store's `'change'` (a new key is a new id, so a new record). Not wired into host.js yet
+  (step 8), so nothing is announced for real.
+- A child that dies is started again after 1 s, 2 s, 4 s … 30 s; no `dns-sd` (ENOENT) is said once in the log and
+  not retried (`status().error = 'missing'`); not a Mac is `'unsupported'`. The child is killed on `stop()`
+  (SIGTERM, SIGKILL after 2 s) and on the process's `'exit'`.
+- `computerName()` in store.js now gives the Mac's own name (`scutil --get ComputerName`), the host name as the
+  fallback. PHONE-LINK.md section 5 has the announcer's rules and one new rule for the app (a refused connection
+  = try another record with the same `id`).
+- `tests/phone-link-bonjour.test.js`: 11 tests, all with a stand-in binary through `TRIF_DNS_SD` (the real
+  `dns-sd` never runs in a test). All phone-link tests: 61 pass locally (7 s), three runs in a row.
+- CI: see CI below.
 
 ## Earlier rounds
 
+- Round 3: step 4, `server.js` (the listener: none while the store says none, silent refusals, sessions, `hello`
+  and `ping`), `tests/phone-link-client.js` (the stand-in phone), 13 tests. CI green for 8a04fa2 on the second
+  attempt.
 - Round 2: step 3, `store.js` (the computer's key in the keyring, `phone-link.json`, the pairing window, remove),
   18 tests. CI green for 7dcd239 on the second attempt.
 - Round 1: the survey, docs/PHONE-LINK.md, docs/PHONE-LINK-STRINGS.md, step 2 (`noise.js`, `frames.js`, 18 tests
@@ -72,28 +77,46 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 5: `helper/lib/phonelink/bonjour.js` with its tests (a stand-in binary through `TRIF_DNS_SD`, never the real
-`dns-sd` in a test: it would announce on Tim's Wi-Fi). `new Announcer(store, server, {env, log})`: on the
-server's `'listening'` (port) start one child, `dns-sd -R "<store.name>" _trif._tcp local <port> v=1 id=<id>`
-(`id` = `store.status().id`; argv as an array, no shell); on `'stopped'` kill it; a port that changes means kill
-and start again; a child that exits while the listener is up is started again after a pause that grows (1 s, 2 s,
-… 30 s), and not at all when the binary isn't there (ENOENT: log once; the phone then can't find the computer, a
-state the panel should be able to show, so keep `announcer.status()` → `{running, error}`). `stop()` kills the
-child; make sure the child can't outlive the helper (kill on `process.on('exit')` too; check how host.js ends its
-other children). Not macOS: no announcer, `status().error = 'unsupported'` (PHONE-LINK.md section 9). The stand-in
-binary: a small script in the test's temp folder that writes its argv and pid to a file and sleeps (see how
-`tests/fake-keychain.js` makes its stand-in). Tests: no child while not listening; the exact argv; killed on
-stop, on link off, on the last phone removed; restarted when it dies; nothing started when `TRIF_DNS_SD` points
-nowhere; the name passed as one argument whatever characters it has. Optionally the Mac's friendlier name
-(`scutil --get ComputerName`) for `computerName()` in store.js, with the host name as the fallback.
+Step 6a: the `remote` mark in `helper/lib/runs.js`, with unit tests and the stand-in model (see how the existing
+runs tests start a run without a paid call: grep `tests/` for the stand-in agent). Read first: how a panel chat
+starts a run in runs.js (the run's site, its stage folder, the screenshots folder, the context the agent gets)
+and how `helper/lib/phonemods.js` names and makes the twin folder `sites/phone~<host>/` (docs/MOBILE-EDIT.md).
+Then add one way to start a run for a phone: `{remote: {phone: {id, name}}, url, page (the cleaned page copy,
+text), screenshot (a PNG Buffer), text (what the user asked)}`. The site is always `phone~<host of url>`, taken
+from the url by the helper and never from the phone's message; the page copy and the screenshot are written
+into the run's screenshots folder (size limits: PHONE-LINK.md section 4) and named in the agent's context; the
+commands that need a desktop page (`trif page`, `trif try`, `trif screenshot` and the like) are refused for a
+remote run with a line that says to use `trif phone …` (step 7). The same fence as every run. Tests: the site is
+forced (a url for x.com writes only under `sites/phone~x.com/`, and a mod in `sites/x.com/` is untouched and
+unreadable as a target); a hostile url or host (`..`, a slash, an empty host) is refused; page commands are
+refused; `<private>/phone-link.json` and the keyring are unreadable from the run (the note below). Step 6b
+(`remote.js`, the wire side: `run.start`, numbered events, kept results, resume) comes after and should not be
+started in the same round. If the folder limit can't be had without loosening the fence, stop for Tim (the
+prompt's security rule).
 
 ## Notes for next round
 
 - Tests: `node --test tests/phone-link-store.test.js tests/phone-link-noise.test.js` (3 seconds). The whole suite
   is `npm test`; the browser tests need `TRIF_BROWSER_TESTS=1` and are CI's job (don't run them locally without
   the lock and the watchdog).
-- Tests now: `node --test tests/phone-link-server.test.js tests/phone-link-store.test.js
-  tests/phone-link-noise.test.js` (10 seconds).
+- Tests now: `node --test tests/phone-link-bonjour.test.js tests/phone-link-server.test.js
+  tests/phone-link-store.test.js tests/phone-link-noise.test.js` (7 seconds, 61 tests).
+- `bonjour.js` API: `new Announcer(store, server, {env, log, platform, retryMs, retryMaxMs, settledMs})` (an
+  EventEmitter, `'change'` when `status()` changes); `start()` (returns the announcer), `stop()`, `sync()`,
+  `status()` → `{running, error: null | 'unsupported' | 'missing' | 'failing', record: {name, port, id} | null}`.
+  Also `recordArgs`, `instanceName`, `pause`. In tests always pass `env: {TRIF_DNS_SD: <stand-in>}` and
+  `platform: 'darwin'`: without `TRIF_DNS_SD` it runs the real `/usr/bin/dns-sd`, which announces on the Wi-Fi.
+  The stand-in is `makeStandIn(dir)` in the bonjour test (`calls()` → `[{pid, argv}]`, `die(true)` makes the next
+  ones exit at once); step 10's end-to-end test needs it too: move it to a shared file then.
+- For step 8 (host.js): make the announcer next to the server, `announcer.start()` after `server.start()`, and
+  `announcer.stop()` in `shutdown()` before the exit (the `'exit'` hook is the backstop, SIGKILL there). The
+  helper's test env must carry `TRIF_DNS_SD` (add it to `testEnv` in tests/fake-extension.js, pointing at a
+  stand-in, so that no host test can ever announce for real), and `phone.status` for the panel should include
+  `announcer.status().error`. A helper that is SIGKILLed leaves its `dns-sd` behind: an option for step 8 is a
+  pid file in `<private>/phone-link/` that the next owner checks (`ps -p <pid> -o command=` must show `dns-sd`
+  and `_trif._tcp` before it kills anything); the app-side rule in PHONE-LINK.md section 5 covers it meanwhile.
+- For step 12 (the app): several records can carry the computer's `id` (a stale one, or Bonjour's "Name (2)"
+  after a clash): match on the `id` in the TXT record, never on the name, and try each until one answers.
 - `server.js` API: `new Server(store, {version, log, host, port, hello, firstMessageMs, idleMs, maxConnections})`
   (an EventEmitter: `'session'` (a proven Session), `'listening'` (port), `'stopped'`); `await start()` → the port
   or 0; `await sync()` → the port or 0 (queued behind any change being handled: tests call it after touching the
@@ -129,8 +152,8 @@ nowhere; the name passed as one argument whatever characters it has. Optionally 
   decides before `writeMessage`: that is where server.js refuses with nothing sent. `keyId(publicKey)` is the
   8-byte id. `frames.js`: `packet`, `PacketReader`, `seal(cipher, obj) → [packets]`, `Assembler(cipher).push(msg)`.
 - The published vector is in the noise test file: the Swift side (step 12) should run the same one.
-- The computer's name is `os.hostname()` without `.local` for now (`computerName()` in store.js); the Mac's
-  friendlier name (`scutil --get ComputerName`) could replace it in step 5, where `dns-sd` needs a name anyway.
+- The computer's name is the Mac's own (`scutil --get ComputerName`, read once when a Store is made without a
+  `name`; the host name without `.local` if that fails). Tests pass `name` and never depend on it.
 - The sandbox keeps runs away from the Keychain already (agents/codex-oss.js's note: the home folder is denied),
   so a run can't read the computer's key; step 6 should have a test line for the private folder's
   `phone-link.json` and `phone-link/` being unreadable from a run.

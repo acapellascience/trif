@@ -743,7 +743,9 @@ unchanged.
   `%LOCALAPPDATA%\TRIF` (paths.js `defaultPrivateDir`).
 - **Wrappers** (`win/launchers.js`) in `~\.trif\bin`: `trif-host.bat` (what the manifests name: a
   manifest's `path` takes no arguments, and browsers run a .bat through `cmd.exe /d /c`; `@echo off` first,
-  paths quoted, `%` doubled, CRLF), `trif.cmd` (Command Prompt, PowerShell; no `.ps1`, which the default
+  paths quoted, `%` doubled, CRLF; files inside the workspace named from the wrapper's own folder,
+  `"%~dp0..\app\helper\host.js"`, so the file stays ASCII whatever the profile folder is called: cmd.exe
+  reads a batch file in the console's code page, not UTF-8), `trif.cmd` (Command Prompt, PowerShell; no `.ps1`, which the default
   execution policy refuses and PowerShell would prefer) and `trif` (a `#!/bin/sh` script for Git Bash,
   Claude Code's shell there, which ignores PATHEXT). No `webmods` names: Windows never had them.
 - **Native messaging** (`win/registry.js`, `browsers.js` `WINDOWS`): manifests are written to
@@ -751,10 +753,10 @@ unchanged.
   `HKCU\Software\<vendor key>\NativeMessagingHosts\com.webmods.helper` gets the manifest's path as its
   default value (`reg.exe add … /ve /d <path> /f`, `%SystemRoot%\System32\reg.exe`): Chrome
   `Google\Chrome`, Chromium `Chromium`, Edge `Microsoft\Edge`, Firefox `Mozilla`, Brave
-  `BraveSoftware\Brave-Browser` plus Chrome's key when that doesn't already name a TRIF manifest (Brave is
-  reported to read Chrome's; unverified). A browser is detected by its user data folder
+  `BraveSoftware\Brave-Browser` plus Chrome's key when that doesn't already name a TRIF manifest (Brave
+  reads Chrome's key, not its own: seen with Brave 157). A browser is detected by its user data folder
   (`%LOCALAPPDATA%\Google\Chrome\User Data`, …; Firefox `%APPDATA%\Mozilla\Firefox`). Doctor checks
-  the keys with `reg.exe query`.
+  the keys, read from a `reg.exe export` (UTF-16: what `reg.exe query` prints is in the console's code page).
 - **PATH**: setup adds `~\.trif\bin` to the user's Path (`HKCU\Environment`, kept REG_EXPAND_SZ and
   unexpanded, then WM_SETTINGCHANGE) through Windows PowerShell (`win/userpath.js`); `--no-link` (updates)
   leaves it. There's no `/usr/local/bin` link.
@@ -788,8 +790,10 @@ unchanged.
 
 Testing: `tests/windows.test.js` runs these code paths on any system (fakes for reg.exe and PowerShell,
 Unix sockets standing in for pipes) and with real named pipes on Windows; `tests/windows-smoke.js` does a
-real setup, registry, pipe and Credential Manager round trip on a Windows runner
-(`.github/workflows/windows.yml`). See docs/TESTING.md.
+real setup, registry, pipe and Credential Manager round trip on a Windows runner, and
+`tests/windows-browser.js` has a real browser load the extension and start the helper there
+(`.github/workflows/windows.yml`). See docs/TESTING.md, and docs/WINDOWS.md for where Windows stands
+(the survey, the sandbox for side-panel runs, what's left).
 
 ## Renamed from WebMods (0.2.0)
 

@@ -278,7 +278,7 @@ what it leaves, update its probe.
 
 ## Windows
 
-There's no Windows computer in the loop day to day, so Windows is tested in three layers:
+There's no Windows computer in the loop day to day, so Windows is tested in layers:
 
 1. **`tests/windows.test.js`, on any system** (part of `npm test`). The Windows code paths run with
    `platform: 'win32'` passed in, and stand-ins for what only Windows has: reg.exe (`makeFakeReg` in
@@ -289,18 +289,31 @@ There's no Windows computer in the loop day to day, so Windows is tested in thre
    Credential Manager through keyring.js, setup and doctor end to end, pipe naming and the choice of the
    default helper (with two real helpers and the CLI), Windows path checks, taskkill/rundll32/rename
    retries, agent lookup by extension, and that panel runs and logins are refused.
-2. **The same tests on Windows.** On Windows they use real named pipes; reg.exe and PowerShell stay
-   stand-ins, so `npm test` never touches the computer's registry, Path or Credential Manager. Test files
-   that need macOS or Linux (Unix sockets, `#!/bin/sh` fake agents, file modes, symlinks, signals) use
-   `tests/posix-only.js` and report each test skipped with the reason; making them Windows-proof is later
-   work. Node 18 has no `--test-timeout`, so there it's plain `node --test`.
+2. **The unit suite on Windows.** `tests/windows.test.js` uses real named pipes there; reg.exe and
+   PowerShell stay stand-ins, so `npm test` never touches the computer's registry, Path or Credential
+   Manager. Tests that can't run on Windows yet are skipped one by one, each with its reason:
+   `tests/windows-skips.json` lists them by file and name (side-panel runs, the macOS Keychain's
+   stand-ins, `#!/bin/sh` setup, Unix sockets as files, `~/.webmods`, Safari, the release scripts), and
+   `tests/on-windows.js` (in place of `node:test`) applies it. A test taken off the list must pass on
+   windows-latest. Three files are still skipped whole (`tests/posix-only.js`): run-folders, safari,
+   upgrade. `TRIF_TEST_POSIX_ON_WINDOWS=1` runs everything anyway. Node 18 has no `--test-timeout`, so
+   there it's plain `node --test`.
 3. **`tests/windows-smoke.js`, real Windows, CI only.** Sets TRIF up as a user would, in a scratch user
-   profile, with the real reg.exe, PowerShell and Credential Manager (so it refuses to run outside GitHub
-   Actions unless given `--yes-this-computer`): checks the wrappers, manifests, HKCU keys and user Path,
-   starts `trif-host.bat` through `cmd.exe /d /c` as Chrome does, says hello over native messaging, runs
+   profile whose folder has a space, letters outside ASCII and a `%` in its name, with the real reg.exe,
+   PowerShell and Credential Manager (so it refuses to run outside GitHub Actions unless given
+   `--yes-this-computer`): checks the wrappers (plain ASCII), manifests, HKCU keys and user Path, starts
+   `trif-host.bat` through `cmd.exe /d /c` as Chrome does, says hello over native messaging, runs
    `trif.cmd status` and `trif doctor` over the pipe, saves/reads/removes a key in Credential Manager, and
    closes the helper's stdin (it must exit and remove `helper.pipe`).
+4. **`tests/windows-browser.js`, a real browser, CI only** (Node 22). Chrome for Testing, headless, loads
+   the unpacked extension that setup copied; the extension connects; Chrome finds the manifest through the
+   registry and starts `trif-host.bat`; `trif.cmd status` has the extension's hello and a page command goes
+   through; the browser quits and the helper with it. Run twice (a plain profile folder, and one with
+   letters outside ASCII), and, never failing the job, with Edge (`--browser edge`) and Brave (with one of
+   its two keys at a time, `--drop-key`: that's how Brave was found to read Chrome's).
+5. **`tests/windows-fence/`** (`.github/workflows/windows-fence.yml`): a prototype fence for side-panel
+   runs on Windows and the attempts to get out of it; docs/WINDOWS.md "The sandbox". Not part of TRIF.
 
 The workflow runs on pushes to the `windows` branch and by hand (workflow_dispatch), Node 18 and 22.
-Not covered anywhere yet: a real browser on Windows (Chrome or Firefox loading the extension and
-starting the helper itself), Edge and Brave's registry keys, and Windows on ARM.
+Not covered anywhere yet: a real Firefox on Windows, a mod running on a page there (user scripts allowed),
+a person's own Windows desktop, and Windows on ARM. docs/WINDOWS.md has the whole list.

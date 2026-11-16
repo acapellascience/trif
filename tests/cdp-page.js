@@ -11,6 +11,8 @@
 // waits for any other test browser from here to close (a lock in the temp folder), each runs `nice`, and a
 // watchdog closes it if a process of it passes 1.5 GB (or all of them 4 GB). close() always ends the
 // process, and so does this process exiting.
+// Windows (CI's runners only, where nothing else is running): no `nice`, no watchdog (there's no ps), and
+// the browser's processes are ended as a tree with taskkill.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -22,6 +24,8 @@ const { sleep, waitFor, killMatching } = require('./e2e/lib/util');
 
 const LOCK = path.join(os.tmpdir(), 'trif-cdp-page.lock');
 const ONE_MB = 1024; // (ps rss is in KB)
+const WIN = process.platform === 'win32';
+const taskkill = (pid) => { try { spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* gone */ } };
 const MAX_ONE = 1536 * ONE_MB;
 const MAX_ALL = 4096 * ONE_MB;
 
@@ -101,7 +105,7 @@ class Browser {
     const log = fs.openSync(path.join(this.dir, 'chrome.log'), 'w');
     const env = { ...process.env };
     for (const k of Object.keys(env)) if (/^(TRIF|WEBMODS)_/.test(k)) delete env[k];
-    this.proc = spawn('/usr/bin/nice', ['-n', '10', bin, ...argv], { env, stdio: ['ignore', log, log] });
+    this.proc = WIN ? spawn(bin, argv, { env, stdio: ['ignore', log, log] }) : spawn('/usr/bin/nice', ['-n', '10', bin, ...argv], { env, stdio: ['ignore', log, log] });
     fs.closeSync(log);
     this.proc.on('error', () => {});
     this.exited = new Promise((r) => this.proc.once('exit', r));
@@ -130,7 +134,7 @@ class Browser {
   }
 
   _checkMemory() {
-    if (!this.dir) return;
+    if (!this.dir || WIN) return;
     execFile('/bin/ps', ['-axo', 'rss=,command='], { maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
       if (err || this.closed) return;
       let max = 0, sum = 0;
@@ -148,6 +152,7 @@ class Browser {
   }
 
   _killNow() {
+    if (WIN) { if (this.proc && this.proc.pid && this.proc.exitCode === null) taskkill(this.proc.pid); dropLock(); return; }
     if (this.proc && this.proc.exitCode === null) { try { this.proc.kill('SIGKILL'); } catch { /* gone */ } }
     if (this.dir) spawnSync('/usr/bin/pkill', ['-KILL', '-f', this.dir]);
     dropLock();
@@ -193,12 +198,13 @@ class Browser {
       this.cdp.close();
     }
     if (this.proc && this.proc.exitCode === null) {
-      this.proc.kill('SIGTERM');
+      if (WIN) taskkill(this.proc.pid); else this.proc.kill('SIGTERM');
       await Promise.race([this.exited, sleep(5000)]);
     }
     if (this.dir) {
-      await killMatching(this.dir);
-      fs.rmSync(this.dir, { recursive: true, force: true });
+      if (!WIN) await killMatching(this.dir);
+      // (Windows: a file of the profile can stay open a moment after its process ended)
+      try { fs.rmSync(this.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { if (!WIN) throw e; }
     }
     dropLock();
     process.removeListener('exit', this._onExit);

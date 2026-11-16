@@ -1,0 +1,48 @@
+# A prototype, not part of TRIF yet (docs/WINDOWS.md "The sandbox"): a fence for side-panel agent runs'
+# commands on Windows, tried on GitHub's windows-latest runners. Its own workflow, so it never waits for the
+# unit tests (.github/workflows/windows.yml). Nothing is published, uploaded or signed; no secrets.
+name: windows-fence
+
+on:
+  push:
+    branches: [windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-fence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # A prototype, not part of TRIF yet (docs/WINDOWS.md "The sandbox"): a fence for agent runs' commands
+  # (an AppContainer, tests/windows-fence), with attempts to get out of each thing TRIF's sandbox
+  # guarantees on a Mac.
+  fence:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The fence, and attempts to get out of it
+        run: node tests/windows-fence/run.js
+
+  # Exploration, never failing: what Claude Code and Codex themselves do on Windows (which shell runs a
+  # command, what a CLAUDE_CODE_SHELL_PREFIX program is handed, Codex's own sandboxes with TRIF's profile).
+  # Claude Code talks to a stand-in for the API: no account, no paid call.
+  agents:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code and Codex
+        run: npm install -g @anthropic-ai/claude-code @openai/codex
+      - name: What the agents do here
+        run: node tests/windows-fence/agents.js

@@ -67,7 +67,7 @@ test('reveal runs it (stubbed), and trif reveal does the same without the browse
   fs.unlinkSync(s.log);
   const cli = await runCli(['reveal', 'x.com/hide', '--editor'], { home, env: { TRIF_REVEAL_CMD: s.sh } });
   assert.strictEqual(cli.code, 0, cli.stderr);
-  assert.match(cli.stdout, /opened x\.com\/hide\.js/);
+  assert.match(cli.stdout, /opened x\.com[\\/]hide\.js/);
   const opened = (await waitFor(s.log)).trim();
   assert.ok(opened.replace(/"$/, '').endsWith(path.join('sites', 'x.com', 'hide.js')) && /^(open|xdg-open|\S+notepad\.exe) /.test(opened), opened);
   const bad = await runCli(['reveal', 'x.com/nope'], { home, env: { TRIF_REVEAL_CMD: s.sh } });

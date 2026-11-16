@@ -340,7 +340,7 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   assert.deepStrictEqual(listed.find((m) => m.id === 'x.com/rainbow-rave').update, { version: '2', from: '1', modified: true });
   assert.strictEqual(listed.find((m) => m.id === 'x.com/detox-timeline').update, undefined);
   r = await runCli(['mod-update', 'x.com/rainbow-rave'], { home: w.home });
-  assert.match(r.stdout, /the new version: +.*\.shipped\/x\.com\/rainbow-rave\.new\.js/);
+  assert.match(r.stdout, /the new version: +.*\.shipped[\\/]x\.com[\\/]rainbow-rave\.new\.js/);
 
   // The helper's mods message carries it, and drops it once the user chose.
   const ext = new FakeExtension({ home: w.home });

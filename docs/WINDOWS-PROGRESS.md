@@ -15,7 +15,7 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
       branches of `runs.js` and `agents/claude.js`).
 - [x] **Claude Code: the attempts to get out**, on CI: `tests/windows-fence/run.js` (the fence with the
       helper's own spec, as an administrator and as an ordinary user) and `tests/windows-run.js` (a real
-      run, 68 checks).
+      run, 70 checks).
 - [x] **A real fenced run on CI, Claude Code** (`windows-fence.yml`, job `run`).
 - [x] **Codex, option 1**: its shell off, `trif` and TRIF's file tools as MCP tools inside the fence
       (`agents/codex.js` `windowsConfig`, `runs.js` `_fence` with `files`). Switched on in round 4:
@@ -26,14 +26,26 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
       (job `run-codex`, 134 checks, no longer `continue-on-error`). Three runs: a model name Codex doesn't
       know (tools called directly), a sub-agent of that, and Codex's default model (everything behind
       `exec`) with a sub-agent of its own.
-- [ ] **The tests marked "no side-panel runs" un-skipped and passing on Windows.** Of the 47, 39 run and
-      pass on windows-latest (Node 18 and 22) since round 5. Left in `tests/windows-skips.json`: 3 with the
-      reason `runs` (agents.test.js: the private files a run won't start beside, setup's PATH, doctor's
-      agents), 1 `argv-site` (the run's first test: Windows names the run's site in Claude Code's argv), 1
-      `mac-command` (the macOS command; its Windows twin is in `tests/windows-runs.test.js`) and 3
-      `open-model` (off on Windows, outside the goal). Beside them `login` 6 and `limits` 6.
+- [ ] **The tests marked "no side-panel runs" un-skipped and passing on Windows.** Of the 47, 40 run and
+      pass on windows-latest since round 6. Left to do in `tests/windows-skips.json`: 3 with the reason
+      `runs` (agents.test.js: the private files a run won't start beside, setup's PATH, doctor's agents).
+      Staying skipped, each for its own reason, and **not counted here**: 3 `open-model` (see "Outside the
+      goal" below) and 1 `mac-command` (the macOS command, which Windows never builds; its Windows twin is
+      in `tests/windows-runs.test.js`). Beside them `login` 6 and `limits` 6.
+- [ ] **Security: nothing on Windows relies on `O_NOFOLLOW`**, which Windows doesn't have (the flag is
+      `undefined` there, so the open follows a link). Round 5 gave the run's mailbox a look-first
+      (`runs.js` `_serveBox`); the same is owed to `helper/lib/stage.js` (`readPlain`, line 101, and
+      `_readLive`, line 246: reading the run's copy and the mods folder) and `helper/cli.js`
+      (`writeOptionFile`, line 212: a run's write, `trif screenshot -o`), each with a test that runs on
+      windows-latest. **To be done before GOAL COMPLETE** (the main session's brief, round 6).
 - [x] **The reserves recorded** in `docs/WINDOWS.md` ("The options, against the guarantees", "Codex: where
       it stands", "WSL").
+
+### Outside the goal
+
+- **The open model (`codex-oss`) on Windows** stays out of scope for now (the main session's brief, round
+  6). Its 3 tests stay skipped with the reason `open-model`, its chats stay off there
+  (`WINDOWS_RUN_AGENTS`), and neither counts against GOAL COMPLETE.
 
 ## Done so far
 
@@ -116,7 +128,7 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   run when this was written (the two unit test files that changed pass on a Mac, run by hand with a temp
   HOME): look at the one this commit starts before trusting them.
 
-## Done this round (round 5)
+### Round 5
 
 - The 47 tests skipped for "no side-panel runs": 31 passed on Windows as they were (the stand-in agents'
   `.cmd`s were already made by `tests/fake-extension.js` `windowsShims`), and came off the list. Eight more
@@ -144,18 +156,51 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   macOS tests [43966237458](https://github.com/acapellascience/trif/actions/runs/43966237458) green. The
   commit after it is these notes.
 
+## Done this round (round 6)
+
+- **The run's site is out of Claude Code's argv on Windows**: the rule for its screenshots folder
+  (`Read(//c/…/screenshots/<site>/**)`) moved from `--allowedTools` into the run's `--settings` file
+  (`claude.js` `windowsRules` gives it as `file`; `command()` writes `permissions.allow`). The run's first
+  test ("agent.start: runId first…") is off the skips file and passes there: 40 of the 47.
+- **Proven with the real Claude Code** (`tests/windows-run.js`, job `run`, 70 checks now): it reads a file
+  in its own site's screenshots folder through the rule in the file, and is refused another site's
+  ("Claude requested permissions to read from …\\screenshots\\other.net\\seen.txt, but you haven't
+  granted it").
+- From the main session's brief: the open model is out of scope for now ("Outside the goal"); the
+  `O_NOFOLLOW` reliance in `stage.js` and `cli.js` is on the checklist as a security item, and is the
+  next step.
+- CI at `074eb09` (the code; the commit after it is these notes): windows-fence
+  [43967916867](https://github.com/acapellascience/trif/actions/runs/43967916867) green (`fence`,
+  `fence-standard-user`, `run`, `agents`, `run-codex`). windows
+  [43967916568](https://github.com/acapellascience/trif/actions/runs/43967916568): Node 18 green (737
+  pass, 106 skipped); Node 22 red at first on six tests of `tests/cli.test.js` (its shared helper went
+  away during "run: … timeout gives exit 1", and the five page commands after it found none), green when
+  the job was run again (738 pass, 105 skipped), nothing changed: a flake, not seen before, noted below.
+  The macOS tests [43967916585](https://github.com/acapellascience/trif/actions/runs/43967916585): red
+  on three that timed out on a slow runner (`agent.login without the agent installed…`, `CLI: agent run
+  streams events…`, `screenshot writes a PNG…`: 5 s waits, 26 s tests); `tests/agents.test.js` passes on
+  a Mac by hand (temp HOME), and run again on CI the three passed: red then
+  on the known one alone (`tests/clickjack-browser.test.js`, "a press: 5.93 ms on average"; 832 pass, 1
+  fail).
+
 ## Next step
 
-**The run's site out of Claude Code's argv on Windows**, then the last three. In `helper/lib/agents/claude.js`
-(the `fence` branch of `command()`, near line 235) the rule for the run's screenshots folder,
-`Read(//c/…/screenshots/<site>/**)`, goes to `--allowedTools`; put it in the run's `--settings` file
-(`permissions.allow`: an absolute `//c/…` rule doesn't depend on where the file is) and see that the real
-run still reads a screenshot (`tests/windows-run.js`, job `run`) and `tests/windows-runs.test.js` follows.
-Then take "agent.start: runId first…" off the skips file: its Windows branch is written, unseen past the
-argv line. If the rule only works in argv, stop: that's Tim's to accept. After that, the three `runs`
-left, all in `tests/agents.test.js`: "a run never starts with private files…" (its second half locks the
-private folder with `chmod`, which does nothing on Windows: `icacls <folder> /deny <user>:(WD,AD)` and
-`/remove:d` after), "setup records PATH…" and "doctor: an agent that isn't logged in…" (`#!/bin/sh`
+**The security item: no reliance on `O_NOFOLLOW` on Windows** (the checklist has it). Three places, the
+pattern is `runs.js` `_serveBox` (look first with `lstat`, open, and what was opened must be the file that
+was looked at: `ino` and `dev`):
+- `helper/cli.js` `writeOptionFile` (line 212), a run's write: nothing else guards it. A link in the file's
+  place must be refused, not written through (`lstat` first; a new file with `wx`; an existing plain one
+  opened and matched to what was looked at before anything is written, so no `O_TRUNC` in the open).
+- `helper/lib/stage.js` `_readLive` (line 246): compares with `st` only when it's given, and line 405 calls
+  it with none: `lstat` there first.
+- `helper/lib/stage.js` `readPlain` (line 101): it already compares what it opened with an `lstat` taken
+  after (a link's own `ino` differs from its target's), so a link is refused there today; say so in a
+  test rather than trust it, and write the flag as `(fs.constants.O_NOFOLLOW || 0)` in all three.
+Each with a test that runs on windows-latest (the runner may make links: round 5's mailbox test does;
+`fs.symlinkSync` for a file, and a junction for a folder, which needs no privilege). Then the last three
+`runs` tests, all in `tests/agents.test.js`: "a run never starts with private files…" (its second half
+locks the private folder with `chmod`, which does nothing on Windows: `icacls <folder> /deny <user>:(WD,AD)`
+and `/remove:d` after), "setup records PATH…" and "doctor: an agent that isn't logged in…" (`#!/bin/sh`
 stand-ins and a PATH with colons, started by the CLI before any config exists, so `windowsShims` has
 nothing to read: write Node scripts with a `.cmd` beside each, `path.delimiter`, `exe()`).
 
@@ -237,5 +282,21 @@ nothing to read: write Node scripts with a `.cmd` beside each, `path.delimiter`,
   (line 212, a run's write): no fenced program can make a link there (no privilege in an AppContainer),
   and Claude Code's file tools can't either, but they want the same look-first as the mailbox got.
   `docs/WINDOWS.md`'s list of what's next names `cli.js`'s.
-- The open model on Windows is outside the goal as written (Claude Code and Codex): its three tests are
-  skipped as `open-model`. Tim's to say if he wants it fenced too.
+- The open model on Windows: out of scope for now, settled in round 6 ("Outside the goal" above). Leave
+  its three tests skipped as `open-model`.
+- **Round 6, the rule in the settings file**: Claude Code takes `permissions.allow` from the run's
+  `--settings` file on Windows as on macOS; an absolute `//c/…` rule there works as it did in argv. Still
+  in argv on Windows: the relative rules, other sites' folder names among the denies
+  (`Edit(./sites/<other site>/**)`; on macOS those are in the settings file). Not the run's own site, and
+  nothing a fenced program can read (the run test's `cmdline` attempt is refused), but if they're wanted
+  out too they'd have to be spelled `//c/…` (the run's copy), and the matching tried again on the runner
+  (case, slashes, 8.3 names, `..`).
+- **A flake on windows-latest, Node 22** (round 6, once): in `tests/cli.test.js` the shared helper
+  closed the connection during `trif run --timeout 100 hang` ("the helper closed the connection before
+  answering"), and the next five page-command tests found no helper. Green on a re-run
+  (`gh run rerun <id> --failed`). If it comes back, look at why the helper went away there (its log isn't
+  printed by the test), before blaming the change in hand.
+- `fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW` doesn't throw on Windows: `0 | undefined` is `0`, so
+  the open just follows. Junctions and hard links need no privilege on Windows in general; an
+  AppContainer is said to be refused both unless it may write the target. Not seen here: an attempt at
+  each from inside the fence (`tests/windows-fence/run.js`) would say.

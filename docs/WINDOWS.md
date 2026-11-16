@@ -193,11 +193,12 @@ and left as they are.
 
 - 60 test files. On Windows 19 were skipped whole (Phase 1: 455 tests ran, 368 were skipped); now their
   tests run except the ones named in `tests/windows-skips.json`, each with a reason (**seen**, Node 22: of
-  832 tests 687 run and pass, 145 are skipped), and three files still skipped whole (`run-folders`,
+  843 tests 737 run and pass, 106 are skipped, the six of `tests/windows-smoke.js` beside them), and three files still skipped whole (`run-folders`,
   `safari`, `upgrade`).
 - The helpers had Unix in them: `tempDir` (now the native real path), the fake extension's sockets (now
   pipes on Windows), stand-ins written as `#!/bin/sh` scripts (the reveal stub is a `.js` now; the fake
-  agents and the fake keychain still are: their tests stay skipped until runs exist).
+  agents get a `.cmd` beside them on Windows, `windowsShims`, and most of their tests run there since
+  round 5; the fake keychain still is one).
 - The real-browser unit tests (`tests/cdp-page.js`: `nice`, `ps`, `pkill`) start their browser on Windows
   now, without the memory watchdog (CI only), and pass there (**seen**: 6 of 6, as a step that only
   informs; a new tab's first navigation is sometimes aborted on Windows and is tried again).

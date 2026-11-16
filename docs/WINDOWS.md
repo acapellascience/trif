@@ -32,7 +32,7 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 | API keys | Windows Credential Manager, never in argv or the environment | smoke test (a decision for Tim: [Keys](#keys-and-secrets)) |
 | Updates | unpacked with System32's `tar.exe`; `~\.trif\app` swapped with retries | unit tests with stand-ins only |
 | Mods | scanned, sent, held, switched, as elsewhere | unit tests |
-| Chats from the panel, `trif agent run` | **Claude Code: yes**, fenced (no shell; `trif` as a tool whose program runs in the run's AppContainer). Codex and open models: listed as not available from the panel, with why | `tests/windows-run.js`: a real run with the real Claude Code, 68 checks (**seen**); unit tests |
+| Chats from the panel, `trif agent run` | **Claude Code: yes**, fenced (no shell; `trif` as a tool whose program runs in the run's AppContainer). Codex: wired the same way with TRIF's file tools, green in a real run on CI, not switched on yet; it and open models are listed as not available from the panel, with why | `tests/windows-run.js`: a real run with the real Claude Code, 68 checks, and with the real Codex, 93 (**seen**); unit tests |
 | Logging in from the panel | off on Windows: the agent's own sign-in is done in a terminal | unit tests |
 
 A profile folder with a space, letters outside ASCII and a `%` in it (`C:\Users\Zoë 用户 100%`) works
@@ -473,8 +473,46 @@ What's been **seen** towards 1 (`tests/windows-fence/agents.js`, Codex 0.169 on 
   - Which tools Codex offers depends on the model's name: one it doesn't know gets a small set called
     directly (no `exec`, no `apply_patch`); its default model gets everything behind `exec`. The tests use
     both. `sandbox_mode="workspace-write"` behaved as read-only here (no Windows sandbox chosen).
-- So 1 holds in the prototype. Not yet wired into the helper (`agents/codex.js`, `runs.js`), and what a
-  run's sub-agent tools (`spawn_agent` and the rest) start with hasn't been looked at.
+- So 1 holds in the prototype.
+
+**Wired into the helper** (round 3), and run for real on CI (`tests/windows-run.js codex`, job `run-codex`
+of `windows-fence.yml`: the real helper, the real Codex 0.169, a stand-in for OpenAI's API behind the
+helper's key proxy, a made-up key in Credential Manager):
+
+- `helper/lib/agents/codex.js` `command()` with a `fence` (`windowsConfig`): no permission profile;
+  `sandbox_mode="read-only"`; `shell_tool`, `unified_exec`, `unified_exec_tty`, `shell_snapshot` and
+  `view_image` off; `mcp_servers.trif` = `helper/mcp.js` with `default_tools_approval_mode = "approve"`
+  (and 330 s for a tool, 30 s to start). `runs.js` `_fence` gives that server TRIF's file tools too
+  (`files`), and the run is told to use them (`contextText`, `noShell: 'files'`).
+- The key proxy's token: Codex's `auth` command was `/bin/cat <file>`; on Windows it's this Node with
+  `helper/lib/win/print-file.js`. Seen: the proxy added the key from Credential Manager to the requests.
+- TRIF's file tools write no file agents read as instructions (`CLAUDE.md`, `AGENTS.md`, `.claude/`,
+  `.codex/`: by name as Windows reads one), as Claude Code's rules don't let its own. That's the tool's
+  refusal, not the fence's: inside the fence a site's folder is the run's to change.
+- **Seen in the real run** (a model name Codex doesn't know, so its tools are called directly and listed in
+  each request): every `trif` command a run uses works through the tool; `write_file`, `read_file`,
+  `edit_file`, `list_files`, `search_files` work in the run's folder; a mod written there reaches the mods
+  folder and the browser. Refused: through `trif` (words that would be commands in a shell, another
+  site's tab, a file elsewhere, another workspace); through the file tools (a file elsewhere in the home
+  folder, TRIF's settings, the live workspace, `..` out of the working folder, a listing and a picture
+  elsewhere, another site's folder, the guide, an instruction file, the live mods folder); Codex's own
+  (`apply_patch`, `shell`, `exec_command`, `shell_command`, `view_image`: each "unsupported"). From a
+  program in the run's own container: the same refusals as Claude Code's run (files, 127.0.0.1, the
+  model's address, the internet, a name lookup, the key in Credential Manager, the helper's command line,
+  the clipboard).
+- **The tools Codex offered the model**: `mcp__trif`'s seven, the MCP resource tools (one server, TRIF's,
+  with no resources), `request_user_input` (nobody to ask in `codex exec`), the goal tools (its own
+  words), and `multi_agent_v1` (`spawn_agent`, `wait_agent`, `send_input`, `close_agent`,
+  `resume_agent`). The test fails on a tool it doesn't know, so a new Codex's new tool gets looked at.
+- **Sub-agents**: a second run has the model call `spawn_agent`, and tries to get out from the sub-agent.
+  Seen: it starts with what its parent has, less the sub-agent tools: no shell, no `apply_patch`, no
+  `view_image` of Codex's, TRIF's tools from a fenced server; a file elsewhere, another site's folder
+  and another site's tab are refused there in the same words.
+- **Not yet proven with the helper's own command**: Codex's default models, which get everything behind
+  `exec` (and an `apply_patch` that read-only refuses). The prototype saw that with a config written by
+  hand; the real run has to see it with `windowsConfig` before Codex is switched on.
+- **Not switched on yet**: `platform.js` `WINDOWS_RUN_AGENTS` is still Claude Code alone; the real run
+  switches Codex on for itself (`TRIF_WINDOWS_CODEX_RUNS=1`, which goes when Codex joins the list).
 
 **WSL: later, as an option for people who already live there.** Not the default: see below.
 

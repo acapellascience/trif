@@ -160,6 +160,20 @@ Built on the probe, toward something to use every day:
   without the 16 KB guide. Project chats still show in Recents on both services (user reports, 11-16), so this
   groups them, it doesn't hide them. Unchecked on real logged-in pages: Claude's `/project/<id>` and ChatGPT's
   `/g/g-p-<id>-<name>/project` composers. The stand-in: serve.js answers `/project/<id>` with chat.html.
+- **Each conversation belongs to one site** (ClaudePane.owner/setOwner, 11-16: an NYT tab got a follow-up in Tim's
+  YouTube conversation). A conversation is recorded for the site it was started for; a site's chat reopens only a
+  conversation recorded as its own (one kept before this, or another site's, gives a new chat, to the service's new-chat
+  or project page); a follow-up goes only into a conversation that has TRIF's instructions and is this tab's site's;
+  another site's conversation gets the whole instructions with "This is a different site: …". The chat shown while all
+  three are busy gets nothing put in it. Each fill's line in the report says the conversation, its site and why
+  instructions or a follow-up. More's sessions go on only for their own site. More → Claude and Ask Claude go the same way.
+- **ChatGPT's newer mobile page** (seen logged out, 11-16): messages are li[data-message-role], a reply is done when its
+  li has data-message-complete (it pauses while it searches, with no stop button, which ended the watch early), and its
+  conversations are /uc/<id>; its file inputs take pictures only (a text file given to one said "The selected file is
+  not a supported image.", which read as the screenshot failing): a file input is given only a file its accept takes,
+  and where none takes text the instructions are typed in. Code blocks are read line by line (a code editor's lines
+  too, .cm-editor/.cm-line); Add to TRIF hands over on the press itself. A reply with code but no mod read from it is
+  noted in the diagnostics ("chat"). The stand-in has it: `?octane` (and `?cm` for editor lines).
 - **More than one chat** (ClaudePane: ChatView, viewFor, release; 11-16, Tim approved). Up to three chat pages, each
   its own web view (sharing the sign-ins) with its own conversation, reply watcher and pending fill; all stay in the
   view tree (the shown one on top), so a reply goes on being written while another chat shows. The robot opens the

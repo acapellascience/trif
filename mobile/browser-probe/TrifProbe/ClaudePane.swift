@@ -84,6 +84,8 @@ final class ChatView: Identifiable {
     var projectFill = false
     /// The tab the person was on when they sent: a notification's tap goes back to it.
     var sentTab: UUID?
+    /// The site a new conversation started by TRIF's instructions is for (recorded once it has an address).
+    var ownerNext: String?
     /// The things put into its message box, one after another.
     var chain: Task<Void, Never>?
     var lastUsed = Date()
@@ -99,7 +101,7 @@ final class ChatView: Identifiable {
     var onChatPage: Bool {
         guard let u = webView.url, let home = URL(string: service.home), u.host == home.host else { return false }
         let p = u.path
-        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
+        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p.hasPrefix("/uc/") || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
     }
     /// For the chats' list: its site and a short title.
     var label: String {
@@ -381,14 +383,29 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// A conversation's address (claude.ai/chat/…, chatgpt.com/c/…), kept for its chat and site; nothing else is.
     private func remember(_ v: ChatView, _ url: URL?) {
         guard let url, let home = URL(string: v.service.home), url.host == home.host,
-              url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return }
+              url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") || url.path.hasPrefix("/uc/") else { return }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
         c?.fragment = nil
         if let s = c?.url?.absoluteString {
-            UserDefaults.standard.set(s, forKey: lastKey(v.service, v.site))
+            // (a conversation belongs to the site it was started for (Tim, 11-16: an NYT tab got a follow-up in his YouTube
+            // conversation): recorded the first time it's seen in a site's chat, and kept as that site's only if it's
+            // that site's)
+            if ClaudePane.owner(of: s) == nil || v.ownerNext != nil { ClaudePane.setOwner(s, v.ownerNext ?? v.site); v.ownerNext = nil }
+            if ClaudePane.owner(of: s) == v.site { UserDefaults.standard.set(s, forKey: lastKey(v.service, v.site)) }
+            else { report.log("claude", "\(v.service.rawValue): the chat for \(v.site.isEmpty ? "no site" : v.site) is on \(ClaudePane.owner(of: s) ?? "?")'s conversation: not kept as this site's") }
             if v.contextNext { v.contextNext = false; noteContext(s) }
         }
+    }
+
+    /// Which site each conversation is for (by address; the last 500).
+    private static let ownersKey = "chatConversationSites"
+    static func owner(of conv: String) -> String? { (UserDefaults.standard.dictionary(forKey: ownersKey) as? [String: String])?[conv] }
+    static func setOwner(_ conv: String, _ site: String) {
+        var d = UserDefaults.standard.dictionary(forKey: ownersKey) as? [String: String] ?? [:]
+        d[conv] = site
+        if d.count > 500 { for k in d.keys.prefix(d.count - 500) { d[k] = nil } }
+        UserDefaults.standard.set(d, forKey: ownersKey)
     }
 
     // MARK: which conversations have TRIF's instructions
@@ -407,7 +424,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
     /// Where a chat opens: its site's conversation, else a new one.
     private func resumeURL(_ v: ChatView) -> URL? {
-        UserDefaults.standard.string(forKey: lastKey(v.service, v.site)).flatMap(URL.init(string:)) ?? URL(string: v.service.start)
+        if let kept = UserDefaults.standard.string(forKey: lastKey(v.service, v.site)) {
+            if ClaudePane.owner(of: kept) == v.site, let u = URL(string: kept) { return u }
+            // (kept before conversations were recorded by site, or another site's: not reopened; a new chat instead)
+            UserDefaults.standard.removeObject(forKey: lastKey(v.service, v.site))
+            report.log("claude", "\(v.service.rawValue): the conversation kept for \(v.site.isEmpty ? "no site" : v.site) isn't recorded as its own: a new chat instead")
+        }
+        return URL(string: v.service.start)
     }
 
     /// Loads an address in a chat, marked as loading at once (a fill waits for it: waitForPage).
@@ -466,7 +489,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         report.log("claude", "\(v.service.rawValue): opened\(was == .idle ? "" : " (\(was.rawValue))")")
         // (the tab's data starts being gathered now, while the chat's page gets ready: 11-15)
         Diagnostics.shared.mark("opening the chat: gathering the page")
-        let ready = was == .idle && !already ? prepare(v) : nil
+        // (the shown chat isn't this tab's site's (all three were writing): shown, but nothing put in it)
+        let mine = v.site == tabSite
+        if !mine { report.log("claude", "\(v.service.rawValue): the chat shown is \(v.site.isEmpty ? "no site" : v.site)'s, not \(tabSite.isEmpty ? "this tab" : tabSite)'s: nothing put in it") }
+        let ready = was == .idle && !already && mine ? prepare(v) : nil
         Diagnostics.shared.mark("opening the chat: the chat's page")
         queue(v) { [weak self] in
             guard let self else { return }
@@ -520,7 +546,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// The conversation an address is (kept without query or fragment), or nil for a new chat.
     static func conversation(of url: URL?) -> String? {
-        guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return nil }
+        guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") || url.path.hasPrefix("/uc/") else { return nil }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
         c?.fragment = nil
@@ -540,7 +566,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private func prepare(_ v: ChatView) -> Prepared? {
         guard let browser else { return nil }
         let conv = ClaudePane.conversation(of: v.loading ? v.requested : v.webView.url)
-        let followUp = conv.map(hasContext) ?? false
+        let followUp = conv.map { hasContext($0) && ClaudePane.owner(of: $0) == browser.site } ?? false
         let sw = Stopwatch("\(followUp ? "the follow-up" : "the instructions") for \(browser.host.isEmpty ? "a new tab" : browser.host)")
         let shot = Task { @MainActor in await browser.quickScreenshot() }
         // (a new chat in TRIF's project, which has TRIF's instructions: the page only; once sent, the chat counts as
@@ -648,10 +674,29 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
         let conv = v.conversation
         if st["context"] as? Bool == true, let conv { noteContext(conv) }
-        // (the conversation turned out to have the instructions after all, seen on its page: the follow-up instead)
-        let followUp = conv.map(hasContext) ?? false
+        // (a follow-up only into a conversation that has TRIF's instructions and is this tab's site's (Tim, 11-16: an NYT
+        // tab got a follow-up in his YouTube conversation). Another site's conversation, or one whose site isn't known,
+        // gets the whole instructions, saying it's a different site.)
+        let tabSite = browser.site
+        let owner = conv.flatMap(ClaudePane.owner(of:))
+        let has = conv.map(hasContext) ?? false
+        let followUp = has && owner == tabSite
+        let why: String
+        if conv == nil { why = "a new chat" }
+        else if followUp { why = "it has TRIF's instructions and is \(tabSite)'s" }
+        else if !has { why = "it doesn't have TRIF's instructions yet" }
+        else { why = "it's \(owner ?? "an unknown site")'s, not \(tabSite.isEmpty ? "this tab" : tabSite)'s" }
+        report.log("claude", "\(name): fill for \(tabSite.isEmpty ? "no site" : tabSite) in \(conv.map { "conversation …\($0.suffix(8))" } ?? "a new chat") (recorded for \(owner ?? "no site yet")): \(followUp ? "the follow-up" : "the instructions"), as \(why)")
         var text = await ready.text.value
-        if followUp && !ready.followUp { text = await browser.feedbackForChat(conv: conv, sw) }
+        // (made again when the chat turned out to be on another conversation than the one it was made for, or the
+        // decision changed: a navigation inside the chat, say)
+        if ready.conv != conv || ready.followUp != followUp {
+            text = followUp ? await browser.feedbackForChat(conv: conv, sw)
+                : await browser.pageForChat(conv: conv, sw, guideInProject: conv == nil && v.service.projectHasGuide)
+        }
+        if !followUp, has, let t = text { text = "(This is a different site: \(tabSite.isEmpty ? "another page" : tabSite). Start from these instructions and this page; the mods above in this conversation were for \(owner ?? "another site").)\n\n\(t)" }
+        // (a new chat is this tab's site's once it has an address; one with no site recorded yet becomes this site's)
+        if conv == nil { v.ownerNext = tabSite } else if owner == nil, let conv { ClaudePane.setOwner(conv, tabSite) }
         if let text {
             await fill(v, text, as: followUp ? "TRIF follow-up.txt" : "TRIF instruction.txt")
             sw.lap("text into the message box")
@@ -697,6 +742,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "done":
             // (the mods: the reply's new code blocks with a whole mod file in each)
             handleDone(v, d, d["mods"] as? [String] ?? [])
+        case "nopickup":
+            // (a reply with code in it, and no mod read from it: what there was, for the next report)
+            let what = "\(name)'s reply at \(d["path"] as? String ?? "?") had \(d["blocks"] as? Int ?? 0) code block(s)\(d["header"] as? Bool == true ? " and a mod's header" : ""), and no mod was read from it (\(d["kinds"] as? String ?? "?"))"
+            report.log("claude", what)
+            Diagnostics.shared.log("chat", what)
         case "viewer":
             // (the chat's own viewer opened, on a file the person tapped: the mod it shows, to Add this mod?; or, when no
             // code could be read off it, a line in the diagnostics, so the next report shows what was there)

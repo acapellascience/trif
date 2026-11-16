@@ -319,7 +319,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     }
     private var runs: [String: Run] = [:]
     /// Each session's conversation (by the panel's sessionId), with its engine.
-    private var sessions: [String: (engine: String, conv: PanelConversation)] = [:]
+    private var sessions: [String: (engine: String, conv: PanelConversation, site: String)] = [:]
 
     private func startRun(_ d: [String: Any]) -> (Any?, String?) {
         guard let browser else { return (nil, "no browser") }
@@ -331,13 +331,15 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         }
         var sid = d["sessionId"] as? String ?? ""
         var isNew = false
-        if sid.isEmpty || sessions[sid]?.engine != e.id {
+        let site = d["site"] as? String ?? ""
+        // (a session goes on only for its own site and engine: another site's is never continued)
+        if sid.isEmpty || sessions[sid]?.engine != e.id || sessions[sid]?.site != site {
             // (a session the app doesn't have any more, the app closed meanwhile: a new one, told what was said)
-            if sid.isEmpty || sessions[sid] == nil { isNew = true }
+            if sid.isEmpty || sessions[sid] == nil || sessions[sid]?.site != site { isNew = true }
             sid = "trif-\(UUID().uuidString.prefix(12))"
             let conv = e.conversation(model: model)
             if let c = conv as? ChatCompletionsConversation { c.images = (liveModels[e.id] ?? []).first { $0.id == model }?.images ?? false }
-            sessions[sid] = (e.id, conv)
+            sessions[sid] = (e.id, conv, site)
         }
         let said = (d["said"] as? [[String: Any]] ?? []).compactMap { m -> [String: String]? in
             guard let r = m["role"] as? String, let t = m["text"] as? String else { return nil }

@@ -242,3 +242,41 @@ test('the chat script: a file opened in the chat\'s viewer (Claude\'s, 11-16): i
     server.close();
   }
 });
+
+test('the chat script on chatgpt.com\'s newer mobile page (11-16): pictures-only file inputs, li[data-message-role] messages, a pause mid-reply, code as editor lines', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    await page.goto(`${base}/chat.html?octane&cm&gpt`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    // (the instructions: no text file offered to an input that takes pictures only, so no "not a supported image")
+    const said = await page.evaluate(() => globalThis.__trifChat.fill("I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…", null, 'TRIF instruction.txt', null, null));
+    assert.match(said, /pictures only/);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.toast').length), 0, 'no "not a supported image" toast');
+    assert.match(await page.evaluate(() => document.querySelector('.ProseMirror').textContent), /How TRIF mods are written/);
+    // (a picture: taken)
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    assert.match(await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.png'), png), /picture pasted/);
+    await page.click('button[aria-label="Send message"]');
+    await waitPost(page, 'sent');
+    // (the reply pauses 3 s with no stop button; not done until it's marked complete)
+    await page.waitForTimeout(2500);
+    assert.equal((await posts(page)).filter((m) => m.type === 'done').length, 0, 'not done during the pause');
+    const [done] = await waitPost(page, 'done');
+    assert.equal(done.mods.length, 1);
+    assert.match(done.mods[0], /^\/\/ ==WebMod==\n\/\/ @name/, 'the editor\'s lines kept as lines');
+    // (Add to TRIF under the code: the same file)
+    await page.waitForFunction(() => (document.querySelector('.trif-add') ? [1] : null));
+    await page.click('.trif-add');
+    const [mod] = await waitPost(page, 'mod');
+    assert.equal(mod.text, done.mods[0]);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

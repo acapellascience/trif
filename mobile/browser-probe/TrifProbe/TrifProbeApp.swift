@@ -220,6 +220,7 @@ extension Model {
         }
         // (the robot view's More: chosen, and JavaScript in the side panel's page)
         if let m = step["more"] as? Bool { Model.pane?.choose(more: m, service: m ? nil : .claude) }
+        if let sv = step["service"] as? String, let s = ChatService(rawValue: sv) { Model.pane?.choose(more: false, service: s) }
         if let js = step["paneljs"] as? String, let wv = Model.pane?.panel.webView {
             do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
         }

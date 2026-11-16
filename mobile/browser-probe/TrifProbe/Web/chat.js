@@ -134,14 +134,27 @@
   // while only the picture was in it)
   const TILES = '[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]:not([data-cds="MessageAttachments"]), span[class*="group/composer-attachment"]';
   /** The page's own file input for the message box: one that takes any file or text (not pictures only). */
-  function fileInput() {
+  function fileInput(file) {
     const box = composerBox();
     const all = [...(box && box.closest('form') || document).querySelectorAll('input[type="file"]'), ...document.querySelectorAll('input[type="file"]')];
-    const usable = all.filter((i) => !i.disabled);
-    // (one that takes text; else the one for files rather than photos or the camera: chatgpt.com's mobile composer has
-    // #octane-mobile-composer-files-input beside its photos and camera inputs; logged out it takes pictures only)
-    return usable.find((i) => !i.accept || /text|\.txt|\*\/\*/.test(i.accept))
-      || usable.find((i) => /file/i.test(`${i.id} ${i.name}`) && !/photo|camera/i.test(`${i.id} ${i.name}`)) || null;
+    // (only one that takes this kind of file: 11-16, logged-out chatgpt.com's files input takes pictures only, and a
+    // text file given to it said "The selected file is not a supported image." over the chat, which read as the
+    // screenshot failing)
+    const usable = all.filter((i) => !i.disabled && accepts(i, file));
+    return usable.find((i) => /file/i.test(`${i.id} ${i.name}`) && !/photo|camera/i.test(`${i.id} ${i.name}`)) || usable.find((i) => !/camera/i.test(`${i.id} ${i.name}`)) || null;
+  }
+  /** Whether a file input's accept takes this file (by its type or its name's ending). */
+  function accepts(input, file) {
+    const list = (input.accept || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!list.length) return true;
+    const type = (file.type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    return list.some((a) => a === '*/*' || a === type || (a.endsWith('/*') && type.startsWith(a.slice(0, -1))) || (a.startsWith('.') && name.endsWith(a)));
+  }
+  /** The message box takes no text files at all (only pictures: logged-out chatgpt.com): its file inputs say so. */
+  function picturesOnly() {
+    const ins = [...document.querySelectorAll('input[type="file"]')].filter((i) => !i.disabled);
+    return ins.length > 0 && !ins.some((i) => accepts(i, new File([''], 'x.txt', { type: 'text/plain' })));
   }
   /** How many attachment tiles in the message box carry this name (in their text, a picture's alt or a label). */
   function tiles(label) {
@@ -164,8 +177,17 @@
     if (png) {
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
-      dt.items.add(new File([bytes], picture || 'TRIF screenshot.png', { type: /\.jpe?g$/i.test(picture || '') ? 'image/jpeg' : 'image/png' }));
-      said.push(paste(ed, dt) ? 'picture pasted' : 'picture not taken');
+      const pic = new File([bytes], picture || 'TRIF screenshot.png', { type: /\.jpe?g$/i.test(picture || '') ? 'image/jpeg' : 'image/png' });
+      dt.items.add(pic);
+      if (paste(ed, dt)) said.push('picture pasted');
+      else {
+        // (not taken as a paste: given to the page's own picture input, as its picker would)
+        const input = fileInput(pic);
+        if (input) {
+          try { input.files = dt.files; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); said.push(`picture given to its ${input.id || 'file'} input`); }
+          catch (e) { said.push('picture not taken'); }
+        } else said.push('picture not taken (no input for pictures)');
+      }
       await wait(300);
     }
     if (pdf) {
@@ -177,7 +199,8 @@
       said.push(paste(editor() || ed, dt) ? 'PDF pasted' : 'PDF not taken');
       await wait(300);
     }
-    if (text && name) {
+    if (text && name && picturesOnly()) said.push('this chat takes pictures only as files: the text typed in');
+    else if (text && name) {
       // (a chat that has only just loaded may take the file late, without saying so at the paste: Tim, 11-14,
       // got the attachment and the whole text typed in too. So: its tile looked for, and one more try, before
       // the text goes in as text)
@@ -198,7 +221,7 @@
             for (const type of ['dragenter', 'dragover', 'drop']) target.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
           } catch (e) { said.push('drop refused'); continue; }
         } else {
-          const input = fileInput();
+          const input = fileInput(dt.files[0]);
           if (!input) { said.push('no file input'); continue; }
           try { input.files = dt.files; } catch (e) { said.push('file input refused'); continue; }
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -249,17 +272,20 @@
     // (no button while a reply is being written: a mod's header comes before its code, so a button then would
     // hand over half a mod)
     if (replying()) return;
-    for (const pre of document.querySelectorAll('pre')) {
+    for (const { pre, text } of modBlocks()) {
       if (pre.nextElementSibling && pre.nextElementSibling.classList.contains('trif-add')) continue;
-      const t = pre.textContent || '';
-      if (!t.includes('==WebMod==') || !t.includes('==/WebMod==')) continue;
       const b = document.createElement('button');
       b.className = 'trif-add';
       b.type = 'button';
       b.textContent = 'Add to TRIF';
       b.setAttribute('style', 'all:initial;display:inline-block;margin:6px 0 10px;padding:6px 14px;border-radius:999px;' +
         'background:#34d399;color:#04291c;font:600 14px -apple-system,system-ui,sans-serif;cursor:pointer;');
-      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); post({ type: 'mod', text: pre.innerText || '' }); });
+      // (handed over on the press itself, before the page's own handlers can swallow the click: some take the
+      // pointer events of everything inside a reply)
+      let handed = 0;
+      const hand = (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() - handed < 800) return; handed = Date.now(); post({ type: 'mod', text: text() }); };
+      b.addEventListener('click', hand, true);
+      b.addEventListener('touchend', hand, true);
       pre.after(b);
     }
   }
@@ -336,8 +362,16 @@
   //   quiet; it stops when the reply is done (or after 15 minutes).
   const STOP = 'button[aria-label="Stop response"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[data-testid="stop-button"], [data-is-streaming="true"]';
   const SEND = 'button[data-testid="send-button"], #composer-submit-button, button[aria-label="Send message"], button[aria-label="Send prompt"], button[aria-label="Send"], button[data-testid="chat-input-send"]';
-  const USER = '[data-testid="user-message"], [data-message-author-role="user"]';
-  const REPLY = '[data-is-streaming], .font-claude-response, [data-message-author-role="assistant"]';
+  // (ChatGPT's mobile page since 11-16 marks its messages li[data-message-role], the reply's li gets
+  // data-message-complete when it's done, and its conversations are /uc/<id> logged out: seen logged out, 11-16)
+  const USER = '[data-testid="user-message"], [data-message-author-role="user"], [data-message-role="user"]';
+  const REPLY = '[data-is-streaming], .font-claude-response, [data-message-author-role="assistant"], [data-message-role="assistant"]';
+  /** ChatGPT's last reply hasn't been marked complete yet (its newer page marks each one when it's done). */
+  function incomplete() {
+    const all = document.querySelectorAll('li[data-message-role="assistant"]');
+    const last = all[all.length - 1];
+    return !!last && !last.hasAttribute('data-message-complete');
+  }
   const replying = () => !!document.querySelector(STOP);
 
   /** The message box's surroundings (where what's attached shows): its widest ancestor, up to eight levels, that
@@ -371,15 +405,27 @@
     // (not the code a viewer shows over the chat: that's read as the viewer's, without its line numbers, lookAtViewer)
     const v = viewer();
     const over = v && v.root !== document.body && v.root.localName !== 'main' ? v.root : null;
-    for (const pre of document.querySelectorAll('pre')) {
+    // (a code block: a pre, or a code editor's box (CodeMirror's .cm-editor, which some chats use), the outermost)
+    for (const pre of document.querySelectorAll(CODE_BLOCKS)) {
+      if (pre.parentElement && pre.parentElement.closest(CODE_BLOCKS)) continue;
       if (onlyAfter && !(onlyAfter.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
       if (pre.closest(VIEWER) || (over && over.contains(pre))) continue;
       const raw = pre.textContent || '';
       const end = raw.search(/==\/WebMod==/);
       if (raw.indexOf('==WebMod==') === -1 || end === -1) continue;
-      out.push({ key: raw.slice(0, end), raw, pre });
+      out.push({ key: raw.slice(0, end), raw, pre, text: () => blockText(pre) || raw });
     }
     return out;
+  }
+  const CODE_BLOCKS = 'pre, .cm-editor, [data-code-block]';
+  /** A code block's text, line by line: its lines as shown (a code editor puts each in an element of its own, so
+   *  textContent runs them together); from the mod's header on. */
+  function blockText(el) {
+    const lines = el.querySelectorAll('.cm-line');
+    let t = lines.length ? [...lines].map((l) => l.textContent || '').join('\n') : ((el.querySelector('code') || el).innerText || '');
+    const a = t.search(/^.*==WebMod==/m);
+    if (a > 0) t = t.slice(t.lastIndexOf('\n', a) + 1);
+    return t;
   }
   /** What tells a reply is still changing: the last reply's text (or, without one, how much text the page has). */
   function signature() {
@@ -432,7 +478,7 @@
       w.queued = true;
       setTimeout(() => { w.queued = false; settle(w); }, 500);
     });
-    w.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-is-streaming', 'aria-label', 'disabled'] });
+    w.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-is-streaming', 'aria-label', 'disabled', 'data-message-complete'] });
     settle(w);
   }
   function stopWatch() {
@@ -450,7 +496,10 @@
     const sig = signature();
     if (sig !== w.sig) { w.sig = sig; w.at = now; }
     const quiet = now - w.at;
-    const done = !busy && !!editor() && (w.saw ? quiet >= 1200 : quiet >= 6000);
+    // (ChatGPT's reply not marked complete yet: not done, however quiet, for up to 90 s of quiet: it pauses while it
+    // searches or thinks, which ended the watch early, 11-16, its mod then only picked up late)
+    const pending = incomplete();
+    const done = !busy && !!editor() && (pending ? quiet >= 90000 : w.saw ? quiet >= 1200 : quiet >= 6000);
     if (done) return finish(w, w.saw ? 'done' : 'quiet');
     if (now - w.started > 15 * 60000) return finish(w, 'timed out');
     // (one more look once the page has gone quiet: nothing else wakes this up when nothing changes)
@@ -460,7 +509,16 @@
   function finish(w, why) {
     stopWatch();
     last = { seen: w.seen, path: location.pathname };
-    post({ type: 'done', why, mods: autoPickup(w.seen), stop: w.saw });
+    const mods = autoPickup(w.seen);
+    // (code in the reply but no mod read from it: said, with what there was, for the diagnostics)
+    if (!mods.length) {
+      const all = document.querySelectorAll(REPLY);
+      const r = all[all.length - 1];
+      const blocks = r ? r.querySelectorAll(`${CODE_BLOCKS}, code`).length : 0;
+      const header = !!r && /==WebMod==/.test(r.textContent || '');
+      if (blocks || header) post({ type: 'nopickup', blocks, header, kinds: r ? [...new Set([...r.querySelectorAll(`${CODE_BLOCKS}, code`)].map((n) => n.localName + (n.className && typeof n.className === 'string' ? '.' + n.className.split(/\s+/)[0] : '')))].slice(0, 5).join(' ') : '', path: location.pathname.replace(/[^/]{20,}/g, '…') });
+    }
+    post({ type: 'done', why, mods, stop: w.saw });
   }
   /** (AUTO path) The mod files in code blocks that weren't there before the send, the latest of each (by its header);
    *  all of them then count as seen. */
@@ -468,7 +526,7 @@
     // (a mod by its header, ==WebMod== to ==/WebMod==, whatever is around it)
     const keyOf = (t) => { const end = t.search(/==\/WebMod==/); return end === -1 ? t : t.slice(t.indexOf('==WebMod=='), end).replace(/\s+/g, ' '); };
     const byKey = new Map();
-    for (const b of modBlocks()) if (!seen.has(b.raw)) { const t = (b.pre.querySelector('code') || b.pre).innerText || b.raw; byKey.set(keyOf(t), t); }
+    for (const b of modBlocks()) if (!seen.has(b.raw)) { const t = b.text(); byKey.set(keyOf(t), t); }
     for (const b of modBlocks()) seen.add(b.raw);
     return [...byKey.values()];
   }
@@ -555,7 +613,7 @@
   // the reply and its "working" line above it. So: when the conversation's last message is wholly above what
   // shows (nothing but space below everything), it's brought back to sit 60% of the way down. Never when the
   // person has scrolled up to read (then the last message is below the view, not above it).
-  const MSGS = '[data-testid="user-message"], [data-is-streaming], .font-claude-response, [data-message-author-role]';
+  const MSGS = '[data-testid="user-message"], [data-is-streaming], .font-claude-response, [data-message-author-role], [data-message-role]';
   function scrollerOf(el) {
     for (let n = el && el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
       if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight + 4) return n;

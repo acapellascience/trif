@@ -68,14 +68,37 @@ const CODEX_HARMLESS = ['update_plan',
   ...['spawn_agent', 'wait_agent', 'send_input', 'close_agent', 'resume_agent'].map((n) => `multi_agent_v1.${n}`)];
 const CODEX_MINE = ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'view_image'];
 const codexKnown = (t) => CODEX_MINE.some((n) => t === `mcp__trif.${n}`) || CODEX_HARMLESS.includes(t);
+// With Codex's default model (no -m) all but a few tools are behind `exec`: JavaScript in an isolate of
+// Codex's own ("no Node, no file system, no network access"), which calls the others. Beside it:
+const CODEX_BY_DEFAULT = ['exec',
+  // waiting: for a script of exec's still going, or for a while
+  'wait', 'sleep',
+  'request_user_input', 'request_user_input_async',
+  // its sub-agents, as that model gets them (the third run below starts one and tries each way out from there)
+  'spawn_agent', 'wait_agent', 'send_message', 'followup_task', 'interrupt_agent', 'list_agents', 'close_agent'];
+const codexKnownByDefault = (t) => codexKnown(t) || CODEX_BY_DEFAULT.includes(t.split('.').pop());
+// ... and what exec can call (ALL_TOOLS in the isolate): TRIF's tools; apply_patch, which Codex refuses
+// (read-only), tried on every run; the time; the goal and the MCP resources as above.
+const CODEX_BEHIND_EXEC = [...CODEX_MINE.map((n) => `mcp__trif__${n}`), 'apply_patch', 'clock__curr_time', 'update_plan',
+  'get_goal', 'create_goal', 'update_goal', 'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'];
 let failed = 0;
 function check(ok, what, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${!ok && detail ? `\n      ${String(detail).slice(0, 3000).split('\n').join('\n      ')}` : ''}`);
   if (!ok) failed++;
   return !!ok;
 }
-// The tools in requests to the stand-in model, as Codex lists them (a namespace's inside it): a.b, sorted.
-const offeredTo = (bodies) => [...new Set(bodies.filter((b) => b && Array.isArray(b.tools)).flatMap((b) => b.tools.flatMap((t) => (Array.isArray(t.tools) ? t.tools.map((x) => `${t.name}.${x.name}`) : [t.name || t.type]))))].sort();
+// The tools in a request to the stand-in model, as Codex lists them: in `tools`, or (its default model) in
+// `input` as additional_tools. A namespace's are inside it. [{ns, name, def}]
+function directTools(body) {
+  const out = [];
+  const add = (list) => { for (const t of Array.isArray(list) ? list : []) { if (t && Array.isArray(t.tools)) for (const x of t.tools) out.push({ ns: t.name, name: x && x.name, def: x || {} }); else if (t) out.push({ ns: null, name: t.name || t.type, def: t }); } };
+  if (body) { add(body.tools); for (const i of Array.isArray(body.input) ? body.input : []) if (i && i.type === 'additional_tools') add(i.tools); }
+  return out;
+}
+// ... over some requests: a.b, sorted.
+const offeredTo = (bodies) => [...new Set(bodies.flatMap((b) => directTools(b).map((t) => (t.ns ? `${t.ns}.${t.name}` : t.name))))].sort();
+// What Codex sent back for the tool calls so far, in a request.
+const outputsOf = (j) => (Array.isArray(j && j.input) ? j.input : []).filter((i) => i && (i.type === 'function_call_output' || i.type === 'custom_tool_call_output')).map((i) => (typeof i.output === 'string' ? i.output : JSON.stringify(i.output)));
 const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
 const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// ==/WebMod==\ndocument.title = "hello";\n';
 
@@ -436,6 +459,155 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     check(!later.includes(SECRET), '  no secret reached the model from that run or its sub-agent');
     check(!fs.existsSync(path.join(home, 'Documents', 'patched-by-child.txt')) && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'patched-by-child.js')) && fs.readdirSync(path.join(ws, 'sites', 'other.net')).join() === 'keep.js', '  and nothing was planted');
     await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  // ---- Codex's default model (no -m): what people's runs get. All but a few tools are behind `exec`
+  // (JavaScript in Codex's own isolate, which calls the others as tools.<name>), and its requests list
+  // them in `input` (additional_tools), not in `tools`. The same attempts to get out, from there and from
+  // a sub-agent it starts.
+  if (CX && run && run.done.ok === true) {
+    console.log('\n  Codex\'s default model (no model named: everything behind exec), in a third run:');
+    const before = api.requests.length;
+    const hitsBefore = localHits;
+    const ex = (body) => ({ custom: { name: 'exec', input: `try { ${body} } catch (e) { text('THREW\\n' + String((e && e.message) || e).slice(0, 600)); }` } });
+    // (what an MCP tool answers arrives in the isolate as {content: [{type: "text", text}], isError})
+    const viaExec = (expr) => ex(`const r = await ${expr}; text('RESULT\\n' + String(typeof r === 'string' ? r : r && Array.isArray(r.content) ? r.content.map((p) => (p && p.text) || '').join('\\n') + (r.isError ? '\\n(isError)' : '') : JSON.stringify(r)).slice(0, 3000));`);
+    const mcp = (name, args) => viaExec(`tools.mcp__trif__${name}(${JSON.stringify(args)})`);
+    const listTools = ex('text(\'TOOLS \' + ALL_TOOLS.map((t) => t.name).join(\', \'));');
+    const isolate = ex('text(\'ISOLATE \' + [typeof fetch, typeof require, typeof process, typeof Deno, typeof WebSocket, typeof XMLHttpRequest].join(\' \') + \'; import \' + (await import(\'node:fs\').then(() => \'WORKED\', () => \'refused\')));');
+    const patch = (file) => `*** Begin Patch\n*** Add File: ${file}\n+// planted\n*** End Patch\n`;
+    const elsewhere = (n) => path.join(home, 'Documents', n);
+    const MOD3 = MOD.replace('@name Hello', '@name Hello again');
+    const type = `type "${secretFile}"`;
+    // [what, the step, a pattern its answer must match | how it must be refused]
+    const parentSteps = [
+      ['the tools exec can call', listTools, 'tools'],
+      ['exec\'s isolate: no fetch, require, process, Deno, WebSocket or XMLHttpRequest, no import of node:fs', isolate, /ISOLATE undefined undefined undefined undefined undefined undefined; import refused/],
+      ['trif status, through exec', mcp('trif', { args: ['status'] }), /helper|extension|mods?/i],
+      ['write a mod (TRIF\'s write_file), through exec', mcp('write_file', { path: 'sites/example.com/again.js', content: MOD3 }), /^wrote sites\/example\.com\/again\.js/m],
+      ['check the mod, through exec', mcp('trif', { args: ['check', 'example.com/again'] }), /^ok: /m],
+      ['read_file, through exec', mcp('read_file', { path: 'sites/example.com/again.js' }), /@name Hello again/],
+      ['the tool, called directly', tool('trif', { args: ['mods'] }), /example\.com\/again/],
+      ['refused: Codex\'s apply_patch through exec, in its own site\'s folder', viaExec(`tools.apply_patch(${JSON.stringify(patch('sites/example.com/patched3.js'))})`), 'threw'],
+      ['refused: Codex\'s apply_patch through exec, elsewhere in the home folder', viaExec(`tools.apply_patch(${JSON.stringify(patch(elsewhere('patched3.txt')))})`), 'threw'],
+      ['refused: Codex\'s apply_patch called directly, in its own site\'s folder', { custom: { name: 'apply_patch', input: patch('sites/example.com/patched3-direct.js') } }, 'codex'],
+      ['refused: Codex\'s apply_patch called directly, elsewhere in the home folder', { custom: { name: 'apply_patch', input: patch(elsewhere('patched3-direct.txt')) } }, 'codex'],
+      ['not there: a shell command through exec (exec_command)', viaExec(`tools.exec_command(${JSON.stringify({ cmd: type })})`), 'absent'],
+      ['not there: a shell command through exec (shell_command)', viaExec(`tools.shell_command(${JSON.stringify({ command: type })})`), 'absent'],
+      ['not there: a shell command through exec (shell)', viaExec(`tools.shell(${JSON.stringify({ command: ['cmd', '/c', type] })})`), 'absent'],
+      ['not there: Codex\'s own view_image through exec', viaExec(`tools.view_image(${JSON.stringify({ path: outsideImage })})`), 'absent'],
+      ['refused: a shell command called directly (shell)', { run: type }, 'codex'],
+      ['refused: a shell command called directly (exec_command)', { call: { name: 'exec_command', arguments: { cmd: type } } }, 'codex'],
+      ['refused: Codex\'s own view_image called directly', { call: { name: 'view_image', arguments: { path: outsideImage } } }, 'codex'],
+      ['refused: read_file through exec, a file elsewhere in the home folder', mcp('read_file', { path: secretFile }), 'files'],
+      ['refused: read_file through exec, TRIF\'s settings', mcp('read_file', { path: cfgFile }), 'files'],
+      ['refused: write_file through exec, another site\'s folder', mcp('write_file', { path: 'sites/other.net/planted3.js', content: '// planted' }), 'files'],
+      ['refused: write_file through exec, the live mods folder', mcp('write_file', { path: path.join(ws, 'sites', 'example.com', 'direct3.js'), content: '// direct' }), 'files'],
+      ['refused: the tool through exec, another site\'s tab', mcp('trif', { args: ['text', '--tab', '13'] }), 'trif'],
+      ['refused: the tool through exec, a command that isn\'t for runs', mcp('trif', { args: ['agent', 'key', '--agent', AGENT] }), 'trif'],
+    ];
+    const childSteps = [
+      ['the tools its exec can call', listTools, 'tools'],
+      ['not there: a shell command through exec (exec_command)', viaExec(`tools.exec_command(${JSON.stringify({ cmd: type })})`), 'absent'],
+      ['not there: Codex\'s own view_image through exec', viaExec(`tools.view_image(${JSON.stringify({ path: outsideImage })})`), 'absent'],
+      ['refused: Codex\'s apply_patch through exec, elsewhere in the home folder', viaExec(`tools.apply_patch(${JSON.stringify(patch(elsewhere('patched-by-child3.txt')))})`), 'threw'],
+      ['refused: Codex\'s apply_patch through exec, in its own site\'s folder', viaExec(`tools.apply_patch(${JSON.stringify(patch('sites/example.com/patched-by-child3.js'))})`), 'threw'],
+      ['refused: a shell command called directly', { run: type }, 'codex'],
+      ['refused: read_file through exec, a file elsewhere in the home folder', mcp('read_file', { path: secretFile }), 'files'],
+      ['refused: write_file through exec, another site\'s folder', mcp('write_file', { path: 'sites/other.net/planted-by-child3.js', content: '// planted' }), 'files'],
+      ['refused: the tool through exec, another site\'s tab', mcp('trif', { args: ['text', '--tab', '13'] }), 'trif'],
+    ];
+    const HOW = { ...BY, threw: /^THREW$[\s\S]*(rejected|blocked|denied|not (allowed|permitted))/m, absent: /^THREW$[\s\S]*(is not a function|is not defined|undefined)/m };
+    const TROUBLE = /\bEPERM\b|\bEACCES\b|operation not permitted|permission denied|cannot find module|trif-fence:|\(isError\)|\(exit status [1-9]/i;
+    const execTools = (out) => ((/^TOOLS (.*)$/m.exec(out) || [])[1] || '').split(', ').filter(Boolean).sort();
+    const judge = (how, out) => {
+      if (out === undefined || out.includes(SECRET) || out.includes(KEY)) return false;
+      if (how instanceof RegExp) return !/^THREW$/m.test(out) && !TROUBLE.test(out) && how.test(out);
+      if (how === 'tools') { const t = execTools(out); return t.every((n) => CODEX_BEHIND_EXEC.includes(n)) && CODEX_MINE.every((n) => t.includes(`mcp__trif__${n}`)); }
+      return HOW[how].test(out);
+    };
+    const report = (list, got, indent) => list.forEach(([what, , how], i) => {
+      const out = got[i] === undefined ? undefined : String(got[i]);
+      check(judge(how, out), `${indent}${what}`, out === undefined ? '(no answer)' : how === 'tools' ? `not looked at yet: ${execTools(out).filter((n) => !CODEX_BEHIND_EXEC.includes(n)).join(', ')}\n${out}` : out);
+      console.log(`      ${String(out).replace(/^Script completed\s+Wall time[^\n]*\s+Output:\s*/, '').replace(/\s+/g, ' ').slice(0, how === 'tools' ? 600 : 170)}`);
+    });
+    const answers = (j) => outputsOf(j).map((r) => { try { const v = JSON.parse(r); return Array.isArray(v) ? parts(v) : r; } catch { return r; } });
+    const parent = [];
+    const child = [];
+    let pi = 0;
+    let ci = 0;
+    let spawned = false;
+    let waits = 0;
+    let parentKey;
+    let spawnOut = '';
+    const waitOuts = [];
+    const called = (j, name) => (Array.isArray(j && j.input) ? j.input : []).some((i) => i && i.type === 'function_call' && i.name === name);
+    // What a call to one of Codex's sub-agent tools takes, from the tool as Codex describes it.
+    const argsFor = (t, id) => {
+      const props = (t && t.def && t.def.parameters && t.def.parameters.properties) || null;
+      if (!props) return id === null ? { message: 'do the steps', task_name: 'helper' } : { timeout_ms: 30000 };
+      const a = {};
+      for (const [k, v] of Object.entries(props)) {
+        const kind = Array.isArray(v && v.type) ? v.type[0] : v && v.type;
+        if (/timeout/i.test(k)) a[k] = 30000;
+        else if (k === 'fork_turns') a[k] = 'none';
+        else if (/fork/i.test(k)) a[k] = false;
+        else if (id === null && kind === 'string' && /message|prompt|instructions|^task$/i.test(k)) a[k] = 'do the steps';
+        else if (id === null && kind === 'string' && /name$/i.test(k)) a[k] = 'helper';
+        else if (id && kind === 'array') a[k] = [id];
+        else if (id && kind === 'string' && /target|id$|agent|path|name$/i.test(k)) a[k] = id;
+      }
+      return a;
+    };
+    const callTo = (name, id) => { const t = directTools(parent[0]).find((x) => x.name === name); return { call: { ...(t && t.ns ? { namespace: t.ns } : {}), name, arguments: argsFor(t, id) } }; };
+    pick = (j) => {
+      if (parentKey === undefined) parentKey = (j && j.prompt_cache_key) || null;
+      // (a sub-agent's requests: another conversation's, or without its parent's call to spawn_agent)
+      if (spawned && ((parentKey && j && j.prompt_cache_key && j.prompt_cache_key !== parentKey) || !called(j, 'spawn_agent'))) {
+        child.push(j);
+        return ci < childSteps.length ? childSteps[ci++][1] : { say: 'child done' };
+      }
+      parent.push(j);
+      if (pi < parentSteps.length) return parentSteps[pi++][1];
+      if (!spawned) { spawned = true; return callTo('spawn_agent', null); }
+      const outs = outputsOf(j).slice(parentSteps.length);
+      spawnOut = outs[0] || '';
+      waitOuts.splice(0, waitOuts.length, ...outs.slice(1));
+      const id = (/"(?:agent_id|id|agent_path|thread_id|target|task_name|path|name)"\s*:\s*"([^"]+)"/.exec(spawnOut) || [])[1] || '';
+      // (until the sub-agent has been through its steps)
+      if (ci < childSteps.length && waits++ < 8) return callTo('wait_agent', id);
+      return { say: 'done' };
+    };
+    const id = 'def1';
+    ext.send({ type: 'request', id, cmd: 'agent.start', args: { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps' } });
+    const started = await ext.next((m) => m.type === 'response' && m.id === id, { timeout: 60000 });
+    if (check(started.ok === true, '  a third run started, with no model named', started.error)) {
+      const done = await ext.next((m) => m.type === 'agentEvent' && m.runId === started.result.runId && m.event.kind === 'done', { timeout: 300000 }).catch((e) => ({ event: { ok: false, error: e.message } }));
+      const posts = api.requests.slice(before).filter((q) => q.body && Array.isArray(q.body.input));
+      check(done.event.ok === true, `  the run finished (${posts.length} requests; the model Codex named: ${[...new Set(posts.map((q) => q.body.model))].join(', ') || '(none)'})`, `${JSON.stringify(done.event)}\n--- helper.log\n${helperLog()}`);
+      const first = parent[0] || {};
+      console.log(`      (a request has: ${Object.keys(first).join(', ')}; in its input: ${[...new Set((Array.isArray(first.input) ? first.input : []).map((i) => i && i.type))].join(', ')})`);
+      console.log(`      (its sub-agent tools, as Codex describes them: ${JSON.stringify(directTools(first).filter((t) => /agent/.test(t.name)).map((t) => ({ ns: t.ns, name: t.name, parameters: t.def.parameters }))).slice(0, 4000)})`);
+      const had = offeredTo(parent);
+      check(had.length > 0 && had.every(codexKnownByDefault), `  the tools Codex had beside exec's: ${had.join(', ') || '(none listed)'}`, `not looked at yet: ${had.filter((t) => !codexKnownByDefault(t)).join(', ')}`);
+      report(parentSteps, answers(parent[parent.length - 1]), '  ');
+      console.log('\n  and a sub-agent of that run\'s (spawn_agent):');
+      console.log(`      spawn_agent was asked ${JSON.stringify(callTo('spawn_agent', null).call)} and answered: ${String(spawnOut).replace(/\s+/g, ' ').slice(0, 600)}`);
+      waitOuts.forEach((o) => console.log(`      wait_agent answered: ${String(o).replace(/\s+/g, ' ').slice(0, 400)}`));
+      const childHad = offeredTo(child);
+      check(child.length > 0 && childHad.every(codexKnownByDefault), `  a sub-agent started (${child.length} requests); the tools it had beside exec's: ${childHad.join(', ') || '(none listed)'}`, `not looked at yet: ${childHad.filter((t) => !codexKnownByDefault(t)).join(', ')}`);
+      report(childSteps, child.length ? answers(child[child.length - 1]) : [], '  from the sub-agent, ');
+    }
+    pick = null;
+    await new Promise((r) => setTimeout(r, 3000));
+    const later = JSON.stringify(api.requests.slice(before).map((q) => q.body));
+    check(!later.includes(SECRET) && !later.includes(KEY), '  no secret reached the model from that run or its sub-agent');
+    const again = path.join(ws, 'sites', 'example.com', 'again.js');
+    check(fs.existsSync(again) && fs.readFileSync(again, 'utf8') === MOD3, '  the mod it wrote is in the mods folder');
+    const siteNow = fs.readdirSync(path.join(ws, 'sites', 'example.com')).filter((n) => /patched|direct3|planted/.test(n));
+    const docsNow = fs.readdirSync(path.join(home, 'Documents')).filter((n) => !['secret.txt', 'photo.png'].includes(n));
+    check(siteNow.length === 0 && docsNow.length === 0 && fs.readdirSync(path.join(ws, 'sites', 'other.net')).join() === 'keep.js', '  and nothing was planted', `${siteNow.join(', ')} ${docsNow.join(', ')} ${fs.readdirSync(path.join(ws, 'sites', 'other.net')).join(', ')}`);
+    check(localHits === hitsBefore, `  the server on this computer heard nothing (${localHits - hitsBefore})`);
   }
 
   // ---- tidy up

@@ -4,8 +4,11 @@
 // 1024 px (one size is all iOS 17 and later need), approved by Tim 11-16.
 //
 // The robot is robot-shaded.svg's (scripts/render-icon.js shadedSvg), with its body outline replaced by iOS's own
-// icon mask: the gradient rim is stroked centred exactly on the mask edge at twice the scaled rim width, so after
-// iOS clips the outer half the visible rim is uniform all round.
+// icon mask: iOS clips the square to its mask, which makes the rim's outer edge. The face (the dark area inside the
+// rim) is Apple's same curve scaled down (Tim 11-16, option A: the mask moved inward made its inner corners too
+// sharp): a continuous-corner square inset by the rim width, corner radius 0.26 x its own side. The rim is the
+// whole square minus the face (even-odd), in the rim's gradient; the face is filled on top. So the rim is 100.4
+// wide at the middle of each side and 120.5 on the diagonal.
 //
 // iOS's mask (measured): UIKit's continuous-corner rounded rect (PaintCode's reverse-engineered bezier, "Drawing
 // Code for iOS 7 Rounded Rectangles"), corner radius 0.26 x side on iOS 26 (the 192 px home-screen icons of an iOS
@@ -36,40 +39,43 @@ const MID = (HEAD.outer + HEAD.inner) / 2; // 51: the rim's centre line, the squ
 const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, blur: 1.5 };
 // TRIF's squircle (its rim's centre line) goes onto iOS's outline: 51 units -> half the icon.
 const K = (S / 2) / MID; // 10.039
-const RIM = (HEAD.outer - HEAD.inner) * K; // 100.39 visible; stroked at twice that, half of it outside the mask
+const RIM = (HEAD.outer - HEAD.inner) * K; // 100.39: the rim's width at the middle of each side
+const FACE_SIDE = S - 2 * RIM; // 823.22
 
 const COLOURS = {
-  light: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: '#18181a', corners: true },
+  light: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: '#18181a' },
   // Dark: the same robot with the face left transparent, so iOS's own dark gradient shows through (Apple:
   // "Provide your dark app icon with a transparent background"). Our face is already that dark.
-  dark: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: 'none', corners: false },
+  dark: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: 'none' },
   // Tinted: fully opaque grayscale; iOS maps luminance to the tint over its own dark tile, so black is "no paint"
   // (the face stays the tile's dark), white is full tint. Tim, 11-16: the light colour art itself, grayscaled
   // (Rec. 709 luminance of the rendered pixels, so it stays tied to the colours), with the face black; a version
   // brightened towards white was much too white on his phone.
-  tinted: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: '#000000', corners: true },
+  tinted: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: '#000000' },
 };
 
 const f = (v) => +v.toFixed(2);
 
-/** iOS's icon mask as an SVG path: UIKit's continuous corners (PaintCode's coefficients, top-right corner, in
- * radii from the corner: [dx from the right, dy from the top]), rotated for the other three corners. */
-function maskPath(size = S, ratio = RADIUS) {
-  const r = Math.min(ratio * size, size / 2 / 1.52866483);
-  const TR = [ // [cmd, ...points] after the start point (1.52866483, 0)
+/** A continuous-corner rounded square (UIKit's curve: PaintCode's coefficients, top-right corner, in radii from the
+ * corner: [dx from the right, dy from the top], rotated for the other three corners) at (x0, y0), side `size`,
+ * corner radius `r` (capped where UIKit caps it), as SVG path data. continuous(0, 0, S, RADIUS * S) is iOS's mask;
+ * the face is continuous(RIM, RIM, FACE_SIDE, RADIUS * FACE_SIDE) = (100.39, 100.39, 823.22, 214.04). */
+function continuous(x0, y0, size, r) {
+  const C = 1.52866483; // the curve starts this many radii from the corner
+  const TR = [ // [cmd, ...points] after the start point (C, 0)
     ['L', [1.52866471, 0]],
     ['C', [1.08849323, 0], [0.86840689, 0], [0.66993427, 0.065496]],
     ['L', [0.63149399, 0.074911]],
     ['C', [0.37282392, 0.16905899], [0.16906013, 0.37282401], [0.07491176, 0.63149399]],
-    ['C', [0, 0.86840701], [0, 1.08849299], [0, 1.52866483]],
+    ['C', [0, 0.86840701], [0, 1.08849299], [0, C]],
   ];
+  r = Math.min(r, size / 2 / C);
   const pt = ([dx, dy], q) => { // top-right local -> absolute, then rotate q quarter turns clockwise about the centre
     let x = size - dx * r, y = dy * r;
     for (let i = 0; i < q; i++) [x, y] = [size - y, x];
-    return `${f(x)} ${f(y)}`;
+    return `${f(x0 + x)} ${f(y0 + y)}`;
   };
-  let d = `M${pt([0, 1.52866483], 3)}`; // the top-left corner's end on the top edge
-
+  let d = `M${pt([0, C], 3)}`; // the top-left corner's end on the top edge
   for (let q = 0; q < 4; q++) for (const [cmd, ...ps] of TR) d += ` ${cmd}${ps.map((p) => pt(p, q)).join(' ')}`;
   return `${d} Z`;
 }
@@ -86,19 +92,21 @@ function squircle(cx, cy, a, b, n, count = 720) {
 }
 
 function iconSvg(variant) {
-  const { rim, eye, glow, face, corners } = COLOURS[variant];
+  const { rim, eye, glow, face } = COLOURS[variant];
+  const d = continuous(RIM, RIM, FACE_SIDE, RADIUS * FACE_SIDE);
   const X = (v) => S / 2 + (v - HEAD.c) * K;
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">`,
-    `  <!-- TRIF iPhone app icon (${variant}), make-icon.js: iOS mask continuous corners r=${RADIUS}*side; rim ${f(RIM)} visible (stroke ${f(2 * RIM)}); eyes x${f(K)} -->`,
+    `  <!-- TRIF iPhone app icon (${variant}), make-icon.js: iOS mask continuous corners r=${RADIUS}*side; face the same curve inset ${f(RIM)}, r=${RADIUS}*its side; eyes x${f(K)} -->`,
     '  <defs>',
     `    <linearGradient id="r" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${S}" y2="${S}"><stop offset="0" stop-color="${rim[0]}"/><stop offset="1" stop-color="${rim[1]}"/></linearGradient>`,
     `    <radialGradient id="e" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="${eye[0]}"/><stop offset="1" stop-color="${eye[1]}"/></radialGradient>`,
     `    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="${f(EYES.blur * K)}" result="b"/><feColorMatrix in="b" type="matrix" values="${glow.map((c) => `0 0 0 0 ${c}`).join('  ')}  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`,
     '  </defs>',
-    // The square's corners, outside the mask, in the rim's gradient: iOS clips them; opaque so the PNG has no alpha.
-    corners ? `  <rect width="${S}" height="${S}" fill="url(#r)"/>` : null,
-    `  <path d="${maskPath()}" fill="${face}" stroke="url(#r)" stroke-width="${f(2 * RIM)}"/>`,
+    // The rim: the whole square minus the face (iOS clips the square to its mask, which makes the rim's outer edge;
+    // the square's corners are opaque so the light PNG has no alpha).
+    `  <path fill-rule="evenodd" fill="url(#r)" d="M0 0 H${S} V${S} H0 Z ${d}"/>`,
+    face === 'none' ? null : `  <path fill="${face}" d="${d}"/>`,
     `  <g filter="url(#h)">${EYES.xs.map((ex) => `<polygon points="${squircle(X(ex), X(EYES.cy), EYES.a * K, EYES.b * K, EYES.n)}" fill="url(#e)"/>`).join('')}</g>`,
     '</svg>',
     '',
@@ -198,7 +206,7 @@ function convert(img, to) {
   return { ...img, channels: to, pixels: out };
 }
 
-module.exports = { maskPath, iconSvg, RADIUS, readPng, writePng };
+module.exports = { continuous, iconSvg, RADIUS, RIM, FACE_SIDE, readPng, writePng };
 
 if (require.main === module) {
   (async () => {

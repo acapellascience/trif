@@ -94,6 +94,11 @@ async function claudeCode(base) {
   await new Promise((r) => tcp.listen(0, '127.0.0.1', r));
   const tcpPort = tcp.address().port;
   const fileRules = ['--allowedTools', 'Read(./**)', 'Edit(./sites/**)'];
+  const shots = path.join(base, 'shots');
+  put(path.join(shots, 'shot.txt'), 'SHOT-OK');
+  put(path.join(work, 'sites', 'y.com', 'other.js'), '// other');
+  const shotsDrive = shots.replace(/\\/g, '/');
+  const shotsPosix = '/' + shotsDrive[0].toLowerCase() + shotsDrive.slice(2);
   for (const [label, extraEnv, script, extraArgs] of [
     ['no prefix: which shell runs a command', {}, [{ bash: 'echo shell-ok; uname -s; pwd' }, { say: 'done' }], ['--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(uname:*)', 'Bash(pwd:*)']],
     ['with CLAUDE_CODE_SHELL_PREFIX', { CLAUDE_CODE_SHELL_PREFIX: prefix.replace(/\\/g, '/') }, [{ bash: 'echo prefixed-ok && pwd' }, { bash: 'cd sites && ls' }, { say: 'done' }], ['--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(pwd:*)']],
@@ -117,6 +122,12 @@ async function claudeCode(base) {
       { tool: 'Write', input: { file_path: path.join(work, 'sites', 'x.com', 'j', 'planted.txt'), content: 'planted' } },
       { tool: 'Write', input: { file_path: path.join(base, 'home', 'planted2.txt'), content: 'planted' } },
       { say: 'done' }], fileRules],
+    // How a rule names a folder outside the working folder on Windows (the run's screenshots folder): each
+    // spelling alone, then a read of a file there.
+    ...[['//' + shotsPosix + '/**', 'two slashes, /c/Users/…'], ['//' + shotsDrive + '/**', 'two slashes, C:/Users/…'], ['/' + shotsDrive + '/**', 'one slash, C:/Users/…'], [shotsDrive + '/**', 'C:/Users/…'], [shots + '\\**', 'C:\\Users\\…']]
+      .map(([rule, label]) => [`a rule for a folder elsewhere, spelled with ${label}: Read(${rule})`, {}, [{ tool: 'Read', input: { file_path: path.join(shots, 'shot.txt') } }, { tool: 'Read', input: { file_path: outside } }, { say: 'done' }], ['--allowedTools', 'Read(./**)', `Read(${rule})`]]),
+    // And a deny inside an allow, relative: another site's folder.
+    ['Edit(./sites/**) allowed, Edit(./sites/y.com/**) denied', {}, [{ tool: 'Write', input: { file_path: path.join(work, 'sites', 'y.com', 'planted.js'), content: '// planted' } }, { tool: 'Write', input: { file_path: path.join(work, 'sites', 'Y.COM', 'planted2.js'), content: '// planted' } }, { tool: 'Write', input: { file_path: path.join(work, 'sites', 'x.com', 'ok.js'), content: '// ok' } }, { tool: 'Write', input: { file_path: path.join(work, 'sites', 'x.com', 'CLAUDE.md'), content: 'planted' } }, { say: 'done' }], ['--allowedTools', 'Read(./**)', 'Edit(./sites/**)', '--disallowedTools', 'Edit(./sites/y.com/**)', 'Edit(./sites/**/CLAUDE.md)', 'WebFetch']],
     ['no Bash at all; TRIF\'s commands as an MCP tool', {}, [{ tool: 'mcp__trif__trif', input: { args: ['status', '--json'] } }, { bash: 'echo should-not-run' }, { say: 'done' }], ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__trif__trif', '--tools', 'Read,Edit,Write,Glob,Grep']],
     ['the same, with the MCP server inside the AppContainer fence', {}, [{ tool: 'mcp__trif__trif', input: { args: ['status'] } }, { tool: 'mcp__trif__trif', input: { args: ['try', outside, String(tcpPort)] } }, { say: 'done' }], ['--mcp-config', fencedConfig, '--allowedTools', 'mcp__trif__trif', '--tools', 'Read,Edit,Write,Glob,Grep']],
   ]) {

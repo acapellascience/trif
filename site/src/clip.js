@@ -70,7 +70,7 @@ export const CLIP_JS = `(() => {
   ${CHECK_SRC}
   const raw = location.hash.slice(1);
   // (?debug: how much arrived after the #, for testing how the app's handover carries it)
-  if (/[?&]debug\b/.test(location.search)) { $('debug').hidden = false; $('debug').textContent = 'location.hash.length ' + location.hash.length; }
+  if (/[?&]debug(&|=|$)/.test(location.search)) { $('debug').hidden = false; $('debug').textContent = 'location.hash.length ' + location.hash.length; }
   // (out of the address bar and the history at once: the profile isn't left behind)
   if (raw) history.replaceState(null, '', location.pathname);
   if (!raw) return show('none');

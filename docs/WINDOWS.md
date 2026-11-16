@@ -308,11 +308,11 @@ account, no paid call).
   mailbox and working folder, a server and a pipe as the helper makes them, another program with a canary
   on its command line, a registry value, the clipboard), then tries everything from inside.
 
-What was **seen**: 65 checks, each passing, as a plain AppContainer and again as a less-privileged one
+What was **seen**: 66 checks, each passing, as a plain AppContainer and again as a less-privileged one
 with `registryRead`; run by the runner's own account (an administrator) and again by an ordinary user
 made for it (`fence-standard-user`: not an administrator, same results, so making the container and its
 entries needs no rights a normal person lacks).
-[The run](https://github.com/acapellascience/trif/actions/runs/43847087712): "every guarantee held, and
+[The run](https://github.com/acapellascience/trif/actions/runs/43849520916): "every guarantee held, and
 everything a run needs worked", in both. Every row below is one attempt or more:
 
 | | From inside the fence |
@@ -323,6 +323,7 @@ everything a run needs worked", in both. Every row below is one attempt or more:
 | Network | refused: the internet (`EACCES`), a name lookup, `fetch`, a question to a name server over UDP (no answer), a server on this computer (127.0.0.1 and `localhost`), the helper's pipe |
 | Private folder | refused: reading `config.json`, listing the folder, another site's screenshot, writing into it |
 | Other runs | refused: reading or writing another run's mailbox, reading its working folder, listing the mailboxes' folder |
+| Keys | refused: reading a key in Windows Credential Manager saved the way TRIF saves one, and listing the credentials there |
 | Other programs | refused: another program's command line (asked of WMI, and of the kernel with the least right there is), opening it to read its memory (where its environment is), the clipboard. Outside the fence the same small program (`spy.cs`) got all three: the canaries came back |
 | Afterwards | from outside: nothing changed that shouldn't have; the server, the UDP socket and the pipe on this computer heard nothing; the run's entries were on its folders while it ran and gone after |
 
@@ -426,7 +427,9 @@ WSL"); not something to ask of everyone.
 3. **Where keys live on Windows.** Credential Manager, as built (Phase 1). It keeps other *users* out and
    keeps keys out of files, argv and the environment, but any program running as the user can read a
    credential without a prompt; the Mac's Keychain asks. Windows has nothing better without a prompt of
-   TRIF's own. Whether a fenced program can read Credential Manager wasn't tried.
+   TRIF's own. A program inside the fence can't: **seen**, a made-up key saved under TRIF's own name
+   (`TRIF API key/anthropic`) was refused there, as was listing the credentials, in both kinds of container
+   (error 5, and 1702 in the less-privileged one), while the same program outside read it.
 4. **File permissions.** TRIF relies on the profile folder's own protection for `%LOCALAPPDATA%\TRIF` and
    `~\.trif` and tightens nothing. Fine on an ordinary PC; on one where the profile folder was opened up,
    TRIF wouldn't notice. A check in doctor is possible.

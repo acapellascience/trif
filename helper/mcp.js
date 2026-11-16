@@ -9,7 +9,11 @@
 // answers with what it printed.
 //
 //   node mcp.js <config.json>      (the agent starts it; runs.js wrote the config in the run's own folder)
-//   config: { launcher: {file, prefix}, spec, node, nodeFlags, cli, timeoutMs }
+//   config: { launcher: {file, prefix}, spec, node, nodeFlags, cli, timeoutMs, files }
+//
+// With `files` (the path of lib/win/fenced-files.js: for an agent with no file tools of its own that TRIF
+// can hold to the run's folders, Codex), it offers file tools too: read_file, write_file, edit_file,
+// list_files, search_files, each done by that program inside the fence as well.
 //
 // This program itself is outside the fence (the agent starts it, and the agent is). It reads no file but
 // its config, opens no network, and does one thing: start the launcher with the run's spec and the words
@@ -41,6 +45,32 @@ const TOOL = {
   },
 };
 
+// The file tools (config.files): what each is called, says and takes; `op` is fenced-files.js's.
+const where = 'Paths are relative to your working folder (sites/x.com/hide-banner.js). You can read anything in it, and change files in your own site\'s folder under sites/ (and sites/all-sites/); other sites\' folders and the guides are read-only.';
+const FILE_TOOLS = [
+  { name: 'read_file', op: 'read', description: `Reads a text file. ${where} Long files come in parts: \`offset\` is the first line (from 1), \`limit\` how many.`,
+    inputSchema: { type: 'object', properties: { path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['path'] } },
+  { name: 'write_file', op: 'write', description: `Writes a whole file, replacing it if it's there (folders are made as needed). ${where}`,
+    inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string', description: 'The file\'s whole text.' } }, required: ['path', 'content'] } },
+  { name: 'edit_file', op: 'edit', description: `Replaces one piece of text in a file with another. \`old\` must be in the file exactly once, as it is there (or pass \`all\`: true for every place). ${where}`,
+    inputSchema: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' }, all: { type: 'boolean' } }, required: ['path', 'old', 'new'] } },
+  { name: 'list_files', op: 'list', description: `Lists a folder (folders end in /). \`depth\`: how many levels below it to list too (1 by default). ${where}`,
+    inputSchema: { type: 'object', properties: { path: { type: 'string' }, depth: { type: 'integer' } } } },
+  { name: 'search_files', op: 'search', description: `Finds lines matching a regular expression in a file or under a folder: file:line: text. ${where}`,
+    inputSchema: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, ignoreCase: { type: 'boolean' } }, required: ['pattern'] } },
+];
+const FILES_NOTE = ' To look at and change files use read_file, write_file, edit_file, list_files and search_files.';
+
+/** Does a file tool's work inside the fence: resolves the tool's answer. Never rejects. */
+function runFileTool(config, tool, args, opts = {}) {
+  return runFenced(config, [config.node, ...(config.nodeFlags || []), config.files], JSON.stringify({ op: tool.op, args: args && typeof args === 'object' ? args : {} }), opts).then((r) => {
+    let j = null;
+    try { j = JSON.parse(r.stdout); } catch { /* below */ }
+    if (j && typeof j.text === 'string') return { content: [{ type: 'text', text: j.text.length > MAX_OUTPUT ? `${j.text.slice(0, MAX_OUTPUT)}\n[… cut]` : j.text }], isError: !j.ok };
+    return { content: [{ type: 'text', text: `couldn't ${tool.name.replace('_', ' the ')}: ${r.note || (r.stderr || r.stdout || `exit status ${r.code}`).trim().slice(0, 400)}` }], isError: true };
+  });
+}
+
 /** Why `input` can't be run (a string), or null. */
 function inputProblem(input) {
   if (!input || typeof input !== 'object' || !Array.isArray(input.args)) return '`args` must be a list of words, e.g. {"args": ["status"]}';
@@ -57,10 +87,15 @@ function inputProblem(input) {
 }
 
 /** Runs `trif <args>` inside the fence: resolves {code, stdout, stderr, note}. Never rejects. */
-function runTrif(config, input, { spawnFn = spawn } = {}) {
+function runTrif(config, input, opts = {}) {
+  return runFenced(config, [config.node, ...(config.nodeFlags || []), config.cli, ...input.args], input.stdin, opts);
+}
+
+/** Starts `program` (a file and its arguments) inside the run's fence, `stdin` on its standard input. */
+function runFenced(config, program, stdin, { spawnFn = spawn } = {}) {
   return new Promise((resolve) => {
     const l = config.launcher;
-    const argv = [...(l.prefix || []), 'exec', config.spec, '--', config.node, ...(config.nodeFlags || []), config.cli, ...input.args];
+    const argv = [...(l.prefix || []), 'exec', config.spec, '--', ...program];
     let child;
     try { child = spawnFn(l.file, argv, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); } catch (e) { resolve({ code: null, stdout: '', stderr: '', note: `couldn't start trif: ${e.message}` }); return; }
     let stdout = '';
@@ -77,7 +112,7 @@ function runTrif(config, input, { spawnFn = spawn } = {}) {
     child.on('error', (e) => finish({ code: null, note: `couldn't start trif: ${e.message}` }));
     child.on('close', (code) => finish({ code }));
     child.stdin.on('error', () => { /* it may exit before reading */ });
-    child.stdin.end(typeof input.stdin === 'string' ? input.stdin : undefined);
+    child.stdin.end(typeof stdin === 'string' ? stdin : undefined);
   });
 }
 
@@ -102,9 +137,12 @@ function serve(config, { input = process.stdin, output = process.stdout, run = r
       return answer(m.id, { protocolVersion: (m.params && typeof m.params.protocolVersion === 'string' && m.params.protocolVersion) || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'trif', version: String(config.version || '0') } });
     }
     if (m.method === 'ping') return answer(m.id, {});
-    if (m.method === 'tools/list') return answer(m.id, { tools: [TOOL] });
+    const fileTools = config.files ? FILE_TOOLS : [];
+    if (m.method === 'tools/list') return answer(m.id, { tools: [{ ...TOOL, description: TOOL.description.replace(' To look at files use your own reading and searching tools: there is no `ls` or `cd`.', fileTools.length ? FILES_NOTE : ' To look at files use your own reading and searching tools: there is no `ls` or `cd`.') }, ...fileTools.map(({ op, ...t }) => t)] });
     if (m.method === 'tools/call') {
       const p = m.params || {};
+      const fileTool = fileTools.find((t) => t.name === p.name);
+      if (fileTool) return runFileTool(config, fileTool, p.arguments).then((r) => answer(m.id, r), (e) => answer(m.id, { content: [{ type: 'text', text: e.message }], isError: true }));
       if (p.name !== TOOL.name) return refuse(m.id, -32602, `no tool called ${String(p.name).slice(0, 60)}`);
       const problem = inputProblem(p.arguments);
       if (problem) return answer(m.id, { content: [{ type: 'text', text: `trif: ${problem}` }], isError: true });
@@ -140,4 +178,4 @@ if (require.main === module) {
   serve(config);
 }
 
-module.exports = { TOOL, inputProblem, runTrif, toolResult, serve, readConfig, MAX_OUTPUT };
+module.exports = { TOOL, FILE_TOOLS, inputProblem, runTrif, runFenced, runFileTool, toolResult, serve, readConfig, MAX_OUTPUT };

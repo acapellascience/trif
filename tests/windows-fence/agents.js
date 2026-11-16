@@ -325,6 +325,7 @@ async function codexTools(base) {
     for (const x of t.tools) {
       if (/trif/i.test(String(x.name)) && !trifTool) { trifTool = x.name; show(`the MCP tool as Codex offers it (${x.name})`, JSON.stringify(x).slice(0, 700)); }
       if (x.name === 'apply_patch' && label.startsWith('as TRIF')) show('apply_patch as offered', JSON.stringify(x).slice(0, 500));
+      if (x.name === 'exec' && label.includes('the trif MCP server')) show('exec as Codex offers it (how its other tools are called)', String(x.description || JSON.stringify(x)).slice(0, 3500), 3600);
       if (x.name === 'exec') console.log(`    exec can call: ${[...String(x.description || '').matchAll(/^### `([\w]+)`/gm)].map((m) => m[1]).join(', ') || JSON.stringify(x).slice(0, 600)}`);
     }
   }
@@ -341,15 +342,17 @@ async function codexTools(base) {
     { call: { name: 'view_image', arguments: { path: outsideImage } } },
     { say: 'done' },
   ];
-  for (const [label, extra] of [
-    ['read-only, the shell off, MCP', [...readOnly, ...noShell]],
-    ['read-only, MCP, every feature that gives a tool off', [...readOnly, ...bare]],
-    ['workspace-write (not read-only), the shell off, MCP: what apply_patch may write', [...noProfile, '-c', 'sandbox_mode="workspace-write"', ...noShell]],
+  for (const [label, extra, withMcp] of [
+    ['read-only, the shell off, no MCP server (does a run start at all?)', [...readOnly, ...noShell], false],
+    ['read-only, the shell off, MCP', [...readOnly, ...noShell], true],
+    ['no sandbox at all (danger-full-access), the shell off, MCP: only to see whether the sandbox is what waits', [...noProfile, '-c', 'sandbox_mode="danger-full-access"', ...noShell], true],
   ]) {
     const api = await startFakeModelServer({ script: steps.map((x) => ({ ...x })), models: ['standin'] });
-    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...mcp,
+    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...(withMcp ? mcp : []),
       '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses", supports_websockets = false, request_max_retries = 1, stream_max_retries = 1 }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
-    const r = runTool(bin, args, { env, cwd: work, input: 'do the steps', timeout: 180000 });
+    const t0 = Date.now();
+    const r = runTool(bin, args, { env: { ...env, RUST_LOG: 'info' }, cwd: work, input: 'do the steps', timeout: 150000 });
+    console.log(`  (${Math.round((Date.now() - t0) / 1000)} s)`);
     console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
     const asked = steps.filter((x) => !x.say).map((x) => (x.call ? `${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `apply_patch ${x.custom.input.split('\n')[1]}` : `shell: ${x.run}`));
     console.log(`  tools offered to the model: ${[...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.map((t) => t && (t.name || t.type))))].join(', ')}`);
@@ -357,7 +360,7 @@ async function codexTools(base) {
     console.log(asked.map((q, i) => `  asked   ${q.slice(0, 200)}\n  got     ${String(outs[i] === undefined ? '(no result)' : outs[i]).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n'));
     const events = r.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     show('what Codex reported', events.filter((e) => e.type === 'item.completed' || e.type === 'error' || e.type === 'turn.failed').map((e) => JSON.stringify(e.item || e).slice(0, 260)).join('\n'), 3500);
-    if (r.stderr.trim()) show('stderr', r.stderr.slice(-1200));
+    if (r.stderr.trim()) show('stderr (its last lines)', r.stderr.split(/\r?\n/).filter((l) => l.trim()).slice(-25).map((l) => l.slice(0, 260)).join('\n'), 6000);
     console.log(`  afterwards: sites/x.com: ${fs.readdirSync(path.join(work, 'sites', 'x.com')).join(', ')}; sites/y.com: ${fs.readdirSync(path.join(work, 'sites', 'y.com')).join(', ')}; planted in the root: ${fs.existsSync(path.join(work, 'held.json.planted'))}; planted outside: ${fs.existsSync(path.join(base, 'cxt', 'home', 'planted.txt'))}`);
     for (const f of [path.join(work, 'sites', 'x.com', 'new.js'), path.join(work, 'held.json.planted'), path.join(work, 'sites', 'y.com', 'planted.js'), path.join(base, 'cxt', 'home', 'planted.txt')]) fs.rmSync(f, { force: true });
     await api.close();

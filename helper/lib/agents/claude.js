@@ -67,6 +67,7 @@ const TRIF_TOOL = 'mcp__trif__trif';
 
 /** C:\Users\x -> //c/Users/x: an absolute path as Claude Code's rules name it on Windows. */
 function windowsRulePath(p) {
+  if (/^\/[^/]/.test(String(p))) return `/${p}`; // (a path of another system's, as rules name it there: tests)
   const m = /^([A-Za-z]):[\\/](.*)$/.exec(String(p));
   if (!m) throw new Error(`can't name ${p} in a rule for Claude Code`); // (a network share: not somewhere runs work)
   return `//${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;

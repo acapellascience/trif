@@ -82,7 +82,31 @@ function windowsEnv(fakeHome) {
   for (const k of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']) {
     if (process.env[k] !== undefined) keep[k] = process.env[k];
   }
-  return { ...keep, USERPROFILE: fakeHome, LOCALAPPDATA: path.join(fakeHome, 'AppData', 'Local'), APPDATA: path.join(fakeHome, 'AppData', 'Roaming') };
+  // (and a stand-in for the fence's launcher, tests/fake-fence.js: side-panel runs on Windows are fenced, and
+  // the unit tests neither build the real launcher nor make containers; tests/windows-run.js does)
+  return { ...keep, USERPROFILE: fakeHome, LOCALAPPDATA: path.join(fakeHome, 'AppData', 'Local'), APPDATA: path.join(fakeHome, 'AppData', 'Roaming'), TRIF_FENCE_BIN: path.join(__dirname, 'fake-fence.js') };
+}
+
+// Windows: the tests' stand-in agents are scripts called `claude` and `codex` (#!/usr/bin/env node), which
+// Windows can't start by name. Each gets a .cmd beside it that runs it with this Node, the way npm's own
+// claude.cmd runs the real one: in every folder of the PATH the test recorded for the helper (config.json
+// env.PATH), looked at when a helper is started for the workspace.
+function windowsShims(home) {
+  if (process.platform !== 'win32') return;
+  let dirs = [];
+  try { dirs = String(JSON.parse(fs.readFileSync(path.join(`${home}-private`, 'config.json'), 'utf8')).env.PATH || '').split(path.delimiter).filter(Boolean); } catch { return; }
+  for (const d of dirs) {
+    let names = [];
+    try { names = fs.readdirSync(d); } catch { continue; }
+    for (const n of names) {
+      if (path.extname(n) || names.includes(`${n}.cmd`)) continue;
+      try {
+        const f = path.join(d, n);
+        if (!fs.statSync(f).isFile() || !fs.readFileSync(f, 'utf8').startsWith('#!')) continue;
+        fs.writeFileSync(path.join(d, `${n}.cmd`), `@ECHO off\r\n"${process.execPath}" "%~dp0${n}" %*\r\n`);
+      } catch { /* not a script */ }
+    }
+  }
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -101,6 +125,7 @@ class FakeExtension {
   // (`hostJs`: another copy of TRIF's helper/host.js than this checkout's, e.g. tests/run-sandbox.test.js's)
   constructor({ home, env = {}, hostJs = HOST_JS }) {
     this.home = home;
+    windowsShims(home);
     this.messages = [];      // every message received from the host (a set in parts as the mods message it makes)
     this.parts = [];         // the modsPart messages received
     this.assembling = null;
@@ -252,4 +277,4 @@ function writeMod(home, site, name, code) {
 }
 
 module.exports = {
-  windowsEnv, FakeExtension, runCli, writeMod, tempDir, privDir, testEnv, waitFor, sleep, REPO, HOST_JS, CLI_JS };
+  windowsShims, windowsEnv, FakeExtension, runCli, writeMod, tempDir, privDir, testEnv, waitFor, sleep, REPO, HOST_JS, CLI_JS };

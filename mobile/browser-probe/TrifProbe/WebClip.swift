@@ -25,12 +25,44 @@ enum TrifLink {
         var c = URLComponents()
         c.scheme = "trif"
         c.host = "open"
-        c.queryItems = [URLQueryItem(name: "url", value: site.absoluteString)]
+        // (app=1: the icon opens its site in the app view, no browser around it: Tim, 11-16)
+        c.queryItems = [URLQueryItem(name: "url", value: site.absoluteString), URLQueryItem(name: "app", value: "1")]
         return c.url!
     }
 }
 
+extension TrifLink {
+    /// The link asks for the app view (app=1).
+    static func wantsApp(_ url: URL) -> Bool {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "app" && $0.value == "1" } ?? false
+    }
+}
+
 extension Browser {
+    /// Opened from a site's Home Screen icon made for the app view (Tim, 11-16): the site full screen, no browser
+    /// around it, as a native app; each icon's site keeps its own tab for it, so the icon comes back to it.
+    func openApp(_ target: URL) {
+        let site = Site.of(target.host ?? "")
+        var map = UserDefaults.standard.dictionary(forKey: "appTabs") as? [String: String] ?? [:]
+        if let id = map[site].flatMap(UUID.init(uuidString:)), let t = tabs.first(where: { $0.id == id }) {
+            if t !== current { select(t) }
+            report.log("icon", "opened \(site) in the app view: its own tab")
+        } else {
+            newTab(target.absoluteString)
+            map[site] = current.id.uuidString
+            UserDefaults.standard.set(map, forKey: "appTabs")
+            report.log("icon", "opened \(site) in the app view: a new tab of its own")
+        }
+        appSite = site
+        appMode = true
+    }
+    /// Back to TRIF's own view, on the same tab.
+    func leaveApp() {
+        guard appMode else { return }
+        appMode = false
+        report.log("icon", "back to TRIF's view from the app view of \(appSite)")
+    }
+
     /// Opened from a site's Home Screen icon: its tab if one is open on that site (as an app comes back where it
     /// was), else a new tab there.
     func openFromIcon(_ target: URL) {

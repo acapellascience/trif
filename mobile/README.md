@@ -243,6 +243,12 @@ to Add this mod?, one at a time; files iCloud hasn't brought down yet are asked 
 there is moved or changed. And `trif://add?v=1&name=<site>-<mod>.js&z=<raw deflate, base64url>[&h=<16 hex of
 sha256>]` (a QR code's link): unpacked (256 KB at most), checked, offered the same way.
 
+The app view (Browser.openApp, TrifProbeApp.swift AppViewSwitch): `trif://open?url=…&app=1`, what Home Screen icons made
+from 11-16 open, shows the site full screen with no browser chrome (no bars, no pull-down, no pointing at parts of the
+page); each icon's site keeps its own tab (`appTabs`). Two fingers held still on the page bring up Switch to TRIF view
+(the status bar's strip gets no touches on iOS; a tap the lifting fingers make is let go for 0.8 s). A tapped link to
+another site, or a window the page opens, goes to TRIF's own view in a new tab.
+
 Home Screen icons (WebClip.swift): the ⋯ menu's Add to Home Screen makes a configuration profile with one Web Clip
 (`trif://open?url=<site>`, full screen, identifier `com.timsrobot.trif.webclip.<site>` so adding a site again replaces
 its icon) and hands it to Safari: first at timsrobot.com/clip, the profile in the address's # part (x-safari-https, so Safari

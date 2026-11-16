@@ -315,9 +315,12 @@ struct ContentView: View {
                     NewTabView(history: browser.history).modifier(BarPadding(bars: bars, top: true, bottom: true))
                 }
             }
-            .modifier(BarPadding(bars: bars, top: !BarState.moves, bottom: !BarState.moves))
-            .padding(.top, BarState.compactHeight)
+            .modifier(BarPadding(bars: bars, top: !BarState.moves && !browser.appMode, bottom: !BarState.moves && !browser.appMode))
+            .padding(.top, browser.appMode ? 0 : BarState.compactHeight)
             .accessibilityHidden(pane.shown)
+            if browser.appMode {
+                AppViewSwitch(asked: browser.appSwitchAsked, leave: { browser.leaveApp() })
+            } else {
             PullActionsView(pull: bars.pull, insets: bars.insets)
             TopBar(bars: bars, full: addressBar, compact: compactBar)
                 .modifier(PullShift(pull: bars.pull))
@@ -340,9 +343,11 @@ struct ContentView: View {
                 .background(.bar)
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
+            }
         }
+        .onChange(of: browser.appMode) { _, now in bars.setApp(now); if now { closeCovers() } }
         .onAppear {
-            pane.follow(site: browser.site); bars.attach(browser.webView)
+            pane.follow(site: browser.site); bars.attach(browser.webView); bars.setApp(browser.appMode)
             // (a pull's choice: as the toolbar's new tab, a reload, and closing the tab as the switcher does)
             bars.pull.act = { [browser] c in
                 switch c {
@@ -395,7 +400,8 @@ struct ContentView: View {
                 // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it)
                 ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
                 if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
-                closeCovers(); browser.openFromIcon(site)
+                closeCovers()
+                if TrifLink.wantsApp(url) { browser.openApp(site) } else { browser.leaveApp(); browser.openFromIcon(site) }
             }
             else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
         }
@@ -1079,6 +1085,17 @@ final class BarState: NSObject, ObservableObject {
         applyInsets(range: true)
     }
 
+    /// The app view: no bars at all (nothing covers the page, nothing moves, no pull-down).
+    private(set) var app = false
+    func setApp(_ a: Bool) {
+        guard a != app else { return }
+        app = a
+        stop()
+        target = 0
+        progress = 0
+        applyInsets(range: true)
+    }
+
     /// The bars full again (a load starting, the address being typed, a tap on the small line).
     func expand() { settle(to: 0) }
     /// (development) Compact, as after scrolling down.
@@ -1106,6 +1123,7 @@ final class BarState: NSObject, ObservableObject {
         let y = sv.contentOffset.y
         defer { lastY = y }
         if shifting { return } // (the page moved with the bar: not the person's scrolling)
+        guard !app else { return }
         pulled(sv)
         guard BarState.moves, !held else { return }
         let top = -sv.adjustedContentInset.top
@@ -1237,7 +1255,7 @@ final class BarState: NSObject, ObservableObject {
         if #available(iOS 26, *) {
             let p = progress
             let gone = keyboardUp ? 1 : p // (the toolbar, gone down with the keyboard)
-            let e = UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * gone, 0) * 2).rounded() / 2, right: 0)
+            let e = app ? .zero : UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * gone, 0) * 2).rounded() / 2, right: 0)
             let was = wv.obscuredContentInsets
             let sv = wv.scrollView
             if was != e || (BarState.compensates && sv.contentInset != e) {
@@ -1257,7 +1275,9 @@ final class BarState: NSObject, ObservableObject {
                 // comes back on scrolling up, stayed hidden under the full bar: 11-16, Tim's phone)
                 shift(sv, by: e.top - was.top)
             }
-            if range {
+            if range && app {
+                wv.setMinimumViewportInset(.zero, maximumViewportInset: .zero)
+            } else if range {
                 wv.setMinimumViewportInset(UIEdgeInsets(top: 0, left: 0, bottom: max(bottomHeight - toolbarHeight, 0), right: 0),
                                            maximumViewportInset: UIEdgeInsets(top: extra, left: 0, bottom: bottomHeight, right: 0))
             }
@@ -1285,6 +1305,40 @@ final class FingerWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+}
+
+/// The app view's one way back (Tim, 11-16): two fingers held still on the page for a moment (no page uses that,
+/// and the gesture never blocks the page) brings up "Switch to TRIF view" at the top for a few seconds; a tap on it
+/// goes back to TRIF's own view, on the same tab. Nothing else of the browser shows. (The status bar's strip, the
+/// first idea, gets no touches on iOS.)
+struct AppViewSwitch: View {
+    let asked: Int
+    let leave: () -> Void
+    @State private var shown = false
+    var body: some View {
+        ZStack(alignment: .top) {
+            if shown {
+                Button(action: leave) {
+                    Label("Switch to TRIF view", systemImage: "rectangle.on.rectangle")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(.regularMaterial, in: Capsule())
+                        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+                }
+                .tint(Color.trifGreen)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onChange(of: asked) { _, _ in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { shown = true }
+            let mine = asked
+            Task { try? await Task.sleep(nanoseconds: 4_000_000_000); if mine == asked { withAnimation(.easeOut(duration: 0.25)) { shown = false } } }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Switch to TRIF view") { leave() }
+    }
 }
 
 /// Pulling the page down past its top: three choices (+ New Tab, Reload, × Close Tab), Reload chosen at first; the

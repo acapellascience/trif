@@ -225,6 +225,15 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The profile in Settings (description) | — | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. |
 | The icon's label on the Home Screen | — | {Name}, as typed in the sheet |
 
+## The app view (added 11-16, from a Home Screen icon)
+
+| Where | Old | New |
+|---|---|---|
+| A Home Screen icon made from now on (its address has app=1) | — | opens its site full screen: no address bar, toolbar or tabs; mods run as usual; each icon keeps its own tab |
+| Two fingers held still on the page for a moment (the way back) | — | a control at the top for 4 seconds: Switch to TRIF view (accessibility: the same, also as an action) |
+| A link tapped there to another site | — | opens in TRIF's own view, in a new tab |
+| A window the page opens | — | a tab in TRIF's own view |
+
 ## Mods that arrive by themselves (added 11-16, Tim approved)
 
 | Where | Old | New |

@@ -56,6 +56,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
     @Published var wantsMods = false
     @Published var status = ""
+    /// The app view (Tim, 11-16): a site opened from its Home Screen icon, full screen, no browser chrome around it.
+    @Published var appMode = false
+    var appSite = ""
+    /// Two fingers held on the page in the app view: the "Switch to TRIF view" control shows (counted, so each shows it).
+    @Published var appSwitchAsked = 0
     @Published var picked: Picked?
     /// The last thing hidden, while it can be undone (the status strip's Undo: Tim, 11-14, hid a whole page).
     @Published var lastHide: HideRule?
@@ -138,6 +143,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         press.minimumPressDuration = 0.45
         press.delegate = self
         wv.addGestureRecognizer(press)
+        // (the app view's way back: two fingers held still on the page; pages don't use it, and it never blocks them)
+        let two = UILongPressGestureRecognizer(target: self, action: #selector(twoFingerPress(_:)))
+        two.numberOfTouchesRequired = 2
+        two.minimumPressDuration = 0.6
+        two.allowableMovement = 24
+        two.delegate = self
+        wv.addGestureRecognizer(two)
         // (an address or title that changes without a page load, as a single-page site's do: the tab and History follow)
         tab.watches = [
             wv.observe(\.url, options: [.new]) { [weak self, weak tab] w, _ in Task { @MainActor in
@@ -624,8 +636,19 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
-    @objc private func longPressed(_ press: UILongPressGestureRecognizer) {
+    @objc private func twoFingerPress(_ press: UILongPressGestureRecognizer) {
+        guard appMode else { return }
+        // (the fingers lifting can read to the page as a tap on whatever was under them: a link tapped from then until
+        // a moment after is let go, Simulator 11-16, X's "Get the app")
+        if press.state == .began || press.state == .ended || press.state == .cancelled { ignoreLinksUntil = Date().addingTimeInterval(0.8) }
         guard press.state == .began else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        appSwitchAsked += 1
+    }
+    private var ignoreLinksUntil = Date.distantPast
+
+    @objc private func longPressed(_ press: UILongPressGestureRecognizer) {
+        guard press.state == .began, !appMode else { return } // (no pointing at parts of the page in the app view)
         let point = press.location(in: webView)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task { await pick(at: point) }
@@ -1059,6 +1082,16 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             return .cancel
         }
         let scheme = url.scheme ?? ""
+        if navigationAction.navigationType == .linkActivated, Date() < ignoreLinksUntil, webView === self.webView { return .cancel }
+        // (in the app view, a link the person taps to another site opens in TRIF's own view, in a tab of its own; the
+        // app view stays the icon's site's. Redirects and sign-in hops are left alone: only a tapped link)
+        if appMode, webView === self.webView, navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? false,
+           ["http", "https"].contains(scheme), !Site.host(url.host ?? "", isIn: appSite) {
+            appMode = false
+            newTab(url.absoluteString)
+            report.log("icon", "a link from the app view of \(appSite) to \(url.host ?? "?"): TRIF's view, a new tab")
+            return .cancel
+        }
         if ModDownloads.wanted(navigationAction) { return .download }
         return ["http", "https", "about", "blob", "data", PageSchemeHandler.scheme].contains(scheme) ? .allow : .cancel
     }
@@ -1134,6 +1167,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let url = navigationAction.request.url, let link = Browser.modLink(url, source: "the page") { offer(link); return nil }
         let t = makeTab(configuration: configuration)
         t.started = true
+        appMode = false // (a window the page opens: a tab of TRIF's, in its own view)
         let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.count - 1) + 1
         tabs.insert(t, at: at)
         select(t)

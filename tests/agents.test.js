@@ -708,7 +708,10 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'default');
   // (Windows: no sandbox of Claude Code's to switch on, and no shell: the run is behind TRIF's fence, tests/windows-runs.test.js)
   if (WIN) {
-    assert.deepEqual(JSON.parse(call.settings), { permissions: { deny: ['WebFetch', 'WebSearch'] } });
+    const perms = JSON.parse(call.settings).permissions;
+    assert.deepEqual(perms.deny, ['WebFetch', 'WebSearch']);
+    // (the run's screenshots folder, named after its site: in the settings file, not in argv)
+    assert.ok(perms.allow.length === 1 && /^Read\(\/\/[a-z]\/.+\/screenshots\/example\.com\/\*\*\)$/.test(perms.allow[0]), JSON.stringify(perms.allow));
     assert.equal(a[a.indexOf('--tools') + 1], 'Read,Edit,Write,Glob,Grep');
   } else assert.equal(JSON.parse(call.settings).sandbox.enabled, true);
   assert.equal(path.dirname(call.settingsFile), path.join(home, 'boxes', `${runId}.agent`), 'beside the mailbox, not in it');

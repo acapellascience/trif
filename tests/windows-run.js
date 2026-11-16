@@ -125,6 +125,10 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   fs.writeFileSync(outsideImage, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
   const cfgFile = path.join(priv, 'config.json');
   fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')), secret: `${SECRET} settings` }));
+  // In the screenshots folders (the private folder): one file in the run's own site's, which it may read;
+  // one in another site's, which it may not.
+  const ownShot = put(path.join(priv, 'screenshots', 'example.com', 'seen.txt'), 'SHOT-OK from the run\'s own screenshots folder\n');
+  const otherShot = put(path.join(priv, 'screenshots', 'other.net', 'seen.txt'), `${SECRET} another site's screenshots\n`);
   put(path.join(ws, 'sites', 'other.net', 'keep.js'), '// ==WebMod==\n// @name Keep\n// @match https://other.net/*\n// ==/WebMod==\n');
   // The made-up API key, in the real Credential Manager, saved as `trif agent key` saves one.
   let savedKey = false;
@@ -246,6 +250,8 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     CX ? ['write a mod (TRIF\'s write_file)', tool('write_file', { path: 'sites/example.com/hello.js', content: MOD }), /^wrote sites\/example\.com\/hello\.js/m]
       : ['write a mod', { tool: 'Write', input: { file_path: copy('sites', 'example.com', 'hello.js'), content: MOD } }, /created successfully|updated/i],
     ['check the mod', trif('check', 'example.com/hello'), /^ok: /m],
+    // (Claude Code's rule for it is in the run's settings file, not in what it's started with)
+    ...(CX ? [] : [['Read a file in the run\'s screenshots folder', { tool: 'Read', input: { file_path: ownShot } }, /SHOT-OK/]]),
     ['mods again', trif('mods'), /example\.com\/hello/],
     ...(CX ? [
       ['read_file', tool('read_file', { path: 'sites/example.com/hello.js' }), /@name Hello/],
@@ -290,6 +296,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     ['Read a file elsewhere in the home folder', { tool: 'Read', input: { file_path: secretFile } }, 'claude'],
     ['Read TRIF\'s settings', { tool: 'Read', input: { file_path: cfgFile } }, 'claude'],
     ['Read the live workspace', { tool: 'Read', input: { file_path: path.join(ws, 'AGENTS.md') } }, 'claude'],
+    ['Read another site\'s screenshots', { tool: 'Read', input: { file_path: otherShot } }, 'claude'],
     ['Grep the home folder', { tool: 'Grep', input: { pattern: 'CANARY', path: home, output_mode: 'content' } }, 'claude'],
     ['Write another site\'s folder', { tool: 'Write', input: { file_path: copy('sites', 'other.net', 'planted.js'), content: '// planted' } }, 'claude'],
     ['Write the guide', { tool: 'Write', input: { file_path: copy('AGENTS.md'), content: 'planted' } }, 'claude'],

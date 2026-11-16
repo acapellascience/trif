@@ -81,13 +81,15 @@ test('Claude Code on Windows: no Bash among its tools, the trif tool, rules rela
   const after = (flag) => { const i = c.args.indexOf(flag); const out = []; for (let j = i + 1; j < c.args.length && !c.args[j].startsWith('--'); j++) out.push(c.args[j]); return out; };
   assert.deepEqual(after('--tools'), ['Read,Edit,Write,Glob,Grep']);
   assert.ok(!c.args.join(' ').includes('Bash'), 'no shell anywhere in the command');
-  assert.deepEqual(after('--allowedTools'), ['Read(./**)', 'Edit(./sites/**)', 'mcp__trif__trif', 'Read(//d/p/screenshots/x.com/**)']);
+  assert.deepEqual(after('--allowedTools'), ['Read(./**)', 'Edit(./sites/**)', 'mcp__trif__trif']);
+  assert.ok(!c.args.some((x) => /x\.com/.test(x)), 'nothing of the run\'s site in the command (any program can read one): its screenshots folder is named in the settings file');
   const denied = after('--disallowedTools');
   for (const want of ['WebFetch', 'WebSearch', 'Edit(./sites/y.com/**)', 'Edit(./sites/CLAUDE.md)', 'Edit(./sites/**/CLAUDE.md)', 'Edit(./sites/**/AGENTS.md)', 'Edit(./sites/**/.claude/**)']) assert.ok(denied.includes(want), want);
   assert.ok(c.args.includes('--strict-mcp-config'), 'the trif server and no other');
   const files = Object.fromEntries(c.files.map((f) => [path.basename(f.path), f.content]));
   assert.deepEqual(JSON.parse(files['mcp.json']), { mcpServers: { trif: { command: 'C:\\n\\node.exe', args: ['C:\\t\\helper\\mcp.js', 'C:\\b\\r1.agent\\trif-tool.json'] } } });
-  assert.deepEqual(JSON.parse(files['settings.json']), { permissions: { deny: ['WebFetch', 'WebSearch'] } }, 'no sandbox settings, and no relative rule in a file (read from the file\'s folder)');
+  assert.deepEqual(JSON.parse(files['settings.json']), { permissions: { allow: ['Read(//d/p/screenshots/x.com/**)'], deny: ['WebFetch', 'WebSearch'] } }, 'no sandbox settings, and no relative rule in a file (read from the file\'s folder)');
+  assert.deepEqual(JSON.parse(claude.command({ bin: 'C:\\npm\\claude.cmd', prompt: 'p', workspace: 'C:\\b\\r1.ws', fence: { mcp: {} } }).files[0].content), { permissions: { deny: ['WebFetch', 'WebSearch'] } }, 'and with no screenshots folder, nothing allowed there');
   assert.equal(c.stdin, 'hide it');
   // elsewhere, as before: Bash for trif, in Claude Code's own sandbox
   const mac = claude.command({ bin: '/x/claude', prompt: 'p', workspace: '/w', box: '/b', screenshots: '/s', home: '/h' });
@@ -328,7 +330,11 @@ test('a run on Windows (stand-ins for the launcher and the agent): fenced before
     // the agent: no shell, the tool
     assert.ok(call.argv.includes('Read,Edit,Write,Glob,Grep') && !call.argv.join(' ').includes('Bash'));
     assert.ok(call.argv.includes('mcp__trif__trif') && call.argv.includes('--mcp-config') && call.argv.includes('--strict-mcp-config'));
-    assert.deepEqual(JSON.parse(call.settings), { permissions: { deny: ['WebFetch', 'WebSearch'] } });
+    const perms = JSON.parse(call.settings).permissions;
+    assert.deepEqual(perms.deny, ['WebFetch', 'WebSearch']);
+    assert.equal(perms.allow.length, 1);
+    assert.match(perms.allow[0], /^Read\(\/.+\/screenshots\/example\.com\/\*\*\)$/, 'the run\'s screenshots folder, in the settings file');
+    assert.ok(!call.argv.some((x) => /example\.com/.test(x)), `nothing of the run's site in the command: ${JSON.stringify(call.argv)}`);
     assert.match(call.context, /There is no shell in this chat\. Wherever AGENTS\.md says to run `trif <words>`, call the `trif` tool/);
     assert.match(path.basename(call.cwd), new RegExp(`^${runId}\\.ws$`), 'in its own copy of the workspace');
     assert.equal(path.basename(call.mcp.mcpServers.trif.args[0]), 'mcp.js');

@@ -76,13 +76,16 @@ function windowsRulePath(p) {
 /** The allow and deny rules of a run on Windows (limits: runs.js runLimits; the working folder is the run's copy). */
 function windowsRules({ workspace = '', lockedDirs = [], screenshots } = {}) {
   const inCopy = (p) => path.win32.relative(workspace, p).replace(/\\/g, '/');
-  const allow = ['Read(./**)', 'Edit(./sites/**)', TRIF_TOOL, ...(screenshots ? [`Read(${windowsRulePath(screenshots)}/**)`] : [])];
+  const allow = ['Read(./**)', 'Edit(./sites/**)', TRIF_TOOL];
+  // The run's screenshots folder is named after its site, and any program of the user's can read a command
+  // line: its rule goes in the run's --settings file (`file`), where an absolute rule means the same.
+  const file = screenshots ? [`Read(${windowsRulePath(screenshots)}/**)`] : [];
   const deny = [...DENIED_TOOLS,
     // other sites' folders, as they are in the run's copy (which holds no links: stage.js)
     ...lockedDirs.map((d) => `Edit(./${inCopy(d.literal)}/**)`),
     // no instruction files under the mods folder
     ...INSTRUCTION_FILES.flatMap((f) => [`Edit(./sites/${f})`, `Edit(./sites/**/${f})`])];
-  return { allow, deny };
+  return { allow, deny, file };
 }
 
 const MIN_VERSION = [2, 1, 285]; // the sandbox settings used here, and --settings taking precedence over the workspace's
@@ -232,9 +235,10 @@ const adapter = {
     // Windows (`fence`: runs.js _fence): no shell, the `trif` tool, the rules spelled for Windows; no
     // sandbox settings, since Claude Code has no sandbox there to give them to.
     const win = fence ? windowsRules(limits) : null;
-    // (its --settings file there holds only the tools denied outright: the rules are relative, and a relative
-    // rule in a file is read from the file's folder, not the run's; on the command line, from the run's)
-    const files = [{ path: file('settings.json'), content: JSON.stringify(win ? { permissions: { deny: DENIED_TOOLS } } : runSettings(limits)) }];
+    // (its --settings file there holds the tools denied outright and the one absolute rule, for the run's
+    // screenshots folder, whose name is the site's. The other rules are relative, and a relative rule in a
+    // file is read from the file's folder, not the run's; on the command line, from the run's)
+    const files = [{ path: file('settings.json'), content: JSON.stringify(win ? { permissions: { ...(win.file.length ? { allow: win.file } : {}), deny: DENIED_TOOLS } } : runSettings(limits)) }];
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
       '--settings', file('settings.json'),

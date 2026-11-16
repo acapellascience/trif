@@ -321,7 +321,9 @@ branches of `helper/lib/runs.js` and `helper/lib/agents/claude.js`.
 - Claude Code's file tools keep TRIF's rules, spelled for Windows: relative to the working folder
   (`Read(./**)`, `Edit(./sites/**)`, denies for other sites and instruction files), and the screenshots
   folder as `//c/Users/…` (of six spellings tried, the ones Claude Code takes there are that, `C:/…` and
-  `C:\…`).
+  `C:\…`). The relative rules are on the command line (in a file they'd be read from the file's folder);
+  the screenshots folder's, which names the run's site, is in the run's `--settings` file, so nothing of
+  the page is in what Claude Code is started with.
 - No fence, no run: if the launcher can't be built or the container can't be made, the run ends with why.
 
 `tests/windows-fence/run.js` lays out what a run sees, all inside the user's profile folder as on a real

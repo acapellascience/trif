@@ -235,6 +235,8 @@ struct ContentView: View {
     @State private var showHistory = false
     @State private var showMods = false
     @State private var addingIcon = false
+    @State private var pickingFolder = false
+    @ObservedObject private var folder = FolderWatch.shared
     @State private var importing = false
     @State private var asking = false
     @State private var question = ""
@@ -384,6 +386,11 @@ struct ContentView: View {
         .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
         .onOpenURL { url in
             if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
+            else if url.host?.lowercased() == "add", url.scheme?.lowercased() == "trif" {
+                // (a mod in a link: a QR code's, from desktop TRIF; offered like any other)
+                if let m = ModLinkInURL.read(url) { closeCovers(); Task { await browser.offerFiles([(m.name, m.text)], from: "a code") } }
+                else { browser.status = "That code's mod couldn't be read: it may be cut short or damaged." }
+            }
             else if let site = TrifLink.target(url) {
                 // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it)
                 ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
@@ -396,6 +403,9 @@ struct ContentView: View {
             if case .success(let urls) = result { browser.importFiles(urls) }
         }
         .sheet(isPresented: $addingIcon) { WebClipSheet().environmentObject(browser) }
+        .background(Color.clear.fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { FolderWatch.shared.choose(url) }
+        })
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
@@ -585,6 +595,8 @@ struct ContentView: View {
                 Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
                 Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
                 Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
+                if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
                 Button { onTab { addingIcon = true } } label: { Label("Add to Home Screen", systemImage: "plus.app") }
                     .disabled(!onWebPage)
                 Divider()

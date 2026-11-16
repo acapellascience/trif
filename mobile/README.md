@@ -236,6 +236,13 @@ The chat can't be signed in to in the Simulator: `-chathome http://localhost:837
 buttons and a reply written a few words at a time, with a mod in it ("two" in the message: two mods; "no mod": none).
 Screenshots from 11-15 are in browser-probe/shots/ (not committed).
 
+Mods that arrive by themselves (FolderWatch.swift; the phone half of desktop's Send to iPhone, docs/MOBILE-EDIT.md
+section 8 on the mobile-edit branch): a folder picked once (⋯ → Watch a folder for mods…, a security-scoped bookmark),
+looked through each time the app comes to the front: each .js file not offered before (by name, size and date) goes
+to Add this mod?, one at a time; files iCloud hasn't brought down yet are asked for and offered next time; nothing
+there is moved or changed. And `trif://add?v=1&name=<site>-<mod>.js&z=<raw deflate, base64url>[&h=<16 hex of
+sha256>]` (a QR code's link): unpacked (256 KB at most), checked, offered the same way.
+
 Home Screen icons (WebClip.swift): the ⋯ menu's Add to Home Screen makes a configuration profile with one Web Clip
 (`trif://open?url=<site>`, full screen, identifier `com.timsrobot.trif.webclip.<site>` so adding a site again replaces
 its icon) and hands it to Safari: first at timsrobot.com/clip, the profile in the address's # part (x-safari-https, so Safari

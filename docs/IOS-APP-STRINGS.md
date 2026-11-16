@@ -225,6 +225,17 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The profile in Settings (description) | — | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. |
 | The icon's label on the Home Screen | — | {Name}, as typed in the sheet |
 
+## Mods that arrive by themselves (added 11-16, Tim approved)
+
+| Where | Old | New |
+|---|---|---|
+| The ⋯ menu | — | Watch a folder for mods… · once one is watched: Mods folder: {folder}… and Stop watching {folder} |
+| After picking a folder | — | TRIF looks in {folder} for new mods each time you open it. |
+| Each new .js file there, and a mod in a QR code's link | — | the usual Add this mod? sheet, one at a time |
+| A file there that isn't a mod | — | Couldn't read a mod from {folder}: {file}: {why}. (Couldn't read {n} mods … for several) |
+| A QR code's link that can't be read | — | That code's mod couldn't be read: it may be cut short or damaged. |
+| If the folder can't be kept | — | TRIF couldn't keep that folder. |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

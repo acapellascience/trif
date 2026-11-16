@@ -67,9 +67,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// (Tim, 11-15: "when the code is pasted, just hide the claude window"). The chat keeps its conversation.
     @Published var hideChat = 0
     /// The mods of a reply waiting for their Add this mod? (one sheet at a time), and where the one shown is in them.
-    private var offerQueue: [InstalledMod] = []
+    var offerQueue: [InstalledMod] = []
     @Published private(set) var offerPlace: (n: Int, of: Int)?
-    private var offerBatch = 0, offerShown = 0
+    var offerBatch = 0, offerShown = 0
     /// The last mod added from the chat, for what the chat is told next (feedbackForChat).
     private var lastAdded: (id: String, name: String)?
     @Published var modLink: ModLink?
@@ -113,6 +113,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         installScripts()
         ModDownloads.shared.browser = self
+        FolderWatch.shared.browser = self
         restoreTabs()
     }
 

@@ -51,6 +51,39 @@ function absoluteRules(rules, workspace) {
   return rules.map((r) => r.replace(/^(\w+)\(\.\/(.*)\)$/, (_, tool, p) => `${tool}(/${path.join(workspace, p)})`));
 }
 
+// ---------------------------------------------------------------- Windows: no shell
+//
+// Claude Code has no sandbox on native Windows (and with failIfUnavailable it wouldn't start there), so a
+// run gets no Bash at all: `--tools` without it (the tool isn't there to be talked into anything), and in
+// its place the `trif` tool (helper/mcp.js), whose program runs inside TRIF's own fence (lib/win/fence.js).
+// The file tools keep the same rules as everywhere, spelled for Windows:
+//   - relative to the run's working folder (./sites/**): with no shell there's no `cd`, so the folder a
+//     relative rule is read from never moves. Claude Code matches them whatever the case, the slashes, an
+//     8.3 name, `..` or a link on the way (docs/WINDOWS.md: tried with 2.1.325 on windows-latest);
+//   - a folder outside it (the run's screenshots) as //c/Users/…: the one absolute spelling of the six
+//     tried that Claude Code takes there besides C:/… and C:\….
+const WINDOWS_TOOLS = TOOLS.filter((t) => t !== 'Bash');
+const TRIF_TOOL = 'mcp__trif__trif';
+
+/** C:\Users\x -> //c/Users/x: an absolute path as Claude Code's rules name it on Windows. */
+function windowsRulePath(p) {
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(String(p));
+  if (!m) throw new Error(`can't name ${p} in a rule for Claude Code`); // (a network share: not somewhere runs work)
+  return `//${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+}
+
+/** The allow and deny rules of a run on Windows (limits: runs.js runLimits; the working folder is the run's copy). */
+function windowsRules({ workspace = '', lockedDirs = [], screenshots } = {}) {
+  const inCopy = (p) => path.win32.relative(workspace, p).replace(/\\/g, '/');
+  const allow = ['Read(./**)', 'Edit(./sites/**)', TRIF_TOOL, ...(screenshots ? [`Read(${windowsRulePath(screenshots)}/**)`] : [])];
+  const deny = [...DENIED_TOOLS,
+    // other sites' folders, as they are in the run's copy (which holds no links: stage.js)
+    ...lockedDirs.map((d) => `Edit(./${inCopy(d.literal)}/**)`),
+    // no instruction files under the mods folder
+    ...INSTRUCTION_FILES.flatMap((f) => [`Edit(./sites/${f})`, `Edit(./sites/**/${f})`])];
+  return { allow, deny };
+}
+
 const MIN_VERSION = [2, 1, 285]; // the sandbox settings used here, and --settings taking precedence over the workspace's
 
 function tooOld(version) {
@@ -193,15 +226,25 @@ const adapter = {
    * context (system prompt: the page the user is on) go in files in `agentDir`, the run's own folder that
    * only the helper and Claude Code itself read (runs.js writes `files`, 0600, and removes them after).
    */
-  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', ...limits }) {
+  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', fence = null, ...limits }) {
     const file = (name) => path.join(agentDir || '.', name);
-    const files = [{ path: file('settings.json'), content: JSON.stringify(runSettings(limits)) }];
+    // Windows (`fence`: runs.js _fence): no shell, the `trif` tool, the rules spelled for Windows; no
+    // sandbox settings, since Claude Code has no sandbox there to give them to.
+    const win = fence ? windowsRules(limits) : null;
+    // (its --settings file there holds only the tools denied outright: the rules are relative, and a relative
+    // rule in a file is read from the file's folder, not the run's; on the command line, from the run's)
+    const files = [{ path: file('settings.json'), content: JSON.stringify(win ? { permissions: { deny: DENIED_TOOLS } } : runSettings(limits)) }];
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
       '--settings', file('settings.json'),
-      '--tools', TOOLS.join(','), '--disable-slash-commands',
-      '--allowedTools', ...absoluteRules(ALLOWED_TOOLS, limits.workspace),
-      '--disallowedTools', ...absoluteRules(DENIED_TOOLS, limits.workspace)];
+      '--tools', (win ? WINDOWS_TOOLS : TOOLS).join(','), '--disable-slash-commands',
+      '--allowedTools', ...(win ? win.allow : absoluteRules(ALLOWED_TOOLS, limits.workspace)),
+      '--disallowedTools', ...(win ? win.deny : absoluteRules(DENIED_TOOLS, limits.workspace))];
+    if (win) {
+      // (--strict-mcp-config: this server and no other, whatever the user's own settings name)
+      files.push({ path: file('mcp.json'), content: JSON.stringify({ mcpServers: { trif: fence.mcp } }) });
+      args.push('--mcp-config', file('mcp.json'));
+    }
     if (context) {
       files.push({ path: file('context.md'), content: context });
       args.push('--append-system-prompt-file', file('context.md'));
@@ -409,3 +452,6 @@ module.exports.toolSummary = toolSummary;
 module.exports.parseLoginLine = parseLoginLine;
 module.exports.runSettings = runSettings;
 module.exports.tooOld = tooOld;
+module.exports.windowsRules = windowsRules;
+module.exports.windowsRulePath = windowsRulePath;
+module.exports.TRIF_TOOL = TRIF_TOOL;

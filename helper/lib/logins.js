@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { envVar } = require('./env');
 const { spawn } = require('child_process');
 const agents = require('./agents');
-const { killTree, panelRunsOff } = require('./platform');
+const { killTree, panelLoginOff } = require('./platform');
 
 const LOGIN_TIMEOUT_MS = Number(envVar('LOGIN_TIMEOUT_MS')) > 0 ? Number(envVar('LOGIN_TIMEOUT_MS')) : 10 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -54,9 +54,9 @@ class Logins {
 
   start(args = {}) {
     const ws = this.getWorkspace();
-    // Logging in is for the panel's chats, which Windows doesn't have yet (platform.js panelRunsOff).
-    const off = panelRunsOff(this.platform, ws.home);
-    if (off) throw new Error(`${off.error} (log in there too)`);
+    // Not on Windows yet (platform.js panelLoginOff): the agent's own sign-in there is done in a terminal.
+    const off = panelLoginOff(this.platform, ws.home);
+    if (off) throw new Error(off.error);
     const agentId = typeof args.agent === 'string' && args.agent ? args.agent : agents.listAgents(ws, { version: false }).default;
     const adapter = agents.getAdapter(agentId);
     if (!adapter) throw new Error(`unknown agent "${agentId}" (known: ${agents.ADAPTERS.map((a) => a.id).join(', ')})`);

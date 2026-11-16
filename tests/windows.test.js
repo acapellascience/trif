@@ -7,11 +7,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+// Tests here call doctor and the agents' list in this process: never the computer's own agents.
+if (process.env.TRIF_DEFAULT_AGENT_DIRS === undefined) process.env.TRIF_DEFAULT_AGENT_DIRS = '';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { tempDir, FakeExtension, waitFor, CLI_JS } = require('./fake-extension');
+const { tempDir, FakeExtension, waitFor, CLI_JS, testEnv } = require('./fake-extension');
+// (setup records this process's PATH for the helper, and doctor looks along it: one with no agent on it)
+process.env.PATH = testEnv(tempDir('wp-')).PATH;
 const { makeFakePowerShell, makeFakeReg } = require('./fake-powershell');
 const P = require('../helper/lib/paths');
 const B = require('../helper/lib/browsers');
@@ -319,7 +323,8 @@ test('windows setup: wrappers, manifests + registry keys, PATH, no /usr/local/bi
   assert.match(titles, /^ok Google Chrome: native host manifest$/m);
   assert.match(titles, /^ok Firefox: native host manifest$/m);
   assert.match(titles, /^fail helper isn't running \(no .*helper\.pipe\)$/m);
-  assert.match(titles, /^info Chats from the panel aren’t available on Windows yet: use your coding agent in a terminal, in /m);
+  assert.match(titles, /^(ok the fence for chats from the panel can be built here|warn Windows' C# compiler \(csc\.exe, part of \.NET Framework 4\) isn't on this computer)/m);
+  assert.ok(!/Claude Code \d/.test(titles), 'never the computer\'s own agents in a test');
   // The key gone (a registry cleaner, another program): doctor says which, and setup is the fix.
   reg.keys.delete(B.nativeRegKeys(B.browserTable(homedir, 'win32', env)[0], regOpts)[0].toLowerCase());
   d = await doctor({ home, platform: 'win32', homedir, env, regOpts });
@@ -507,26 +512,45 @@ test('windows agents: found by extension, a real .exe before an npm .cmd', () =>
   assert.equal(findExecutable('nothing', [a, b], { platform: 'win32' }), null);
 });
 
-test('windows: no chats from the panel (runs and logins refused, with what to do instead); other systems unchanged', () => {
-  const off = platform.panelRunsOff('win32', 'C:\\Users\\Tim\\.trif');
-  assert.equal(off.title, 'Chats from the panel aren’t available on Windows yet');
-  assert.match(off.text, /^Use your coding agent in a terminal instead: open one in C:\\Users\\Tim\\.trif and ask it there\./);
-  assert.equal(platform.panelRunsOff('darwin'), null);
-  assert.equal(platform.panelRunsOff('linux'), null);
-  const home = tempDir('wx-');
-  const getWorkspace = () => P.workspace(home);
+test('windows: chats from the panel for the agents TRIF can fence there; another agent\'s runs and logins from the panel refused, with what to do instead', () => {
+  const home = 'C:\\Users\\Tim\\.trif';
+  assert.equal(platform.panelRunsOff('win32', home), null, 'no agent in particular: chats are there');
+  assert.equal(platform.panelRunsOff('win32', home, 'claude', 'Claude Code'), null);
+  const off = platform.panelRunsOff('win32', home, 'codex', 'Codex');
+  assert.equal(off.title, 'Codex can’t be used from the panel on Windows yet');
+  assert.match(off.text, /^TRIF can’t keep Codex’s commands to the site you’re fixing on Windows yet\. Use Claude Code here, or Codex in a terminal in C:\\Users\\Tim\\\.trif/);
+  for (const sys of ['darwin', 'linux']) assert.equal(platform.panelRunsOff(sys, home, 'codex', 'Codex'), null);
+  const ws = tempDir('wx-');
+  const getWorkspace = () => P.workspace(ws);
   const runs = new Runs({ getWorkspace, platform: 'win32' });
-  assert.throws(() => runs.start({ prompt: 'make it blue', site: 'x.com', url: 'https://x.com/' }), /chats from the panel aren't available on Windows yet: use your coding agent in a terminal, in /);
+  assert.throws(() => runs.start({ agent: 'codex', prompt: 'make it blue', site: 'x.com', url: 'https://x.com/' }), /Codex can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there/);
   assert.deepEqual(runs.list(), []);
   const logins = new Logins({ getWorkspace, platform: 'win32' });
-  assert.throws(() => logins.start({ agent: 'claude' }), /aren't available on Windows yet.*\(log in there too\)/);
+  assert.throws(() => logins.start({ agent: 'claude' }), /logging in from the panel isn't available on Windows yet: open a terminal in /);
 });
 
-test('windows: the panel shows the helper\'s notice instead of the chat box', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
-  assert.match(src, /const runsOff = view\.agents\?\.runsOff \|\| null;/);
-  assert.match(src, /const canSend = !runsOff && /);
-  assert.match(src, /view\.agents\.runsOff\.title\), el\('p', null, view\.agents\.runsOff\.text\)/);
+test('windows: a .cmd goes through cmd.exe with every argument as it is; a real program is started as given', () => {
+  const env = { SystemRoot: 'C:\\Windows' };
+  assert.deepEqual(platform.spawnable('C:\\tools\\claude.exe', ['-p', 'a b'], { platform: 'win32', env }), { file: 'C:\\tools\\claude.exe', args: ['-p', 'a b'], options: {} });
+  assert.deepEqual(platform.spawnable('/usr/local/bin/claude', ['-p'], { platform: 'darwin' }), { file: '/usr/local/bin/claude', args: ['-p'], options: {} });
+  const s = platform.spawnable('C:\\npm\\claude.cmd', ['-p', 'Read(./**)'], { platform: 'win32', env });
+  assert.equal(s.file, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(s.args.slice(0, 3), ['/d', '/s', '/c']);
+  assert.equal(s.args[3], '"C:\\npm\\claude.cmd ^^^"-p^^^" ^^^"Read^^^(./^^^*^^^*^^^)^^^""');
+  assert.deepEqual(s.options, { windowsVerbatimArguments: true });
+  assert.throws(() => platform.spawnable('C:\\npm\\claude.cmd', ['a\nb'], { platform: 'win32', env }), /can't be passed to a batch file/);
+});
+
+// On Windows for real: a batch file like npm's shims, and arguments with everything in them.
+test('windows for real: arguments reach a program behind a .cmd as they were given', { skip: process.platform !== 'win32' && 'needs cmd.exe' }, () => {
+  const dir = tempDir('wc-');
+  fs.writeFileSync(path.join(dir, 'echo.js'), 'process.stdout.write(JSON.stringify(process.argv.slice(2)));');
+  fs.writeFileSync(path.join(dir, 'shim.cmd'), `@ECHO off\r\n"${process.execPath}" "%~dp0echo.js" %*\r\n`);
+  const args = ['-p', 'Read(./**)', 'a b', '100% & more', 'q"uote', 'back\\slash\\', 'tr\\"icky', '^caret^', '<in >out |pipe', '%PATH%', '!bang!', 'ünï 用户', '', 'Edit(./sites/**/CLAUDE.md)', 'x;y,z', '(paren)'];
+  const s = platform.spawnable(path.join(dir, 'shim.cmd'), args);
+  const r = require('child_process').spawnSync(s.file, s.args, { encoding: 'utf8', ...s.options });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), args);
 });
 
 test('windows: the npm package installs there; checkouts keep LF line endings', () => {

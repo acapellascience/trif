@@ -53,11 +53,31 @@ function agentEnv(ws) {
   };
   for (const k of ['USER', 'LANG']) if (process.env[k]) env[k] = process.env[k];
   if (!env.USER) { try { env.USER = os.userInfo().username; } catch { /* ignore */ } }
+  if (process.platform === 'win32') Object.assign(env, windowsBasics(env.PATH));
   return env;
 }
 
+// Windows: what any program there needs to start and find the user's folders (without SystemRoot not even
+// node's networking works; an agent keeps its login under USERPROFILE and APPDATA), and Windows' own folders
+// at the end of PATH (cmd.exe, for npm's claude.cmd and codex.cmd). Names, folders and the computer's make:
+// nothing an API key could be in.
+const WINDOWS_KEEP = ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
+  'TEMP', 'TMP', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'CommonProgramFiles', 'CommonProgramFiles(x86)', 'CommonProgramW6432', 'ALLUSERSPROFILE', 'PUBLIC',
+  'USERNAME', 'USERDOMAIN', 'COMPUTERNAME', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'OS'];
+function windowsBasics(pathValue, source = process.env) {
+  const out = {};
+  // (Windows' variable names ignore case: Path, PATH)
+  for (const k of WINDOWS_KEEP) { const name = Object.keys(source).find((n) => n.toLowerCase() === k.toLowerCase()); if (name && source[name]) out[k] = source[name]; }
+  const root = out.SystemRoot || 'C:\\Windows';
+  out.PATH = uniq([...String(pathValue || '').split(path.delimiter).filter(Boolean), path.win32.join(root, 'System32'), root, path.win32.join(root, 'System32', 'Wbem')]).join(path.delimiter);
+  return out;
+}
+
 function detect(adapter, ws, opts = {}) {
-  const d = adapter.detect({ dirs: searchDirs(ws), env: agentEnv(ws), version: opts.version !== false });
+  let d = adapter.detect({ dirs: searchDirs(ws), env: agentEnv(ws), version: opts.version !== false });
+  // Windows: an agent TRIF can't fence there isn't available from the panel, and says why (platform.js).
+  const off = d.available ? require('../platform').panelRunsOff(process.platform, ws.home, adapter.id, adapter.name) : null;
+  if (off) d = { ...d, available: false, note: off.text };
   return {
     id: adapter.id, name: adapter.name, path: d.path, available: !!d.available, version: d.version || null, note: d.note || adapter.note || '',
     canLogin: !!adapter.login, canLogout: !!adapter.logout, loginFix: adapter.loginFix || '',
@@ -214,7 +234,7 @@ const LEVEL_TEXT = {
   ask: ' "Agent on this site" is Ask here: you can read the page; the first time you run code (trif run), the user is asked in the panel, and the command waits for their answer.',
   run: '',
 };
-function contextText({ url, tabId, scope, browser, agentLevel }) {
+function contextText({ url, tabId, scope, browser, agentLevel, noShell = false }) {
   const shown = url ? promptUrl(url) : null;
   const where = shown
     ? `They're looking at ${shown}${tabId != null ? ` (tab ${Number(tabId)}): pass \`--tab ${Number(tabId)}\` to trif commands` : ''}.`
@@ -226,7 +246,9 @@ function contextText({ url, tabId, scope, browser, agentLevel }) {
   return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit + (LEVEL_TEXT[agentLevel] || '') +
     ' Follow AGENTS.md. Mods can be switched off and on with `trif disable/enable <site>/<mod>`; `trif status` shows which are on.' +
     ' Reply briefly in plain language; your replies appear in a narrow chat panel: before your first command, one line saying what you\'re about to change; then don\'t narrate your steps as you go, and end with a sentence or two on what changed (AGENTS.md "5. Report"), more only if the user asks.' +
-    " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";
+    " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question." +
+    // (Windows runs: no shell, lib/win/fence.js; `trif` is a tool, helper/mcp.js)
+    (noShell ? ' There is no shell in this chat. Wherever AGENTS.md says to run `trif <words>`, call the `trif` tool with those words as its `args` (one item per word, as they are: no quoting, pipes or redirection). Look at and change files with your own file tools, with paths relative to the folder you\'re in (sites/…); there is no `ls`, `cd` or `cat`.' : '');
 }
 
 // One-line reminder for later messages of a session (agents without a system prompt flag).

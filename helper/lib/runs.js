@@ -18,7 +18,7 @@ const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
-const { panelRunsOff, killTree } = require('./platform');
+const { panelRunsOff, killTree, spawnable } = require('./platform');
 const { Stage, INSTRUCTION_NAME } = require('./stage');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
@@ -56,6 +56,8 @@ function pruneScreenshots(root, now = Date.now()) {
  */
 function boxRoot() {
   if (envVar('BOX_ROOT')) return path.resolve(envVar('BOX_ROOT'));
+  // (Windows: beside TRIF's private folder, not in it; a run's fence opens it its own mailbox alone)
+  if (process.platform === 'win32') return path.join(require('./paths').localAppData(), 'TRIF-Cache', 'boxes');
   return process.platform === 'darwin'
     ? path.join(os.homedir(), 'Library', 'Caches', 'TRIF', 'boxes')
     : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'trif', 'boxes');
@@ -496,13 +498,16 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
   const readOnly = lockedDirs.map((d) => d.real).filter((r) => within(r, runMods, { ci: ignoresCase(runMods) }));
   // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
   // denying it would deny the workspace itself to a sandbox that follows links.)
-  const inHome = deniedInHome(home, readable);
+  // (Windows: a run's fence, lib/win/fence.js, lets it open only what names it, so there's nothing to list
+  // as denied, nor a temporary folder of Claude Code's to keep it out of: no shell runs there)
+  const win = process.platform === 'win32';
+  const inHome = win ? [] : deniedInHome(home, readable);
   // Inside the skill folders: secrets, and links to what the run may not read (skillSecrets).
   const under = (p, list) => list.some((r) => within(p, r, { ci, orEqual: true }));
   const deniedTarget = (t) => under(t, [privateDir]) || (within(t, home, { ci }) && (!under(t, readable) || under(t, inHome)));
   const { secrets, links } = skillSecrets(skills, deniedTarget);
   const skillDenied = secrets.map((x) => x.path);
-  const denied = [...inHome, ...deniedOutsideHome(home, readable), privateDir, ...skillDenied];
+  const denied = [...inHome, ...(win ? [] : deniedOutsideHome(home, readable)), privateDir, ...skillDenied];
   // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
   // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
   // command() returns `locked`, the ones it did (runs.js uses that, not this).
@@ -514,11 +519,11 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
   // Claude Code's own (CLAUDE_CODE_TMPDIR), which its commands' sandbox may always write: one of the run's
   // own, short (Claude Code 2.1.316 falls back to the /tmp/claude-<uid> every session shares when
   // <it>/claude-<uid> is longer than 44 bytes), as the literal /tmp path it measures. runs.js makes it.
-  const agentTmp = shortTmp(box);
+  const agentTmp = win ? null : shortTmp(box);
   // The system's temporary folders the run may neither read nor write: every Claude Code session's
   // scratch files and task output (/tmp/claude-<uid>), and $TMPDIR. (codex.js denies /tmp and $TMPDIR
   // whole, by its own names; Claude Code's commands need /tmp for agentTmp.)
-  const systemTemp = [...new Set([path.join(real('/tmp'), `claude-${typeof process.getuid === 'function' ? process.getuid() : 0}`), real(os.tmpdir())])]
+  const systemTemp = win ? [] : [...new Set([path.join(real('/tmp'), `claude-${typeof process.getuid === 'function' ? process.getuid() : 0}`), real(os.tmpdir())])]
     .filter((p) => !within(tmp, p, { ci, orEqual: true }) && !within(real(agentTmp), p, { ci, orEqual: true }));
   const base = { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), tmp, agentTmp, systemTemp, screenshots: shots, modsDir: mods };
   if (!stage) return base;
@@ -601,9 +606,6 @@ class Runs {
   }
 
   start(args = {}) {
-    // Not where the operating system can't confine the agent (Windows, for now: platform.js).
-    const off = panelRunsOff(this.platform, this.getWorkspace().home);
-    if (off) throw new Error(off.error);
     const prompt = typeof args.prompt === 'string' ? args.prompt : '';
     if (!prompt.trim()) throw new Error('missing prompt');
     const site = normalizeSite(args.site, args.url);
@@ -621,6 +623,9 @@ class Runs {
     const agentId = typeof args.agent === 'string' && args.agent ? args.agent : agents.listAgents(ws, { version: false }).default;
     const adapter = agents.getAdapter(agentId);
     if (!adapter) throw new Error(`unknown agent "${agentId}" (known: ${agents.ADAPTERS.map((a) => a.id).join(', ')})`);
+    // Not an agent TRIF can't fence on this system (Windows: platform.js panelRunsOff).
+    const off = panelRunsOff(this.platform, ws.home, adapter.id, adapter.name);
+    if (off) throw new Error(off.error);
 
     const run = {
       id: newRunId(),
@@ -760,8 +765,10 @@ class Runs {
       fs.mkdirSync(path.join(run.box, 'tmp'), { mode: 0o700 }); // its temporary folder (runLimits tmp)
       // Claude Code's own (runLimits agentTmp; fresh, not recursive: never one someone left there, a link
       // included, nor another run's).
-      fs.mkdirSync(shortTmp(run.box), { mode: 0o700 });
-      run.agentTmp = shortTmp(run.box);
+      if (this.platform !== 'win32') {
+        fs.mkdirSync(shortTmp(run.box), { mode: 0o700 });
+        run.agentTmp = shortTmp(run.box);
+      }
       const shots = screenshotsFolder(ws, run.scope);
       run.screenshots = shots.dir;
       run.screenshotsReal = shots.real;
@@ -832,7 +839,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, noShell: this.platform === 'win32' };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -850,7 +857,9 @@ class Runs {
     let cmd;
     try {
       fs.mkdirSync(run.agentDir, { mode: 0o700 });
-      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
+      // Windows: the run's fence, and the `trif` tool that starts TRIF's commands inside it (_fence).
+      const fenced = this.platform === 'win32' ? this._fence(run, limits, env) : {};
+      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options, ...fenced });
       for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't prepare ${adapter.name}'s run: ${e.message}` });
@@ -873,7 +882,9 @@ class Runs {
     let child;
     try {
       // The message on stdin (cmd.stdin), never in argv: other processes can read those.
-      child = spawn(file, args, { cwd: run.stage ? run.stage.dir : ws.home, env, stdio: [typeof cmd.stdin === 'string' ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true });
+      // (Windows: npm's claude.cmd goes through cmd.exe, platform.js spawnable; no process groups there)
+      const s = spawnable(file, args, { platform: this.platform });
+      child = spawn(s.file, s.args, { cwd: run.stage ? run.stage.dir : ws.home, env, stdio: [typeof cmd.stdin === 'string' ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: this.platform !== 'win32', windowsHide: true, ...s.options });
       if (typeof cmd.stdin === 'string') { child.stdin.on('error', () => { /* it may exit first */ }); child.stdin.end(cmd.stdin); }
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't start ${adapter.name}: ${e.message}` });
@@ -915,6 +926,31 @@ class Runs {
       this._emit(run, { kind: 'error', message: `${adapter.name} was stopped after ${Math.round(RUN_TIMEOUT_MS / 60000) || 1} minutes` });
       this._kill(run);
     }, RUN_TIMEOUT_MS));
+  }
+
+  /**
+   * Windows: the run's fence (lib/win/fence.js). Makes its container and its entries on the run's folders,
+   * and returns what the agent's adapter needs to offer `trif` as a tool: {fence: {mcp: {command, args}}},
+   * helper/mcp.js with a config in the run's own folder. Throws when the fence can't be made: no fence, no
+   * run.
+   */
+  _fence(run, limits, env) {
+    const fence = require('./win/fence');
+    const l = fence.launcher(run.ws);
+    if (l.error) throw new Error(l.error);
+    const root = realOrResolved(path.join(__dirname, '..', '..'));
+    // (what the run's `trif` needs to know: the run's own variables, nothing else of the agent's)
+    const runEnv = {};
+    for (const [k, v] of Object.entries(env)) if (/^(TRIF|WEBMODS)_/.test(k)) runEnv[k] = v;
+    const specFile = path.join(run.agentDir, 'fence.json');
+    fs.writeFileSync(specFile, JSON.stringify(fence.specFor({ runId: run.id, limits, code: trifCode(root), node: realOrResolved(process.execPath), runEnv })), { mode: 0o600, flag: 'wx' });
+    run.fence = { launcher: l, specFile }; // (cleaned up in _finish, made or half made)
+    const why = fence.prepare(l, specFile);
+    if (why) throw new Error(`TRIF's fence for this run couldn't be made (${why})`);
+    const configFile = path.join(run.agentDir, 'trif-tool.json');
+    fs.writeFileSync(configFile, JSON.stringify({ launcher: { file: l.file, prefix: l.prefix }, spec: specFile, node: realOrResolved(process.execPath), nodeFlags: fence.NODE_FLAGS, cli: path.join(root, 'helper', 'cli.js'), version: require('./paths').VERSION }), { mode: 0o600, flag: 'wx' });
+    this.logger.info(`agent run ${run.id}: fenced (${fence.containerName(run.id)})`);
+    return { fence: { mcp: { command: realOrResolved(process.execPath), args: [path.join(root, 'helper', 'mcp.js'), configFile] } } };
   }
 
   // Answer requests from the run's mailbox (client.js boxRequest). The agent can write there, so files are
@@ -1089,6 +1125,8 @@ class Runs {
       try { if (run.adapter.afterRun && run.child) run.adapter.afterRun({ workingDir: run.stage.dir }); } catch { /* left */ }
     }
     if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();
+    // (Windows: the run's entries off its folders and its container gone, while its spec is still there)
+    if (run.fence) { const why = require('./win/fence').cleanup(run.fence.launcher, run.fence.specFile); if (why) this.logger.warn(`agent run ${run.id}: couldn't take its fence down: ${why}`); run.fence = null; }
     if (run.agentDir) { try { fs.rmSync(run.agentDir, { recursive: true, force: true }); } catch { /* ignore */ } }
     if (run.agentTmp) { try { fs.rmSync(run.agentTmp, { recursive: true, force: true }); } catch { /* ignore */ } }
     // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment. (Not

@@ -81,3 +81,18 @@ jobs:
           if (Test-Path "$work\out.txt") { Get-Content "$work\out.txt" }
           if (Test-Path "$work\err.txt") { Write-Output '--- stderr'; Get-Content "$work\err.txt" }
           exit 0
+
+  # A real side-panel run, fenced: the real helper and the real Claude Code (a stand-in for the model's API:
+  # no account, no paid call), every trif command through the tool, and the attempts to get out.
+  run:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: A fenced run, end to end
+        run: node tests/windows-run.js

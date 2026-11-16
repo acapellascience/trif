@@ -100,6 +100,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   fs.mkdirSync(nodeDir);
   fs.copyFileSync(process.execPath, path.join(nodeDir, 'node.exe'));
   const node = path.join(nodeDir, 'node.exe');
+  const NODE = `"${node}" ${fenceLib.NODE_FLAGS.join(' ')}`;
   // The test's own programs go in the run's mailbox, which the run may read and write: the spec stays the
   // helper's own.
   const probe = path.join(box, 'probe.js');
@@ -263,7 +264,6 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     if (mode === 'appcontainer') { spec.lpac = false; spec.capabilities = []; spec.capability = `${spec.capability}.plain`; }
     return { ...spec, ...(command ? { command } : {}), revoke, job };
   };
-  const NODE = `"${node}" ${fenceLib.NODE_FLAGS.join(' ')}`;
 
   const results = {};
   for (const mode of ['trif', 'appcontainer']) {

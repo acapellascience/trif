@@ -397,11 +397,12 @@ async function doctor(opts = {}) {
   // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside
   // what its sandbox can read, and the run itself shows one works.
   if (inRun) return { ok: !checks.some((c) => c.status === 'fail'), checks };
-  // Windows: no side-panel runs yet (platform.js panelRunsOff), so no agent or login checks for them.
-  const off = panelRunsOff(platform, ws.home);
-  if (off) {
-    add('info', `${off.title}: use your coding agent in a terminal, in ${ws.home}`);
-    return { ok: !checks.some((c) => c.status === 'fail'), checks };
+  // Windows: side-panel runs are fenced by TRIF itself (lib/win/fence.js), whose launcher Windows' own C#
+  // compiler builds; without it no run starts.
+  if (win) {
+    const fence = require('./win/fence');
+    if (envVar('FENCE_BIN') || fence.cscPath({ env: opts.env || process.env })) add('ok', 'the fence for chats from the panel can be built here (Windows\' C# compiler)');
+    else add('warn', 'Windows\' C# compiler (csc.exe, part of .NET Framework 4) isn\'t on this computer, so chats from the panel can\'t start: TRIF builds its fence for them with it', 'turn on ".NET Framework 4.8 Advanced Services" in "Turn Windows features on or off"');
   }
   const agents = require('./agents');
   const listed = agents.listAgents(ws);
@@ -427,6 +428,9 @@ async function doctor(opts = {}) {
     const label = `${a.name}${adapter.note ? ` (${adapter.note})` : ''}`;
     const another = listed.agents.some((x) => x.available);
     if (!a.available) {
+      // (Windows: found, but not an agent TRIF can fence there: platform.js panelRunsOff)
+      const off = a.path ? panelRunsOff(platform, ws.home, a.id, a.name) : null;
+      if (off) { add('info', `${label}: ${off.title} (${a.path})`); continue; }
       const here = findExecutable(adapter.binary, termDirs);
       if (here) add('warn', `${label} is at ${here}, but the helper won't find it there`, 'run trif setup in this terminal (it records your PATH for the helper)');
       else if (another) add('info', `${label}: not found (optional)`);

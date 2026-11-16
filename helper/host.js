@@ -21,7 +21,6 @@ const path = require('path');
 const { envVar } = require('./lib/env');
 const { workspace, VERSION, examplesDir } = require('./lib/paths');
 const pipes = require('./lib/win/pipes');
-const { panelRunsOff } = require('./lib/platform');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
@@ -686,17 +685,12 @@ function stopRunRecording(runId) {
 function agentCommand(cmd, args) {
   switch (cmd) {
     // (With the agents the user allowed to run without TRIF's sandbox: Settings shows them.)
-    case 'agent.list': {
-      // Windows: no chats from the panel yet (lib/platform.js panelRunsOff). The panel says so and why,
-      // and the agents aren't asked whether they're logged in (that runs them).
-      const off = panelRunsOff(process.platform, ws.home);
-      if (off) return { ...agents.listAgents(workspace(ws.home), { version: false }), runsOff: { title: off.title, text: off.text } };
-      return agents.listAgentsWithLogin(workspace(ws.home)).then((r) => {
-        const allowed = withoutSandbox.consents(ws.home);
-        for (const a of r.agents) if (allowed[a.id]) a.withoutSandbox = true;
-        return r;
-      });
-    }
+    // (Windows: an agent TRIF can't fence there comes back unavailable, with why: agents/index.js detect)
+    case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home)).then((r) => {
+      const allowed = withoutSandbox.consents(ws.home);
+      for (const a of r.agents) if (allowed[a.id]) a.withoutSandbox = true;
+      return r;
+    });
     case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh, openModel: args.openModel || null });
     // Open models (agents/codex-oss.js): the defaults in config.json, which runs can't read or change.
     case 'agent.openModel': return agents.getAdapter('codex-oss').settings(workspace(ws.home));

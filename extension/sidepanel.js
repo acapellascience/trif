@@ -696,8 +696,6 @@ function render() {
   const helperOk = !!status?.helper?.connected;
   const { info: agentInfo, list: agentList } = currentAgent();
   const anyAgent = agentList.some((a) => a.available);
-  // The helper says chats from the panel aren't available on this system (Windows, for now).
-  const runsOff = view.agents?.runsOff || null;
 
   renderSites();
   renderAgentLevel();
@@ -731,12 +729,11 @@ function render() {
   let dotLabel = 'Helper not connected';
   if (!status) { dot = ''; dotLabel = 'Checking…'; }
   else if (helperOk) {
-    const agentOk = !problem && !runsOff && (noRobot || (agentInfo ? agentInfo.available : anyAgent));
+    const agentOk = !problem && (noRobot || (agentInfo ? agentInfo.available : anyAgent));
     dot = red ? 'bad' : agentOk ? 'ok' : 'warn';
     dotLabel = problem === 'scripts' ? 'User scripts are off'
       : problem === 'login' ? `${agentInfo?.name || 'The agent'} isn’t logged in`
       : problem === 'key' ? `No ${openModelKeyMissing()} API key yet`
-      : runsOff ? runsOff.title
       : !agentOk ? 'Coding agent not available'
       : noRobot ? 'Ready · robotless'
       : `Ready${agentInfo ? ` · ${agentInfo.name}` : ''}`;
@@ -748,13 +745,12 @@ function render() {
   // Before the mods: a mod's "Merge with my agent" starts a run too.
   // Not while the agent is known to be logged out (or the open model has no key): the run would only fail
   // with that. From the agent itself, not the panel's main problem: a red one (user scripts off) takes
-  // that slot, and the login is still missing. Send's tooltip says what to do. Nor where the helper says
-  // chats from the panel aren't available (runsOff).
+  // that slot, and the login is still missing. Send's tooltip says what to do.
   const keyMissing = agentInfo?.id === 'codex-oss' && agentInfo.available && openModelKeyMissing();
   // (Except a login a run found gone, loginExpired: the agent's own check still says logged in then, so
   // after logging in from a terminal, sending again is the only way to tell. The notice still shows.)
   const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false && !agentInfo.loginExpired) || !!keyMissing;
-  const canSend = !runsOff && !!site && helperOk && !noRobot && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
+  const canSend = !!site && helperOk && !noRobot && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
   ui.send.title = !waitsForLogin ? 'Send'
     : keyMissing ? `Add your ${keyMissing} API key in Settings first`
@@ -991,8 +987,6 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     parts.push(actions);
   } else if (status && !status.userScripts) {
     // "Mods are paused" (renderPaused).
-  } else if (helperOk && view.agents?.runsOff && !robotless()) {
-    parts.push(el('p', 'title', view.agents.runsOff.title), el('p', null, view.agents.runsOff.text));
   } else if (helperOk && view.agents && !robotless() && (agentInfo ? !agentInfo.available : !anyAgent)) {
     bad = true;
     if (agentInfo) {

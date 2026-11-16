@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
+const { spawnable } = require('../platform');
 
 function isExecutableFile(p) {
   try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; }
@@ -39,7 +40,8 @@ function versionOf(file, env, args = ['--version']) {
   if (versionCache.has(key)) return versionCache.get(key);
   let version = null;
   try {
-    const r = spawnSync(file, args, { env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const s = spawnable(file, args, { env: env || process.env }); // (Windows: npm's .cmd through cmd.exe)
+    const r = spawnSync(s.file, s.args, { env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...s.options });
     const text = String(r.stdout || '').trim().split('\n')[0] || '';
     const m = /\d+\.\d+(?:\.\d+)?(?:[-+.\w]*)?/.exec(text);
     version = m ? m[0] : (text || null);
@@ -73,7 +75,8 @@ function parseJsonLine(line) {
 // Run a short command (stdin closed) and collect {status, error, stdout, stderr}. Never throws.
 function captureSync(file, args, { env, cwd, timeout = 10000 } = {}) {
   try {
-    const r = spawnSync(file, args, { env, cwd, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const s = spawnable(file, args, { env: env || process.env });
+    const r = spawnSync(s.file, s.args, { env, cwd, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...s.options });
     return { status: r.status, error: r.error || null, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
   } catch (e) {
     return { status: null, error: e, stdout: '', stderr: '' };
@@ -96,7 +99,8 @@ function capture(file, args, { env, cwd, timeout = 10000, maxBytes = 65536 } = {
     };
     let child;
     try {
-      child = spawn(file, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const s = spawnable(file, args, { env: env || process.env });
+      child = spawn(s.file, s.args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...s.options });
     } catch (e) {
       resolve({ status: null, error: e, stdout, stderr });
       return;

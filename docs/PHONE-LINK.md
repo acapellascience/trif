@@ -113,11 +113,22 @@ computer → phone   e, ee, se      payload: {"v":1,"name":"<computer's name>","
 IK because the phone already knows the computer's key (from the QR), so its own key and the pairing secret travel
 encrypted to the computer in the very first message, and the computer can decide before it answers: a first
 message that doesn't decrypt, comes from a key that isn't paired, or carries a wrong secret gets the connection
-closed with nothing sent (rule 2). A first message must arrive within 5 seconds, and at most 8 connections are
-open at once.
+closed with nothing sent (rule 2). A first message must arrive within 5 seconds (the whole message, however
+slowly its bytes come), and at most 8 connections are open at once; one more is closed at once.
+
+**When a connection becomes a session** (`server.js`): the handshake's answer is not yet proof that the other
+side is the phone, since a copied first message gets the same answer. The session counts when its first transport
+message decrypts, which must happen within 5 seconds of the answer (the app sends `hello` at once). Only then
+does the phone's "last seen" move, and only then are that phone's older connections closed: **one session per
+phone**, the newest proven one (the app came back from suspension and the old connection is dead). A session
+with no message for 2 minutes is closed; the app sends `ping` every 30 seconds while it is in front. A paired
+phone that comes again with a pairing secret that was already used (its pairing answer was lost) is let in as
+the paired phone it is. A phone that doesn't read what it is sent (more than 32 MB waiting) is closed.
 
 Known limits, accepted: a copied first message played again gets the computer's second message (which only the
-real phone can read) and nothing more, since every later message needs the handshake's keys; the first message's
+real phone can read) and nothing more, since every later message needs the handshake's keys: it never becomes a
+session, and is closed 5 seconds later; someone on the Wi-Fi can fill the 8 connections for as long as they keep
+trying, which keeps the phone out and gets them nothing; the first message's
 payload has no forward secrecy, and holds only the phone's name and a secret that is used once.
 
 **After the handshake**: both directions are Noise transport messages. Each carries one byte and a piece of an
@@ -129,7 +140,7 @@ Phone → computer:
 
 | `t` | Fields | Answer |
 |---|---|---|
-| `hello` | `app` (version), `device` (`{name, width, height}`) | `hello`: `version` (TRIF's), `agent` (the default agent's name and model, to show), `pending` (kept runs, below) |
+| `hello` | `app` (version), `device` (`{name, width, height}`) | `hello`: `v` (1), `version` (TRIF's), `name` (the computer's), `agent` (the default agent's name and model, to show), `pending` (kept runs, below) |
 | `run.start` | `url`, `prompt`, `page` (the cleaned copy, text), `shot` (JPEG, base64, optional), `chat` (the app's chat id), `session` (to continue a run's conversation) | `run.started` `{runId}` or `error` |
 | `run.stop` | `runId` | `ok` |
 | `run.resume` | `runId`, `after` (the last event number seen) | the events after it, then live ones |

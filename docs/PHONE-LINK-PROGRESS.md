@@ -13,8 +13,8 @@ Computer side:
 - [x] 3. `store.js`: the computer's key (keyring, service `TRIF phone link`), `<private>/phone-link.json`
       (on/off, port, paired phones), the pairing window (secret, 5 minutes, 5 tries, one phone), remove. Unit tests
       with `tests/fake-keychain.js`
-- [ ] 4. `server.js`: the listener (none while off; silent refusal of unpaired, removed, garbage, late), sessions,
-      `hello`/`ping`. Tests on 127.0.0.1, a random port
+- [x] 4. `server.js`: the listener (none while off; silent refusal of unpaired, removed, garbage, late), sessions,
+      `hello`/`ping`. Tests on 127.0.0.1, a random port. `tests/phone-link-client.js` (the stand-in phone) begun
 - [ ] 5. `bonjour.js`: `dns-sd -R` while the listener is up (a stand-in binary in tests, `TRIF_DNS_SD`)
 - [ ] 6. Remote runs: `remote.js` and the `remote` mark in `runs.js` (site forced to `phone~<host>`, page copy and
       screenshot into the run's screenshots folder, context, page commands refused), events numbered, kept
@@ -35,23 +35,26 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 2, 2026-11-16)
+## Done this round (round 3, 2026-11-16)
 
-- Built step 3: `helper/lib/phonelink/store.js` (class `Store`): the computer's key pair made on first turn-on
-  (private key in the keyring only, base64url; public key in the file), `<private>/phone-link.json` written whole
-  with mode 600, the pairing window (16-byte secret in memory, 5 minutes, 5 wrong tries, one phone, a new QR
-  replaces it), `pairTry` with a constant-time compare, `isPaired`, `seen`, `remove`, `list`, `status`. No network.
-- `tests/phone-link-store.test.js`: 18 tests pass locally (both keyring stand-ins, the key in no file or argv,
-  a locked keyring is not a lost key,
-  expiry, tries, one phone per window, remove, a tampered file, two stores on one workspace, and a pairing through
-  the real Noise handshake with the store's keys). The noise tests still pass (18).
-- Two rules the store settles, now in PHONE-LINK.md section 3: the helper listens only while on AND (a phone is
-  paired OR a window is open); a key gone from the keyring means a new key on the next turn-on and the old phones
-  dropped.
-- CI green for 7dcd239 on the second attempt (two unrelated browser tests flaked on the first): see CI below.
+- Built step 4: `helper/lib/phonelink/server.js` (class `Server`, class `Session`). It follows the store's
+  `'change'`: a listener only while `status().listen` and the key is there; sessions of removed phones, and
+  everything when the link goes off, are closed. Not wired into host.js yet (step 8), so nothing listens for real.
+- Refusals write nothing: garbage, a browser's GET, silence, a slow drip, an unpaired key, a wrong secret, a bad
+  payload, the ninth connection. Five wrong secrets close the window and, with nobody paired, the listener.
+- Three rules the server settles, now in PHONE-LINK.md section 4 ("When a connection becomes a session"): a
+  session counts only once its first transport message decrypts (a replayed first message never becomes one and
+  can't touch the real phone's session); one session per phone, the newest proven one; a 2-minute idle limit
+  (the app pings every 30 s). None weakens section 2.
+- `tests/phone-link-client.js`: the stand-in phone (`PhoneClient.connect`, `request`, `next`, `raw`,
+  `firstMessage`), for step 10 to grow. `tests/phone-link-server.test.js`: 13 tests pass locally, three runs in a
+  row (7 s each); the store and noise tests still pass (36).
+- CI: see below.
 
 ## Earlier rounds
 
+- Round 2: step 3, `store.js` (the computer's key in the keyring, `phone-link.json`, the pairing window, remove),
+  18 tests. CI green for 7dcd239 on the second attempt.
 - Round 1: the survey, docs/PHONE-LINK.md, docs/PHONE-LINK-STRINGS.md, step 2 (`noise.js`, `frames.js`, 18 tests
   with the published cacophony vector). CI green for c8898a4:
   https://github.com/acapellascience/trif/actions/runs/43959884729
@@ -66,25 +69,45 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 4: `helper/lib/phonelink/server.js` with its tests on 127.0.0.1 and a random port (`listen({host, port})`
-options so tests never bind all interfaces; stop it in `test.after`). `new Server(store, {version, log})`:
-on the store's `'change'`, start or stop the listener to match `store.status().listen` (keys from
-`await store.keys()`; null = don't listen). Per connection: `PacketReader`, a 5-second timer for the first
-message, at most 8 connections; a responder `Handshake` with the store's keys; `readMessage` throws → destroy the
-socket, nothing written. Then `hs.rs` is the phone's key: if the payload has `pair` → `store.pairTry(hs.rs,
-pair, name)`, else `store.isPaired(hs.rs)`; null → destroy, nothing written. Otherwise `writeMessage({v:1, name:
-store.name, paired:true})`, `split()`, `store.seen(id)`, a session `{phone, send(obj), close()}` with `seal` /
-`Assembler`; answer `hello` and `ping`; any other `t` → `error` `bad-request` for now (step 6 adds runs). When a
-phone is removed or the link goes off, close its sessions (compare sessions' phone ids with `store.list()` on
-`'change'`). Call `store.setPort(port)` once listening on a system-given port. Tests: link off = no listener at
-all; unpaired key, removed phone, garbage, a late first message and a wrong pairing secret each get zero bytes
-back and a closed socket; a paired phone gets `hello`/`pong`; removal closes the open session.
+Step 5: `helper/lib/phonelink/bonjour.js` with its tests (a stand-in binary through `TRIF_DNS_SD`, never the real
+`dns-sd` in a test: it would announce on Tim's Wi-Fi). `new Announcer(store, server, {env, log})`: on the
+server's `'listening'` (port) start one child, `dns-sd -R "<store.name>" _trif._tcp local <port> v=1 id=<id>`
+(`id` = `store.status().id`; argv as an array, no shell); on `'stopped'` kill it; a port that changes means kill
+and start again; a child that exits while the listener is up is started again after a pause that grows (1 s, 2 s,
+… 30 s), and not at all when the binary isn't there (ENOENT: log once; the phone then can't find the computer, a
+state the panel should be able to show, so keep `announcer.status()` → `{running, error}`). `stop()` kills the
+child; make sure the child can't outlive the helper (kill on `process.on('exit')` too; check how host.js ends its
+other children). Not macOS: no announcer, `status().error = 'unsupported'` (PHONE-LINK.md section 9). The stand-in
+binary: a small script in the test's temp folder that writes its argv and pid to a file and sleeps (see how
+`tests/fake-keychain.js` makes its stand-in). Tests: no child while not listening; the exact argv; killed on
+stop, on link off, on the last phone removed; restarted when it dies; nothing started when `TRIF_DNS_SD` points
+nowhere; the name passed as one argument whatever characters it has. Optionally the Mac's friendlier name
+(`scutil --get ComputerName`) for `computerName()` in store.js, with the host name as the fallback.
 
 ## Notes for next round
 
 - Tests: `node --test tests/phone-link-store.test.js tests/phone-link-noise.test.js` (3 seconds). The whole suite
   is `npm test`; the browser tests need `TRIF_BROWSER_TESTS=1` and are CI's job (don't run them locally without
   the lock and the watchdog).
+- Tests now: `node --test tests/phone-link-server.test.js tests/phone-link-store.test.js
+  tests/phone-link-noise.test.js` (10 seconds).
+- `server.js` API: `new Server(store, {version, log, host, port, hello, firstMessageMs, idleMs, maxConnections})`
+  (an EventEmitter: `'session'` (a proven Session), `'listening'` (port), `'stopped'`); `await start()` → the port
+  or 0; `await sync()` → the port or 0 (queued behind any change being handled: tests call it after touching the
+  store); `await stop()`; `address()`; `handle(type, fn(session, msg) → answer | nothing | a promise)` (the
+  answer gets `t: 'ok'` unless it has a `t`, and the request's `id`; a throw becomes `error` with `e.code` or
+  `bad-request`); `sessions` (a Set), `stats` (`refused`, `sessions`). `Session`: `phone` `{id, name}`, `key`,
+  `hello` (`{app, device}` after the app's `hello`), `send(obj)` → false when closed (throws only "message too
+  big"), `close()`, `'close'`. The `hello` option gives the `hello` answer's `agent` and `pending` (step 6).
+  Without `host` it binds every interface: always pass `host: '127.0.0.1'` in tests.
+- For step 6: push to a phone with `session.send({t: 'run.event', …})`; find a phone's live session by
+  `[...server.sessions].find((s) => s.phone.id === id)`; on `'session'`, send what was kept for that phone.
+  Removal already closes the session; remote.js deletes the kept results on the store's `'change'`.
+- For the iPhone side (step 12): after the handshake's answer the app must send `hello` within 5 seconds, then a
+  `ping` every 30 seconds while in front (the computer closes a session that is quiet for 2 minutes); a silent
+  close before any answer = "isn't connected any more".
+- Test timings: the tests use `firstMessageMs: 500`; the `pair()` helper in the server test sends a ping right
+  after the handshake (so its ids start at q2). The stand-in clients treat ECONNRESET as a close.
 - `store.js` API: `new Store(home, {env, now, name})` (an EventEmitter, `'change'`); `await setOn(true|false)` →
   `{on, created}`; `await keys()` → `{publicKey, privateKey}` Buffers or null (off, or the keyring's key isn't the
   file's); `status()` → `{on, id, name, port, phones, pairing, listen}` (no secret, no keys: safe for the panel);

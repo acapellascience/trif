@@ -51,7 +51,7 @@ iPhone side (needs ios-poc free):
   = try another record with the same `id`).
 - `tests/phone-link-bonjour.test.js`: 11 tests, all with a stand-in binary through `TRIF_DNS_SD` (the real
   `dns-sd` never runs in a test). All phone-link tests: 61 pass locally (7 s), three runs in a row.
-- CI: see CI below.
+- CI green for 0bd5bdc on the first attempt: see CI below.
 
 ## Earlier rounds
 
@@ -66,6 +66,10 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 4, 0bd5bdc: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43967487962
+  (all 11 announcer tests ran there). Round 3's docs-only commit 0f79fa7 had failed on the clickjacking guard's
+  timing check alone (873 passed, 1 failed, run 43966627115): the known flake, rerun once with
+  `gh run rerun 43966627115 --failed`.
 - Round 3, 8a04fa2: success on the second attempt, https://github.com/acapellascience/trif/actions/runs/43965527256
   (attempt 1: 873 passed, 1 failed, the clickjacking guard's timing check again, this time "the second look:
   19.40 ms at most"; all 13 server tests passed in both attempts; `gh run rerun <id> --failed` cleared it)

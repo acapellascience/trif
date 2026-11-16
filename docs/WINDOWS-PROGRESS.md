@@ -18,7 +18,8 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
       run, 68 checks).
 - [x] **A real fenced run on CI, Claude Code** (`windows-fence.yml`, job `run`).
 - [ ] **Codex, option 1**: its shell off, `trif` (and TRIF's file tools) as MCP tools inside the fence.
-      Explored only; see the notes.
+      Proven as a prototype on CI (real Codex, the stand-in model, the echo MCP server inside the fence:
+      `tests/windows-fence/agents.js`); not yet wired into the helper.
 - [ ] **Codex, option 2**: its commands through the fence's launcher. Not started. (Seen already: no
       shell starts inside the fence, and node there can't start a child. Only if 1 fails.)
 - [ ] **Codex, option 3**: its `elevated` sandbox with name lookups and 127.0.0.1 closed. Not started.
@@ -50,23 +51,53 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   ([43951176467](https://github.com/acapellascience/trif/actions/runs/43951176467)) were still waiting
   for a runner when this was written: look before trusting them.
 
+## Done this round (round 2)
+
+- Read the Codex runs against the stand-in model, then two more rounds of them. Option 1 holds in the
+  prototype: with `sandbox_mode="read-only"`, the shell's features and `view_image` off, Codex's own
+  `apply_patch` is refused everywhere, its picture and shell tools are gone, `exec`'s isolate reaches
+  nothing but the other tools, and the `trif` MCP tool, once approved in the server's config, answers from
+  inside the fence, where a read outside and a connection to this computer are refused. What was seen is in
+  `docs/WINDOWS.md`, "Codex: where it stands".
+- Strings 2 and 3 (`helper/lib/platform.js` `panelRunsOff`) no longer name another agent: "Use another
+  coding agent here, or …". `docs/WINDOWS-STRINGS.md` and `tests/windows.test.js` follow.
+- CI at `07d3d44` (the code; the commit after it is these notes): windows-fence
+  [43953801088](https://github.com/acapellascience/trif/actions/runs/43953801088) green (`fence`,
+  `fence-standard-user`, `run`, `agents`), windows
+  [43953801100](https://github.com/acapellascience/trif/actions/runs/43953801100) green (Node 18 and 22,
+  `still-skipped`), the macOS tests
+  [43953800965](https://github.com/acapellascience/trif/actions/runs/43953800965) red on the known one
+  alone (`tests/clickjack-browser.test.js`, "a press: 4.67 ms on average"; 831 pass, 1 fail).
+
 ## Next step
 
-**Codex, option 1, as a real run on the runner.** In `tests/windows-fence/agents.js` (job `agents` of
-`windows-fence.yml`, never failing) the Codex runs against the stand-in model now go through
-`runToolAsync`: read that job's output for the three runs under "Codex: its tools, and a run without its
-shell" and find out (a) whether Codex with `features.shell_tool=false` calls an MCP tool at all, (b) what
-`apply_patch` and `view_image` (Codex's own, outside the fence) can reach under `sandbox_mode="read-only"`
-and whether any setting takes them away or makes Codex refuse them, (c) whether `exec` (its JavaScript
-tool) can reach anything but the other tools. If Codex's own file tools can be shut, wire it:
-`agents/codex.js` on Windows with the shell off, `helper/mcp.js` with `files`, then a `tests/windows-run.js`
-for Codex. If they can't, write down what was seen and go to option 2.
+**Wire Codex, option 1, into the helper on Windows.** `helper/lib/agents/codex.js` `command()` with a
+`fence` (as `claude.js` has): no `default_permissions`/`permissions` (no session starts with them on
+Windows), `sandbox_mode="read-only"`, `features.shell_tool`, `unified_exec`, `unified_exec_tty`,
+`shell_snapshot` and `view_image` off, and
+`mcp_servers.trif={ command, args, default_tools_approval_mode = "approve" }` from `fence.mcp`, with
+`files` on in `helper/mcp.js`'s config (TRIF's fenced file tools: Codex has none of its own left). Add
+`codex` to `WINDOWS_RUN_AGENTS` only once `tests/windows-run.js` has a Codex pass (the same checks as
+Claude Code's, the stand-in model calling `mcp__trif` / `trif` and the file tools) green on CI. Before
+that pass counts, look at what `spawn_agent` and the other sub-agent tools start with (the same config?),
+or switch them off (`features.multi_agent=false` took `spawn_agent` out of the tool list only together
+with other switches: see `bare` in `agents.js`).
 
 ## Notes for next round
 
-- **Why Codex's runs "didn't get going"** (0 requests to the stand-in in 150 s, even with no sandbox): the
-  test started Codex with `spawnSync`, which stops the very program the stand-in server lives in. Not
-  Codex's doing. Fixed with `runToolAsync`; the result hasn't been read yet.
+- **Codex and the stand-in model**: a model name Codex doesn't know gets a small tool set called directly
+  and sends `tools` in each request; its default model (no `-m`) gets everything behind `exec` and sends no
+  `tools` field (they're in `input`), so ask `exec` for `ALL_TOOLS` to see them. A stand-in's call to an
+  MCP tool is `{type: "function_call", namespace: "mcp__trif", name: "trif"}` (`tests/fake-model-server.js`
+  takes `call.namespace`); `mcp__trif__trif` as a plain name is "unsupported call". Through `exec`:
+  `await tools.mcp__trif__trif({...})`, in a `custom_tool_call` named `exec` whose input is JavaScript.
+- A finished job's output while the rest of its run goes on (`gh run view --log` waits for the whole run):
+  `gh api --allow-escape-sequences repos/acapellascience/trif/actions/jobs/<job id>/logs` into a scratch
+  file; job ids from `gh run view <id> --json jobs --jq '.jobs[] | "\(.name) \(.databaseId)"'`. Then
+  `grep -n ">>> "` for the headings and `sed -n` a range, `cut -c1-500`: Codex's stderr lines are long.
+- The guarantee for Codex's own tools (no shell, no `view_image`, `apply_patch` refused) is Codex's config
+  and its own refusal, as Claude Code's file tools on Windows are held by its rules, not by the fence. The
+  run test has to attack each on every CI run, since a new Codex may add a tool.
 - Codex 0.169 with `shell_tool` off still has: `apply_patch`, `view_image`, `exec` (JavaScript in its own
   isolate: "no Node, no file system, no network access"; it calls the other tools), the MCP tools, and
   tools for sub-agents and questions. Switching off every feature found left `apply_patch`. With TRIF's
@@ -83,7 +114,8 @@ for Codex. If they can't, write down what was seen and go to option 2.
   `all-on-windows.tap` artifact is the list of what fails once the skips go: start the un-skipping there.
 - `tests/windows-run.js` and `tests/windows-fence/run.js` set `TRIF_FENCE_BIN: ''` to get the real fence;
   anything else started through `tests/fake-extension.js` gets the stand-in.
-- Strings: 2 and 3 in `docs/WINDOWS-STRINGS.md` name Claude Code inside a message about another agent
-  ("Use Claude Code here, or …"). Listed for Tim; they go when Codex runs fenced.
+- Strings: 2 and 3 in `docs/WINDOWS-STRINGS.md` now say "another coding agent"; still awaiting Tim, and
+  they go when Codex runs fenced. 5c, 5d and README's Windows section (26) name Claude Code as the agent
+  they're about.
 - Rules: commits by path, never `-a`; the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`;
   push only `windows`; never `~/.trif`, never the real helper; a temp HOME for anything local.

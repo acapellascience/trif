@@ -451,8 +451,30 @@ What's been **seen** towards 1 (`tests/windows-fence/agents.js`, Codex 0.169 on 
   `write_file`, `edit_file`, `list_files`, `search_files` and `view_image`, each done by
   `helper/lib/win/fenced-files.js` inside the run's fence (built, unit-tested with the stand-in fence; not
   yet used by a run).
-- A real Codex run with the shell off against the stand-in model didn't get going: no request reached the
-  stand-in in 150 s. Not yet understood.
+- Real runs against the stand-in model (the earlier "didn't get going" was the test's own doing:
+  `spawnSync` stopped the program the stand-in lives in). With `sandbox_mode="read-only"`,
+  `approval_policy="never"`, the shell's features and `view_image` off, and the `trif` MCP server:
+  - **`apply_patch` is refused everywhere**, called directly or through `exec`: inside the site, the
+    workspace's root, another site, outside ("patch rejected: writing is blocked by read-only sandbox;
+    rejected by user approval settings"). Nothing was written.
+  - **`view_image` is gone** with `features.view_image=false` (left on, it reads any picture the user can:
+    seen, a PNG elsewhere in the home folder came back). The shell tools are gone ("unsupported call").
+  - **`exec`'s isolate** has no `fetch`, `require`, `process`, `WebSocket`, and `import('node:fs')` fails.
+    Its `ALL_TOOLS`: `apply_patch`, `clock__curr_time`, the goal tools, the MCP resource tools,
+    `mcp__trif__trif`.
+  - **The MCP tool** is offered as a namespace (`mcp__trif`, tool `trif`; through `exec` it's
+    `tools.mcp__trif__trif`). Under `approval_policy="never"` Codex refuses its calls ("MCP tool call
+    requires approval, but approval policy is never") unless the server's config approves them:
+    `default_tools_approval_mode = "approve"`, or `tools = { trif = { approval_mode = "approve" } }`. Both
+    work.
+  - **With the MCP server inside the fence** (the launcher as the server's command): `status` answers;
+    asked to read a file outside and to reach a port on this computer, "read refused (EPERM); connect
+    refused". The same server unfenced read the file and connected.
+  - Which tools Codex offers depends on the model's name: one it doesn't know gets a small set called
+    directly (no `exec`, no `apply_patch`); its default model gets everything behind `exec`. The tests use
+    both. `sandbox_mode="workspace-write"` behaved as read-only here (no Windows sandbox chosen).
+- So 1 holds in the prototype. Not yet wired into the helper (`agents/codex.js`, `runs.js`), and what a
+  run's sub-agent tools (`spawn_agent` and the rest) start with hasn't been looked at.
 
 **WSL: later, as an option for people who already live there.** Not the default: see below.
 

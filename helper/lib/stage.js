@@ -20,7 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { scopeFor, scopeOf } = require('./scope');
+const { scopeFor, scopeOf, isPhoneSite, phoneBase } = require('./scope');
 const { within, ignoresCase, unsafeName, badName } = require('./pathcheck');
 
 const ALL_SITES = 'all-sites';
@@ -41,6 +41,16 @@ const statKey = (st) => `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
 function ownFolder(name, scope, splits = []) {
   if (name === ALL_SITES) return true;
   return scopeOf(name, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) === scope;
+}
+
+/**
+ * Whether the folder `name` under sites/ is the phone twin a run for a phone writes (`twinOnly`: runs.js
+ * startRemote, docs/PHONE-LINK.md): its own site's twin, sites/phone~<site>/ (or a part of the site's), and
+ * nothing else: not all-sites/, no desktop folder, not a new folder for another site.
+ */
+function ownTwin(name, scope, splits = []) {
+  if (!isPhoneSite(name) || !isPhoneSite(scope)) return false;
+  return scopeOf(phoneBase(name), [...splits, phoneBase(scope)]) === phoneBase(scope);
 }
 
 // Why a path under sites/ (`parts`: its names) is never staged, or ''.
@@ -174,6 +184,7 @@ class Stage {
     this.written = new Map(); // path relative to the workspace (as held.js names mods) -> sha1 the run put there
     this.touched = new Set(); // paths relative to the workspace the run changed (pushes, and its trif delete/restore)
     this.refused = new Map(); // rel -> why (said once in the log)
+    this.twinOnly = false; // a run for a phone: only its phone twin's folder goes to the mods folder (ownTwin)
   }
 
   /** Makes the working folder and copies what the run may read and change into it. */
@@ -287,6 +298,7 @@ class Stage {
     const why = nameRefused(parts);
     if (why) return why;
     const site = parts[0];
+    if (this.twinOnly) return ownTwin(site, this.scope, this.splits) ? '' : `a run for a phone writes its phone twin's folder only, not ${site}/`;
     if (ownFolder(site, this.scope, this.splits) || this.newFolders.has(site)) return '';
     if (this.otherAtStart.has(site)) return `${site} is another site's folder`;
     const st = lstatOrNull(path.join(this.liveReal, site));
@@ -427,4 +439,4 @@ class Stage {
   }
 }
 
-module.exports = { Stage, ownFolder, nameRefused, readPlain, writePlain, INSTRUCTION_NAME, ALL_SITES, DOCS };
+module.exports = { Stage, ownFolder, ownTwin, nameRefused, readPlain, writePlain, INSTRUCTION_NAME, ALL_SITES, DOCS };

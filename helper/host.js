@@ -25,6 +25,7 @@ const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
 const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
+const { remoteRefusal } = require('./lib/phonelink/remoterun');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
@@ -1371,6 +1372,9 @@ function onClientLine(sock, line) {
             ? 'only the user adds Tim\'s mods (on the setup page, or in Settings in the side panel)'
             : `"${cmd}" isn't available inside an agent run` });
     }
+    // (a run for a phone has no tab here: the helper's own commands only, nothing of its goes to the extension)
+    const refused = remoteRefusal(run, cmd, args);
+    if (refused) return reply(sock, { id, ok: false, error: refused });
     args.scope = run.scope;
     args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)

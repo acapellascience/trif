@@ -19,6 +19,7 @@ const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
 const { Stage, INSTRUCTION_NAME } = require('./stage');
+const { remoteStart, writeRemoteFiles, removeRemoteFiles, remoteContext } = require('./phonelink/remoterun');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -600,7 +601,8 @@ class Runs {
     return [...live, ...this.recent];
   }
 
-  start(args = {}) {
+  // (`own`: the helper's own word, never a message's. Its `remote` marks a run for a phone: startRemote.)
+  start(args = {}, own = {}) {
     const prompt = typeof args.prompt === 'string' ? args.prompt : '';
     if (!prompt.trim()) throw new Error('missing prompt');
     const site = normalizeSite(args.site, args.url);
@@ -636,6 +638,7 @@ class Runs {
       phone: args.phone && typeof args.phone === 'object' && typeof args.phone.device === 'string' ? { device: args.phone.device.slice(0, 40), width: Number(args.phone.width) || null } : null,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
+      remote: own.remote || null, // (a run for a paired phone: phonelink/remoterun.js)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
       effort: typeof args.effort === 'string' && /^[a-z]{2,12}$/.test(args.effort) ? args.effort : null, // (the panel's Effort setting)
@@ -663,6 +666,18 @@ class Runs {
     // Launch on the next tick so the caller can send {runId} before the first event.
     setImmediate(() => this._launch(run));
     return { runId: run.id };
+  }
+
+  /**
+   * A run for a paired phone (docs/PHONE-LINK.md section 6; phonelink/remoterun.js remoteStart for `own`, the
+   * helper's word, and `msg`, the phone's). Its site is the phone twin of the page address's host, whatever
+   * else the phone says; the same run as any other from there. -> {runId, site, scope}
+   */
+  startRemote(own, msg) {
+    const { args, remote } = remoteStart(own, msg);
+    const { runId } = this.start(args, { remote });
+    const run = this.runs.get(runId);
+    return { runId, site: run.site, scope: run.scope };
   }
 
   stop(runId) {
@@ -764,10 +779,12 @@ class Runs {
       const shots = screenshotsFolder(ws, run.scope);
       run.screenshots = shots.dir;
       run.screenshotsReal = shots.real;
+      if (run.remote) writeRemoteFiles(run); // (the phone's copy of the page and its screenshot)
       // The run's own working folder, a copy of the workspace (stage.js): the only mods folder it writes.
       // The helper copies its changes into the real one as they're saved (_syncStage).
       run.stage = new Stage({ ws, dir: path.join(boxRoot(), `${run.id}.ws`), scope: run.scope, splits: run.splits, liveReal: run.modsReal, logger: this.logger,
         settings: run.adapter.workspaceSettings ? JSON.stringify({ permissions: { allow: run.adapter.allowedTools, deny: run.adapter.deniedTools } }, null, 2) + '\n' : null });
+      run.stage.twinOnly = !!run.remote; // (a run for a phone: its phone twin's folder only, stage.js ownTwin)
       run.stage.create();
       run.state.workspace = run.stage.dir; // (the chat names files by their place in it: sites/x.com/a.js)
     } catch (e) {
@@ -831,7 +848,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, remote: run.remote ? remoteContext(run) : null };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -988,7 +1005,8 @@ class Runs {
    */
   _withoutSandbox(run, { why = [], message, from = '' }) {
     let ok = false;
-    try { ok = !!this.withoutSandbox.allowed(run.agent); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't read the consent to run without TRIF's sandbox: ${e.message}`); }
+    // (never a run for a phone: the consent is for the side panel's chats, a click on this computer)
+    try { ok = !run.remote && !!this.withoutSandbox.allowed(run.agent); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't read the consent to run without TRIF's sandbox: ${e.message}`); }
     const settingsName = run.adapter.settingsName || run.adapter.name;
     if (ok) {
       run.withoutSandbox = true;
@@ -1091,6 +1109,7 @@ class Runs {
     if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();
     if (run.agentDir) { try { fs.rmSync(run.agentDir, { recursive: true, force: true }); } catch { /* ignore */ } }
     if (run.agentTmp) { try { fs.rmSync(run.agentTmp, { recursive: true, force: true }); } catch { /* ignore */ } }
+    if (run.remote) removeRemoteFiles(run);
     // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment. (Not
     // every one: Claude Code starts each command in a session of its own, and any can leave the group. What
     // they write lands in the run's working folder, which nothing reads any more.)

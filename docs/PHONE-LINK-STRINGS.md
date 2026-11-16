@@ -3,7 +3,7 @@
 Every string people see that this branch adds, exact, for Tim's OK. **None is approved yet**: they are drafts,
 used meanwhile. `{computer}`, `{phone}` and the like are filled in. How it works: docs/PHONE-LINK.md.
 
-Nothing is built that shows these yet (round 1 wrote the design; round 2's store only makes three error texts). Each round adds the strings its step shows.
+Nothing is built that shows these yet (round 1 wrote the design; round 2's store only makes three error texts; round 5's remote run makes short error texts for a bad page address, a missing page copy and things too big, which the app turns into its own words). Each round adds the strings its step shows.
 
 ## Desktop: Settings in the side panel (not built)
 
@@ -35,3 +35,4 @@ Nothing is built that shows these yet (round 1 wrote the design; round 2's store
 | Removed | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there. | |
 | The link drops in a run | Still working on {computer}. | |
 | A run kept from before | {computer} finished this while TRIF was closed. | |
+| The computer's agent can't run inside TRIF's sandbox (an organization's settings replace it) | {computer}'s coding agent can't work inside TRIF's sandbox there, so it can't make mods for this iPhone. Chats in TRIF on the computer still can. | round 5: a phone run never goes on without the sandbox, even if that was allowed on the computer (the progress file, "For Tim" 6) |

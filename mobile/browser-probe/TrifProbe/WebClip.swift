@@ -40,21 +40,23 @@ extension TrifLink {
 
 extension Browser {
     /// Opened from a site's Home Screen icon made for full screen (Tim, 11-16): the site with no browser around it, as
-    /// a native app; each icon's site keeps its own tab for it, so the icon comes back to it. The tab starts in full
-    /// screen (the hold switches it, as any tab's, and it stays as it was left).
+    /// a native app; each icon's site keeps its own tab for it, so the icon comes back to it. The icon always lands in
+    /// full screen, whatever its tab was left in (Tim, 11-16: "it should go straight to full screen view so it feels
+    /// like an app"); inside, the hold still switches it either way, and TRIF's own icon opens TRIF as it was left.
     func openFullScreen(_ target: URL) {
         let site = Site.of(target.host ?? "")
         var map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
         if let id = map[site].flatMap(UUID.init(uuidString:)), let t = tabs.first(where: { $0.id == id }) {
+            let was = fullScreenTabs.contains(t.id)
             if t !== current { select(t) }
-            report.log("icon", "opened \(site) from its icon: its own tab")
+            report.log("icon", "opened \(site) from its icon: its own tab, \(was ? "already in full screen" : "back to full screen")")
         } else {
             newTab(target.absoluteString)
             map[site] = current.id.uuidString
             UserDefaults.standard.set(map, forKey: "iconTabs")
             report.log("icon", "opened \(site) from its icon: a new tab of its own, in full screen")
-            setFullScreen(true, note: false)
         }
+        setFullScreen(true, note: false)
     }
 
     /// Opened from a site's Home Screen icon: its tab if one is open on that site (as an app comes back where it
@@ -68,6 +70,54 @@ extension Browser {
             newTab(target.absoluteString)
             report.log("icon", "opened \(site) from its Home Screen icon: a new tab")
         }
+    }
+}
+
+extension Model {
+    /// (development) {"iconcheck": "https://…/"}: that site's Home Screen icon link opened from each state the app can
+    /// be in while in front (no tab of its own yet; its tab in or out of full screen; another tab in front; the tabs,
+    /// the chat, More's settings, the address screen, the Mods tab, history over the page), as the icon opens it;
+    /// each must end on the icon's own tab, in full screen, nothing over it. One
+    /// line a state, PASS or FAIL. Through onOpenURL's own handler (ContentView.openForCheck): the app opening its own
+    /// scheme asks "Open in …?" first. A cold launch and the app in the background need `simctl openurl` (notes).
+    static func iconCheck(browser: Browser, site: URL) async -> String {
+        let link = TrifLink.link(to: site), host = Site.of(site.host ?? "")
+        func wait(_ s: Double) async { try? await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000)) }
+        func own() -> Tab? {
+            (UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String])?[host]
+                .flatMap(UUID.init(uuidString:)).flatMap { id in browser.tabs.first { $0.id == id } }
+        }
+        var lines: [String] = [], made: [Tab] = []
+        func other() { browser.newTab(PageSchemeHandler.home + "plain.html"); made.append(browser.current) }
+        func tap(_ name: String) async {
+            let before = "\(browser.current === own() ? "its tab" : "another tab"), full screen \(browser.fullScreen), covers \(ContentView.coversNow)"
+            ContentView.openForCheck?(link)
+            await wait(1.5)
+            let ok = own() != nil && browser.current === own() && browser.fullScreen && ContentView.coversNow == "none"
+            lines.append("\(ok ? "PASS" : "FAIL") \(name) (was: \(before)) → on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow)")
+        }
+        // (no tab of its own: the map's entry dropped, so the icon makes one)
+        var map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
+        map[host] = nil
+        UserDefaults.standard.set(map, forKey: "iconTabs")
+        await tap("no tab of its own yet")
+        await tap("its tab in front, in full screen")
+        browser.setFullScreen(false, note: false)
+        await tap("its tab in front, left in TRIF view")
+        other()
+        await tap("another tab in front, its tab in full screen")
+        let wasMore = Model.pane?.more ?? false
+        for cover in ["", "tabs", "chat", "more", "address", "mods", "history"] {
+            if let t = own() { browser.setFullScreen(false, tab: t, note: false) }
+            other()
+            if cover == "more" { Model.pane?.choose(more: true); browser.wantsSheet = "chat" }
+            else if !cover.isEmpty { browser.wantsSheet = cover }
+            await wait(1.2)
+            await tap("another tab in front\(cover.isEmpty ? "" : ", \(cover) over it"), its tab in TRIF view")
+            if cover == "more" { Model.pane?.choose(more: wasMore) }
+        }
+        for t in made where browser.tabs.contains(where: { $0 === t }) { browser.close(t) }
+        return lines.joined(separator: "\n")
     }
 }
 

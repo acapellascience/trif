@@ -317,9 +317,12 @@ centre; a tap the lifting fingers make is let go for 0.8 s); the ⋯ menu's Full
 top in full screen; the first time, how to switch back. A small exit button at the top right, 60 points down so it's
 below a site's own top bar (X's and Instagram's buttons are up there), bright for 3 s on entering and for a moment when
 the page is scrolled back up or the app comes back, otherwise at 30%; ⋯ → Hide the full screen button takes it away.
-`trif://open?url=…&app=1`, what Home Screen icons made from 11-16 open, starts that site's tab in full screen; each
-icon's site keeps its own tab (`iconTabs`). A tapped link to another site, or a window the page opens, goes to a new tab
-in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen` and `resethint`.)
+`trif://open?url=…&app=1`, what Home Screen icons made from 11-16 open, always lands on that site's own tab in full
+screen, whatever it was left in and whatever was open (the tabs, the chat, More, the address screen, the Mods tab,
+history and other sheets close; an Add this mod? stays, as it waits for an OK); each icon's site keeps its own tab
+(`iconTabs`). TRIF's own icon opens it as it was left. A tapped link to another site, or a window the page opens, goes to a new tab
+in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen`, `resethint`, `view` (the
+tab's site, full screen, what covers it) and `iconcheck` (the icon from every in-app state, PASS/FAIL).)
 
 Home Screen icons (WebClip.swift): the ⋯ menu's Add to Home Screen makes a configuration profile with one Web Clip
 (`trif://open?url=<site>`, full screen, identifier `com.timsrobot.trif.webclip.<site>` so adding a site again replaces

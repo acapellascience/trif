@@ -192,6 +192,8 @@ extension Model {
         if step["back"] != nil { browser.back() }
         // ({"openurl": "…"}: opened as the app opens addresses in other apps, UIApplication.open)
         if let u = step["openurl"] as? String, let url = URL(string: u) { out = await UIApplication.shared.open(url) ? "opened" : "not opened" }
+        if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
+        if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
@@ -264,6 +266,7 @@ struct ContentView: View {
     var body: some View {
         let _ = Diagnostics.shared.bodyRan("the browser's main view")
         page
+        .onChange(of: coverNames, initial: true) { _, now in ContentView.coversNow = now }
         .onChange(of: phase) { _, p in
             // (safe mode: the record is unclean only while the app is in front; Safety follows UIKit's own notices too)
             browser.safety.active(p == .active)
@@ -406,22 +409,9 @@ struct ContentView: View {
             browser.wantsSheet = ""
         }
         .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
-        .onOpenURL { url in
-            if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
-            else if url.host?.lowercased() == "add", url.scheme?.lowercased() == "trif" {
-                // (a mod in a link: a QR code's, from desktop TRIF; offered like any other)
-                if let m = ModLinkInURL.read(url) { closeCovers(); Task { await browser.offerFiles([(m.name, m.text)], from: "a code") } }
-                else { browser.status = "That code's mod couldn't be read: it may be cut short or damaged." }
-            }
-            else if let site = TrifLink.target(url) {
-                // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it)
-                ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
-                if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
-                closeCovers()
-                if TrifLink.wantsFullScreen(url) { browser.openFullScreen(site) } else { browser.openFromIcon(site) }
-            }
-            else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
-        }
+        .onOpenURL { url in openLink(url) }
+        // (the icon check's way in, Model.iconCheck: UIApplication.open of the app's own scheme asks "Open in …?" first)
+        .onAppear { ContentView.openForCheck = { url in openLink(url) } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { browser.importFiles(urls) }
         }
@@ -550,13 +540,44 @@ struct ContentView: View {
     private var onWebPage: Bool { let s = browser.webView.url?.scheme; return s == "https" || s == "http" }
     /// Something covers the page: the chat, the tabs, the Mods tab, the address screen.
     private var covered: Bool { pane.shown || showTabs || showMods || showAddress }
-    /// Whatever covers the page closes (the chat as its own Back does: nothing in it lost).
-    private func closeCovers() {
+    /// Whatever covers the page closes (the chat as its own Back does: nothing in it lost). `all`: the sheets and
+    /// questions too (history, checks, report, the project and Ask the phone questions, the file pickers), for a Home
+    /// Screen icon, which lands on its page as an app would. An Add this mod? stays: it waits for the person's OK.
+    private func closeCovers(all: Bool = false) {
         if pane.shown { pane.close() }
         showTabs = false
         showMods = false
         showAddress = false
+        guard all else { return }
+        showHistory = false; showChecks = false; showReport = false
+        askingProject = false; asking = false; importing = false; pickingFolder = false
     }
+    /// A link the app was opened with: a file to import, a mod's trif://add, a Home Screen icon's trif://open.
+    private func openLink(_ url: URL) {
+        if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
+        else if url.host?.lowercased() == "add", url.scheme?.lowercased() == "trif" {
+            // (a mod in a link: a QR code's, from desktop TRIF; offered like any other)
+            if let m = ModLinkInURL.read(url) { closeCovers(); Task { await browser.offerFiles([(m.name, m.text)], from: "a code") } }
+            else { browser.status = "That code's mod couldn't be read: it may be cut short or damaged." }
+        }
+        else if let site = TrifLink.target(url) {
+            // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it)
+            ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
+            if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
+            closeCovers(all: true)
+            if TrifLink.wantsFullScreen(url) { browser.openFullScreen(site) } else { browser.openFromIcon(site) }
+        }
+        else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
+    }
+    static var openForCheck: ((URL) -> Void)?
+    /// What covers the page, by name ("none"), for the dev step {"view": 1} and the icon check (Model.iconCheck).
+    private var coverNames: String {
+        let all: [(Bool, String)] = [(pane.shown, "chat"), (showTabs, "tabs"), (showMods, "mods"), (showAddress, "address"),
+                                     (showHistory, "history"), (showChecks, "checks"), (showReport, "report"), (addingIcon, "icon"),
+                                     (askingProject, "project"), (asking, "ask"), (importing, "import"), (pickingFolder, "folder")]
+        return all.filter(\.0).map(\.1).joined(separator: ",").nonEmpty ?? "none"
+    }
+    static var coversNow = "none"
     /// The toolbar's page button (Tim, 11-15): back to the page, from whatever covers it. On the page already (Tim,
     /// 11-16): a + that opens a new tab, onto the address screen.
     private func showPage() {

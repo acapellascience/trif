@@ -41,6 +41,31 @@ function runTool(file, args, opts = {}) {
     : spawnSync(file, args, { encoding: 'utf8', timeout: 180000, ...opts });
   return { status: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), error: r.error ? r.error.message : null };
 }
+// The same without stopping this program meanwhile: for a run that talks to a stand-in server living here
+// (under spawnSync the server never answers: that's why Codex's runs first sat at "0 requests" for 150 s).
+function runToolAsync(file, args, opts = {}) {
+  const { input, timeout = 180000, ...rest } = opts;
+  const viaCmd = /\.(cmd|bat)$/i.test(file);
+  const q = (x) => (/[\s"&|<>^()%!]/.test(x) ? `"${String(x).replace(/"/g, '""')}"` : x);
+  return new Promise((resolve) => {
+    const child = viaCmd
+      ? spawn(process.env.ComSpec || sys('cmd.exe'), ['/d', '/s', '/c', `"${[file, ...args].map(q).join(' ')}"`], { windowsVerbatimArguments: true, ...rest })
+      : spawn(file, args, rest);
+    let stdout = '';
+    let stderr = '';
+    let error = null;
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    const t = setTimeout(() => {
+      error = `stopped after ${Math.round(timeout / 1000)} s`;
+      try { if (process.platform === 'win32') spawnSync(sys('taskkill.exe'), ['/PID', String(child.pid), '/T', '/F']); else child.kill('SIGKILL'); } catch { /* gone */ }
+    }, timeout);
+    child.on('close', (status) => { clearTimeout(t); resolve({ status, stdout, stderr, error }); });
+    child.on('error', (e) => { clearTimeout(t); resolve({ status: null, stdout, stderr, error: e.message }); });
+    child.stdin.on('error', () => { /* it may exit before reading */ });
+    child.stdin.end(input || '');
+  });
+}
 
 async function claudeCode(base) {
   console.log('\n================ Claude Code');
@@ -351,7 +376,7 @@ async function codexTools(base) {
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...(withMcp ? mcp : []),
       '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses", supports_websockets = false, request_max_retries = 1, stream_max_retries = 1 }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
     const t0 = Date.now();
-    const r = runTool(bin, args, { env: { ...env, RUST_LOG: 'info' }, cwd: work, input: 'do the steps', timeout: 150000 });
+    const r = await runToolAsync(bin, args, { env: { ...env, RUST_LOG: 'info' }, cwd: work, input: 'do the steps', timeout: 150000 });
     console.log(`  (${Math.round((Date.now() - t0) / 1000)} s)`);
     console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
     const asked = steps.filter((x) => !x.say).map((x) => (x.call ? `${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `apply_patch ${x.custom.input.split('\n')[1]}` : `shell: ${x.run}`));

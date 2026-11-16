@@ -120,7 +120,11 @@ jobs:
         shell: bash
         env:
           TRIF_TEST_POSIX_ON_WINDOWS: 1
-        run: node --test --test-timeout=120000 --test-reporter=tap > all-on-windows.tap 2>&1; grep -cE "^ok " all-on-windows.tap; grep -E "^not ok " all-on-windows.tap | head -150; exit 0
+        run: |
+          # (bash here stops at the first command that fails: each one is let fail)
+          node --test --test-timeout=120000 --test-reporter=tap > all-on-windows.tap 2>&1 || true
+          grep -cE "^ok " all-on-windows.tap || true
+          grep -E "^not ok " all-on-windows.tap | head -150 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -46,3 +46,37 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code @openai/codex
       - name: What the agents do here
         run: node tests/windows-fence/agents.js
+
+  # The same fence and attempts, run by an ordinary user (the runner's own account is an administrator):
+  # a local account made for this, on a runner that's thrown away afterwards. Never failing: whether a
+  # program can be started as another user from here at all is part of what this finds out.
+  fence-standard-user:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The fence, as a user who isn't an administrator
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $name = 'trifstd'
+          $plain = 'Tf!' + [guid]::NewGuid().ToString('N') + 'aA1'
+          $pw = ConvertTo-SecureString $plain -AsPlainText -Force
+          New-LocalUser -Name $name -Password $pw -PasswordNeverExpires | Out-Null
+          Add-LocalGroupMember -Group 'Users' -Member $name
+          $work = 'C:\trif-std'
+          New-Item -ItemType Directory -Force $work | Out-Null
+          Copy-Item -Recurse -Force "$env:GITHUB_WORKSPACE\helper", "$env:GITHUB_WORKSPACE\tests", "$env:GITHUB_WORKSPACE\extension", "$env:GITHUB_WORKSPACE\examples", "$env:GITHUB_WORKSPACE\package.json" $work
+          icacls $work /grant "${name}:(OI)(CI)M" /T /Q | Out-Null
+          $node = (Get-Command node).Source
+          $cred = New-Object System.Management.Automation.PSCredential($name, $pw)
+          Write-Output "node: $node; as: $name (groups below, from inside the run)"
+          $p = Start-Process -FilePath $node -ArgumentList "`"$work\tests\windows-fence\run.js`" --yes-this-computer" -Credential $cred -WorkingDirectory $work -RedirectStandardOutput "$work\out.txt" -RedirectStandardError "$work\err.txt" -Wait -PassThru -NoNewWindow
+          Write-Output "exit code: $($p.ExitCode)"
+          if (Test-Path "$work\out.txt") { Get-Content "$work\out.txt" }
+          if (Test-Path "$work\err.txt") { Write-Output '--- stderr'; Get-Content "$work\err.txt" }
+          exit 0

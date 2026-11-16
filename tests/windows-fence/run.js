@@ -56,6 +56,8 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-fence-')));
   console.log(`scratch ${base}\nuser profile ${os.homedir()}\nnode ${process.execPath} ${process.version}`);
   console.log(spawnSync(sys('cmd.exe'), ['/d', '/c', 'ver'], { encoding: 'utf8' }).stdout.trim());
+  // (who runs this: an administrator, as GitHub's runner account is, or an ordinary user)
+  console.log(`run by ${os.userInfo().username}; administrator: ${/S-1-5-32-544.*Enabled group/.test(spawnSync(sys('whoami.exe'), ['/groups', '/fo', 'csv', '/nh'], { encoding: 'utf8' }).stdout.split(/\r?\n/).filter((l) => l.includes('S-1-5-32-544')).join(' ')) ? 'yes' : 'no'}`);
   const exe = build(path.join(base, 'bin'));
 
   // ---- what a run sees, as on a user's computer: everything inside the user's profile folder

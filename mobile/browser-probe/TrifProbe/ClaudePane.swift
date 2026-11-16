@@ -371,6 +371,20 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         return Prepared(followUp: followUp, conv: conv, text: text, shot: shot, watch: sw)
     }
 
+    /// The last fill not yet sent, for this chat service: its conversation ("new" for a new chat), and the tab and page
+    /// it was of. Cleared at a send. Kept between launches (a reload of the chat's page must not fill again).
+    struct FillRecord: Codable { var conv: String; var page: String; var at: Date }
+    private var lastFill: FillRecord? {
+        get { UserDefaults.standard.data(forKey: "lastFill.\(service.rawValue)").flatMap { try? JSONDecoder().decode(FillRecord.self, from: $0) } }
+        set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "lastFill.\(service.rawValue)") }
+    }
+    /// The tab and its page (its address without the fragment): another tab or another page is a new fill.
+    static func pageKey(_ b: Browser) -> String {
+        var c = b.webView.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        c?.fragment = nil
+        return "\(b.current.id.uuidString) \(c?.url?.absoluteString ?? "")"
+    }
+
     /// "Adding the page…" over the chat while the tab's data goes into its box.
     @Published private(set) var adding = false
 
@@ -408,9 +422,33 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             Diagnostics.shared.log("chat", "the page's data wasn't put in: the chat \(onChatPage ? "had no message box" : "wasn't on a conversation") for 20 s")
             return
         }
-        if st["has"] as? Bool == true { report.log("claude", "\(service.rawValue): the message box already has something in it: left as it is"); return }
         if st["working"] as? Bool == true { return }
         guard let browser, shown || activity == .idle else { return }
+        // (once per page: 11-16, leaving the chat and coming back put the page in a second time. What's in the box
+        // is looked at (TRIF's tiles or text, or the person's own) and so is the record of the last fill, which
+        // outlives a reload of the chat's page)
+        let convKey = conversation ?? "new"
+        let page = ClaudePane.pageKey(browser)
+        let record = lastFill
+        let same = record.map { $0.conv == convKey && $0.page == page } ?? false
+        var ours = st["trif"] as? Int ?? 0
+        if ours == 0, st["has"] as? Bool != true, same {
+            // (the record says it's in, unsent, but the box looks empty: a page that puts its draft back a moment
+            // after it loads is given that moment)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            st = (Browser.parse(await chatJS("state()")) as? [String: Any]) ?? st
+            ours = st["trif"] as? Int ?? 0
+        }
+        if ours > 0 {
+            if same { report.log("claude", "\(service.rawValue): the page is already in the message box, unsent: not again"); return }
+            if st["others"] as? Bool == true { report.log("claude", "\(service.rawValue): the message box has the person's own things too: left as it is"); return }
+            let r = try? await webView.callAsyncJavaScript("return globalThis.__trifChat ? await globalThis.__trifChat.clearTrif() : 1;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld)
+            let left = (r as? NSNumber)?.intValue ?? 1
+            report.log("claude", "\(service.rawValue): the tab changed since the last fill: the old one taken out\(left > 0 ? " (not all of it: \(left) left, so nothing added)" : "")")
+            if left > 0 { return }
+        } else if st["has"] as? Bool == true {
+            report.log("claude", "\(service.rawValue): the message box already has something in it: left as it is"); return
+        }
         let conv = conversation
         if st["context"] as? Bool == true, let conv { noteContext(conv) }
         // (the conversation turned out to have the instructions after all, seen on its page: the follow-up instead)
@@ -425,6 +463,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             await fill("", png: shot, picture: "TRIF screenshot.jpg")
             sw.lap("screenshot into the message box", "\(shot.count / 1000) kB JPEG")
         }
+        lastFill = FillRecord(conv: convKey, page: page, at: Date())
         await browser.noteBaseline()
         sw.lap("the page's layout, for next time")
         sw.done()
@@ -442,6 +481,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
             report.log("claude", "\(service.rawValue): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
             if d["withInstructions"] as? Bool == true { if let conv = conversation { noteContext(conv) } else { contextNext = true } }
+            lastFill = nil
             activity = .working
             workingSince = Date()
             sentTab = browser?.current.id
@@ -604,9 +644,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// Puts text (and a PNG) into the chat's message box as a paste, for the person to send (Web/chat.js fill).
     @discardableResult
     func fill(_ text: String, png: Data? = nil, pdf: Data? = nil, picture: String = "TRIF screenshot.png", as file: String? = nil) async -> String {
-        let r = try? await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null, pdf || null, picture) : 'not loaded';",
-                                                       arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "pdf": pdf?.base64EncodedString() ?? "", "name": file ?? "", "picture": picture], in: nil, contentWorld: ClaudePane.chatWorld)
-        let said = r as? String ?? "failed"
+        var said = "failed"
+        do {
+            let r = try await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null, pdf || null, picture) : 'not loaded';",
+                                                          arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "pdf": pdf?.base64EncodedString() ?? "", "name": file ?? "", "picture": picture], in: nil, contentWorld: ClaudePane.chatWorld)
+            said = r as? String ?? "failed (\(String(describing: r)))"
+        } catch {
+            said = "failed: \((error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription)"
+        }
         // (filling focuses the message box; if the person has gone back to the tab meanwhile, no keyboard over it)
         if !shown { blur() }
         report.log("claude", "\(service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : ", a picture")\(pdf == nil ? "" : ", a \(pdf!.count / 1000) kB PDF")): \(said)")

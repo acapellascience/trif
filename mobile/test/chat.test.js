@@ -37,7 +37,7 @@ test('the chat script: fill, the send, the reply watched until done, its mods ha
     await page.addScriptTag({ content: CHAT });
 
     // A new chat: no instructions in it, nothing in the box. The instructions go in as an attached file.
-    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, has: false, context: false, working: false, replying: false });
+    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, has: false, trif: 0, others: false, context: false, working: false, replying: false });
     const said = await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null),
       "I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…");
     assert.match(said, /text attached/);
@@ -149,6 +149,40 @@ test('the chat script: a file a reply attaches is never read (no request at all)
       assert.equal(src.includes(route), false, `chat.js has no ${route}`);
     }
 
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+test('the chat script: TRIF\'s file attached through the page\'s file input when a paste goes in as text (chatgpt.com, 11-16); what TRIF put in, seen and taken out', { skip: browserTestsSkip(), timeout: 60000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    await page.goto(`${base}/chat.html?gptpaste`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    const text = "I'm looking at http://127.0.0.1:9/plain.html in TRIF, an app that changes websites with small mods.\n…";
+    const said = await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), text);
+    assert.match(said, /went in as text, taken out.*text attached \(file input\)/);
+    let st = JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
+    assert.equal(st.trif, 1);
+    assert.equal(st.others, false);
+    assert.equal(await page.evaluate(() => document.querySelector('.ProseMirror').textContent), '');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('[data-testid="file-thumbnail"]').length), 1);
+    // (the person's own words beside it: seen as theirs)
+    await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'make it green'); });
+    st = JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
+    assert.equal(st.trif, 1);
+    assert.equal(st.others, true);
+    // (taken out: TRIF's tile only, the person's words stay)
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.clearTrif()), 0);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('[data-testid="file-thumbnail"]').length), 0);
+    assert.equal(await page.evaluate(() => document.querySelector('.ProseMirror').textContent), 'make it green');
   } finally {
     if (browser) await browser.close();
     server.close();

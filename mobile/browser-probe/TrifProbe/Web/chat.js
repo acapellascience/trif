@@ -43,6 +43,16 @@
   // would cover every tile in it: Tim, 11-14, saw the instruction labelled "TRIF screenshot", the row marked
   // while only the picture was in it)
   const TILES = '[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]:not([data-cds="MessageAttachments"]), span[class*="group/composer-attachment"]';
+  /** The page's own file input for the message box: one that takes any file or text (not pictures only). */
+  function fileInput() {
+    const box = composerBox();
+    const all = [...(box && box.closest('form') || document).querySelectorAll('input[type="file"]'), ...document.querySelectorAll('input[type="file"]')];
+    const usable = all.filter((i) => !i.disabled);
+    // (one that takes text; else the one for files rather than photos or the camera: chatgpt.com's mobile composer has
+    // #octane-mobile-composer-files-input beside its photos and camera inputs; logged out it takes pictures only)
+    return usable.find((i) => !i.accept || /text|\.txt|\*\/\*/.test(i.accept))
+      || usable.find((i) => /file/i.test(`${i.id} ${i.name}`) && !/photo|camera/i.test(`${i.id} ${i.name}`)) || null;
+  }
   /** How many attachment tiles in the message box carry this name (in their text, a picture's alt or a label). */
   function tiles(label) {
     return [...document.querySelectorAll(TILES)].filter((t) => `${t.textContent || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')]
@@ -81,16 +91,39 @@
       // (a chat that has only just loaded may take the file late, without saying so at the paste: Tim, 11-14,
       // got the attachment and the whole text typed in too. So: its tile looked for, and one more try, before
       // the text goes in as text)
+      // (11-16, Tim's iPhone: chatgpt.com put a pasted file's text in the box, not as a file. So the page's own file
+      // input comes second, given the file as a person picking it would (its files, then its change event), then the
+      // file dropped on the box as a drag would, then one more paste)
       const label = name.replace(/\.[^.]*$/, '');
-      for (let tryNo = 1; tryNo <= 2; tryNo++) {
+      for (const how of ['paste', 'file input', 'drop', 'paste']) {
         const before = tiles(label);
         const dt = new DataTransfer();
         dt.items.add(new File([text], name, { type: 'text/plain' }));
-        const took = paste(editor() || ed, dt);
-        for (let i = 0; i < 25 && !took && tiles(label) <= before; i++) await wait(100);
-        if (took || tiles(label) > before) { said.push(took ? 'text attached' : 'text attached (late)'); return said.join(', '); }
-        said.push(`file not taken (try ${tryNo})`);
-        await wait(1000);
+        let took = false;
+        if (how === 'paste') took = paste(editor() || ed, dt);
+        else if (how === 'drop') {
+          // (as a file dragged onto the message box: dragenter, dragover, then drop, each carrying the file)
+          const target = composerBox() || editor() || ed;
+          try {
+            for (const type of ['dragenter', 'dragover', 'drop']) target.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+          } catch (e) { said.push('drop refused'); continue; }
+        } else {
+          const input = fileInput();
+          if (!input) { said.push('no file input'); continue; }
+          try { input.files = dt.files; } catch (e) { said.push('file input refused'); continue; }
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        // (taken: a tile with the file's name in the box; the text in the box instead: not. Either can come late, so
+        // looked for 2.5 s; a paste the page cancelled with neither seen counts as taken, as before)
+        const snippet = text.slice(0, 60);
+        for (let i = 0; i < 25 && tiles(label) <= before && !composerText().includes(snippet); i++) await wait(100);
+        if (tiles(label) > before) { said.push(`text attached (${how})`); return said.join(', '); }
+        if (how === 'paste' && took && !composerText().includes(snippet)) { said.push('text attached (paste, no tile seen)'); return said.join(', '); }
+        // (the page took the paste as text after all: that text out again before the next try)
+        if (composerText().includes(text.slice(0, 60))) { await clearTrif(); said.push(`${how}: went in as text, taken out`); }
+        else said.push(`${how}: file not taken`);
+        await wait(300);
       }
       said.push('so as text');
     }
@@ -370,7 +403,41 @@
   /** For the app: is there a message box, is anything in it, does the chat have TRIF's instructions, is it replying. */
   function state() {
     const c = composer();
-    return JSON.stringify({ editor: !!editor(), has: !!(c.text || c.names.length), context: hasContext(), working: replying() || !!watch, replying: replying() });
+    const ours = trifInBox(c);
+    return JSON.stringify({ editor: !!editor(), has: !!(c.text || c.names.length), trif: ours.count, others: ours.others, context: hasContext(), working: replying() || !!watch, replying: replying() });
+  }
+
+  // ---- what TRIF put in the message box (11-16: the page went in twice after leaving the chat and coming back) ----
+  const OUR_FILE = /TRIF (instruction|follow-up|screenshot|full page)/;
+  const OUR_TEXT = /^(I'm looking at \S+ in TRIF, an app|Here's .{1,300} in TRIF now:)/;
+  /** How many of TRIF's things are in the box (its files' tiles, its text typed in), and whether anything else is. */
+  function trifInBox(c = composer()) {
+    const mine = c.names.filter((n) => OUR_FILE.test(n)).length;
+    const text = OUR_TEXT.test(c.text);
+    return { count: mine + (text ? 1 : 0), others: c.names.length - mine > 0 || (!!c.text && !text) };
+  }
+  /** Takes TRIF's things out of the box, as the person would: each tile's own remove button; TRIF's typed text
+   *  cleared only when the box holds nothing else. Returns how many are left. */
+  async function clearTrif() {
+    const box = composerBox();
+    if (!box) return 0;
+    for (const t of [...box.querySelectorAll(TILES)].filter((x) => !x.querySelector(TILES))) {
+      const label = `${t.textContent || ''} ${t.getAttribute('data-trif-chip') || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
+      if (!OUR_FILE.test(label)) continue;
+      const buttons = [...t.querySelectorAll('button')];
+      const x = buttons.find((b) => /remove|delete|close/i.test(`${b.getAttribute('aria-label') || ''} ${b.title || ''}`)) || buttons[buttons.length - 1];
+      if (x) { x.click(); await wait(150); }
+    }
+    const c = composer();
+    if (OUR_TEXT.test(c.text) && !c.names.some((n) => !OUR_FILE.test(n))) {
+      const ed = editor();
+      if (ed) {
+        ed.focus();
+        if (ed.localName === 'textarea') { ed.value = ''; ed.dispatchEvent(new Event('input', { bubbles: true })); }
+        else { document.execCommand('selectAll'); document.execCommand('delete'); }
+      }
+    }
+    return trifInBox().count;
   }
   /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
   function resume() {
@@ -440,5 +507,5 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply };
+  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif };
 })();

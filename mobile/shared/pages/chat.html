@@ -14,7 +14,10 @@
   The reply: a style mod for the page named in what was attached or said (its first address), in a code block; two mods
   if the message says "two"; no mod at all if it says "no mod"; the mod as an attached file if it says "file" (and in a code block too: "file and block"),
   ?gpt gives ChatGPT's /c/<id> addresses; "wait 90" makes it take about 90 seconds. `?slow` writes it more slowly; `?nostop` has no stop button or streaming mark (a chat
-  that changed its page: TRIF's fallback, the reply unchanged for a few seconds).
+  that changed its page: TRIF's fallback, the reply unchanged for a few seconds). `?draft` keeps the box's
+  attachments and text across a reload and puts them back 0.8 s after the page loads, as claude.ai keeps a draft;
+  `?gptpaste` takes a pasted text file as its text, as chatgpt.com did on Tim's iPhone (11-16), while its hidden file
+  input (the paper clip's) still makes tiles.
 -->
 <style>
   :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
@@ -65,6 +68,36 @@
 
   const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length); };
   ed.addEventListener('input', refresh);
+  // (?draft: the box's attachments and text kept across a reload and put back a moment after the page loads, as
+  // claude.ai keeps a draft)
+  const draft = location.search.includes('draft');
+  const saveDraft = () => { if (draft) sessionStorage.setItem('draft', JSON.stringify({ text: ed.textContent, files })); };
+  function addFile(name, text, type) {
+    const entry = { name, text: text || '' };
+    files.push(entry);
+    const tile = document.createElement('div');
+    tile.setAttribute('data-testid', 'file-thumbnail');
+    const label = document.createElement('span');
+    label.textContent = name;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.setAttribute('aria-label', `Remove ${name}`);
+    x.textContent = '×';
+    x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); saveDraft(); });
+    tile.append(label, x);
+    tiles.append(tile);
+    return entry;
+  }
+  const takeFile = (f) => { const entry = addFile(f.name, '', f.type); if (f.type.startsWith('text/')) f.text().then((t) => { entry.text = t; saveDraft(); }); };
+  // (?gptpaste: as chatgpt.com on Tim's iPhone, 11-16: a pasted text file goes into the box as its text; pictures
+  // and files picked with the file input (the paper clip) become tiles)
+  const gptpaste = location.search.includes('gptpaste');
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.multiple = true;
+  picker.hidden = true;
+  picker.addEventListener('change', () => { for (const f of picker.files) takeFile(f); refresh(); saveDraft(); });
+  document.querySelector('.composer').append(picker);
   ed.addEventListener('paste', (e) => {
     const dt = e.clipboardData;
     if (!dt) return;
@@ -72,26 +105,24 @@
     const list = [...dt.files];
     if (list.length) {
       for (const f of list) {
-        const entry = { name: f.name, text: '' };
-        files.push(entry);
-        if (f.type.startsWith('text/')) f.text().then((t) => { entry.text = t; });
-        const tile = document.createElement('div');
-        tile.setAttribute('data-testid', 'file-thumbnail');
-        const label = document.createElement('span');
-        label.textContent = f.name;
-        const x = document.createElement('button');
-        x.type = 'button';
-        x.setAttribute('aria-label', `Remove ${f.name}`);
-        x.textContent = '×';
-        x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); });
-        tile.append(label, x);
-        tiles.append(tile);
+        if (gptpaste && !f.type.startsWith('image/')) f.text().then((t) => { document.execCommand('insertText', false, t); refresh(); saveDraft(); });
+        else takeFile(f);
       }
     } else {
       document.execCommand('insertText', false, dt.getData('text/plain'));
     }
     refresh();
+    saveDraft();
   });
+  ed.addEventListener('input', saveDraft);
+  const kept = draft ? JSON.parse(sessionStorage.getItem('draft') || 'null') : null; // (the draft from before the load)
+  if (draft) setTimeout(() => {
+    const d = kept;
+    if (!d) return;
+    for (const f of d.files) addFile(f.name, f.text);
+    if (d.text) ed.textContent = d.text;
+    refresh();
+  }, 800);
   ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
   row.addEventListener('click', (e) => { if (e.target.closest('button[aria-label="Send message"]')) go(); });
 
@@ -115,6 +146,7 @@ ${JSON.stringify(body, null, 2)}`;
     ed.textContent = '';
     files.length = 0;
     tiles.textContent = '';
+    if (draft) sessionStorage.removeItem('draft');
     if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}`);
     const origin = (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
     let parts;

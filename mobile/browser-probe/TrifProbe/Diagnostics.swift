@@ -35,6 +35,70 @@ final class Diagnostics {
         }
         Diagnostics.watchMainThread()
         log("start", "the app started: \(Diagnostics.device()), iOS \(UIDevice.current.systemVersion), \(Diagnostics.freeMB()) MB left for it")
+        logInstall()
+        // (a few seconds in: asked at once, WebKit's store answers 0 before it has read its file)
+        Task { @MainActor in try? await Task.sleep(nanoseconds: 5_000_000_000); await Diagnostics.shared.cookieCensus("just after launch") }
+        // (going to the background: a few seconds held, so WebKit can write down what the pages stored, and the count)
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { Diagnostics.shared.wentToBackground() }
+        }
+    }
+
+    // MARK: sign-ins that don't last (Tim, 11-15: X, Instagram and Claude signed out after restarts)
+    // Not seen in the Simulator: cookies and storage were on disk within a second, and survived the app being killed
+    // (kill -9, with WebKit's own processes too) and relaunched. So these lines say where they go on a phone: whether
+    // this is the same install as before (a fresh install or data container starts with no sign-ins), and how many
+    // cookies each site has at launch and on going to the background. Counts only: never a cookie's name or value.
+
+    private func logInstall() {
+        let d = UserDefaults.standard
+        let launch = d.integer(forKey: "diag.launches") + 1
+        d.set(launch, forKey: "diag.launches")
+        var install = d.string(forKey: "diag.install") ?? ""
+        let fresh = install.isEmpty
+        if fresh { install = String(UUID().uuidString.prefix(8)); d.set(install, forKey: "diag.install") }
+        let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        let cookieFile = lib.appendingPathComponent("Cookies/Cookies.binarycookies")
+        let a = try? FileManager.default.attributesOfItem(atPath: cookieFile.path)
+        let size = (a?[.size] as? NSNumber)?.intValue
+        let ago = (a?[.modificationDate] as? Date).map { Int(Date().timeIntervalSince($0) / 60) }
+        let websiteData = FileManager.default.fileExists(atPath: lib.appendingPathComponent("WebKit").path)
+        let tabsKept = FileManager.default.fileExists(atPath: SavedTabs.file.path)
+        log("install", "launch \(launch) of install \(install)\(fresh ? " (new: no data from before)" : ""), app id \(Bundle.main.bundleIdentifier ?? "?"), data folder \(String(NSHomeDirectory().split(separator: "/").last?.prefix(8) ?? "?")); tabs kept: \(tabsKept ? "yes" : "no"), cookie file: \(size.map { "\($0) bytes, written \(ago ?? 0) min ago" } ?? "none"), WebKit's data folder: \(websiteData ? "yes" : "no")")
+    }
+
+    /// How many cookies each site has in the app's one store (the tabs' and the chat's), and how many of them last
+    /// only while the app runs (a sign-in kept in those ends with the app, by design).
+    func cookieCensus(_ when: String) async {
+        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        var count: [String: Int] = [:], session: [String: Int] = [:]
+        for c in cookies {
+            let site = Site.of(c.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
+            count[site, default: 0] += 1
+            if c.isSessionOnly { session[site, default: 0] += 1 }
+        }
+        let list = count.sorted { $0.value > $1.value }.prefix(25).map { "\($0.key) \($0.value)\(session[$0.key].map { " (\($0) for this run only)" } ?? "")" }
+        log("cookies", "\(when): \(cookies.count) cookies\(list.isEmpty ? "" : ": " + list.joined(separator: ", "))")
+    }
+
+    private var holdTask: UIBackgroundTaskIdentifier = .invalid
+    private func wentToBackground() {
+        if holdTask == .invalid {
+            holdTask = UIApplication.shared.beginBackgroundTask(withName: "TRIF: storing the pages' data") { [weak self] in
+                MainActor.assumeIsolated { self?.endHold() }
+            }
+        }
+        Task { @MainActor in
+            await self.cookieCensus("going to the background")
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self.endHold()
+        }
+    }
+    private func endHold() {
+        guard holdTask != .invalid else { return }
+        let t = holdTask
+        holdTask = .invalid
+        UIApplication.shared.endBackgroundTask(t)
     }
 
     /// From any thread: logged on the main one.

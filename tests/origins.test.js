@@ -187,7 +187,7 @@ async function twoBrowsers() {
   await a.waitForSocket(15000);
   const b = startHost(home);
   b.hello({ browser: 'Firefox', chrome: '159.0', installId: 'B' });
-  await b.waitForSocket(15000, b.ownSock);
+  await b.waitForSocket(15000, 'own');
   // Both have scanned once (with their hello), so later files count as new.
   await a.nextMods((mods) => !!modIn(mods, 'x.com/before'), { timeout: 15000 });
   await b.nextMods((mods) => !!modIn(mods, 'x.com/before'), { timeout: 15000 });

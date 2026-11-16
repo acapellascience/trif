@@ -57,7 +57,7 @@ async function twoBrowsers(first = 'Chrome', second = 'Firefox') {
   await a.waitForSocket(15000);
   const b = startHost(home);
   b.hello({ browser: second, chrome: second === 'Firefox' ? '159.0' : '141.0.0.0' });
-  await b.waitForSocket(15000, b.ownSock);
+  await b.waitForSocket(15000, 'own');
   for (const [ext, name] of [[a, 'a'], [b, 'b']]) {
     ext.handlers.tabs = () => [{ id: name === 'a' ? 1 : 2, windowId: 1, active: true, url: `https://${name}.example/`, title: `Tab ${name}` }];
     ext.handlers.status = () => ({ userScripts: true, chrome: '140.0.0.0', version: '0.1.0', mods: [], recording: [] });
@@ -76,7 +76,7 @@ test('host: serves its own helper-<pid>.sock (0600) next to helper.sock, and rem
   const home = tempDir();
   const ext = startHost(home);
   await ext.waitForSocket();
-  await ext.waitForSocket(5000, ext.ownSock);
+  await ext.waitForSocket(5000, 'own');
   assert.equal(fs.statSync(ext.ownSock).mode & 0o777, 0o600);
   const own = await sockRequest(ext.ownSock, { id: 1, cmd: 'ping' });
   assert.equal(own.result.pid, ext.child.pid);
@@ -97,7 +97,7 @@ test('host: a second helper answers on its own socket as secondary; page command
   const a = startHost(home);
   await a.waitForSocket();
   const b = startHost(home);
-  await b.waitForSocket(5000, b.ownSock);
+  await b.waitForSocket(5000, 'own');
   a.handlers.run = () => ({ value: 'from a' });
   b.handlers.run = () => ({ value: 'from b' });
 
@@ -138,7 +138,7 @@ test('host: removes a helper-<pid>.sock left by a helper that died', async () =>
   const stale = path.join(home, `helper-${await deadPid()}.sock`);
   fs.writeFileSync(stale, '');
   const ext = startHost(home);
-  await ext.waitForSocket(5000, ext.ownSock);
+  await ext.waitForSocket(5000, 'own');
   await waitFor(() => !fs.existsSync(stale), { message: 'stale socket removed' });
   assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /removed stale socket .*helper-\d+\.sock/);
 });

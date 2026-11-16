@@ -85,3 +85,17 @@ jobs:
           name: posix-on-windows
           path: posix-on-windows.tap
           if-no-files-found: ignore
+
+  # A prototype, not part of TRIF yet (docs/WINDOWS.md "The sandbox"): a fence for agent runs' commands
+  # (an AppContainer, tests/windows-fence), with attempts to get out of each thing TRIF's sandbox
+  # guarantees on a Mac.
+  fence:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The fence, and attempts to get out of it
+        run: node tests/windows-fence/run.js

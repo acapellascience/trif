@@ -32,6 +32,12 @@ enum ChatActivity: String { case idle, working, replied }
 @MainActor
 final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     static var home: String { ChatService.claude.home }
+    /// How a reply's mods come to the app (Web/chat.js PICKUP): `.auto`, its code blocks handed over when the reply is
+    /// done (and Add to TRIF under each); `.button`, only by the person's Add to TRIF tap. One switch, both paths kept
+    /// apart (11-16: Tim is weighing `.button`, as OpenAI's terms forbid programmatically extracting output).
+    enum Pickup: String { case auto, button }
+    static let pickup: Pickup = ProcessInfo.processInfo.arguments.contains("-pickupbutton") ? .button : .auto
+
     /// TRIF in the chat (Web/chat.js; Tim, 11-13): its own world beside Claude's or ChatGPT's page.
     static let chatWorld = WKContentWorld.world(name: "trif-chat")
     @Published var service: ChatService = ChatService(rawValue: UserDefaults.standard.string(forKey: "chatService") ?? "") ?? .claude
@@ -76,6 +82,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         config.applicationNameForUserAgent = Browser.safariSuffix
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         // (Add to TRIF under each mod in a reply, and filling the message box: Web/chat.js, main frame only)
+        config.userContentController.addUserScript(WKUserScript(source: "globalThis.__trifChatPickup = '\(ClaudePane.pickup.rawValue)';", injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
         config.userContentController.addUserScript(WKUserScript(source: Browser.resource("chat", "js"), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
@@ -455,44 +462,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 self.activity = .idle
             }
         case "done":
-            var texts = d["mods"] as? [String] ?? []
-            let fetchList = (d["fetch"] as? [[String: Any]] ?? []).compactMap { f -> (URL, String)? in
-                guard let u = (f["url"] as? String).flatMap(URL.init(string:)), u.scheme == "https" else { return nil }
-                return (u, f["name"] as? String ?? u.lastPathComponent)
-            }
-            if let unread = d["unread"] as? [String], !unread.isEmpty {
-                Diagnostics.shared.log("chat files", "\(service.rawValue): a reply had file links the app couldn't read: \(unread.prefix(8).joined(separator: "; "))")
-            }
-            if !fetchList.isEmpty {
-                // (a reply's mod file on another site, a signed download address: fetched here, without cookies)
-                Task { @MainActor in
-                    for (u, name) in fetchList.prefix(6) {
-                        if let t = await ClaudePane.fetchText(u) { texts.append(t) }
-                        else { Diagnostics.shared.log("chat files", "\(self.service.rawValue): couldn't fetch \(name) from \(u.host ?? "?")") }
-                    }
-                    var e = d
-                    e["mods"] = texts
-                    e["fetch"] = nil
-                    e["unread"] = nil
-                    self.handleDone(e, texts)
-                }
-                return
-            }
-            handleDone(d, texts)
+            // (the mods: the reply's code blocks, on the auto path only; on the button path none, each comes by its tap)
+            handleDone(d, d["mods"] as? [String] ?? [])
         default: break
         }
     }
 
-    /// A text file at an address, 2 MB at most, 15 s at most; nil if it isn't one.
-    nonisolated static func fetchText(_ url: URL) async -> String? {
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-        req.httpShouldHandleCookies = false
-        guard let (data, response) = try? await URLSession.shared.data(for: req), (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
-              data.count < 2_000_000 else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    /// A reply done, with the mod files in it (code blocks and files): offered with Add this mod?.
+    /// A reply done, with the mod files in its code blocks (auto path): offered with Add this mod?. None (the button
+    /// path, or a reply without one): the chat button's replied mark.
     private func handleDone(_ d: [String: Any], _ texts: [String]) {
         report.log("claude", "\(service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")), \(texts.count) mod file(s) in it")
         let late = d["why"] as? String == "late"

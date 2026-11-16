@@ -129,7 +129,11 @@ an app", below.
 The chat runs TRIF's script (TrifProbe/Web/chat.js) in a world of its own beside the chat's page: it fills the
 message box, notices a send, watches whether a reply is still being written (Claude's stop button and its
 streaming mark; ChatGPT's stop button; else the reply unchanged for six seconds) and reads the code blocks
-written in the reply. It never presses Send and never reads the rest of the conversation.
+written in the reply. It never presses Send and never reads the rest of the conversation. It reads only what the
+page shows: no internal routes of claude.ai or chatgpt.com, no session token, no cookie (Tim, 11-16: nothing against
+their terms). A .js file a reply attaches comes to TRIF only when the person taps it (a download the app catches).
+A reply's mods reach the app one of two ways, kept apart (ClaudePane.pickup, chat.js PICKUP): `auto` (the default:
+handed over when the reply is done) or `button` (only an Add to TRIF tap; `-pickupbutton` at launch).
 
 ## The browser probe as an app (branch ios-poc, 11-15)
 

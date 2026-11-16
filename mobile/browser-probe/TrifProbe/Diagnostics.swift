@@ -269,13 +269,14 @@ final class Stopwatch {
 /// server that rotates its cookie, the app and its WebKit networking process killed together (as on a phone) up to
 /// 8 s after a load. So each change is written down at once, a tenth of a second after it, and on leaving the front,
 /// with WebKit's own flush (a private call, used only if WebKit has it: checked, never assumed).
-/// And, for the sites whose sign-ins Tim lost (x.com, twitter.com, instagram.com, claude.ai, chatgpt.com), the
-/// diagnostics name their cookies, with each one's domain and expiry, and what changed during a run: added,
-/// removed, or replaced by a new value. Names only: a cookie's value is never logged, only compared, in memory.
+/// And, for the sites whose sign-ins Tim lost (x.com, twitter.com, instagram.com), the diagnostics name their
+/// cookies, with each one's domain and expiry, and what changed during a run: added, removed, or replaced by a new
+/// value. Names only: a cookie's value is never logged, only compared, in memory. Not claude.ai's or chatgpt.com's
+/// (11-16: no code touches the chats' session tokens); those are only counted, as every site's are.
 @MainActor
 final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
     static let shared = CookieKeeper()
-    static let watched: Set<String> = ["x.com", "twitter.com", "instagram.com", "claude.ai", "chatgpt.com"]
+    static let watched: Set<String> = ["x.com", "twitter.com", "instagram.com"]
     private var store: WKHTTPCookieStore { WKWebsiteDataStore.default().httpCookieStore }
     private var started = false
     private var pending: Task<Void, Never>?
@@ -352,7 +353,7 @@ final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
         remember(list)
         let bySite = Dictionary(grouping: list) { Site.of($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }
         // (a line a site: the log keeps 1500 characters a line)
-        if bySite.isEmpty { Diagnostics.shared.log("cookie names", "\(when): none for x.com, twitter.com, instagram.com, claude.ai, chatgpt.com") }
+        if bySite.isEmpty { Diagnostics.shared.log("cookie names", "\(when): none for x.com, twitter.com, instagram.com") }
         for site in bySite.keys.sorted() {
             let names = bySite[site]!.sorted { $0.name < $1.name }.map { "\($0.name) (\($0.domain), \(CookieKeeper.when($0)))" }
             Diagnostics.shared.log("cookie names", "\(when), \(site): \(names.joined(separator: ", "))")

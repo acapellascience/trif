@@ -118,8 +118,12 @@ test('the chat script: a chat with no stop button to see, done once the reply ha
   }
 });
 
-test('the chat script: mod files a reply attaches (a download link, ChatGPT\'s sandbox link), read with no click; a file and a block with the same header: once', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
-  const server = http.createServer(handler(() => {}));
+test('the chat script: a file a reply attaches is never read (no request at all); a button-only chat hands mods over only by a tap', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+  // (Tim, 11-16: nothing against Claude's or ChatGPT's terms: no internal routes, no session token, no reading a
+  // reply's files; a file comes only when the person taps it, as a download the app catches)
+  const h = handler(() => {});
+  const asked = [];
+  const server = http.createServer((req, res) => { asked.push(req.url); h(req, res); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   let browser;
@@ -134,20 +138,29 @@ test('the chat script: mod files a reply attaches (a download link, ChatGPT\'s s
     await page.goto(`${base}/chat.html`);
     await page.addScriptTag({ content: STUB });
     await page.addScriptTag({ content: CHAT });
+    asked.length = 0;
     const file = await ask('as a file please', 1);
-    assert.equal(file.mods.length, 1, JSON.stringify(file.mods.map((m) => m.slice(0, 160))));
-    assert.match(file.mods[0], /@name\s+Calmer feed[\s\S]*==\/WebMod==/);
-    assert.deepEqual(file.unread || [], []);
+    assert.deepEqual(file.mods, [], 'an attached file is not read');
+    assert.equal(file.pickup, 'auto');
     const both = await ask('file and block, the same mod', 2);
-    assert.equal(both.mods.length, 1, 'a file and a code block with the same header: offered once');
+    assert.equal(both.mods.length, 1, 'the code block only');
+    assert.deepEqual(asked, [], `the chat script asked for nothing: ${asked.join(', ')}`);
+    const src = CHAT;
+    for (const route of ['/api/', 'backend-api', 'auth/session', 'wiggle', 'chat_conversations', 'document.cookie', 'Authorization', 'fetch(']) {
+      assert.equal(src.includes(route), false, `chat.js has no ${route}`);
+    }
 
-    // ChatGPT's sandbox:/mnt/data/… link, through its session and download route (stand-ins in serve.js)
-    await page.goto(`${base}/chat.html?gpt`);
-    await page.addScriptTag({ content: STUB });
+    // The button path (ClaudePane.pickup = .button): done carries no mods; the person's Add to TRIF tap does.
+    await page.goto(`${base}/chat.html`);
+    await page.addScriptTag({ content: `${STUB} globalThis.__trifChatPickup = 'button';` });
     await page.addScriptTag({ content: CHAT });
-    const sandbox = await ask('save it to the sandbox', 1);
-    assert.equal(sandbox.mods.length, 1);
-    assert.match(sandbox.mods[0], /@name\s+Sandbox mod/);
+    const done = await ask('Make the headings green', 1);
+    assert.equal(done.pickup, 'button');
+    assert.deepEqual(done.mods, []);
+    await page.waitForFunction(() => (document.querySelector('.trif-add') ? [1] : null));
+    await page.click('.trif-add');
+    const [mod] = await waitPost(page, 'mod');
+    assert.match(mod.text, /@name\s+Calmer feed[\s\S]*==\/WebMod==/);
   } finally {
     if (browser) await browser.close();
     server.close();

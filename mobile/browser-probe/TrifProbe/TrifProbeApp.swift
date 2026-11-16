@@ -877,6 +877,32 @@ final class BarState: NSObject, ObservableObject {
     private var target: CGFloat = 0
     private var speed: CGFloat = 0
     private var link: CADisplayLink?
+    /// The software keyboard is up (Tim, 11-15: the toolbar rode on it, eating the room): the toolbar goes down with
+    /// it and comes back with it, as Chrome's does. Not for a hardware keyboard's strip alone (the keyboard's frame
+    /// must cover more than that of the screen).
+    @Published private(set) var keyboardUp = false
+
+    override init() {
+        super.init()
+        for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardWillHideNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] n in
+                let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+                let duration = (n.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
+                let hiding = n.name == UIResponder.keyboardWillHideNotification
+                MainActor.assumeIsolated { self?.keyboard(hiding ? .zero : end, duration: duration) }
+            }
+        }
+    }
+
+    private func keyboard(_ end: CGRect, duration: Double) {
+        let screen = UIScreen.main.bounds
+        let overlap = end.isEmpty ? 0 : max(0, screen.maxY - max(end.minY, screen.minY))
+        let up = overlap > 150
+        guard up != keyboardUp else { return }
+        withAnimation(.easeOut(duration: max(duration, 0.1))) { keyboardUp = up }
+        insets.set(keyboard: up)
+        applyInsets()
+    }
 
     func measured(full: CGFloat) {
         let e = max(full - BarState.compactHeight, 0)
@@ -1005,7 +1031,8 @@ final class BarState: NSObject, ObservableObject {
         guard let wv = webView else { return }
         if #available(iOS 26, *) {
             let p = progress
-            let e = UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * p, 0) * 2).rounded() / 2, right: 0)
+            let gone = keyboardUp ? 1 : p // (the toolbar, gone down with the keyboard)
+            let e = UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * gone, 0) * 2).rounded() / 2, right: 0)
             if wv.obscuredContentInsets != e { wv.obscuredContentInsets = e }
             if range {
                 wv.setMinimumViewportInset(UIEdgeInsets(top: 0, left: 0, bottom: max(bottomHeight - toolbarHeight, 0), right: 0),
@@ -1021,7 +1048,10 @@ final class BarInsets: ObservableObject {
     @Published private(set) var top: CGFloat = 0
     @Published private(set) var bottom: CGFloat = 0
     @Published private(set) var toolbar: CGFloat = 50
+    /// The software keyboard is up: the toolbar is down behind it, so what lies over the page leaves it no room.
+    @Published private(set) var keyboard = false
     func set(toolbar t: CGFloat) { if abs(t - toolbar) > 0.5 { toolbar = t } }
+    func set(keyboard k: Bool) { if k != keyboard { keyboard = k } }
     func set(top t: CGFloat, bottom b: CGFloat) {
         if abs(t - top) > 0.5 { top = t }
         if abs(b - bottom) > 0.5 { bottom = b }
@@ -1031,7 +1061,7 @@ final class BarInsets: ObservableObject {
 /// Room at the foot for the toolbar (the open chat leaves it showing).
 struct ToolbarRoom: ViewModifier {
     @ObservedObject var insets: BarInsets
-    func body(content: Content) -> some View { content.padding(.bottom, insets.toolbar) }
+    func body(content: Content) -> some View { content.padding(.bottom, insets.keyboard ? 0 : insets.toolbar) }
 }
 
 /// Room for the full bars around something that lies under them.
@@ -1102,6 +1132,9 @@ struct BottomBars<Notes: View, Middle: View, Toolbar: View>: View {
         self.toolbar = toolbar()
     }
 
+    /// How far the toolbar has gone: with the page's scrolling, or all the way while the keyboard is up.
+    private var gone: CGFloat { bars.keyboardUp ? 1 : bars.progress }
+
     var body: some View {
         VStack(spacing: 0) {
             notes
@@ -1109,12 +1142,12 @@ struct BottomBars<Notes: View, Middle: View, Toolbar: View>: View {
                 middle
                 toolbar
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bars.measured(toolbar: $0) }
-                    .opacity(Double(1 - bars.progress))
-                    .allowsHitTesting(bars.progress < 0.5)
-                    .accessibilityHidden(bars.progress >= 0.5)
+                    .opacity(Double(1 - gone))
+                    .allowsHitTesting(gone < 0.5)
+                    .accessibilityHidden(gone >= 0.5)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bars.measured(bottom: $0) }
         }
-        .offset(y: bars.progress * bars.toolbarHeight)
+        .offset(y: gone * bars.toolbarHeight)
     }
 }

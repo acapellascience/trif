@@ -16,6 +16,25 @@ enum ChatService: String, CaseIterable, Identifiable {
     case claude = "Claude", chatgpt = "ChatGPT"
     var id: String { rawValue }
     var home: String { ChatService.standIn ?? (self == .claude ? "https://claude.ai/new" : "https://chatgpt.com/") }
+
+    // MARK: a project for TRIF's chats (Tim, 11-16: they cluttered his history)
+    /// The project TRIF's new chats start in, picked by the person (Use this project for TRIF chats), or nil.
+    var project: URL? { UserDefaults.standard.string(forKey: "chatProject.\(rawValue)").flatMap(URL.init(string:)) }
+    /// The person said the project has TRIF's instructions (then a new chat gets the page, not the 16 KB guide again).
+    var projectHasGuide: Bool { project != nil && UserDefaults.standard.bool(forKey: "chatProjectGuide.\(rawValue)") }
+    func useProject(_ url: URL?, hasGuide: Bool) {
+        UserDefaults.standard.set(url?.absoluteString, forKey: "chatProject.\(rawValue)")
+        UserDefaults.standard.set(hasGuide, forKey: "chatProjectGuide.\(rawValue)")
+    }
+    /// Where a new chat starts: the project's page (its message box starts a chat in it), else a new chat.
+    var start: String { project?.absoluteString ?? home }
+    /// Where the person makes a project.
+    var projectsPage: String { ChatService.standIn ?? (self == .claude ? "https://claude.ai/projects" : "https://chatgpt.com/") }
+    /// A project's own page: claude.ai/project/<id>; chatgpt.com/g/g-p-<id>-<name>/project.
+    func isProjectPage(_ url: URL?) -> Bool {
+        guard let url, let h = URL(string: home)?.host, url.host == h else { return false }
+        return self == .claude ? url.path.hasPrefix("/project/") : url.path.range(of: "^/g/g-p-[^/]+/project/?$", options: .regularExpression) != nil
+    }
     /// (development) `-chathome <address>`: a stand-in chat page for both (mobile/shared/pages/chat.html, served by
     /// mobile/serve.js), for the Simulator, where neither can be signed in to.
     static let standIn: String? = {
@@ -233,7 +252,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private var contextNext = false
     /// Where the pane opens: the site's conversation, else a new one.
     private var resumeURL: URL? {
-        UserDefaults.standard.string(forKey: lastKey(service, site)).flatMap(URL.init(string:)) ?? URL(string: service.home)
+        UserDefaults.standard.string(forKey: lastKey(service, site)).flatMap(URL.init(string:)) ?? URL(string: service.start)
     }
 
     /// Loads an address in the chat, marked as loading at once (a fill waits for it: waitForPage).
@@ -266,7 +285,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     var onChatPage: Bool {
         guard let u = webView.url, let home = URL(string: service.home), u.host == home.host else { return false }
         let p = u.path
-        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p == home.path || p == "/" || p == "/new"
+        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
     }
 
     private func catchUp() {
@@ -321,7 +340,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func home() {
         UserDefaults.standard.removeObject(forKey: lastKey(service, site))
         activity = .idle
-        guard let url = URL(string: service.home) else { return }
+        guard let url = URL(string: service.start) else { return }
         go(url)
         guard let ready = prepare() else { return }
         queue { [weak self] in await self?.fillContext(ready) }
@@ -367,7 +386,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let followUp = conv.map(hasContext) ?? false
         let sw = Stopwatch("\(followUp ? "the follow-up" : "the instructions") for \(browser.host.isEmpty ? "a new tab" : browser.host)")
         let shot = Task { @MainActor in await browser.quickScreenshot() }
-        let text = Task { @MainActor in followUp ? await browser.feedbackForChat(conv: conv, sw) : await browser.pageForChat(conv: conv, sw) }
+        // (a new chat in TRIF's project, which has TRIF's instructions: the page only; once sent, the chat counts as
+        // having them, as the project does)
+        let inProject = !followUp && conv == nil && service.projectHasGuide
+        if inProject { projectFill = true }
+        let text = Task { @MainActor in followUp ? await browser.feedbackForChat(conv: conv, sw) : await browser.pageForChat(conv: conv, sw, guideInProject: inProject) }
         return Prepared(followUp: followUp, conv: conv, text: text, shot: shot, watch: sw)
     }
 
@@ -480,7 +503,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "sent":
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
             report.log("claude", "\(service.rawValue): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
-            if d["withInstructions"] as? Bool == true { if let conv = conversation { noteContext(conv) } else { contextNext = true } }
+            if d["withInstructions"] as? Bool == true || projectFill { if let conv = conversation { noteContext(conv) } else { contextNext = true } }
+            projectFill = false
             lastFill = nil
             activity = .working
             workingSince = Date()
@@ -714,7 +738,43 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { if webView === self.webView { loading = true } }
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { if webView === self.webView { navigating = false } }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === self.webView else { return }
+        navigating = false
+        projectPage = service.isProjectPage(webView.url) && webView.url?.absoluteString != service.project?.absoluteString
+    }
+    /// The page went into a new chat in TRIF's project without the guide (the project has it).
+    private var projectFill = false
+    /// The chat shows a project's page that isn't TRIF's project yet (the top bar offers to use it).
+    @Published var projectPage = false
+    /// ⋯'s Keep TRIF chats in a project: the chat, at the service's projects (TRIF's instructions on the clipboard).
+    func openProjects() {
+        UIPasteboard.general.string = ClaudePane.projectInstructions
+        start()
+        shown = true
+        if let u = URL(string: service.projectsPage) { go(u) }
+        report.log("claude", "\(service.rawValue): to its projects, TRIF's instructions copied")
+    }
+    /// What goes in a project's instructions: how TRIF mods are written, and how to answer (agent-facing words).
+    static var projectInstructions: String {
+        """
+        This project is for making TRIF mods: small changes to websites, made in the TRIF app. Each chat starts with a page I'm looking at in TRIF: its address, a screenshot, and an outline of the page in which each line starts with a CSS selector for a part of it.
+
+        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Everything you need is in what I send: don't open the page in a browser or any other tool.
+
+        --- How TRIF mods are written ---
+        \(Browser.resource("mod-guide", "txt"))
+        """
+    }
+    /// The project shown, used for TRIF's chats from now on.
+    func useShownProject(hasGuide: Bool) {
+        guard let u = webView.url, service.isProjectPage(u) else { return }
+        var c = URLComponents(url: u, resolvingAgainstBaseURL: false)
+        c?.query = nil; c?.fragment = nil
+        service.useProject(c?.url, hasGuide: hasGuide)
+        projectPage = false
+        report.log("claude", "\(service.rawValue): TRIF's chats start in a project now\(hasGuide ? ", which has TRIF's instructions" : "")")
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if webView === self.webView { loading = false }
@@ -799,6 +859,11 @@ struct ChatScreen: View {
                 Button { pane.home() } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel("Start over")
             }
+            .overlay(alignment: .bottom) {
+                // (a project's page, not yet TRIF's: use it for TRIF's chats)
+                if pane.projectPage { ProjectOffer(pane: pane).offset(y: 44) }
+            }
+            .zIndex(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             Divider()
@@ -848,5 +913,29 @@ struct ChatGlyph: View {
                     }
                 }
             }
+    }
+}
+
+/// "Use this project for TRIF chats" over a project's page in the chat; then whether it has TRIF's instructions (so
+/// a new chat there gets the page without them).
+struct ProjectOffer: View {
+    @ObservedObject var pane: ClaudePane
+    @State private var asking = false
+    var body: some View {
+        Button { asking = true } label: {
+            Label("Use this project for TRIF chats", systemImage: "folder")
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        }
+        .zIndex(2)
+        .confirmationDialog("Use this project for TRIF chats?", isPresented: $asking, titleVisibility: .visible) {
+            Button("Use it: TRIF's instructions are in it") { pane.useShownProject(hasGuide: true) }
+            Button("Use it: they aren't in it") { pane.useShownProject(hasGuide: false) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("New TRIF chats start in this project. If you pasted TRIF's instructions into it, each chat gets just the page.")
+        }
     }
 }

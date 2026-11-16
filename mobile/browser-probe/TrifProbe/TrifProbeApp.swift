@@ -236,6 +236,7 @@ struct ContentView: View {
     @State private var showMods = false
     @State private var addingIcon = false
     @State private var pickingFolder = false
+    @State private var askingProject = false
     @ObservedObject private var folder = FolderWatch.shared
     @State private var importing = false
     @State private var asking = false
@@ -409,6 +410,15 @@ struct ContentView: View {
             if case .success(let urls) = result { browser.importFiles(urls) }
         }
         .sheet(isPresented: $addingIcon) { WebClipSheet().environmentObject(browser) }
+        .alert(pane.service.project == nil ? "Keep TRIF chats in a project" : "TRIF chats' project", isPresented: $askingProject) {
+            Button(pane.service.project == nil ? "Copy and go" : "Make another") { pane.openProjects() }
+            if pane.service.project != nil { Button("Stop using it", role: .destructive) { pane.service.useProject(nil, hasGuide: false) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(pane.service.project == nil
+                 ? "In \(pane.service.rawValue), make a new project and paste TRIF's instructions as its instructions (they're copied when you tap Copy and go). Then, on the project's page, tap Use this project for TRIF chats. New TRIF chats then start in it."
+                 : "New TRIF chats in \(pane.service.rawValue) start in your project\(pane.service.projectHasGuide ? ", which has TRIF's instructions" : ""). Project chats may still show in \(pane.service.rawValue)'s recent chats.")
+        }
         .background(Color.clear.fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { FolderWatch.shared.choose(url) }
         })
@@ -603,6 +613,7 @@ struct ContentView: View {
                 Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
                 Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
                 if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
+                Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
                 Button { onTab { addingIcon = true } } label: { Label("Add to Home Screen", systemImage: "plus.app") }
                     .disabled(!onWebPage)
                 Divider()

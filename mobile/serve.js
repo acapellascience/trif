@@ -41,6 +41,8 @@ function handler(log = console.log) {
     if (/^c\/[\w-]+$/.test(name)) name = 'chat.html';
     // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)
     if (/^chat\/[\w-]+$/.test(name)) name = 'chat.html';
+    // (and a project's page, /project/<id>, as claude.ai's: its message box starts a chat in the project)
+    if (/^project\/[\w-]+$/.test(name)) name = 'chat.html';
     if (name === '') {
       const list = Object.keys(headers).map((f) => `<li><a href="${f}">${f}</a>${headers[f]['Content-Security-Policy'] ? ' (strict policy)' : ''}</li>`).join('');
       res.writeHead(200, { 'Content-Type': TYPES['.html'] });

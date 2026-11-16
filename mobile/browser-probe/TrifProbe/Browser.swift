@@ -767,7 +767,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     private var baseline: (host: String, layout: String)?
 
     /// What the chat gets for this page: how TRIF mods are written, then its outline. Notes its layout.
-    func pageForChat(conv: String? = nil, _ sw: Stopwatch? = nil) async -> String? {
+    func pageForChat(conv: String? = nil, _ sw: Stopwatch? = nil, guideInProject: Bool = false) async -> String? {
         guard let o = await outline() else { return nil }
         sw?.lap("outline", "\(o.chars) chars")
         // (agent-facing words: what TRIF mods are and how to hand one over, then the page)
@@ -775,6 +775,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let origin = page.map { "\($0.scheme ?? "https")://\($0.host ?? "")" } ?? "https://\(host)"
         let here = await alreadyHere(conv: conv)
         sw?.lap("mods and their errors")
+        // (a chat in the person's TRIF project, whose instructions have how TRIF mods are written: the page only)
+        if guideInProject {
+            let r = """
+            I'm looking at \(page?.absoluteString ?? host) in TRIF (how TRIF mods are written is in this project's instructions). Its @match must cover \(origin)/*; for the whole site, all of its subdomains too (https://*.\(Site.of(page?.host ?? host))/*). A screenshot is attached; below is an outline of the page, each line starting with a CSS selector.
+            \(here)
+            --- The page: \(page?.absoluteString ?? host) ---
+            \(o.text)
+            """
+            report.log("outline", "\(host): \(o.chars) characters, for a chat in TRIF's project (\(r.count) characters in all, without the guide)")
+            return r
+        }
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 

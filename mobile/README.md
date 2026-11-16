@@ -145,6 +145,14 @@ Built on the probe, toward something to use every day:
 - **The chat follows the tab's site** (ClaudePane.follow). Each site (its domain) keeps its own conversation:
   switching tabs, or going to another site, brings that site's chat back, or a new one. Start over forgets
   the site's.
+- **TRIF chats in a project** (ClaudePane: ChatService.project, openProjects, ProjectOffer; 11-16). ⋯ → Keep TRIF
+  chats in a project… copies TRIF's instructions (the reply note plus the mod guide) and opens the service's
+  projects; the person makes the project there. On a project's page the chat offers Use this project for TRIF
+  chats, which keeps that URL (with whether the instructions were pasted in). New chats start there (no private
+  APIs: just that page's composer); with the instructions in the project, the first message is the page alone,
+  without the 16 KB guide. Project chats still show in Recents on both services (user reports, 11-16), so this
+  groups them, it doesn't hide them. Unchecked on real logged-in pages: Claude's `/project/<id>` and ChatGPT's
+  `/g/g-p-<id>-<name>/project` composers. The stand-in: serve.js answers `/project/<id>` with chat.html.
 - **History** (History.swift). Every page any tab shows, newest first, by day; search, tap to open, long-press
   for a new tab, swipe to delete, Clear… (last hour, today, all). Kept in one file in Application Support, left
   out of backups; nothing sends it anywhere.

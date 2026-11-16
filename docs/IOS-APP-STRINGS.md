@@ -246,6 +246,17 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | A QR code's link that can't be read | — | That code's mod couldn't be read: it may be cut short or damaged. |
 | If the folder can't be kept | — | TRIF couldn't keep that folder. |
 
+## TRIF chats in a project (added 11-16)
+
+| Where | Old | New |
+|---|---|---|
+| The ⋯ menu | — | Keep TRIF chats in a project… · once one is used: TRIF chats' project… |
+| Its question, before a project is used | — | **Keep TRIF chats in a project** In {Claude/ChatGPT}, make a new project and paste TRIF's instructions as its instructions (they're copied when you tap Copy and go). Then, on the project's page, tap Use this project for TRIF chats. New TRIF chats then start in it. · Copy and go · Cancel |
+| Its question, once one is used | — | **TRIF chats' project** New TRIF chats in {service} start in your project[, which has TRIF's instructions]. Project chats may still show in {service}'s recent chats. · Make another · Stop using it · Cancel |
+| Over a project's page in the chat (one TRIF isn't using yet) | — | Use this project for TRIF chats |
+| Tapping it | — | **Use this project for TRIF chats?** New TRIF chats start in this project. If you pasted TRIF's instructions into it, each chat gets just the page. · Use it: TRIF's instructions are in it · Use it: they aren't in it · Cancel |
+| What's copied for the project's instructions | — | agent-facing (TRIF's how-to-reply note and the mod guide), not for review |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

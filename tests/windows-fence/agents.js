@@ -22,6 +22,8 @@ if (process.env.GITHUB_ACTIONS !== 'true' && !process.argv.includes('--yes-this-
 
 const REPO = path.resolve(__dirname, '..', '..');
 const SYSROOT = process.env.SystemRoot || 'C:\\Windows';
+// (the echo MCP server inside the fence, as claudeCode sets it up: {command, args}; Codex's runs use it too)
+let FENCED_MCP = null;
 const sys = (n) => path.join(SYSROOT, 'System32', n);
 const rand = (n = 6) => crypto.randomBytes(n).toString('hex');
 const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
@@ -113,6 +115,7 @@ async function claudeCode(base) {
     grant: [{ path: path.join(fenced, 'app'), rights: 'r', to: 'capability' }, { path: path.join(fenced, 'node'), rights: 'r', to: 'capability' }, { path: path.join(fenced, 'box'), rights: 'rw' }],
     command: `"${path.join(fenced, 'node', 'node.exe')}" --preserve-symlinks --preserve-symlinks-main "${path.join(fenced, 'app', 'mcp-echo.js')}" -`,
   }));
+  FENCED_MCP = { command: fenceExe, args: ['run', fencedSpec] };
   const fencedConfig = path.join(base, 'mcp-fenced.json');
   fs.writeFileSync(fencedConfig, JSON.stringify({ mcpServers: { trif: { command: fenceExe, args: ['run', fencedSpec] } } }));
   const tcp = require('net').createServer((c) => c.destroy());
@@ -385,14 +388,30 @@ async function codexTools(base) {
   ];
   const viewOff = off('view_image');
   const unknown = 'standin';
-  for (const [label, extra, model, script] of [
-    ['a model name Codex doesn\'t know; read-only, the shell and view_image off, MCP', [...readOnly, ...noShell, ...viewOff], unknown, direct],
-    ['Codex\'s default model; read-only, the shell and view_image off, MCP', [...readOnly, ...noShell, ...viewOff], null, throughExec],
-    ['Codex\'s default model; workspace-write (to see where its own apply_patch may write), the shell and view_image off, MCP', [...noProfile, '-c', 'sandbox_mode="workspace-write"', ...noShell, ...viewOff], null, throughExec],
+  // Seen: Codex refuses an MCP tool's call under approval_policy="never" unless the server's tools are
+  // approved in its config. Two ways to say so, then the server inside the fence, asked to read the file
+  // outside and to reach a port on this computer.
+  const tcp = require('net').createServer((c) => c.destroy());
+  await new Promise((r) => tcp.listen(0, '127.0.0.1', r));
+  const server = (m, more) => ['-c', `mcp_servers.trif={ command = ${toml(m.command)}, args = [${m.args.map(toml).join(', ')}], ${more} }`];
+  const echo = { command: process.execPath, args: [path.join(__dirname, 'mcp-echo.js'), '-'] };
+  const calls = [
+    { call: { namespace: 'mcp__trif', name: 'trif', arguments: { args: ['status'] } } },
+    { custom: { name: 'exec', input: viaExec(`tools.mcp__trif__trif({ args: ['status'] })`) } },
+    { call: { namespace: 'mcp__trif', name: 'trif', arguments: { args: ['try', outside, String(tcp.address().port)] } } },
+    { custom: { name: 'exec', input: viaExec(`tools.apply_patch(${JSON.stringify(patch('sites/x.com/new.js', '// new'))})`) } },
+  ];
+  const closed = [...readOnly, ...noShell, ...viewOff];
+  for (const [label, extra, model, script, mcpArgs] of [
+    ['a model name Codex doesn\'t know; read-only, the shell and view_image off, MCP', closed, unknown, direct, mcp],
+    ['Codex\'s default model; read-only, the shell and view_image off, MCP', closed, null, throughExec, mcp],
+    ['the same, the MCP server\'s tools approved (default_tools_approval_mode="approve"); the server NOT fenced, so "try" reads and connects', closed, null, calls, server(echo, 'default_tools_approval_mode = "approve"')],
+    ['the same, approved tool by tool (tools.trif.approval_mode="approve")', closed, null, calls, server(echo, 'tools = { trif = { approval_mode = "approve" } }')],
+    ...(FENCED_MCP ? [['the same (default_tools_approval_mode), the MCP server inside the AppContainer fence: "try" must be refused both', closed, null, calls, server(FENCED_MCP, 'default_tools_approval_mode = "approve"')]] : []),
   ]) {
     const steps = [...script.map((x) => ({ ...x })), { say: 'done' }];
     const api = await startFakeModelServer({ script: steps, models: [unknown] });
-    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...mcp,
+    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...mcpArgs,
       '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses", supports_websockets = false, request_max_retries = 1, stream_max_retries = 1 }`, '-c', 'model_provider="standin"', ...(model ? ['-m', model] : []), '-'];
     const t0 = Date.now();
     const r = await runToolAsync(bin, args, { env, cwd: work, input: 'do the steps', timeout: 150000 });
@@ -400,7 +419,7 @@ async function codexTools(base) {
     console.log(`\n>>> ${label}: exit ${r.status}${r.error ? ` (${r.error})` : ''} after ${Math.round((Date.now() - t0) / 1000)} s; requests to the stand-in: ${api.requests.length}; the model it named: ${[...new Set(posts.map((q) => q.body.model))].join(', ')}`);
     const offered = new Map();
     for (const q of posts) for (const t of q.body.tools) if (t) offered.set(t.name || t.type, Array.isArray(t.tools) ? `${t.name}{${t.tools.map((n) => n && n.name).join(', ')}}` : `${t.name || t.type}`);
-    console.log(`  tools offered to the model: ${[...offered.values()].join(', ')}`);
+    console.log(`  tools offered to the model: ${[...offered.values()].join(', ') || `(none in "tools"; a request has: ${Object.keys((api.requests.find((q) => q.body && q.body.input) || { body: {} }).body).join(', ')})`}`);
     const ns = posts.flatMap((q) => q.body.tools).find((t) => t && Array.isArray(t.tools) && /trif/.test(String(t.name)));
     if (ns) console.log(`  the MCP tool as offered: ${JSON.stringify(ns).slice(0, 500)}`);
     const ex = posts.flatMap((q) => q.body.tools).find((t) => t && t.name === 'exec');
@@ -416,6 +435,7 @@ async function codexTools(base) {
     for (const f of planted) fs.rmSync(f, { force: true });
     await api.close();
   }
+  tcp.close();
 }
 
 (async () => {

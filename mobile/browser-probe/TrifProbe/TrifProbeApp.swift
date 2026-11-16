@@ -148,6 +148,10 @@ extension Model {
                 out = "spi: \(store.responds(to: NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")))"
             }
         }
+        if step["toolbar"] != nil {
+            let w = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+            out = "page button centre \(ContentView.pageButtonMidX), screen centre \((w?.bounds.midX ?? 0)), off by \(abs(ContentView.pageButtonMidX - (w?.bounds.midX ?? 0)))"
+        }
         if let id = step["approve"] as? String {
             for m in browser.mods.mods where m.held && (id == "*" || m.id == id) { browser.approveMod(m.id) }
         }
@@ -465,17 +469,19 @@ struct ContentView: View {
     }
 
     private var toolbar: some View {
-        HStack {
+        // (the page button at the screen's exact centre, a little bigger; the three on each side evenly in their half,
+        // mirrored: each side cell the same width. Tim, 11-15: evenly spaced, the bigger middle one sat 11 pt left)
+        HStack(spacing: 0) {
             // (with the chat open, back and forward only close it, back to the page as it was: Tim, 11-15, "that's
             // the behaviour people will expect")
             Button { if covered { closeCovers() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
                 .disabled(!covered && !browser.canGoBack)
                 .accessibilityLabel(covered ? backToTab : "Back")
-            Spacer()
+                .frame(maxWidth: .infinity)
             Button { if covered { closeCovers() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
                 .disabled(!covered && !browser.canGoForward)
                 .accessibilityLabel(covered ? backToTab : "Forward")
-            Spacer()
+                .frame(maxWidth: .infinity)
             // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
             Button { if pane.shown { pane.close() } else { closeCovers(); pane.open() } } label: {
                 ChatGlyph(activity: pane.activity).frame(width: 24, height: 24)
@@ -485,11 +491,12 @@ struct ContentView: View {
             }
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
-            Spacer()
+                .frame(maxWidth: .infinity)
             // (the page: back to it from whatever covers it; in the middle, a little bigger)
             Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil) }
                 .accessibilityLabel(backToTab)
-            Spacer()
+                .frame(width: 64)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { ContentView.pageButtonMidX = $0 }
             // (the mods' button is a switch, on or, with all paused, off: Tim, 11-15; the robot is the chat's now)
             Button { onTab { showMods = true } } label: {
                 SwitchGlyph(on: !store.paused).frame(width: 30, height: 24)
@@ -501,7 +508,7 @@ struct ContentView: View {
                     }
             }
             .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
-            Spacer()
+                .frame(maxWidth: .infinity)
             Button { onTab { browser.snapshot(); showTabs = true } } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
@@ -509,7 +516,7 @@ struct ContentView: View {
                 }
             }
             .accessibilityLabel("Tabs, \(browser.tabs.count) open")
-            Spacer()
+                .frame(maxWidth: .infinity)
             Menu {
                 Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
                 Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
@@ -537,10 +544,22 @@ struct ContentView: View {
                 }
             } label: { Image(systemName: "ellipsis.circle") }
             .accessibilityLabel("More")
+                .frame(maxWidth: .infinity)
         }
         .font(.title3)
-        .padding(.horizontal, 18)
+        // (the same room on both sides, the larger side's safe area (landscape): the row's centre is the screen's)
+        .padding(.horizontal, 6 + ContentView.sideInset)
         .padding(.vertical, 10)
+        .ignoresSafeArea(.container, edges: .horizontal)
+    }
+
+    /// (development: where the page button's centre is, for the step {"toolbar": 1})
+    static var pageButtonMidX: CGFloat = 0
+
+    /// The larger of the window's left and right safe areas (0 in portrait).
+    static var sideInset: CGFloat {
+        let w = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+        return max(w?.safeAreaInsets.left ?? 0, w?.safeAreaInsets.right ?? 0)
     }
 }
 

@@ -4,6 +4,7 @@
 // /api/version) and LM Studio / OpenAI-compatible servers (/v1/models) serve. Each POST to /responses
 // takes the next step of a script: {run: "<shell command>"} answers with a call to whichever shell tool
 // Codex offered (exec_command, shell_command or shell), {say: "<text>"} with a message (ending the turn).
+// {call: {name, arguments}} calls a tool by name, {custom: {name, input}} a free-form one (apply_patch).
 // Every request is kept in `requests` ({method, url, headers, body}). `echoAuth`: /models answers say the
 // Authorization header they came with (as `auth`), to check where a key goes.
 
@@ -29,7 +30,12 @@ function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b
       const tools = (json && Array.isArray(json.tools) ? json.tools : []).map((t) => t && (t.name || t.type));
       const n = step;
       let item;
-      if (s.run !== undefined) {
+      if (s.call !== undefined) {
+        // (a call to a tool by name: an MCP tool, say; `custom`: a free-form tool such as apply_patch)
+        item = { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name: s.call.name, arguments: JSON.stringify(s.call.arguments || {}) };
+      } else if (s.custom !== undefined) {
+        item = { type: 'custom_tool_call', id: `ctc_${n}`, call_id: `call_${n}`, name: s.custom.name, input: String(s.custom.input || '') };
+      } else if (s.run !== undefined) {
         const name = ['exec_command', 'shell_command', 'shell'].find((t) => tools.includes(t)) || 'shell';
         const args = name === 'exec_command' ? { cmd: s.run } : name === 'shell_command' ? { command: s.run } : { command: ['bash', '-lc', s.run] };
         item = { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name, arguments: JSON.stringify(args) };
@@ -56,7 +62,7 @@ function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b
         // The outputs Codex sent back for the tool calls so far (what each command printed).
         toolOutputs() {
           const last = [...requests].reverse().find((r) => r.body && Array.isArray(r.body.input));
-          return last ? last.body.input.filter((i) => i && i.type === 'function_call_output').map((i) => String(i.output)) : [];
+          return last ? last.body.input.filter((i) => i && (i.type === 'function_call_output' || i.type === 'custom_tool_call_output')).map((i) => (typeof i.output === 'string' ? i.output : JSON.stringify(i.output))) : [];
         },
         close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(() => r()); }),
       });

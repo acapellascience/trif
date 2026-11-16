@@ -264,11 +264,97 @@ async function codex(base, where = 'inside the user\'s profile folder') {
   fs.rmSync(profileCanary, { force: true });
 }
 
+// Codex without its shell: which tools it has under which settings (`codex debug prompt-input`: no model),
+// then real runs against a stand-in model that calls an MCP tool, apply_patch and the shell.
+async function codexTools(base) {
+  console.log('\n================ Codex: its tools, and a run without its shell');
+  const bin = which('codex');
+  if (!bin) { console.log('codex not found on PATH'); return; }
+  const codexAdapter = require(path.join(REPO, 'helper', 'lib', 'agents', 'codex'));
+  const work = path.join(base, 'cxt', 'ws');
+  put(path.join(work, 'AGENTS.md'), '# guide');
+  put(path.join(work, 'held.json'), '{}');
+  put(path.join(work, 'sites', 'x.com', 'a.js'), '// a');
+  put(path.join(work, 'sites', 'y.com', 'other.js'), '// other');
+  const box = path.join(base, 'cxt', 'box');
+  fs.mkdirSync(path.join(box, 'tmp'), { recursive: true });
+  const outside = put(path.join(base, 'cxt', 'home', 'secret.txt'), 'CANARY outside');
+  const codexHome = path.join(base, 'cxt', 'codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
+  const env = { ...process.env, CODEX_HOME: codexHome };
+  const toml = (v) => JSON.stringify(String(v));
+  const c = codexAdapter.command({ bin, prompt: 'hi', readable: [work], writable: [path.join(work, 'sites'), box], readOnly: [path.join(work, 'sites', 'y.com')], denied: [path.join(base, 'cxt', 'home')], tmp: path.join(box, 'tmp') });
+  const trifConfig = [];
+  for (let i = 0; i < c.args.length; i++) if (c.args[i] === '-c') trifConfig.push('-c', c.args[i + 1]);
+  const mcp = ['-c', `mcp_servers.trif={ command = ${toml(process.execPath)}, args = [${toml(path.join(__dirname, 'mcp-echo.js'))}, "-"] }`];
+  const all = (runTool(bin, ['features', 'list'], { env }).stdout || '').split(/\r?\n/).map((l) => l.trim().split(/\s+/)).filter((p) => p.length >= 3);
+  console.log(`features on by default: ${all.filter((p) => p[p.length - 1] === 'true').map((p) => p[0]).join(', ')}`);
+  const toolsOf = (config) => {
+    const r = runTool(bin, ['debug', 'prompt-input', ...config, 'hi'], { env, cwd: work, timeout: 120000 });
+    if (r.status !== 0) return { error: `${r.stderr.trim().slice(-400)} ${r.error || ''}` };
+    let input;
+    try { input = JSON.parse(r.stdout); } catch (e) { return { error: `not JSON: ${r.stdout.slice(0, 300)}` }; }
+    const tools = [];
+    for (const item of input.filter((x) => x.type === 'additional_tools')) for (const ns of item.tools || []) for (const t of ns.tools || [ns]) tools.push(t);
+    return { tools, web: /web_search/.test(r.stdout) };
+  };
+  const variants = [
+    ['as TRIF starts it today', trifConfig],
+    ['features.shell_tool=false', [...trifConfig, '-c', 'features.shell_tool=false']],
+    ['shell_tool=false, the trif MCP server', [...trifConfig, '-c', 'features.shell_tool=false', ...mcp]],
+    ['shell_tool=false, MCP, and every switch that might take the rest away', [...trifConfig, '-c', 'features.shell_tool=false', ...mcp,
+      ...['features.code_mode_host=false', 'features.sleep_tool=false', 'features.goals=false', 'features.multi_agent=false', 'features.collab=false', 'features.apply_patch_tool=false', 'include_apply_patch_tool=false', 'tools.view_image=false', 'features.view_image_tool=false', 'features.unified_exec=false', 'features.request_user_input=false'].flatMap((x) => ['-c', x])]],
+  ];
+  let trifTool = null;
+  for (const [label, config] of variants) {
+    const t = toolsOf(config);
+    if (t.error) { console.log(`\n>>> ${label}: ${t.error}`); continue; }
+    console.log(`\n>>> ${label}: ${t.tools.map((x) => `${x.name || '?'}(${x.type || '?'})`).join(', ')}${t.web ? '  [web_search mentioned]' : ''}`);
+    for (const x of t.tools) {
+      if (/trif/i.test(String(x.name)) && !trifTool) { trifTool = x.name; show(`the MCP tool as Codex offers it (${x.name})`, JSON.stringify(x).slice(0, 700)); }
+      if (x.name === 'apply_patch' && label.startsWith('as TRIF')) show('apply_patch as offered', JSON.stringify(x).slice(0, 500));
+      if (x.name === 'exec' && label.startsWith('features.shell_tool')) show('exec as offered without the shell (the tools it can call)', [...String(x.description || '').matchAll(/^### `([\w]+)`/gm)].map((m) => m[1]).join(', ') || JSON.stringify(x).slice(0, 400));
+    }
+  }
+  // Real runs, the stand-in model asking for each thing in turn.
+  const { startFakeModelServer } = require(path.join(REPO, 'tests', 'fake-model-server'));
+  const patch = (file, text) => `*** Begin Patch\n*** Add File: ${file}\n+${text}\n*** End Patch\n`;
+  const steps = [
+    { call: { name: trifTool || 'mcp__trif__trif', arguments: { args: ['status'] } } },
+    { custom: { name: 'apply_patch', input: patch('sites/x.com/new.js', '// new') } },
+    { custom: { name: 'apply_patch', input: patch('held.json.planted', 'planted in the workspace root') } },
+    { custom: { name: 'apply_patch', input: patch('sites/y.com/planted.js', '// planted in another site') } },
+    { custom: { name: 'apply_patch', input: patch(path.join(base, 'cxt', 'home', 'planted.txt'), 'planted outside') } },
+    { run: `type "${outside}"` },
+    { say: 'done' },
+  ];
+  for (const [label, extra] of [
+    ['no shell, MCP, TRIF\'s profile, Codex\'s sandbox as it comes', []],
+    ['the same, windows.sandbox="unelevated"', ['-c', 'windows.sandbox="unelevated"']],
+  ]) {
+    const api = await startFakeModelServer({ script: steps.map((x) => ({ ...x })), models: ['standin'] });
+    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...trifConfig, '-c', 'features.shell_tool=false', ...mcp, ...extra,
+      '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses" }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
+    const r = runTool(bin, args, { env, cwd: work, input: 'do the steps', timeout: 180000 });
+    console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
+    const asked = steps.filter((x) => !x.say).map((x) => (x.call ? `${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `apply_patch ${x.custom.input.split('\n')[1]}` : `shell: ${x.run}`));
+    const outs = api.toolOutputs();
+    console.log(asked.map((q, i) => `  asked   ${q.slice(0, 200)}\n  got     ${String(outs[i] === undefined ? '(no result)' : outs[i]).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n'));
+    const events = r.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    show('what Codex reported', events.filter((e) => e.type === 'item.completed' || e.type === 'error' || e.type === 'turn.failed').map((e) => JSON.stringify(e.item || e).slice(0, 260)).join('\n'), 3500);
+    if (r.stderr.trim()) show('stderr', r.stderr.slice(-1200));
+    console.log(`  afterwards: sites/x.com: ${fs.readdirSync(path.join(work, 'sites', 'x.com')).join(', ')}; sites/y.com: ${fs.readdirSync(path.join(work, 'sites', 'y.com')).join(', ')}; planted in the root: ${fs.existsSync(path.join(work, 'held.json.planted'))}; planted outside: ${fs.existsSync(path.join(base, 'cxt', 'home', 'planted.txt'))}`);
+    for (const f of [path.join(work, 'sites', 'x.com', 'new.js'), path.join(work, 'held.json.planted'), path.join(work, 'sites', 'y.com', 'planted.js'), path.join(base, 'cxt', 'home', 'planted.txt')]) fs.rmSync(f, { force: true });
+    await api.close();
+  }
+}
+
 (async () => {
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-agents-')));
   console.log(`scratch ${base}`);
   console.log(spawnSync(sys('cmd.exe'), ['/d', '/c', 'ver'], { encoding: 'utf8' }).stdout.trim());
   try { await claudeCode(base); } catch (e) { console.log(`Claude Code: ${e.stack || e.message}`); }
+  try { await codexTools(base); } catch (e) { console.log(`Codex's tools: ${e.stack || e.message}`); }
   try { await codex(base); } catch (e) { console.log(`Codex: ${e.stack || e.message}`); }
   // (and somewhere that isn't in anyone's profile folder: the runner's own temp folder, on D:)
   if (process.env.RUNNER_TEMP) { try { await codex(fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'trif-agents-')), 'outside any profile folder'); } catch (e) { console.log(`Codex: ${e.stack || e.message}`); } }

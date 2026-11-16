@@ -39,6 +39,21 @@ style mod's old name, `@rules`, still works):
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
+**Scrolling feeds: filter the data, not the drawn rows.** `hide` and `filter` (and a boxed mod's
+`post.hide()`) act on what the site has already drawn: it builds each item, then TRIF hides it. That's
+right for a few things: a box, a sidebar, an ad every tenth post. To drop many of a feed's items (X,
+Instagram, Threads, Facebook, Reddit, YouTube, TikTok: lists that load as you scroll and keep only the
+visible rows on the page), it costs: the site still builds every row, scrolling stutters (worst on
+phones), hidden rows leave gaps or blank stretches, and when most rows are hidden the list can stop
+loading more, because it only asks for more when its end comes on screen. There, remove the items from
+the response the feed is built from, so the site never draws them: a boxed mod with the `site-data`
+power (`trif.filterResponse`; BOXED.md, "Powers"), or a free mod that patches `fetch` and XHR
+(TECHNIQUES.md, "Filtering data before the app sees it"). The trade-off: more code, it depends on the
+response's shape (that changes less often than class names, but it changes), and it must keep the
+pagination cursors; if a whole page filters down to nothing, the list may stall. If you do hide drawn
+rows in such a list, hide the row's contents, not the row, so the list closes up. Tell the user which way
+you went and why, in a sentence.
+
 ## Boxed mods: when a style mod isn't enough
 
 When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **boxed
@@ -190,3 +205,19 @@ Good to know:
 - Where it isn't enough, see if a power covers it (below); if none does, say so and write a free mod; don't
   contort the mod.
   Examples: examples/boxed in TRIF's folder (Simple Shopping, DVD Logo).
+
+### Powers (BOXED.md): filtering a feed's data
+
+A boxed mod that needs one exception asks for it in its header, `// @powers sound, read-drafts`, from this
+menu. TRIF holds the mod until the user approves that set of powers, once (an update that asks for nothing
+new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. The quiet
+powers (`sound`, `controls`, `mods`, `preload`, `embeds`, `media`) don't make it wait on their own; a warned
+combination one of them makes does. No power
+sends anything the mod makes up (go-to and click go only where the header or the page's links say), so ask
+only for what the mod needs; a mod that needs the network is a free mod.
+
+- `site-data`: `trif.filterResponse(urlGlob, (data, {url, method, status}) => data)`: the site's JSON
+  responses (fetch and XHR) whose address matches (`*` for anything), as a plain copy, before the page
+  sees them. Change it in place or return it. **Remove or reorder only**: every string, number and boolean
+  in what you return, and every object key, has to be in what the site sent (a string or number no more
+  times than it was there), or TRIF keeps the original and `trif errors` says why. Synchronous: no `await`.

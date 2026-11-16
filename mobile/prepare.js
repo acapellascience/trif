@@ -72,7 +72,8 @@ function kitFile() {
 }
 
 // mod-guide.txt: what the chat is told about writing a mod, with the page's outline (the copy for Claude):
-// the agent guide's style-mod section and the boxed-mod section, as the workspace has them.
+// the agent guide's style-mod section and the boxed-mod section, as the workspace has them, plus how a
+// boxed mod asks for a power and the site-data power (filtering a feed's data: the chat can't open BOXED.md).
 const GUIDE_OUT = path.join(__dirname, 'shared', 'gen', 'mod-guide.txt');
 function guideFile() {
   const between = (file, start, end) => {
@@ -81,7 +82,10 @@ function guideFile() {
     if (a === -1 || b === -1) throw new Error(`${file}: no "${start}" … "${end}"`);
     return t.slice(a, b).trim();
   };
-  return `${between('AGENTS.md', '### Style mods: start here', '### A style section')}\n\n${between('BOXED.md', '## Boxed mods: when a style mod isn', '### Powers')}\n`;
+  const asking = between('BOXED.md', 'A boxed mod that needs one exception asks', '- `sound`');
+  const siteData = between('BOXED.md', '- `site-data`', '- `page-data`');
+  return `${between('AGENTS.md', '### Style mods: start here', '### A style section')}\n\n${between('BOXED.md', '## Boxed mods: when a style mod isn', '### Powers')}\n\n` +
+    `### Powers (BOXED.md): filtering a feed's data\n\n${asking}\n\n${siteData}\n`;
 }
 
 async function main() {

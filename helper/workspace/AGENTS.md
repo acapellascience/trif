@@ -149,6 +149,21 @@ style mod's old name, `@rules`, still works):
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
+**Scrolling feeds: filter the data, not the drawn rows.** `hide` and `filter` (and a boxed mod's
+`post.hide()`) act on what the site has already drawn: it builds each item, then TRIF hides it. That's
+right for a few things: a box, a sidebar, an ad every tenth post. To drop many of a feed's items (X,
+Instagram, Threads, Facebook, Reddit, YouTube, TikTok: lists that load as you scroll and keep only the
+visible rows on the page), it costs: the site still builds every row, scrolling stutters (worst on
+phones), hidden rows leave gaps or blank stretches, and when most rows are hidden the list can stop
+loading more, because it only asks for more when its end comes on screen. There, remove the items from
+the response the feed is built from, so the site never draws them: a boxed mod with the `site-data`
+power (`trif.filterResponse`; BOXED.md, "Powers"), or a free mod that patches `fetch` and XHR
+(TECHNIQUES.md, "Filtering data before the app sees it"). The trade-off: more code, it depends on the
+response's shape (that changes less often than class names, but it changes), and it must keep the
+pagination cursors; if a whole page filters down to nothing, the list may stall. If you do hide drawn
+rows in such a list, hide the row's contents, not the row, so the list closes up. Tell the user which way
+you went and why, in a sentence.
+
 ### A style section in boxed and free mods
 
 Most follow-up requests are looks: a colour, a size, a gap, what's hidden. In a boxed or free mod, put those

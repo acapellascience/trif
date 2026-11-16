@@ -61,8 +61,13 @@ const CODEX_HARMLESS = ['update_plan',
   // a question for the user: there's nobody to ask in a run (`codex exec`)
   'request_user_input',
   // the session's own goal: words Codex keeps for itself
-  'get_goal', 'create_goal', 'update_goal'];
-// (multi_agent_v1.*, its sub-agents: not here until what one starts with has been seen; below)
+  'get_goal', 'create_goal', 'update_goal',
+  // its sub-agents. Seen (Codex 0.169): one starts with what its parent has but these tools: no shell, no
+  // apply_patch or view_image of Codex's own, TRIF's tools from a fenced server. The second run below
+  // starts one and tries each way out from there, on every CI run.
+  ...['spawn_agent', 'wait_agent', 'send_input', 'close_agent', 'resume_agent'].map((n) => `multi_agent_v1.${n}`)];
+const CODEX_MINE = ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'view_image'];
+const codexKnown = (t) => CODEX_MINE.some((n) => t === `mcp__trif.${n}`) || CODEX_HARMLESS.includes(t);
 let failed = 0;
 function check(ok, what, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${!ok && detail ? `\n      ${String(detail).slice(0, 3000).split('\n').join('\n      ')}` : ''}`);
@@ -330,9 +335,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       // What Codex offered the model: TRIF's tools (a namespace's are listed inside it) and nothing that
       // touches the computer. A list of what's known, so a tool a new Codex adds fails here until looked at.
       const offered = offeredTo(api.requests.map((q) => q.body));
-      const mine = ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'view_image'];
-      const known = (t) => mine.some((n) => t === `mcp__trif.${n}` || t === `mcp__trif__${n}`) || CODEX_HARMLESS.includes(t);
-      check(offered.every(known) && mine.every((n) => offered.includes(`mcp__trif.${n}`) || offered.includes(`mcp__trif__${n}`)), `the tools Codex had: ${offered.join(', ')}`, `not looked at yet: ${offered.filter((t) => !known(t)).join(', ')}`);
+      check(offered.every(codexKnown) && CODEX_MINE.every((n) => offered.includes(`mcp__trif.${n}`)), `the tools Codex had: ${offered.join(', ')}`, `not looked at yet: ${offered.filter((t) => !codexKnown(t)).join(', ')}`);
       for (const q of api.requests) { if (q.body && Array.isArray(q.body.tools)) { console.log(`      (as it listed them: ${JSON.stringify(q.body.tools.map((t) => ({ type: t.type, name: t.name, tools: Array.isArray(t.tools) ? t.tools.map((x) => x.name) : undefined }))).slice(0, 1500)})`); break; } }
     }
     const tools = CX ? [] : [...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.map((t) => t.name)))].sort();
@@ -374,8 +377,8 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     check(/agent run \S+: fenced \(trif\.run\./.test(helperLog()), 'the helper\'s log says the run was fenced', helperLog());
   }
 
-  // ---- Codex's sub-agents: what does one start with? (For information until it's been read: the tools a
-  // sub-agent is offered, and what each of its attempts came to. Nothing may get out either way.)
+  // ---- Codex's sub-agents: one starts with what its parent has (no shell, none of Codex's own file tools,
+  // TRIF's tools from a fenced server), and gets out no more than its parent does.
   if (CX && run && run.done.ok === true) {
     console.log('\n  a sub-agent of Codex\'s (multi_agent_v1.spawn_agent), in a second run:');
     const first = api.requests.find((q) => q.body && Array.isArray(q.body.tools));
@@ -398,6 +401,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       { call: { namespace: 'mcp__trif', name: 'trif', arguments: { args: ['text', '--tab', '13'] } } },
       { say: 'child done' },
     ];
+    const BY_ATTACK = ['codex', 'codex', 'codex', 'codex', 'codex', 'files', 'files', 'trif'];
     const outputs = (j) => (Array.isArray(j && j.input) ? j.input : []).filter((i) => i && (i.type === 'function_call_output' || i.type === 'custom_tool_call_output')).map((i) => (typeof i.output === 'string' ? i.output : JSON.stringify(i.output)));
     pick = (j) => {
       const input = Array.isArray(j && j.input) ? j.input : [];
@@ -418,8 +422,14 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       console.log(`      spawn_agent answered: ${String(spawnOut).replace(/\s+/g, ' ').slice(0, 600)}`);
       const parentOut = outputs(([...api.requests].reverse().find((q) => q.body && Array.isArray(q.body.input) && !child.includes(q.body)) || {}).body);
       parentOut.slice(1).forEach((o) => console.log(`      wait_agent answered: ${String(o).replace(/\s+/g, ' ').slice(0, 400)}`));
-      console.log(`      requests from a sub-agent: ${child.length}; the tools it was offered: ${offeredTo(child).join(', ') || '(none listed)'}`);
-      outputs(child[child.length - 1]).forEach((o, i) => console.log(`      its attempt ${i + 1} (${JSON.stringify(attacks[i].call || attacks[i].custom || attacks[i]).slice(0, 90)}): ${String(o).replace(/\s+/g, ' ').slice(0, 220)}`));
+      const had = offeredTo(child);
+      check(child.length > 0 && had.every(codexKnown) && CODEX_MINE.every((n) => had.includes(`mcp__trif.${n}`)), `  a sub-agent started (${child.length} requests); the tools it had: ${had.join(', ') || '(none listed)'}`, `not looked at yet: ${had.filter((t) => !codexKnown(t)).join(', ')}`);
+      const got = outputs(child[child.length - 1]).map((r) => { try { const j = JSON.parse(r); return Array.isArray(j) ? parts(j) : r; } catch { return r; } });
+      BY_ATTACK.forEach((by, i) => {
+        const out = String(got[i] === undefined ? '(no answer)' : got[i]);
+        check(got[i] !== undefined && !out.includes(SECRET) && BY[by].test(out), `  refused, from the sub-agent: ${JSON.stringify(attacks[i].call || attacks[i].custom || attacks[i]).replace(/\\\\/g, '\\').slice(0, 100)}`, out);
+        console.log(`      ${out.replace(/\s+/g, ' ').slice(0, 170)}`);
+      });
     }
     pick = null;
     const later = JSON.stringify(api.requests.slice(before).map((q) => q.body));

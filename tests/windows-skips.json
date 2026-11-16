@@ -2,6 +2,7 @@
   "reasons": {
     "runs": "a side-panel run's test still written for macOS and Linux: #!/bin/sh stand-ins, a PATH with colons, a folder locked with chmod (docs/WINDOWS-PROGRESS.md)",
     "mac-command": "about the command and the sandbox settings for macOS and Linux, which Windows never builds (Windows' own: tests/windows-runs.test.js, \"Claude Code on Windows: …\")",
+    "argv-site": "there the run's site is named in what Claude Code is started with (its rule for the run's screenshots folder), and this test says nothing of the page is: the rule moves into the run's settings file first (docs/WINDOWS-PROGRESS.md)",
     "open-model": "chats with an open model are off there: no run of one has been fenced or attacked (docs/WINDOWS-PROGRESS.md)",
     "login": "logging an agent in from the panel is off there, with runs",
     "limits": "a run's limits are worked out for macOS's and Linux's sandboxes; Windows' aren't built",
@@ -27,6 +28,7 @@
       "agent.login: URL event, code, done ok; agent.list then says loggedIn (cached); nothing secret in helper.log": "login",
       "agent.login: bad code fails (redacted), cancel, one login at a time, bad requests, codex unsupported, time limit": "login",
       "agent.logout: only from the side panel; runs the agent's own logout; agent.list then says logged out": "login",
+      "agent.start: runId first, then session/text/tool events, one done with changedFiles and sessionId": "argv-site",
       "an expired login: one \"log in again\" error, no reply; agent.list says logged out until a login or a run works": "login",
       "claude adapter: command flags, resume and model; nothing private in argv": "mac-command",
       "doctor: an agent that isn't logged in is only a warning when the side panel's default can't run either": "runs",

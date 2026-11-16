@@ -193,7 +193,7 @@ struct ContentView: View {
         let _ = Diagnostics.shared.bodyRan("the browser's main view")
         page
         .onChange(of: phase) { _, p in
-            // (safe mode: the record is unclean only while the app is in front)
+            // (safe mode: the record is unclean only while the app is in front; Safety follows UIKit's own notices too)
             browser.safety.active(p == .active)
             if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot() } }
         }

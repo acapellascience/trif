@@ -17,8 +17,10 @@ import UserNotifications
 
 @MainActor
 final class Safety: ObservableObject {
-    /// What the last launch left: the sites whose mods were running, and whether it ended cleanly.
-    private struct Session: Codable { var clean: Bool; var sites: [String: [String]] }
+    /// What the last launch left: the sites whose mods were running, and whether it ended cleanly (it's unclean only
+    /// while the app is in front: a launch that never came to the front, one iOS prewarmed or launched in the
+    /// background, or one an installer ended, is clean); `since`: when it last came to the front or left it.
+    private struct Session: Codable { var clean: Bool; var sites: [String: [String]]; var since: Date? = nil }
     private static let key = "safety.session"
     private static let offKey = "safety.switchedOff"
 
@@ -39,6 +41,10 @@ final class Safety: ObservableObject {
         session = (UserDefaults.standard.data(forKey: Safety.key)).flatMap { try? JSONDecoder().decode(Session.self, from: $0) } ?? Session(clean: true, sites: [:])
         switchedOff = (UserDefaults.standard.data(forKey: Safety.offKey)).flatMap { try? JSONDecoder().decode([String: SwitchedOff].self, from: $0) } ?? [:]
         let args = ProcessInfo.processInfo.arguments
+        let ago = session.since.map { " \(Int(Date().timeIntervalSince($0))) s before this launch" } ?? ""
+        Diagnostics.shared.log("safe mode", session.clean
+            ? "the last run ended cleanly (it had left the front\(ago), or never came to it)"
+            : "the last run ended while the app was in front (it came to the front\(ago)), with mods running on \(session.sites.keys.sorted().joined(separator: ", ").nonEmpty ?? "no site")")
         if !session.clean, !session.sites.isEmpty, !args.contains("-nosafe") {
             for (site, ids) in session.sites {
                 let off = store.switchOff(ids, site: site)
@@ -48,8 +54,22 @@ final class Safety: ObservableObject {
             }
             saveOff()
         }
-        session = Session(clean: false, sites: [:])
+        // (clean until the app is in front: 11-16, Tim's phone switched x.com's mods off after an install over the app,
+        // because every launch was marked unclean from its start, in front or not)
+        session = Session(clean: true, sites: [:], since: Date())
         saveSession()
+        // (in front, or not, from UIKit's own notifications: they come for every change, the first one too, which
+        // SwiftUI's scenePhase onChange doesn't)
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.active(true) }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.active(false) }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.active(false) }
+        }
+        if UIApplication.shared.applicationState == .active { active(true) }
     }
 
     private func saveSession() { if let d = try? JSONEncoder().encode(session) { UserDefaults.standard.set(d, forKey: Safety.key) } }
@@ -57,7 +77,9 @@ final class Safety: ObservableObject {
 
     /// The app is in front (unclean until it leaves), or has left (clean).
     func active(_ inFront: Bool) {
+        guard session.clean == inFront else { return }
         session.clean = !inFront
+        session.since = Date()
         saveSession()
     }
 

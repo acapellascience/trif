@@ -183,8 +183,51 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
     return pageSize(tabId);
   }
 
+  /**
+   * What's in place for phone tab `tabId` (the panel's console line, `trif tabs`): its rules, the page script,
+   * and whether the page showing has the marker (the rules reached its document) and a service worker.
+   */
+  async function check(tabId) {
+    const p = phones.get(tabId);
+    if (!p) return { phone: false };
+    const rules = (await chrome.declarativeNetRequest.getSessionRules().catch(() => [])).filter((r) => p.ids.includes(r.id)).length;
+    const script = (await chrome.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] }).catch(() => [])).length > 0;
+    let page = null;
+    try {
+      const [r] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] }, world: 'ISOLATED', injectImmediately: true, args: [MARK],
+        func: (mark) => {
+          const nav = performance.getEntriesByType('navigation')[0];
+          return { url: location.href, marked: !!nav?.serverTiming?.some((e) => e.name === mark), worker: !!navigator.serviceWorker?.controller };
+        },
+      });
+      page = r?.result || null;
+    } catch (e) { page = { error: String(e?.message ?? e) }; }
+    return { phone: true, rules, script, page };
+  }
+
+  // A page in the phone tab that came without the marker (a service worker served it, or the HTTP cache: a
+  // reload, a link to another page of the site): loaded again, hard, once per address in a while.
+  const healed = new Map(); // tabId -> {url, at}
+  async function heal(tabId, url) {
+    if (!/^https?:/.test(url || '')) return;
+    const h = healed.get(tabId);
+    if (h && h.url === url && Date.now() - h.at < 15000) return;
+    const c = await check(tabId);
+    if (!c.phone || !c.page || c.page.error || c.page.marked || c.page.url !== url) return;
+    const u = new URL(url);
+    if (!(await chrome.permissions.contains({ origins: [`${u.protocol}//${u.hostname}/*`] }).catch(() => false))) {
+      log(`phone view, tab ${tabId}: no access to ${u.hostname}, so it sees a desktop there`);
+      return;
+    }
+    healed.set(tabId, { url, at: Date.now() });
+    log(`phone view, tab ${tabId}: ${url} came without the phone's rules${c.page.worker ? ' (its service worker served it)' : ''}: loading it again past the worker and the cache`);
+    await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+  }
+
   return {
     ready,
+    check: (tabId) => ready.then(() => check(Number(tabId))),
     isPhone: (tabId) => phones.has(Number(tabId)),
     get: (tabId) => phones.get(Number(tabId)) || null,
     windows: () => [...phones.values()].map((p) => p.window),
@@ -233,7 +276,11 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
           viewport = await fit(tabId, win.id, screen, home);
           if (!viewport) await new Promise((r) => setTimeout(r, 150));
         }
-        await chrome.tabs.reload(tabId);
+        // A hard reload: past the HTTP cache and the site's service worker. A page a service worker serves (X
+        // has one) comes from the worker's own request, which belongs to no tab (tabId -1): the tab's rules
+        // never see it, so the server would get the desktop user agent and the page no marker. A hard reload
+        // skips the worker for that load, and leaves the page uncontrolled, so its own requests are the tab's.
+        await chrome.tabs.reload(tabId, { bypassCache: true });
         if (panel && panelUrl) {
           const pw = await chrome.windows.get(win.id).catch(() => null);
           const pb = pw ? { left: pw.left + pw.width, top: pw.top, width: 420, height: pw.height } : {};
@@ -265,16 +312,20 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
         await chrome.tabs.update(tabId, { active: true });
         await chrome.windows.update(windowId, { focused: true }).catch(() => {});
       } catch (e) { log(`back to desktop: ${e?.message ?? e}`); }
-      if (reload) await chrome.tabs.reload(tabId).catch(() => {});
+      if (reload) await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {}); // (past the worker and the cache, as open)
       changed();
       return { back: true, window: windowId };
     },
 
     /** The browser's events: a phone window closed (its tab with it), a phone tab closed. */
     listen() {
+      chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
+        if (info.status === 'complete' && phones.has(tabId)) ready.then(() => heal(tabId, tab?.url || '')).catch(() => {});
+      });
       chrome.tabs?.onRemoved?.addListener((tabId) => { if (phones.has(tabId)) ready.then(() => forget(tabId)).then(changed).catch(() => {}); });
       chrome.windows?.onRemoved?.addListener((windowId) => {
         for (const [tabId, p] of phones) if (p.window === windowId) ready.then(() => forget(tabId)).then(changed).catch(() => {});
+        healed.clear();
       });
     },
   };

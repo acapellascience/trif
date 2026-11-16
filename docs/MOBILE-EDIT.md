@@ -101,6 +101,33 @@ Session rules with `tabIds` (only session rules take them), as `extension/tabloc
 - Rule ids from 1,000,000 up are the phone view's; tab locks (`tablock.js`, which removes session rules it
   doesn't own when it starts) leave them alone (`createTabLocks({ foreign })`).
 
+### A site's service worker (the x.com bug, 2026-11-16)
+
+Tim's x.com in his own Chrome opened the window but stayed a desktop site: no iPhone, no touch. The cause is
+X's **service worker**. On a site you've visited, the worker answers the tab's page loads: it makes the request
+itself, and a worker's requests belong to no tab (`tabId` −1). So the phone tab's rules never saw the page
+request (X got Chrome's desktop user agent) or its response (no `Server-Timing: trif-phone`, so the page script
+stood down: no touch, no iPhone navigator). The page's own `fetch`es went through the worker too. The tests had
+missed it: their pages had no worker, and Wikipedia and Instagram don't serve pages from one. Permissions
+weren't the cause: the same failure happens with the site granted, as Tim's was.
+
+The fix (`phone.js`): the phone view loads the page with a **hard reload** (`tabs.reload(…, {bypassCache: true})`),
+which skips the service worker and the HTTP cache for that load and leaves the page uncontrolled by the worker,
+so its own requests are the tab's again. And when a later page of the tab comes without the marker (a plain
+reload, a link the worker answers), TRIF **loads it again, hard**, once per address in 15 s. Back to desktop
+reloads hard too. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
+that serves a kept copy of the page (an app shell), visited first, as X is.
+
+Other hosts: X's API is `api.x.com`, under `*.x.com`, which the site's Connect gives. Pictures, scripts and video
+from `twimg.com` keep Chrome's user agent (no access there), which doesn't change what X lays out. So the phone
+view asks for no access beyond the site's. **To tell whether it's on**: the phone view's panel logs a line to
+its console (right-click the panel → Inspect) whenever it changes, for example `[TRIF] phone view, tab 12:
+rules on, page script registered, this page has the marker (it sees an iPhone)`, or `has NO marker (it sees a
+desktop), a service worker controls it`. `trif tabs` gives the phone's tab `phoneView: {rules, script, marked}`.
+
+Not checked on x.com itself: X refuses headless browsers (403), and getting past that is a bot check, so the
+real x.com needs one look in Tim's Chrome.
+
 ## 4. Touch and the rest, in the page
 
 `extension/phone-page.js`: a classic script registered with `chrome.scripting.registerContentScripts` (world

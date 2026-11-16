@@ -3222,12 +3222,19 @@ async function exportMod() {
 // The bar's phone button moves this tab into a phone-sized window where the site sees an iPhone, with a panel
 // window of its own beside it (which this panel isn't: it stays with the user's window). In that panel the
 // button is pressed, and a line under the bar says what the window is, with Back to desktop.
+let lastPhoneLine = '';
 async function refreshPhone() {
   const tabId = view.tab?.id;
   if (!Number.isInteger(tabId) || SAFARI) { view.phone = null; return; }
   try {
     const r = await request({ type: 'phone.state', tabId });
     if (view.tab?.id === tabId) view.phone = { tabId, ...r };
+    // (a line in the panel's console when what's in place changes: Tim's check that the phone view is one)
+    if (r?.phone) {
+      const line = `[TRIF] phone view, tab ${tabId}: rules ${r.rules === 2 ? 'on' : `MISSING (${r.rules} of 2)`}, page script ${r.script ? 'registered' : 'MISSING'}, ` +
+        (r.page?.error ? `page not readable (${r.page.error})` : r.page ? `this page ${r.page.marked ? 'has the marker (it sees an iPhone)' : 'has NO marker (it sees a desktop)'}${r.page.worker ? ', a service worker controls it' : ''}` : 'no page');
+      if (line !== lastPhoneLine) { (r.rules === 2 && r.script && r.page?.marked ? console.info : console.warn)(line); lastPhoneLine = line; }
+    }
   } catch { view.phone = null; }
 }
 

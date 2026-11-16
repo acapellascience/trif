@@ -1166,6 +1166,11 @@ const commands = {
 
   async tabs(args) {
     await phones.ready;
+    const phoneChecks = new Map();
+    for (const id of phones.tabs()) {
+      const c = await phones.check(id);
+      phoneChecks.set(id, { rules: c.rules, script: c.script, marked: !!c.page?.marked, ...(c.page?.worker ? { worker: true } : {}) });
+    }
     // (and the phone view's tabs, in popup windows of their own: `phone: true`, phone.js)
     const phoneTabs = (await Promise.all(phones.windows().map((windowId) => chrome.tabs.query({ windowId }).catch(() => [])))).flat();
     const tabs = [...await chrome.tabs.query({ windowType: 'normal' }), ...phoneTabs];
@@ -1176,6 +1181,11 @@ const commands = {
     }).map((t) => {
       // (a site the agent is Off for: its tab is there, but not what's in it, title or address past the site)
       const info = { ...tabInfo(t), ...(phones.isPhone(t.id) ? { phone: PHONE.name } : {}) };
+      if (info.phone) {
+        // (whether the phone view is really on there: its rules, the page script, the page marked)
+        const c = phoneChecks.get(t.id);
+        if (c) info.phoneView = c;
+      }
       let host = '';
       try { host = new URL(t.url || t.pendingUrl || '').hostname; } catch { /* none */ }
       if (agentCheck('text', host, agentSettings()) === 'ok') return info;
@@ -2331,7 +2341,10 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'phone.state': {
       await phones.ready;
       const p = phones.get(Number(msg.tabId));
-      return p ? { phone: true, device: PHONE.name, window: p.window } : { phone: false };
+      if (!p) return { phone: false };
+      // (what's in place for it: the panel logs it, so a phone view that isn't one can be told apart)
+      const c = await phones.check(Number(msg.tabId));
+      return { phone: true, device: PHONE.name, window: p.window, rules: c.rules, script: c.script, page: c.page };
     }
     case 'site.set': return setSiteOn(msg);
     case 'site.disconnect': return disconnectSite(msg);

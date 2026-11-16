@@ -44,7 +44,8 @@ test('the phone view: the site sees an iPhone in that tab only, and Back to desk
     const opened = await ask({ type: 'phone.open', tabId: phoneTab, screen: { left: 0, top: 25, width: 1470, height: 931 } });
     assert.ok(Number.isInteger(opened.window));
     assert.deepEqual(opened.viewport, { w: 390, h: 750 }, 'the page area is the phone\'s');
-    assert.deepEqual(await ask({ type: 'phone.state', tabId: phoneTab }), { phone: true, device: 'iPhone', window: opened.window });
+    const st = await waitFor('the phone page marked', async () => { const x = await ask({ type: 'phone.state', tabId: phoneTab }); return x.page?.marked && x; });
+    assert.deepEqual([st.phone, st.device, st.window, st.rules, st.script, st.page.marked], [true, 'iPhone', opened.window, 2, true, true], 'what the panel logs');
     const win = await E((id) => chrome.windows.get(id, { populate: true }).then((w) => ({ type: w.type, tabs: w.tabs.map((t) => t.id) })), opened.window);
     assert.deepEqual(win, { type: 'popup', tabs: [phoneTab] }, 'the tab itself moved into a popup window');
     // the panel window beside it, following it
@@ -124,5 +125,63 @@ test('the phone view: the site sees an iPhone in that tab only, and Back to desk
     await browser.close();
     pages.server.close();
     fs.rmSync(ext, { recursive: true, force: true });
+  }
+});
+
+// Tim's x.com (2026-11-16): a site with a service worker, visited before. The worker answers the tab's page with
+// its own request, which belongs to no tab, so the tab's rules never saw it: the desktop page, no marker, no
+// touch. The phone view loads past the worker (a hard reload), and loads again past it when the worker serves
+// a later page (a plain reload here); a worker that keeps a copy of the desktop page (an app shell) too.
+test('the phone view on a site whose service worker serves its pages (as X\'s does)', { skip, timeout: 900000 }, async () => {
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
+  try {
+    const h = await harness(browser);
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    for (const kind of ['sw', 'swc']) {
+      const tabId = await h.E((u) => chrome.windows.create({ url: u, width: 1200, height: 800 }).then((w) => w.tabs[0].id), pages.url(`/${kind}/detect`));
+      await waitFor('the worker', () => h.page(tabId, 'window.__sw === true'));
+      await h.E((id) => chrome.tabs.reload(id), tabId);
+      await waitFor('the page under its worker', () => h.page(tabId, 'document.readyState === "complete" && !!navigator.serviceWorker.controller'));
+      assert.equal(await h.page(tabId, 'document.getElementById("server").textContent'), 'desktop');
+      await h.ask({ type: 'phone.open', tabId, screen: null });
+      const seen = () => h.page(tabId, `document.readyState === 'complete' && window.__fetchHeaders && ({ server: document.getElementById('server').textContent, uaPhone: window.__seen.uaPhone, touch: window.__seen.touchPoints, marked: performance.getEntriesByType('navigation')[0].serverTiming.some((x) => x.name === 'trif-phone'), fetchUa: window.__fetchHeaders['user-agent'] })`);
+      const s1 = await waitFor('the phone page', seen);
+      assert.deepEqual({ ...s1, fetchUa: /iPhone/.test(s1.fetchUa) }, { server: 'phone', uaPhone: true, touch: 5, marked: true, fetchUa: true }, `${kind}: past the worker`);
+      // a plain reload: the worker serves it again, without the rules; TRIF loads it again past the worker
+      await h.E((id) => chrome.tabs.reload(id), tabId);
+      await sleep(800);
+      const s2 = await waitFor('the phone page again', async () => { const x = await seen(); return x && x.marked && x; }, 20000);
+      assert.deepEqual([s2.server, s2.uaPhone, s2.touch], ['phone', true, 5], `${kind}: after a plain reload`);
+      await h.ask({ type: 'phone.close', tabId });
+      await h.E((id) => chrome.tabs.get(id).then((t) => chrome.windows.remove(t.windowId)), tabId);
+    }
+  } finally {
+    await browser.close();
+    pages.server.close();
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
+});
+
+// TRIF as installed: no site in its manifest (optional <all_urls>, a site given by the panel's Connect). Without
+// the site's access, the phone view refuses rather than open a window where nothing is faked. (Chrome won't let
+// a test answer its permission prompt, so the access itself comes from the manifest in the tests above: Chrome
+// keeps both the same way, as the extension's granted explicit hosts.)
+test('the phone view, TRIF as installed, on a site without access: refused, nothing moved', { skip, timeout: 900000 }, async () => {
+  const pages = await servePhonePages();
+  const browser = await launch({ extension: require('path').join(__dirname, '..', 'extension'), args: ['--screen-info={0,0 1470x956}'] });
+  try {
+    const h = await harness(browser);
+    assert.deepEqual(await h.E(() => chrome.permissions.getAll().then((p) => p.origins)), [], 'the real manifest: no site');
+    const tabId = await h.E((u) => chrome.windows.create({ url: u }).then((w) => w.tabs[0].id), pages.url('/detect'));
+    await sleep(800);
+    await assert.rejects(h.ask({ type: 'phone.open', tabId, screen: null }), /isn't on for 127\.0\.0\.1/);
+    assert.deepEqual(await h.ask({ type: 'phone.state', tabId }), { phone: false });
+    assert.equal(await h.E(() => chrome.declarativeNetRequest.getSessionRules().then((r) => r.length)), 0);
+    assert.equal(await h.E(() => chrome.scripting.getRegisteredContentScripts().then((r) => r.length)), 0);
+  } finally {
+    await browser.close();
+    pages.server.close();
   }
 });

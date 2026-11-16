@@ -80,6 +80,18 @@ function servePhonePages(port = 0) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     requests.push({ path: url.pathname, ua: req.headers['user-agent'] || '', hints: Object.keys(req.headers).filter((h) => h.startsWith('sec-ch-ua')) });
+    // (a site with a service worker, as X has: /sw/ pages register one that answers every request in its scope
+    // by fetching it itself, so the browser's request comes from the worker, not the tab; /swc/ one that keeps
+    // the first copy of each page and serves that, as an app shell cache does)
+    if (url.pathname === '/sw/sw.js' || url.pathname === '/swc/sw.js') {
+      res.setHeader('content-type', 'text/javascript');
+      res.end(url.pathname.startsWith('/swc/')
+        ? "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));\n" +
+          "self.addEventListener('fetch', (e) => { if (e.request.mode !== 'navigate') return; e.respondWith(caches.open('pages').then(async (c) => (await c.match(e.request.url)) || fetch(e.request).then((r) => { c.put(e.request.url, r.clone()); return r; }))); });"
+        : "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));\n" +
+          "self.addEventListener('fetch', (e) => e.respondWith(fetch(e.request)));");
+      return;
+    }
     if (url.pathname === '/echo') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.headers)); return; }
     if (url.pathname === '/frame') {
       res.setHeader('content-type', 'text/html');
@@ -97,8 +109,10 @@ function servePhonePages(port = 0) {
     res.setHeader('content-type', 'text/html');
     // (Accept-CH: a site asking for more hints, as Google's does; the phone view must not send them either)
     res.setHeader('accept-ch', 'Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List');
-    const title = url.pathname.startsWith('/m/') ? 'Mobile site (m.)' : url.pathname.startsWith('/desktop/') ? 'Desktop site' : 'Phone or desktop?';
-    res.end(detectPage(req, title));
+    const title = url.pathname.startsWith('/m/') ? 'Mobile site (m.)' : url.pathname.startsWith('/desktop/') ? 'Desktop site' : url.pathname.startsWith('/sw') ? 'With a service worker' : 'Phone or desktop?';
+    let html = detectPage(req, title);
+    if (/^\/swc?\//.test(url.pathname)) html = html.replace('</body>', `<script>navigator.serviceWorker.register('${url.pathname.startsWith('/swc/') ? '/swc/' : '/sw/'}sw.js').then(() => navigator.serviceWorker.ready).then(() => { window.__sw = true; });</script></body>`);
+    res.end(html);
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => {
     const p = server.address().port;

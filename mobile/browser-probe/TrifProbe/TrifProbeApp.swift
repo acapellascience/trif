@@ -188,7 +188,7 @@ struct ContentView: View {
         .onChange(of: phase) { _, p in
             // (safe mode: the record is unclean only while the app is in front)
             browser.safety.active(p == .active)
-            if p != .active { browser.saveTabs(); browser.history.saveNow() }
+            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot() } }
         }
         .alert(item: $safety.offer) { o in
             let name = o.likely.flatMap { id in browser.mods.mods.first { $0.id == id }?.name }

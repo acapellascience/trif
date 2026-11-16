@@ -195,6 +195,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                 let t = makeTab(id: s.id, title: s.title, url: nil)
                 t.savedState = s.state
                 t.savedURL = s.url.flatMap(URL.init(string:))
+                TabShots.shared.load(t) // (its last picture, from the last launch: Tabs.swift)
                 return t
             }
             select(tabs.first { $0.id == saved.selected } ?? tabs[tabs.count - 1])
@@ -251,17 +252,27 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         guard let i = tabs.firstIndex(where: { $0 === tab }) else { return }
         tab.webView.stopLoading()
         tabs.remove(at: i)
+        TabShots.shared.remove(tab.id)
         if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
         if tab === current { select(tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
     }
 
-    /// The tab's picture for the switcher.
+    /// The tab's picture for the switcher (TabShots: kept on disk too). Taken as a tab is left, when the app goes to
+    /// the background, when the switcher opens, and a moment after a page has loaded.
     func snapshot(_ tab: Tab? = nil) {
-        let t = tab ?? current!
-        guard t.webView.url != nil, t.webView.window != nil else { return }
-        let cfg = WKSnapshotConfiguration()
-        cfg.snapshotWidth = 300
-        t.webView.takeSnapshot(with: cfg) { image, _ in if let image { t.snapshot = image } }
+        guard let t = tab ?? current else { return }
+        TabShots.shared.take(t)
+    }
+    /// After the shown tab's page loads: its picture a second later (once it has drawn), at most every 3 s.
+    private var shotLater: Task<Void, Never>?
+    private func snapshotSoon() {
+        guard shotLater == nil, let t = current else { return }
+        shotLater = Task { @MainActor [weak self, weak t] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if let t, t === self?.current { TabShots.shared.take(t) }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            self?.shotLater = nil
+        }
     }
 
     /// Set when a new tab wants its address typed; the app focuses the address bar.
@@ -1045,6 +1056,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         canGoForward = webView.canGoForward
         pageChanged += 1
         resumeLoadWaiters()
+        snapshotSoon()
     }
 
     /// A load that was stopped, not one that failed: cancelled (NSURLErrorCancelled, -999: another navigation

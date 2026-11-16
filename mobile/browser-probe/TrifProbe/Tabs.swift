@@ -14,7 +14,8 @@ final class Tab: ObservableObject, Identifiable {
     @Published var title: String
     @Published var url: URL?
     @Published var loading = false
-    /// A picture of the page, for the tab switcher (taken when the switcher opens, or the tab is left).
+    /// A picture of the page, for the tab switcher (TabShots: taken when the tab is left, the app goes to the
+    /// background, the switcher opens, or a page has loaded; kept in Caches, so restored tabs have theirs).
     @Published var snapshot: UIImage?
     /// What to restore when the tab is first shown: its back/forward list, else its address.
     var savedState: Data?
@@ -32,6 +33,59 @@ final class Tab: ObservableObject, Identifiable {
     /// The tab's name in the switcher: its title, else its host, else New tab.
     var label: String { !title.isEmpty ? title : url?.host ?? (savedURL?.host ?? "New tab") }
     var host: String { (url ?? savedURL)?.host ?? "" }
+}
+
+/// The tabs' pictures for the switcher (Tim, 11-15: only the shown tab had one; the others were letters): each
+/// taken from the tab's web view at the card's size (its width at the screen's scale), shown at once, and kept as a
+/// JPEG in Caches/tab-shots/<tab id>.jpg, written off the main thread, so a tab restored at launch shows its last
+/// one. A tab's picture goes when it's closed. Only a web view on the screen can be pictured, so a tab is taken as
+/// it's left, not afterwards.
+@MainActor
+final class TabShots {
+    static let shared = TabShots()
+    /// About a card's width in points (two columns on a phone); the picture is that times the screen's scale.
+    private static let width: CGFloat = 200
+    private let dir: URL = {
+        let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("tab-shots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+    private let io = DispatchQueue(label: "trif.tab-shots", qos: .utility)
+    private func file(_ id: UUID) -> URL { dir.appendingPathComponent("\(id.uuidString).jpg") }
+
+    func take(_ tab: Tab) {
+        let wv = tab.webView
+        guard wv.url != nil, wv.window != nil, wv.bounds.width > 10 else { return }
+        let cfg = WKSnapshotConfiguration()
+        cfg.snapshotWidth = NSNumber(value: Double(TabShots.width))
+        cfg.afterScreenUpdates = false
+        let url = file(tab.id)
+        let io = self.io
+        wv.takeSnapshot(with: cfg) { [weak tab] image, _ in
+            guard let image, let tab else { return }
+            tab.snapshot = image
+            io.async {
+                guard let data = image.jpegData(compressionQuality: 0.7) else { return }
+                try? data.write(to: url, options: .atomic)
+            }
+        }
+    }
+
+    /// A restored tab's last picture, read off the main thread.
+    func load(_ tab: Tab) {
+        guard tab.snapshot == nil else { return }
+        let url = file(tab.id)
+        let scale = tab.webView.traitCollection.displayScale > 0 ? tab.webView.traitCollection.displayScale : 2
+        io.async {
+            guard let data = try? Data(contentsOf: url), let image = UIImage(data: data, scale: scale) else { return }
+            DispatchQueue.main.async { [weak tab] in if let tab, tab.snapshot == nil { tab.snapshot = image } }
+        }
+    }
+
+    func remove(_ id: UUID) {
+        let url = file(id)
+        io.async { try? FileManager.default.removeItem(at: url) }
+    }
 }
 
 /// What's kept of the tabs between launches (Application Support/tabs.json).
@@ -107,11 +161,20 @@ struct TabCard: View {
                         .frame(maxWidth: .infinity)
                         .overlay(alignment: .top) {
                             if let shot = tab.snapshot {
+                                // (top-aligned, the card's width, cut off at the bottom)
                                 Image(uiImage: shot).resizable().scaledToFill()
+                                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
                             } else {
-                                Text(String(tab.host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased())
-                                    .font(.largeTitle.bold()).foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                // (a tab never pictured yet: its site's letter, and the site)
+                                VStack(spacing: 4) {
+                                    Text(String(tab.host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased())
+                                        .font(.largeTitle.bold())
+                                    if !tab.host.isEmpty {
+                                        Text(tab.host.replacingOccurrences(of: "www.", with: "")).font(.caption2).lineLimit(1).padding(.horizontal, 6)
+                                    }
+                                }
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

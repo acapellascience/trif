@@ -4,7 +4,7 @@
 // panel: helper/lib/withoutsandbox.js, host.js agent.withoutSandbox) it goes on, marked; and when the
 // organization's profile turns out to stop the run's work (`trif` can't reach the helper, writes to sites/
 // refused), it's ended with why. Fake agents only, in a scratch home.
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

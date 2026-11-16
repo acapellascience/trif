@@ -120,6 +120,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   fs.writeFileSync(profileCanary, `${CANARY} profile`);
   spawnSync(sys('clip.exe'), [], { input: `${CANARY} clipboard` });
 
+  const PSEXE = path.join(SYSROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   // ---- every attempt: expect 'allow' (a run needs it), 'deny' (a guarantee), 'info' (to know)
   const ops = [
     // what a run needs
@@ -135,8 +136,6 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'write its mailbox', g: 'works', expect: 'allow', op: 'write', path: path.join(box, 'req-1.json') },
     { id: 'write its temporary folder', g: 'works', expect: 'allow', op: 'write', path: path.join(box, 'tmp', 't.txt') },
     { id: 'write its screenshots folder', g: 'works', expect: 'allow', op: 'write', path: path.join(shots, 'a.png') },
-    { id: 'start a child (cmd /c echo)', g: 'works', expect: 'allow', op: 'exec', file: sys('cmd.exe'), args: ['/d', '/c', 'echo', 'child-ok'] },
-    { id: 'run TRIF\'s CLI (trif help)', g: 'works', expect: 'allow', op: 'exec', file: node, args: [path.join(app, 'helper', 'cli.js'), 'help'], keep: 80 },
     // reads: nothing else in the home folder
     { id: 'read a file elsewhere in the home folder', g: 'reads', expect: 'deny', op: 'read', path: path.join(home, 'secret.txt') },
     { id: 'read an ssh key', g: 'reads', expect: 'deny', op: 'read', path: path.join(home, '.ssh', 'id_ed25519') },
@@ -145,7 +144,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'list the real profile folder', g: 'reads', expect: 'deny', op: 'list', path: os.homedir() },
     { id: 'list C:\\Users', g: 'reads', expect: 'deny', op: 'list', path: path.dirname(os.homedir()) },
     { id: 'list the system\'s temporary folder', g: 'reads', expect: 'deny', op: 'list', path: os.tmpdir() },
-    { id: 'the same from a child (cmd /c type)', g: 'reads', expect: 'deny', op: 'childRead', path: path.join(home, 'secret.txt') },
+    { id: 'the same with cmd.exe (type)', g: 'reads', expect: 'deny', direct: `"${sys('cmd.exe')}" /d /c type "${path.join(home, 'secret.txt')}"`, through: (r) => r.stdout.includes(CANARY) },
     { id: 'read through a junction it made', g: 'reads', expect: 'deny', op: 'junction', path: path.join(box, 'j'), target: home, file: 'secret.txt' },
     { id: 'read through a symlink it made', g: 'reads', expect: 'deny', op: 'symlink', path: path.join(box, 'sl'), target: path.join(home, 'secret.txt') },
     { id: 'read through a hard link it made', g: 'reads', expect: 'deny', op: 'hardlink', path: path.join(box, 'hl'), target: path.join(home, 'secret.txt') },
@@ -154,8 +153,8 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'list C:\\', g: 'reads', expect: 'info', op: 'list', path: 'C:\\' },
     { id: 'read C:\\Windows\\win.ini', g: 'reads', expect: 'info', op: 'read', path: path.join(SYSROOT, 'win.ini') },
     { id: 'list C:\\Program Files', g: 'reads', expect: 'info', op: 'list', path: 'C:\\Program Files' },
-    { id: 'read a value under HKCU\\Software', g: 'reads', expect: 'info', op: 'regRead', key: REG_KEY, value: 'secret' },
-    { id: 'read HKCU\\Environment (the user\'s variables)', g: 'reads', expect: 'info', op: 'regRead', key: 'HKCU\\Environment', value: 'Path' },
+    { id: 'read a value under HKCU\\Software', g: 'reads', expect: 'info', direct: `"${sys('reg.exe')}" query ${REG_KEY} /v secret`, through: (r) => r.stdout.includes(CANARY) },
+    { id: 'read HKCU\\Environment (the user\'s variables)', g: 'reads', expect: 'info', direct: `"${sys('reg.exe')}" query HKCU\\Environment`, through: (r) => r.status === 0 && /REG_/.test(r.stdout) },
     // private: TRIF's private folder
     { id: 'read TRIF\'s settings (config.json)', g: 'private', expect: 'deny', op: 'read', path: path.join(priv, 'config.json') },
     { id: 'list the private folder', g: 'private', expect: 'deny', op: 'list', path: priv },
@@ -175,7 +174,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'replace node', g: 'state', expect: 'deny', op: 'write', path: path.join(nodeDir, 'node.exe') },
     { id: 'write elsewhere in the home folder', g: 'writes', expect: 'deny', op: 'write', path: path.join(home, 'planted.txt') },
     { id: 'write the real profile folder', g: 'writes', expect: 'deny', op: 'write', path: path.join(os.homedir(), `trif-fence-planted-${rand()}.txt`) },
-    { id: 'write a value under HKCU\\Software', g: 'writes', expect: 'deny', op: 'regWrite', key: REG_KEY },
+    { id: 'write a value under HKCU\\Software', g: 'writes', expect: 'deny', direct: `"${sys('reg.exe')}" add ${REG_KEY} /v fromInside /t REG_SZ /d x /f`, through: () => spawnSync(sys('reg.exe'), ['query', REG_KEY, '/v', 'fromInside']).status === 0 },
     // others: other runs
     { id: 'read another run\'s mailbox', g: 'others', expect: 'deny', op: 'read', path: path.join(boxes, 'r2', 'request.json') },
     { id: 'write another run\'s mailbox', g: 'others', expect: 'deny', op: 'write', path: path.join(boxes, 'r2', 'forged.json') },
@@ -191,23 +190,36 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'connect to the helper\'s pipe', g: 'network', expect: 'deny', op: 'pipe', name: pipeName },
     { id: 'listen on 127.0.0.1', g: 'network', expect: 'info', op: 'listen' },
     // others: other programs
-    { id: 'read another program\'s command line', g: 'others', expect: 'deny', op: 'cmdline', pid: other.pid, canary: `${CANARY}-argv` },
+    { id: 'read another program\'s command line (PowerShell, WMI)', g: 'others', expect: 'deny', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${other.pid}').CommandLine"`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
+    { id: 'the same with wmic', g: 'others', expect: 'deny', direct: `"${sys('wbem\\WMIC.exe')}" process where ProcessId=${other.pid} get CommandLine`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
+    { id: 'list programs (tasklist /v)', g: 'others', expect: 'info', direct: `"${sys('tasklist.exe')}" /FI "PID eq ${other.pid}" /V /FO CSV`, through: (r) => r.status === 0 && r.stdout.includes(String(other.pid)) },
     { id: 'signal another program (kill 0)', g: 'others', expect: 'info', op: 'kill', pid: other.pid },
-    { id: 'read the clipboard', g: 'others', expect: 'deny', op: 'clipboard' },
-    // to know
-    { id: 'Git Bash starts (bash -c echo)', g: 'shells', expect: 'info', op: 'exec', file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['-c', 'echo bash-ok; ls / | head -3'] },
-    { id: 'Git\'s ls.exe alone', g: 'shells', expect: 'info', op: 'exec', file: 'C:\\Program Files\\Git\\usr\\bin\\ls.exe', args: ['C:\\Windows\\System32\\drivers\\etc'] },
-    { id: 'Windows PowerShell starts', g: 'shells', expect: 'info', op: 'exec', file: path.join(SYSROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'Write-Output ps-ok'] },
-    { id: 'node from C:\\Program Files\\nodejs starts', g: 'shells', expect: 'info', op: 'exec', file: 'C:\\Program Files\\nodejs\\node.exe', args: ['-p', 'process.version'] },
+    { id: 'read the clipboard', g: 'others', expect: 'deny', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -STA -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::GetText()"`, through: (r) => r.stdout.includes(CANARY) },
+    // children and shells (last: a child that never ends costs its time-out)
+    { id: 'start a child, its output through a pipe (cmd /c echo)', g: 'children', expect: 'info', op: 'exec', file: sys('cmd.exe'), args: ['/d', '/c', 'echo', 'child-ok'] },
+    { id: 'start a child, its output nowhere', g: 'children', expect: 'info', op: 'exec', file: sys('cmd.exe'), args: ['/d', '/c', 'echo', 'child-ok'], opts: { stdio: 'ignore' } },
+    { id: 'start a child, sharing this program\'s output', g: 'children', expect: 'info', op: 'exec', file: sys('cmd.exe'), args: ['/d', '/c', 'echo', 'child-shares-output-ok'], opts: { stdio: ['ignore', 'inherit', 'inherit'] } },
+    { id: 'run TRIF\'s CLI as a child (trif help)', g: 'children', expect: 'info', op: 'exec', file: node, args: ['--preserve-symlinks', '--preserve-symlinks-main', path.join(app, 'helper', 'cli.js'), 'help'], keep: 80 },
+    { id: 'Git Bash starts (bash -c echo)', g: 'shells', expect: 'info', direct: '"C:\\Program Files\\Git\\bin\\bash.exe" -c "echo bash-ok; ls / | head -3"', through: (r) => r.stdout.includes('bash-ok') },
+    { id: 'Git\'s sh.exe (usr\\bin)', g: 'shells', expect: 'info', direct: '"C:\\Program Files\\Git\\usr\\bin\\sh.exe" -c "echo sh-ok"', through: (r) => r.stdout.includes('sh-ok') },
+    { id: 'Git\'s ls.exe alone', g: 'shells', expect: 'info', direct: '"C:\\Program Files\\Git\\usr\\bin\\ls.exe" C:\\Windows\\System32\\drivers\\etc', through: (r) => r.status === 0 && /hosts/.test(r.stdout) },
+    { id: 'Windows PowerShell starts', g: 'shells', expect: 'info', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -Command "Write-Output ps-ok"`, through: (r) => r.stdout.includes('ps-ok') },
+    { id: 'cmd.exe starts', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c echo cmd-ok`, through: (r) => r.stdout.includes('cmd-ok') },
+    { id: 'cmd.exe starts a child of its own (cmd /c cmd /c echo)', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c "${sys('cmd.exe')}" /d /c echo grandchild-ok`, through: (r) => r.stdout.includes('grandchild-ok') },
+    { id: 'trif.cmd-like: cmd.exe starts node with a script', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c ""${node}" --preserve-symlinks --preserve-symlinks-main "${path.join(app, 'fence-test', 'hello.js')}""`, through: (r) => r.stdout.includes('script-ok') },
+    { id: 'TRIF\'s CLI (trif help)', g: 'shells', expect: 'allow', direct: `"${node}" --preserve-symlinks --preserve-symlinks-main "${path.join(app, 'helper', 'cli.js')}" help`, through: (r) => r.status === 0 && /trif/i.test(r.stdout) },
+    { id: 'node from C:\\Program Files\\nodejs starts', g: 'shells', expect: 'info', direct: '"C:\\Program Files\\nodejs\\node.exe" -p process.version', through: (r) => r.status === 0 && /^v\d/.test(r.stdout.trim()) },
     { id: 'the environment it has', g: 'shells', expect: 'info', op: 'env' },
-    { id: 'who it is (whoami /groups)', g: 'shells', expect: 'info', op: 'whoami' },
+    { id: 'who it is (whoami /groups)', g: 'shells', expect: 'info', direct: `"${sys('whoami.exe')}" /groups /fo csv /nh`, through: (r) => r.status === 0, long: true },
   ];
   // (a process the command leaves behind: the job ends it)
   const leftPid = path.join(box, 'left.pid');
   ops.push({ id: 'leave a process behind', g: 'others', expect: 'info', op: 'exec', file: node, args: ['-e', `const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' }); c.unref(); require('fs').writeFileSync(${JSON.stringify(leftPid)}, String(c.pid));`] });
   const cfgFile = path.join(box, 'probe.json');
   const outFile = path.join(box, 'probe-out.json');
-  fs.writeFileSync(cfgFile, JSON.stringify({ ops, out: outFile }));
+  // (`direct`: a command started by the fence itself, one launch each, judged from here by `through`;
+  // the rest are tried by probe.js, one process inside the fence)
+  fs.writeFileSync(cfgFile, JSON.stringify({ ops: ops.filter((o) => !o.direct), out: outFile }));
 
   const envInside = {
     SystemRoot: SYSROOT, SystemDrive: process.env.SystemDrive || 'C:', windir: SYSROOT, ComSpec: sys('cmd.exe'),
@@ -259,7 +271,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     if (!how) { console.log('FAIL  node can\'t run a script inside the fence at all'); failed++; continue; }
     console.log(`using: ${how.label}`);
     const name = `trif.run.${rand()}`;
-    const r = fence(exe, specFor(mode, { ...how, name }));
+    const r = fence(exe, specFor(mode, { ...how, name, revoke: false }));
     const m = /FENCE-PROBE (\{.*\})/.exec(r.stdout);
     let got = null;
     if (m) got = JSON.parse(m[1]);
@@ -269,15 +281,23 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       try { got = JSON.parse(fs.readFileSync(outFile, 'utf8')); console.log('(what it got to before that:)'); } catch { continue; }
     }
     results[mode] = got;
+    for (const o of ops.filter((x) => x.direct)) {
+      const d = fence(exe, specFor(mode, { ...how, name, revoke: false, command: o.direct }), { timeout: 40000 });
+      const hung = d.status === null;
+      let through = false;
+      try { through = !hung && !!o.through(d); } catch { /* not through */ }
+      got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().slice(0, 60)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
+    }
     console.log(`the probe ran in ${r.ms} ms\n`);
     let group = '';
     for (const o of ops) {
-      const res = got[o.id] || { ok: false, why: 'not run' };
+      const res = got[o.id];
+      if (!res) { if (o.g !== group) { group = o.g; console.log(`  [${group}]`); } console.log(`  ${o.expect === 'info' ? 'info' : 'FAIL'} NOT TRIED    ${o.id}`); if (o.expect !== 'info') failed++; continue; }
       const through = !!res.ok;
       const verdict = o.expect === 'info' ? 'info' : (o.expect === 'allow') === through ? 'PASS' : 'FAIL';
       if (verdict === 'FAIL') failed++;
       if (o.g !== group) { group = o.g; console.log(`  [${group}]`); }
-      const detail = through ? (res.got !== undefined ? String(res.got).replace(/\s+/g, ' ').slice(0, o.op === 'env' || o.op === 'whoami' ? 1800 : 110) : '') : String(res.why || '').replace(/\s+/g, ' ').slice(0, 110);
+      const detail = through ? (res.got !== undefined ? String(res.got).replace(/\s+/g, ' ').slice(0, o.op === 'env' || o.long ? 1800 : 110) : '') : String(res.why || '').replace(/\s+/g, ' ').slice(0, 140);
       console.log(`  ${verdict.padEnd(4)} ${through ? 'got through' : 'refused    '}  ${o.id}${detail ? `  — ${detail}` : ''}${res.ms > 3000 ? `  (${res.ms} ms)` : ''}`);
       if (through && typeof res.got === 'string' && res.got.includes(CANARY) && o.expect === 'deny') console.log('        (the canary came back)');
     }
@@ -296,11 +316,14 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       for (let i = 0; i < 20 && alive; i++) { try { process.kill(left, 0); await new Promise((res) => setTimeout(res, 100)); } catch { alive = false; } }
       check(!alive, `the process it left behind (pid ${left}) ended with the command`);
     } else console.log('  info (outside)  it couldn\'t leave a process behind');
-    const acl = spawnSync(sys('icacls.exe'), [stage], { encoding: 'utf8' }).stdout || '';
-    const sidOut = spawnSync(exe, ['sid', name], { encoding: 'utf8' });
-    const sid = String(sidOut.stdout || '').trim();
-    spawnSync(exe, ['delete', name]);
-    check(!!sid && !acl.includes(sid), `afterwards the run's entries are gone from its working folder (${sid.slice(0, 24)}…)`);
+    // (a last launch with `revoke`: the run's entries leave its folders and its profile is deleted)
+    const sid = String(spawnSync(exe, ['sid', name], { encoding: 'utf8' }).stdout || '').trim();
+    const sddl = () => String(spawnSync(PSEXE, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `(Get-Acl -LiteralPath '${stage}').Sddl; (Get-Acl -LiteralPath '${path.join(stage, 'sites')}').Sddl`], { encoding: 'utf8' }).stdout || '');
+    const before = sddl();
+    fence(exe, specFor(mode, { ...how, name, revoke: true, command: `"${node}" -p 1` }), { timeout: 40000 });
+    const acl = sddl();
+    check(!!sid && before.includes(sid) && !acl.includes(sid), `while it runs its working folder names it (${sid.slice(0, 24)}…); afterwards its entries are gone`);
+    spawnSync(sys('reg.exe'), ['delete', REG_KEY, '/v', 'fromInside', '/f']);
     // (put back what the allowed writes changed, for the next mode)
     for (const f of [path.join(stage, 'sites', 'x.com', 'new.js'), path.join(box, 'req-1.json'), path.join(box, 'tmp', 't.txt'), path.join(shots, 'a.png'), leftPid, path.join(box, 'hl'), path.join(box, 'sl')]) fs.rmSync(f, { force: true });
     for (const d of [path.join(stage, 'sites', 'new.org'), path.join(box, 'j')]) { try { fs.rmdirSync(d); } catch { /* not made */ } }

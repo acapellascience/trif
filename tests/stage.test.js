@@ -3,7 +3,7 @@
 // workspace, never the mods folder; the helper copies its changes over as they're saved, and which changes
 // are the run's is what it copied. Unit tests of the copy, then runs through the helper with a stand-in agent.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

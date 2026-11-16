@@ -2,7 +2,7 @@
 // Tests for agent runs: helper/lib/agents/*, helper/lib/runs.js, the agent.* commands in host.js,
 // `trif agent`, and the agent bits of setup/doctor. Uses a fake `claude` executable; never the real one.
 
-const test = require('./posix-only')('fake agents are #!/bin/sh scripts, process groups and signals, Unix sockets');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

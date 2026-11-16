@@ -8,7 +8,7 @@
 // HOME (so no OpenAI login, nothing of the user's). It applies macOS's sandbox, which may fail inside
 // another sandbox; TRIF_TEST_NO_REAL_CODEX=1 skips it.
 
-const test = require('./posix-only')('fake agents are #!/bin/sh scripts, the macOS/Linux keyring tools');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

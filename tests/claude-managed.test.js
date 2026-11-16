@@ -4,7 +4,7 @@
 // stops unless the user chose "Use Claude Code anyway"), which only break runs (stopped, with why), and
 // which change nothing. Fixture files in scratch folders ($TRIF_CLAUDE_MANAGED_DIR, or `dir`): never the
 // real system paths. Fake agents only.
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

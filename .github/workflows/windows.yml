@@ -95,17 +95,10 @@ jobs:
           Write-Output "=== with Chrome's key alone"
           node tests/windows-browser.js --browser brave --bin "$brave" --drop-key 0
           exit 0
-      # For now, to see what's left: the tests marked macOS/Linux only, run anyway. Never fails the job.
-      - name: (information) the macOS/Linux-only tests, run on Windows
+      # The unit suite's real-browser tests (the sandbox runtime under real SES, the CSS reader, the
+      # clickjacking guard), now that Chrome for Testing is here. Their browser starts on Windows; their
+      # pages don't all load yet, so for now this informs and never fails the job.
+      - name: (information) the real-browser unit tests
         if: always() && matrix.node != 18
         continue-on-error: true
-        env:
-          TRIF_TEST_POSIX_ON_WINDOWS: 1
-        run: node --test --test-timeout=180000 --test-reporter=tap > posix-on-windows.tap 2>&1; grep -cE "^ok " posix-on-windows.tap; grep -E "^not ok " posix-on-windows.tap; exit 0
-        shell: bash
-      - uses: actions/upload-artifact@v4
-        if: always() && matrix.node != 18
-        with:
-          name: posix-on-windows
-          path: posix-on-windows.tap
-          if-no-files-found: ignore
+        run: node --test --test-timeout=180000 tests/cdp-page.test.js tests/sandbox-browser.test.js tests/css-browser.test.js tests/clickjack-browser.test.js

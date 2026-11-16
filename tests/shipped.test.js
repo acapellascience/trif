@@ -3,7 +3,7 @@
 // edited ones offered the new version, the user's choices, the history of shipped versions, and how it
 // reaches the helper's mods messages and the CLI. Everything in temp folders.
 
-const test = require('./posix-only')('helpers on Unix sockets, file modes');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

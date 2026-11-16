@@ -1,0 +1,137 @@
+{
+  "reasons": {
+    "runs": "no side-panel runs there yet (docs/WINDOWS.md, \"The sandbox\"), and the stand-in agents are #!/usr/bin/env scripts",
+    "login": "logging an agent in from the panel is off there, with runs",
+    "limits": "a run's limits are worked out for macOS's and Linux's sandboxes; Windows' aren't built",
+    "keychain": "about the macOS Keychain and Linux's Secret Service, through stand-ins that are scripts (Credential Manager: tests/windows.test.js, tests/windows-smoke.js)",
+    "setup": "about macOS's and Linux's setup: #!/bin/sh wrappers, the /usr/local/bin link, browsers' folders in the home folder (Windows' setup: tests/windows.test.js, tests/windows-smoke.js)",
+    "sockets": "about Unix sockets as files (named pipes: tests/windows.test.js)",
+    "legacy": "about the move from ~/.webmods (before 0.2.0), which Windows never had",
+    "safari": "Safari and launchd are macOS only",
+    "release": "the build and release scripts are for the Mac (zip, the Keychain)"
+  },
+  "files": {
+    "agent-keys.test.js": {
+      "Claude Code with a saved key: the run's key proxy adds it; Claude Code gets a placeholder and the proxy's address, never the key": "keychain",
+      "Codex with a saved key: a provider of its own at the run's key proxy (bearer); no key variable; profile keys excluded": "keychain",
+      "`trif agent key`: --set-key from stdin (never argv), status, --remove-key; refused in a run; doctor says where it is": "keychain",
+      "migrateKeys: config.json's API keys move to the keyring, then leave config.json; a saved one wins; no keyring: left": "keychain",
+      "setup moves config.json's API keys to the keyring and says so": "keychain"
+    },
+    "agents.test.js": {
+      "CLI: agent login prints the URL, reads the code from stdin, reports the result": "login",
+      "CLI: agent run on a busy site fails fast": "runs",
+      "CLI: agent run streams events and prints a summary; agent list with and without the helper": "runs",
+      "a run never starts with private files in the workspace: they're moved first, or the run is refused": "runs",
+      "agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, never an API key (a key proxy instead)": "runs",
+      "agent.list: finds the fake claude on the recorded PATH, codex missing": "runs",
+      "agent.login without the agent installed fails right away": "login",
+      "agent.login: URL event, code, done ok; agent.list then says loggedIn (cached); nothing secret in helper.log": "login",
+      "agent.login: bad code fails (redacted), cancel, one login at a time, bad requests, codex unsupported, time limit": "login",
+      "agent.logout: only from the side panel; runs the agent's own logout; agent.list then says logged out": "login",
+      "agent.models: Codex lists the account's catalog (picker models, best first); Claude Code offers its aliases": "runs",
+      "agent.running lists the runs still going (for an extension that was away)": "runs",
+      "agent.start with sessionId passes --resume; unchanged files give empty changedFiles": "runs",
+      "agent.start: runId first, then session/text/tool events, one done with changedFiles and sessionId": "runs",
+      "agent.stop kills the run (SIGTERM, then SIGKILL for a stubborn agent); done says stopped": "runs",
+      "an expired login: one \"log in again\" error, no reply; agent.list says logged out until a login or a run works": "login",
+      "claude adapter: command flags, resume and model; nothing private in argv": "runs",
+      "claude adapter: parses init, text, tools, result; maps \"Not logged in\"": "runs",
+      "codex adapter: command, resume, JSONL events": "runs",
+      "doctor: an agent that isn't logged in is only a warning when the side panel's default can't run either": "runs",
+      "errors: not logged in, crash with stderr tail, agent missing, 15-minute limit (shortened)": "runs",
+      "held mods: a change in another site's folder during a run isn't held on that run's account": "runs",
+      "held mods: a mod in a folder a looser snapshot skipped (node_modules) is held too": "runs",
+      "held mods: a run's mod that matches other sites is held (not registered) until approved": "runs",
+      "held mods: editing a held mod yourself releases it; `trif approve` refuses inside a run": "runs",
+      "helper shutdown kills a running agent": "runs",
+      "in a run: screenshot -o NAME saves in the run's screenshots folder, other places are refused plainly; a custom modsDir holds": "runs",
+      "instructions: saved and read through the helper, never from a run; claude gets them via CLAUDE.md, not the context": "runs",
+      "merge run: choosing what happens to the update is the user's, not the run's": "runs",
+      "merge: a run on another site never settles it": "runs",
+      "merge: the first run only proposes; the update settles after the run that merged the user's copy": "runs",
+      "mod.delete / mod.restore: from the panel any mod; from a run only mods inside its scope": "runs",
+      "one run per site: a second start for a busy site fails; another site is fine": "runs",
+      "private files that reappear in the workspace during a run (an old helper's log) are moved out when it ends": "runs",
+      "recording a run switched on goes off when that run ends; the user's own recording stays": "runs",
+      "run limits: inside skill folders, secrets and links out of what a run may read are denied": "limits",
+      "run limits: other users' folders and other volumes are denied; the home folder, the startup disk and the way to what a run reads are not": "limits",
+      "run logs are pruned to the last 50": "runs",
+      "run mailbox: whatever a request in it says, it's the run's; links aren't followed; agent commands refused": "runs",
+      "run scope: the run token limits trif requests to the run's site; agent commands refused; ends with the run": "runs",
+      "session ids and model names are one word: nothing that reads as an option": "runs",
+      "setup records PATH (merging config.json) and writes .claude/settings.json; doctor reports agents": "runs",
+      "tabs a run opened are closed when it ends; trif close names a tab, and the user's own tabs stay": "runs"
+    },
+    "claude-managed.test.js": {
+      "helper: Claude Code under managed settings that loosen TRIF's limits: stopped before it starts, the card; consent for claude (not codex) lets it go on, marked": "runs",
+      "helper: Claude Code under managed settings that only break runs: stopped with what they do, no card, no consent offered": "runs"
+    },
+    "cli.test.js": {
+      "doctor: after setup, wrong manifest and missing node are caught; live helper and user-scripts switch reported": "setup",
+      "doctor: an unreadable Safari login item doesn't crash it; inside a run it skips the browsers' setup files": "safari",
+      "setup: --browser picks folders under HOME; unknown browser fails": "setup",
+      "setup: does not overwrite a non-symlink trif in the bin dir; honours TRIF_HOME": "setup",
+      "setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone": "setup"
+    },
+    "codex-sandbox.test.js": {
+      "helper: agent.withoutSandbox is refused from the socket (the terminal, `trif` in a run, with a token or not) and from a run's mailbox": "runs",
+      "helper: no consent stops the run (the choice card's event); \"Use Codex anyway\" stores it privately; the same message then goes on, marked; Stop allowing removes it": "runs",
+      "helper: with consent, a run the organization's profile keeps from reaching TRIF is ended with why, once": "runs"
+    },
+    "helpers.test.js": {
+      "host: removes a helper-<pid>.sock left by a helper that died": "sockets",
+      "removeStaleSockets: removes sockets of dead pids, keeps live ones and our own": "sockets"
+    },
+    "install.test.js": {
+      "Safari bridge agent: restarted in place when loaded, loaded afresh when changed, later and detached from inside the bridge": "safari",
+      "browserTable: Arc's manifest goes in Chrome's folder (the one Arc reads, first) and its own; the others' in their own": "setup",
+      "browserTable: Firefox has one native host folder for every profile": "setup",
+      "build-extension firefox: sidebar, background scripts, optional userScripts, gecko id": "release",
+      "cleanPath drops the folders npx adds for its own run": "setup",
+      "doctor: a browser whose profile folder is there but that setup didn't do is a note, not a failure, while others are set up": "setup",
+      "setup --browser firefox writes a manifest with allowed_extensions; doctor checks it": "setup",
+      "setup --copy: copies helper/extension/examples into <home>/app and points everything there": "setup",
+      "setup --link: wrappers run the package where it is; warns when that is not a git checkout": "setup",
+      "setup for Arc writes the manifest to Chrome's folder and Arc's; doctor checks Chrome's, and leaves Chrome out": "setup",
+      "setup for Chrome and Arc: one manifest in Chrome's folder for both; doctor checks both": "setup",
+      "setup from a package that is not a git checkout copies by default; re-running from the copy keeps it": "setup",
+      "setup opens chrome://extensions in Chrome (macOS, Chrome installed), quietly not otherwise": "setup",
+      "setup's next steps give the trif command that works from this terminal: ~/.trif/bin/trif until it's on PATH": "setup"
+    },
+    "migrate.test.js": {
+      "migrate: both folders there: merged, ~/.trif wins conflicts, the other copy kept aside": "legacy",
+      "paths: the default workspace is ~/.trif, or an unmoved ~/.webmods; ~/.webmods given means the default": "legacy",
+      "run limits: the workspace is readable as a whole, the private folder (and only the run's screenshots in it) isn't; only the TRIF code": "limits",
+      "run limits: the ~/.webmods link to the workspace is not denied, the real path is what is allowed": "limits",
+      "setup moves the private files out of an upgraded ~/.webmods (0.1.x), through the link too": "legacy",
+      "setup: an upgrade from 0.1.x moves the workspace, rewrites manifests and wrappers, keeps the old command": "legacy",
+      "the Safari app reads the key from the private folder first, the old places for one more version": "safari"
+    },
+    "open-models.test.js": {
+      "`trif agent open-model`: --set-key from stdin (never argv), --remove-key; --key-env gone; doctor: key saved or missing (never shown), key variables in the environment": "keychain",
+      "codex-oss prepare: a proxy only with a saved key, read afresh each run; the run closes it; settings say whether one is saved": "keychain",
+      "command: local Ollama, LM Studio, OpenRouter (through the key proxy), custom URL with resume": "runs",
+      "helper: codex-oss listed (experimental, never the default); settings and the API key through agent.openModel*; refused from a run": "runs",
+      "helper: no key, Ollama down or the model missing: the run fails fast with the fix, Codex never starts": "runs",
+      "helper: the key never reaches Codex (no env, no argv): read from the keyring, the run's key proxy adds it, closes after; never in logs or events": "keychain",
+      "keyring: macOS `security` (written through -i on stdin, as hex: never in argv), Linux secret-tool, none; keys checked": "keychain"
+    },
+    "origins.test.js": {
+      "a run on a host whose extension sent no install id isn't marked": "runs",
+      "two browsers: a mod made by A's run carries origin A in both helpers' mods; others get none": "runs"
+    },
+    "scope.test.js": {
+      "locked folders: a linked site folder gets Edit deny rules by its workspace path and its real path; only protected folders are exempt": "limits"
+    },
+    "stage.test.js": {
+      "a run: a mod saved in its working folder reaches the browser while it runs, is the run's (held for its match), and its trif delete shows in its copy at once": "runs",
+      "a run: a process it leaves behind, out of its group, writes into its working folder after it ended: that goes nowhere": "runs",
+      "stage: the sandboxes write the run's copy, never the mods folder; Claude Code's rules are rooted in the copy": "limits"
+    },
+    "update.test.js": {
+      "release script: an earlier run's signed add-on is reused only if it holds exactly this build": "release",
+      "release script: secrets go to security and web-ext in no argv or environment": "release"
+    }
+  }
+}

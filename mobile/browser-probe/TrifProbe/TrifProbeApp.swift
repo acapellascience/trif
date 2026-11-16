@@ -72,6 +72,7 @@ final class Model: ObservableObject {
         // {"newtab": "…"}, {"select": n}, {"close": n}, {"back": true}.
         let panel = self.modsPanel
         Model.pane = self.pane
+        Model.barsRef = self.bars
         Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
                                         "com.trif.probe.step" as CFString, nil, .deliverImmediately)
@@ -115,6 +116,7 @@ final class Model: ObservableObject {
 extension Model {
     static var stepRunner: (() -> Void)?
     static weak var pane: ClaudePane?
+    static weak var barsRef: BarState?
 
     static func runStep(browser: Browser, panel: ModsPanel) async {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -167,6 +169,10 @@ extension Model {
             }
         }
         if step["appstate"] != nil { out = "app state \(UIApplication.shared.applicationState.rawValue) (0 active, 1 inactive, 2 background), scenes \(UIApplication.shared.connectedScenes.map { "\($0.activationState.rawValue)" })" }
+        if let b = step["bars"] as? String, let bars = Model.barsRef {
+            if b == "full" { bars.expand() } else if b == "compact" { bars.collapse() }
+            out = bars.describe()
+        }
         if step["toolbar"] != nil {
             let w = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
             out = "page button centre \(ContentView.pageButtonMidX), screen centre \((w?.bounds.midX ?? 0)), off by \(abs(ContentView.pageButtonMidX - (w?.bounds.midX ?? 0)))"
@@ -1035,6 +1041,16 @@ final class BarState: NSObject, ObservableObject {
 
     /// The bars full again (a load starting, the address being typed, a tap on the small line).
     func expand() { settle(to: 0) }
+    /// (development) Compact, as after scrolling down.
+    func collapse() { settle(to: 1) }
+    /// (development) Where the bars and the page are.
+    func describe() -> String {
+        guard let wv = webView else { return "no page" }
+        let sv = wv.scrollView
+        var top: CGFloat = 0
+        if #available(iOS 26, *) { top = wv.obscuredContentInsets.top }
+        return "progress \(progress), target \(target), obscured top \(top), contentOffset \(sv.contentOffset.y), adjusted top \(sv.adjustedContentInset.top), web view top \(wv.convert(CGPoint.zero, to: nil).y)"
+    }
     /// While something covers the page (the chat, the tabs, Mods, the address screen) the bars stay full; when it
     /// goes, they go back to where they were (11-16: they stayed full, and x.com's own header, which hides as the
     /// page scrolls down until it scrolls up again, stayed hidden behind the full address bar).
@@ -1049,6 +1065,7 @@ final class BarState: NSObject, ObservableObject {
     private func scrolled(_ sv: UIScrollView) {
         let y = sv.contentOffset.y
         defer { lastY = y }
+        if shifting { return } // (the page moved with the bar: not the person's scrolling)
         pulled(sv)
         guard BarState.moves, !held else { return }
         let top = -sv.adjustedContentInset.top
@@ -1157,6 +1174,21 @@ final class BarState: NSObject, ObservableObject {
         applyInsets()
     }
 
+    /// The page's content moved down by `dy` points with the bar's edge (up for a negative one): the scroll offset
+    /// takes the change, so the page's scrollY stays put. Not counted as the person's scrolling (`lastY`).
+    private func shift(_ sv: UIScrollView, by dy: CGFloat) {
+        guard dy != 0, BarState.compensates else { return }
+        var o = sv.contentOffset
+        o.y -= dy
+        shifting = true
+        sv.contentOffset = o
+        shifting = false
+        lastY = sv.contentOffset.y
+    }
+    private var shifting = false
+    /// (development) `-nobarshift` at launch: the bars move without the page moving with them, as before 11-16.
+    static let compensates = !ProcessInfo.processInfo.arguments.contains("-nobarshift")
+
     /// What the bars cover now, told to WebKit (every frame they move); with `range`, also the viewport's range
     /// (compact … full, for the page's vh units), when a bar's size changes.
     private func applyInsets(range: Bool = false) {
@@ -1166,7 +1198,25 @@ final class BarState: NSObject, ObservableObject {
             let p = progress
             let gone = keyboardUp ? 1 : p // (the toolbar, gone down with the keyboard)
             let e = UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * gone, 0) * 2).rounded() / 2, right: 0)
-            if wv.obscuredContentInsets != e { wv.obscuredContentInsets = e }
+            let was = wv.obscuredContentInsets
+            let sv = wv.scrollView
+            if was != e || (BarState.compensates && sv.contentInset != e) {
+                // (as Chrome for iOS does on iOS 26 (CRWWebViewContentView, its content-inset mode): the web view
+                // stays the whole height under the bars; what they cover is both WebKit's obscured insets and the
+                // scroll view's content insets, so the page's top and foot can be scrolled out from under them)
+                shifting = true
+                if BarState.compensates {
+                    if sv.contentInsetAdjustmentBehavior != .never { sv.contentInsetAdjustmentBehavior = .never }
+                    sv.contentInset = e
+                }
+                wv.obscuredContentInsets = e
+                shifting = false
+                // (and the page moves with the address bar's edge, so its own scroll position (scrollY) never
+                // changes because the bar did: only the person's scrolling moves it. Without this a bar growing over a
+                // still page read to the page as a scroll down, and x.com's header, which hides on scrolling down and
+                // comes back on scrolling up, stayed hidden under the full bar: 11-16, Tim's phone)
+                shift(sv, by: e.top - was.top)
+            }
             if range {
                 wv.setMinimumViewportInset(UIEdgeInsets(top: 0, left: 0, bottom: max(bottomHeight - toolbarHeight, 0), right: 0),
                                            maximumViewportInset: UIEdgeInsets(top: extra, left: 0, bottom: bottomHeight, right: 0))

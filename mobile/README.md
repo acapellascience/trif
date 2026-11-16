@@ -226,7 +226,8 @@ time, for a headless Simulator: write the app's Documents/step.json, then
 for the chat `{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`, `{"chat": 1}` (shown, what
 it's doing, its address), `{"closechat": 1}`; `{"boxjs": "…"}` (in the boxed mods' world: `return JSON.stringify(globalThis.__trifSandbox.errors)`),
 `{"approve": "<mod id>|*"}` (Allow on waiting mods); `{"sheet": "address"}` opens the address screen; `{"sheet": "icon"}`
-the Add to Home Screen sheet; `{"tabhosts": 1}` lists the tabs' hosts (* on the one shown); `-pageletter` at
+the Add to Home Screen sheet; `{"tabhosts": 1}` lists the tabs' hosts (* on the one shown); `{"bars": "full|compact|state"}` moves the bars and
+says where they and the page are (`-nobarshift` at launch: the page doesn't move with the bars, as before 11-16); `-pageletter` at
 launch shows the site's letter in the toolbar's page button instead of the page glyph. shared/pages/fixedbars.html
 has a fixed header and an x.com-like fixed tab bar at the bottom, for the bars moving over a page. shared/pages/feed.html draws a feed from feed.json by fetch and by
 XMLHttpRequest, for a boxed mod's site-data power (trif.filterResponse).

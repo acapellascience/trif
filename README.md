@@ -111,11 +111,12 @@ run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then fol
 extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH: open a
 new terminal afterwards to use `trif`.
 
-Chats from the side panel work with Claude Code. On Windows TRIF gives it no shell: it changes mods with
-its file tools and runs TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on your
-computer the first time (with the C# compiler that comes with Windows). Log in to Claude Code in a
-terminal first (`claude`, then `/login`): logging in from the panel isn't there on Windows yet. Codex and
-open models can't be used from the panel on Windows yet; in a terminal in `~\.trif` they work as anywhere.
+Chats from the side panel work with Claude Code and Codex. On Windows TRIF gives them no shell: they
+change mods with file tools and run TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on
+your computer the first time (with the C# compiler that comes with Windows). Log in to your coding agent in
+a terminal first (`claude`, then `/login`; or `codex login`): logging in from the panel isn't there on
+Windows yet. Open models can't be used from the panel on Windows yet; in a terminal in `~\.trif` they work
+as anywhere.
 API keys you save with `trif agent key` go to Windows Credential Manager.
 
 ## Using it

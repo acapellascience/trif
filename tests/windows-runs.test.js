@@ -131,10 +131,10 @@ test('Codex on Windows: no profile and no shell; read-only, so its own apply_pat
   assert.match(agents.contextText({ url: 'https://x.com/', scope: 'x.com', noShell: 'files' }), /no shell in this chat.*call the `trif` tool.*read_file, write_file, edit_file, list_files and search_files tools beside it/);
   assert.match(agents.contextText({ url: 'https://x.com/', scope: 'x.com', noShell: true }), /with your own file tools, with paths relative/);
   assert.ok(!/no shell/.test(agents.contextText({ url: 'https://x.com/', scope: 'x.com' })));
-  // not from the panel until its real run is green on CI: only the test that proves it switches it on
+  // from the panel, since its real run is green on CI (tests/windows-run.js codex); no switch in the environment
   const platform = require('../helper/lib/platform');
-  assert.deepEqual(platform.windowsRunAgents({}), ['claude']);
-  assert.deepEqual(platform.windowsRunAgents({ TRIF_WINDOWS_CODEX_RUNS: '1' }), ['claude', 'codex']);
+  assert.deepEqual(platform.WINDOWS_RUN_AGENTS, ['claude', 'codex']);
+  assert.equal(platform.windowsRunAgents, undefined);
 });
 
 // ------------------------------------------------------------------ the trif tool's server

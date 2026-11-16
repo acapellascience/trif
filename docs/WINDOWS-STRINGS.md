@@ -9,11 +9,11 @@ coding agents read (guides, the fence prototype's messages, test output) isn't h
 
 ## New: side-panel chats on Windows
 
-Chats run with Claude Code (fenced: docs/WINDOWS.md). What a person can read about it:
+Chats run with Claude Code and, since round 4 of the work, Codex (fenced: docs/WINDOWS.md). What a person can read about it:
 
 | # | Text | Where |
 |---|---|---|
-| 1 | `<Agent> can’t be used from the panel on Windows yet` | `trif doctor`, an information line for an agent that's installed but that TRIF can't fence there (Codex, the open model), followed by its path in brackets (`helper/lib/platform.js` `panelRunsOff`) |
+| 1 | `<Agent> can’t be used from the panel on Windows yet` | `trif doctor`, an information line for an agent that's installed but that TRIF can't fence there (the open model), followed by its path in brackets (`helper/lib/platform.js` `panelRunsOff`) |
 | 2 | `TRIF can’t keep <Agent>’s commands to the site you’re fixing on Windows yet. Use another coding agent here, or <Agent> in a terminal in <workspace>: mods it writes show up here as usual.` | the side panel, under the existing title "<Agent> isn’t available", when that agent is the one picked; Settings' agent list |
 | 3 | `<Agent> can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there. Use another coding agent, or <Agent> in a terminal in <workspace>` | the error if a chat with that agent is started anyway (`trif agent run --agent codex`) |
 | 4 | `logging in from the panel isn't available on Windows yet: open a terminal in <workspace>, start your coding agent there and log in` | the error from the panel's Log in button and `trif agent login` on Windows |
@@ -22,7 +22,7 @@ Chats run with Claude Code (fenced: docs/WINDOWS.md). What a person can read abo
 | 5c | `couldn't prepare Claude Code's run: TRIF's fence for this run couldn't be made (<why>)` | the chat, when the fence can't be made (the first half is an existing text) |
 | 5d | `couldn't prepare Claude Code's run: Windows' C# compiler (csc.exe, part of .NET Framework 4) isn't on this computer, so TRIF can't build its fence for agent runs` · `… couldn't build TRIF's fence for agent runs: <why>` | the chat, when the launcher can't be built |
 
-(1–3 name the agent the message is about by its own name, as TRIF's messages about agents already do, and no other agent: 2 and 3 say "another coding agent".)
+(1–3 name the agent the message is about by its own name, as TRIF's messages about agents already do, and no other agent: 2 and 3 say "another coding agent". Now that Codex runs fenced, the open model is the only agent they're shown for, so `<Agent>` is always its name there, "Open model (via Codex)": "Open model (via Codex) can’t be used from the panel on Windows yet", "TRIF can’t keep Open model (via Codex)’s commands to the site…". They go altogether if the open model's runs get fenced. 5c and 5d start with an existing text that names the run's agent: "couldn't prepare Codex's run: …" in a chat with Codex.)
 
 What the agent reads, not the user: the `trif` tool's description and the file tools' (`helper/mcp.js`), the
 "There is no shell in this chat…" line added to a run's context on Windows (`helper/lib/agents/index.js`),
@@ -68,7 +68,7 @@ use for a refusal (`helper/lib/win/fenced-files.js`). Not listed here.
 | # | Text | Where |
 |---|---|---|
 | 25 | **changed**: `- A Mac (or Linux, or Windows 10/11: see [Windows](#windows)).` (was: `- A Mac (or Linux). Windows isn't supported yet.`) | What you need |
-| 26 | a new section, `### Windows`: "TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome, Edge, Brave and Firefox: run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps (the extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH: open a new terminal afterwards to use `trif`. Chats from the side panel work with Claude Code. On Windows TRIF gives it no shell: it changes mods with its file tools and runs TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on your computer the first time (with the C# compiler that comes with Windows). Log in to Claude Code in a terminal first (`claude`, then `/login`): logging in from the panel isn't there on Windows yet. Codex and open models can't be used from the panel on Windows yet; in a terminal in `~\.trif` they work as anywhere. API keys you save with `trif agent key` go to Windows Credential Manager." | after Safari's section |
+| 26 | a new section, `### Windows`: "TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome, Edge, Brave and Firefox: run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps (the extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH: open a new terminal afterwards to use `trif`. Chats from the side panel work with Claude Code and Codex. On Windows TRIF gives them no shell: they change mods with file tools and run TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on your computer the first time (with the C# compiler that comes with Windows). Log in to your coding agent in a terminal first (`claude`, then `/login`; or `codex login`): logging in from the panel isn't there on Windows yet. Open models can't be used from the panel on Windows yet; in a terminal in `~\.trif` they work as anywhere. API keys you save with `trif agent key` go to Windows Credential Manager." | after Safari's section. (Changed in round 4, when Codex's chats were switched on: the three sentences from "Chats from the side panel" to "work as anywhere"; before, they were about Claude Code alone and said Codex couldn't be used from the panel.) |
 | 27 | **changed**: `(on Linux, ~/.local/state/trif; on Windows, %LOCALAPPDATA%\TRIF, and the registry keys named com.webmods.helper under HKEY_CURRENT_USER\Software\…\NativeMessagingHosts);` | Uninstalling |
 
 ## Behaviour a person sees, without new words

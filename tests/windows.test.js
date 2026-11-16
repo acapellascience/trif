@@ -516,16 +516,19 @@ test('windows: chats from the panel for the agents TRIF can fence there; another
   const home = 'C:\\Users\\Tim\\.trif';
   assert.equal(platform.panelRunsOff('win32', home), null, 'no agent in particular: chats are there');
   assert.equal(platform.panelRunsOff('win32', home, 'claude', 'Claude Code'), null);
-  const off = platform.panelRunsOff('win32', home, 'codex', 'Codex');
-  assert.equal(off.title, 'Codex can’t be used from the panel on Windows yet');
-  assert.match(off.text, /^TRIF can’t keep Codex’s commands to the site you’re fixing on Windows yet\. Use another coding agent here, or Codex in a terminal in C:\\Users\\Tim\\\.trif/);
-  assert.match(off.error, /TRIF can't keep its commands to the site there\. Use another coding agent, or Codex in a terminal in /);
+  assert.equal(platform.panelRunsOff('win32', home, 'codex', 'Codex'), null);
+  // (the open model's runs aren't fenced there yet: agents/codex-oss.js)
+  const OSS = 'Open model (via Codex)';
+  const off = platform.panelRunsOff('win32', home, 'codex-oss', OSS);
+  assert.equal(off.title, `${OSS} can’t be used from the panel on Windows yet`);
+  assert.ok(off.text.startsWith(`TRIF can’t keep ${OSS}’s commands to the site you’re fixing on Windows yet. Use another coding agent here, or ${OSS} in a terminal in C:\\Users\\Tim\\.trif`), off.text);
+  assert.ok(off.error.includes(`TRIF can't keep its commands to the site there. Use another coding agent, or ${OSS} in a terminal in `), off.error);
   for (const said of [off.title, off.text, off.error]) assert.doesNotMatch(said, /Claude/, 'a message about one agent names no other');
-  for (const sys of ['darwin', 'linux']) assert.equal(platform.panelRunsOff(sys, home, 'codex', 'Codex'), null);
+  for (const sys of ['darwin', 'linux']) assert.equal(platform.panelRunsOff(sys, home, 'codex-oss', OSS), null);
   const ws = tempDir('wx-');
   const getWorkspace = () => P.workspace(ws);
   const runs = new Runs({ getWorkspace, platform: 'win32' });
-  assert.throws(() => runs.start({ agent: 'codex', prompt: 'make it blue', site: 'x.com', url: 'https://x.com/' }), /Codex can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there/);
+  assert.throws(() => runs.start({ agent: 'codex-oss', prompt: 'make it blue', site: 'x.com', url: 'https://x.com/' }), /Open model \(via Codex\) can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there/);
   assert.deepEqual(runs.list(), []);
   const logins = new Logins({ getWorkspace, platform: 'win32' });
   assert.throws(() => logins.start({ agent: 'claude' }), /logging in from the panel isn't available on Windows yet: open a terminal in /);

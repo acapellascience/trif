@@ -10,8 +10,9 @@
 //     stand-in asks for exactly the tool calls scripted here;
 //   - or, with `codex` as an argument, the real Codex the same way (a stand-in for OpenAI's API): no shell
 //     and none of its own tools that touch the computer, `trif` and TRIF's file tools from helper/mcp.js
-//     (agents/codex.js windowsConfig). Codex isn't offered in the panel on Windows until this is green
-//     (platform.js windowsRunAgents), so this run switches it on for itself;
+//     (agents/codex.js windowsConfig). Three runs: a model name Codex doesn't know (its tools called
+//     directly), a sub-agent of that, and Codex's default model (everything behind `exec`) with a
+//     sub-agent of its own. Codex is in platform.js WINDOWS_RUN_AGENTS because this is green;
 //   - the helper builds the fence's launcher with Windows' own C# compiler, makes the run's AppContainer,
 //     and starts Claude Code without a shell, with `trif` as a tool (helper/mcp.js).
 //
@@ -147,7 +148,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   // ---- the real helper, with a stand-in extension
   const ext = new FakeExtension({ home: ws, hostJs: path.join(code, 'helper', 'host.js'), env: {
     ...env, PATH: process.env.PATH, TRIF_HOME: '', TRIF_BOX_ROOT: '', TRIF_KEYCHAIN_BIN: '', TRIF_FENCE_BIN: '' /* (the real fence, not the unit tests' stand-in) */, TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'),
-    ...(CX ? { TRIF_OPENAI_URL: `${api.url}/v1`, TRIF_WINDOWS_CODEX_RUNS: '1' } : { TRIF_ANTHROPIC_URL: api.url }), TRIF_AGENT_TIMEOUT_MS: '240000', TRIF_AGENT_KILL_GRACE_MS: '400',
+    ...(CX ? { TRIF_OPENAI_URL: `${api.url}/v1` } : { TRIF_ANTHROPIC_URL: api.url }), TRIF_AGENT_TIMEOUT_MS: '240000', TRIF_AGENT_KILL_GRACE_MS: '400',
   } });
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   const tabs = [{ id: 12, windowId: 1, active: true, url: 'https://example.com/page', title: 'Example' }, { id: 13, windowId: 1, active: false, url: 'https://other.net/page', title: 'Other' }];

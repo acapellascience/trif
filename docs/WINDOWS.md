@@ -508,11 +508,28 @@ helper's key proxy, a made-up key in Credential Manager):
   Seen: it starts with what its parent has, less the sub-agent tools: no shell, no `apply_patch`, no
   `view_image` of Codex's, TRIF's tools from a fenced server; a file elsewhere, another site's folder
   and another site's tab are refused there in the same words.
-- **Not yet proven with the helper's own command**: Codex's default models, which get everything behind
-  `exec` (and an `apply_patch` that read-only refuses). The prototype saw that with a config written by
-  hand; the real run has to see it with `windowsConfig` before Codex is switched on.
-- **Not switched on yet**: `platform.js` `WINDOWS_RUN_AGENTS` is still Claude Code alone; the real run
-  switches Codex on for itself (`TRIF_WINDOWS_CODEX_RUNS=1`, which goes when Codex joins the list).
+- **Codex's default model** (round 4; a third run, started with no model named, as people's are: Codex
+  named `gpt-6.1-sol`). Everything but a few tools is behind `exec`, and the requests list the tools in
+  `input` (`additional_tools`), not in `tools`. Seen with the helper's own command:
+  - beside `exec`: `functions.exec`, `functions.wait`, `functions.request_user_input` (and `_async`),
+    `clock.sleep`, and `collaboration`'s sub-agent tools (`spawn_agent`, `wait_agent`, `send_message`,
+    `followup_task`, `interrupt_agent`, `list_agents`);
+  - what `exec` can call (`ALL_TOOLS`): `mcp__trif__`'s seven, `apply_patch`, `clock__curr_time`, the goal
+    tools and the MCP resource tools. No `exec_command`, `shell_command`, `shell` or `view_image`
+    ("tools.exec_command is not a function");
+  - the isolate has no `fetch`, `require`, `process`, `Deno`, `WebSocket` or `XMLHttpRequest`, and an
+    import of `node:fs` is refused;
+  - through `exec`, `trif status`, `write_file`, `trif check` and `read_file` work, and the mod reaches
+    the mods folder; `apply_patch` throws "patch rejected: writing is blocked by read-only sandbox" in
+    the site's folder and elsewhere (called directly, the same words); a file elsewhere, TRIF's settings,
+    another site's folder, the live mods folder, another site's tab and a command that isn't for runs
+    are refused in TRIF's words;
+  - **its sub-agent** (`collaboration.spawn_agent` with `fork_turns: "none"`, answered
+    `{"task_name": "/root/helper"}`) has the same tools as its parent, the sub-agent tools included (so
+    it could start one of its own, which gets the same config again: not tried), and the same refusals.
+- **Switched on** (round 4): `platform.js` `WINDOWS_RUN_AGENTS` is Claude Code and Codex; `run-codex` no
+  longer only informs (134 checks). The open model (`codex-oss.js`) stays off there: its runs go through
+  `codex.command` too, but nothing has run one fenced yet.
 
 **WSL: later, as an option for people who already live there.** Not the default: see below.
 

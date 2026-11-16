@@ -727,14 +727,16 @@ Re-running setup is safe; run it again to update.
 ## Windows (Phase 1)
 
 What runs on Windows: the extension (Chrome, Edge, Brave, Chromium, Firefox), the helper, `trif setup`,
-`trif doctor`, the `trif` CLI, updates and the keyring. What doesn't yet: **side-panel chats** (and
-`trif agent run`, and logging in from the panel). The panel shows "Chats from the panel aren’t available
-on Windows yet" with "Use your coding agent in a terminal instead: open one in <workspace> and ask it
-there." Neither Claude Code nor Codex gives TRIF a sandbox it can rely on there yet (Claude Code runs its
-commands unsandboxed on Windows; Codex's needs a recent Windows 11), and TRIF never runs an agent
-unconfined from the panel (`helper/lib/platform.js` `panelRunsOff`; `Runs.start` and `Logins.start`
-refuse, `agent.list` returns `runsOff: {title, text}` and no login status). An agent in a terminal in
-the workspace is the user's own session, as on a Mac.
+`trif doctor`, the `trif` CLI, updates, the keyring, and **side-panel chats** (and `trif agent run`) with
+Claude Code and Codex. Neither gives TRIF a sandbox it can rely on there, so a run gets no shell: `trif` is
+an MCP tool (`helper/mcp.js`) whose program runs inside TRIF's own fence, an AppContainer per run
+(`helper/lib/win/fence.js`); Claude Code keeps its file tools, held to the run's folders by its rules, and
+Codex gets TRIF's fenced file tools in place of its own (`docs/WINDOWS.md`, "The fence, as built" and
+"Codex: where it stands"). What doesn't yet: logging in from the panel, and the open model's chats.
+TRIF never runs an agent unconfined from the panel (`helper/lib/platform.js` `panelRunsOff`,
+`WINDOWS_RUN_AGENTS`; `Runs.start` refuses another agent and `Logins.start` refuses, `agent.list` lists
+that agent as not available, with why in its `note`). An agent in a terminal in the workspace is the
+user's own session, as on a Mac.
 
 Windows specifics live in `helper/lib/win/` and `helper/lib/platform.js`; macOS and Linux code paths are
 unchanged.

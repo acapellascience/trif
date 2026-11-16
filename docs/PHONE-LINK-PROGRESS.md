@@ -43,11 +43,11 @@ iPhone side (needs ios-poc free):
   18 tests pass locally, among them the published cacophony vector for `Noise_IK_25519_ChaChaPoly_SHA256`
   (handshake bytes, handshake hash and four transport messages match), RFC 7748's X25519 example, every flipped
   byte of message 1 refused, replay, wrong key, wrong prologue, frames up to a screenshot's size and the limits.
-- CI: see "CI" below (filled in at the end of the round).
+- CI green for c8898a4 (the whole suite on macOS): https://github.com/acapellascience/trif/actions/runs/43959884729
 
 ## CI
 
-- Round 1: (see the last lines of this section)
+- Round 1, c8898a4: success, https://github.com/acapellascience/trif/actions/runs/43959884729 (the commit after it only edits this file)
 
 ## Next step
 

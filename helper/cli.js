@@ -196,7 +196,7 @@ function optionPath(ctx, file, { write = false } = {}) {
     if (isInside(here, realLive, { orEqual: true }) && !isInside(here, ctx.ws.modsDir, { orEqual: true })) resolved = path.join(ctx.ws.modsDir, path.relative(realLive, here));
   }
   // Real paths, compared as the file system does (pathcheck.js: links, `..`, and case on macOS). For a
-  // write, the folder is checked and the file itself must not be a link (written with O_NOFOLLOW below).
+  // write, the folder is checked and the file itself must not be a link (writeOptionFile below).
   const target = write ? path.join(realish(path.dirname(resolved)), path.basename(resolved)) : realish(resolved);
   const roots = [ctx.ws.modsDir, ...(write && envVar('RUN_SCREENSHOTS') ? [envVar('RUN_SCREENSHOTS')] : [])].map((r) => realish(r));
   if (!roots.some((r) => isInside(target, r))) {
@@ -205,12 +205,34 @@ function optionPath(ctx, file, { write = false } = {}) {
   return target;
 }
 
-/** Write a file the CLI was told to (-o, screenshots): in a run, never through a link left in its place. */
+/**
+ * Write a file the CLI was told to (-o, screenshots): in a run, never through a link left in its place,
+ * nor into a file with another name elsewhere (a hard link). Not left to O_NOFOLLOW, which Windows hasn't:
+ * the name is looked at first, a new file is made only where there's none, and what's opened must be the
+ * plain file of that name before anything in it changes (so it's emptied after the open, not by it).
+ */
 function writeOptionFile(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (!envVar('RUN_BOX')) { fs.writeFileSync(file, data); return; }
-  const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o644);
-  try { fs.writeFileSync(fd, data); } finally { fs.closeSync(fd); }
+  const C = fs.constants;
+  const look = () => { try { return fs.lstatSync(file, { bigint: true }); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  const refuse = (why) => new UsageError(`inside a side-panel agent run, a file is written only as a plain file of its own: ${file} ${why}`);
+  const seen = look();
+  if (seen && !seen.isFile()) throw refuse(seen.isSymbolicLink() ? 'is a link' : 'isn\'t a file');
+  if (seen && seen.nlink > 1n) throw refuse('has another name too (a hard link)');
+  let fd;
+  try { fd = fs.openSync(file, C.O_WRONLY | (seen ? 0 : C.O_CREAT | C.O_EXCL) | (C.O_NOFOLLOW || 0), 0o644); } catch (e) {
+    if (e.code === 'EEXIST' || e.code === 'ELOOP') throw refuse('changed while it was written');
+    throw e;
+  }
+  try {
+    const st = fs.fstatSync(fd, { bigint: true });
+    const now = look();
+    const same = (a) => a && a.isFile() && a.ino === st.ino && a.dev === st.dev;
+    if (!st.isFile() || st.nlink > 1n || !same(now) || (seen && !same(seen))) throw refuse('changed while it was written');
+    if (seen) fs.ftruncateSync(fd, 0);
+    fs.writeFileSync(fd, data);
+  } finally { fs.closeSync(fd); }
 }
 
 function makeCtx(opts) {
@@ -1574,7 +1596,7 @@ async function main(argv) {
   }
 }
 
-module.exports = { parseArgs, detectExpression, formatValue, normalizeSite, normalizeUrl, main, optionPath };
+module.exports = { parseArgs, detectExpression, formatValue, normalizeSite, normalizeUrl, main, optionPath, writeOptionFile };
 
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; });

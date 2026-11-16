@@ -85,7 +85,7 @@ it's tested. "Phase 1" is the Windows work from 0.2.0 that this branch carried f
 |---|---|---|
 | `0600`/`0700` keep other users out of the private folder, the sockets, the token files | modes do nothing on Windows. What keeps other users out is the profile folder's own access list (the user, SYSTEM, Administrators), which `%LOCALAPPDATA%` and `~\.trif` inherit. Nothing is checked or tightened by TRIF | not tested: a decision ([Keys](#keys-and-secrets)) |
 | `chmod +x` makes a wrapper runnable | a `.bat`/`.cmd` runs by its name; doctor checks it's a file | windows.test.js |
-| `O_NOFOLLOW` when the CLI writes a file (`trif screenshot -o`), in `stage.js` reads | the constant is missing on Windows (the flag is silently dropped). `stage.js` also checks the real path afterwards, which holds; `cli.js`'s write doesn't | **left**: matters once runs exist |
+| `O_NOFOLLOW` when the CLI writes a file (`trif screenshot -o`), in `stage.js` reads | the constant is missing on Windows (the flag is silently dropped) | **done**: nothing relies on it. The file is looked at first and what's opened must be it (`cli.js` `writeOptionFile`, `stage.js` `_readLive` and `readPlain`, `runs.js` `_serveBox`); tests in `tests/cli.test.js`, `tests/stage.test.js`, `tests/agents.test.js` |
 | `process.umask` before `listen` | no effect; pipes have their own security (below) | — |
 | `process.getuid()` | not there on Windows: `runs.js` guards it; `browsers.js legacySafariAgentLoaded` is macOS only | unit tests |
 
@@ -593,8 +593,8 @@ In the order it would be done:
    get out on the runner. `claude-managed.js` for Windows' locations; the agents' guide for Windows runs.
 3. Un-skip the tests marked "no side-panel runs" in `tests/windows-skips.json` (the stand-in fence,
    `tests/fake-fence.js`, and stand-in agents that run on Windows), and make them pass there.
-4. Renames that replace a file (`stage.js`, `setConfigKey`) with retries; `O_NOFOLLOW`'s absence in
-   `cli.js`'s write.
+4. Renames that replace a file (`stage.js`, `setConfigKey`) with retries. (`O_NOFOLLOW`'s absence: done,
+   see the table above.)
 5. The browser check with user scripts allowed and a mod running on a page; Firefox on Windows in a real
    Firefox; the unit suite's real-browser tests as part of the Windows job proper (they pass as a step
    that only informs).

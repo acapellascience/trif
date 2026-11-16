@@ -1274,7 +1274,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
   (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default;
   `trif screenshot -o name.png` with a relative name saves there), never through a link left in its
-  place (O_NOFOLLOW). The run works in its own copy of the workspace (docs/STAGING.md), so the helper passes
+  place (looked at first, and what's opened must be that plain file: Windows has no O_NOFOLLOW). The run works in its own copy of the workspace (docs/STAGING.md), so the helper passes
   that copy's `sites/` as `TRIF_RUN_MODS_DIR`, and the mods folder itself as `TRIF_RUN_LIVE_MODS_DIR` (a
   custom `modsDir` holds for the run's `trif` too; the run can't read `config.json`): a path into the mods
   folder is taken as the same path in the copy. Screenshots older than 30

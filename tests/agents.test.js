@@ -1562,6 +1562,22 @@ test('in a run: screenshot -o NAME saves in the run\'s screenshots folder, other
   res = await runCli(['screenshot', '-o', path.join(home, 'x.png')], { home, env });
   assert.equal(res.code, 1);
   assert.match(res.stderr, /leave out -o to save to the run's screenshots folder/);
+  // A link left where the picture goes isn't written through (Windows has no O_NOFOLLOW to refuse it): one
+  // that points out of the run's folders is refused as a place, one that points within them as a link.
+  const elsewhere = path.join(home, 'elsewhere.png');
+  fs.writeFileSync(elsewhere, 'KEEP');
+  fs.symlinkSync(elsewhere, path.join(env.TRIF_RUN_SCREENSHOTS, 'out.png'));
+  res = await runCli(['screenshot', '-o', 'out.png'], { home, env });
+  assert.equal(res.code, 1, res.stdout);
+  assert.match(res.stderr, /leave out -o to save to the run's screenshots folder/);
+  assert.equal(fs.readFileSync(elsewhere, 'utf8'), 'KEEP');
+  const first = path.join(env.TRIF_RUN_SCREENSHOTS, 'page.png');
+  fs.writeFileSync(first, 'KEEP');
+  fs.symlinkSync(first, path.join(env.TRIF_RUN_SCREENSHOTS, 'linked.png'));
+  res = await runCli(['screenshot', '-o', 'linked.png'], { home, env });
+  assert.equal(res.code, 1, res.stdout);
+  assert.match(res.stderr, /a file is written only as a plain file of its own: .*linked\.png is a link/);
+  assert.equal(fs.readFileSync(first, 'utf8'), 'KEEP');
   // The run's `trif` can't read config.json (private), so the mods folder comes from TRIF_RUN_MODS_DIR.
   fs.renameSync(path.join(privDir(home), 'config.json'), path.join(privDir(home), 'config.json.away'));
   try {

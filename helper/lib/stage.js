@@ -35,6 +35,7 @@ const MAX_FILES = 20000;
 
 const sha1 = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 const lstatOrNull = (p) => { try { return fs.lstatSync(p); } catch { return null; } };
+const NOFOLLOW = fs.constants.O_NOFOLLOW || 0; // (not on Windows: `x | undefined` is x, so nothing would say)
 const statKey = (st) => `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
 
 /** Whether the folder `name` under sites/ is the run's own (its site, a part of it, or all-sites/). */
@@ -98,14 +99,16 @@ function plainUnder(root, rel, ci) {
  */
 function readPlain(root, rel, ci) {
   const file = path.join(root, rel);
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  // (Windows has no O_NOFOLLOW, and opens what a link points at: there a link is told by its real path, and
+  // by the name being a plain file that's the one opened)
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
   try {
     const st = fs.fstatSync(fd);
     if (!st.isFile()) throw new Error('not a file');
     if (st.nlink > 1) throw new Error('a file with more than one name (a hard link)');
     if (!plainUnder(root, rel, ci)) throw new Error('reached through a link');
     const rst = lstatOrNull(file);
-    if (!rst || rst.ino !== st.ino || rst.dev !== st.dev) throw new Error('changed while it was read');
+    if (!rst || !rst.isFile() || rst.ino !== st.ino || rst.dev !== st.dev) throw new Error('changed while it was read');
     return { buf: fs.readFileSync(fd), st };
   } finally { fs.closeSync(fd); }
 }
@@ -242,11 +245,16 @@ class Stage {
     });
   }
 
+  // A file of the mods folder, never through a link: `st` is what the walk saw there (looked at here when
+  // it's not given), and what's opened must be that file. (Not left to O_NOFOLLOW, which Windows hasn't.)
   _readLive(rel, st) {
-    const fd = fs.openSync(path.join(this.liveReal, rel), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const file = path.join(this.liveReal, rel);
+    const seen = st || fs.lstatSync(file);
+    if (!seen.isFile()) throw new Error('not a file');
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
     try {
       const fst = fs.fstatSync(fd);
-      if (!fst.isFile() || (st && (fst.ino !== st.ino || fst.dev !== st.dev))) throw new Error('changed');
+      if (!fst.isFile() || fst.ino !== seen.ino || fst.dev !== seen.dev) throw new Error('changed');
       return fs.readFileSync(fd);
     } finally { fs.closeSync(fd); }
   }

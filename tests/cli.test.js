@@ -719,6 +719,45 @@ test('inside a side-panel run, -f/-o/check paths are compared as the file system
   }
 });
 
+test('inside a side-panel run, -o never writes through a link or a hard link left in the file\'s place (Windows has no O_NOFOLLOW)', () => {
+  const home = tempDir();
+  const dir = path.join(home, 'sites', 'example.com');
+  fs.mkdirSync(dir, { recursive: true });
+  const { writeOptionFile } = require('../helper/cli');
+  const text = (f) => fs.readFileSync(f, 'utf8');
+  const outside = path.join(home, 'outside.txt');
+  const nowhere = path.join(home, 'made-through-a-link.txt');
+  fs.writeFileSync(outside, 'KEEP');
+  const saved = { ...process.env };
+  process.env.TRIF_RUN_BOX = path.join(home, 'boxes', 'r1');
+  try {
+    // A link to a file, a link to nowhere (the file would be made there), a hard link, a folder: refused,
+    // and nothing is written anywhere.
+    fs.symlinkSync(outside, path.join(dir, 'link.txt'));
+    fs.symlinkSync(nowhere, path.join(dir, 'dangling.txt'));
+    fs.linkSync(outside, path.join(dir, 'hard.txt'));
+    fs.mkdirSync(path.join(dir, 'folder.txt'));
+    for (const [name, why] of [['link.txt', /is a link$/], ['dangling.txt', /is a link$/], ['hard.txt', /has another name too \(a hard link\)$/], ['folder.txt', /isn't a file$/]]) {
+      assert.throws(() => writeOptionFile(path.join(dir, name), 'WRITTEN'), (e) => /^inside a side-panel agent run, a file is written only as a plain file of its own: /.test(e.message) && why.test(e.message), name);
+    }
+    assert.equal(text(outside), 'KEEP');
+    assert.ok(!fs.existsSync(nowhere));
+    assert.ok(fs.lstatSync(path.join(dir, 'link.txt')).isSymbolicLink(), 'the link is left as it was');
+    // A plain file: made (its folder too), and replaced whole by a shorter one.
+    writeOptionFile(path.join(dir, 'sub', 'new.txt'), 'a longer text');
+    assert.equal(text(path.join(dir, 'sub', 'new.txt')), 'a longer text');
+    writeOptionFile(path.join(dir, 'sub', 'new.txt'), Buffer.from('short'));
+    assert.equal(text(path.join(dir, 'sub', 'new.txt')), 'short');
+    // Outside a run it's the person's own command: their link is theirs to write through.
+    delete process.env.TRIF_RUN_BOX;
+    writeOptionFile(path.join(dir, 'link.txt'), 'THEIRS');
+    assert.equal(text(outside), 'THEIRS');
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+});
+
 test('site and mod names: no colon, trailing dot or space, reserved name', async () => {
   const home = tempDir();
   for (const [site, mod] of [['x.com:evil', 'a'], ['x.com.', 'a'], ['x.com', 'a.'], ['con', 'a'], ['x.com', 'nul'], ['x.com', 'a:b']]) {

@@ -7,7 +7,7 @@ const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { Stage, ownFolder } = require('../helper/lib/stage');
+const { Stage, ownFolder, readPlain } = require('../helper/lib/stage');
 const { FakeExtension, tempDir, privDir, waitFor, sleep, runCli, writeMod } = require('./fake-extension');
 
 const cleanups = [];
@@ -144,6 +144,29 @@ test('stage: changes in the mods folder come into the copy; the run\'s edit over
   assert.match(read(l('x.com', 'tidy.js')), /the run's/);
   const hist = path.join(home, 'history', 'x.com');
   assert.ok(fs.readdirSync(hist).filter((n) => n.endsWith('.js')).some((n) => /the user again/.test(read(path.join(hist, n)))));
+});
+
+test('stage: a file swapped for a link, in the copy or in the mods folder, is never read through (Windows has no O_NOFOLLOW)', () => {
+  const { home, stage, s, l, outside } = setup();
+  const all = (dir) => fs.readdirSync(dir, { recursive: true }).map((n) => path.join(dir, n)).filter((f) => fs.lstatSync(f).isFile());
+  const secret = (dirs) => dirs.filter((d) => fs.existsSync(d)).flatMap(all).filter((f) => f !== outside && /SECRET/.test(read(f)));
+  const rel = path.join('x.com', 'tidy.js');
+  // The run swaps a mod of its copy for a link to a file it can't read: not read, so not copied anywhere.
+  fs.unlinkSync(s('x.com', 'tidy.js'));
+  fs.symlinkSync(outside, s('x.com', 'tidy.js'));
+  assert.throws(() => readPlain(stage.sites, rel, stage.ci), /ELOOP|reached through a link/);
+  stage.sync();
+  assert.deepEqual(secret([l(), path.join(home, 'trash'), path.join(home, 'history')]), []);
+  // A link in the mods folder (someone's own, or put there between the helper's look and its read): the
+  // helper doesn't bring what it points at into the run's copy.
+  fs.rmSync(l('x.com', 'tidy.js'), { force: true });
+  fs.symlinkSync(outside, l('x.com', 'tidy.js'));
+  assert.throws(() => stage._readLive(rel), /not a file/);
+  assert.throws(() => stage._readLive(rel, fs.lstatSync(l('x.com', '_notes.md'))), /ELOOP|changed/); // (what was seen there was another file)
+  assert.equal(String(stage._readLive(path.join('x.com', '_notes.md'))), 'notes');
+  assert.equal(String(stage._readLive(path.join('x.com', '_notes.md'), fs.lstatSync(l('x.com', '_notes.md')))), 'notes');
+  stage.sync();
+  assert.deepEqual(secret([stage.dir]), []);
 });
 
 test('stage: a folder of the copy swapped for a link is never read or written through; after close, nothing is read', () => {

@@ -117,6 +117,19 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   const profileCanary = path.join(os.homedir(), `trif-fence-canary-${rand()}.txt`);
   fs.writeFileSync(profileCanary, `${CANARY} profile`);
   spawnSync(sys('clip.exe'), [], { input: `${CANARY} clipboard` });
+  // A key in Windows Credential Manager, saved as TRIF saves one (helper/lib/keyring.js): a made-up key
+  // under TRIF's own name for an Anthropic key, unless this computer has a real one there (then under a
+  // name of the test's own).
+  const keyring = require(path.join(REPO, 'helper', 'lib', 'keyring'));
+  const CRED_SECRET = `${CANARY}-credential`;
+  let credService = 'TRIF API key';
+  let credSaved = false;
+  try {
+    if ((await keyring.hasKey('anthropic', { service: credService })).stored) credService = 'TRIF fence test';
+    await keyring.setKey('anthropic', CRED_SECRET, { service: credService });
+    credSaved = true;
+  } catch (e) { console.log(`(no credential could be saved here: ${e.message})`); }
+  const credTarget = `${credService}/anthropic`;
 
   const PSEXE = path.join(SYSROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   // ---- every attempt: expect 'allow' (a run needs it), 'deny' (a guarantee), 'info' (to know)
@@ -193,6 +206,8 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'the same with wmic', g: 'others', expect: 'info', direct: `"${sys('wbem\\WMIC.exe')}" process where ProcessId=${other.pid} get CommandLine`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
     { id: 'list programs (tasklist /v)', g: 'others', expect: 'info', direct: `"${sys('tasklist.exe')}" /FI "PID eq ${other.pid}" /V /FO CSV`, through: (r) => r.status === 0 && r.stdout.includes(String(other.pid)) },
     { id: 'signal another program (kill 0)', g: 'others', expect: 'info', op: 'kill', pid: other.pid },
+    { id: `read TRIF's API key in Credential Manager (${credTarget})`, g: 'private', expect: credSaved ? 'deny' : 'info', direct: `"${spy}" cred "${credTarget}"`, through: (r) => r.stdout.includes(CRED_SECRET), keep: 200 },
+    { id: 'list the credentials in Credential Manager', g: 'private', expect: 'info', direct: `"${spy}" cred "${credTarget}"`, through: (r) => /CRED-LIST \d+ credential/.test(r.stdout), keep: 200 },
     { id: 'read the clipboard (a small program of its own)', g: 'others', expect: 'deny', direct: `"${spy}" clip`, through: (r) => r.stdout.includes(CANARY) },
     { id: 'the same, without the job (the AppContainer alone)', g: 'others', expect: 'info', job: false, direct: `"${spy}" clip`, through: (r) => r.stdout.includes(CANARY) },
     { id: 'read another program\'s command line (Windows\' own calls)', g: 'others', expect: 'deny', direct: `"${spy}" cmdline ${other.pid}`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
@@ -298,13 +313,13 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       const hung = d.status === null;
       let through = false;
       try { through = !hung && !!o.through(d); } catch { /* not through */ }
-      got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().replace(CANARY, 'CANARY').slice(0, 90)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
+      got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().replace(/\s+/g, ' ').split(CANARY).join('CANARY').slice(0, o.keep || 90)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
     }
     console.log(`the probe ran in ${r.ms} ms\n`);
     if (mode === 'appcontainer') {
       // (so a refusal below means the fence: outside it the same small program gets each of these)
       const out = (args) => String(spawnSync(spy, args, { encoding: 'utf8', timeout: 30000 }).stdout || '').trim().replace(/\s+/g, ' ').split(CANARY).join('CANARY').slice(0, 200);
-      console.log(`  outside the fence, for comparison: clipboard: ${out(['clip'])} | command line: ${out(['cmdline', String(other.pid)])} | memory: ${out(['open', String(other.pid)])}\n`);
+      console.log(`  outside the fence, for comparison: clipboard: ${out(['clip'])} | command line: ${out(['cmdline', String(other.pid)])} | memory: ${out(['open', String(other.pid)])} | credential: ${out(['cred', credTarget]).split(CRED_SECRET.replace(CANARY, 'CANARY')).join('CANARY-credential')}\n`);
     }
     let group = '';
     for (const o of ops) {
@@ -363,6 +378,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   udpServer.close();
   pipeServer.close();
   spawnSync(sys('reg.exe'), ['delete', REG_KEY, '/f']);
+  if (credSaved) { try { await keyring.removeKey('anthropic', { service: credService }); } catch { /* left: a made-up key */ } }
   fs.rmSync(profileCanary, { force: true });
   try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* left in the temp folder */ }
   console.log(`\n${failed ? `${failed} attempt(s) went the wrong way` : 'every guarantee held, and everything a run needs worked'}`);

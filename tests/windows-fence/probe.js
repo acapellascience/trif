@@ -67,6 +67,16 @@ const OPS = {
     s.on('error', (e) => { try { s.close(); } catch { /* closed */ } resolve({ ok: false, why: short(e) }); });
     s.send('x', o.port, o.host, (e) => { try { s.close(); } catch { /* closed */ } resolve(e ? { ok: false, why: short(e) } : { ok: true }); });
   }),
+  // a real question to a name server, and whether an answer comes back (a send alone says nothing)
+  udpAsk: (o) => new Promise((resolve) => {
+    const s = dgram.createSocket('udp4');
+    const q = Buffer.from('abcd01000001000000000000076578616d706c6503636f6d0000010001', 'hex'); // example.com A
+    const done = (r) => { try { s.close(); } catch { /* closed */ } resolve(r); };
+    s.on('error', (e) => done({ ok: false, why: short(e) }));
+    s.on('message', (m) => done({ ok: true, got: `${m.length} bytes back` }));
+    s.send(q, o.port, o.host, (e) => { if (e) done({ ok: false, why: short(e) }); });
+    setTimeout(() => done({ ok: false, why: 'no answer within 4 s' }), 4000);
+  }),
   listen: () => new Promise((resolve) => {
     const s = net.createServer();
     s.on('error', (e) => resolve({ ok: false, why: short(e) }));

@@ -72,6 +72,27 @@ async function claudeCode(base) {
   const mcpLog = path.join(base, 'mcp.log');
   const mcpConfig = path.join(base, 'mcp.json');
   fs.writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { trif: { command: process.execPath, args: [path.join(__dirname, 'mcp-echo.js'), mcpLog] } } }));
+  // The MCP server again, this time started inside the fence (an AppContainer: tests/windows-fence/fence.cs):
+  // Claude Code starts the launcher, the launcher starts node in the container, their pipes joined.
+  const { build } = require('./build');
+  const fenceExe = build(path.join(base, 'bin'));
+  const fenced = path.join(base, 'fenced');
+  fs.cpSync(__dirname, path.join(fenced, 'app'), { recursive: true });
+  fs.mkdirSync(path.join(fenced, 'node'), { recursive: true });
+  fs.copyFileSync(process.execPath, path.join(fenced, 'node', 'node.exe'));
+  fs.mkdirSync(path.join(fenced, 'box', 'tmp'), { recursive: true });
+  const fencedSpec = path.join(base, 'fenced-spec.json');
+  fs.writeFileSync(fencedSpec, JSON.stringify({
+    name: `trif.run.${rand()}`, capability: 'trifRunCode.agents', revoke: true, cwd: path.join(fenced, 'box'),
+    env: { SystemRoot: SYSROOT, SystemDrive: process.env.SystemDrive || 'C:', windir: SYSROOT, ComSpec: sys('cmd.exe'), PATH: path.join(SYSROOT, 'System32'), TEMP: path.join(fenced, 'box', 'tmp'), TMP: path.join(fenced, 'box', 'tmp'), USERPROFILE: path.join(fenced, 'box'), APPDATA: path.join(fenced, 'box', 'tmp'), LOCALAPPDATA: path.join(fenced, 'box', 'tmp') },
+    grant: [{ path: path.join(fenced, 'app'), rights: 'r', to: 'capability' }, { path: path.join(fenced, 'node'), rights: 'r', to: 'capability' }, { path: path.join(fenced, 'box'), rights: 'rw' }],
+    command: `"${path.join(fenced, 'node', 'node.exe')}" --preserve-symlinks --preserve-symlinks-main "${path.join(fenced, 'app', 'mcp-echo.js')}" -`,
+  }));
+  const fencedConfig = path.join(base, 'mcp-fenced.json');
+  fs.writeFileSync(fencedConfig, JSON.stringify({ mcpServers: { trif: { command: fenceExe, args: ['run', fencedSpec] } } }));
+  const tcp = require('net').createServer((c) => c.destroy());
+  await new Promise((r) => tcp.listen(0, '127.0.0.1', r));
+  const tcpPort = tcp.address().port;
   const fileRules = ['--allowedTools', 'Read(./**)', 'Edit(./sites/**)'];
   for (const [label, extraEnv, script, extraArgs] of [
     ['no prefix: which shell runs a command', {}, [{ bash: 'echo shell-ok; uname -s; pwd' }, { say: 'done' }], ['--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(uname:*)', 'Bash(pwd:*)']],
@@ -97,6 +118,7 @@ async function claudeCode(base) {
       { tool: 'Write', input: { file_path: path.join(base, 'home', 'planted2.txt'), content: 'planted' } },
       { say: 'done' }], fileRules],
     ['no Bash at all; TRIF\'s commands as an MCP tool', {}, [{ tool: 'mcp__trif__trif', input: { args: ['status', '--json'] } }, { bash: 'echo should-not-run' }, { say: 'done' }], ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__trif__trif', '--tools', 'Read,Edit,Write,Glob,Grep']],
+    ['the same, with the MCP server inside the AppContainer fence', {}, [{ tool: 'mcp__trif__trif', input: { args: ['status'] } }, { tool: 'mcp__trif__trif', input: { args: ['try', outside, String(tcpPort)] } }, { say: 'done' }], ['--mcp-config', fencedConfig, '--allowedTools', 'mcp__trif__trif', '--tools', 'Read,Edit,Write,Glob,Grep']],
   ]) {
     const api = await startFakeAnthropic({ script });
     const cfg = path.join(base, `claude-config-${rand()}`);
@@ -131,6 +153,7 @@ async function claudeCode(base) {
     if (r.stderr.trim()) show('stderr', r.stderr.slice(-1500));
     await api.close();
   }
+  tcp.close();
   console.log(`afterwards: held.json = ${fs.readFileSync(path.join(work, 'held.json'), 'utf8')}; planted outside: ${['planted.txt', 'planted2.txt'].filter((n) => fs.existsSync(path.join(base, 'home', n))).join(', ') || 'nothing'}; sites/x.com: ${fs.readdirSync(path.join(work, 'sites', 'x.com')).join(', ')}`);
   show('the MCP server\'s log', fs.existsSync(mcpLog) ? fs.readFileSync(mcpLog, 'utf8') : '(never started)', 2500);
   show('what the prefix program was handed (prefix.log)', fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '(nothing: the prefix was never run)', 6000);
@@ -147,13 +170,12 @@ function codexProfile(layout) {
   return permissionsToml;
 }
 
-async function codex(base) {
-  console.log('\n================ Codex');
+async function codex(base, where = 'inside the user\'s profile folder') {
+  console.log(`\n================ Codex, its files ${where}: ${base}`);
   const bin = which('codex');
   if (!bin) { console.log('codex not found on PATH'); return; }
   console.log(`codex: ${bin}`);
   show('codex --version', runTool(bin, ['--version']).stdout);
-  show('codex sandbox --help', runTool(bin, ['sandbox', '--help']).stdout + runTool(bin, ['sandbox', '--help']).stderr);
   // The same layout as run.js, smaller: a working folder, a mailbox, a secret elsewhere, the private folder.
   const CANARY = `CANARY-${rand(8)}`;
   const home = path.join(base, 'cx', 'home');
@@ -202,6 +224,7 @@ async function codex(base) {
   fs.mkdirSync(codexHome, { recursive: true });
   const env = { ...process.env, CODEX_HOME: codexHome };
   for (const kind of ['unelevated', 'elevated', 'mxc']) {
+    if (kind !== 'elevated' && where.startsWith('outside')) continue;
     console.log(`\n>>> windows.sandbox = "${kind}"`);
     if (kind === 'elevated') {
       const s = runTool(bin, ['sandbox', 'setup', '--elevated', '--current-user'], { env, timeout: 240000 });
@@ -234,5 +257,7 @@ async function codex(base) {
   console.log(spawnSync(sys('cmd.exe'), ['/d', '/c', 'ver'], { encoding: 'utf8' }).stdout.trim());
   try { await claudeCode(base); } catch (e) { console.log(`Claude Code: ${e.stack || e.message}`); }
   try { await codex(base); } catch (e) { console.log(`Codex: ${e.stack || e.message}`); }
+  // (and somewhere that isn't in anyone's profile folder: the runner's own temp folder, on D:)
+  if (process.env.RUNNER_TEMP) { try { await codex(fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'trif-agents-')), 'outside any profile folder'); } catch (e) { console.log(`Codex: ${e.stack || e.message}`); } }
   process.exit(0);
 })();

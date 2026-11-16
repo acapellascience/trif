@@ -41,17 +41,7 @@ const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.w
 const rand = (n = 6) => crypto.randomBytes(n).toString('hex');
 let failed = 0;
 
-function build(base) {
-  const csc = [path.join(SYSROOT, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'), path.join(SYSROOT, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')].find((f) => fs.existsSync(f));
-  if (!csc) throw new Error('no csc.exe (.NET Framework 4) on this computer');
-  const exe = path.join(base, 'bin', 'trif-fence.exe');
-  fs.mkdirSync(path.dirname(exe), { recursive: true });
-  const t = Date.now();
-  const r = spawnSync(csc, ['/nologo', '/o+', '/r:System.Web.Extensions.dll', `/out:${exe}`, path.join(__dirname, 'fence.cs')], { encoding: 'utf8' });
-  if (r.status !== 0 || !fs.existsSync(exe)) throw new Error(`csc failed:\n${r.stdout}\n${r.stderr}`);
-  console.log(`built ${exe} with ${csc} in ${Date.now() - t} ms (${fs.statSync(exe).size} bytes)`);
-  return exe;
-}
+const { build } = require('./build');
 
 function fence(exe, spec, { timeout = 240000 } = {}) {
   const file = path.join(os.tmpdir(), `trif-fence-spec-${rand()}.json`);
@@ -66,7 +56,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-fence-')));
   console.log(`scratch ${base}\nuser profile ${os.homedir()}\nnode ${process.execPath} ${process.version}`);
   console.log(spawnSync(sys('cmd.exe'), ['/d', '/c', 'ver'], { encoding: 'utf8' }).stdout.trim());
-  const exe = build(base);
+  const exe = build(path.join(base, 'bin'));
 
   // ---- what a run sees, as on a user's computer: everything inside the user's profile folder
   const CANARY = `CANARY-${rand(8)}`;
@@ -110,6 +100,11 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   const server = net.createServer((s) => { tcpHits++; s.destroy(); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
+  let udpHits = 0;
+  const udpServer = require('dgram').createSocket('udp4');
+  udpServer.on('message', () => { udpHits++; });
+  await new Promise((r) => udpServer.bind(0, '127.0.0.1', r));
+  const udpPort = udpServer.address().port;
   const pipeName = `\\\\.\\pipe\\trif-${rand(16)}`;
   const pipeServer = net.createServer((s) => { pipeHits++; s.destroy(); });
   await new Promise((r) => pipeServer.listen(pipeName, r));
@@ -184,7 +179,8 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'connect to the internet (1.1.1.1:443)', g: 'network', expect: 'deny', op: 'tcp', host: '1.1.1.1', port: 443 },
     { id: 'look up a name (example.com)', g: 'network', expect: 'deny', op: 'dns', host: 'example.com' },
     { id: 'fetch https://example.com', g: 'network', expect: 'deny', op: 'fetch', url: 'https://example.com/' },
-    { id: 'send a UDP packet out (1.1.1.1:53)', g: 'network', expect: 'info', op: 'udp', host: '1.1.1.1', port: 53 },
+    { id: 'ask a name server over UDP and get an answer (8.8.8.8:53)', g: 'network', expect: 'deny', op: 'udpAsk', host: '8.8.8.8', port: 53 },
+    { id: 'send a UDP packet to this computer (127.0.0.1)', g: 'network', expect: 'info', op: 'udp', host: '127.0.0.1', port: udpPort },
     { id: 'connect to a server on this computer (127.0.0.1)', g: 'network', expect: 'deny', op: 'tcp', host: '127.0.0.1', port },
     { id: 'the same by name (localhost)', g: 'network', expect: 'deny', op: 'tcp', host: 'localhost', port },
     { id: 'connect to the helper\'s pipe', g: 'network', expect: 'deny', op: 'pipe', name: pipeName },
@@ -206,6 +202,9 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'Windows PowerShell starts', g: 'shells', expect: 'info', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -Command "Write-Output ps-ok"`, through: (r) => r.stdout.includes('ps-ok') },
     { id: 'cmd.exe starts', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c echo cmd-ok`, through: (r) => r.stdout.includes('cmd-ok') },
     { id: 'cmd.exe starts a child of its own (cmd /c cmd /c echo)', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c "${sys('cmd.exe')}" /d /c echo grandchild-ok`, through: (r) => r.stdout.includes('grandchild-ok') },
+    { id: 'node starts a child (cmd /c echo), in the job', g: 'shells', expect: 'info', direct: `"${node}" -e "const r=require('child_process').spawnSync(process.env.ComSpec,['/d','/c','echo','node-child-ok'],{encoding:'utf8',timeout:8000});console.log(r.status,r.stdout,r.error&&r.error.code)"`, through: (r) => r.stdout.includes('node-child-ok') },
+    { id: 'node starts a child, without the job', g: 'shells', expect: 'info', job: false, direct: `"${node}" -e "const r=require('child_process').spawnSync(process.env.ComSpec,['/d','/c','echo','node-child-ok'],{encoding:'utf8',timeout:8000});console.log(r.status,r.stdout,r.error&&r.error.code)"`, through: (r) => r.stdout.includes('node-child-ok') },
+    { id: 'cmd.exe starts a child, without the job', g: 'shells', expect: 'info', job: false, direct: `"${sys('cmd.exe')}" /d /c "${sys('cmd.exe')}" /d /c echo grandchild-ok`, through: (r) => r.stdout.includes('grandchild-ok') },
     { id: 'trif.cmd-like: cmd.exe starts node with a script', g: 'shells', expect: 'info', direct: `"${sys('cmd.exe')}" /d /c ""${node}" --preserve-symlinks --preserve-symlinks-main "${path.join(app, 'fence-test', 'hello.js')}""`, through: (r) => r.stdout.includes('script-ok') },
     { id: 'TRIF\'s CLI (trif help)', g: 'shells', expect: 'allow', direct: `"${node}" --preserve-symlinks --preserve-symlinks-main "${path.join(app, 'helper', 'cli.js')}" help`, through: (r) => r.status === 0 && /trif/i.test(r.stdout) },
     { id: 'node from C:\\Program Files\\nodejs starts', g: 'shells', expect: 'info', direct: '"C:\\Program Files\\nodejs\\node.exe" -p process.version', through: (r) => r.status === 0 && /^v\d/.test(r.stdout.trim()) },
@@ -245,12 +244,15 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       { path: app, rights: 'r', to: 'capability' },
       { path: nodeDir, rights: 'r', to: 'capability' },
       { path: stage, rights: 'r' },
-      { path: path.join(stage, 'sites'), rights: 'rw' },
+      // sites/: folders may be made in it (a new site's); what's inside is the run's to change...
+      { path: path.join(stage, 'sites'), rights: 'r+mkdir', inherit: false },
+      { path: path.join(stage, 'sites'), rights: 'rw', inherit: 'only' },
       { path: box, rights: 'rw' },
       { path: shots, rights: 'rw' },
       ...(stat ? onTheWay().map((p) => ({ path: p, rights: 'stat', to: 'capability' })) : []),
     ],
-    deny: [{ path: path.join(stage, 'sites', 'y.com'), rights: 'w' }],
+    // ...but for the folders of other sites that are there when it starts: read only
+    readonly: [path.join(stage, 'sites', 'y.com')],
     command: command || `"${node}" ${flags.join(' ')} "${probe}" "${cfgFile}"`,
   });
 
@@ -282,11 +284,11 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     }
     results[mode] = got;
     for (const o of ops.filter((x) => x.direct)) {
-      const d = fence(exe, specFor(mode, { ...how, name, revoke: false, command: o.direct }), { timeout: 40000 });
+      const d = fence(exe, { ...specFor(mode, { ...how, name, revoke: false, command: o.direct }), ...(o.job === false ? { job: false } : {}) }, { timeout: 40000 });
       const hung = d.status === null;
       let through = false;
       try { through = !hung && !!o.through(d); } catch { /* not through */ }
-      got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().slice(0, 60)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
+      got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().replace(CANARY, 'CANARY').slice(0, 90)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
     }
     console.log(`the probe ran in ${r.ms} ms\n`);
     let group = '';
@@ -302,13 +304,13 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       if (through && typeof res.got === 'string' && res.got.includes(CANARY) && o.expect === 'deny') console.log('        (the canary came back)');
     }
     // From outside: nothing it shouldn't have changed did, the servers saw nobody, nothing was left running.
-    const check = (ok, what) => { console.log(`  ${ok ? 'PASS' : 'FAIL'} (outside)  ${what}`); if (!ok) failed++; };
-    check(fs.readFileSync(path.join(stage, 'sites', 'y.com', 'other.js'), 'utf8') === '// other' && fs.existsSync(path.join(stage, 'sites', 'y.com', 'keep.js')) && !fs.existsSync(path.join(stage, 'sites', 'y.com', 'planted.js')), 'another site\'s folder is as it was');
-    check(fs.readFileSync(path.join(stage, 'AGENTS.md'), 'utf8') === '# guide' && !fs.existsSync(path.join(stage, 'CLAUDE.md')), 'the guides are as they were');
-    check(fs.readFileSync(path.join(live, 'allowed.json'), 'utf8') === '{}' && !fs.existsSync(path.join(live, 'sites', 'x.com', 'planted.js')), 'the live workspace is as it was');
+    const check = (ok, what) => { let v = false; try { v = typeof ok === 'function' ? !!ok() : !!ok; } catch { /* not so */ } console.log(`  ${v ? 'PASS' : 'FAIL'} (outside)  ${what}`); if (!v) failed++; };
+    check(() => fs.readFileSync(path.join(stage, 'sites', 'y.com', 'other.js'), 'utf8') === '// other' && fs.existsSync(path.join(stage, 'sites', 'y.com', 'keep.js')) && !fs.existsSync(path.join(stage, 'sites', 'y.com', 'planted.js')), 'another site\'s folder is as it was');
+    check(() => fs.readFileSync(path.join(stage, 'AGENTS.md'), 'utf8') === '# guide' && !fs.existsSync(path.join(stage, 'CLAUDE.md')), 'the guides are as they were');
+    check(() => fs.readFileSync(path.join(live, 'allowed.json'), 'utf8') === '{}' && !fs.existsSync(path.join(live, 'sites', 'x.com', 'planted.js')), 'the live workspace is as it was');
     check(!fs.existsSync(path.join(priv, 'planted.json')) && !fs.existsSync(path.join(home, 'planted.txt')) && !fs.existsSync(path.join(boxes, 'r2', 'forged.json')), 'nothing planted in the private folder, the home folder or another run\'s mailbox');
     check(fs.existsSync(path.join(stage, 'sites', 'x.com', 'new.js')) && fs.existsSync(path.join(box, 'req-1.json')) && fs.existsSync(path.join(shots, 'a.png')), 'its own mod, mailbox request and screenshot are there');
-    check(tcpHits === 0 && pipeHits === 0, `the server and the pipe on this computer saw no connection (tcp ${tcpHits}, pipe ${pipeHits})`);
+    check(tcpHits === 0 && pipeHits === 0 && udpHits === 0, `the servers and the pipe on this computer heard nothing (tcp ${tcpHits}, udp ${udpHits}, pipe ${pipeHits})`);
     let left = null;
     try { left = Number(fs.readFileSync(leftPid, 'utf8')); } catch { /* it couldn't start one */ }
     if (left) {
@@ -327,14 +329,18 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     // (put back what the allowed writes changed, for the next mode)
     for (const f of [path.join(stage, 'sites', 'x.com', 'new.js'), path.join(box, 'req-1.json'), path.join(box, 'tmp', 't.txt'), path.join(shots, 'a.png'), leftPid, path.join(box, 'hl'), path.join(box, 'sl')]) fs.rmSync(f, { force: true });
     for (const d of [path.join(stage, 'sites', 'new.org'), path.join(box, 'j')]) { try { fs.rmdirSync(d); } catch { /* not made */ } }
+    for (const [n, t] of [['other.js', '// other'], ['keep.js', '// keep']]) { try { put(path.join(stage, 'sites', 'y.com', n), t); } catch { /* as it is */ } }
+    fs.rmSync(path.join(stage, 'sites', 'y.com', 'planted.js'), { force: true });
+    fs.rmSync(path.join(stage, 'sites', 'x.com', 'stolen'), { recursive: true, force: true });
     fs.writeFileSync(path.join(stage, 'sites', 'x.com', 'own.js'), '// own');
     fs.writeFileSync(path.join(stage, 'sites', 'all-sites', 'dark.js'), '// all');
-    tcpHits = 0; pipeHits = 0;
+    tcpHits = 0; pipeHits = 0; udpHits = 0;
   }
 
   // ---- tidy up
   other.kill();
   server.close();
+  udpServer.close();
   pipeServer.close();
   spawnSync(sys('reg.exe'), ['delete', REG_KEY, '/f']);
   fs.rmSync(profileCanary, { force: true });

@@ -15,8 +15,12 @@
 //   grant       [{path, rights: "r"|"rw"|"stat", to: "run"|"capability", inherit: true|false}]
 //               access-control entries added before the command starts ("stat": read attributes only,
 //               this folder only, for programs that look at every folder on a path)
-//   deny        [{path, rights: "w"}]  explicit deny entries for the run's SID (a read-only folder inside
-//               a writable one)
+//   grant       ... rights "r+mkdir": read, and make folders in it (not files); inherit "only": the entry
+//               is for what's inside the folder, not the folder itself
+//   readonly    [path]  folders inside a writable one that the run may only read (another site's mods):
+//               the folder stops inheriting, the run's entries on it are taken out, and it gets a read
+//               entry of its own. (Not a deny entry: Windows ignores deny entries that name an
+//               AppContainer, seen on windows-latest: the run wrote the folder all the same.)
 //   revoke      true: when the command has ended, take the run's entries out again and delete the profile
 //   cwd, env    the command's folder and its whole environment ({NAME: value}; none: this program's)
 //   command     the command line, as CreateProcess takes it
@@ -132,16 +136,32 @@ static class Fence {
     if (r == "stat") return FileSystemRights.ReadAttributes | FileSystemRights.Synchronize;
     if (r == "r") return FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize;
     if (r == "rw") return FileSystemRights.Modify | FileSystemRights.Synchronize;
+    if (r == "r+mkdir") return FileSystemRights.ReadAndExecute | FileSystemRights.CreateDirectories | FileSystemRights.Synchronize;
     // "w", for a deny: everything that changes the folder or what's in it (reading stays as granted)
     if (r == "w") return FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
     throw new Exception("unknown rights " + r);
   }
 
-  static void Acl(string path, SecurityIdentifier who, FileSystemRights rights, bool inherit, AccessControlType type, bool remove) {
+  // A folder inside a writable one, made read-only to the run: see "readonly" above.
+  static void ReadOnly(string path, SecurityIdentifier who) {
+    if (!Directory.Exists(path)) throw new Exception("no folder at " + path);
+    DirectoryInfo d = new DirectoryInfo(path);
+    DirectorySecurity s = d.GetAccessControl(AccessControlSections.Access);
+    s.SetAccessRuleProtection(true, true); // stop inheriting; what was inherited stays, as the folder's own
+    d.SetAccessControl(s);
+    s = d.GetAccessControl(AccessControlSections.Access);
+    s.PurgeAccessRules(who);
+    s.AddAccessRule(new FileSystemAccessRule(who, FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+    d.SetAccessControl(s);
+  }
+
+  static void Acl(string path, SecurityIdentifier who, FileSystemRights rights, bool inherit, AccessControlType type, bool remove) { Acl(path, who, rights, inherit, false, type, remove); }
+
+  static void Acl(string path, SecurityIdentifier who, FileSystemRights rights, bool inherit, bool only, AccessControlType type, bool remove) {
     if (Directory.Exists(path)) {
       DirectoryInfo d = new DirectoryInfo(path);
       DirectorySecurity s = d.GetAccessControl(AccessControlSections.Access);
-      FileSystemAccessRule rule = new FileSystemAccessRule(who, rights, inherit ? (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit) : InheritanceFlags.None, PropagationFlags.None, type);
+      FileSystemAccessRule rule = new FileSystemAccessRule(who, rights, inherit ? (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit) : InheritanceFlags.None, only ? PropagationFlags.InheritOnly : PropagationFlags.None, type);
       if (remove) s.RemoveAccessRuleAll(rule); else s.AddAccessRule(rule);
       d.SetAccessControl(s);
     } else if (File.Exists(path)) {
@@ -192,9 +212,17 @@ static class Fence {
       bool toCap = Str(g, "to", "run") == "capability";
       if (toCap && cap == null) return Fail("a grant to the capability, but the spec names none");
       string rights = Str(g, "rights", "r");
-      bool inherit = rights != "stat" && Bool(g, "inherit", true);
-      Acl(Str(g, "path", ""), toCap ? cap : run, Rights(rights), inherit, AccessControlType.Allow, false);
+      bool only = Str(g, "inherit", "") == "only";
+      bool inherit = only || (rights != "stat" && Bool(g, "inherit", true));
+      Acl(Str(g, "path", ""), toCap ? cap : run, Rights(rights), inherit, only, AccessControlType.Allow, false);
       if (!toCap) mine.Add(new object[] { Str(g, "path", ""), Rights(rights), inherit, AccessControlType.Allow });
+    }
+    object ro;
+    if (spec.TryGetValue("readonly", out ro) && ro != null) {
+      foreach (object o in (IEnumerable)ro) {
+        ReadOnly(Convert.ToString(o), run);
+        mine.Add(new object[] { Convert.ToString(o), FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize, true, AccessControlType.Allow });
+      }
     }
     foreach (Dictionary<string, object> g in List(spec, "deny")) {
       Acl(Str(g, "path", ""), run, Rights(Str(g, "rights", "w")), true, AccessControlType.Deny, false);

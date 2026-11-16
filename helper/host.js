@@ -564,7 +564,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
+const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.toPhone', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit']);
@@ -798,6 +798,16 @@ function agentCommand(cmd, args) {
         require('./lib/reveal').revealPath(r.dir, 'folder');
         logger.info(`exported ${r.ids.length} mod(s) of ${r.site} to ${r.dir}`);
         return { site: r.site, dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };
+      });
+    }
+    // Send to iPhone (lib/tophone.js): a copy of the mod's file to the Mac's AirDrop, which the iPhone app opens
+    // ("Add this mod?"); without AirDrop's window, the copy shown in Finder. No server.
+    case 'mod.toPhone': {
+      const id = String(args.id ?? '');
+      if (!state.mods.find((x) => x.id === id)) throw new Error(`no mod ${id || '(no id)'}`);
+      return require('./lib/tophone').sendToPhone(ws, state.mods, id, { logger }).then((r) => {
+        logger.info(`sent ${r.id} to the phone: ${r.how}`);
+        return { id: r.id, file: path.basename(r.file), how: r.how, ...(r.airdrop === false ? { airdrop: false } : {}) };
       });
     }
     // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so

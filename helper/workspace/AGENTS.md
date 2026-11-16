@@ -236,6 +236,19 @@ where the user finds it on the TRIF setup page).
   (`@risk 0`) unless they asked for more, cheap on pages it doesn't apply to, and quick to bail out
   (check `location.hostname` or for the elements it needs, and return).
 
+### Phone mods
+
+The panel's "Edit for mobile" puts the user's tab in TRIF's phone view: a window as wide as a phone where the
+site sees an iPhone (Safari's user agent, touch, no hover), so it shows its mobile layout; `trif tabs` marks
+that tab `phone`. A mod made there is for TRIF on the user's phone:
+
+- Investigate and screenshot that tab (`--tab`), not a desktop one: the mobile layout's elements differ.
+- Add `// @device phone` to the header. TRIF on the phone runs it; desktop TRIF runs it too, in every tab of
+  the site, so make it act only where the mobile layout is (check for its elements, or
+  `matchMedia('(max-width: 600px)')`, and return).
+- Style sheets in the phone view still see a mouse (`@media (hover: hover)` matches there and not on the
+  phone): don't key a mod on hover or pointer media queries.
+
 ## The CLI
 
 `TAB` below is `--tab <id>` or `--url <substring|/regex/>`. Without one, commands use the active tab of

@@ -630,6 +630,8 @@ class Runs {
       ws,
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
+      // (the panel's tab is TRIF's phone view, "Edit for mobile": extension/phone.js; {device, width})
+      phone: args.phone && typeof args.phone === 'object' && typeof args.phone.device === 'string' ? { device: args.phone.device.slice(0, 40), width: Number(args.phone.width) || null } : null,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
@@ -827,7 +829,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));

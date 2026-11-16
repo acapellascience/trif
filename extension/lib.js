@@ -574,12 +574,17 @@ export async function lastFocusedNormalWindow(chromeApi, firefox = FIREFOX) {
   return win && (!win.type || win.type === 'normal') ? win : null;
 }
 
-/** Resolve a tab selector using chrome.windows/chrome.tabs. */
-export async function resolveTab(chromeApi, args = {}) {
-  const [tabs, win] = await Promise.all([
+/**
+ * Resolve a tab selector using chrome.windows/chrome.tabs: the tabs of normal windows, and those of `also`
+ * (window ids: the phone view's windows, which are popups, phone.js).
+ */
+export async function resolveTab(chromeApi, args = {}, also = []) {
+  const [normal, win, extra] = await Promise.all([
     chromeApi.tabs.query({ windowType: 'normal' }),
     lastFocusedNormalWindow(chromeApi),
+    Promise.all((also || []).filter(Number.isInteger).map((windowId) => chromeApi.tabs.query({ windowId }).catch(() => []))),
   ]);
+  const tabs = [...normal, ...extra.flat().filter((t) => !normal.some((n) => n.id === t.id))];
   tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
   return selectTab(tabs, win?.id, args);
 }

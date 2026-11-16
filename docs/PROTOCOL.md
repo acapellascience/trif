@@ -126,6 +126,9 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.), unless its header says 
   the groups `rules`, `sandboxed`, `page`): only what people see says style, boxed and free mods. A mod's
   hash is taken with its header's `@style`/`@boxed` lines spelled `@rules`/`@sandboxed`, so switching
   spelling alone keeps its hash (what was allowed for it, holds, the extension's `unsandboxedOk`).
+- `@device phone` (or `desktop`): made in the phone view ("Edit for mobile", docs/MOBILE-EDIT.md) for TRIF on
+  a phone. Parsed into `device` (absent when the header doesn't say; not in the hash's metadata). Nothing acts
+  on it yet: the mod runs wherever its `@match` says.
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/detox-timeline`). The helper parses headers; the extension never parses.
@@ -398,6 +401,16 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   windowId}`) instead of `openPanelOnActionClick`, because only then does the click give TRIF `activeTab`
   on that tab (also where the panel opens in a window instead: see "The panel in a window"). Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
   that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).
+
+### The phone view (`phone.open`, `phone.close`, `phone.state`)
+
+From the panel only (docs/MOBILE-EDIT.md, extension/phone.js): `{type: "phone.open", tabId, screen}` moves the
+tab into a phone-sized popup window with Safari-on-iPhone rules for that tab (session rules from id 1,000,000,
+which tab locks leave alone) and the page script (phone-page.js), and opens the panel window beside it;
+`{type: "phone.close", tabId}` puts it back; `{type: "phone.state", tabId}` says whether a tab is one. Page
+commands find the phone's tab (resolveTab's extra windows), `tabs` marks it `phone: "iPhone"`, and `agent.start`
+from it carries `phone: {device, width}` to the helper, which tells the agent. `mod.toPhone {id}` (helper,
+lib/tophone.js): a copy of the mod's file to AirDrop, or shown in Finder: `{id, file, how: "airdrop"|"folder"}`.
 
 ### Mod switches (`mod.enable`)
 

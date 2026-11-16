@@ -974,6 +974,10 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 /* the one-time note after an update gave up every site's access */
 .access-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
 
+/* the phone view (phone.js): the bar's phone button, pressed in the phone view's panel; the line under the bar */
+.phone-btn[aria-pressed="true"] { color: var(--switch-on); }
+.phone-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
+
 /* ---- sensitive sites and Off (Tim, 2026-11-11) ------------------------------------------------------------ */
 /* Off: no starter suggestions (the agent can't see the page), and the level in words, however narrow. */
 body.agent-off #empty .chips { display: none; }

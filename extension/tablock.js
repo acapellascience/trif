@@ -356,7 +356,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // icon(tabId, paused): sets the tab's toolbar icon (background.js: the paused face, or the tab's own face
 // when it unlocks, faces.js); without it, the paused robot or the normal one.
-export function createTabLocks({ chrome, log = () => {}, changed = () => {}, noted = () => {}, key = 'tabLocks', inScope = defaultInScope, icon = null }) {
+// foreign(id): a session rule another part of TRIF owns (the phone view's, phone.js): never counted or removed here.
+export function createTabLocks({ chrome, log = () => {}, changed = () => {}, noted = () => {}, key = 'tabLocks', inScope = defaultInScope, icon = null, foreign = () => false }) {
   // tabId -> {token, ids, site, url, since, parent, kind, domains, fp, cleared, noted}
   // kind: 'code' (the agent's code ran there), 'opened' (a locked tab opened it), 'site' (another tab of a
   // locked site: the same rules as the tab the code ran in, until the site unlocks)
@@ -367,7 +368,7 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     try {
       const raw = (await chrome.storage.session.get(key))[key] || {};
       const saved = raw.locks ? raw : { locks: raw, sites: {} }; // (the shape before site locks)
-      const rules = await chrome.declarativeNetRequest.getSessionRules();
+      const rules = (await chrome.declarativeNetRequest.getSessionRules()).filter((r) => !foreign(r.id));
       const have = new Set(rules.map((r) => r.id));
       for (const [s, x] of Object.entries(saved.sites || {})) if (x && Array.isArray(x.ids) && x.ids.every((i) => have.has(i))) sites.set(s, x);
       for (const [tab, l] of Object.entries(saved.locks || {})) {

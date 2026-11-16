@@ -84,6 +84,12 @@ function parseHeader(code) {
       case 'version':
         if (value) out.version = value;
         break;
+      // `@device phone`: made in the phone view ("Edit for mobile", extension/phone.js) for TRIF on a phone; it
+      // runs wherever its @match says, here too (AGENTS.md "Phone mods"). Only set when the header says.
+      case 'device':
+        if (/^(phone|desktop)$/i.test(value)) out.device = value.toLowerCase();
+        else out.warnings.push(`@device should be phone or desktop (got "${value}")`);
+        break;
       // `@style` (or `@rules`, its name before): a style mod (lib/rules.js): data after the header, run by
       // TRIF's own code. Inside TRIF it's still a "rules" mod (`rules: true`).
       case 'style':
@@ -172,6 +178,7 @@ function buildMod({ site, file, code }) {
     risk: header.risk, // {tier, why} or null when the header doesn't say
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
+    ...(header.device ? { device: header.device } : {}), // ('phone': made in the phone view)
   };
   // (`sandboxed` only when it is: the hashes of every other mod stay as they were. The code is hashed with its
   // header's new names spelled the old way, so a mod that only changes `@rules` to `@style`, or `@sandboxed` to

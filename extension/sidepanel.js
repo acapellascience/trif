@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, setBrowser, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
@@ -30,6 +30,7 @@ const ui = {
   sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
   sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
   waitingBadge: document.getElementById('waiting-badge'),
+  phoneBtn: $('#phone-btn'), phoneNote: $('#phone-note'), phoneNoteText: $('#phone-note-text'), phoneBack: $('#phone-back'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateFoot: $('#gate-foot'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
@@ -54,6 +55,7 @@ const ui = {
 
 const view = {
   windowId: null,
+  phone: null, // {tabId, phone, device}: whether the tab shown is in the phone view (refreshPhone)
   tab: null,                 // {id, url}
   site: null,
   chat: emptyChat(),
@@ -191,6 +193,7 @@ async function refreshStatus() {
   try {
     const wasConnected = !!view.status?.helper?.connected;
     view.status = await request({ type: 'status' });
+    await refreshPhone();
     // (the background's name for the browser, which it may have learned since this panel opened)
     if (view.status?.browser) setBrowser(view.status.browser);
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
@@ -331,6 +334,7 @@ async function setTab(tab) {
     ui.input.value = drafts.get(tab.id) || '';
   }
   view.tab = { id: tab.id, url };
+  if (view.phone?.tabId !== tab.id) refreshPhone().then(() => renderPhone()).catch(() => {});
   const site = siteForUrl(url);
   if (site !== view.site) {
     leaveSite(view.site);
@@ -757,6 +761,7 @@ function render() {
       : `Log in to ${agentInfo?.name || 'your agent'} first`;
 
   renderGate(problem, agentInfo);
+  renderPhone();
   renderTabLock();
   renderFaces(problem, agentInfo);
   renderPausedAll();
@@ -2647,6 +2652,9 @@ function codeViewDialog() {
   const item = (label, cls, fn) => { const b = button(label, `menu-item ${cls}`, () => { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); fn(); }); b.setAttribute('role', 'menuitem'); return b; };
   const editor = item('Open in editor', 'cv-editor', () => revealMod('editor'));
   const reveal = item(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
+  // (Send to iPhone: AirDrop from the Mac, which TRIF's iPhone app opens; docs/MOBILE-EDIT.md "Send to phone")
+  const toPhone = item('Send to iPhone…', 'cv-to-phone', () => sendModToPhone());
+  toPhone.hidden = !IS_MAC;
   const wrap = item('Wrap lines', 'cv-wrap', () => {
     codeWrap = !codeWrap;
     try { localStorage.setItem('codeWrap', codeWrap ? 'on' : 'off'); } catch { /* this time only */ }
@@ -2657,7 +2665,7 @@ function codeViewDialog() {
   wrap.setAttribute('aria-checked', String(codeWrap));
   // ("Copy to {host}": one per sensitive site of its own under the mod's site, filled in by openCodeView)
   const copyTo = el('span', 'cv-copy-to');
-  menu.append(editor, reveal, wrap, copyTo);
+  menu.append(editor, reveal, toPhone, wrap, copyTo);
   more.addEventListener('click', () => { menu.hidden = !menu.hidden; more.setAttribute('aria-expanded', String(!menu.hidden)); });
   x.addEventListener('click', () => d.close());
   const moreWrap = el('span', 'cv-more-wrap');
@@ -3187,6 +3195,18 @@ async function saveEdit() {
   } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; } finally { P.eSave.disabled = false; }
 }
 
+async function sendModToPhone() {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  try {
+    const r = await request({ type: 'mod.toPhone', id: codeView.id });
+    P.note.textContent = r.how === 'airdrop'
+      ? `Pick your iPhone in AirDrop. On the phone, open ${r.file} in TRIF.`
+      : `${r.airdrop === false ? 'No AirDrop on this Mac. ' : ''}${r.file} is in the Finder window: Share → AirDrop sends it to your iPhone, which opens it in TRIF.`;
+    P.note.hidden = false;
+  } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
+}
+
 async function exportMod() {
   const P = codeView.parts;
   P.err.hidden = true;
@@ -3197,6 +3217,49 @@ async function exportMod() {
     P.note.hidden = false;
   } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
 }
+
+// ---- the phone view: Edit for mobile, Back to desktop (phone.js, docs/MOBILE-EDIT.md) ---------------------------
+// The bar's phone button moves this tab into a phone-sized window where the site sees an iPhone, with a panel
+// window of its own beside it (which this panel isn't: it stays with the user's window). In that panel the
+// button is pressed, and a line under the bar says what the window is, with Back to desktop.
+async function refreshPhone() {
+  const tabId = view.tab?.id;
+  if (!Number.isInteger(tabId) || SAFARI) { view.phone = null; return; }
+  try {
+    const r = await request({ type: 'phone.state', tabId });
+    if (view.tab?.id === tabId) view.phone = { tabId, ...r };
+  } catch { view.phone = null; }
+}
+
+function renderPhone() {
+  const site = view.site;
+  const here = !!view.phone && view.phone.tabId === view.tab?.id;
+  const on = here && !!view.phone.phone;
+  // (where the site is on: the phone view needs TRIF's access to it, and it's for making mods there)
+  ui.phoneBtn.hidden = SAFARI || !site || !view.status || (!on && currentState() !== 'on');
+  ui.phoneBtn.setAttribute('aria-pressed', String(on));
+  ui.phoneBtn.title = on ? 'Back to desktop' : 'Edit for mobile';
+  ui.phoneBtn.setAttribute('aria-label', ui.phoneBtn.title);
+  ui.phoneNote.hidden = !on;
+  document.body.classList.toggle('phone-view', on);
+  if (on) ui.phoneNoteText.textContent = `Phone view: ${site} sees an ${view.phone.device || 'iPhone'}. Mods you make here are for TRIF on your phone.`;
+}
+
+async function togglePhone() {
+  const tabId = view.tab?.id;
+  if (!Number.isInteger(tabId)) return;
+  const on = !!view.phone?.phone && view.phone.tabId === tabId;
+  ui.phoneBtn.disabled = true;
+  try {
+    if (on) await request({ type: 'phone.close', tabId });
+    else await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
+    await refreshPhone();
+  } catch (e) {
+    request({ type: 'chat.note', site: view.site, text: `${on ? 'Couldn’t go back to desktop' : 'Couldn’t open the phone view'}: ${e?.message ?? e}` }).catch(() => {});
+  } finally { ui.phoneBtn.disabled = false; renderPhone(); }
+}
+ui.phoneBtn?.addEventListener('click', togglePhone);
+ui.phoneBack?.addEventListener('click', togglePhone);
 
 // ---- Import, export, a site's files, and dropping files on the panel (helper lib/share.js) -------------
 function renderSiteTools() {

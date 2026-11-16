@@ -29,6 +29,11 @@
     <button id="site-switch" class="icon-btn power" type="button" role="switch" aria-checked="false" hidden>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 4.3a5 5 0 1 0 5.6 0"/><path d="M8 2.2v5"/></svg>
     </button>
+    <!-- Edit for mobile (phone.js, docs/MOBILE-EDIT.md): this tab into a phone-sized window where the site sees an
+         iPhone; pressed in the phone view's own panel, where it's Back to desktop (sidepanel.js renderPhone). -->
+    <button id="phone-btn" class="icon-btn phone-btn" type="button" aria-pressed="false" hidden>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.6"/><path d="M7 12.2h2"/></svg>
+    </button>
     <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat" disabled>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
     </button>
@@ -187,6 +192,8 @@
 <section id="paused" class="notice" hidden></section>
 <section id="notice" class="notice" hidden></section>
 <section id="update" class="notice" hidden></section>
+<!-- The phone view's line: this panel follows a phone window (sidepanel.js renderPhone). -->
+<p id="phone-note" class="phone-note" hidden><span id="phone-note-text"></span> <button id="phone-back" class="link-btn" type="button">Back to desktop</button></p>
 
 <details id="mods" class="mods" hidden>
   <summary>Mods on this site <span id="mods-count" class="count"></span>

@@ -10,6 +10,7 @@ import CryptoKit
 import Network
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import WebKit
 
 /// trif://open?url=<an http(s) address>: the site to open (anything else: nil).
@@ -200,41 +201,68 @@ enum WebClipMaker {
     }
 }
 
-/// Hands a profile to Safari: a server on 127.0.0.1 that answers with it, then stops 2 s later (or after 90 s),
-/// kept running while the app is in the background with iOS's background time; then Safari is opened at its address.
+/// Hands a profile to Safari: a server on this phone's loopback (127.0.0.1) that answers with it, then stops 2 s
+/// later (or after 90 s, or when iOS's background time runs out); then Safari is opened at its address.
+/// On Tim's iPhone (11-16) Safari found nothing listening (it worked in the Simulator), so now: the background time
+/// is asked for first, before anything else (its own identifier); the server listens on the loopback interface only,
+/// on a port the system picks; it must answer a test request from the app itself before Safari is opened; and each
+/// step is in the diagnostics ("icon"). If any of it fails, or Safari never fetches the profile, the sheet offers to
+/// save the profile to Files instead (FilesFallback below).
 @MainActor
-final class ProfileHandoff {
+final class ProfileHandoff: ObservableObject {
     static let shared = ProfileHandoff()
+    enum State: Equatable { case idle, starting, handed, fetched, failed(String), timedOut }
+    @Published private(set) var state: State = .idle
     private var listener: NWListener?
     private var task: UIBackgroundTaskIdentifier = .invalid
-
     private var generation = 0
+    private var openedAt: Date?
 
-    func hand(_ profile: Data, name: String, done: @escaping (Bool) -> Void) {
-        stop()
+    private func log(_ text: String) { Diagnostics.shared.log("icon", text) }
+
+    func hand(_ profile: Data, name: String) {
+        stop(log: false)
         generation += 1
         let gen = generation
-        // (bound to 127.0.0.1: nothing else on the network can reach it)
-        let params = NWParameters.tcp
-        params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
-        guard let l = try? NWListener(using: params) else { done(false); return }
-        listener = l
-        let file = name.replacingOccurrences(of: "[^A-Za-z0-9.-]+", with: "-", options: .regularExpression)
-        let stopSoon: @Sendable (Double) -> Void = { secs in
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(secs * 1e9))
-                if ProfileHandoff.shared.generation == gen { ProfileHandoff.shared.stop() }
+        state = .starting
+        // (the background time first, its own identifier, so the server outlives the switch to Safari)
+        task = UIApplication.shared.beginBackgroundTask(withName: "TRIF: a Home Screen icon for Safari") {
+            MainActor.assumeIsolated {
+                let me = ProfileHandoff.shared
+                guard me.generation == gen else { return }
+                if me.state == .handed { me.log("iOS's background time ran out before Safari fetched the profile"); me.state = .timedOut }
+                me.stop(log: true)
             }
         }
+        log("server starting (background time asked for: \(task != .invalid ? "yes" : "no"))")
+        // (development: `-noserver` at launch, as if the server had failed, for the Files route)
+        if ProcessInfo.processInfo.arguments.contains("-noserver") { fail("development: -noserver"); return }
+        let params = NWParameters.tcp
+        params.requiredInterfaceType = .loopback // (only this phone can reach it)
+        params.allowLocalEndpointReuse = true
+        guard let l = try? NWListener(using: params, on: .any) else { fail("the server couldn't be made"); return }
+        listener = l
+        let file = name.replacingOccurrences(of: "[^A-Za-z0-9.-]+", with: "-", options: .regularExpression)
         l.newConnectionHandler = { c in
             c.start(queue: .main)
-            c.receive(minimumIncompleteLength: 1, maximumLength: 8192) { _, _, _, _ in
-                var head = "HTTP/1.1 200 OK\r\nContent-Type: application/x-apple-aspen-config\r\nContent-Length: \(profile.count)\r\n"
-                head += "Content-Disposition: attachment; filename=\"\(file).mobileconfig\"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
-                c.send(content: Data(head.utf8) + profile, completion: .contentProcessed { _ in
+            c.receive(minimumIncompleteLength: 1, maximumLength: 16384) { data, _, _, _ in
+                let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                let ping = request.hasPrefix("GET /trif-ping ")
+                let body = ping ? Data("ok".utf8) : profile
+                var head = "HTTP/1.1 200 OK\r\nContent-Type: \(ping ? "text/plain" : "application/x-apple-aspen-config")\r\nContent-Length: \(body.count)\r\n"
+                if !ping { head += "Content-Disposition: attachment; filename=\"\(file).mobileconfig\"\r\n" }
+                head += "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
+                c.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in
                     c.cancel()
-                    Task { @MainActor in Diagnostics.shared.log("icon", "Safari fetched the profile for \(name)") }
-                    stopSoon(2)
+                    guard !ping else { return }
+                    Task { @MainActor in
+                        let me = ProfileHandoff.shared
+                        guard me.generation == gen else { return }
+                        me.log("Safari fetched the profile for \(name)\(me.openedAt.map { String(format: ", %.1f s after it was opened", Date().timeIntervalSince($0)) } ?? "")")
+                        me.state = .fetched
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        if me.generation == gen { me.stop(log: false) }
+                    }
                 })
             }
         }
@@ -244,11 +272,31 @@ final class ProfileHandoff {
                 guard me.generation == gen else { return }
                 switch st {
                 case .ready:
-                    guard let port = me.listener?.port?.rawValue, let url = URL(string: "http://127.0.0.1:\(port)/\(file).mobileconfig") else { done(false); return }
-                    me.task = UIApplication.shared.beginBackgroundTask(withName: "TRIF: handing a profile to Safari") { MainActor.assumeIsolated { ProfileHandoff.shared.stop() } }
-                    UIApplication.shared.open(url) { ok in done(ok) }
-                    stopSoon(90)
-                case .failed: done(false); me.stop()
+                    guard let port = me.listener?.port?.rawValue, port != 0 else { me.fail("the server has no port"); return }
+                    me.log("listening on 127.0.0.1:\(port)")
+                    // (it has to answer the app itself first: then Safari is opened, never before)
+                    let ok = await ProfileHandoff.selfTest(port: port)
+                    guard me.generation == gen else { return }
+                    guard ok else { me.fail("the server didn't answer the app's own test"); return }
+                    me.log("ready: it answered the app's own test")
+                    guard let url = URL(string: "http://127.0.0.1:\(port)/\(file).mobileconfig") else { me.fail("no address"); return }
+                    me.openedAt = Date()
+                    UIApplication.shared.open(url) { opened in
+                        MainActor.assumeIsolated {
+                            guard me.generation == gen else { return }
+                            me.log("Safari \(opened ? "opened" : "not opened") at the profile's address")
+                            if opened { if me.state == .starting { me.state = .handed } } else { me.fail("Safari wasn't opened") }
+                        }
+                    }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 90_000_000_000)
+                        guard me.generation == gen, me.state == .handed else { return }
+                        me.log("timed out: Safari didn't fetch the profile in 90 s")
+                        me.state = .timedOut
+                        me.stop(log: false)
+                    }
+                case .failed(let e): me.fail("the server failed: \(e)")
+                case .waiting(let e): me.log("the server is waiting: \(e)")
                 default: break
                 }
             }
@@ -256,64 +304,167 @@ final class ProfileHandoff {
         l.start(queue: .main)
     }
 
-    func stop() {
+    /// One request to the server from the app itself, over the same loopback: true if it answers within 2 s.
+    nonisolated static func selfTest(port: UInt16) async -> Bool {
+        await withCheckedContinuation { (k: CheckedContinuation<Bool, Never>) in
+            let once = TakeOnce()
+            let c = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+            let finish: @Sendable (Bool) -> Void = { ok in if once.take() { c.cancel(); k.resume(returning: ok) } }
+            c.stateUpdateHandler = { st in
+                switch st {
+                case .ready:
+                    c.send(content: Data("GET /trif-ping HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".utf8), completion: .contentProcessed { _ in
+                        c.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, _ in
+                            finish(data.flatMap { String(data: $0, encoding: .utf8) }?.hasPrefix("HTTP/1.1 200") ?? false)
+                        }
+                    })
+                case .failed, .cancelled: finish(false)
+                default: break
+                }
+            }
+            c.start(queue: .global())
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { finish(false) }
+        }
+    }
+
+    /// The app is back in front with Safari not having fetched the profile: it didn't work (the sheet offers Files).
+    func cameBack() {
+        guard state == .handed, let at = openedAt, Date().timeIntervalSince(at) > 3 else { return }
+        log("back in TRIF \(Int(Date().timeIntervalSince(at))) s after Safari was opened, the profile not fetched")
+        state = .timedOut
+        stop(log: false)
+    }
+
+    private func fail(_ why: String) {
+        log("couldn't hand the profile to Safari: \(why)")
+        state = .failed(why)
+        stop(log: false)
+    }
+
+    /// A new sheet: nothing handed yet.
+    func reset() { if state != .starting && state != .handed { state = .idle } }
+
+    func stop(log: Bool) {
         listener?.cancel()
         listener = nil
         if task != .invalid { UIApplication.shared.endBackgroundTask(task); task = .invalid }
+        if log { self.log("server stopped") }
     }
 }
 
-/// The ⋯ menu's Add to Home Screen: the icon, its name (editable), and the button; then what to do in Settings.
+/// A flag that can be taken once, from any thread.
+final class TakeOnce: @unchecked Sendable {
+    private var taken = false
+    private let lock = NSLock()
+    func take() -> Bool { lock.lock(); defer { lock.unlock() }; if taken { return false }; taken = true; return true }
+}
+
+/// The profile as a file to save in Files (the route that needs no server: Files opens a .mobileconfig as Safari
+/// does, "Profile Downloaded", then Settings).
+struct ProfileFile: FileDocument {
+    static let type = UTType(filenameExtension: "mobileconfig") ?? .data
+    static var readableContentTypes: [UTType] { [type] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+}
+
+/// The ⋯ menu's Add to Home Screen: the icon, its name (editable), and the button; then what to do in Settings. If
+/// Safari can't be handed the profile (or never fetches it), saving it to Files instead.
 struct WebClipSheet: View {
     @EnvironmentObject var browser: Browser
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var phase
+    @ObservedObject private var handoff = ProfileHandoff.shared
     @State private var face: SiteFace?
     @State private var name = ""
-    @State private var stage = 0 // 0 reading the site, 1 ready, 2 handed to Safari, 3 failed
+    @State private var failed = false
+    @State private var saving: ProfileFile?
+    @State private var saved = false
+
+    private var label: String { name.isEmpty ? (face?.name ?? "") : name }
+    private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label) } }
+    /// Safari didn't get it: the Files route is offered.
+    private var offerFiles: Bool {
+        switch handoff.state { case .failed, .timedOut: return true; default: return failed }
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                Group {
-                    if let icon = face?.icon {
-                        Image(uiImage: icon).resizable().frame(width: 96, height: 96)
-                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                    } else {
-                        ProgressView().frame(width: 96, height: 96)
+            ScrollView {
+                VStack(spacing: 18) {
+                    Group {
+                        if let icon = face?.icon {
+                            Image(uiImage: icon).resizable().frame(width: 96, height: 96)
+                                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                        } else {
+                            ProgressView().frame(width: 96, height: 96)
+                        }
+                    }
+                    .padding(.top, 24)
+                    TextField("Name", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 240)
+                        .disabled(face == nil)
+                    note.font(.footnote).multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal, 24)
+                    Button {
+                        guard let f = face, let p = profile else { failed = true; return }
+                        saved = false
+                        Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(f.source), \(p.count / 1000) kB profile)")
+                        ProfileHandoff.shared.hand(p, name: label)
+                    } label: {
+                        Text(handoff.state == .idle ? "Add to Home Screen" : "Try again").bold().frame(maxWidth: 240)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(face == nil || handoff.state == .starting)
+                    if offerFiles {
+                        Button {
+                            guard let p = profile else { return }
+                            saving = ProfileFile(data: p)
+                        } label: {
+                            Text("Save to Files instead").frame(maxWidth: 240)
+                        }
+                        .buttonStyle(.bordered)
+                        .onAppear { Diagnostics.shared.log("icon", "fallback offered: save the profile to Files") }
                     }
                 }
-                .padding(.top, 24)
-                TextField("Name", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 240)
-                    .disabled(face == nil)
-                if stage == 2 {
-                    Text("Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install.")
-                        .font(.footnote).multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal, 24)
-                } else if stage == 3 {
-                    Text("Couldn't hand the icon to Safari.").font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    Text("The icon opens \(face?.site ?? "the site") in TRIF.").font(.footnote).foregroundStyle(.secondary)
-                }
-                Button {
-                    guard let f = face, let p = WebClipMaker.profile(f, name: name.isEmpty ? f.name : name) else { stage = 3; return }
-                    Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(f.source), \(p.count / 1000) kB profile)")
-                    ProfileHandoff.shared.hand(p, name: name.isEmpty ? f.name : name) { ok in stage = ok ? 2 : 3 }
-                } label: {
-                    Text(stage == 2 ? "Make it again" : "Add to Home Screen").bold().frame(maxWidth: 240)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(face == nil)
-                Spacer()
+                .padding(.bottom, 24)
             }
             .navigationTitle("Add to Home Screen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
+        .fileExporter(isPresented: Binding(get: { saving != nil }, set: { if !$0 { saving = nil } }), document: saving,
+                      contentType: ProfileFile.type, defaultFilename: "\(label) for TRIF") { result in
+            switch result {
+            case .success(let url): saved = true; Diagnostics.shared.log("icon", "profile saved to Files (\(url.lastPathComponent))")
+            case .failure(let e): Diagnostics.shared.log("icon", "profile not saved to Files: \(e.localizedDescription)")
+            }
+            saving = nil
+        }
+        .onChange(of: phase) { _, now in if now == .active { ProfileHandoff.shared.cameBack() } }
         .task {
-            if let f = await WebClipMaker.face(of: browser) { face = f; name = f.name; stage = 1 } else { stage = 3 }
+            ProfileHandoff.shared.reset()
+            if let f = await WebClipMaker.face(of: browser) { face = f; name = f.name } else { failed = true }
+        }
+    }
+
+    @ViewBuilder private var note: some View {
+        if saved {
+            Text("Saved. Open the Files app and tap the file, then open Settings, tap Profile Downloaded near the top, and Install.")
+        } else {
+            switch handoff.state {
+            case .handed, .fetched:
+                Text("Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install.")
+            case .failed, .timedOut:
+                Text("Safari didn't get the icon. Save it to Files instead, then tap it there.")
+            default:
+                if failed { Text("Couldn't make the icon for this page.") }
+                else { Text("The icon opens \(face?.site ?? "the site") in TRIF.") }
+            }
         }
     }
 }

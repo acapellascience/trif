@@ -175,6 +175,17 @@ A tap opens the app on the tab the message was sent from, with Add this mod? (or
 
 The tabs and the Mods tab now open over the page with the toolbar showing under them (they were sheets over it).
 
+## iOS's permission questions (added 11-16)
+
+A page asking for the camera or microphone (x.com's compose, for a photo) ended the app: iOS requires these words.
+iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" question.
+
+| Key | New |
+|---|---|
+| Camera | Websites you visit can ask to use the camera, for a photo or a video call. |
+| Microphone | Websites you visit can ask to use the microphone, for a voice or video call. |
+| Saving to Photos | To save pictures from websites to your photos. |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

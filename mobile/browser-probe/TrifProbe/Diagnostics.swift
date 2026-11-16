@@ -37,7 +37,12 @@ final class Diagnostics {
         log("start", "the app started: \(Diagnostics.device()), iOS \(UIDevice.current.systemVersion), \(Diagnostics.freeMB()) MB left for it")
         logInstall()
         // (a few seconds in: asked at once, WebKit's store answers 0 before it has read its file)
-        Task { @MainActor in try? await Task.sleep(nanoseconds: 5_000_000_000); await Diagnostics.shared.cookieCensus("just after launch") }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await Diagnostics.shared.cookieCensus("just after launch")
+            await CookieKeeper.shared.names("just after launch")
+        }
+        CookieKeeper.shared.start()
         // (going to the background: a few seconds held, so WebKit can write down what the pages stored, and the count)
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { Diagnostics.shared.wentToBackground() }
@@ -88,8 +93,10 @@ final class Diagnostics {
                 MainActor.assumeIsolated { self?.endHold() }
             }
         }
+        CookieKeeper.shared.flush("going to the background")
         Task { @MainActor in
             await self.cookieCensus("going to the background")
+            await CookieKeeper.shared.names("going to the background")
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             self.endHold()
         }
@@ -248,5 +255,127 @@ final class Stopwatch {
     var elapsedMs: Int { Int(Date().timeIntervalSince(start) * 1000) }
     func done(_ note: String = "") {
         Diagnostics.shared.log("timing", "\(name): \(laps.joined(separator: ", ")); \(elapsedMs) ms in all\(note.isEmpty ? "" : " (\(note))")")
+    }
+}
+
+
+/// Sign-ins kept on disk (11-16). WebKit writes a change to its cookies to disk about ten seconds after it happens
+/// (Simulator: not yet after 8 s, done by 11 s), or when the app is suspended. A site that rotates its sign-in cookie
+/// on a page load (a new value each time; the old one stops working) and an app ended before then, by a crash or
+/// an installer, leaves the old value on disk: signed out at the next launch. Reproduced in the Simulator with a
+/// server that rotates its cookie, the app and its WebKit networking process killed together (as on a phone) up to
+/// 8 s after a load. So each change is written down at once, a tenth of a second after it, and on leaving the front,
+/// with WebKit's own flush (a private call, used only if WebKit has it: checked, never assumed).
+/// And, for the sites whose sign-ins Tim lost (x.com, twitter.com, instagram.com, claude.ai, chatgpt.com), the
+/// diagnostics name their cookies, with each one's domain and expiry, and what changed during a run: added,
+/// removed, or replaced by a new value. Names only: a cookie's value is never logged, only compared, in memory.
+@MainActor
+final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
+    static let shared = CookieKeeper()
+    static let watched: Set<String> = ["x.com", "twitter.com", "instagram.com", "claude.ai", "chatgpt.com"]
+    private var store: WKHTTPCookieStore { WKWebsiteDataStore.default().httpCookieStore }
+    private var started = false
+    private var pending: Task<Void, Never>?
+    /// What the watched sites' cookies were at the last look: name|domain|path -> (a hash of the value, expiry).
+    private var last: [String: (value: Int, expires: Date?)]?
+    private var firstLoad = true
+
+    func start() {
+        guard !started else { return }
+        started = true
+        store.add(self)
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { CookieKeeper.shared.flush("leaving the front") }
+        }
+    }
+
+    nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        Task { @MainActor in self.changed() }
+    }
+
+    private var flushing: Task<Void, Never>?
+    private func changed() {
+        // (written down a tenth of a second after a change, several changes at once; looked at a second after)
+        if flushing == nil {
+            flushing = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                self.flushing = nil
+                self.flush(nil)
+            }
+        }
+        pending?.cancel()
+        pending = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self.diff()
+        }
+    }
+
+    /// WebKit's cookies onto disk now, if WebKit offers it (its private _flushCookiesToDiskWithCompletionHandler:).
+    func flush(_ why: String?) {
+        let sel = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
+        let s = store
+        guard s.responds(to: sel) else {
+            if let why { Diagnostics.shared.logOnce("cookies", "WebKit has no cookie flush here (\(why)): cookies reach disk on WebKit's own schedule") }
+            return
+        }
+        typealias Flush = @convention(c) (AnyObject, Selector, @convention(block) @escaping () -> Void) -> Void
+        let f = unsafeBitCast(s.method(for: sel), to: Flush.self)
+        f(s, sel) {}
+    }
+
+    private static func key(_ c: HTTPCookie) -> String { "\(c.name)|\(c.domain)|\(c.path)" }
+    private static func watched(_ c: HTTPCookie) -> Bool { watched.contains(Site.of(c.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))) }
+    private static func when(_ c: HTTPCookie) -> String {
+        guard let d = c.expiresDate else { return "this run only" }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return "until \(f.string(from: d))"
+    }
+
+    private func snapshot() async -> [HTTPCookie] { await store.allCookies().filter(CookieKeeper.watched) }
+
+    /// The watched sites' cookies by name, domain and expiry (never a value), for the diagnostics.
+    func names(_ when: String) async {
+        let list = await snapshot()
+        remember(list)
+        let bySite = Dictionary(grouping: list) { Site.of($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }
+        // (a line a site: the log keeps 1500 characters a line)
+        if bySite.isEmpty { Diagnostics.shared.log("cookie names", "\(when): none for x.com, twitter.com, instagram.com, claude.ai, chatgpt.com") }
+        for site in bySite.keys.sorted() {
+            let names = bySite[site]!.sorted { $0.name < $1.name }.map { "\($0.name) (\($0.domain), \(CookieKeeper.when($0)))" }
+            Diagnostics.shared.log("cookie names", "\(when), \(site): \(names.joined(separator: ", "))")
+        }
+    }
+
+    /// The first page load of a launch: the names then too.
+    func firstPageLoaded() {
+        guard firstLoad else { return }
+        firstLoad = false
+        Task { @MainActor in await self.names("at the first page load") }
+    }
+
+    private func remember(_ list: [HTTPCookie]) {
+        last = Dictionary(list.map { (CookieKeeper.key($0), ($0.value.hashValue, $0.expiresDate)) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// What changed for the watched sites since the last look: added, removed, or replaced (a new value).
+    private func diff() async {
+        let list = await snapshot()
+        guard let before = last else { remember(list); return }
+        var lines: [String] = []
+        var now: [String: HTTPCookie] = [:]
+        for c in list { now[CookieKeeper.key(c)] = c }
+        for (k, c) in now {
+            if let b = before[k] {
+                if b.value != c.value.hashValue { lines.append("replaced \(c.name) (\(c.domain), \(CookieKeeper.when(c)))") }
+            } else { lines.append("added \(c.name) (\(c.domain), \(CookieKeeper.when(c)))") }
+        }
+        for k in before.keys where now[k] == nil {
+            let parts = k.split(separator: "|", omittingEmptySubsequences: false)
+            lines.append("removed \(parts.first ?? "") (\(parts.count > 1 ? parts[1] : ""))")
+        }
+        remember(list)
+        if !lines.isEmpty { Diagnostics.shared.log("cookie changes", lines.sorted().joined(separator: ", ")) }
     }
 }

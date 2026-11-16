@@ -33,6 +33,14 @@
 			<string>UIApplicationShortcutIconTypePause</string>
 		</dict>
 	</array>
+	<!-- (a page asking for the camera or microphone, x.com's compose for a photo: without these iOS ends the app at
+	     once. Tim's phone, 11-15 23:08, a TCC abort) -->
+	<key>NSCameraUsageDescription</key>
+	<string>Websites you visit can ask to use the camera, for a photo or a video call.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Websites you visit can ask to use the microphone, for a voice or video call.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>To save pictures from websites to your photos.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 </dict>

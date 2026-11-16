@@ -189,7 +189,28 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         for t in tabs where t !== current { letGo[t.id]?.cancel(); discard(t) }
     }
 
+    /// A launch that isn't in front yet (iOS prewarming the app, a launch in the background) loads no page: the tabs
+    /// are restored, and the shown one loads once the app first comes to the front, as Safari's and Chrome's do.
+    /// (11-16: a page loaded in such a launch, then the launch ended by an installer, left a site's rotated sign-in
+    /// cookie not yet on disk.)
+    private var waitingForFront = true
+    private let launchedAt = Date()
+    private func cameToFront() {
+        guard waitingForFront else { return }
+        waitingForFront = false
+        let waited = Date().timeIntervalSince(launchedAt)
+        if waited > 2 { Diagnostics.shared.log("launch", "the app was launched without being in front (prewarmed, or in the background) \(Int(waited)) s before it came to the front; no page loaded until then") }
+        if let t = current, !t.started { start(t); loading = t.webView.isLoading }
+    }
+
     private func restoreTabs() {
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cameToFront() }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.waitingForFront == true { Diagnostics.shared.log("launch", "the app went to the background before it ever came to the front: no page loaded") } }
+        }
+        if UIApplication.shared.applicationState == .active { waitingForFront = false }
         if let saved = SavedTabs.load(), !saved.tabs.isEmpty {
             tabs = saved.tabs.map { s in
                 let t = makeTab(id: s.id, title: s.title, url: nil)
@@ -223,12 +244,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let was = current, was !== tab { snapshot(was); letGoLater(was) }
         current = tab
         picked = nil; previewing = false; lastHide = nil; status = ""
-        if !tab.started {
-            tab.started = true
-            if let state = tab.savedState { tab.webView.interactionState = state }
-            else if let u = tab.savedURL { tab.webView.load(URLRequest(url: u)) }
-            tab.savedState = nil
-        }
+        if !tab.started && !waitingForFront { start(tab) }
         address = tab.webView.url?.absoluteString ?? tab.savedURL?.absoluteString ?? ""
         title = tab.webView.title ?? tab.title
         loading = tab.webView.isLoading
@@ -236,6 +252,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         canGoForward = tab.webView.canGoForward
         pageChanged += 1
         saveTabs()
+    }
+
+    /// A tab's page, the first time it's shown: what was kept of it (its back/forward list, else its address).
+    private func start(_ tab: Tab) {
+        tab.started = true
+        if let state = tab.savedState { tab.webView.interactionState = state }
+        else if let u = tab.savedURL { tab.webView.load(URLRequest(url: u)) }
+        tab.savedState = nil
     }
 
     /// A new tab after the one shown: empty (the address bar's), or at an address.
@@ -1055,6 +1079,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        CookieKeeper.shared.firstPageLoaded()
         Diagnostics.shared.log("page", "\(Diagnostics.place(webView.url)) loaded, with \(mods.running(on: webView.url?.absoluteString ?? "").map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
         if let t = tab(of: webView) { t.loading = false; t.title = webView.title ?? t.title }
         history.visit(webView.url, title: webView.title ?? "")

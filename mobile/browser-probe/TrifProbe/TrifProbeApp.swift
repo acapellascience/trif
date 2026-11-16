@@ -128,6 +128,26 @@ extension Model {
             let r = await browser.call(js, in: Browser.boxWorld)
             out = r.text ?? "error: \(r.error ?? "?")"
         }
+        // (development, 11-16: how to get WebKit's cookies onto disk at once: {"cookies": "touch"} sets a throwaway
+        // cookie through the public store; {"cookies": "spi"} says whether WebKit's private flush is there)
+        if let c = step["cookies"] as? String {
+            let store = WKWebsiteDataStore.default().httpCookieStore
+            if c == "touch", let k = HTTPCookie(properties: [.name: "trif_touch", .value: String(Int(Date().timeIntervalSince1970)), .domain: "trif.invalid", .path: "/", .expires: Date().addingTimeInterval(60)]) {
+                await store.setCookie(k)
+                out = "touched"
+            } else if c == "flush" {
+                let sel = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
+                if store.responds(to: sel) {
+                    typealias Flush = @convention(c) (AnyObject, Selector, @convention(block) @escaping () -> Void) -> Void
+                    let f = unsafeBitCast(store.method(for: sel), to: Flush.self)
+                    let t0 = Date()
+                    await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in f(store, sel) { k.resume() } }
+                    out = "flushed in \(Int(Date().timeIntervalSince(t0) * 1000)) ms"
+                } else { out = "no flush" }
+            } else {
+                out = "spi: \(store.responds(to: NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")))"
+            }
+        }
         if let id = step["approve"] as? String {
             for m in browser.mods.mods where m.held && (id == "*" || m.id == id) { browser.approveMod(m.id) }
         }

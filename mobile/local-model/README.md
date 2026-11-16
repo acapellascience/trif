@@ -43,7 +43,14 @@ LocalModels.swift, checked after every download.)
   its usual checks. Every reply ends with Not right? Ask Claude: the same request in Claude's chat, with the page.
 - The model is loaded when a request comes and let go when the robot view closes or memory runs low.
 - Downloads: only when asked (the size and free space shown first), in a background URLSession, resumable, checked
-  against the SHA-256, into Application Support/models, left out of backups.
+  against the SHA-256, into Application Support/models, left out of backups. (11-16, after Tim couldn't tell whether
+  one was moving, and a first try did nothing:) a bar with MB done, speed and time left in Settings and over the More
+  chat; a stall said as one instead of a frozen speed; a note and, with the app away, a notification when it ends; the
+  app delegate's handleEventsForBackgroundURLSession makes the session again and attaches its downloads; a download
+  iOS cancelled (the app swiped away) shows as paused with why and resumes where it was (its resume data kept in
+  Caches); one with nothing after 15 s is said, and after 45 s started again once; the diagnostics get the start
+  (asked for, refused, started, the first bytes with their HTTP status and host), every 10%, stalls, pauses, resumes,
+  the end and why it failed.
 - Measured each time, for the diagnostics ("local model"): load time, the system prompt restored or read, prompt and
   generation tokens per second, memory left before and after (os_proc_available_memory). The SE's numbers will come
   from Tim's phone.

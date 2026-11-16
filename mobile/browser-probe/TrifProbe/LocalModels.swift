@@ -11,6 +11,7 @@
 import CryptoKit
 import Foundation
 import UIKit
+import UserNotifications
 
 struct LocalModelInfo {
     let id: String
@@ -76,64 +77,283 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
     func file(_ m: LocalModelInfo) -> URL { dir.appendingPathComponent(m.file) }
     func isReady(_ m: LocalModelInfo) -> Bool { FileManager.default.fileExists(atPath: file(m).path) && states[m.id] == nil }
     var readyModels: [LocalModelInfo] { LocalModels.all.filter(isReady) }
-    /// Free space where the models go, in bytes.
-    var freeSpace: Int64 {
-        (try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage).flatMap { $0 } ?? 0
+    /// Free space where the models go, in bytes; nil when iOS doesn't say (then a download isn't refused for it).
+    var freeSpace: Int64? {
+        let v = try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        if let important = v?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        if let plain = v?.volumeAvailableCapacity, plain > 0 { return Int64(plain) }
+        return nil
     }
+    private var freeText: String { freeSpace.map { LocalModels.size($0) } ?? "an unknown amount" }
 
     // MARK: downloads (in the background: they go on while the app is away)
+    // (11-16, Tim's phone: he started one and couldn't tell whether it was moving. So: bytes, speed and time left for
+    // every view of it (Settings and the chat's bar), each change pushed to the panel, a note and a notification when
+    // it ends, and the diagnostics told at the start, every 10%, and at each pause, resume, end and failure. A download
+    // iOS stopped (the app swiped away: its background downloads are cancelled) is no longer forgotten silently: it
+    // shows as paused, with why, and resumes from where it was.)
 
     enum State: Equatable { case downloading(Double), paused, checking, failed(String) }
     @Published private(set) var states: [String: State] = [:]
+    /// Bytes so far, the total, the speed (bytes a second, smoothed) and the last 10% told to the diagnostics.
+    struct Progress { var done: Int64 = 0; var total: Int64 = 0; var speed: Double = 0; var at = Date(); var atBytes: Int64 = 0; var decile = -1; var told = false; var lastByte = Date(); var stallTold = false }
+    private var progress: [String: Progress] = [:]
+    /// The last end of a download, for a note: "ready" or why it stopped, and when.
+    private(set) var notes: [String: (kind: String, text: String, at: Date)] = [:]
+    /// Why a paused download is paused, when it wasn't the person (the app was closed, no network).
+    private var pausedWhy: [String: String] = [:]
+    /// Downloads iOS was asked to make (so one that vanished while the app was away is known).
+    private var wanted: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: "modelDownloads") ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: "modelDownloads") }
+    }
     private var tasks: [String: URLSessionDownloadTask] = [:]
-    private var resumeData: [String: Data] = [:]
+    /// Cancelled here (Pause, Delete): not a failure.
+    private var cancelling: Set<String> = []
+    private let resumeDir: URL = {
+        let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("model-resume", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+    private func resumeFile(_ id: String) -> URL { resumeDir.appendingPathComponent("\(id).data") }
+    private func keepResume(_ id: String, _ data: Data?) {
+        if let data { try? data.write(to: resumeFile(id)) } else { try? FileManager.default.removeItem(at: resumeFile(id)) }
+    }
+    /// The background session's events finished being handed over (iOS woke the app for them): its handler called.
+    var backgroundDone: (() -> Void)?
     private lazy var session: URLSession = {
-        let c = URLSessionConfiguration.background(withIdentifier: "com.timsrobot.trif.models")
+        let c = URLSessionConfiguration.background(withIdentifier: LocalModels.sessionID)
         c.isDiscretionary = false
         c.sessionSendsLaunchEvents = true
+        // (the person asked for it: on cellular and in Low Data Mode too, rather than waiting without saying so)
+        c.allowsCellularAccess = true
+        c.allowsExpensiveNetworkAccess = true
+        c.allowsConstrainedNetworkAccess = true
         return URLSession(configuration: c, delegate: self, delegateQueue: .main)
     }()
-    /// (the app started: downloads iOS kept going meanwhile are picked up again)
+    nonisolated static let sessionID = "com.timsrobot.trif.models"
+
+    private func log(_ text: String) { Diagnostics.shared.log("local model", text) }
+    private func name(_ id: String) -> String { LocalModels.named(id)?.name ?? id }
+
+    /// (the app started, or iOS woke it for the downloads: the session made again with its identifier, and the
+    /// downloads still going attached; one asked for that isn't there any more shows as paused, with why)
     func wake() {
         session.getAllTasks { all in
             Task { @MainActor in
-                for t in all { if let id = t.taskDescription, let d = t as? URLSessionDownloadTask, t.state == .running { self.tasks[id] = d; self.states[id] = .downloading(0) } }
+                var found = Set<String>()
+                for t in all {
+                    guard let id = t.taskDescription, let d = t as? URLSessionDownloadTask, t.state == .running || t.state == .suspended else { continue }
+                    found.insert(id)
+                    self.tasks[id] = d
+                    if t.state == .suspended { d.resume() }
+                    let total = d.countOfBytesExpectedToReceive > 0 ? d.countOfBytesExpectedToReceive : (LocalModels.named(id)?.size ?? 0)
+                    self.progress[id] = Progress(done: d.countOfBytesReceived, total: total, at: Date(), atBytes: d.countOfBytesReceived, decile: Int(Double(d.countOfBytesReceived) / Double(max(total, 1)) * 10), told: true)
+                    self.states[id] = .downloading(Double(d.countOfBytesReceived) / Double(max(total, 1)))
+                    self.monitor(id, d)
+                    self.log("\(self.name(id)): its download found going on (\(LocalModels.size(d.countOfBytesReceived)) of \(LocalModels.size(total)))")
+                }
+                for id in self.wanted where !found.contains(id) && self.states[id] == nil {
+                    guard let m = LocalModels.named(id), !self.isReady(m) else { self.wanted.remove(id); continue }
+                    if FileManager.default.fileExists(atPath: self.resumeFile(id).path) {
+                        self.states[id] = .paused
+                        self.pausedWhy[id] = self.pausedWhy[id] ?? "it stopped while the app was closed"
+                    } else {
+                        self.states[id] = .failed("it stopped while the app was closed")
+                    }
+                    self.log("\(m.name): its download wasn't going on when the app started (\(self.pausedWhy[id] ?? "no way to resume it"))")
+                }
             }
         }
     }
 
     /// Starts (or resumes) a model's download. Refused, with why, when there's no room for it.
     func download(_ m: LocalModelInfo) -> String? {
+        log("\(m.name): download asked for (\(freeText) free\(tasks[m.id] != nil ? "; one is already going" : ""))")
         guard tasks[m.id] == nil else { return nil }
-        if freeSpace < m.size + 300_000_000 { return "There isn't room for it: it needs \(Self.size(m.size + 300_000_000)), and \(Self.size(freeSpace)) is free." }
+        if let free = freeSpace, free < m.size + 300_000_000 {
+            let why = "There isn't room for it: it needs \(Self.size(m.size + 300_000_000)), and \(Self.size(free)) is free."
+            log("\(m.name): not downloaded, no room")
+            return why
+        }
         let t: URLSessionDownloadTask
-        if let r = resumeData.removeValue(forKey: m.id) { t = session.downloadTask(withResumeData: r) } else { t = session.downloadTask(with: m.url) }
+        let resume = try? Data(contentsOf: resumeFile(m.id))
+        if let resume { t = session.downloadTask(withResumeData: resume) } else { t = session.downloadTask(with: m.url) }
+        keepResume(m.id, nil)
         t.taskDescription = m.id
         tasks[m.id] = t
-        states[m.id] = .downloading(states[m.id].flatMap { if case .downloading(let p) = $0 { return p } else { return nil } } ?? 0)
+        pausedWhy[m.id] = nil
+        notes[m.id] = nil
+        var w = wanted; w.insert(m.id); wanted = w
+        var pr = progress[m.id] ?? Progress()
+        pr.total = m.size; pr.at = Date(); pr.atBytes = pr.done; pr.speed = 0; pr.told = false
+        progress[m.id] = pr
+        states[m.id] = .downloading(Double(pr.done) / Double(max(m.size, 1)))
         t.resume()
-        Diagnostics.shared.log("local model", "downloading \(m.name) (\(Self.size(m.size)), \(Self.size(freeSpace)) free)")
+        LocalModels.askToNotify()
+        log("\(m.name): download \(resume != nil ? "resumed at \(Self.size(pr.done))" : "started") from \(m.url.host ?? "?") (\(Self.size(m.size)), task \(LocalModels.stateName(t.state)))")
+        watch(m.id, t)
+        monitor(m.id, t)
         return nil
+    }
+
+    /// A download that hasn't begun coming in (11-16, Tim's first try did nothing, with no word why): looked at after 15 s
+    /// and 45 s. A task iOS left suspended is resumed; one still with nothing is said (the bar's note and the
+    /// diagnostics), with its state and any error; after 45 s it's started again from scratch, once.
+    private func watch(_ id: String, _ t: URLSessionDownloadTask, again: Bool = false) {
+        for (delay, last) in [(15.0, false), (45.0, true)] {
+            Task { @MainActor [weak self, weak t] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard let self, let t, self.tasks[id] === t, t.countOfBytesReceived == 0 else { return }
+                let state = LocalModels.stateName(t.state)
+                let err = t.error.map { " (\(LocalModels.why($0)))" } ?? ""
+                self.log("\(self.name(id)): nothing has come in after \(Int(delay)) s; the task is \(state)\(err)")
+                if t.state == .suspended { t.resume() }
+                if last, !again, t.state != .completed {
+                    // (started again, from scratch: a task that never began)
+                    self.cancelling.insert(id)
+                    t.cancel()
+                    self.tasks[id] = nil
+                    let fresh = self.session.downloadTask(with: LocalModels.named(id)!.url)
+                    fresh.taskDescription = id
+                    self.tasks[id] = fresh
+                    fresh.resume()
+                    self.notes[id] = ("waiting", "It hadn’t started, so it was started again.", Date())
+                    self.log("\(self.name(id)): started again (the first task never began)")
+                    self.objectWillChange.send()
+                    self.watch(id, fresh, again: true)
+                } else if self.notes[id] == nil || self.notes[id]?.kind == "waiting" {
+                    self.notes[id] = ("waiting", "Nothing has come in yet\(err.isEmpty ? "" : err). It may be waiting for a network connection.", Date())
+                    self.objectWillChange.send()
+                }
+            }
+        }
+    }
+    /// While a download is on its way: every 10 s, a stall (nothing new for 30 s) told to the diagnostics, once per stall.
+    private func monitor(_ id: String, _ t: URLSessionDownloadTask) {
+        Task { @MainActor [weak self, weak t] in
+            while true {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard let self, let t, self.tasks[id] === t, var pr = self.progress[id] else { return }
+                let quiet = Date().timeIntervalSince(pr.lastByte)
+                if quiet >= 30, !pr.stallTold, t.countOfBytesReceived > 0 {
+                    pr.stallTold = true
+                    self.progress[id] = pr
+                    self.log("\(self.name(id)): nothing new for \(Int(quiet)) s at \(LocalModels.mb(pr.done)) of \(LocalModels.mb(pr.total)); the task is \(LocalModels.stateName(t.state))")
+                }
+            }
+        }
+    }
+    nonisolated static func stateName(_ s: URLSessionTask.State) -> String {
+        switch s { case .running: return "running"; case .suspended: return "suspended"; case .canceling: return "cancelling"; case .completed: return "completed"; @unknown default: return "unknown" }
     }
     func pause(_ m: LocalModelInfo) {
         guard let t = tasks.removeValue(forKey: m.id) else { return }
-        t.cancel { [weak self] data in Task { @MainActor in self?.resumeData[m.id] = data; self?.states[m.id] = .paused } }
+        cancelling.insert(m.id)
+        t.cancel { [weak self] data in Task { @MainActor in
+            guard let self else { return }
+            self.keepResume(m.id, data)
+            self.states[m.id] = data == nil ? .failed("it couldn't be paused; start it again") : .paused
+            self.log("\(m.name): paused at \(Self.size(self.progress[m.id]?.done ?? 0))\(data == nil ? " (no way to resume: it starts over)" : "")")
+        } }
     }
     /// The model's file deleted (or its download stopped and forgotten).
     func delete(_ m: LocalModelInfo) {
-        tasks.removeValue(forKey: m.id)?.cancel()
-        resumeData[m.id] = nil
+        if let t = tasks.removeValue(forKey: m.id) { cancelling.insert(m.id); t.cancel() }
+        keepResume(m.id, nil)
         states[m.id] = nil
+        progress[m.id] = nil
+        notes[m.id] = nil
+        pausedWhy[m.id] = nil
+        var w = wanted; w.remove(m.id); wanted = w
         LocalRunner.shared.unload()
         try? FileManager.default.removeItem(at: file(m))
-        Diagnostics.shared.log("local model", "\(m.name) deleted")
+        log("\(m.name) deleted")
+    }
+
+    /// The download ended: a note for the chat and Settings, and a notification if the app isn't in front.
+    private func ended(_ id: String, ok: Bool, why: String = "") {
+        notes[id] = (ok ? "ready" : "failed", ok ? "Model ready: \(name(id))." : "Couldn’t download \(name(id)): \(why).", Date())
+        if ok || !why.isEmpty { var w = wanted; w.remove(id); wanted = w }
+        guard UIApplication.shared.applicationState != .active else { return }
+        let c = UNMutableNotificationContent()
+        c.title = ok ? "Model ready" : "Model download stopped"
+        c.body = ok ? "\(name(id)) is on this iPhone: the More chat can use it." : "\(name(id)): \(why)."
+        c.userInfo = ["kind": "model"]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "trif.model.\(id)", content: c, trigger: nil))
+    }
+    /// Notifications asked for once, at a first download (as at a first chat send).
+    static func askToNotify() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { s in
+            guard s.authorizationStatus == .notDetermined else { return }
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
+
+    /// Why a download stopped, in a few plain words.
+    nonisolated static func why(_ error: Error) -> String {
+        let e = error as NSError
+        if e.domain == NSPOSIXErrorDomain && e.code == Int(ENOSPC) { return "this iPhone ran out of space" }
+        if e.domain == NSURLErrorDomain {
+            switch e.code {
+            case NSURLErrorCannotWriteToFile, NSURLErrorCannotCreateFile: return "this iPhone ran out of space"
+            case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut, NSURLErrorCannotConnectToHost, NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff:
+                return "the network connection was lost"
+            default: break
+            }
+        }
+        if let u = e.userInfo[NSUnderlyingErrorKey] as? NSError, u.domain == NSPOSIXErrorDomain, u.code == Int(ENOSPC) { return "this iPhone ran out of space" }
+        return e.localizedDescription
     }
 
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         let id = downloadTask.taskDescription ?? ""
-        let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (LocalModels.named(id)?.size ?? 1)
-        let p = min(1, Double(totalBytesWritten) / Double(max(total, 1)))
-        MainActor.assumeIsolated { if case .downloading(let was) = self.states[id] ?? .downloading(0), p - was >= 0.005 || p >= 1 { self.states[id] = .downloading(p) } }
+        let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
+        let host = downloadTask.response?.url?.host ?? "?"
+        MainActor.assumeIsolated {
+            let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (LocalModels.named(id)?.size ?? 1)
+            var pr = self.progress[id] ?? Progress(total: total)
+            if pr.stallTold { self.log("\(self.name(id)): coming in again after a stall") }
+            pr.lastByte = Date()
+            pr.stallTold = false
+            pr.done = totalBytesWritten
+            pr.total = total
+            let now = Date()
+            let dt = now.timeIntervalSince(pr.at)
+            if dt >= 1 {
+                let rate = Double(totalBytesWritten - pr.atBytes) / dt
+                pr.speed = pr.speed == 0 ? rate : pr.speed * 0.6 + rate * 0.4
+                pr.at = now
+                pr.atBytes = totalBytesWritten
+            }
+            if !pr.told { pr.told = true; self.log("\(self.name(id)): the download is coming in (HTTP \(status), from \(host))"); if self.notes[id]?.kind == "waiting" { self.notes[id] = nil } }
+            let p = min(1, Double(totalBytesWritten) / Double(max(total, 1)))
+            let decile = Int(p * 10)
+            if decile > pr.decile, pr.decile >= 0 || decile > 0 {
+                self.log("\(self.name(id)): \(decile * 10)% (\(LocalModels.mb(totalBytesWritten)) of \(LocalModels.mb(total)), \(LocalModels.mb(Int64(pr.speed)))/s)")
+            }
+            pr.decile = max(pr.decile, decile)
+            self.progress[id] = pr
+            if case .downloading(let was) = self.states[id] ?? .downloading(0), p - was >= 0.002 || p >= 1 { self.states[id] = .downloading(p) }
+        }
+    }
+
+    /// Waiting for a network (background downloads wait rather than fail): said, so it isn't taken for stuck.
+    nonisolated func urlSession(_ session: URLSession, taskIsWaitingForConnectivity task: URLSessionTask) {
+        let id = task.taskDescription ?? ""
+        MainActor.assumeIsolated {
+            self.notes[id] = ("waiting", "Waiting for a network connection.", Date())
+            self.log("\(self.name(id)): waiting for a network connection")
+            self.objectWillChange.send()
+        }
+    }
+
+    nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        MainActor.assumeIsolated {
+            self.backgroundDone?()
+            self.backgroundDone = nil
+        }
     }
 
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
@@ -143,11 +363,21 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
         let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
         let staging = location.deletingLastPathComponent().appendingPathComponent("trif-\(m.file).part")
         try? FileManager.default.removeItem(at: staging)
-        let moved = (try? FileManager.default.moveItem(at: location, to: staging)) != nil
+        var moveError: Error?
+        do { try FileManager.default.moveItem(at: location, to: staging) } catch { moveError = error }
         MainActor.assumeIsolated {
             self.tasks[id] = nil
-            guard moved, status == 200 || status == 206 else { self.states[id] = .failed(moved ? "the server answered \(status)" : "the download couldn't be kept"); return }
+            if let moveError {
+                let why = LocalModels.why(moveError) == moveError.localizedDescription ? "the download couldn't be kept" : LocalModels.why(moveError)
+                self.states[id] = .failed(why); self.ended(id, ok: false, why: why); self.log("\(m.name): \(why) (\(moveError.localizedDescription))"); return
+            }
+            guard status == 200 || status == 206 else {
+                try? FileManager.default.removeItem(at: staging)
+                let why = "the server answered \(status)"
+                self.states[id] = .failed(why); self.ended(id, ok: false, why: why); self.log("\(m.name): \(why)"); return
+            }
             self.states[id] = .checking
+            self.log("\(m.name): downloaded; checking its SHA-256")
             let target = self.file(m)
             Task.detached(priority: .utility) {
                 let ok = LocalModels.sha256(of: staging) == m.sha256
@@ -160,11 +390,16 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
                         var t = target
                         try? t.setResourceValues(v)
                         self.states[id] = nil
-                        Diagnostics.shared.log("local model", "\(m.name) downloaded and checked")
+                        self.progress[id] = nil
+                        self.ended(id, ok: true)
+                        self.log("\(m.name): ready (checked)")
                     } else {
                         try? FileManager.default.removeItem(at: staging)
-                        self.states[id] = .failed("the download didn't match its checksum, so it was deleted")
-                        Diagnostics.shared.log("local model", "\(m.name): the download didn't match its SHA-256; deleted")
+                        let why = "it didn't match its checksum, so it was deleted"
+                        self.states[id] = .failed(why)
+                        self.progress[id] = nil
+                        self.ended(id, ok: false, why: why)
+                        self.log("\(m.name): the download didn't match its SHA-256; deleted")
                     }
                 }
             }
@@ -174,13 +409,28 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let error else { return }
         let id = task.taskDescription ?? ""
-        let data = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+        let e = error as NSError
+        let data = e.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+        let reason = e.userInfo[NSURLErrorBackgroundTaskCancelledReasonKey] as? Int
         MainActor.assumeIsolated {
             self.tasks[id] = nil
-            if (error as NSError).code == NSURLErrorCancelled { return } // (paused or deleted: said there)
-            if let data { self.resumeData[id] = data; self.states[id] = .paused }
-            else { self.states[id] = .failed(error.localizedDescription) }
-            Diagnostics.shared.log("local model", "\(LocalModels.named(id)?.name ?? id)'s download stopped: \(error.localizedDescription)")
+            // (cancelled here, by Pause or Delete: said there)
+            if self.cancelling.remove(id) != nil { return }
+            if let data { self.keepResume(id, data) }
+            var why = LocalModels.why(error)
+            if let reason {
+                why = reason == NSURLErrorCancelledReasonUserForceQuitApplication ? "it stopped when the app was swiped away"
+                    : reason == NSURLErrorCancelledReasonBackgroundUpdatesDisabled ? "Background App Refresh is off for TRIF" : "iOS stopped it to save resources"
+            }
+            if data != nil {
+                self.states[id] = .paused
+                self.pausedWhy[id] = why
+                self.notes[id] = ("failed", "\(self.name(id))’s download is paused: \(why). Resume it in Settings.", Date())
+            } else {
+                self.states[id] = .failed(why)
+                self.ended(id, ok: false, why: why)
+            }
+            self.log("\(self.name(id))'s download stopped: \(why)\(data != nil ? "; it can resume" : "") (\(e.domain) \(e.code))")
         }
     }
 
@@ -194,24 +444,45 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
 
     nonisolated static func size(_ b: Int64) -> String { b >= 1_000_000_000 ? String(format: "%.2f GB", Double(b) / 1e9) : "\(b / 1_000_000) MB" }
 
-    /// For the panel's Settings (Web/panel-adapter.js): each model, its size, whether it suits this phone, its state.
+    /// For the panel (Web/panel-adapter.js: Settings and the chat's bar): each model, its size, whether it suits this
+    /// phone, its state with bytes, speed and time left, and the last note.
     func describe() -> [String: Any] {
         let mem = Int(LocalModels.memoryGB.rounded())
         return [
-            "memory": "This iPhone has \(mem) GB of memory; \(LocalModels.size(freeSpace)) free for files.",
+            "memory": "This iPhone has \(mem) GB of memory; \(freeText) free for files.",
             "models": LocalModels.all.map { m -> [String: Any] in
                 var o: [String: Any] = ["id": m.id, "name": m.name, "size": LocalModels.size(m.size), "note": m.note,
                                         "fits": LocalModels.fits(m), "suggested": m.id == LocalModels.suggested.id, "ready": isReady(m)]
+                if let pr = progress[m.id] {
+                    o["done"] = LocalModels.mb(pr.done); o["total"] = LocalModels.mb(pr.total)
+                    o["progress"] = Double(pr.done) / Double(max(pr.total, 1))
+                    let quiet = Date().timeIntervalSince(pr.lastByte)
+                    if case .downloading = states[m.id], quiet >= 6, pr.done > 0 {
+                        // (nothing new for a while: no speed or time left that's no longer true, but how long it's been)
+                        o["stalled"] = "Nothing new for \(LocalModels.duration(quiet)): it goes on by itself when the network is back."
+                    } else if pr.speed > 1000 {
+                        o["speed"] = "\(LocalModels.mb(Int64(pr.speed)))/s"
+                        o["left"] = LocalModels.duration(Double(pr.total - pr.done) / pr.speed)
+                    }
+                }
                 switch states[m.id] {
-                case .downloading(let p): o["state"] = "downloading"; o["progress"] = p
-                case .paused: o["state"] = "paused"
+                case .downloading(let p): o["state"] = "downloading"; if o["progress"] == nil { o["progress"] = p }
+                case .paused: o["state"] = "paused"; if let w = pausedWhy[m.id] { o["why"] = w }
                 case .checking: o["state"] = "checking"
                 case .failed(let why): o["state"] = "failed"; o["why"] = why
                 case nil: o["state"] = isReady(m) ? "ready" : "none"
                 }
+                if let n = notes[m.id] { o["noteKind"] = n.kind; o["noteText"] = n.text; o["noteAge"] = Date().timeIntervalSince(n.at) }
                 return o
             },
         ]
+    }
+    nonisolated static func mb(_ b: Int64) -> String { b >= 10_000_000_000 ? String(format: "%.1f GB", Double(b) / 1e9) : "\(Int((Double(b) / 1e6).rounded())) MB" }
+    nonisolated static func duration(_ s: Double) -> String {
+        guard s.isFinite, s >= 0 else { return "" }
+        if s < 60 { return "\(max(1, Int(s))) s" }
+        if s < 3600 { return "\(Int((s / 60).rounded())) min" }
+        return "\(Int(s / 3600)) h \(Int(s.truncatingRemainder(dividingBy: 3600) / 60)) min"
     }
 }
 

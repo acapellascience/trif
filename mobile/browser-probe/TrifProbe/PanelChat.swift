@@ -14,6 +14,7 @@
 // one line in the chat (the panel's tool lines). The mods in the replies go to Add this mod?, with its checks and holds,
 // as the other chats' do.
 
+import Combine
 import SwiftUI
 import UIKit
 import WebKit
@@ -86,8 +87,22 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
     }
 
+    /// The models' downloads changed (progress, an end): the page told, at most once a second, to look again (its
+    /// Settings block and the chat's bar).
+    private var modelWatch: AnyCancellable?
+    private func watchModels() {
+        guard modelWatch == nil else { return }
+        modelWatch = LocalModels.shared.objectWillChange
+            .throttle(for: .seconds(1), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] _ in
+                guard let self, self.loaded else { return }
+                Task { _ = try? await self.webView.callAsyncJavaScript("window.__trifPanelModelsChanged && window.__trifPanelModelsChanged(); return 1;", arguments: [:], in: nil, contentWorld: .page) }
+            }
+    }
+
     /// Loads the panel the first time More is shown, with what it kept and the shown tab.
     func start() {
+        watchModels()
         guard !loaded else { pushTab(); return }
         loaded = true
         let store = (try? String(contentsOf: PanelChat.storeFile, encoding: .utf8)).flatMap { $0.isEmpty ? nil : $0 } ?? "{}"
@@ -156,7 +171,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "local.models":
             return (LocalModels.shared.describe(), nil)
         case "local.download":
-            guard let m = LocalModels.named(d["model"] as? String) else { return (nil, "no such model") }
+            guard let m = LocalModels.named(d["model"] as? String) else { Diagnostics.shared.log("local model", "a download asked for an unknown model (\(d["model"] ?? "none"))"); return (nil, "no such model") }
             if let why = LocalModels.shared.download(m) { return (nil, why) }
             return (["downloading": true], nil)
         case "local.pause":

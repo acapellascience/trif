@@ -147,7 +147,7 @@ function handler(log = []) {
     const url = new URL(req.url, 'http://localhost');
     const [, engine, ...rest] = url.pathname.split('/');
     const path = `/${rest.join('/')}`;
-    // (the model downloads' stand-in: 40 MB of a fixed pattern for any /models/<file>, about 8 MB a second, with
+    // (the model downloads' stand-in: 40 MB of a fixed pattern for any /models/<file>, about 8 MB a second (MOCK_MODEL_MS=125: 2), with
     // ranges so a paused download resumes; its SHA-256 isn't the real model's, so the app's check refuses it)
     if (engine === 'models' && req.method === 'GET') {
       const size = 40 * 1024 * 1024;
@@ -162,7 +162,7 @@ function handler(log = []) {
         const n = Math.min(chunk.length, size - at);
         res.write(chunk.subarray(0, n));
         at += n;
-        setTimeout(pump, 30);
+        setTimeout(pump, Number(process.env.MOCK_MODEL_MS || 30));
       };
       pump();
       return;

@@ -164,6 +164,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    /// iOS woke (or launched) the app for the model downloads' background session (LocalModels): the session made again
+    /// with its identifier, its downloads attached, and iOS told once its events are handled.
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        guard identifier == LocalModels.sessionID else { completionHandler(); return }
+        MainActor.assumeIsolated {
+            Diagnostics.shared.log("local model", "iOS woke the app for the model downloads")
+            LocalModels.shared.backgroundDone = completionHandler
+            LocalModels.shared.wake()
+        }
+    }
+
     /// A tap on a reply's notification (ClaudePane): told to the chat once the app's parts are there.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo

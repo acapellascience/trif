@@ -271,73 +271,131 @@
     if (k.where) { const w = document.createElement('p'); w.className = 'note'; w.textContent = k.where; out.append(w); }
     return out;
   }
-  // (a key saved or removed: the panel lists its agents again, which it does each time Settings opens: closed and
-  // opened again, so the agent's line and the notice follow at once)
+  // (a key saved or removed, a model ready: the panel lists its agents again, which it does each time Settings opens:
+  // opened and closed again in one go (closed, then opened, while it shows), so the agent's line and the notice follow)
   async function afterKeys() {
     await paintKeys();
     const b = document.getElementById('settings-btn');
-    if (b && !document.getElementById('settings')?.hidden) { b.click(); b.click(); }
+    if (b) { b.click(); b.click(); }
     post({ type: 'statusChanged' });
   }
-  // ---- Settings: the models that run on this iPhone (On this iPhone's), downloaded only when asked --------------
-  // One row each: its name, size and what it's for, whether it suits this iPhone; Download (then its size asked
-  // about once more), Pause, Resume, Delete, as its state is. Looked at again each second while one downloads.
+  // ---- The models that run on this iPhone (On this iPhone's): Settings' block, and a bar over the chat ------------
+  // (11-16, Tim: a download he started showed him nothing he could see. Now: in Settings, each model with a real bar,
+  // "{MB} of {MB}", its speed and time left, Pause and Cancel; over the chat, while On this iPhone is the chat's
+  // agent and its model is on its way, the same in a slim bar, in place of the "isn't logged in" notice; and when it
+  // ends, a note: ready, or why not. Looked at again each second while one is on its way (and whenever the app says
+  // something changed), whether Settings is open or not.)
   let modelsTimer = null;
   let asking = null; // the model whose download is being asked about
-  async function paintModels() {
+  const startErrors = {}; // why a start was refused, by model, until the next try
+  let lastModels = null;
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  const btn = (text, onClick) => { const b = el('button', 'btn', text); b.type = 'button'; b.addEventListener('click', onClick); return b; };
+  const going = (m) => m.state === 'downloading' || m.state === 'checking';
+  /** "{done} of {total} · {speed} · {left} left" */
+  const numbers = (m) => [m.done && m.total ? `${m.done} of ${m.total}` : '', m.speed || '', m.left ? `${m.left} left` : ''].filter(Boolean).join(' · ');
+  function bar(m) {
+    const b = el('div', 'phone-bar');
+    b.setAttribute('role', 'progressbar');
+    b.setAttribute('aria-valuemin', '0'); b.setAttribute('aria-valuemax', '100');
+    const pct = Math.round((m.progress || 0) * 100);
+    b.setAttribute('aria-valuenow', String(pct));
+    b.setAttribute('aria-label', `${m.name}: ${pct}%`);
+    const fill = el('span');
+    fill.style.width = `${Math.max(2, pct)}%`;
+    b.append(fill);
+    return b;
+  }
+  async function act(msg) {
+    delete startErrors[msg.model];
+    try { await app(msg); } catch (e) { startErrors[msg.model] = String(e?.message ?? e); }
+    refreshModels();
+  }
+  /** The state of a model's download, as words, and its buttons (Settings and the chat's bar alike). */
+  function stateLine(m, line) {
+    const say = (t) => line.append(el('span', 'model-state', t), ' ');
+    if (m.state === 'downloading') {
+      say(`Downloading… ${Math.round((m.progress || 0) * 100)}%`);
+      line.append(btn('Pause', () => act({ type: 'local.pause', model: m.id })), ' ', btn('Cancel', () => act({ type: 'local.delete', model: m.id })));
+    } else if (m.state === 'paused') {
+      say(`Paused${m.why ? `: ${m.why}` : ''}`);
+      line.append(btn('Resume', () => act({ type: 'local.download', model: m.id })), ' ', btn('Cancel', () => act({ type: 'local.delete', model: m.id })));
+    } else if (m.state === 'checking') {
+      say('Checking it…');
+    } else if (m.state === 'failed') {
+      say(`Couldn’t download it: ${m.why}.`);
+      line.append(btn('Try again', () => act({ type: 'local.download', model: m.id })));
+    }
+  }
+  function paintSettings(st) {
     const box = document.getElementById('phone-models');
     if (!box) return;
-    let st;
-    try { st = await app({ type: 'local.models' }); } catch (e) { return; }
-    const was = box.dataset.ready || '';
-    const ready = st.models.filter((m) => m.state === 'ready').map((m) => m.id).join(',');
-    box.dataset.ready = ready;
-    box.replaceChildren();
-    const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
-    const btn = (text, onClick) => { const b = el('button', 'btn', text); b.type = 'button'; b.addEventListener('click', onClick); return b; };
-    box.append(el('p', 'sites-title', 'Model on this iPhone'), el('p', 'note', st.memory));
-    const act = async (msg) => {
-      try { await app(msg); } catch (e) { const n = box.querySelector(`[data-model="${msg.model}"] .model-why`); if (n) { n.textContent = String(e?.message ?? e); n.hidden = false; } return; }
-      paintModels();
-    };
+    box.replaceChildren(el('p', 'sites-title', 'Model on this iPhone'), el('p', 'note', st.memory));
     for (const m of st.models) {
       const row = el('div', 'phone-model');
       row.dataset.model = m.id;
       row.append(el('p', 'model-name', `${m.name} · ${m.size}${m.suggested ? ' · suggested for this iPhone' : ''}`));
       row.append(el('p', 'note', m.fits ? m.note : `${m.note} This iPhone has too little memory for it.`));
+      if (m.state === 'downloading' || m.state === 'paused') { row.append(bar(m)); const n = numbers(m); if (n) row.append(el('p', 'note model-numbers', n)); if (m.stalled) row.append(el('p', 'note', m.stalled)); }
       const line = el('p', 'actions');
-      const say = (t) => line.append(el('span', 'model-state', t), ' ');
       if (asking === m.id && m.state === 'none') {
-        say(`Download ${m.size}? Best on Wi-Fi; it goes on in the background.`);
-        line.append(btn('Download', () => { asking = null; act({ type: 'local.download', model: m.id }); }), ' ', btn('Cancel', () => { asking = null; paintModels(); }));
+        line.append(el('span', 'model-state', `Download ${m.size}? Best on Wi-Fi; it goes on in the background.`), ' ');
+        line.append(btn('Download', () => { asking = null; act({ type: 'local.download', model: m.id }); }), ' ', btn('Cancel', () => { asking = null; refreshModels(); }));
       } else if (m.state === 'none') {
-        if (m.fits) line.append(btn('Download', () => { asking = m.id; paintModels(); }));
-      } else if (m.state === 'downloading') {
-        say(`Downloading… ${Math.round((m.progress || 0) * 100)}%`);
-        line.append(btn('Pause', () => act({ type: 'local.pause', model: m.id })));
-      } else if (m.state === 'paused') {
-        say('Paused');
-        line.append(btn('Resume', () => act({ type: 'local.download', model: m.id })), ' ', btn('Delete', () => act({ type: 'local.delete', model: m.id })));
-      } else if (m.state === 'checking') {
-        say('Checking it…');
+        if (m.fits) line.append(btn('Download', () => { asking = m.id; refreshModels(); }));
       } else if (m.state === 'ready') {
-        say('✓ On this iPhone');
-        line.append(btn('Delete', () => act({ type: 'local.delete', model: m.id })));
-      } else if (m.state === 'failed') {
-        say(`Couldn’t download it: ${m.why}.`);
-        line.append(btn('Try again', () => act({ type: 'local.download', model: m.id })));
-      }
-      const why = el('p', 'note error model-why');
-      why.hidden = true;
-      row.append(line, why);
+        line.append(el('span', 'model-state', '✓ On this iPhone'), ' ', btn('Delete', () => act({ type: 'local.delete', model: m.id })));
+      } else stateLine(m, line);
+      row.append(line);
+      if (startErrors[m.id]) row.append(el('p', 'note error', `Couldn’t start it: ${startErrors[m.id]}`));
+      else if (m.noteText && (m.noteKind === 'waiting' || m.noteAge < 30)) row.append(el('p', `note ${m.noteKind === 'failed' ? 'error' : ''}`, m.noteText));
       box.append(row);
     }
-    // (a model ready or gone: the panel lists its agents again, as after a key)
-    if (was !== ready && box.dataset.painted) afterKeys();
-    box.dataset.painted = '1';
-    clearTimeout(modelsTimer);
-    if (st.models.some((m) => m.state === 'downloading' || m.state === 'checking') && !document.getElementById('settings')?.hidden) modelsTimer = setTimeout(paintModels, 1000);
   }
+  /** The chat's agent is On this iPhone (the line over the message box says so). */
+  const onPhone = () => /^On this iPhone\b/.test(document.getElementById('using')?.textContent || '');
+  function paintChatBar(st) {
+    let top = document.getElementById('phone-download');
+    if (!top) {
+      top = el('section', 'phone-download');
+      top.id = 'phone-download';
+      top.hidden = true;
+      document.querySelector('header.bar')?.after(top);
+    }
+    // (the model the chat will use: one on its way first, else the latest one to end, for its note)
+    const m = st.models.find((x) => going(x) || x.state === 'paused') || st.models.find((x) => x.noteText && x.noteAge < 12 && x.noteKind !== 'waiting');
+    const show = !!m && onPhone();
+    top.hidden = !show;
+    document.body.classList.toggle('phone-downloading', show && (going(m) || m.state === 'paused'));
+    if (!show) { top.replaceChildren(); return; }
+    top.replaceChildren();
+    if (going(m) || m.state === 'paused') {
+      top.append(el('p', 'phone-download-title', `${m.state === 'checking' ? 'Checking' : m.state === 'paused' ? 'Paused:' : 'Downloading'} ${m.name} to this iPhone`), bar(m));
+      const n = numbers(m);
+      if (n) top.append(el('p', 'note model-numbers', n));
+      if (m.stalled) top.append(el('p', 'note', m.stalled));
+      else if (m.noteKind === 'waiting' && m.noteText) top.append(el('p', 'note', m.noteText));
+      const line = el('p', 'actions');
+      stateLine(m, line);
+      top.append(line);
+    } else {
+      top.append(el('p', m.noteKind === 'failed' ? 'note error' : 'phone-download-title', m.noteText));
+    }
+  }
+  async function refreshModels() {
+    let st;
+    try { st = await app({ type: 'local.models' }); } catch (e) { return; }
+    const ready = st.models.filter((m) => m.state === 'ready').map((m) => m.id).join(',');
+    const was = lastModels ? lastModels.models.filter((m) => m.state === 'ready').map((m) => m.id).join(',') : ready;
+    lastModels = st;
+    paintSettings(st);
+    paintChatBar(st);
+    // (a model ready or gone: the panel lists its agents again, so "isn't logged in" goes, or comes)
+    if (was !== ready) afterKeys();
+    clearTimeout(modelsTimer);
+    if (st.models.some((m) => going(m) || (m.noteText && m.noteAge < 30))) modelsTimer = setTimeout(refreshModels, 1000);
+  }
+  window.__trifPanelModelsChanged = () => { refreshModels(); return true; };
 
   document.addEventListener('DOMContentLoaded', () => {
     const settings = document.getElementById('settings');
@@ -352,8 +410,9 @@
     models.className = 'phone-keys';
     box.after(models);
     paintKeys();
-    paintModels();
-    // (Settings opened: the models' state looked at again)
-    document.getElementById('settings-btn')?.addEventListener('click', () => setTimeout(paintModels, 50));
+    refreshModels();
+    // (Settings opened, the chat's agent changed: the models' state looked at again)
+    document.getElementById('settings-btn')?.addEventListener('click', () => setTimeout(refreshModels, 50));
+    new MutationObserver(() => { if (lastModels) paintChatBar(lastModels); }).observe(document.getElementById('using') || document.body, { childList: true, characterData: true, subtree: true });
   });
 })();

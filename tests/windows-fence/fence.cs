@@ -4,6 +4,7 @@
 //   trif-fence.exe run <spec.json>     run the spec's command inside the container; exits with its status
 //   trif-fence.exe sid <name>          print the container's SID (making its profile if need be)
 //   trif-fence.exe delete <name>       delete the container's profile
+//   trif-fence.exe sddl <folder>       print a folder's access list (for the tests)
 //
 // The spec (JSON, UTF-8):
 //   name        the AppContainer profile's name, one per run ("trif.run.<id>"): its SID is the run's own
@@ -318,6 +319,7 @@ static class Fence {
     try {
       if (args.Length == 2 && args[0] == "run") return Run(args[1]);
       if (args.Length == 2 && args[0] == "sid") { Console.WriteLine(new SecurityIdentifier(ContainerSid(args[1])).Value); return 0; }
+      if (args.Length == 2 && args[0] == "sddl") { Console.WriteLine(new DirectoryInfo(args[1]).GetAccessControl(AccessControlSections.Access).GetSecurityDescriptorSddlForm(AccessControlSections.Access)); return 0; }
       if (args.Length == 2 && args[0] == "delete") { int hr = DeleteAppContainerProfile(args[1]); return hr == 0 ? 0 : Fail("0x" + hr.ToString("x8")); }
       return Fail("usage: trif-fence run <spec.json> | sid <name> | delete <name>");
     } catch (Exception e) {

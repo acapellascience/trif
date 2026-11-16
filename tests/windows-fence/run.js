@@ -301,6 +301,11 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       got[o.id] = { ok: through, got: d.stdout.trim(), why: hung ? 'never ended (40 s)' : `${d.stdout.trim().replace(CANARY, 'CANARY').slice(0, 90)} ${d.stderr.trim().split(/\r?\n/)[0] || ''} (exit ${d.status})`, ms: d.ms, hung };
     }
     console.log(`the probe ran in ${r.ms} ms\n`);
+    if (mode === 'appcontainer') {
+      // (so a refusal below means the fence: outside it the same small program gets each of these)
+      const out = (args) => String(spawnSync(spy, args, { encoding: 'utf8', timeout: 30000 }).stdout || '').trim().replace(/\s+/g, ' ').split(CANARY).join('CANARY').slice(0, 200);
+      console.log(`  outside the fence, for comparison: clipboard: ${out(['clip'])} | command line: ${out(['cmdline', String(other.pid)])} | memory: ${out(['open', String(other.pid)])}\n`);
+    }
     let group = '';
     for (const o of ops) {
       const res = got[o.id];
@@ -333,7 +338,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     } else console.log('  info (outside)  it couldn\'t leave a process behind');
     // (a last launch with `revoke`: the run's entries leave its folders and its profile is deleted)
     const sid = String(spawnSync(exe, ['sid', name], { encoding: 'utf8' }).stdout || '').trim();
-    const sddl = () => String(spawnSync(PSEXE, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `(Get-Acl -LiteralPath '${stage}').Sddl; (Get-Acl -LiteralPath '${path.join(stage, 'sites')}').Sddl`], { encoding: 'utf8' }).stdout || '');
+    const sddl = () => [stage, path.join(stage, 'sites'), box].map((d) => String(spawnSync(exe, ['sddl', d], { encoding: 'utf8' }).stdout || '')).join('\n');
     const before = sddl();
     const last = fence(exe, specFor(mode, { ...how, name, revoke: true, command: `"${node}" -p 1` }), { timeout: 40000 });
     const acl = sddl();

@@ -1,8 +1,12 @@
 # TRIF on Windows
 
 Where Windows support stands on the `windows` branch, what was found on the way, and what's still to
-decide. Nothing here is released: the branch isn't merged, and side-panel chats stay off on Windows until
-Tim decides how they're fenced (see [The sandbox](#the-sandbox)).
+do. Nothing here is released: the branch isn't merged, and releasing is Tim's decision.
+
+Side-panel chats run on Windows with **Claude Code**, behind a fence of TRIF's own (see
+[The sandbox](#the-sandbox)): built on the branch and seen working end to end on windows-latest with the
+real Claude Code. **Codex** isn't there yet: what's been tried and what's next is under
+[Codex](#codex-where-it-stands).
 
 Everything marked **seen** was seen passing on GitHub's `windows-latest` runners (Windows Server 2025,
 build 26100; an administrator account, UAC off), not on a person's Windows 11 laptop. Nobody has yet used
@@ -11,7 +15,7 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 - [What works](#what-works)
 - [How it's tested](#how-its-tested)
 - [The survey](#the-survey): every macOS assumption, the plan, the test
-- [The sandbox](#the-sandbox): what a Mac guarantees, what Windows can, the prototype, the recommendation
+- [The sandbox](#the-sandbox): what a Mac guarantees, what Windows can, the fence as built, the reserves
 - [Decisions for Tim](#decisions-for-tim)
 - [What's left](#whats-left)
 
@@ -28,7 +32,8 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 | API keys | Windows Credential Manager, never in argv or the environment | smoke test (a decision for Tim: [Keys](#keys-and-secrets)) |
 | Updates | unpacked with System32's `tar.exe`; `~\.trif\app` swapped with retries | unit tests with stand-ins only |
 | Mods | scanned, sent, held, switched, as elsewhere | unit tests |
-| Chats from the panel, `trif agent run`, logging in from the panel | **off**: the panel and doctor say so | unit tests |
+| Chats from the panel, `trif agent run` | **Claude Code: yes**, fenced (no shell; `trif` as a tool whose program runs in the run's AppContainer). Codex and open models: listed as not available from the panel, with why | `tests/windows-run.js`: a real run with the real Claude Code, 68 checks (**seen**); unit tests |
+| Logging in from the panel | off on Windows: the agent's own sign-in is done in a terminal | unit tests |
 
 A profile folder with a space, letters outside ASCII and a `%` in it (`C:\Users\Zoë 用户 100%`) works
 end to end: setup, the wrappers, the registry, the Path, a real browser starting the helper (**seen**).
@@ -292,27 +297,44 @@ account, no paid call).
 | WSL: the agent inside Linux, with Linux's sandbox | ✓ | ✓ | ✓ | ✓ | ✓ | a lot: see [WSL](#wsl-what-it-would-ask-of-people) | not tried: GitHub's runners can't run WSL 2. The guarantees would be Linux's, once every Windows drive is denied to the run by name |
 | No fence, with a warning | ✗ | ✗ | ✗ | ✗ | ✗ | a click | what "without TRIF's sandbox" already is for organizations. As the default it would give up every guarantee |
 
-### The prototype
+### The fence, as built
 
-`tests/windows-fence/`, run by `.github/workflows/windows-fence.yml`. **Nothing in TRIF uses it.**
+`helper/lib/win/fence.js` and `fence.cs` (the launcher), `helper/mcp.js` (the `trif` tool), and the Windows
+branches of `helper/lib/runs.js` and `helper/lib/agents/claude.js`.
 
-- `fence.cs` → `trif-fence.exe`: a 16 KB launcher, built in 1.5 s by the C# compiler that ships with every
-  Windows (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`): nothing to download, no native
-  module. It makes an AppContainer for one run (its own identity, a SID), gives that identity entries on
-  exactly the run's folders, starts the command inside with no capabilities at all (so: no network, and
-  no file or pipe that doesn't name the run), in a job (so that anything it left running would end with
-  it), and takes the entries out again afterwards.
-- `run.js` lays out what a run sees, all inside the user's profile folder as on a real computer (a working
-  folder, a mailbox, a screenshots folder, TRIF's code as `setup --copy` leaves it, node as nvm has it;
-  and the rest of a home folder, an ssh key, the private folder, the live workspace, another run's
-  mailbox and working folder, a server and a pipe as the helper makes them, another program with a canary
-  on its command line, a registry value, the clipboard), then tries everything from inside.
+- `fence.cs` → `trif-fence-<hash>.exe` in `~\.trif\bin`: a 19 KB launcher, built in under two seconds, the
+  first time a run needs it, by the C# compiler that ships with every Windows
+  (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`). Nothing compiled is shipped, so nothing
+  needs signing; a new version of the source gets a new file.
+- Before the agent starts, the helper has the launcher make an AppContainer for the run (its own identity)
+  and give it entries on exactly the run's folders: its working folder (a copy of the workspace) to read,
+  `sites\` in it to change (other sites' folders there read-only), its mailbox and its screenshots folder.
+  TRIF's code and node are readable through a capability every run carries. It's the less-privileged kind
+  of container with Windows' `registryRead` (what node needs to start), and no other capability: no
+  network at all, no pipe, no credential. When the run ends the entries are taken out and the container
+  deleted.
+- Claude Code is started with `--tools Read,Edit,Write,Glob,Grep` (no Bash) and one MCP tool, `trif`.
+  `helper/mcp.js` serves it: for each call it starts TRIF's own CLI inside the container with the words it
+  was given, one argument each (no shell reads them), and answers with what it printed. The CLI reaches the
+  helper through the run's mailbox, as in any run.
+- Claude Code's file tools keep TRIF's rules, spelled for Windows: relative to the working folder
+  (`Read(./**)`, `Edit(./sites/**)`, denies for other sites and instruction files), and the screenshots
+  folder as `//c/Users/…` (of six spellings tried, the ones Claude Code takes there are that, `C:/…` and
+  `C:\…`).
+- No fence, no run: if the launcher can't be built or the container can't be made, the run ends with why.
 
-What was **seen**: 66 checks, each passing, as a plain AppContainer and again as a less-privileged one
-with `registryRead`; run by the runner's own account (an administrator) and again by an ordinary user
-made for it (`fence-standard-user`: not an administrator, same results, so making the container and its
-entries needs no rights a normal person lacks).
-[The run](https://github.com/acapellascience/trif/actions/runs/43849520916): "every guarantee held, and
+`tests/windows-fence/run.js` lays out what a run sees, all inside the user's profile folder as on a real
+computer, gives it **the helper's own spec** (nothing added for the test), and tries everything from inside:
+a working folder, a mailbox, a screenshots folder, TRIF's code as `setup --copy` leaves it, node as nvm has
+it; and the rest of a home folder, an ssh key, the private folder, the live workspace, another run's
+mailbox and working folder, a server and a pipe as the helper makes them, another program with a canary on
+its command line, a registry value, the clipboard, a key in Credential Manager.
+
+What was **seen**: every check passing with the helper's spec (a less-privileged container with
+`registryRead`) and again as a plain AppContainer (the reserve); run by the runner's own account (an
+administrator) and again by an ordinary user made for it (`fence-standard-user`: not an administrator,
+same results, so making the container and its entries needs no rights a normal person lacks).
+[A run](https://github.com/acapellascience/trif/actions/runs/43892374756): "every guarantee held, and
 everything a run needs worked", in both. Every row below is one attempt or more:
 
 | | From inside the fence |
@@ -341,6 +363,10 @@ Found on the way, each of which a real build has to respect:
   its own commands. `cmd.exe` starts, and can start node, but not another `cmd.exe`; node can't start any
   child (`EPERM`). So "wrap the agent's shell commands" (the `CLAUDE_CODE_SHELL_PREFIX` route) has
   nothing to run them with. What does run is one node program: TRIF's own.
+- **The system gives no path its real name in there** (`realpathSync.native`: `EPERM`, for the run's own
+  folder too: asking needs the mount manager, closed to an AppContainer). TRIF's scanner asks for real
+  paths, so `trif mods` found nothing until, inside a fenced run, the path as written stands in
+  (`pathcheck.js`); outside, where the helper makes those checks for real, nothing changes.
 - **It can't start programs**, so the job has nothing to end: node inside couldn't leave a process
   behind (`EPERM`). "What it leaves running ends with it" is how the launcher is built, not something seen.
 - **The user's variables are readable** (`reg query HKCU\Environment` from inside worked; a value under
@@ -348,16 +374,38 @@ Found on the way, each of which a real build has to respect:
   send them anywhere, but a run that could run `reg.exe` there could write one into a mod. See the
   recommendation for why no run can.
 
-### Recommendation
+### A real run, end to end
 
-**Claude Code: no shell at all, `trif` as a tool, and that tool's program inside the fence.**
+`tests/windows-run.js` (**seen**, 68 checks, [the same run](https://github.com/acapellascience/trif/actions/runs/43892374756)):
+TRIF set up in a scratch profile folder by its own `setup --copy`; the real helper; the real Claude Code
+2.1.325 from npm, talking through the helper's key proxy to a stand-in for Anthropic's API (a made-up key
+in the real Credential Manager: no account, no paid call) that asks for the tool calls the test lists.
 
-On Windows TRIF would start Claude Code with `--tools Read,Edit,Write,Glob,Grep` (no Bash) and one MCP
-tool, `trif`, which takes a `trif` command's arguments. The program behind the tool is TRIF's own CLI,
-started by `trif-fence.exe` inside the run's AppContainer, reaching the helper through the run's mailbox
-as today. **Seen** end to end on windows-latest: the real Claude Code started the launcher, the launcher
-started node in the container, the tool call came back, and from inside that program a secret in the home
-folder couldn't be read (`EPERM`) and this computer's own server couldn't be reached.
+- **Every `trif` command a run uses works through the tool, inside the fence**: `status`, `tabs`, `new`,
+  `check`, `verify`, `explain`, `errors`, `logs`, `mods`, `help`, `doctor`.
+- A mod written with Claude Code's Write tool in the run's working folder reached the mods folder and the
+  browser; so did the one `trif new` made from inside the fence.
+- **Refused**: through the tool, a tab of another site, a file elsewhere, a command that isn't for runs
+  (words like `&`, `$(…)` and `| more` stayed words); with Claude Code's own tools, a file elsewhere in the
+  home folder, TRIF's settings, the live workspace, a search of the home folder, another site's folder, the
+  guide, an instruction file in its own site's folder, the live mods folder; a shell command and a web page
+  ("No such tool available: Bash. Bash is disabled for this session").
+- The tools Claude Code had: `Edit, Glob, Grep, Read, Write, mcp__trif__trif` (and its own
+  `DeferredToolPlaceholder`, "never call this tool").
+- **From a program started in the run's own container while the run was going** (the helper's launcher
+  and spec): its working folder read, its own site's folder written; refused: a file elsewhere in the home
+  folder, TRIF's settings, the live workspace, writing the live mods folder, another site's folder and the
+  guide in its copy, a server on this computer, the model's own address on this computer, the internet, a
+  name lookup, the API key in Credential Manager (which the same program outside read), the helper's
+  command line, the clipboard.
+- No secret reached the model; the API key was in no request body, event or log (the key proxy added it).
+  Afterwards the run's folders were gone and its entries off the screenshots and mods folders.
+
+### What was decided, and what it gives
+
+Tim's answer (16 November, through the coordinating session): build it as recommended, with the other
+options kept here as reserves. So, for **Claude Code: no shell at all, `trif` as a tool, and that tool's
+program inside the fence.**
 
 | | On Windows, this way | Against the Mac |
 |---|---|---|
@@ -378,21 +426,37 @@ What's given up, plainly:
 - The registry hole above is real but out of reach: reading it takes running a program inside the fence,
   and the only program there is TRIF's CLI.
 
-**Codex: not from the panel on Windows yet.** There's no place to put a fence of TRIF's under Codex's
-shell, and its own sandboxes either refuse TRIF's profile (good), need an administrator and then leak
-name lookups and local servers (and didn't start inside the profile folder at all), or need a Windows the
-runners don't have. The honest choices are: leave Codex (and open models, which run through it) off in the
-panel on Windows, saying why; or offer it only where `mxc` is there, once that can be tried on a real
-Windows 11. A weaker Codex shouldn't ship quietly.
+### Codex: where it stands
 
-One lead, not tried: Codex 0.169 lists a feature called `shell_tool` (on by default). If switching it off
-really leaves Codex without a shell, the Claude Code design could carry over (`trif` as an MCP tool, its
-program in TRIF's fence). Codex's patch tool, which is how it would then write mods, runs under Codex's own
-sandbox, so that still has to be looked at on Windows.
+Tim requires Codex from the panel too, fenced as surely as Claude Code. To be tried in this order, each
+proven with the same attempts to get out before it's switched on; until then Codex and open models (which
+run through it) are listed in the panel as not available on Windows, with why:
+
+1. **Codex with its shell off, `trif` as an MCP tool whose program is in TRIF's fence** (the Claude Code
+   design carried over).
+2. **Codex's commands run through the fence's launcher.**
+3. **Codex's `elevated` sandbox, with name lookups and this computer's own servers closed.** Needs an
+   administrator once, so only if 1 and 2 fail.
+
+What's been **seen** towards 1 (`tests/windows-fence/agents.js`, Codex 0.169 on windows-latest):
+
+- With `shell_tool` off, `exec_command` and `write_stdin` go. What's left: `apply_patch`, `view_image`,
+  the MCP tools, `exec` (JavaScript in an isolate of Codex's own that calls the other tools: "no Node, no
+  file system, no network access"), and its tools for sub-agents and questions. No feature switch found so
+  far takes `apply_patch` away.
+- `apply_patch` and `view_image` are Codex's own and run outside TRIF's fence, under Codex's sandbox:
+  which on Windows without an administrator can't be given TRIF's profile ("unelevated restricted-token
+  sandbox cannot enforce deny-read restrictions directly; refusing"). So for 1 to hold, Codex's own file
+  tools have to be off or refused, and files done by TRIF: `helper/mcp.js` can offer `read_file`,
+  `write_file`, `edit_file`, `list_files`, `search_files` and `view_image`, each done by
+  `helper/lib/win/fenced-files.js` inside the run's fence (built, unit-tested with the stand-in fence; not
+  yet used by a run).
+- A real Codex run with the shell off against the stand-in model didn't get going: no request reached the
+  stand-in in 150 s. Not yet understood.
 
 **WSL: later, as an option for people who already live there.** Not the default: see below.
 
-This is a recommendation. Nothing is switched on: panel chats stay off on Windows until Tim says which way.
+Where the work stands round by round, and the next step: `docs/WINDOWS-PROGRESS.md`.
 
 ### WSL: what it would ask of people
 
@@ -419,8 +483,9 @@ WSL"); not something to ask of everyone.
 
 ## Decisions for Tim
 
-1. **The fence for panel chats on Windows.** Recommended: Claude Code with no shell, `trif` as a tool, its
-   program in TRIF's AppContainer (above). Codex and open models off in the panel on Windows for now.
+1. **The fence for panel chats on Windows.** Decided (16 November): Claude Code with no shell, `trif` as a
+   tool, its program in TRIF's AppContainer (above); Codex too, by the first of three ways that holds
+   ([Codex](#codex-where-it-stands)).
 2. **How the launcher gets onto a computer.** Built at setup by Windows' own C# compiler (nothing shipped
    but source; an antivirus may still look twice at a program made on the spot), or shipped built in the
    npm package (then it should be signed, which means a Windows signing certificate). Not decided here.
@@ -443,15 +508,11 @@ WSL"); not something to ask of everyone.
 
 In the order it would be done:
 
-1. Tim's decisions above.
-2. If the recommendation stands, build it: the launcher's place in setup; `runs.js` on Windows (mailboxes
-   and working folders under `%LOCALAPPDATA%\TRIF`, the run's limits as the launcher's spec); the `trif`
-   tool (an MCP server in `helper/`); the Claude Code adapter's Windows branch (no Bash, no sandbox block,
-   the tool's config, path rules in Windows' spelling); starting `claude.cmd` through `cmd.exe`;
-   `claude-managed.js` for Windows' locations; the panel's notices; the agents' guide for Windows runs.
-3. Then un-skip the 60-odd tests marked "no side-panel runs" in `tests/windows-skips.json`, with stand-in
-   agents that run on Windows, and add a real run on the runner: the real helper, the real Claude Code,
-   the stand-in model, the attempts to get out (as `tests/run-sandbox.test.js` does on a Mac).
+1. Tim's other decisions above.
+2. Codex from the panel, fenced ([Codex](#codex-where-it-stands)), with its own real run and attempts to
+   get out on the runner. `claude-managed.js` for Windows' locations; the agents' guide for Windows runs.
+3. Un-skip the tests marked "no side-panel runs" in `tests/windows-skips.json` (the stand-in fence,
+   `tests/fake-fence.js`, and stand-in agents that run on Windows), and make them pass there.
 4. Renames that replace a file (`stage.js`, `setConfigKey`) with retries; `O_NOFOLLOW`'s absence in
    `cli.js`'s write.
 5. The browser check with user scripts allowed and a mod running on a page; Firefox on Windows in a real

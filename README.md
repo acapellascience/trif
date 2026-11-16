@@ -19,7 +19,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## What you need
 
-- A Mac (or Linux, or Windows 10/11 without chats from the side panel yet: see [Windows](#windows)).
+- A Mac (or Linux, or Windows 10/11: see [Windows](#windows)).
 - Google Chrome 138 or newer (or Firefox 153, or Safari 27.2: see below).
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
@@ -106,15 +106,17 @@ Settings → Extensions and delete the old WebMods app.
 
 ### Windows
 
-TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome and Firefox: run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps
-(the extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH:
-open a new terminal afterwards to use `trif`.
+TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome, Edge, Brave and Firefox:
+run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps (the
+extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH: open a
+new terminal afterwards to use `trif`.
 
-What's missing for now: **chats from the side panel**. TRIF only runs your coding agent from the panel
-where the agent's commands can be kept to the site you're fixing, and on Windows neither Claude Code
-nor Codex can do that for TRIF yet. Use your agent in a terminal instead: open one in `~\.trif`, start
-Claude Code or Codex there, and ask it to fix a site; it reads `AGENTS.md`, and the mods it writes show
-up in the panel as usual. API keys you save with `trif agent key` go to Windows Credential Manager.
+Chats from the side panel work with Claude Code. On Windows TRIF gives it no shell: it changes mods with
+its file tools and runs TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on your
+computer the first time (with the C# compiler that comes with Windows). Log in to Claude Code in a
+terminal first (`claude`, then `/login`): logging in from the panel isn't there on Windows yet. Codex and
+open models can't be used from the panel on Windows yet; in a terminal in `~\.trif` they work as anywhere.
+API keys you save with `trif agent key` go to Windows Credential Manager.
 
 ## Using it
 

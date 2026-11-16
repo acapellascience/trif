@@ -378,21 +378,57 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 self.activity = .idle
             }
         case "done":
-            let texts = d["mods"] as? [String] ?? []
-            report.log("claude", "\(service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")), \(texts.count) mod file(s) in it")
-            let late = d["why"] as? String == "late"
-            guard activity == .working || late else { return }
-            guard let browser else { activity = .idle; endBackground(); return }
-            Task { @MainActor in
-                let offered = await browser.offerFromChat(texts)
-                if let conv = self.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
-                // (the app in the background: a notification says so, then iOS's background time is given back)
-                if UIApplication.shared.applicationState == .background { self.notifyDone(offered) } // (not inactive: an alert of the system's over the app)
-                self.endBackground()
-                if late { if !offered.isEmpty, self.activity == .replied { self.activity = .idle }; return }
-                self.activity = !offered.isEmpty || self.shown ? .idle : .replied
+            var texts = d["mods"] as? [String] ?? []
+            let fetchList = (d["fetch"] as? [[String: Any]] ?? []).compactMap { f -> (URL, String)? in
+                guard let u = (f["url"] as? String).flatMap(URL.init(string:)), u.scheme == "https" else { return nil }
+                return (u, f["name"] as? String ?? u.lastPathComponent)
             }
+            if let unread = d["unread"] as? [String], !unread.isEmpty {
+                Diagnostics.shared.log("chat files", "\(service.rawValue): a reply had file links the app couldn't read: \(unread.prefix(8).joined(separator: "; "))")
+            }
+            if !fetchList.isEmpty {
+                // (a reply's mod file on another site, a signed download address: fetched here, without cookies)
+                Task { @MainActor in
+                    for (u, name) in fetchList.prefix(6) {
+                        if let t = await ClaudePane.fetchText(u) { texts.append(t) }
+                        else { Diagnostics.shared.log("chat files", "\(self.service.rawValue): couldn't fetch \(name) from \(u.host ?? "?")") }
+                    }
+                    var e = d
+                    e["mods"] = texts
+                    e["fetch"] = nil
+                    e["unread"] = nil
+                    self.handleDone(e, texts)
+                }
+                return
+            }
+            handleDone(d, texts)
         default: break
+        }
+    }
+
+    /// A text file at an address, 2 MB at most, 15 s at most; nil if it isn't one.
+    nonisolated static func fetchText(_ url: URL) async -> String? {
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        req.httpShouldHandleCookies = false
+        guard let (data, response) = try? await URLSession.shared.data(for: req), (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+              data.count < 2_000_000 else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// A reply done, with the mod files in it (code blocks and files): offered with Add this mod?.
+    private func handleDone(_ d: [String: Any], _ texts: [String]) {
+        report.log("claude", "\(service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")), \(texts.count) mod file(s) in it")
+        let late = d["why"] as? String == "late"
+        guard activity == .working || late else { return }
+        guard let browser else { activity = .idle; endBackground(); return }
+        Task { @MainActor in
+            let offered = await browser.offerFromChat(texts)
+            if let conv = self.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
+            // (the app in the background: a notification says so, then iOS's background time is given back)
+            if UIApplication.shared.applicationState == .background { self.notifyDone(offered) } // (not inactive: an alert of the system's over the app)
+            self.endBackground()
+            if late { if !offered.isEmpty, self.activity == .replied { self.activity = .idle }; return }
+            self.activity = !offered.isEmpty || self.shown ? .idle : .replied
         }
     }
 
@@ -570,9 +606,17 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             note("an address for another app, not followed", url)
             return .cancel
         }
+        if ModDownloads.wanted(navigationAction) { return .download }
         if navigationAction.targetFrame?.isMainFrame ?? false { note("going to", url) }
         return .allow
     }
+
+    // (a .js file the person downloads in the chat: to Add this mod?: ModDownloads)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        ModDownloads.wanted(navigationResponse) ? .download : .allow
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { if webView === self.webView { loading = true } }
 

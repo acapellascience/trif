@@ -112,6 +112,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             MainActor.assumeIsolated { self?.memoryWarning() }
         }
         installScripts()
+        ModDownloads.shared.browser = self
         restoreTabs()
     }
 
@@ -241,7 +242,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func select(_ tab: Tab) {
         defer { noteRunning() }
         letGo[tab.id]?.cancel()
-        if let was = current, was !== tab { snapshot(was); letGoLater(was) }
+        if let was = current, was !== tab { TabShots.shared.take(was, "left"); letGoLater(was) }
         current = tab
         picked = nil; previewing = false; lastHide = nil; status = ""
         if !tab.started && !waitingForFront { start(tab) }
@@ -283,9 +284,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// The tab's picture for the switcher (TabShots: kept on disk too). Taken as a tab is left, when the app goes to
     /// the background, when the switcher opens, and a moment after a page has loaded.
-    func snapshot(_ tab: Tab? = nil) {
+    func snapshot(_ tab: Tab? = nil, _ why: String = "the tabs opened") {
         guard let t = tab ?? current else { return }
-        TabShots.shared.take(t)
+        TabShots.shared.take(t, why)
     }
     /// After the shown tab's page loads: its picture a second later (once it has drawn), at most every 3 s.
     private var shotLater: Task<Void, Never>?
@@ -293,7 +294,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         guard shotLater == nil, let t = current else { return }
         shotLater = Task { @MainActor [weak self, weak t] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if let t, t === self?.current { TabShots.shared.take(t) }
+            if let t, t === self?.current { TabShots.shared.take(t, "loaded") }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             self?.shotLater = nil
         }
@@ -443,6 +444,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func go(_ text: String) {
         guard let url = Browser.address(for: text) else { status = "That isn't an address."; return }
         picked = nil
+        // (a tab not started yet, waiting for the app to come to the front: this is its page now, not what was kept)
+        if let t = current, !t.started { t.started = true; t.savedState = nil }
         webView.load(URLRequest(url: url))
     }
 
@@ -751,7 +754,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
-        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
+        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. A big mod (over about 300 lines), or a change to one: if you can create files, write the .js file (or edit it, changing only what's needed) and attach it, rather than printing it all. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
 
         A screenshot of what I see is attached. If I attach TRIF pointer files, those are the parts of the page I mean. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 
@@ -866,7 +869,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let here = await alreadyHere(conv: conv)
         sw?.lap("mods and their errors", "\(on.count) mods")
         text += here.isEmpty ? "\nNo TRIF mods are running on this page, and nothing on it is hidden.\n" : here
-        text += "\nI'll say what I want changed. As before: reply with the whole mod file in one code block, nothing to fill in; to change a mod above, give back its whole file with the same @name. Work from what I've attached; don't open the page in a browser or another tool.\n"
+        text += "\nI'll say what I want changed. As before: reply with the whole mod file in one code block, nothing to fill in (a big one: an attached .js file if you can create files, changing only what's needed); to change a mod above, give back its whole file with the same @name. Work from what I've attached; don't open the page in a browser or another tool.\n"
         text += "\n--- The page now: \(page) ---\n\(o.text)\n"
         report.log("outline", "\(host): the follow-up, \(text.count) characters")
         return text
@@ -1055,8 +1058,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             return .cancel
         }
         let scheme = url.scheme ?? ""
+        if ModDownloads.wanted(navigationAction) { return .download }
         return ["http", "https", "about", "blob", "data", PageSchemeHandler.scheme].contains(scheme) ? .allow : .cancel
     }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        ModDownloads.wanted(navigationResponse) ? .download : .allow
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
 
     private func tab(of webView: WKWebView) -> Tab? { tabs.first { $0.webView === webView } }
 
@@ -1159,3 +1169,48 @@ struct WebViewHost: UIViewRepresentable {
 
 /// (Browser.within: whichever of an answer and its time limit comes first)
 @MainActor final class OnceFlag { var done = false }
+
+
+/// A .js file downloaded (a link tapped in a page or the chat, its download the file): to Add this mod?, not to
+/// Files (Tim, 11-16). Only a .js file, 2 MB at most; anything else downloaded is let go, as before.
+@MainActor
+final class ModDownloads: NSObject, WKDownloadDelegate {
+    static let shared = ModDownloads()
+    weak var browser: Browser?
+    private var files: [ObjectIdentifier: (url: URL, name: String)] = [:]
+
+    private static func jsName(_ s: String?) -> Bool { (s ?? "").lowercased().hasSuffix(".js") }
+    /// A link that asks to be downloaded (its `download` attribute) to a .js file, or a page's own made file.
+    static func wanted(_ a: WKNavigationAction) -> Bool {
+        guard a.shouldPerformDownload, let u = a.request.url else { return false }
+        return jsName(u.path) || u.scheme == "blob" || u.scheme == "data"
+    }
+    /// A response that's a .js file to save (an attachment, or something the web view wouldn't show), in the main frame.
+    static func wanted(_ r: WKNavigationResponse) -> Bool {
+        guard r.isForMainFrame, jsName(r.response.suggestedFilename) else { return false }
+        let disposition = (r.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
+        return disposition.contains("attachment") || !r.canShowMIMEType
+    }
+
+    func take(_ d: WKDownload) { d.delegate = self }
+
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
+        guard ModDownloads.jsName(suggestedFilename), response.expectedContentLength < 2_000_000 else { return nil }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).js")
+        files[ObjectIdentifier(download)] = (url, suggestedFilename)
+        return url
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let f = files.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        let text = (try? String(contentsOf: f.url, encoding: .utf8)) ?? ""
+        try? FileManager.default.removeItem(at: f.url)
+        browser?.report.log("mods", "downloaded \(f.name) (\(text.count) characters): to Add this mod?")
+        browser?.offer(text: text.isEmpty ? nil : text)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        let f = files.removeValue(forKey: ObjectIdentifier(download))
+        Diagnostics.shared.log("chat files", "couldn't download \(f?.name ?? "a file"): \(error.localizedDescription)")
+    }
+}

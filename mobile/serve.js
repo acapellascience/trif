@@ -29,6 +29,24 @@ function handler(log = console.log) {
       return res.end('canary');
     }
     if (name === 'trif-install') name = 'install.html';
+    // (the stand-in chat's files: a mod file to download (stand-in-file/<name>.js), and ChatGPT's routes for its
+    // sandbox:/mnt/data/… links: its session, then the download route giving a download address)
+    const fileMatch = /^stand-in-file\/([\w-]+)\.js$/.exec(name);
+    if (fileMatch) {
+      const title = fileMatch[1].replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+      const css = fileMatch[1].includes('feed') || fileMatch[1].includes('calmer') ? '.feed-item h2 { color: #1f8a5b }' : '.cookie-consent { outline: 3px solid #f91880 }';
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Disposition': `attachment; filename="${fileMatch[1]}.js"`, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      return res.end(`// ==WebMod==\n// @name        ${title}\n// @description Made by the stand-in chat\n// @match       http://localhost/*\n// @style\n// ==/WebMod==\n${JSON.stringify({ css }, null, 2)}\n`);
+    }
+    if (name === 'api/auth/session') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ accessToken: 'stand-in-token' })); }
+    const dl = /^backend-api\/conversation\/[\w-]+\/interpreter\/download$/.test(name);
+    if (dl) {
+      if (req.headers.authorization !== 'Bearer stand-in-token') { res.writeHead(401); return res.end(); }
+      const p = url.searchParams.get('sandbox_path') || '';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ download_url: `http://127.0.0.1:${req.socket.localPort}/stand-in-file/${p.split('/').pop()}` }));
+    }
+    if (/^c\/[\w-]+$/.test(name)) name = 'chat.html';
     // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)
     if (/^chat\/[\w-]+$/.test(name)) name = 'chat.html';
     if (name === '') {

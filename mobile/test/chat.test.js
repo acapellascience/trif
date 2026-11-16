@@ -117,3 +117,39 @@ test('the chat script: a chat with no stop button to see, done once the reply ha
     server.close();
   }
 });
+
+test('the chat script: mod files a reply attaches (a download link, ChatGPT\'s sandbox link), read with no click; a file and a block with the same header: once', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    const ask = async (text, n) => {
+      await page.evaluate((t) => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, t); }, text);
+      await page.click('button[aria-label="Send message"]');
+      return (await waitPost(page, 'done', n))[n - 1];
+    };
+    await page.goto(`${base}/chat.html`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    const file = await ask('as a file please', 1);
+    assert.equal(file.mods.length, 1, JSON.stringify(file.mods.map((m) => m.slice(0, 160))));
+    assert.match(file.mods[0], /@name\s+Calmer feed[\s\S]*==\/WebMod==/);
+    assert.deepEqual(file.unread || [], []);
+    const both = await ask('file and block, the same mod', 2);
+    assert.equal(both.mods.length, 1, 'a file and a code block with the same header: offered once');
+
+    // ChatGPT's sandbox:/mnt/data/… link, through its session and download route (stand-ins in serve.js)
+    await page.goto(`${base}/chat.html?gpt`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    const sandbox = await ask('save it to the sandbox', 1);
+    assert.equal(sandbox.mods.length, 1);
+    assert.match(sandbox.mods[0], /@name\s+Sandbox mod/);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

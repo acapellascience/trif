@@ -53,20 +53,35 @@ final class TabShots {
     private let io = DispatchQueue(label: "trif.tab-shots", qos: .utility)
     private func file(_ id: UUID) -> URL { dir.appendingPathComponent("\(id.uuidString).jpg") }
 
-    func take(_ tab: Tab) {
+    /// Pictures the tab now, if its page is on the screen; a failed try keeps the picture it had. Each try is in the
+    /// diagnostics (11-16): taken or not, why, its size, saved or not.
+    func take(_ tab: Tab, _ why: String = "") {
         let wv = tab.webView
-        guard wv.url != nil, wv.window != nil, wv.bounds.width > 10 else { return }
+        let host = tab.host.isEmpty ? "a new tab" : tab.host
+        guard wv.url != nil else { return }
+        guard wv.window != nil, wv.bounds.width > 10 else {
+            Diagnostics.shared.log("tab shot", "\(host) (\(why)): not taken, its page isn't on the screen\(wv.window == nil ? "" : " (no size)")")
+            return
+        }
+        let url = file(tab.id)
+        let io = self.io
         let cfg = WKSnapshotConfiguration()
         cfg.snapshotWidth = NSNumber(value: Double(TabShots.width))
         cfg.afterScreenUpdates = false
-        let url = file(tab.id)
-        let io = self.io
-        wv.takeSnapshot(with: cfg) { [weak tab] image, _ in
-            guard let image, let tab else { return }
+        wv.takeSnapshot(with: cfg) { [weak tab] image, error in
+            guard let tab else { return }
+            guard let image, image.size.width > 1 else {
+                Diagnostics.shared.log("tab shot", "\(host) (\(why)): WebKit gave no picture\(error.map { ": \($0.localizedDescription)" } ?? ""); the one before is kept")
+                return
+            }
             tab.snapshot = image
+            let size = "\(Int(image.size.width * image.scale))x\(Int(image.size.height * image.scale))"
             io.async {
-                guard let data = image.jpegData(compressionQuality: 0.7) else { return }
-                try? data.write(to: url, options: .atomic)
+                let outcome: String
+                if let data = image.jpegData(compressionQuality: 0.7) {
+                    do { try data.write(to: url, options: .atomic); outcome = "saved, \(data.count / 1000) kB" } catch { outcome = "not saved: \(error.localizedDescription)" }
+                } else { outcome = "not saved: no JPEG" }
+                Diagnostics.logLater("tab shot", "\(host) (\(why)): taken, \(size), \(outcome)")
             }
         }
     }
@@ -75,9 +90,13 @@ final class TabShots {
     func load(_ tab: Tab) {
         guard tab.snapshot == nil else { return }
         let url = file(tab.id)
+        let host = tab.host.isEmpty ? "a new tab" : tab.host
         let scale = tab.webView.traitCollection.displayScale > 0 ? tab.webView.traitCollection.displayScale : 2
         io.async {
-            guard let data = try? Data(contentsOf: url), let image = UIImage(data: data, scale: scale) else { return }
+            guard let data = try? Data(contentsOf: url), let image = UIImage(data: data, scale: scale) else {
+                Diagnostics.logLater("tab shot", "\(host): no picture kept from before (\(FileManager.default.fileExists(atPath: url.path) ? "its file unreadable" : "no file"))")
+                return
+            }
             DispatchQueue.main.async { [weak tab] in if let tab, tab.snapshot == nil { tab.snapshot = image } }
         }
     }

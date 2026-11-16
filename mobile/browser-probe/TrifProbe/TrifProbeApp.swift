@@ -4,6 +4,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 import WebKit
 
 @main
@@ -144,10 +145,21 @@ extension Model {
                     await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in f(store, sel) { k.resume() } }
                     out = "flushed in \(Int(Date().timeIntervalSince(t0) * 1000)) ms"
                 } else { out = "no flush" }
+            } else if c == "bench" {
+                // (300 flushes by the path in use: how long each takes, and that no cookie changed or went)
+                let sig = { (l: [HTTPCookie]) in Set(l.map { "\($0.name)|\($0.domain)|\($0.path)|\($0.value.hashValue)|\($0.expiresDate?.timeIntervalSince1970 ?? 0)" }) }
+                let before = await store.allCookies()
+                let t0 = Date()
+                for _ in 0..<300 { await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in CookieKeeper.shared.flush(nil) { k.resume() } } }
+                let ms = Date().timeIntervalSince(t0) * 1000 / 300
+                let after = await store.allCookies()
+                let a = sig(before), b = sig(after)
+                out = "\(CookieKeeper.shared.usesPrivateFlush ? "private" : "public"): \(String(format: "%.2f", ms)) ms a flush; cookies before \(before.count) (\(Set(before.map { Site.of($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }).count) sites), after \(after.count); \(a == b ? "identical" : "CHANGED: \(a.subtracting(b).count) gone, \(b.subtracting(a).count) new")"
             } else {
                 out = "spi: \(store.responds(to: NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")))"
             }
         }
+        if step["appstate"] != nil { out = "app state \(UIApplication.shared.applicationState.rawValue) (0 active, 1 inactive, 2 background), scenes \(UIApplication.shared.connectedScenes.map { "\($0.activationState.rawValue)" })" }
         if step["toolbar"] != nil {
             let w = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
             out = "page button centre \(ContentView.pageButtonMidX), screen centre \((w?.bounds.midX ?? 0)), off by \(abs(ContentView.pageButtonMidX - (w?.bounds.midX ?? 0)))"
@@ -219,7 +231,7 @@ struct ContentView: View {
         .onChange(of: phase) { _, p in
             // (safe mode: the record is unclean only while the app is in front; Safety follows UIKit's own notices too)
             browser.safety.active(p == .active)
-            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot() } }
+            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot(nil, "the app left the front") } }
         }
         .alert(item: $safety.offer) { o in
             let name = o.likely.flatMap { id in browser.mods.mods.first { $0.id == id }?.name }
@@ -283,6 +295,7 @@ struct ContentView: View {
             .modifier(BarPadding(bars: bars, top: !BarState.moves, bottom: !BarState.moves))
             .padding(.top, BarState.compactHeight)
             .accessibilityHidden(pane.shown)
+            PullActionsView(pull: bars.pull, insets: bars.insets)
             TopBar(bars: bars, full: addressBar, compact: compactBar)
                 .accessibilityHidden(pane.shown)
             BottomBars(bars: bars) {
@@ -304,7 +317,17 @@ struct ContentView: View {
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .onAppear { pane.follow(site: browser.site); bars.attach(browser.webView) }
+        .onAppear {
+            pane.follow(site: browser.site); bars.attach(browser.webView)
+            // (a pull's choice: as the toolbar's new tab, a reload, and closing the tab as the switcher does)
+            bars.pull.act = { [browser] c in
+                switch c {
+                case .newTab: browser.newTab()
+                case .reload: browser.reload()
+                case .close: if let t = browser.current { browser.close(t) }
+                }
+            }
+        }
         .onChange(of: browser.address) { _, _ in pane.follow(site: browser.site) }
         .onChange(of: browser.pageChanged) { _, _ in pane.follow(site: browser.site); bars.attach(browser.webView) }
         .onChange(of: browser.loading) { _, now in if now { bars.expand() } }
@@ -432,11 +455,11 @@ struct ContentView: View {
                         .accessibilityLabel("Share")
                 }
             }
+            // (no reload button: pull the page down. A stop while loading, so a slow page can be stopped)
             if browser.loading {
-                Button { browser.webView.stopLoading() } label: { Image(systemName: "xmark") }.accessibilityLabel("Stop")
-            } else {
-                Button { browser.reload() } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Reload")
-                    .disabled(browser.webView.url == nil)
+                Button { browser.webView.stopLoading() } label: { Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)) }
+                    .accessibilityLabel("Stop loading")
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 10)
@@ -547,20 +570,15 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
         }
         .font(.title3)
-        // (the same room on both sides, the larger side's safe area (landscape): the row's centre is the screen's)
-        .padding(.horizontal, 6 + ContentView.sideInset)
+        // (the same room on both sides: iOS's side safe areas are the same on both sides in landscape, so the row's
+        // centre is the screen's)
+        .padding(.horizontal, 6)
         .padding(.vertical, 10)
-        .ignoresSafeArea(.container, edges: .horizontal)
     }
 
     /// (development: where the page button's centre is, for the step {"toolbar": 1})
     static var pageButtonMidX: CGFloat = 0
 
-    /// The larger of the window's left and right safe areas (0 in portrait).
-    static var sideInset: CGFloat {
-        let w = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
-        return max(w?.safeAreaInsets.left ?? 0, w?.safeAreaInsets.right ?? 0)
-    }
 }
 
 /// The robot (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head and two round eyes, in the
@@ -977,6 +995,8 @@ final class BarState: NSObject, ObservableObject {
             wv.observe(\.isLoading, options: [.new]) { [weak self] w, _ in main { self?.loading = w.isLoading } },
         ]
         sv.panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
+        fingers.view?.removeGestureRecognizer(fingers)
+        wv.addGestureRecognizer(fingers)
         settleTask?.cancel()
         stop()
         target = 0
@@ -1000,6 +1020,7 @@ final class BarState: NSObject, ObservableObject {
     private func scrolled(_ sv: UIScrollView) {
         let y = sv.contentOffset.y
         defer { lastY = y }
+        pulled(sv)
         guard BarState.moves, !held else { return }
         let top = -sv.adjustedContentInset.top
         // (a page with little or nothing to scroll keeps its bars)
@@ -1015,7 +1036,43 @@ final class BarState: NSObject, ObservableObject {
     }
 
     @objc private func panned(_ g: UIPanGestureRecognizer) {
-        if g.state == .ended || g.state == .cancelled || g.state == .failed { settleSoon() }
+        switch g.state {
+        case .began:
+            // (a pull counts only if it starts with the page at its very top)
+            if let sv = webView?.scrollView { pullFromTop = !held && sv.contentOffset.y <= -sv.adjustedContentInset.top + 1 }
+        case .changed:
+            // (the finger going sideways moves no scrolling, so the choice follows the gesture itself too)
+            if let sv = webView?.scrollView { pulled(sv) }
+        case .ended:
+            pull.release()
+            pullFromTop = false
+            settleSoon()
+        case .cancelled, .failed:
+            pull.cancel()
+            pullFromTop = false
+            settleSoon()
+        default: break
+        }
+    }
+
+    // MARK: pulling down at the top (Tim, 11-16, as Chrome: + New Tab, Reload, × Close Tab)
+    /// The pull's state, for its own small view (PullActionsView): its own object, so the bars don't redraw for it.
+    let pull = PullActions()
+    private var pullFromTop = false
+    private lazy var fingers: FingerWatch = {
+        let f = FingerWatch()
+        f.moved = { [weak self] in guard let self, self.pullFromTop, let sv = self.webView?.scrollView else { return }; self.pulled(sv) }
+        return f
+    }()
+    /// Only the page's own scroll view going past its top, with the person's finger on it: a page that handles the touch
+    /// itself (a map, a canvas, a piece dragged, an inner scroller) never moves it, and a page with
+    /// `overscroll-behavior: none` doesn't let it go past its top (WebKit stops the bounce), so neither pulls.
+    private func pulled(_ sv: UIScrollView) {
+        guard pullFromTop, sv.isTracking else { return }
+        let past = -sv.adjustedContentInset.top - sv.contentOffset.y
+        // (where the finger is across the screen: the scroll view's own pan reports none of the sideways part once it's
+        // scrolling up and down, so a watcher of the touches themselves says)
+        pull.update(distance: max(past, 0), sideways: fingers.x)
     }
 
     /// Once the finger is off and the page has stopped moving: fully one way or the other.
@@ -1086,6 +1143,115 @@ final class BarState: NSObject, ObservableObject {
                                            maximumViewportInset: UIEdgeInsets(top: extra, left: 0, bottom: bottomHeight, right: 0))
             }
         }
+    }
+}
+
+/// Watches the finger on a web view without taking part: where it is across the screen (`x`), as it moves. Never
+/// recognizes, never cancels or delays a touch, and works alongside every other gesture.
+final class FingerWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private(set) var x: CGFloat = 0
+    var moved: () -> Void = {}
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+    convenience init() { self.init(target: nil, action: nil) }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) { if let t = touches.first { x = t.location(in: nil).x } }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { if let t = touches.first { x = t.location(in: nil).x; moved() } }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+}
+
+/// Pulling the page down past its top: three choices (+ New Tab, Reload, × Close Tab), Reload chosen at first; the
+/// finger sliding left or right chooses another (a tick each time); far enough, a tap of feel, and letting go does it.
+/// Not far enough, or pushed back up, and letting go does nothing.
+@MainActor
+final class PullActions: ObservableObject {
+    enum Choice: Int, CaseIterable { case newTab = 0, reload, close }
+    /// How far down to pull for it to count.
+    static let reach: CGFloat = 70
+    @Published private(set) var distance: CGFloat = 0
+    @Published private(set) var choice: Choice = .reload
+    var armed: Bool { distance >= PullActions.reach }
+    /// What the app does with a choice (set by the app).
+    var act: (Choice) -> Void = { _ in }
+    private var startX: CGFloat?
+    private let tick = UISelectionFeedbackGenerator()
+    private let tap = UIImpactFeedbackGenerator(style: .light)
+
+    func update(distance d: CGFloat, sideways x: CGFloat) {
+        let was = armed
+        if distance == 0, d > 0 { startX = x; choice = .reload; tick.prepare() }
+        distance = d
+        if armed && !was { tap.impactOccurred() }
+        // (a third of the way across a choice's column moves to the next: about 45 points on a phone)
+        let dx = x - (startX ?? x)
+        let c: Choice = dx < -45 ? .newTab : dx > 45 ? .close : .reload
+        if c != choice {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { choice = c }
+            if armed { tick.selectionChanged() }
+        }
+    }
+    func release() {
+        let go = armed ? choice : nil
+        cancel()
+        if let go { act(go) }
+    }
+    func cancel() { distance = 0; startX = nil; choice = .reload }
+}
+
+/// The three choices in the gap a pull opens at the top of the page: the chosen one in a soft circle that slides
+/// between them, its name under it; the reload arrow drawn round as the pull nears far enough.
+struct PullActionsView: View {
+    @ObservedObject var pull: PullActions
+    @ObservedObject var insets: BarInsets
+    @Namespace private var ns
+
+    var body: some View {
+        if pull.distance > 2 {
+            HStack(spacing: 0) {
+                item(.newTab, "plus", "New Tab")
+                item(.reload, "arrow.clockwise", "Reload")
+                item(.close, "xmark", "Close Tab")
+            }
+            .padding(.top, 10)
+            .frame(maxWidth: .infinity)
+            .frame(height: max(pull.distance, 0), alignment: .top)
+            .background(Color(.systemBackground))
+            .clipped()
+            .opacity(Double(min(1, pull.distance / 40)))
+            .padding(.top, BarState.compactHeight + insets.top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func item(_ c: PullActions.Choice, _ symbol: String, _ label: String) -> some View {
+        let chosen = pull.choice == c
+        let progress = min(1, pull.distance / PullActions.reach)
+        return VStack(spacing: 4) {
+            ZStack {
+                if chosen {
+                    Circle().fill(Color.trifGreen.opacity(pull.armed ? 0.22 : 0.10)).frame(width: 46, height: 46)
+                        .matchedGeometryEffect(id: "chosen", in: ns)
+                }
+                if c == .reload && !pull.armed {
+                    Circle().trim(from: 0, to: progress).stroke(Color.trifGreen, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90)).frame(width: 30, height: 30)
+                }
+                Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(chosen ? Color.trifGreen : Color.secondary)
+            }
+            .frame(width: 46, height: 46)
+            Text(label).font(.caption.weight(.semibold)).foregroundStyle(Color.trifGreen).opacity(chosen && pull.armed ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

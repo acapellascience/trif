@@ -12,7 +12,8 @@
   a reply ([data-is-streaming], .font-claude-response) written a few words at a time with a "Stop response"
   button meanwhile, and the address changing to /chat/<id> after the first send, as Claude's does.
   The reply: a style mod for the page named in what was attached or said (its first address), in a code block; two mods
-  if the message says "two"; no mod at all if it says "no mod"; "wait 90" makes it take about 90 seconds. `?slow` writes it more slowly; `?nostop` has no stop button or streaming mark (a chat
+  if the message says "two"; no mod at all if it says "no mod"; the mod as an attached file if it says "file" (and in a code block too: "file and block"),
+  a ChatGPT sandbox:/mnt/data link if it says "sandbox" (with ?gpt: ChatGPT's /c/<id> addresses); "wait 90" makes it take about 90 seconds. `?slow` writes it more slowly; `?nostop` has no stop button or streaming mark (a chat
   that changed its page: TRIF's fallback, the reply unchanged for a few seconds).
 -->
 <style>
@@ -111,10 +112,17 @@ ${JSON.stringify(body, null, 2)}`;
     ed.textContent = '';
     files.length = 0;
     tiles.textContent = '';
-    if (!location.pathname.startsWith('/chat/')) history.pushState({}, '', `/chat/${Math.random().toString(36).slice(2, 10)}`);
+    if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}`);
     const origin = (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
     let parts;
     if (/no mod/i.test(text)) parts = [['p', 'Which part of the page do you mean? Point TRIF at it and send me that.']];
+    // ("file": the mod as an attached file, a card with a download link, as Claude's file cards; "file and block":
+    // the same mod in a code block too; "sandbox": ChatGPT's sandbox:/mnt/data/… link)
+    else if (/sandbox/i.test(text)) parts = [['p', 'I saved the mod as a file:'], ['a', 'sandbox:/mnt/data/sandbox-mod.js', 'sandbox-mod.js']];
+    else if (/file/i.test(text)) {
+      parts = [['p', 'The mod is big, so here it is as a file:'], ['a', '/stand-in-file/calmer-feed.js', 'calmer-feed.js']];
+      if (/block/i.test(text)) parts.push(['pre', modFor('http://localhost', 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }' })]);
+    }
     else {
       parts = [['p', 'Here is a style mod that does that. It only changes how the page looks.'],
         ['pre', modFor(origin, 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }', hide: ['#promo-banner', '.feed-item.promoted'] })]];
@@ -133,10 +141,15 @@ ${JSON.stringify(body, null, 2)}`;
     else send.disabled = true;
     const box = document.createElement('div');
     box.className = 'font-claude-response';
+    if (location.pathname.startsWith('/c/')) { box.setAttribute('data-message-author-role', 'assistant'); box.setAttribute('data-message-id', `msg-${Date.now()}`); }
     if (!nostop) box.setAttribute('data-is-streaming', 'true');
     log.append(box);
     const steps = [];
-    for (const [tag, t] of parts) {
+    for (const [tag, t, label] of parts) {
+      if (tag === 'a') {
+        steps.push(() => { const card = document.createElement('div'); card.setAttribute('data-testid', 'file-card'); const a = document.createElement('a'); a.href = t; a.textContent = label; a.setAttribute('download', label); card.append('📄 ', a); box.append(card); });
+        continue;
+      }
       const words = t.split(/(?<=\s)/);
       let into = null; // (not box.lastElementChild: TRIF puts its Add to TRIF button after a code block)
       steps.push(() => { const n = document.createElement(tag); into = n; if (tag === 'pre') { into = document.createElement('code'); n.append(into); } box.append(n); });

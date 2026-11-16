@@ -186,6 +186,14 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | Microphone | Websites you visit can ask to use the microphone, for a voice or video call. |
 | Saving to Photos | To save pictures from websites to your photos. |
 
+## Pulling the page down (added 11-16, as Chrome's)
+
+| Where | Old | New |
+|---|---|---|
+| The address bar | Reload (accessibility) | (gone: pull the page down) |
+| The address bar while a page loads | Stop (accessibility) | a small × after Share; accessibility: Stop loading |
+| Pulling the page down past its top: three choices, the chosen one's name under it | — | New Tab · Reload · Close Tab |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

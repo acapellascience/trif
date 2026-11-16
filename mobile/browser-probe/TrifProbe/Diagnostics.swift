@@ -283,6 +283,9 @@ final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
     func start() {
         guard !started else { return }
         started = true
+        // (later: this starts while the diagnostics themselves are starting)
+        let how = usesPrivateFlush ? "WebKit's private flush" : "the public route (removing cookies changed since the distant future: none)"
+        Task { @MainActor in Diagnostics.shared.log("cookies", "cookies are written down at once with \(how)") }
         store.add(self)
         NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { CookieKeeper.shared.flush("leaving the front") }
@@ -311,17 +314,22 @@ final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
         }
     }
 
-    /// WebKit's cookies onto disk now, if WebKit offers it (its private _flushCookiesToDiskWithCompletionHandler:).
-    func flush(_ why: String?) {
-        let sel = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
+    /// How cookies are written down: WebKit's own private flush when it has one (Tim's choice for now), else a public
+    /// call that, in WebKit's current source, ends in the same save: removing cookies changed since the distant future
+    /// (none), then saving (undocumented behaviour, not a contract). `-publicflush` forces the public one.
+    private static let flushSelector = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
+    var usesPrivateFlush: Bool { !ProcessInfo.processInfo.arguments.contains("-publicflush") && store.responds(to: CookieKeeper.flushSelector) }
+
+    /// WebKit's cookies onto disk now; `done` once written.
+    func flush(_ why: String?, done: (@MainActor () -> Void)? = nil) {
         let s = store
-        guard s.responds(to: sel) else {
-            if let why { Diagnostics.shared.logOnce("cookies", "WebKit has no cookie flush here (\(why)): cookies reach disk on WebKit's own schedule") }
-            return
+        if usesPrivateFlush {
+            typealias Flush = @convention(c) (AnyObject, Selector, @convention(block) @escaping () -> Void) -> Void
+            let f = unsafeBitCast(s.method(for: CookieKeeper.flushSelector), to: Flush.self)
+            f(s, CookieKeeper.flushSelector) { Task { @MainActor in done?() } }
+        } else {
+            WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantFuture) { Task { @MainActor in done?() } }
         }
-        typealias Flush = @convention(c) (AnyObject, Selector, @convention(block) @escaping () -> Void) -> Void
-        let f = unsafeBitCast(s.method(for: sel), to: Flush.self)
-        f(s, sel) {}
     }
 
     private static func key(_ c: HTTPCookie) -> String { "\(c.name)|\(c.domain)|\(c.path)" }

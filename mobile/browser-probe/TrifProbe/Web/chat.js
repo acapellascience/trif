@@ -326,13 +326,122 @@
   /** The reply's done: the mod files that weren't there before the send, the latest of each (by its header). */
   function finish(w, why) {
     stopWatch();
+    // (a mod by its header, ==WebMod== to ==/WebMod==, whatever is around it)
+    const keyOf = (t) => { const end = t.search(/==\/WebMod==/); return end === -1 ? t : t.slice(t.indexOf('==WebMod=='), end).replace(/\s+/g, ' '); };
     const byKey = new Map();
-    for (const b of modBlocks()) if (!w.seen.has(b.raw)) byKey.set(b.key, b);
-    const mods = [...byKey.values()].map((b) => (b.pre.querySelector('code') || b.pre).innerText || b.raw);
+    for (const b of modBlocks()) if (!w.seen.has(b.raw)) { const t = (b.pre.querySelector('code') || b.pre).innerText || b.raw; byKey.set(keyOf(t), t); }
     for (const b of modBlocks()) w.seen.add(b.raw);
     last = { seen: w.seen, path: location.pathname };
-    post({ type: 'done', why, mods, stop: w.saw });
+    // (and the mod files the reply attached: read, then the same as a code block; a file and a block with the same
+    // header: the file, once)
+    replyFiles().then((f) => {
+      for (const t of f.texts) byKey.set(keyOf(t), t);
+      post({ type: 'done', why, mods: [...byKey.values()], stop: w.saw, fetch: f.fetch, unread: f.unread });
+    }, () => post({ type: 'done', why, mods: [...byKey.values()], stop: w.saw }));
   }
+
+  // ---- mod files attached to a reply (Tim, 11-16: "with zero clicks, just like code blocks") ----------------------
+  // A big mod may come as a file instead of a code block. Read here, from inside the chat's page with its own
+  // session, same-origin, and only what the newest reply links to:
+  //   - a link in the reply to a .js file (its address, its download name or its text): fetched; a link to another
+  //     site (a signed download address) is handed to the app to fetch;
+  //   - ChatGPT's sandbox:/mnt/data/… links: its own download route (backend-api …/interpreter/download, with the
+  //     page's session token, used for that request only), which gives a signed address;
+  //   - Claude: the conversation's own data (its api, the page's session): the newest reply's tools' inputs (a file
+  //     it created, an artifact's code) and its .js output files (wiggle/download-file).
+  // The markup and routes are from public descriptions of the two sites, not checked signed in: unverified. What a
+  // reply named but couldn't be read goes back as `unread`, for the diagnostics.
+  const JS_FILE = /([\w .()-]+\.js)$/i;
+  function afterLastUser(node) {
+    const users = document.querySelectorAll(USER);
+    const lastUser = users[users.length - 1];
+    return !lastUser || !!(lastUser.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+  function replyLinks() {
+    const box = composerBox();
+    const out = [];
+    for (const a of document.querySelectorAll('a[href]')) {
+      if (!afterLastUser(a) || (box && box.contains(a))) continue;
+      const href = a.getAttribute('href') || '';
+      const path = href.split(/[?#]/)[0];
+      const name = [a.getAttribute('download') || '', decodeURIComponent(path.split('/').pop() || ''), (a.textContent || '').trim()].map((x) => (JS_FILE.exec(x) || [])[1]).find(Boolean);
+      if (name) out.push({ href: a.href || href, name });
+    }
+    return out;
+  }
+  /** Does the reply mention a .js file, or show something like a file or artifact card? (Then Claude's data is read.) */
+  function replyMentionsFile() {
+    const all = document.querySelectorAll(REPLY);
+    const r = all[all.length - 1];
+    if (!r) return false;
+    return /\b[\w.-]+\.js\b/.test(r.textContent || '') || !!r.querySelector('[class*="artifact" i], [data-testid*="artifact" i], [data-testid*="file" i], [aria-label*="download" i]');
+  }
+  const isMod = (t) => typeof t === 'string' && t.includes('==WebMod==') && t.includes('==/WebMod==') && t.length < 2000000;
+  async function replyFiles() {
+    const texts = [], fetchList = [], unread = [];
+    for (const l of replyLinks()) {
+      try {
+        const got = await readLink(l.href);
+        if (got.url) fetchList.push({ url: got.url, name: l.name });
+        else if (isMod(got.text)) texts.push(got.text);
+        else unread.push(`${l.name} (no mod file in it)`);
+      } catch (e) { unread.push(`${l.name} (${(e && e.message) || e})`); }
+    }
+    if (location.hostname === 'claude.ai' && replyMentionsFile()) {
+      try { for (const t of await claudeFiles()) if (isMod(t)) texts.push(t); } catch (e) { unread.push(`Claude's files (${(e && e.message) || e})`); }
+    }
+    return { texts, fetch: fetchList, unread };
+  }
+  async function readLink(href) {
+    if (/^sandbox:/i.test(href)) return readSandbox(href.replace(/^sandbox:/i, ''));
+    const u = new URL(href, location.href);
+    if (u.protocol === 'blob:' || u.protocol === 'data:' || u.origin === location.origin) {
+      const r = await fetch(u.href, { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return { text: await r.text() };
+    }
+    if (!/^https?:$/.test(u.protocol)) throw new Error(`a ${u.protocol} link`);
+    // (another site: a signed download address; read here if it lets the page, else by the app, without cookies)
+    try { const r = await fetch(u.href, { credentials: 'omit' }); if (r.ok) return { text: await r.text() }; } catch (e) { /* the app's turn */ }
+    return { url: u.href };
+  }
+  async function readSandbox(path) {
+    const conv = (/\/c\/([\w-]+)/.exec(location.pathname) || [])[1];
+    const msgs = document.querySelectorAll('[data-message-author-role="assistant"][data-message-id]');
+    const msg = msgs[msgs.length - 1];
+    if (!conv || !msg) throw new Error('no conversation or message id on the page');
+    const session = await (await fetch('/api/auth/session', { credentials: 'include' })).json();
+    const r = await fetch(`/backend-api/conversation/${conv}/interpreter/download?message_id=${encodeURIComponent(msg.getAttribute('data-message-id'))}&sandbox_path=${encodeURIComponent(path)}`,
+      { credentials: 'include', headers: session && session.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {} });
+    if (!r.ok) throw new Error(`download route: HTTP ${r.status}`);
+    const j = await r.json();
+    if (!j || typeof j.download_url !== 'string') throw new Error('no download address');
+    return readLink(j.download_url);
+  }
+  async function claudeFiles() {
+    const conv = (/\/chat\/([\w-]+)/.exec(location.pathname) || [])[1];
+    const org = decodeURIComponent((/(?:^|; )lastActiveOrg=([^;]+)/.exec(document.cookie) || [])[1] || '');
+    if (!conv || !org) throw new Error('no conversation or organization on the page');
+    const base = `/api/organizations/${encodeURIComponent(org)}`;
+    const r = await fetch(`${base}/chat_conversations/${conv}?tree=True&rendering_mode=messages&render_all_tools=true`, { credentials: 'include' });
+    if (!r.ok) throw new Error(`conversation: HTTP ${r.status}`);
+    const j = await r.json();
+    const msgs = (j && j.chat_messages) || [];
+    const reply = [...msgs].reverse().find((m) => m.sender === 'assistant');
+    const out = [], paths = new Set();
+    for (const c of (reply && reply.content) || []) {
+      if (!c || c.type !== 'tool_use' || !c.input || typeof c.input !== 'object') continue;
+      const i = c.input;
+      for (const t of [i.file_text, i.content, i.code]) if (isMod(t)) out.push(t);
+      for (const p of [].concat(i.path || [], i.filepaths || [], i.paths || [])) if (typeof p === 'string' && /\.js$/i.test(p)) paths.add(p);
+    }
+    for (const p of paths) {
+      const f = await fetch(`${base}/conversations/${conv}/wiggle/download-file?path=${encodeURIComponent(p)}`, { credentials: 'include' });
+      if (f.ok) out.push(await f.text());
+    }
+    return out;
+  }
+
   /** After a reply, a mod file that turns up later on the same conversation (a chat that paused, a revised block). */
   let lateSig = '';
   let lateTimer = 0;

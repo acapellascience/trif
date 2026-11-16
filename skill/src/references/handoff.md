@@ -27,8 +27,9 @@ Use the first of these you can:
    `scripts/page/download.js`, then `__trifDownload('calmer-timeline.js', MOD_TEXT)` with the whole file's text.
    The browser saves it in the user's downloads (it may ask them first). This passes through the page's own
    world: on a site the user doesn't trust, prefer 2 or 4.
-4. **In the chat**, as one code block, when nothing above works: the user saves it as a `.js` file (any text
-   editor), then adds it as below. Keep it short enough to copy in one go.
+4. **In the chat**, as one code block: the user copies it and, in TRIF's panel, clicks ⋯ next to *Mods on this
+   site* → *Paste a mod…*, pastes it and clicks Add (a TRIF without that menu item: they save it as a `.js` file in
+   any text editor and import that). Keep it short enough to copy in one go.
 
 ## What to tell the user
 

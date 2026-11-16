@@ -1412,7 +1412,7 @@ class Scenario {
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty; the boxed mods of a site of its own are approved as that site ("Your inbox.x.com mods can:" on its card), apart from x.com\'s', () => this.sensitiveCheck(win));
-      await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
+      await r.check('sharing: a mod pasted in the panel is imported, switched off; a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
@@ -4442,7 +4442,23 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       // (Import and Export all in the Mods header's ⋯; held rows say "on hold" once)
       const tidy = await this.panel(`async () => ({ menu: [...document.querySelectorAll('#mods-menu .menu-item')].map((b) => b.textContent), files: document.getElementById('site-files-summary').textContent,
         twice: [...document.querySelectorAll('#mod-list li.held')].filter((li) => [...li.querySelectorAll('.tag')].filter((t) => !t.hidden && t.textContent === 'on hold').length > 1).length })`);
-      if (tidy.menu[0] !== 'Import mod…' || tidy.files !== 'Files (1)' || tidy.twice) problems.push(`the mods box: ${JSON.stringify(tidy)}`);
+      if (tidy.menu[0] !== 'Import mod…' || tidy.menu[1] !== 'Paste a mod…' || tidy.files !== 'Files (1)' || tidy.twice) problems.push(`the mods box: ${JSON.stringify(tidy)}`);
+      // Paste a mod… (the ⋯ menu): the text imported as a file of it would be: named from its @name, filed by its
+      // @match, switched off (a style mod: nothing to hold)
+      const pasted = path.join(dir, 'e2e-pasted-calm.js');
+      made.push(pasted);
+      const pasteText = '// ==WebMod==\n// @name E2E Pasted Calm\n// @description Hides the e2e page\'s banner\n// @match *://127.0.0.1/*\n// @style\n// @risk 0 render-only\n// ==/WebMod==\n{ "hide": ["#e2e-nothing"] }\n';
+      await this.panelClick('#mods-more');
+      await this.panelClick('#paste-mod');
+      const pasteCard = await waitFor('the paste card', () => this.panel(`async () => { const d = document.getElementById('paste-ask'); return d && d.open ? { title: d.querySelector('.ap-name').textContent, add: d.querySelector('.ap-actions .btn').disabled } : null; }`), { timeoutMs: 5000 }).catch(() => null);
+      if (!pasteCard || pasteCard.title !== 'Paste a mod' || pasteCard.add !== true) problems.push(`the paste card: ${JSON.stringify(pasteCard)}`);
+      await this.panel(`async (t) => { const a = document.querySelector('#paste-ask textarea'); a.value = t; a.dispatchEvent(new Event('input')); return true; }`, [pasteText]);
+      await themes('share-paste');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(1)');
+      await waitFor('the pasted mod', () => (fs.existsSync(pasted) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Paste a mod wrote nothing'));
+      if (fs.existsSync(pasted) && fs.readFileSync(pasted, 'utf8') !== pasteText) problems.push('the pasted mod isn\'t the text pasted');
+      const pastedStatus = await waitFor('the pasted mod off', async () => { const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout; const line = out.split('\n').find((l) => l.includes(`${site}/e2e-pasted-calm`)); return line && /off/.test(line) ? line.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
+      if (!pastedStatus) problems.push('the pasted mod isn\'t listed as off');
       await themes('share-files');
       // a file bigger than a slice (a few MB: the panel sends 4 MB at a time, the helper appends them)
       await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(5 * 1024 * 1024).fill(97)], 'e2e-big.bin', { type: 'application/octet-stream' })); document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true })); return true; }`);
@@ -4457,7 +4473,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('share-drop-overlay');
       await this.panel(`async () => { document.body.dispatchEvent(new DragEvent('dragleave', { bubbles: true })); return true; }`);
       if (problems.length) throw new Error(problems.join('\n'));
-      return `a dropped .js imported (no shipped markers) and held, "imported from a file"; Add as a copy and Replace; History "${hist[0]}", its diff, Restore; Export to the run's Downloads, shown; a dropped .txt in the site's files, noted, listed, not a mod`;
+      return `a pasted mod imported, named from its @name, off; a dropped .js imported (no shipped markers) and held, "imported from a file"; Add as a copy and Replace; History "${hist[0]}", its diff, Restore; Export to the run's Downloads, shown; a dropped .txt in the site's files, noted, listed, not a mod`;
     } finally {
       for (const f of made) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.panel(`async () => { for (const id of ['code-view', 'import-ask']) { const d = document.getElementById(id); if (d && d.open) d.close(); } document.getElementById('drop-overlay').hidden = true; return true; }`).catch(() => {});

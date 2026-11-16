@@ -682,6 +682,16 @@ export function normalizeNewOff(value) {
  * what the user had on there stays on.
  * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
  */
+/**
+ * The file name a pasted mod is imported under (sidepanel.js "Paste a mod…"): its @name in kebab-case, as the
+ * helper names a mod (helper/lib/share.js nameOf), or "pasted-mod". Pure.
+ */
+export function pastedModName(text) {
+  const m = /^\s*\/\/\s*@name\s+(.+?)\s*$/m.exec(String(text || ''));
+  const base = (m ? m[1] : '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  return `${base || 'pasted-mod'}.js`;
+}
+
 export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {}, waits = () => false } = {}) {
   const list = (mods || []).filter((m) => typeof m?.id === 'string');
   const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };

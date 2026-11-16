@@ -7,7 +7,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
-  ROBOTLESS, isRobotless, switchableAgents } from './lib.js';
+  ROBOTLESS, isRobotless, switchableAgents, pastedModName } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
@@ -22,7 +22,7 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
-  modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), exportSite: document.getElementById('export-site'),
+  modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), pasteMod: document.getElementById('paste-mod'), exportSite: document.getElementById('export-site'),
   siteFilesBox: document.getElementById('site-files-box'), siteFilesSummary: document.getElementById('site-files-summary'),
   importFile: document.getElementById('import-file'), siteFiles: document.getElementById('site-files'), dropOverlay: document.getElementById('drop-overlay'), dropText: document.getElementById('drop-text'),
   agentLevel: document.getElementById('agent-level'), agentSiteNote: document.getElementById('agent-site-note'),
@@ -3261,6 +3261,43 @@ ui.importFile?.addEventListener('change', async () => {
   ui.importFile.value = '';
   if (f) await importModFile(f);
 });
+// A mod's text pasted in (copied from a chat that wrote one): imported as a file of it would be, so it's held and
+// switched off like any import (helper/lib/share.js importMod). Only what the user pastes here: nothing a page sends.
+ui.pasteMod?.addEventListener('click', async () => {
+  ui.modsMenu.hidden = true;
+  const text = await pasteCard();
+  if (text) await importModFile(new File([text], pastedModName(text), { type: 'text/javascript' }));
+});
+function pasteCard() {
+  return new Promise((resolve) => {
+    const d = el('dialog', 'approval import-ask paste-mod');
+    d.id = 'paste-ask';
+    const top = el('div', 'ap-top');
+    const x = el('button', 'ap-x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Cancel');
+    top.append(el('span', 'ap-count', 'Import mod'), x);
+    const area = el('textarea', 'paste-text');
+    area.rows = 10;
+    area.spellcheck = false;
+    area.setAttribute('aria-label', 'The mod\'s code');
+    area.placeholder = 'Paste the whole mod here, from // ==WebMod== to the end.';
+    const acts = el('div', 'ap-actions');
+    const done = (v) => { siteCards.delete(cancel); d.close(); d.remove(); resolve(v); setTimeout(() => renderMods(), 0); };
+    const cancel = () => done(null);
+    siteCards.add(cancel);
+    const add = button('Add', 'go', () => done(area.value));
+    add.disabled = true;
+    area.addEventListener('input', () => { add.disabled = !area.value.trim(); });
+    acts.append(add, button('Cancel', 'text', () => done(null)));
+    x.addEventListener('click', () => done(null));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    d.append(top, el('h2', 'ap-name', 'Paste a mod'), el('p', 'ap-lead', 'It\'s added switched off, like an imported file: look at it, then turn it on.'), area, acts);
+    document.body.append(d);
+    d.showModal();
+    area.focus();
+  });
+}
 ui.exportSite?.addEventListener('click', async () => {
   ui.modsMenu.hidden = true;
   try {

@@ -453,6 +453,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if panelActivity == .replied { panelActivity = .idle; refreshActivity() }
             shown = true
             panel.start()
+            panel.preloadLocal()
             report.log("claude", "More: opened")
             return
         }

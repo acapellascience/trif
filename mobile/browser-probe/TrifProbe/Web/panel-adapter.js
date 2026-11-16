@@ -291,7 +291,7 @@
   let lastModels = null;
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const btn = (text, onClick) => { const b = el('button', 'btn', text); b.type = 'button'; b.addEventListener('click', onClick); return b; };
-  const going = (m) => m.state === 'downloading' || m.state === 'checking';
+  const going = (m) => !m.hidden && (m.state === 'downloading' || m.state === 'checking');
   /** "{done} of {total} · {speed} · {left} left" */
   const numbers = (m) => [m.done && m.total ? `${m.done} of ${m.total}` : '', m.speed || '', m.left ? `${m.left} left` : ''].filter(Boolean).join(' · ');
   function bar(m) {
@@ -331,7 +331,31 @@
     const box = document.getElementById('phone-models');
     if (!box) return;
     box.replaceChildren(el('p', 'sites-title', 'Model on this iPhone'), el('p', 'note', st.memory));
+    // (where it runs: the processor (smoother: the phone stays usable) or the graphics chip (faster, but the phone may
+    // stutter while it works); 11-16, Tim's SE froze, so the processor is the default and the two can be compared)
+    const runRow = el('label', 'field');
+    runRow.append(el('span', null, 'Runs on'));
+    const sel = document.createElement('select');
+    sel.append(new Option('Processor (smoother)', 'cpu'), new Option('Graphics chip (faster, may stutter)', 'gpu'));
+    sel.value = st.gpu ? 'gpu' : 'cpu';
+    sel.addEventListener('change', () => { app({ type: 'local.gpu', on: sel.value === 'gpu' }).then(refreshModels, () => {}); });
+    runRow.append(sel);
+    box.append(runRow);
+    const check = (text, on, type) => {
+      const l = el('label', 'check phone-check');
+      const c = document.createElement('input');
+      c.type = 'checkbox';
+      c.checked = !!on;
+      c.addEventListener('change', () => { app({ type, on: c.checked }).then(refreshModels, () => {}); });
+      l.append(c, ' ', text);
+      return l;
+    };
+    // (a 4 GB phone: the bigger model only when asked for; Tim, 11-16)
+    if (st.smallPhone) box.append(check('Show bigger models (may be slow on this iPhone)', st.showBigger, 'local.bigger'));
+    // (the 4B model: whole mods, boxed ones too, when picked; style mods as JSON otherwise)
+    if (st.models.some((m) => m.id === 'qwen35-4b' && !m.hidden)) box.append(check('Qwen3.5 4B: boxed mods too (experimental)', st.boxed, 'local.boxed'));
     for (const m of st.models) {
+      if (m.hidden) continue;
       const row = el('div', 'phone-model');
       row.dataset.model = m.id;
       row.append(el('p', 'model-name', `${m.name} · ${m.size}${m.suggested ? ' · suggested for this iPhone' : ''}`));
@@ -363,7 +387,7 @@
       document.querySelector('header.bar')?.after(top);
     }
     // (the model the chat will use: one on its way first, else the latest one to end, for its note)
-    const m = st.models.find((x) => going(x) || x.state === 'paused') || st.models.find((x) => x.noteText && x.noteAge < 12 && x.noteKind !== 'waiting');
+    const m = st.models.find((x) => !x.hidden && (going(x) || x.state === 'paused')) || st.models.find((x) => x.noteText && x.noteAge < 12 && x.noteKind !== 'waiting');
     const show = !!m && onPhone();
     top.hidden = !show;
     document.body.classList.toggle('phone-downloading', show && (going(m) || m.state === 'paused'));

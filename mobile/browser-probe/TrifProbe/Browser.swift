@@ -347,12 +347,18 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     // MARK: resources and scripts
 
+    /// A file of the app's, read once and kept (11-16: the pages' scripts are made again at each change to the mods,
+    /// and read SES and the sandbox, about 400 KB, from disk each time).
     static func resource(_ name: String, _ ext: String) -> String {
+        let key = "\(name).\(ext)"
+        if let t = resourceCache[key] { return t }
         guard let url = Bundle.main.url(forResource: name, withExtension: ext), let text = try? String(contentsOf: url, encoding: .utf8) else {
             return "throw new Error('the app is missing \(name).\(ext)');"
         }
+        resourceCache[key] = text
         return text
     }
+    private static var resourceCache: [String: String] = [:]
 
     /// The scripts every page gets at its start. Put in again whenever the hide rules change: the rules are
     /// part of the start script's own text, so a page never waits for them.

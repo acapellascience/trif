@@ -40,6 +40,34 @@ enum LocalPrompt {
         return "I'm looking at \(url). Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (https://*.\(site)/*).\n\n--- The page: \(url) (an outline: each line starts with a CSS selector for a part of it, then its size and first words) ---\n\(outline)\n\nWhat I want: \(request)"
     }
 
+    // MARK: pages the model on the phone can't name parts of
+
+    /// How many of the outline's parts have only made-up names (11-16, Tim's SE: twice it couldn't hide Google's AI
+    /// Overview, whose parts are named with codes like `div.MjjYud` that mean nothing and change): the share of its
+    /// lines whose selector is a tag and generated-looking classes, nothing a person chose (an id, a test id, an
+    /// aria-label, a role, a custom element).
+    static func generatedShare(outline: String) -> Double {
+        var parts = 0, generated = 0
+        for line in outline.split(separator: "\n") {
+            guard let sel = line.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init), !sel.isEmpty else { continue }
+            if sel.contains("|") { continue } // (the title line)
+            parts += 1
+            if sel.hasPrefix("#") || sel.contains("[") || sel.split(separator: ".").first?.contains("-") == true { continue }
+            let classes = sel.split(separator: ".").dropFirst()
+            guard !classes.isEmpty else { continue }
+            if classes.allSatisfy({ c in
+                let s = String(c)
+                return s.count >= 4 && s.count <= 8 && !s.contains("-") && !s.contains("_")
+                    && (s.rangeOfCharacter(from: .decimalDigits) != nil || (s.rangeOfCharacter(from: .uppercaseLetters) != nil && s.rangeOfCharacter(from: .lowercaseLetters) != nil))
+            }) { generated += 1 }
+        }
+        return parts == 0 ? 0 : Double(generated) / Double(parts)
+    }
+    /// A request about one part of the page (hide it, move it, resize it), rather than the whole page's look.
+    static func targetsAPart(_ request: String) -> Bool {
+        request.range(of: "\\b(hide|remove|get rid|delete|block|move|bigger|smaller|shrink|collapse|only show)\\b", options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     // MARK: the reply's shape
 
     /// styleJSON: the research's JSON schema (gen.js SCHEMA), as GBNF, its keys in a fixed order.

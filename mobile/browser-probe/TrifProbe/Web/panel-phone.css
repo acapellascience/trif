@@ -30,3 +30,5 @@ textarea#input { font-size: 16px; } /* (under 16 px, iOS zooms the page when the
 .phone-download .phone-download-title { font-weight: 600; font-size: 0.95em; }
 .phone-download .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 body.phone-downloading #notice { display: none !important; }
+/* (the model switches: kept, where desktop's checkboxes in Settings are hidden) */
+#settings label.check.phone-check { display: block !important; margin: 6px 0; }

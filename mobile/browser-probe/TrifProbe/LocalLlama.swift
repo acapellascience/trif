@@ -20,21 +20,23 @@ final class LocalLlama {
     struct Stats {
         var loadMs = 0, restoreMs = 0, restored = false
         var promptTokens = 0, promptMs = 0.0, genTokens = 0, genMs = 0.0
-        var memBeforeMB = -1, memAfterMB = -1
+        var memBeforeMB = -1, memAfterMB = -1, memMinMB = -1
+        var threads = 0, batch = 0, gpu = false
         var promptPerSecond: Double { promptMs > 0 ? Double(promptTokens) / promptMs * 1000 : 0 }
         var genPerSecond: Double { genMs > 0 ? Double(genTokens) / genMs * 1000 : 0 }
         var summary: String {
-            "load \(loadMs) ms, system prompt \(restored ? "restored in \(restoreMs) ms" : "evaluated (\(restoreMs) ms, saved)"), read \(promptTokens) tokens at \(Int(promptPerSecond)) tok/s, wrote \(genTokens) at \(String(format: "%.1f", genPerSecond)) tok/s, memory left \(memBeforeMB) → \(memAfterMB) MB"
+            "\(gpu ? "graphics chip" : "processor"), \(threads) threads, batch \(batch); load \(loadMs) ms, system prompt \(restored ? "restored in \(restoreMs) ms" : "evaluated (\(restoreMs) ms, saved)"), read \(promptTokens) tokens at \(Int(promptPerSecond)) tok/s, wrote \(genTokens) at \(String(format: "%.1f", genPerSecond)) tok/s, memory left \(memBeforeMB) → lowest \(memMinMB) → \(memAfterMB) MB"
         }
     }
     enum Failure: LocalizedError {
-        case load(String), decode(Int32), grammar, tooLong(Int)
+        case load(String), decode(Int32), grammar, tooLong(Int), cancelled
         var errorDescription: String? {
             switch self {
             case .load(let p): return "the model couldn't be loaded (\(p))"
             case .decode(let c): return "the model stopped while reading (\(c))"
             case .grammar: return "the reply's shape couldn't be set up"
             case .tooLong(let n): return "the page is too long for the model (\(n) tokens)"
+            case .cancelled: return "stopped"
             }
         }
     }
@@ -43,6 +45,10 @@ final class LocalLlama {
     private var ctx: OpaquePointer?
     private var vocab: OpaquePointer?
     let nCtx: Int32
+    /// How it runs (11-16, Tim's SE froze while the model worked): its threads (2 on a 6-core phone, leaving the
+    /// others to the screen and the pages), the batch (small, so the work comes in short pieces that let the rest of
+    /// the phone in between), and the graphics chip or the processor only.
+    let threads: Int32, batch: Int32, gpu: Bool
     private(set) var loadMs = 0
     private static let backend: Void = { llama_backend_init() }()
 
@@ -55,24 +61,28 @@ final class LocalLlama {
         #endif
     }
 
-    init(path: String, nCtx: Int32) throws {
+    init(path: String, nCtx: Int32, threads: Int32 = 2, batch: Int32 = 128, gpu: Bool = false) throws {
         _ = LocalLlama.backend
         self.nCtx = nCtx
+        self.threads = threads
+        self.batch = batch
+        self.gpu = gpu
         let t0 = Date()
         var mp = llama_model_default_params()
-        mp.n_gpu_layers = 99
+        mp.n_gpu_layers = gpu ? 99 : 0
         mp.load_mode = LLAMA_LOAD_MODE_MMAP
         guard let m = llama_model_load_from_file(path, mp) else { throw Failure.load((path as NSString).lastPathComponent) }
         model = m
         vocab = llama_model_get_vocab(m)
         var cp = llama_context_default_params()
         cp.n_ctx = UInt32(nCtx)
-        cp.n_batch = 512
-        cp.n_ubatch = 512
+        cp.n_batch = UInt32(batch)
+        cp.n_ubatch = UInt32(batch)
         cp.n_seq_max = 1
-        let cores = max(2, min(6, ProcessInfo.processInfo.activeProcessorCount - 2))
-        cp.n_threads = Int32(cores)
-        cp.n_threads_batch = Int32(cores)
+        cp.n_threads = threads
+        cp.n_threads_batch = threads
+        cp.offload_kqv = gpu
+        cp.op_offload = gpu
         // (the KV cache in q8_0, half of f16's memory; a quantized V cache needs flash attention)
         cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED
         cp.type_k = GGML_TYPE_Q8_0
@@ -124,14 +134,19 @@ final class LocalLlama {
         return Array(out.prefix(Int(got)))
     }
 
-    private func decode(_ tokens: [llama_token]) throws {
+    /// Reads tokens in pieces of `batch`, with a breath between them (the rest of the phone gets the chip), and the
+    /// stop looked at each time.
+    private func decode(_ tokens: [llama_token], cancelled: () -> Bool = { false }, sample: () -> Void = {}) throws {
         guard let ctx else { return }
         var i = 0
         while i < tokens.count {
-            var chunk = Array(tokens[i..<min(i + 512, tokens.count)])
+            if cancelled() { throw Failure.cancelled }
+            var chunk = Array(tokens[i..<min(i + Int(batch), tokens.count)])
             let rc = chunk.withUnsafeMutableBufferPointer { llama_decode(ctx, llama_batch_get_one($0.baseAddress, Int32($0.count))) }
             if rc != 0 { throw Failure.decode(rc) }
             i += chunk.count
+            sample()
+            if i < tokens.count { usleep(3000) }
         }
     }
 
@@ -146,10 +161,16 @@ final class LocalLlama {
         var stats = Stats()
         stats.loadMs = loadMs
         stats.memBeforeMB = LocalLlama.memoryLeftMB
+        stats.memMinMB = stats.memBeforeMB
+        stats.threads = Int(threads); stats.batch = Int(batch); stats.gpu = gpu
+        let sample = { let m = LocalLlama.memoryLeftMB; if m >= 0, stats.memMinMB < 0 || m < stats.memMinMB { stats.memMinMB = m } }
         let (prefix, suffix) = template(system: system)
         let pre = tokenize(prefix, addSpecial: true)
         let rest = tokenize(user + suffix, addSpecial: false)
-        if pre.count + rest.count + maxTokens > Int(nCtx) { throw Failure.tooLong(pre.count + rest.count) }
+        // (the reply gets what's left of the context, at least 300 tokens: a style mod's JSON is rarely over 200)
+        let room = Int(nCtx) - pre.count - rest.count
+        if room < 300 { throw Failure.tooLong(pre.count + rest.count) }
+        let maxTokens = min(maxTokens, room)
         llama_memory_clear(llama_get_memory(ctx), true)
         llama_perf_context_reset(ctx)
         // (the system prompt: its saved state, if it's this prompt's; else read now and saved for next time)
@@ -163,13 +184,13 @@ final class LocalLlama {
             else { llama_memory_clear(llama_get_memory(ctx), true); try? FileManager.default.removeItem(atPath: cachePath) }
         }
         if !restored {
-            try decode(pre)
+            try decode(pre, cancelled: cancelled, sample: sample)
             _ = llama_state_seq_save_file(ctx, cachePath, 0, pre, pre.count)
         }
         stats.restored = restored
         stats.restoreMs = Int(Date().timeIntervalSince(t0) * 1000)
         llama_perf_context_reset(ctx)
-        try decode(rest)
+        try decode(rest, cancelled: cancelled, sample: sample)
 
         guard let chain = llama_sampler_chain_init(llama_sampler_chain_default_params()) else { throw Failure.grammar }
         defer { llama_sampler_free(chain) }
@@ -184,14 +205,17 @@ final class LocalLlama {
         var bytes: [UInt8] = []
         var text = ""
         var piece = [CChar](repeating: 0, count: 256)
-        for _ in 0..<maxTokens {
-            if cancelled() { break }
+        var told = Date.distantPast
+        for i in 0..<maxTokens {
+            if cancelled() { throw Failure.cancelled }
+            if i % 32 == 0 { sample() }
             let tok = llama_sampler_sample(chain, ctx, -1)
             if llama_vocab_is_eog(vocab, tok) { break }
             let n = llama_token_to_piece(vocab, tok, &piece, Int32(piece.count), 0, false)
             if n > 0 { bytes += piece.prefix(Int(n)).map { UInt8(bitPattern: $0) } }
             // (a character split across tokens waits for its last byte)
-            if let s = String(bytes: bytes, encoding: .utf8) { text += s; bytes = []; onText(text) }
+            // (told at most five times a second: the screen needn't hear of every token)
+            if let s = String(bytes: bytes, encoding: .utf8) { text += s; bytes = []; if Date().timeIntervalSince(told) > 0.2 { told = Date(); onText(text) } }
             var next = [tok]
             let rc = next.withUnsafeMutableBufferPointer { llama_decode(ctx, llama_batch_get_one($0.baseAddress, 1)) }
             if rc != 0 { throw Failure.decode(rc) }

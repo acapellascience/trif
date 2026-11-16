@@ -100,9 +100,17 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             }
     }
 
+    /// The model on this iPhone loaded ahead (the More chat shown, a model there), so a request doesn't wait for it.
+    func preloadLocal() {
+        let ready = LocalModels.shared.readyModels
+        guard let m = ready.first(where: { $0.id == LocalModels.suggested.id }) ?? ready.first else { return }
+        LocalRunner.shared.preload(path: LocalModels.shared.file(m).path)
+    }
+
     /// Loads the panel the first time More is shown, with what it kept and the shown tab.
     func start() {
         watchModels()
+        preloadLocal()
         guard !loaded else { pushTab(); return }
         loaded = true
         let store = (try? String(contentsOf: PanelChat.storeFile, encoding: .utf8)).flatMap { $0.isEmpty ? nil : $0 } ?? "{}"
@@ -177,6 +185,20 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "local.pause":
             if let m = LocalModels.named(d["model"] as? String) { LocalModels.shared.pause(m) }
             return (["paused": true], nil)
+        case "local.bigger":
+            UserDefaults.standard.set(d["on"] as? Bool == true, forKey: "localModel.showBigger")
+            Diagnostics.shared.log("local model", "bigger models \(d["on"] as? Bool == true ? "shown" : "hidden") (\(Int(LocalModels.memoryGB.rounded())) GB phone)")
+            return (["on": LocalModels.showBigger], nil)
+        case "local.boxed":
+            UserDefaults.standard.set(d["on"] as? Bool == true, forKey: "localModel.boxed")
+            Diagnostics.shared.log("local model", "boxed mods too: \(d["on"] as? Bool == true ? "on" : "off")")
+            return (["on": d["on"] as? Bool == true], nil)
+        case "local.gpu":
+            UserDefaults.standard.set(d["on"] as? Bool == true, forKey: "localModel.gpu")
+            Diagnostics.shared.log("local model", "now runs on the \(d["on"] as? Bool == true ? "graphics chip" : "processor only")")
+            LocalRunner.shared.unload(why: "how it runs changed")
+            preloadLocal()
+            return (["gpu": LocalRunner.useGPU], nil)
         case "local.delete":
             if let m = LocalModels.named(d["model"] as? String) { LocalModels.shared.delete(m) }
             return (["deleted": true], nil)
@@ -350,7 +372,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                 if let local = conv as? LocalConversation {
                     // (the model on this iPhone: the page's outline and the person's words, as its own prompt has them)
                     local.onStep = { [weak self] line in self?.step(run, line) }
-                    local.set(url: run.url, outline: await self.outline(run) ?? "(no outline: the page isn't ready)", request: run.prompt)
+                    // (a shorter outline: the phone reads about 100 tokens a second, and the page was 2,268 of them on Tim's SE)
+                    local.set(url: run.url, outline: await self.outline(run, max: 4000) ?? "(no outline: the page isn't ready)", request: run.prompt)
                     self.lastLocalRequest = run.prompt
                 } else {
                     let (first, image) = await self.firstMessage(run, conv)
@@ -533,9 +556,9 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     }
     private func browserTabAlive(_ wv: WKWebView) -> Bool { browser?.tabs.contains { $0.webView === wv } ?? false }
 
-    private func outline(_ run: Run) async -> String? {
+    private func outline(_ run: Run, max: Int = 6000) async -> String? {
         guard let wv = run.tab else { return nil }
-        let r = await PanelChat.js(wv, "return JSON.stringify(globalThis.__trifKit.outline(6000, 300));", [:], Browser.trifWorld)
+        let r = await PanelChat.js(wv, "return JSON.stringify(globalThis.__trifKit.outline(\(max), 300));", [:], Browser.trifWorld)
         guard let o = Browser.parse(r.text) as? [String: Any], let text = o["text"] as? String else { return nil }
         return o["partial"] as? Bool == true ? text + "\n(Partial: the page is big, so the outline stopped early. read_page with a selector shows more.)" : text
     }

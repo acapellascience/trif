@@ -12,6 +12,7 @@ import CryptoKit
 import Foundation
 import UIKit
 import UserNotifications
+import os
 
 struct LocalModelInfo {
     let id: String
@@ -49,12 +50,32 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
     nonisolated static func named(_ id: String?) -> LocalModelInfo? { all.first { $0.id == id } }
 
     /// The phone's memory, in GB.
-    nonisolated static var memoryGB: Double { Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824 }
-    nonisolated static func fits(_ m: LocalModelInfo) -> Bool { memoryGB >= m.minGB }
+    nonisolated static var memoryGB: Double {
+        // (development: `-memorygb 4`, a 4 GB phone's choices in the Simulator)
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-memorygb"), i + 1 < args.count, let g = Double(args[i + 1]) { return g }
+        return Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+    }
+    nonisolated static func fits(_ m: LocalModelInfo) -> Bool { memoryGB >= m.minGB || (showBigger && m.minGB > 3.5) }
+    /// Settings' "Show bigger models" (a 4 GB phone; Tim, 11-16): the 4B model offered there too, with a plain note.
+    nonisolated static var showBigger: Bool { UserDefaults.standard.bool(forKey: "localModel.showBigger") }
+    nonisolated static var smallPhone: Bool { memoryGB < 5.5 }
+    /// Memory the app can still use, in MB.
+    nonisolated static var memoryLeftMB: Int { Int(os_proc_available_memory() / 1_048_576) }
+    /// How a model writes: style mods as JSON, or (the 4B model, "Boxed mods too", experimental) whole files, style
+    /// or boxed. Whole files by default only where the research ran them, 6 GB phones; a 4 GB phone keeps to JSON
+    /// unless the person picks it.
+    nonisolated static func mode(_ m: LocalModelInfo) -> LocalPrompt.Mode {
+        guard m.mode == .file else { return .styleJSON }
+        let d = UserDefaults.standard
+        let boxed = d.object(forKey: "localModel.boxed") == nil ? !smallPhone : d.bool(forKey: "localModel.boxed")
+        return boxed ? .file : .styleJSON
+    }
     /// The one suggested for this phone.
     nonisolated static var suggested: LocalModelInfo { memoryGB >= 5.5 ? all[2] : all[0] }
     /// The context: 4k on a 4 GB phone, 6k with more.
-    nonisolated static var contextTokens: Int32 { memoryGB >= 5.5 ? 6144 : 4096 }
+    /// The context: 3k on a 4 GB phone (Tim, 11-16, with the bigger model allowed there), 6k with more.
+    nonisolated static var contextTokens: Int32 { smallPhone ? 3072 : 6144 }
 
     /// (development) `-modelbase http://localhost:<port>`: downloads from a local stand-in (a loopback address only).
     nonisolated static let mockBase: URL? = {
@@ -450,8 +471,15 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
         let mem = Int(LocalModels.memoryGB.rounded())
         return [
             "memory": "This iPhone has \(mem) GB of memory; \(freeText) free for files.",
+            "gpu": LocalRunner.useGPU,
+            "smallPhone": LocalModels.smallPhone, "showBigger": LocalModels.showBigger,
+            "boxed": LocalModels.mode(LocalModels.all[2]) == .file,
             "models": LocalModels.all.map { m -> [String: Any] in
-                var o: [String: Any] = ["id": m.id, "name": m.name, "size": LocalModels.size(m.size), "note": m.note,
+                let slow = LocalModels.smallPhone && m.minGB > 3.5
+                // (a 4 GB phone hides the bigger model unless Show bigger models is on; then it says what it costs)
+                if slow && !LocalModels.showBigger && !isReady(m) && states[m.id] == nil { return ["id": m.id, "hidden": true] }
+                var o: [String: Any] = ["id": m.id, "name": m.name, "size": LocalModels.size(m.size),
+                                        "note": slow ? "Style mods (boxed mods too, if you pick them). Slower on this iPhone: about 1–3 minutes a mod, and other apps may close in the background." : m.note,
                                         "fits": LocalModels.fits(m), "suggested": m.id == LocalModels.suggested.id, "ready": isReady(m)]
                 if let pr = progress[m.id] {
                     o["done"] = LocalModels.mb(pr.done); o["total"] = LocalModels.mb(pr.total)
@@ -489,18 +517,28 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
 /// The loaded model, one at a time, on a thread of its own (llama.cpp is called from one thread at a time).
 final class LocalRunner: @unchecked Sendable {
     static let shared = LocalRunner()
-    private let queue = DispatchQueue(label: "trif.local-model", qos: .userInitiated)
+    // (11-16, Tim's SE: the whole phone froze while the model worked, the app's main thread blocked 10 to 22 s at a
+    // time. The model's threads were 4 at user-initiated priority (llama.cpp's own threads take the priority of the
+    // one that starts them), against the screen's and WebKit's; now 2, at utility priority, below the screen.)
+    private let queue = DispatchQueue(label: "trif.local-model", qos: .utility)
     #if canImport(llama)
     private var llama: LocalLlama?
     #endif
-    private var loadedPath = ""
+    private var loadedKey = ""
     private var cancelFlag = false
+    private var busy = false
+    /// Memory warnings during the request under way (for its diagnostics line).
+    private var warnings = 0
+    func warned() { lock.withLock { warnings += 1 } }
     private let lock = NSLock()
 
     private init() {
-        // (memory low: the model goes first)
+        // (memory low: the model goes, but not in the middle of a request, nor straight after one: iOS warns while the
+        // model reads (its own weights count), and letting it go then meant loading it again, 7 s, for every request.
+        // Idle, it goes.)
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
-            LocalRunner.shared.unload()
+            if LocalRunner.shared.isBusy { LocalRunner.shared.warned(); Diagnostics.shared.log("local model", "a memory warning during a request (\(LocalModels.memoryLeftMB) MB left): the model kept") }
+            else { LocalRunner.shared.unload(why: "a memory warning") }
         }
     }
 
@@ -511,39 +549,84 @@ final class LocalRunner: @unchecked Sendable {
         return false
         #endif
     }
+    var isBusy: Bool { lock.withLock { busy } }
 
-    func cancel() { lock.lock(); cancelFlag = true; lock.unlock() }
-    private var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelFlag }
+    func cancel() { lock.withLock { cancelFlag = true } }
+    private var cancelled: Bool { lock.withLock { cancelFlag } }
 
-    /// Let go of the model (the robot view closed, memory low, the model deleted).
-    func unload() {
+    /// How it runs, from Settings (Model on this iPhone: the graphics chip or the processor only; the processor by
+    /// default, as it left the SE smoother), threads and batch for this phone.
+    static var useGPU: Bool { UserDefaults.standard.bool(forKey: "localModel.gpu") }
+    static var threads: Int32 { ProcessInfo.processInfo.activeProcessorCount <= 6 ? 2 : 3 }
+    static var batch: Int32 { useGPU ? 128 : 64 }
+    private static func key(_ path: String) -> String { "\(path)|\(useGPU)|\(threads)|\(batch)" }
+
+    /// Let go of the model (the robot view closed, memory low while idle, the model deleted, how it runs changed).
+    func unload(why: String = "") {
         queue.async {
             #if canImport(llama)
-            if self.llama != nil { self.llama = nil; self.loadedPath = ""; DispatchQueue.main.async { Diagnostics.shared.log("local model", "unloaded (\(LocalLlama.memoryLeftMB) MB of memory left)") } }
+            if self.llama != nil {
+                self.llama = nil
+                self.loadedKey = ""
+                DispatchQueue.main.async { Diagnostics.shared.log("local model", "unloaded\(why.isEmpty ? "" : " (\(why))") (\(LocalLlama.memoryLeftMB) MB of memory left)") }
+            }
             #endif
         }
     }
 
-    /// One reply, off the main thread: (the text, a summary of what it took).
-    func generate(path: String, system: String, user: String, grammar: String, cachePath: String, onText: @escaping @Sendable (String) -> Void) async throws -> (String, String) {
-        lock.withLock { cancelFlag = false }
-        return try await withCheckedThrowingContinuation { c in
-            queue.async {
-                #if canImport(llama)
-                do {
-                    if self.llama == nil || self.loadedPath != path {
-                        self.llama = nil
-                        self.llama = try LocalLlama(path: path, nCtx: LocalModels.contextTokens)
-                        self.loadedPath = path
-                    }
-                    let r = try self.llama!.generate(system: system, user: user, grammar: grammar, maxTokens: 900, cachePath: cachePath,
-                                                     cancelled: { self.cancelled }, onText: onText)
-                    c.resume(returning: (r.text, r.stats.summary))
-                } catch { c.resume(throwing: error) }
-                #else
-                c.resume(throwing: PanelError.message("the model on this iPhone needs a real iPhone: the Simulator can't run it"))
-                #endif
+    /// Loaded ahead, while the person types (the More chat opened on On this iPhone), so a request doesn't wait 7 s for it.
+    func preload(path: String) {
+        let key = LocalRunner.key(path)
+        let (threads, batch, gpu) = (LocalRunner.threads, LocalRunner.batch, LocalRunner.useGPU)
+        queue.async {
+            #if canImport(llama)
+            guard self.loadedKey != key else { return }
+            self.llama = nil
+            let t0 = Date()
+            if let l = try? LocalLlama(path: path, nCtx: LocalModels.contextTokens, threads: threads, batch: batch, gpu: gpu) {
+                self.llama = l
+                self.loadedKey = key
+                let ms = Int(Date().timeIntervalSince(t0) * 1000)
+                DispatchQueue.main.async { Diagnostics.shared.log("local model", "loaded ahead in \(ms) ms (\(LocalLlama.memoryLeftMB) MB of memory left)") }
             }
+            #endif
+        }
+    }
+
+    /// One reply, off the main thread: (the text, a summary of what it took). Stop (the task cancelled) stops it within
+    /// a piece of reading or one token.
+    func generate(path: String, system: String, user: String, grammar: String, cachePath: String, onText: @escaping @Sendable (String) -> Void) async throws -> (String, String) {
+        lock.withLock { cancelFlag = false; busy = true; warnings = 0 }
+        let key = LocalRunner.key(path)
+        let (threads, batch, gpu) = (LocalRunner.threads, LocalRunner.batch, LocalRunner.useGPU)
+        let hangs = Diagnostics.hangs.now
+        defer { lock.withLock { busy = false } }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { c in
+                queue.async {
+                    #if canImport(llama)
+                    do {
+                        var loaded = "kept loaded"
+                        if self.llama == nil || self.loadedKey != key {
+                            self.llama = nil
+                            let t0 = Date()
+                            self.llama = try LocalLlama(path: path, nCtx: LocalModels.contextTokens, threads: threads, batch: batch, gpu: gpu)
+                            self.loadedKey = key
+                            loaded = "loaded now in \(Int(Date().timeIntervalSince(t0) * 1000)) ms"
+                        }
+                        let r = try self.llama!.generate(system: system, user: user, grammar: grammar, maxTokens: 900, cachePath: cachePath,
+                                                         cancelled: { self.cancelled }, onText: onText)
+                        let h = Diagnostics.hangs.now
+                        let w = self.lock.withLock { self.warnings }
+                        c.resume(returning: (r.text, "\(loaded); \(r.stats.summary); \(w) memory warning(s); the app's main thread blocked \(h.count - hangs.count) times, \(h.totalMs - hangs.totalMs) ms in all"))
+                    } catch { c.resume(throwing: error) }
+                    #else
+                    c.resume(throwing: PanelError.message("the model on this iPhone needs a real iPhone: the Simulator can't run it"))
+                    #endif
+                }
+            }
+        } onCancel: {
+            self.cancel()
         }
     }
 }
@@ -569,20 +652,29 @@ final class LocalConversation: PanelConversation {
         guard LocalModels.shared.isReady(m) else { throw PanelError.message("\(m.name) isn't on this iPhone yet: download it in Settings, under Model on this iPhone") }
         guard LocalRunner.available else { throw PanelError.message("the model on this iPhone needs a real iPhone: the Simulator can't run it") }
         let guide = Browser.resource("local-guide", "txt")
-        let system = LocalPrompt.system(guide: guide, mode: m.mode)
+        let mode = LocalModels.mode(m)
+        let system = LocalPrompt.system(guide: guide, mode: mode)
         let user = LocalPrompt.user(url: url, outline: outline, request: request)
         let origin = URL(string: url).map { "\($0.scheme ?? "https")://\($0.host ?? "")" } ?? "https://example.com"
-        let grammar = m.mode == .styleJSON ? LocalPrompt.styleGrammar : LocalPrompt.fileGrammar(origin: origin)
+        let grammar = mode == .styleJSON ? LocalPrompt.styleGrammar : LocalPrompt.fileGrammar(origin: origin)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let cache = caches.appendingPathComponent("trif-\(m.id)-\(m.mode.rawValue)-\(Browser.codeHash(system)).state").path
+        let cache = caches.appendingPathComponent("trif-\(m.id)-\(mode.rawValue)-\(LocalModels.contextTokens)-\(Browser.codeHash(system)).state").path
+        // (a page whose parts have only made-up names, asked about one part: the model on the phone can't find it
+        // (Google's AI Overview, twice on Tim's SE); Claude can, so it's offered at once instead of half a minute's try)
+        let share = LocalPrompt.generatedShare(outline: outline)
+        if share >= 0.4, LocalPrompt.targetsAPart(request) {
+            Diagnostics.shared.log("local model", "not tried: \(Int(share * 100))% of the page's parts have made-up names, and the request is about one part")
+            let host = URL(string: url)?.host ?? "This page"
+            return PanelStep(text: "\(host) names its parts with codes that mean nothing (and change), so the model on this iPhone is unlikely to find the one you mean. Claude can work it out from the page.\n\n[Ask Claude](\(PanelChat.askClaudeLink))", calls: [], stop: "done", inputTokens: 0)
+        }
         onStep("Reading the page… (about half a minute on this iPhone)")
         var wrote = false
         let started = Date()
         let (text, stats) = try await LocalRunner.shared.generate(path: path, system: system, user: user, grammar: grammar, cachePath: cache) { [weak self] _ in
             Task { @MainActor in if !wrote { wrote = true; self?.onStep("Writing…") } }
         }
-        Diagnostics.shared.log("local model", "\(m.name), \(m.mode.rawValue): \(Int(Date().timeIntervalSince(started))) s in all; \(stats)")
-        let made = m.mode == .styleJSON ? LocalPrompt.modFile(json: text, origin: origin) : LocalPrompt.modFile(reply: text)
+        Diagnostics.shared.log("local model", "\(m.name), \(mode.rawValue), context \(LocalModels.contextTokens): \(Int(Date().timeIntervalSince(started))) s in all; \(stats)")
+        let made = mode == .styleJSON ? LocalPrompt.modFile(json: text, origin: origin) : LocalPrompt.modFile(reply: text)
         guard let file = made.file else {
             return PanelStep(text: "The model on this iPhone couldn't write a mod for that (\(made.why ?? "no reason given")).\n\n[Not right? Ask Claude](\(PanelChat.askClaudeLink))", calls: [], stop: "done", inputTokens: 0)
         }

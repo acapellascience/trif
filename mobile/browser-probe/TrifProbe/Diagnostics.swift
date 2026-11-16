@@ -139,6 +139,15 @@ final class Diagnostics {
     private(set) var lastAction = "nothing in particular"
     func mark(_ action: String) { lastAction = action }
 
+    /// The main thread's hangs so far (their count and total), for a run to say how many happened during it.
+    final class Hangs: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0, totalMs = 0
+        func add(_ ms: Int) { lock.withLock { count += 1; totalMs += ms } }
+        var now: (count: Int, totalMs: Int) { lock.withLock { (count, totalMs) } }
+    }
+    nonisolated static let hangs = Hangs()
+
     /// Watches the app's own main thread from another: a check sent every second that comes back late means the
     /// app was blocked (taps waited); over 500 ms, it's logged with what the app was doing. One check out at a time.
     nonisolated static func watchMainThread() {
@@ -155,7 +164,10 @@ final class Diagnostics {
                 DispatchQueue.main.async {
                     let waited = CFAbsoluteTimeGetCurrent() - sent
                     q.async { out.waiting = false }
-                    if waited > limit { MainActor.assumeIsolated { Diagnostics.shared.log("hang", "the app's main thread was blocked \(Int(waited * 1000)) ms (last: \(Diagnostics.shared.lastAction))") } }
+                    if waited > limit {
+                        Diagnostics.hangs.add(Int(waited * 1000))
+                        MainActor.assumeIsolated { Diagnostics.shared.log("hang", "the app's main thread was blocked \(Int(waited * 1000)) ms (last: \(Diagnostics.shared.lastAction))") }
+                    }
                 }
             }
             q.asyncAfter(deadline: .now() + (fine ? 0.1 : 1), execute: tick)

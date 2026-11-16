@@ -17,7 +17,10 @@ let user = LocalPrompt.user(url: shown, outline: outline, request: a[4])
 let origin = URL(string: shown).map { "\($0.scheme!)://\($0.host!)" }!
 let grammar = mode == .styleJSON ? LocalPrompt.styleGrammar : LocalPrompt.fileGrammar(origin: origin)
 let cache = FileManager.default.temporaryDirectory.appendingPathComponent("trif-\(mode.rawValue)-\(system.hashValue).state").path
-let llama = try LocalLlama(path: a[1], nCtx: 6144)
+// (how it runs, as on the phone: TRIF_GPU=1 for the graphics chip, TRIF_THREADS, TRIF_BATCH, TRIF_CTX)
+let env = ProcessInfo.processInfo.environment
+let llama = try LocalLlama(path: a[1], nCtx: Int32(env["TRIF_CTX"] ?? "") ?? 3072, threads: Int32(env["TRIF_THREADS"] ?? "") ?? 2,
+                           batch: Int32(env["TRIF_BATCH"] ?? "") ?? 64, gpu: env["TRIF_GPU"] == "1")
 print("loaded in \(llama.loadMs) ms")
 for run in 1...(a.count > 5 ? Int(a[5]) ?? 1 : 1) {
     let t0 = Date()

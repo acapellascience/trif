@@ -41,7 +41,22 @@ LocalModels.swift, checked after every download.)
   header's shape and @match fixed (fileGrammar). TRIF then writes the header (style JSON), makes the research's
   repairs (a filter's "a|b" words as a pattern; a boxed `text()` as `text`), and the mod goes to Add this mod?, with
   its usual checks. Every reply ends with Not right? Ask Claude: the same request in Claude's chat, with the page.
-- The model is loaded when a request comes and let go when the robot view closes or memory runs low.
+- The model is loaded ahead when the More chat opens (a model there), kept while it's open, and let go when the robot
+  view closes, how it runs changes, or a memory warning comes while it's idle. (Tim's SE, 11-16: iOS warns during
+  every request, the model's own weights counting, and letting it go then meant 7 s to load it again each time.)
+- Tim's SE froze while it worked (11-16: the app's main thread blocked 10 to 22 s at a time, WebKit's pages ended):
+  its threads were 4 at user-initiated priority (llama.cpp's own take the starting thread's), batches of 512, on the
+  graphics chip. Now: 2 threads (3 above 6 cores), utility priority, batches of 64 on the processor (128 on the
+  graphics chip), 3 ms between batches, the screen told of progress at most 5 times a second, Stop looked at every
+  batch and every token. The processor is the default; Settings' Runs on picks the graphics chip, to compare. The page
+  goes in as a 4,000-character outline (it was 2,268 tokens, 6,000 characters, about 18 s to read on the SE).
+- 4 GB phones: a 3k context, MiniCPM5 or Qwen3.5 2B, and the 4B model only with Show bigger models (style mods as
+  JSON there unless "boxed mods too" is picked).
+- A request about one part of a page whose parts have only made-up names (40% of the outline or more: Google's search
+  page) isn't tried: Claude is offered at once (Google's AI Overview failed twice on the SE).
+- Each request's diagnostics line: where it ran, threads, batch, the context, load (kept or now), system prompt
+  restored or read, tokens a second both ways, the memory left (before, lowest, after), memory warnings, and the
+  app's main-thread blocks during it (count and total).
 - Downloads: only when asked (the size and free space shown first), in a background URLSession, resumable, checked
   against the SHA-256, into Application Support/models, left out of backups. (11-16, after Tim couldn't tell whether
   one was moving, and a first try did nothing:) a bar with MB done, speed and time left in Settings and over the More

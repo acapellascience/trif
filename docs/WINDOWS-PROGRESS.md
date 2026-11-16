@@ -17,19 +17,15 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
       helper's own spec, as an administrator and as an ordinary user) and `tests/windows-run.js` (a real
       run, 68 checks).
 - [x] **A real fenced run on CI, Claude Code** (`windows-fence.yml`, job `run`).
-- [ ] **Codex, option 1**: its shell off, `trif` and TRIF's file tools as MCP tools inside the fence.
-      Wired into the helper (`agents/codex.js` `windowsConfig`, `runs.js` `_fence` with `files`) and green
-      in a real run on CI with a model name Codex doesn't know (tools called directly). Left before it's
-      ticked: the same with Codex's default model (everything behind `exec`), then switching it on
-      (`platform.js` `WINDOWS_RUN_AGENTS`; today only the test does, `TRIF_WINDOWS_CODEX_RUNS=1`).
-- [ ] **Codex, option 2**: its commands through the fence's launcher. Not started. (Seen already: no
-      shell starts inside the fence, and node there can't start a child. Only if 1 fails.)
-- [ ] **Codex, option 3**: its `elevated` sandbox with name lookups and 127.0.0.1 closed. Not started.
-      Needs an administrator once: only if 1 and 2 fail, and then stop for Tim first.
-- [ ] **Codex: the attempts to get out**, and a real fenced Codex run on CI. `tests/windows-run.js codex`
-      (job `run-codex`, 93 checks, green): the tool, TRIF's file tools, Codex's own tools, a program in the
-      run's container, a sub-agent. Left: the default-model pass (above); then the job stops being
-      `continue-on-error`.
+- [x] **Codex, option 1**: its shell off, `trif` and TRIF's file tools as MCP tools inside the fence
+      (`agents/codex.js` `windowsConfig`, `runs.js` `_fence` with `files`). Switched on in round 4:
+      `platform.js` `WINDOWS_RUN_AGENTS` is `claude` and `codex`.
+- [x] **Codex, options 2 and 3**: not needed, since option 1 holds. Kept as reserves in `docs/WINDOWS.md`
+      ("Codex: where it stands"); 3 would need an administrator once, and Tim's word first.
+- [x] **Codex: the attempts to get out**, and a real fenced Codex run on CI: `tests/windows-run.js codex`
+      (job `run-codex`, 134 checks, no longer `continue-on-error`). Three runs: a model name Codex doesn't
+      know (tools called directly), a sub-agent of that, and Codex's default model (everything behind
+      `exec`) with a sub-agent of its own.
 - [ ] **The tests marked "no side-panel runs" un-skipped and passing on Windows.** 47 in
       `tests/windows-skips.json` with the reason `runs` (agents.test.js 35, codex-sandbox 3, open-models 3,
       claude-managed 2, origins 2, stage 2); beside them `login` 6 and `limits` 6. The stand-in fence
@@ -74,7 +70,7 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   [43953800965](https://github.com/acapellascience/trif/actions/runs/43953800965) red on the known one
   alone (`tests/clickjack-browser.test.js`, "a press: 4.67 ms on average"; 831 pass, 1 fail).
 
-## Done this round (round 3)
+### Round 3
 
 - Codex, option 1, wired into the helper: `codex.js` `command()` with a `fence` (read-only, the shell's
   features and `view_image` off, the `trif` server approved, no profile), `_fence` gives the server TRIF's
@@ -93,19 +89,44 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   `still-skipped`), the macOS tests
   [43958005763](https://github.com/acapellascience/trif/actions/runs/43958005763) green.
 
+## Done this round (round 4)
+
+- The default-model pass: a third run in `tests/windows-run.js codex`, started with no model named (Codex
+  named `gpt-6.1-sol`). 41 more checks, green on the first push: the tools beside `exec` and those behind
+  it against lists of what's known, the isolate (no `fetch`, `require`, `process`, no import of `node:fs`),
+  TRIF's tools working through `exec`, every way out refused (Codex's `apply_patch` through `exec` and
+  directly, no shell or `view_image` there at all, TRIF's refusals), and the same from a sub-agent
+  (`collaboration.spawn_agent`). Written up in `docs/WINDOWS.md`, "Codex: where it stands".
+- Codex switched on: `WINDOWS_RUN_AGENTS = ['claude', 'codex']`, `windowsRunAgents` and
+  `TRIF_WINDOWS_CODEX_RUNS` gone, `run-codex` no longer `continue-on-error`, the unit tests
+  (`tests/windows.test.js`, `tests/windows-runs.test.js`) use the open model as the agent that's still off.
+- Texts for Tim (`docs/WINDOWS-STRINGS.md`): README's Windows section now says chats work with Claude
+  Code and Codex (26, marked as changed); strings 1–3 are shown for the open model alone now.
+  `docs/PROTOCOL.md`'s Windows section, which still said chats don't run there, says what runs.
+- CI at `e46cfae` (the third run alone): windows-fence
+  [43960664775](https://github.com/acapellascience/trif/actions/runs/43960664775) green, `run-codex` with
+  134 checks. At `e012317` (Codex switched on; the commit after it is these notes): windows-fence
+  [43961432466](https://github.com/acapellascience/trif/actions/runs/43961432466) green (`fence`,
+  `fence-standard-user`, `run`, `agents`, `run-codex`), windows
+  [43961432584](https://github.com/acapellascience/trif/actions/runs/43961432584) green (Node 18 and 22,
+  `still-skipped`). The macOS tests: at `e46cfae`
+  [43960664437](https://github.com/acapellascience/trif/actions/runs/43960664437) red on the known one
+  alone (`tests/clickjack-browser.test.js`; 832 pass, 1 fail); at `e012317` GitHub had started no `tests`
+  run when this was written (the two unit test files that changed pass on a Mac, run by hand with a temp
+  HOME): look at the one this commit starts before trusting them.
+
 ## Next step
 
-**The default-model pass, then switch Codex on.** In `tests/windows-run.js codex`, a third run started
-without a model (Codex's default: everything behind `exec`, no `tools` field in its requests). Through
-`exec` (`{custom: {name: 'exec', input: <JavaScript>}}`, see `viaExec` in `tests/windows-fence/agents.js`):
-`ALL_TOOLS` against the known list; `tools.mcp__trif__trif` and `tools.mcp__trif__write_file` working;
-`tools.apply_patch` in the site's folder and outside refused and nothing written; `tools.exec_command`
-and `tools.view_image` absent; a file elsewhere through `tools.mcp__trif__read_file` refused. When that's
-green: add `codex` to `WINDOWS_RUN_AGENTS`, take out `windowsRunAgents`' switch and
-`TRIF_WINDOWS_CODEX_RUNS`, drop `continue-on-error` from `run-codex`, put `tests/windows.test.js` and the
-unit test in `tests/windows-runs.test.js` right, and strike strings 2 and 3 in `docs/WINDOWS-STRINGS.md`
-for Codex (they stay for open models until `codex-oss.js` passes `fence` on: look at its `command()`).
-After that: the 47 skipped tests.
+**The 47 skipped tests** (`tests/windows-skips.json`, reason `runs`). Start from the `still-skipped` job's
+`all-on-windows.tap` artifact in the latest `windows` run (`gh run download <id> -n <its name>` into the
+scratch folder; `grep -n "^not ok"`): the list of what fails with the skips off. The first thing in the
+way is known: the stand-in agents are `#!/usr/bin/env` scripts, which Windows can't start. Make them
+startable there (a `.cmd` beside each that runs it with this Node is what `findExecutable` and
+`platform.spawnable` already take; look at how the tests write them, one helper if there is one), then
+take `agents.test.js`'s 35 out of the skips file and fix what's left, then the other 12 (codex-sandbox 3,
+open-models 3, claude-managed 2, origins 2, stage 2). Tests about the Mac's own sandbox profile
+(codex-sandbox) may need a Windows twin instead (what `windowsConfig` gives) rather than un-skipping:
+say which in the skips file's reason. `login` 6 and `limits` 6 are not part of the goal.
 
 ## Notes for next round
 
@@ -138,9 +159,9 @@ After that: the 47 skipped tests.
   `all-on-windows.tap` artifact is the list of what fails once the skips go: start the un-skipping there.
 - `tests/windows-run.js` and `tests/windows-fence/run.js` set `TRIF_FENCE_BIN: ''` to get the real fence;
   anything else started through `tests/fake-extension.js` gets the stand-in.
-- Strings: 2 and 3 in `docs/WINDOWS-STRINGS.md` now say "another coding agent"; still awaiting Tim, and
-  they go when Codex runs fenced. 5c, 5d and README's Windows section (26) name Claude Code as the agent
-  they're about.
+- Strings: 1–3 in `docs/WINDOWS-STRINGS.md` say "another coding agent" and are shown for the open model
+  alone since round 4 (they go if its runs get fenced); 5c and 5d name the run's agent; README's Windows
+  section (26) names Claude Code and Codex. All still awaiting Tim.
 - **The real Codex run** (round 3): `node tests/windows-run.js codex` on the runner; its log through the
   job's id as above, then `grep -n "FAIL\|all passed\|checks failed"`. What an MCP tool answers reaches the
   model as two parts, "Wall time: … Output:" and then the text, so patterns need `/m`. Codex's sub-agent
@@ -154,3 +175,20 @@ After that: the 47 skipped tests.
   notes' commit if their result matters.
 - Rules: commits by path, never `-a`; the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`;
   push only `windows`; never `~/.trif`, never the real helper; a temp HOME for anything local.
+- **Codex's default model** (round 4): its requests have no `tools`; they're in `input` as
+  `{type: "additional_tools", tools: [...]}`, namespaces `functions`, `clock`, `collaboration`
+  (`directTools` in `tests/windows-run.js` reads both shapes). `collaboration.spawn_agent` takes
+  `{task_name, message, fork_turns: "none"}` and answers `{"task_name": "/root/helper"}`;
+  `collaboration.wait_agent` takes `{timeout_ms}` alone and answers `{"message": "Wait completed.",
+  "timed_out": false}`. The test builds those calls from the tools' own `parameters` (`argsFor`), so a
+  changed schema shows in the log line "its sub-agent tools, as Codex describes them". A sub-agent's
+  requests are told from its parent's by `prompt_cache_key`, or by the missing `spawn_agent` call.
+- Through `exec` an MCP tool's answer is `{content: [{type: "text", text}], isError}`; the test prints
+  `RESULT\n<text>` or `THREW\n<message>`, so patterns with `^` need `/m`. A real `trif status` through
+  `exec` came back in one go ("Script completed"): no `wait` was needed.
+- Not tried: a sub-agent's own sub-agent under the default model (it has the `collaboration` tools; each
+  starts from the same config). The open model (`codex-oss.js`) is still off on Windows: its `command()`
+  passes `opts` (and so `fence`) on to `codex.command`, but no run of it has been fenced or attacked.
+- No account on CI, so every real run is with an API key through the key proxy. A run on someone's own
+  login differs only in where Codex's model requests go; the config and the fence are the same.
+

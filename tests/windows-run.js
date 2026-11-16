@@ -93,7 +93,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
 
   // ---- the real helper, with a stand-in extension
   const ext = new FakeExtension({ home: ws, hostJs: path.join(code, 'helper', 'host.js'), env: {
-    ...env, PATH: process.env.PATH, TRIF_HOME: '', TRIF_BOX_ROOT: '', TRIF_KEYCHAIN_BIN: '', TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'),
+    ...env, PATH: process.env.PATH, TRIF_HOME: '', TRIF_BOX_ROOT: '', TRIF_KEYCHAIN_BIN: '', TRIF_FENCE_BIN: '' /* (the real fence, not the unit tests' stand-in) */, TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'),
     TRIF_ANTHROPIC_URL: anthropic.url, TRIF_AGENT_TIMEOUT_MS: '240000', TRIF_AGENT_KILL_GRACE_MS: '400',
   } });
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));

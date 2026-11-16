@@ -13,7 +13,7 @@
 //
 // With `files` (the path of lib/win/fenced-files.js: for an agent with no file tools of its own that TRIF
 // can hold to the run's folders, Codex), it offers file tools too: read_file, write_file, edit_file,
-// list_files, search_files, each done by that program inside the fence as well.
+// list_files, search_files, view_image, each done by that program inside the fence as well.
 //
 // This program itself is outside the fence (the agent starts it, and the agent is). It reads no file but
 // its config, opens no network, and does one thing: start the launcher with the run's spec and the words
@@ -58,14 +58,17 @@ const FILE_TOOLS = [
     inputSchema: { type: 'object', properties: { path: { type: 'string' }, depth: { type: 'integer' } } } },
   { name: 'search_files', op: 'search', description: `Finds lines matching a regular expression in a file or under a folder: file:line: text. ${where}`,
     inputSchema: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, ignoreCase: { type: 'boolean' } }, required: ['pattern'] } },
+  { name: 'view_image', op: 'image', maxOutput: 8 * 1024 * 1024, description: 'Shows you a picture (.png, .jpg, .gif, .webp): a screenshot `trif screenshot` made, by the path it printed.',
+    inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
 ];
-const FILES_NOTE = ' To look at and change files use read_file, write_file, edit_file, list_files and search_files.';
+const FILES_NOTE = ' To look at and change files use read_file, write_file, edit_file, list_files and search_files; view_image shows you a screenshot.';
 
 /** Does a file tool's work inside the fence: resolves the tool's answer. Never rejects. */
 function runFileTool(config, tool, args, opts = {}) {
-  return runFenced(config, [config.node, ...(config.nodeFlags || []), config.files], JSON.stringify({ op: tool.op, args: args && typeof args === 'object' ? args : {} }), opts).then((r) => {
+  return runFenced(config, [config.node, ...(config.nodeFlags || []), config.files], JSON.stringify({ op: tool.op, args: args && typeof args === 'object' ? args : {} }), { ...opts, maxOutput: tool.maxOutput }).then((r) => {
     let j = null;
     try { j = JSON.parse(r.stdout); } catch { /* below */ }
+    if (j && j.ok && j.image && typeof j.image.data === 'string') return { content: [{ type: 'image', data: j.image.data, mimeType: String(j.image.mimeType) }], isError: false };
     if (j && typeof j.text === 'string') return { content: [{ type: 'text', text: j.text.length > MAX_OUTPUT ? `${j.text.slice(0, MAX_OUTPUT)}\n[… cut]` : j.text }], isError: !j.ok };
     return { content: [{ type: 'text', text: `couldn't ${tool.name.replace('_', ' the ')}: ${r.note || (r.stderr || r.stdout || `exit status ${r.code}`).trim().slice(0, 400)}` }], isError: true };
   });
@@ -92,7 +95,7 @@ function runTrif(config, input, opts = {}) {
 }
 
 /** Starts `program` (a file and its arguments) inside the run's fence, `stdin` on its standard input. */
-function runFenced(config, program, stdin, { spawnFn = spawn } = {}) {
+function runFenced(config, program, stdin, { spawnFn = spawn, maxOutput = MAX_OUTPUT } = {}) {
   return new Promise((resolve) => {
     const l = config.launcher;
     const argv = [...(l.prefix || []), 'exec', config.spec, '--', ...program];
@@ -107,8 +110,8 @@ function runFenced(config, program, stdin, { spawnFn = spawn } = {}) {
     const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } finish({ code: null, note: `stopped after ${Math.round(ms / 1000)} s` }); }, ms);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (d) => { if (stdout.length < MAX_OUTPUT) stdout += d; });
-    child.stderr.on('data', (d) => { if (stderr.length < MAX_OUTPUT) stderr += d; });
+    child.stdout.on('data', (d) => { if (stdout.length < maxOutput) stdout += d; });
+    child.stderr.on('data', (d) => { if (stderr.length < maxOutput) stderr += d; });
     child.on('error', (e) => finish({ code: null, note: `couldn't start trif: ${e.message}` }));
     child.on('close', (code) => finish({ code }));
     child.stdin.on('error', () => { /* it may exit before reading */ });

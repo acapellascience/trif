@@ -2,7 +2,8 @@
 // Reading and writing files for a side-panel run, from inside the run's fence (docs/WINDOWS.md "The
 // sandbox"). helper/mcp.js starts this (through trif-fence.exe, in the run's AppContainer) for the file
 // tools it offers an agent that has none of its own it can be held to: Codex on Windows, whose shell is
-// off there. One request on stdin (JSON), one answer on stdout (JSON: {ok, text}).
+// off there. One request on stdin (JSON), one answer on stdout (JSON: {ok, text}; for a
+// picture, {ok, image: {mimeType, data}}).
 //
 // What it may open isn't decided here: the fence lets this program read the run's working folder and write
 // its sites\ (other sites' folders read-only), and nothing else on the computer. Paths are taken relative
@@ -17,6 +18,8 @@ const MAX_WRITE = 4 * 1024 * 1024;
 const MAX_LIST = 1000;
 const MAX_HITS = 200;
 const MAX_LINE = 400;
+const MAX_IMAGE = 5 * 1024 * 1024;
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
 const SKIP_DIRS = new Set(['.git', 'node_modules']);
 
 const rel = (p) => path.relative(process.cwd(), p) || '.';
@@ -84,6 +87,18 @@ const OPS = {
     try { fs.writeFileSync(file, all ? text.split(old).join(next) : text.replace(old, () => next)); } catch (e) { throw new Error(why(e, file, true)); }
     return `changed ${slashes(rel(file))}${count > 1 ? ` (${count} places)` : ''}`;
   },
+  // (a screenshot `trif screenshot` made: it prints the file's full path, which is taken as it is)
+  image({ path: p }) {
+    const file = resolve(p);
+    const mimeType = IMAGE_TYPES[path.extname(file).toLowerCase()];
+    if (!mimeType) throw new Error(`${slashes(rel(file))}: not a picture this can show (.png, .jpg, .gif, .webp)`);
+    let data;
+    try {
+      if (fs.statSync(file).size > MAX_IMAGE) throw Object.assign(new Error('too big to show (5 MB at most)'), { code: 'TOO_BIG' });
+      data = fs.readFileSync(file);
+    } catch (e) { throw new Error(why(e, file)); }
+    return { image: { mimeType, data: data.toString('base64') } };
+  },
   list({ path: p = '.', depth = 1 }) {
     const dir = resolve(p);
     try { if (!fs.statSync(dir).isDirectory()) throw Object.assign(new Error('not a folder'), { code: 'ENOTDIR' }); } catch (e) { throw new Error(why(e, dir)); }
@@ -117,7 +132,10 @@ const OPS = {
 function handle(req) {
   const op = req && OPS[req.op];
   if (!op) return { ok: false, text: 'unknown file operation' };
-  try { return { ok: true, text: op(req.args && typeof req.args === 'object' ? req.args : {}) }; } catch (e) { return { ok: false, text: e.message }; }
+  try {
+    const r = op(req.args && typeof req.args === 'object' ? req.args : {});
+    return typeof r === 'string' ? { ok: true, text: r } : { ok: true, text: '', ...r };
+  } catch (e) { return { ok: false, text: e.message }; }
 }
 
 if (require.main === module) {
@@ -131,4 +149,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { handle, OPS };
+module.exports = { handle, OPS, MAX_IMAGE };

@@ -182,12 +182,12 @@ test('the trif tool: a command that never ends is stopped, and said so', async (
   assert.match(r.result.content[0].text, /trif: stopped after 1 s$/);
 });
 
-test('file tools for an agent with none of its own (Codex on Windows): read, write, edit, list and search, each done inside the fence, in the run\'s working folder', async () => {
+test('file tools for an agent with none of its own (Codex on Windows): read, write, edit, list, search and look at a picture, each done inside the fence, in the run\'s working folder', async () => {
   const { work, config, spec } = toolSetup({ files: true });
   const c = client(config);
   await c.call('initialize', {});
   const names = (await c.call('tools/list')).result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files']);
+  assert.deepEqual(names, ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'view_image']);
   const call = async (name, args) => { const r = await c.call('tools/call', { name, arguments: args }); return { text: r.result.content[0].text, bad: r.result.isError }; };
   assert.deepEqual(await call('read_file', { path: 'sites/x.com/a.js' }), { text: '// a\nlet first = 1;\n', bad: false });
   assert.deepEqual(await call('write_file', { path: 'sites/x.com/new/b.js', content: '// b\nlet two = 2;\nlet again = 2;\n' }), { text: 'wrote sites/x.com/new/b.js (33 bytes)', bad: false });
@@ -205,6 +205,14 @@ test('file tools for an agent with none of its own (Codex on Windows): read, wri
   fs.writeFileSync(path.join(work, 'long.txt'), Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n'));
   assert.equal((await call('read_file', { path: 'long.txt', offset: 10, limit: 2 })).text, 'line 10\nline 11\n[… 50 lines in all: pass offset and limit for the rest]');
   assert.ok(fs.readFileSync(`${spec}.calls`, 'utf8').split('\n').filter((l) => l.startsWith('exec ')).length >= 10, 'every one through the launcher');
+  // a picture (a screenshot, by the full path `trif screenshot` printed) comes back as a picture
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const shot = path.join(work, 'shot.png');
+  fs.writeFileSync(shot, png);
+  const seen = await c.call('tools/call', { name: 'view_image', arguments: { path: shot } });
+  assert.deepEqual(seen.result, { content: [{ type: 'image', data: png.toString('base64'), mimeType: 'image/png' }], isError: false });
+  assert.deepEqual(await call('view_image', { path: 'long.txt' }), { text: 'long.txt: not a picture this can show (.png, .jpg, .gif, .webp)', bad: true });
+  assert.deepEqual(await call('view_image', { path: 'gone.png' }), { text: 'gone.png: nothing there', bad: true });
   // (what it may open is the fence's to say, on Windows: here the words it uses when the fence says no)
   const files = require('../helper/lib/win/fenced-files');
   assert.equal(files.handle({ op: 'nope' }).ok, false);

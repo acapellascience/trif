@@ -162,7 +162,7 @@ function runCmd(file, args, env) {
   check(Date.now() - t0 < 8000, `trif.cmd status took ${Date.now() - t0} ms`);
   const doc = await runCmd(cmd, ['doctor'], env);
   console.log(doc.stdout);
-  for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, /^ok {4}Google Chrome: native host manifest$/m, /^ok {4}Firefox: native host manifest$/m, /^ok {4}helper running/m, /^- {5}Chats from the panel aren’t available on Windows yet/m]) {
+  for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, /^ok {4}Google Chrome: native host manifest$/m, /^ok {4}Firefox: native host manifest$/m, /^ok {4}helper running/m, /^ok {4}the fence for chats from the panel can be built here/m]) {
     check(want.test(doc.stdout), `trif doctor: ${want}`);
   }
 

@@ -377,13 +377,17 @@ What's given up, plainly:
 - The registry hole above is real but out of reach: reading it takes running a program inside the fence,
   and the only program there is TRIF's CLI.
 
-**Codex: not from the panel on Windows yet.** TRIF knows no way to take Codex's shell away or to put a
-fence of TRIF's under it (its long feature list is worth one more look for a switch before ruling that
-out); its own sandboxes either refuse TRIF's profile (good), need an administrator and then leak
+**Codex: not from the panel on Windows yet.** There's no place to put a fence of TRIF's under Codex's
+shell, and its own sandboxes either refuse TRIF's profile (good), need an administrator and then leak
 name lookups and local servers (and didn't start inside the profile folder at all), or need a Windows the
 runners don't have. The honest choices are: leave Codex (and open models, which run through it) off in the
 panel on Windows, saying why; or offer it only where `mxc` is there, once that can be tried on a real
 Windows 11. A weaker Codex shouldn't ship quietly.
+
+One lead, not tried: Codex 0.169 lists a feature called `shell_tool` (on by default). If switching it off
+really leaves Codex without a shell, the Claude Code design could carry over (`trif` as an MCP tool, its
+program in TRIF's fence). Codex's patch tool, which is how it would then write mods, runs under Codex's own
+sandbox, so that still has to be looked at on Windows.
 
 **WSL: later, as an option for people who already live there.** Not the default: see below.
 

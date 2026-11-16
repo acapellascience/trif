@@ -41,7 +41,7 @@ const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.w
 const rand = (n = 6) => crypto.randomBytes(n).toString('hex');
 let failed = 0;
 
-const { build } = require('./build');
+const { build, buildSpy } = require('./build');
 
 function fence(exe, spec, { timeout = 240000 } = {}) {
   const file = path.join(os.tmpdir(), `trif-fence-spec-${rand()}.json`);
@@ -93,6 +93,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
   fs.copyFileSync(process.execPath, path.join(nodeDir, 'node.exe'));
   const node = path.join(nodeDir, 'node.exe');
   const probe = path.join(app, 'fence-test', 'probe.js');
+  const spy = buildSpy(path.join(app, 'fence-test'));
 
   // ---- things outside the files: servers, a pipe as the helper makes it, another program, the registry
   let tcpHits = 0;
@@ -186,11 +187,14 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'connect to the helper\'s pipe', g: 'network', expect: 'deny', op: 'pipe', name: pipeName },
     { id: 'listen on 127.0.0.1', g: 'network', expect: 'info', op: 'listen' },
     // others: other programs
-    { id: 'read another program\'s command line (PowerShell, WMI)', g: 'others', expect: 'deny', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${other.pid}').CommandLine"`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
-    { id: 'the same with wmic', g: 'others', expect: 'deny', direct: `"${sys('wbem\\WMIC.exe')}" process where ProcessId=${other.pid} get CommandLine`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
+    { id: 'read another program\'s command line (PowerShell, WMI)', g: 'others', expect: 'info', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${other.pid}').CommandLine"`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
+    { id: 'the same with wmic', g: 'others', expect: 'info', direct: `"${sys('wbem\\WMIC.exe')}" process where ProcessId=${other.pid} get CommandLine`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
     { id: 'list programs (tasklist /v)', g: 'others', expect: 'info', direct: `"${sys('tasklist.exe')}" /FI "PID eq ${other.pid}" /V /FO CSV`, through: (r) => r.status === 0 && r.stdout.includes(String(other.pid)) },
     { id: 'signal another program (kill 0)', g: 'others', expect: 'info', op: 'kill', pid: other.pid },
-    { id: 'read the clipboard', g: 'others', expect: 'deny', direct: `"${PSEXE}" -NoLogo -NoProfile -NonInteractive -STA -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::GetText()"`, through: (r) => r.stdout.includes(CANARY) },
+    { id: 'read the clipboard (a small program of its own)', g: 'others', expect: 'deny', direct: `"${spy}" clip`, through: (r) => r.stdout.includes(CANARY) },
+    { id: 'the same, without the job (the AppContainer alone)', g: 'others', expect: 'info', job: false, direct: `"${spy}" clip`, through: (r) => r.stdout.includes(CANARY) },
+    { id: 'read another program\'s command line (Windows\' own calls)', g: 'others', expect: 'deny', direct: `"${spy}" cmdline ${other.pid}`, through: (r) => r.stdout.includes(`${CANARY}-argv`) },
+    { id: 'open another program to read its memory (its environment)', g: 'others', expect: 'deny', direct: `"${spy}" open ${other.pid}`, through: (r) => /OPENED-FOR-READ/.test(r.stdout) },
     // children and shells (last: a child that never ends costs its time-out)
     { id: 'start a child, its output through a pipe (cmd /c echo)', g: 'children', expect: 'info', op: 'exec', file: sys('cmd.exe'), args: ['/d', '/c', 'echo', 'child-ok'] },
     { id: 'start a child, its output nowhere', g: 'children', expect: 'info', op: 'exec', file: sys('cmd.exe'), args: ['/d', '/c', 'echo', 'child-ok'], opts: { stdio: 'ignore' } },
@@ -270,7 +274,11 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
       console.log(`a script in the profile folder, ${v.label}: ${ok ? 'runs' : `doesn't (${(r.stderr.trim().split(/\r?\n/).find((l) => /Error|EPERM|EACCES/.test(l)) || r.stderr.trim().slice(0, 200) || `exit ${r.status}`)})`} (${r.ms} ms)`);
       if (ok && !how) how = v;
     }
-    if (!how) { console.log('FAIL  node can\'t run a script inside the fence at all'); failed++; continue; }
+    if (!how) {
+      if (mode === 'lpac') console.log('info  node doesn\'t start in an lpac without registryRead (Winsock can\'t read its settings): not a candidate');
+      else { console.log('FAIL  node can\'t run a script inside the fence at all'); failed++; }
+      continue;
+    }
     console.log(`using: ${how.label}`);
     const name = `trif.run.${rand()}`;
     const r = fence(exe, specFor(mode, { ...how, name, revoke: false }));
@@ -310,6 +318,9 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     check(() => fs.readFileSync(path.join(live, 'allowed.json'), 'utf8') === '{}' && !fs.existsSync(path.join(live, 'sites', 'x.com', 'planted.js')), 'the live workspace is as it was');
     check(!fs.existsSync(path.join(priv, 'planted.json')) && !fs.existsSync(path.join(home, 'planted.txt')) && !fs.existsSync(path.join(boxes, 'r2', 'forged.json')), 'nothing planted in the private folder, the home folder or another run\'s mailbox');
     check(fs.existsSync(path.join(stage, 'sites', 'x.com', 'new.js')) && fs.existsSync(path.join(box, 'req-1.json')) && fs.existsSync(path.join(shots, 'a.png')), 'its own mod, mailbox request and screenshot are there');
+    // (a moment first: while the fence ran, this program was waiting on it and took no connections; any
+    // that came are taken now)
+    await new Promise((res) => setTimeout(res, 500));
     check(tcpHits === 0 && pipeHits === 0 && udpHits === 0, `the servers and the pipe on this computer heard nothing (tcp ${tcpHits}, udp ${udpHits}, pipe ${pipeHits})`);
     let left = null;
     try { left = Number(fs.readFileSync(leftPid, 'utf8')); } catch { /* it couldn't start one */ }
@@ -322,9 +333,11 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     const sid = String(spawnSync(exe, ['sid', name], { encoding: 'utf8' }).stdout || '').trim();
     const sddl = () => String(spawnSync(PSEXE, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `(Get-Acl -LiteralPath '${stage}').Sddl; (Get-Acl -LiteralPath '${path.join(stage, 'sites')}').Sddl`], { encoding: 'utf8' }).stdout || '');
     const before = sddl();
-    fence(exe, specFor(mode, { ...how, name, revoke: true, command: `"${node}" -p 1` }), { timeout: 40000 });
+    const last = fence(exe, specFor(mode, { ...how, name, revoke: true, command: `"${node}" -p 1` }), { timeout: 40000 });
     const acl = sddl();
-    check(!!sid && before.includes(sid) && !acl.includes(sid), `while it runs its working folder names it (${sid.slice(0, 24)}…); afterwards its entries are gone`);
+    check(!!sid && before.includes(sid), `while it runs, its working folder's access list names the run (${sid.slice(0, 24)}…)`);
+    check(!!sid && !acl.includes(sid), 'afterwards its entries are gone from its working folder');
+    if (!before.includes(sid) || acl.includes(sid)) console.log(`        last launch: exit ${last.status} ${last.stderr.trim().slice(0, 300)}\n        before: ${before.trim().slice(0, 700)}\n        after:  ${acl.trim().slice(0, 700)}`);
     spawnSync(sys('reg.exe'), ['delete', REG_KEY, '/v', 'fromInside', '/f']);
     // (put back what the allowed writes changed, for the next mode)
     for (const f of [path.join(stage, 'sites', 'x.com', 'new.js'), path.join(box, 'req-1.json'), path.join(box, 'tmp', 't.txt'), path.join(shots, 'a.png'), leftPid, path.join(box, 'hl'), path.join(box, 'sl')]) fs.rmSync(f, { force: true });

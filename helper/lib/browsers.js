@@ -41,7 +41,8 @@ const LINUX = {
 const WINDOWS = {
   chrome: { label: 'Google Chrome', local: 'Google\\Chrome\\User Data', regKeys: ['Google\\Chrome'] },
   chromium: { label: 'Chromium', local: 'Chromium\\User Data', regKeys: ['Chromium'] },
-  // (Brave's own key, and Chrome's, which Brave is reported to read as well: unverified.)
+  // (Brave reads Chrome's key, not one of its own: seen with Brave 157 on windows-latest,
+  // tests/windows-browser.js --browser brave --drop-key. Its own is written too, in case that changes.)
   brave: { label: 'Brave', local: 'BraveSoftware\\Brave-Browser\\User Data', regKeys: ['BraveSoftware\\Brave-Browser', 'Google\\Chrome'] },
   edge: { label: 'Microsoft Edge', local: 'Microsoft\\Edge\\User Data', regKeys: ['Microsoft\\Edge'] },
   firefox: { label: 'Firefox', roaming: 'Mozilla\\Firefox', regKeys: ['Mozilla'], firefox: true },

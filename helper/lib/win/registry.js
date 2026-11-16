@@ -4,9 +4,10 @@
 // file's full path. Per user (no admin needed), under HKEY_CURRENT_USER:
 //   Chrome     HKCU\Software\Google\Chrome\NativeMessagingHosts\com.webmods.helper
 //   Chromium   HKCU\Software\Chromium\NativeMessagingHosts\...
-//   Edge       HKCU\Software\Microsoft\Edge\NativeMessagingHosts\...   (Edge also reads Chromium's and Chrome's)
-//   Brave      HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\...   (unverified: Brave is
-//              reported to read Chrome's key too, so setup writes both for it)
+//   Edge       HKCU\Software\Microsoft\Edge\NativeMessagingHosts\...   (seen with Edge 156; Edge also reads
+//              Chromium's and Chrome's)
+//   Brave      Chrome's key (seen: Brave 157 finds the host there, and doesn't with only
+//              HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\...; setup writes both)
 //   Firefox    HKCU\Software\Mozilla\NativeMessagingHosts\...
 // (browsers.js has which keys each browser gets.) The manifests themselves are files setup writes as on
 // the other systems, in %LOCALAPPDATA%\TRIF\NativeMessagingHosts\<browser>.

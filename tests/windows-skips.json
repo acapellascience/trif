@@ -132,6 +132,9 @@
     "update.test.js": {
       "release script: an earlier run's signed add-on is reused only if it holds exactly this build": "release",
       "release script: secrets go to security and web-ext in no argv or environment": "release"
+    },
+    "helper.test.js": {
+      "host: removes a stale socket left by a crashed helper": "sockets"
     }
   }
 }

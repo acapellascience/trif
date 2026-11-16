@@ -281,7 +281,10 @@ class Page {
 
   /** Goes to `url` and waits for its load event. */
   async goto(url, { timeoutMs = 30000 } = {}) {
-    const r = await this.send('Page.navigate', { url });
+    let r = await this.send('Page.navigate', { url });
+    // (Windows: a new tab's first navigation is sometimes aborted, net::ERR_ABORTED, seen on windows-latest
+    // in about one test in six; tried again a moment later)
+    for (let i = 0; i < 3 && WIN && r.errorText === 'net::ERR_ABORTED'; i++) { await sleep(300); r = await this.send('Page.navigate', { url }); }
     if (r.errorText) throw new Error(`${url}: ${r.errorText}`);
     if (r.loaderId) await waitFor(`${url} to load`, () => this.loaded.has(r.loaderId), { timeoutMs, intervalMs: 20 });
   }

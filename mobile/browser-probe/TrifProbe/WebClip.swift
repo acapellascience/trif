@@ -209,9 +209,9 @@ enum WebClipMaker {
 /// step is in the diagnostics ("icon"). If any of it fails, or Safari never fetches the profile, the sheet offers to
 /// save the profile to Files instead (FilesFallback below).
 @MainActor
-final class ProfileHandoff: ObservableObject {
+final class ProfileHandoff: NSObject, ObservableObject {
     static let shared = ProfileHandoff()
-    enum State: Equatable { case idle, starting, handed, fetched, failed(String), timedOut }
+    enum State: Equatable { case idle, starting, handed, fetched, failed(String), timedOut, wrongBrowser(String) }
     @Published private(set) var state: State = .idle
     private var listener: NWListener?
     private var task: UIBackgroundTaskIdentifier = .invalid
@@ -255,10 +255,20 @@ final class ProfileHandoff: ObservableObject {
                 c.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in
                     c.cancel()
                     guard !ping else { return }
+                    // (only Safari installs a profile: 11-16, Tim's default browser, Chrome, fetched it and did nothing)
+                    let agent = request.components(separatedBy: "\r\n").first { $0.lowercased().hasPrefix("user-agent:") } ?? ""
+                    let other = ["CriOS": "Chrome", "FxiOS": "Firefox", "EdgiOS": "Edge", "OPiOS": "Opera", "DuckDuckGo": "DuckDuckGo", "Brave": "Brave"]
+                        .first { agent.contains($0.key) }?.value
                     Task { @MainActor in
                         let me = ProfileHandoff.shared
                         guard me.generation == gen else { return }
-                        me.log("Safari fetched the profile for \(name)\(me.openedAt.map { String(format: ", %.1f s after it was opened", Date().timeIntervalSince($0)) } ?? "")")
+                        let after = me.openedAt.map { String(format: ", %.1f s after it was opened", Date().timeIntervalSince($0)) } ?? ""
+                        if let other {
+                            me.log("\(other), not Safari, fetched the profile\(after): it can't install it")
+                            me.state = .wrongBrowser(other)
+                            return
+                        }
+                        me.log("Safari fetched the profile for \(name)\(after)")
                         me.state = .fetched
                         try? await Task.sleep(nanoseconds: 2_000_000_000)
                         if me.generation == gen { me.stop(log: false) }
@@ -279,13 +289,33 @@ final class ProfileHandoff: ObservableObject {
                     guard me.generation == gen else { return }
                     guard ok else { me.fail("the server didn't answer the app's own test"); return }
                     me.log("ready: it answered the app's own test")
-                    guard let url = URL(string: "http://127.0.0.1:\(port)/\(file).mobileconfig") else { me.fail("no address"); return }
+                    // (in Safari whatever the default browser is: only Safari installs profiles. Safari registers
+                    // x-safari-https (iOS 17 and later) but not x-safari-http (iOS 26.3 Simulator: its Info.plist, and
+                    // opening it fails), so for this http address that's tried first and the plain address, which goes to
+                    // the default browser, follows; a browser that isn't Safari is seen by its user agent when it fetches)
+                    let path = "127.0.0.1:\(port)/\(file).mobileconfig"
+                    guard let safari = URL(string: "x-safari-http://\(path)"), let plain = URL(string: "http://\(path)") else { me.fail("no address"); return }
                     me.openedAt = Date()
-                    UIApplication.shared.open(url) { opened in
+                    me.away = false
+                    // (development: `-noopen` at launch, no browser opened, the address in the diagnostics, for testing
+                    // what another browser's fetch does)
+                    if ProcessInfo.processInfo.arguments.contains("-noopen") { me.log("development: not opened (\(plain.absoluteString))"); me.state = .handed; return }
+                    UIApplication.shared.open(safari) { opened in
                         MainActor.assumeIsolated {
                             guard me.generation == gen else { return }
-                            me.log("Safari \(opened ? "opened" : "not opened") at the profile's address")
-                            if opened { if me.state == .starting { me.state = .handed } } else { me.fail("Safari wasn't opened") }
+                            if opened {
+                                me.log("opened in Safari (x-safari-http)")
+                                if me.state == .starting { me.state = .handed }
+                                return
+                            }
+                            me.log("x-safari-http didn't open: the plain address instead (the default browser)")
+                            UIApplication.shared.open(plain) { opened in
+                                MainActor.assumeIsolated {
+                                    guard me.generation == gen else { return }
+                                    me.log("the default browser \(opened ? "opened" : "not opened") at the profile's address")
+                                    if opened { if me.state == .starting { me.state = .handed } } else { me.fail("no browser was opened") }
+                                }
+                            }
                         }
                     }
                     Task { @MainActor in
@@ -328,11 +358,32 @@ final class ProfileHandoff: ObservableObject {
     }
 
     /// The app is back in front with Safari not having fetched the profile: it didn't work (the sheet offers Files).
+    /// At once, on coming back: the moment the app is in front again after the browser had it.
     func cameBack() {
-        guard state == .handed, let at = openedAt, Date().timeIntervalSince(at) > 3 else { return }
-        log("back in TRIF \(Int(Date().timeIntervalSince(at))) s after Safari was opened, the profile not fetched")
-        state = .timedOut
-        stop(log: false)
+        guard away, let at = openedAt else { return }
+        away = false
+        switch state {
+        case .handed:
+            log("back in TRIF \(Int(Date().timeIntervalSince(at))) s after Safari was opened, the profile not fetched: Files offered")
+            state = .timedOut
+            stop(log: false)
+        case .wrongBrowser(let b):
+            log("back in TRIF from \(b): Files offered")
+            stop(log: false)
+        default: break
+        }
+    }
+    /// The app left the front after the browser was opened (so its coming back means the person came back).
+    var away = false
+    private var watchers: [NSObjectProtocol] = []
+    override init() {
+        super.init()
+        watchers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { let me = ProfileHandoff.shared; if me.openedAt != nil { switch me.state { case .handed, .starting, .wrongBrowser: me.away = true; default: break } } }
+        })
+        watchers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ProfileHandoff.shared.cameBack() }
+        })
     }
 
     private func fail(_ why: String) {
@@ -375,7 +426,6 @@ struct ProfileFile: FileDocument {
 struct WebClipSheet: View {
     @EnvironmentObject var browser: Browser
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var phase
     @ObservedObject private var handoff = ProfileHandoff.shared
     @State private var face: SiteFace?
     @State private var name = ""
@@ -387,7 +437,7 @@ struct WebClipSheet: View {
     private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label) } }
     /// Safari didn't get it: the Files route is offered.
     private var offerFiles: Bool {
-        switch handoff.state { case .failed, .timedOut: return true; default: return failed }
+        switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return failed }
     }
 
     var body: some View {
@@ -445,7 +495,6 @@ struct WebClipSheet: View {
             }
             saving = nil
         }
-        .onChange(of: phase) { _, now in if now == .active { ProfileHandoff.shared.cameBack() } }
         .task {
             ProfileHandoff.shared.reset()
             if let f = await WebClipMaker.face(of: browser) { face = f; name = f.name } else { failed = true }
@@ -459,6 +508,8 @@ struct WebClipSheet: View {
             switch handoff.state {
             case .handed, .fetched:
                 Text("Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install.")
+            case .wrongBrowser(let b):
+                Text("\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead, then tap it there.")
             case .failed, .timedOut:
                 Text("Safari didn't get the icon. Save it to Files instead, then tap it there.")
             default:

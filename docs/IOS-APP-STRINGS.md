@@ -214,6 +214,7 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The button | — | Add to Home Screen; after it's tapped: Try again |
 | After the button (what to do next) | — | Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install. |
 | If Safari didn't get it (added 11-16, Tim's phone) | — | Safari didn't get the icon. Save it to Files instead, then tap it there. |
+| If another browser (the default one) got it (added 11-16, Tim's Chrome) | — | {Chrome} opened instead of Safari, and only Safari can add the icon. Save it to Files instead, then tap it there. |
 | The second button, then | — | Save to Files instead (Files' own Save screen, the file named {Name} for TRIF) |
 | Once saved | — | Saved. Open the Files app and tap the file, then open Settings, tap Profile Downloaded near the top, and Install. |
 | If the page's icon and name couldn't be read | — | Couldn't make the icon for this page. |

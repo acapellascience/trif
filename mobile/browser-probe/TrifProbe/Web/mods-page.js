@@ -502,7 +502,9 @@
     x.addEventListener('click', () => notNow());
     const acts = el('div', 'ap-actions');
     acts.append(allow, show, reject, later);
-    d.append(top, who, lead, facts, together, note, err, codeBox, acts);
+    // (the buttons above the code, on the phone (Tim, 11-16: "sometimes you don't wanna read the code"): everything
+    // that says what Allow agrees to stays above them; only the code, once shown, comes after)
+    d.append(top, who, lead, facts, together, note, err, acts, codeBox);
     d.addEventListener('cancel', (e) => { e.preventDefault(); notNow(); });
     document.body.append(d);
     approval.dialog = d;

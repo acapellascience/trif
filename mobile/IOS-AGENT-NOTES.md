@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (217 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (228 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -30,7 +30,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`xcrun simctl spawn <dev> notifyutil -p com.trif.probe.step`) and writes `Documents/step-out.txt`. Steps (TrifProbeApp
   `Model.step`): go, newtab, select, sheet ("chat" opens the robot view), chat, closechat, newchat, chats, showchat,
   service ("Claude"/"ChatGPT"), more (true/false), panejs (JS in the shown chat page), paneljs (JS in More's panel),
-  panego, offer/cancelOffer/addOffer, status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve…
+  panego, offer/cancelOffer/addOffer, status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve,
+  view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 11 in-app states, PASS/FAIL lines;
+  regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -94,7 +96,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   public fallback behind `-publicflush`.
 - Full screen: per tab, remembered; the two-finger hold (0.6 s, each finger still) toggles it either way at once, with
   a fading note; ⋯ → Full screen names the hold; a faint exit button at the top right 60 pt down (bright 3 s on entry and
-  on scroll-up), hideable in ⋯. Home Screen icons (`app=1`) start in full screen.
+  on scroll-up), hideable in ⋯. A Home Screen icon (`app=1`) ALWAYS lands on its site's own tab in full screen (Tim
+  11-16: "no matter what it was in before"), closing covers (Add this mod? stays); TRIF's own icon opens as it was left.
+- Add this mod? and the Mods tab's approval card: the buttons come right after what they agree to (name, site, summary,
+  powers, warnings) and before the code (Tim, 11-16: no scrolling past code to approve).
 - Toolbar page button: + on the page with a circle behind it; the page glyph has no circle.
 - The robot glyph is TRIF's exact shape drawn as an outline in the toolbar's tint and line width, like the other icons.
 - At most 3 chats at once; a working chat is never released; the robot opens the tab's own site's chat.
@@ -121,10 +126,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   sideloaded build.
 - Exit button placement checked only on logged-out X and Instagram. Three chat pages' memory on the SE.
 - Permission strings still await Tim.
+- Safe mode's banner (mods switched off) lives in the bars, so a tab in full screen (an icon launch) doesn't show it;
+  only the Mods tab lists them. Icons made before `app=1` (early 11-16) open in TRIF view: re-add them.
+- Add this mod? shows sites, powers and the free warning but not the mod's facts ("names another site: …") that the
+  approval card shows.
 
 ## Gotchas
 
 - `simctl openurl` cuts URLs at about 2 KB (UIApplication.open doesn't).
+- The app opening its own trif:// with UIApplication.open gets iOS's "Open in …?" prompt (and it can linger over a
+  later screen): in-app checks call the handler (ContentView.openForCheck); `simctl openurl` has no prompt.
 - iOS 26 has `x-safari-https://` but no `x-safari-http://`; Chrome as default browser needs the Files route.
 - A Web Clip to a custom scheme needs FullScreen:true or it opens Safari and asks; TargetApplicationBundleIdentifier is
   ignored without MDM.

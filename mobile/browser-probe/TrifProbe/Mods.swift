@@ -550,12 +550,14 @@ struct ModOfferView: View {
                 if mod.tier == "free" {
                     Section { Text("A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.").font(.footnote).foregroundStyle(Color.trifCoral) }
                 }
-                Section("Its code") {
-                    ScrollView(.horizontal) { Text(mod.code).font(.caption2.monospaced()).textSelection(.enabled) }.frame(maxHeight: 260)
-                }
+                // (the buttons before the code (Tim, 11-16: "sometimes you don't wanna read the code and you have to
+                // scroll down"), after all that says what Add it agrees to: name, what it does, sites, powers, warning)
                 Section {
                     Button("Add it") { browser.addMod(mod); dismiss() }.bold()
                     Button("Cancel", role: .cancel) { dismiss() }
+                }
+                Section("Its code") {
+                    ScrollView(.horizontal) { Text(mod.code).font(.caption2.monospaced()).textSelection(.enabled) }.frame(maxHeight: 260)
                 }
             }
             .navigationTitle("Add this mod?")

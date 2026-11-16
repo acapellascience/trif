@@ -23,7 +23,7 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 | Native messaging | Chrome, Chromium, Edge, Brave, Firefox keys under `HKCU\Software` | Chrome for Testing 157, Edge 156, Brave 157: browser check, each starting the helper itself. Firefox: the key is written and read back, not tried in a real Firefox |
 | The helper | started by the browser through `trif-host.bat`; ends when the browser closes its end | browser check |
 | The extension | loads unpacked, its service worker connects, hello with version and browser | browser check |
-| `trif` CLI | `trif.cmd` (Command Prompt, PowerShell), `trif` (Git Bash); talks to the helper over a named pipe | smoke test, browser check |
+| `trif` CLI | `trif.cmd` (Command Prompt, PowerShell); talks to the helper over a named pipe. A `trif` script for Git Bash is written too | smoke test, browser check (`trif.cmd`, through `cmd.exe`). The Git Bash script: written, never run |
 | `trif doctor` | wrappers, manifests, registry keys, helper, extension | smoke test, browser check |
 | API keys | Windows Credential Manager, never in argv or the environment | smoke test (a decision for Tim: [Keys](#keys-and-secrets)) |
 | Updates | unpacked with System32's `tar.exe`; `~\.trif\app` swapped with retries | unit tests with stand-ins only |
@@ -50,7 +50,9 @@ There's no Windows computer here, so everything runs on GitHub Actions (`.github
     setup copied; the extension's service worker calls `connectNative`; Chrome finds the manifest through
     the registry and runs `trif-host.bat`; `trif.cmd status` shows the extension's hello; a page command
     goes helper → extension → helper; the browser quits and the helper goes with it. Twice: a plain
-    profile folder, and one with letters outside ASCII.
+    profile folder, and one with letters outside ASCII. Then, as steps that inform and never fail the
+    job: the same with Edge and with Brave (one registry key at a time), and the unit suite's
+    real-browser tests.
 - **`windows-fence.yml`**: the sandbox prototype (`tests/windows-fence/`), below.
 - **`test.yml`** (every push, macOS): the unit suite as before. One test there fails now and then on main
   too, on timing (`tests/clickjack-browser.test.js`, "a press: 6.00 ms on average"): not Windows' doing.
@@ -185,13 +187,15 @@ and left as they are.
 ### The tests
 
 - 60 test files. On Windows 19 were skipped whole (Phase 1: 455 tests ran, 368 were skipped); now their
-  tests run except the ones named in `tests/windows-skips.json`, each with a reason (**seen**: 682 run and
-  pass, 144 skipped), and three files still skipped whole (`run-folders`, `safari`, `upgrade`).
+  tests run except the ones named in `tests/windows-skips.json`, each with a reason (**seen**, Node 22: of
+  832 tests 687 run and pass, 145 are skipped), and three files still skipped whole (`run-folders`,
+  `safari`, `upgrade`).
 - The helpers had Unix in them: `tempDir` (now the native real path), the fake extension's sockets (now
   pipes on Windows), stand-ins written as `#!/bin/sh` scripts (the reveal stub is a `.js` now; the fake
   agents and the fake keychain still are: their tests stay skipped until runs exist).
 - The real-browser unit tests (`tests/cdp-page.js`: `nice`, `ps`, `pkill`) start their browser on Windows
-  now, without the memory watchdog (CI only).
+  now, without the memory watchdog (CI only), and pass there (**seen**: 6 of 6, as a step that only
+  informs; a new tab's first navigation is sometimes aborted on Windows and is tried again).
 - `tests/e2e` (the big suite) is macOS only: `ps`, `~/Library`, the TCC log, Firefox's and Chrome's Mac
   paths. `tests/windows-browser.js` is the Windows stand-in for its first steps. **Left**: the suite
   itself on Windows.
@@ -444,8 +448,8 @@ In the order it would be done:
 4. Renames that replace a file (`stage.js`, `setConfigKey`) with retries; `O_NOFOLLOW`'s absence in
    `cli.js`'s write.
 5. The browser check with user scripts allowed and a mod running on a page; Firefox on Windows in a real
-   Firefox; the unit suite's real-browser tests made steady on Windows (they run now; a navigation is
-   sometimes aborted).
+   Firefox; the unit suite's real-browser tests as part of the Windows job proper (they pass as a step
+   that only informs).
 6. The texts that read wrong on Windows; `START HERE.txt` for Windows; `trif help setup`.
 7. A person using it on Windows 11.
 

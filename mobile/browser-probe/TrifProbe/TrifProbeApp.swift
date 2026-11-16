@@ -189,6 +189,8 @@ extension Model {
         if let n = step["select"] as? Int, n < browser.tabs.count { browser.select(browser.tabs[n]) }
         if let n = step["close"] as? Int, n < browser.tabs.count { browser.close(browser.tabs[n]) }
         if step["back"] != nil { browser.back() }
+        // ({"openurl": "…"}: opened as the app opens addresses in other apps, UIApplication.open)
+        if let u = step["openurl"] as? String, let url = URL(string: u) { out = await UIApplication.shared.open(url) ? "opened" : "not opened" }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }

@@ -211,7 +211,7 @@ enum WebClipMaker {
 @MainActor
 final class ProfileHandoff: NSObject, ObservableObject {
     static let shared = ProfileHandoff()
-    enum State: Equatable { case idle, starting, handed, fetched, failed(String), timedOut, wrongBrowser(String) }
+    enum State: Equatable { case idle, starting, handed, fetched, failed(String), timedOut, wrongBrowser(String), page, pageBack }
     @Published private(set) var state: State = .idle
     private var listener: NWListener?
     private var task: UIBackgroundTaskIdentifier = .invalid
@@ -220,11 +220,59 @@ final class ProfileHandoff: NSObject, ObservableObject {
 
     private func log(_ text: String) { Diagnostics.shared.log("icon", text) }
 
+    /// The page on timsrobot.com that hands a profile to Safari from the address's # part (site/src/clip.js on the
+    /// main repo's clip-page branch): `-clipbase <https origin>` at launch for a local copy.
+    static var clipBase: String {
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-clipbase"), i + 1 < a.count { return a[i + 1] }
+        return "https://timsrobot.com"
+    }
+
+    /// The main route (Tim, 11-16): Safari opened by name (x-safari-https, whatever the default browser is) at the
+    /// page, the profile in the # part, which no server sees; no server on the phone. Used once the page is there (one
+    /// request for its script, nothing sent with it); else, and if Safari can't be opened that way, the server here.
     func hand(_ profile: Data, name: String) {
         stop(log: false)
         generation += 1
         let gen = generation
         state = .starting
+        Task { @MainActor in
+            let base = ProfileHandoff.clipBase
+            let live = await ProfileHandoff.pageIsThere(base)
+            guard generation == gen else { return }
+            guard live else { log("the page at \(base)/clip isn't there: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
+            let b64 = profile.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+            let host = base.replacingOccurrences(of: "https://", with: "")
+            guard let url = URL(string: "x-safari-https://\(host)/clip#\(b64)") else { serve(profile, name: name, gen: gen); return }
+            openedAt = Date()
+            away = false
+            UIApplication.shared.open(url) { opened in
+                MainActor.assumeIsolated {
+                    guard self.generation == gen else { return }
+                    if opened {
+                        self.log("opened in Safari at \(host)/clip (x-safari-https, \(b64.count) characters after the #)")
+                        self.state = .page
+                    } else {
+                        self.log("x-safari-https didn't open: the server on this phone instead")
+                        self.serve(profile, name: name, gen: gen)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether the page is there: its script answers (a HEAD request, nothing sent).
+    nonisolated static func pageIsThere(_ base: String) async -> Bool {
+        guard let u = URL(string: "\(base)/clip.js") else { return false }
+        var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        req.httpMethod = "HEAD"
+        req.httpShouldHandleCookies = false
+        guard let (_, r) = try? await URLSession.shared.data(for: req) else { return false }
+        return (r as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// The fallback: a server on this phone's loopback, Safari opened at it.
+    private func serve(_ profile: Data, name: String, gen: Int) {
         // (the background time first, its own identifier, so the server outlives the switch to Safari)
         task = UIApplication.shared.beginBackgroundTask(withName: "TRIF: a Home Screen icon for Safari") {
             MainActor.assumeIsolated {
@@ -363,6 +411,10 @@ final class ProfileHandoff: NSObject, ObservableObject {
         guard away, let at = openedAt else { return }
         away = false
         switch state {
+        case .page:
+            // (the page gives no word back: the person is asked, and Files offered beside it)
+            log("back in TRIF \(Int(Date().timeIntervalSince(at))) s after Safari was opened at the page")
+            state = .pageBack
         case .handed:
             log("back in TRIF \(Int(Date().timeIntervalSince(at))) s after Safari was opened, the profile not fetched: Files offered")
             state = .timedOut
@@ -379,7 +431,7 @@ final class ProfileHandoff: NSObject, ObservableObject {
     override init() {
         super.init()
         watchers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { let me = ProfileHandoff.shared; if me.openedAt != nil { switch me.state { case .handed, .starting, .wrongBrowser: me.away = true; default: break } } }
+            MainActor.assumeIsolated { let me = ProfileHandoff.shared; if me.openedAt != nil { switch me.state { case .handed, .starting, .wrongBrowser, .page: me.away = true; default: break } } }
         })
         watchers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { ProfileHandoff.shared.cameBack() }
@@ -437,7 +489,7 @@ struct WebClipSheet: View {
     private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label) } }
     /// Safari didn't get it: the Files route is offered.
     private var offerFiles: Bool {
-        switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return failed }
+        switch handoff.state { case .failed, .timedOut, .wrongBrowser, .pageBack: return true; default: return failed }
     }
 
     var body: some View {
@@ -506,8 +558,10 @@ struct WebClipSheet: View {
             Text("Saved. Open the Files app and tap the file, then open Settings, tap Profile Downloaded near the top, and Install.")
         } else {
             switch handoff.state {
-            case .handed, .fetched:
+            case .handed, .fetched, .page:
                 Text("Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install.")
+            case .pageBack:
+                Text("In Settings, tap Profile Downloaded near the top, and Install. If Safari didn't offer the profile, save it to Files instead and tap it there.")
             case .wrongBrowser(let b):
                 Text("\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead, then tap it there.")
             case .failed, .timedOut:

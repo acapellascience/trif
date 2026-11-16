@@ -102,3 +102,28 @@ jobs:
         if: always() && matrix.node != 18
         continue-on-error: true
         run: node --test --test-timeout=180000 tests/cdp-page.test.js tests/sandbox-browser.test.js tests/css-browser.test.js tests/clickjack-browser.test.js
+
+  # For information, never failing: every test the list in tests/windows-skips.json skips on Windows, run
+  # anyway, to see which pass by now (a test that does comes off the list).
+  still-skipped:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The skipped tests, run anyway
+        shell: bash
+        env:
+          TRIF_TEST_POSIX_ON_WINDOWS: 1
+        run: node --test --test-timeout=120000 --test-reporter=tap > all-on-windows.tap 2>&1; grep -cE "^ok " all-on-windows.tap; grep -E "^not ok " all-on-windows.tap | head -150; exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: all-on-windows
+          path: all-on-windows.tap
+          if-no-files-found: ignore

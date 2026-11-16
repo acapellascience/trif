@@ -5,6 +5,7 @@
 // - sandbox-runtime.js: TRIF's sandbox runtime (extension/sandbox.js) as one file that defines
 //   globalThis.__trifStartSandbox and doesn't start it, so a probe can start it inside a try and report why
 //   it failed. Both probes load it after SES (extension/vendor/ses.umd.min.js).
+// - RobotShape.swift (in the app's sources): the side panel's robot, its polygons and colours, for the app to draw.
 // - browser-checks.json: the browser probe's JavaScript checks (mobile/browser-probe/checks.js) as text the
 //   app can hand to WKWebView. Each step becomes the body of an async function that gets `prevJson` and
 //   returns JSON text.
@@ -104,8 +105,40 @@ async function bridgeFile() {
     `try { (${rt.pageBridge.toString()})(); }\ncatch (e) { console.error('[TRIF] bridge failed', e); }\n})`;
 }
 
+// RobotShape.swift: the robot the app draws (its chat button), TRIF's exactly: the polygons of the side panel's
+// own robot (sidepanel.html #bar-robot: rim, face, eyes, in its 128 space) and its colours (sidepanel.css
+// .bar-robot, switch.css --trif-green), as Swift, so the app never redraws it by hand.
+const ROBOT_OUT = path.join(__dirname, 'browser-probe', 'TrifProbe', 'RobotShape.swift');
+function robotSwiftFile() {
+  const html = fs.readFileSync(path.join(ROOT, 'extension', 'sidepanel.html'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'extension', 'sidepanel.css'), 'utf8');
+  const sw = fs.readFileSync(path.join(ROOT, 'extension', 'switch.css'), 'utf8');
+  const bar = /<button id="bar-robot"[^>]*>\s*<svg[^>]*>([\s\S]*?)<\/svg>/.exec(html);
+  if (!bar) throw new Error('sidepanel.html: no #bar-robot svg');
+  const poly = (cls) => [...bar[1].matchAll(new RegExp(`<polygon class="${cls}" points="([^"]+)"/>`, 'g'))].map((m) => m[1]);
+  const [rim] = poly('rim'), [face] = poly('face'), eyes = poly('eye');
+  if (!rim || !face || eyes.length !== 2) throw new Error('sidepanel.html: the robot has no rim, face or two eyes');
+  const pause = [...bar[1].matchAll(/<rect class="pause" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)"\/>/g)].map((m) => m.slice(1).map(Number));
+  if (pause.length !== 2) throw new Error('sidepanel.html: the robot has no pause bars');
+  const hex = (re, from, what) => { const m = re.exec(from); if (!m) throw new Error(`no ${what}`); return m[1]; };
+  const green = hex(/--trif-green:\s*(#[0-9a-f]{6})/i, sw, 'switch.css --trif-green');
+  const faceColour = hex(/\.bar-robot \.face \{ fill: (#[0-9a-f]{6}); \}/i, css, 'sidepanel.css .bar-robot .face');
+  const eyeColour = hex(/\.bar-robot \.eye \{ fill: (#[0-9a-f]{6}); \}/i, css, 'sidepanel.css .bar-robot .eye');
+  const pts = (p) => `[${p.trim().split(/\s+/).map((xy) => { const [x, y] = xy.split(','); return `(${x}, ${y})`; }).join(', ')}]`;
+  const rgb = (h) => `(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
+  return `// Made by mobile/prepare.js from extension/sidepanel.html's #bar-robot (its polygons), sidepanel.css (.bar-robot's\n` +
+    `// face and eye fills) and switch.css (--trif-green, the rim): don't edit. In the robot's own 128 x 128 space.\n\n` +
+    `enum RobotShape {\n` +
+    `    static let rim: [(Double, Double)] = ${pts(rim)}\n` +
+    `    static let face: [(Double, Double)] = ${pts(face)}\n` +
+    `    static let eyes: [[(Double, Double)]] = [${eyes.map(pts).join(', ')}]\n` +
+    `    /// The paused face's two bars: x, y, width, height, corner radius.\n` +
+    `    static let pause: [(Double, Double, Double, Double, Double)] = [${pause.map((r) => `(${r.join(', ')})`).join(', ')}]\n` +
+    `    static let rimColour = ${rgb(green)}\n    static let faceColour = ${rgb(faceColour)}\n    static let eyeColour = ${rgb(eyeColour)}\n}\n`;
+}
+
 async function main() {
-  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()]];
+  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()], [ROBOT_OUT, robotSwiftFile()]];
   for (const [file, text] of files) {
     if (process.argv.includes('--check')) {
       if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) { console.error(`${path.relative(ROOT, file)} is out of date: run node mobile/prepare.js`); process.exit(1); }
@@ -118,4 +151,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { runtimeFile, checksFile, modsFile, kitFile, bridgeFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT };
+module.exports = { runtimeFile, checksFile, modsFile, kitFile, bridgeFile, robotSwiftFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT, ROBOT_OUT };

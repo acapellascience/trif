@@ -619,38 +619,55 @@ struct ContentView: View {
 
 }
 
-/// The robot (docs/STYLE.md: one colour, its frame and eyes alike): a squircle head and two round eyes, in the
-/// button's colour. The toolbar's chat button (Tim, 11-15); while a reply is being written its eyes are three
-/// dots, lighting up one after another.
+/// TRIF's robot, exactly the side panel's (Tim, 11-16): its own polygons and colours (RobotShape.swift, made by
+/// mobile/prepare.js from extension/sidepanel.html's #bar-robot), filled as the panel fills them: the rim in TRIF's
+/// green, the face dark, the eyes mint. Writing a reply: three dots in the eyes' colour moving across the face.
+/// All mods paused: the panel's paused face, two bars.
 struct RobotGlyph: View {
-    /// All mods paused: two bars for eyes (docs/STYLE.md's paused face).
     var paused = false
     var working = false
+    private static func colour(_ c: (Int, Int, Int)) -> Color { Color(red: Double(c.0) / 255, green: Double(c.1) / 255, blue: Double(c.2) / 255) }
+    private static let rim = colour(RobotShape.rimColour), face = colour(RobotShape.faceColour), eye = colour(RobotShape.eyeColour)
     var body: some View {
         GeometryReader { g in
             let s = min(g.size.width, g.size.height)
             ZStack {
-                RoundedRectangle(cornerRadius: s * 0.3, style: .continuous).stroke(lineWidth: s * 0.09)
-                if working {
+                RobotPolygon(points: RobotShape.rim).fill(RobotGlyph.rim)
+                RobotPolygon(points: RobotShape.face).fill(paused ? Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0x18 / 255, green: 0x18 / 255, blue: 0x1a / 255, alpha: 1) : UIColor(red: 0xf4 / 255, green: 0xf4 / 255, blue: 0xf5 / 255, alpha: 1) }) : RobotGlyph.face)
+                if paused {
+                    ForEach(0..<RobotShape.pause.count, id: \.self) { i in
+                        let r = RobotShape.pause[i], k = s / 128
+                        RoundedRectangle(cornerRadius: r.4 * k).fill(RobotGlyph.rim)
+                            .frame(width: r.2 * k, height: r.3 * k)
+                            .position(x: (r.0 + r.2 / 2) * k, y: (r.1 + r.3 / 2) * k)
+                    }
+                } else if working {
                     PhaseAnimator([0, 1, 2]) { lit in
-                        HStack(spacing: s * 0.08) {
-                            ForEach(0..<3, id: \.self) { i in Circle().frame(width: s * 0.15, height: s * 0.15).opacity(i == lit ? 1 : 0.3) }
+                        HStack(spacing: s * 0.07) {
+                            ForEach(0..<3, id: \.self) { i in Circle().fill(RobotGlyph.eye).frame(width: s * 0.15, height: s * 0.15).opacity(i == lit ? 1 : 0.35) }
                         }
                     } animation: { _ in .easeInOut(duration: 0.3) }
                 } else {
-                    HStack(spacing: s * 0.2) {
-                        if paused {
-                            RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
-                            RoundedRectangle(cornerRadius: s * 0.04).frame(width: s * 0.13, height: s * 0.36)
-                        } else {
-                            Circle().frame(width: s * 0.2, height: s * 0.2)
-                            Circle().frame(width: s * 0.2, height: s * 0.2)
-                        }
-                    }
+                    ForEach(0..<RobotShape.eyes.count, id: \.self) { i in RobotPolygon(points: RobotShape.eyes[i]).fill(RobotGlyph.eye) }
                 }
             }
             .frame(width: s, height: s)
         }
+    }
+}
+
+/// One of the robot's polygons, scaled from its 128 x 128 space to the view's.
+struct RobotPolygon: Shape {
+    let points: [(Double, Double)]
+    func path(in rect: CGRect) -> Path {
+        let k = min(rect.width, rect.height) / 128
+        var p = Path()
+        for (n, (x, y)) in points.enumerated() {
+            let pt = CGPoint(x: rect.minX + x * k, y: rect.minY + y * k)
+            if n == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        }
+        p.closeSubpath()
+        return p
     }
 }
 

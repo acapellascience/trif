@@ -221,7 +221,9 @@ time, for a headless Simulator: write the app's Documents/step.json, then
 `{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"cancelOffer": 1}`, `{"status": 1}`, and
 for the chat `{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`, `{"chat": 1}` (shown, what
 it's doing, its address), `{"closechat": 1}`; `{"boxjs": "…"}` (in the boxed mods' world: `return JSON.stringify(globalThis.__trifSandbox.errors)`),
-`{"approve": "<mod id>|*"}` (Allow on waiting mods). shared/pages/feed.html draws a feed from feed.json by fetch and by
+`{"approve": "<mod id>|*"}` (Allow on waiting mods); `{"sheet": "address"}` opens the address screen; `-pageletter` at
+launch shows the site's letter in the toolbar's page button instead of the page glyph. shared/pages/fixedbars.html
+has a fixed header and an x.com-like fixed tab bar at the bottom, for the bars moving over a page. shared/pages/feed.html draws a feed from feed.json by fetch and by
 XMLHttpRequest, for a boxed mod's site-data power (trif.filterResponse).
 
 The chat can't be signed in to in the Simulator: `-chathome http://localhost:8377/chat.html` (with

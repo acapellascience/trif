@@ -210,13 +210,14 @@ struct ShareSheet: UIViewControllerRepresentable {
 /// The Mods tab, as a sheet over the page: the panel's list for the shown tab's site.
 struct ModsPanelView: View {
     @ObservedObject var panel: ModsPanel
+    /// Closes it (it lies over the page, the toolbar under it).
+    var close: () -> Void = {}
     @EnvironmentObject var browser: Browser
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { close() }
 
     var body: some View {
         NavigationStack {
             WebViewHost(webView: panel.webView)
-                .ignoresSafeArea(edges: .bottom)
                 .background(Color(.systemBackground))
                 .navigationTitle(browser.site.isEmpty ? "Mods" : "Mods on \(browser.site)")
                 .navigationBarTitleDisplayMode(.inline)

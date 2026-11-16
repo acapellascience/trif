@@ -153,6 +153,28 @@ A tap opens the app on the tab the message was sent from, with Add this mod? (or
 | Over the chat while the tab's data goes into its box (a moment; it was 10 to 15 s on Instagram) | — | Adding the page… |
 | The screenshot attached in the message box | TRIF screenshot.png | TRIF screenshot.jpg |
 
+## The address bar and the address screen, like Chrome's (added 11-15)
+
+| Where | Old | New |
+|---|---|---|
+| The address bar, not being typed in (full and small) | the whole address in a field | only the site, centred: x.com (no www. or m., no scheme or path), with the lock on https; a tab with no page: Search or type URL |
+| The address bar, accessibility | — | Address, {site} |
+| The full address bar's share button (iOS's share sheet; Copy is first there) | — | an icon; accessibility: Share |
+| The address screen, the field's placeholder | Search or type an address | Search or type URL |
+| The address screen, beside the field | — | Cancel |
+| The address screen, the current page's row: its buttons (accessibility) | — | Copy link (then Copied) · Edit link |
+| The address screen, over the history | — | History |
+| Typing something that isn't an address | (searched DuckDuckGo) | searches Google (no new words) |
+
+## The toolbar's page button (added 11-15)
+
+| Where | New |
+|---|---|
+| The toolbar's middle button (a page in a soft green circle): back to the page from the chat, the tabs, Mods or the address screen; on the page already, only a light tap | accessibility: Back to {site} (Back to Tab with no site), the string the chat's ‹ {site} uses |
+| Back and forward while any of those cover the page | close it, as they did for the chat; accessibility: Back to {site} |
+
+The tabs and the Mods tab now open over the page with the toolbar showing under them (they were sheets over it).
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

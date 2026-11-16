@@ -113,7 +113,9 @@ struct SavedTabs: Codable {
 /// The tab switcher: every tab as a card (its picture and title), tap to switch, × to close, + for a new one.
 struct TabsView: View {
     @EnvironmentObject var browser: Browser
-    @Environment(\.dismiss) private var dismiss
+    /// Closes it (it lies over the page, the toolbar under it).
+    var close: () -> Void = {}
+    private func dismiss() { close() }
     private let columns = [GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top), GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top)]
 
     var body: some View {

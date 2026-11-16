@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TRIF probe: fixed bars</title>
+<!-- A long page with a fixed header and a fixed tab bar at the bottom, as x.com's timeline has: for the app's own bars
+     moving over it (TrifProbeApp.swift BarState): the page's bars should move with them, never covered, never
+     floating over a gap. -->
+<style>
+  body { margin: 0; font: 17px/1.5 -apple-system, system-ui, sans-serif; background: #fff; }
+  header { position: sticky; top: 0; height: 48px; background: #1d9bf0; color: #fff; display: flex; align-items: center; padding: 0 16px; font-weight: 700; }
+  nav { position: fixed; left: 0; right: 0; bottom: 0; height: 52px; background: #000; color: #fff; display: flex; justify-content: space-around; align-items: center; border-top: 4px solid #f91880; font-weight: 700; }
+  article { padding: 14px 16px; border-bottom: 1px solid #eee; }
+</style>
+</head>
+<body>
+<header>Fixed header (sticky)</header>
+<main id="main"></main>
+<nav><span>Home</span><span>Search</span><span>Bell</span><span>Mail</span></nav>
+<script nonce="probe">
+  const main = document.getElementById('main');
+  for (let i = 1; i <= 120; i++) { const a = document.createElement('article'); a.textContent = `Post ${i}: something a person wrote, long enough to wrap onto a second line on a phone.`; main.append(a); }
+</script>
+</body>
+</html>

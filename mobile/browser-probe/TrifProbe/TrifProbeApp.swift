@@ -173,7 +173,8 @@ struct ContentView: View {
     let bars: BarState
     @Environment(\.scenePhase) private var phase
 
-    @State private var entry = ""
+    /// The address screen (AddressScreen), over the page, the toolbar under it.
+    @State private var showAddress = false
     @State private var showChecks = false
     @State private var showReport = false
     @State private var showTabs = false
@@ -182,7 +183,6 @@ struct ContentView: View {
     @State private var importing = false
     @State private var asking = false
     @State private var question = ""
-    @FocusState private var editing: Bool
 
     /// Mods waiting for the user's OK on this site (the Mods button's badge, as the panel's waiting badge).
     private var waitingHere: Int {
@@ -224,6 +224,20 @@ struct ContentView: View {
                 column
                     .background(Color(.systemBackground))
                     .zIndex(pane.shown ? 0 : 1)
+                // (what else covers the page lies over it the same way, the toolbar showing under it, so the toolbar's
+                // page button (and the others) can always take you back: Tim, 11-15)
+                if showTabs {
+                    TabsView(close: { showTabs = false }).environmentObject(browser)
+                        .modifier(ToolbarRoom(insets: bars.insets)).zIndex(3)
+                }
+                if showMods {
+                    ModsPanelView(panel: modsPanel, close: { showMods = false }).environmentObject(browser)
+                        .modifier(ToolbarRoom(insets: bars.insets)).zIndex(3)
+                }
+                if showAddress {
+                    AddressScreen(history: browser.history, close: { showAddress = false }).environmentObject(browser)
+                        .modifier(ToolbarRoom(insets: bars.insets)).zIndex(4)
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             .clipped()
@@ -266,19 +280,19 @@ struct ContentView: View {
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .onAppear { entry = browser.address; pane.follow(site: browser.site); bars.attach(browser.webView) }
-        .onChange(of: browser.address) { _, new in if !editing { entry = new }; pane.follow(site: browser.site) }
-        .onChange(of: browser.pageChanged) { _, _ in if !editing { entry = browser.address }; pane.follow(site: browser.site); bars.attach(browser.webView) }
+        .onAppear { pane.follow(site: browser.site); bars.attach(browser.webView) }
+        .onChange(of: browser.address) { _, _ in pane.follow(site: browser.site) }
+        .onChange(of: browser.pageChanged) { _, _ in pane.follow(site: browser.site); bars.attach(browser.webView) }
         .onChange(of: browser.loading) { _, now in if now { bars.expand() } }
-        .onChange(of: editing) { _, now in bars.hold(now || pane.shown) }
-        .onChange(of: pane.shown) { _, now in bars.hold(now || editing) }
+        // (the bars stay full while anything covers the page: its toolbar is how to get back)
+        .onChange(of: covered) { _, now in bars.hold(now) }
         .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
         .onChange(of: browser.hideChat) { _, _ in pane.close() }
         // (the next of a reply's mods once the Mods tab, opened for one that waits for an OK, has closed)
         .onChange(of: showMods) { _, open in if !open { browser.holdFromChat = false; nextOfferSoon() } }
         .onChange(of: modsPanel.wantsClose) { _, want in if want { showMods = false; modsPanel.wantsClose = false } }
         .onChange(of: browser.wantsMods) { _, want in if want { showMods = true; browser.wantsMods = false } }
-        .onChange(of: browser.wantsAddress) { _, want in if want { entry = ""; editing = true; browser.wantsAddress = false } }
+        .onChange(of: browser.wantsAddress) { _, want in if want { closeCovers(); showAddress = true; browser.wantsAddress = false } }
         .onChange(of: browser.wantsSheet) { _, which in
             switch which {
             case "mods": showMods = true
@@ -286,7 +300,8 @@ struct ContentView: View {
             case "history": showHistory = true
             case "chat": pane.open()
             case "import": importing = true
-            case "none": showMods = false; showTabs = false; showHistory = false; pane.close(); showChecks = false; showReport = false
+            case "address": showAddress = true
+            case "none": showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
             default: break
             }
             browser.wantsSheet = ""
@@ -298,12 +313,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
-        .sheet(isPresented: $showTabs) { TabsView().environmentObject(browser) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
-        .sheet(isPresented: $showMods) {
-            ModsPanelView(panel: modsPanel).environmentObject(browser)
-                .presentationDetents([.medium, .large], selection: .constant(.large))
-        }
         .sheet(item: $browser.modLink) { link in ModLinkView(link: link).environmentObject(browser) }
         .sheet(item: $browser.modOffer, onDismiss: nextOfferSoon) { mod in ModOfferView(mod: mod).environmentObject(browser) }
         .alert("What bothers you on this page?", isPresented: $asking) {
@@ -349,7 +359,7 @@ struct ContentView: View {
     private var compactBar: some View {
         HStack(spacing: 6) {
             if browser.webView.url?.scheme == "https" { Image(systemName: "lock.fill").font(.system(size: 9)) }
-            Text(browser.host.hasPrefix("www.") ? String(browser.host.dropFirst(4)) : browser.host.isEmpty ? "New tab" : browser.host)
+            Text(siteLabel)
                 .font(.footnote.weight(.medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -365,16 +375,39 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// The page's site as the address bar shows it when it isn't being typed in (Tim, 11-15, as Chrome): only the
+    /// host, without www. or m.; no scheme, no path.
+    private var siteLabel: String {
+        var h = browser.host
+        for p in ["www.", "m."] where h.hasPrefix(p) { h.removeFirst(p.count) }
+        return h.isEmpty ? (browser.webView.url == nil ? "Search or type URL" : browser.address) : h
+    }
+
+    /// The full address bar: the site, centred (a lock for https), and Share inside it; tap it for the address screen.
+    /// Reload (Stop while loading) beside it.
     private var addressBar: some View {
         HStack(spacing: 8) {
-            TextField("Search or type an address", text: $entry)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($editing)
-                .submitLabel(.go)
-                .onSubmit { browser.go(entry) }
+            Button { closeCovers(); showAddress = true } label: {
+                HStack(spacing: 5) {
+                    if browser.webView.url?.scheme == "https" { Image(systemName: "lock.fill").font(.system(size: 11)).foregroundStyle(.secondary) }
+                    Text(siteLabel).font(.body).lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(browser.webView.url == nil ? .secondary : .primary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 36)
+                .frame(height: 38)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemBackground)))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Address, \(siteLabel)")
+            .overlay(alignment: .trailing) {
+                if let url = browser.webView.url, ["http", "https"].contains(url.scheme ?? "") {
+                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up").font(.system(size: 16)) }
+                        .padding(.trailing, 10)
+                        .accessibilityLabel("Share")
+                }
+            }
             if browser.loading {
                 Button { browser.webView.stopLoading() } label: { Image(systemName: "xmark") }.accessibilityLabel("Stop")
             } else {
@@ -386,12 +419,28 @@ struct ContentView: View {
         .padding(.vertical, 6)
     }
 
+    /// Something covers the page: the chat, the tabs, the Mods tab, the address screen.
+    private var covered: Bool { pane.shown || showTabs || showMods || showAddress }
+    /// Whatever covers the page closes (the chat as its own Back does: nothing in it lost).
+    private func closeCovers() {
+        if pane.shown { pane.close() }
+        showTabs = false
+        showMods = false
+        showAddress = false
+    }
+    /// The toolbar's page button (Tim, 11-15): back to the page, from whatever covers it; on the page already, only
+    /// the tap's feel.
+    private func showPage() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        closeCovers()
+    }
+
     /// Back and forward's accessibility label while the chat is open (as the chat's own ‹ {site}).
     private var backToTab: String { "Back to \(browser.site.isEmpty ? "Tab" : browser.site)" }
 
-    /// A toolbar button while the chat is open: back to the tab first, then its job there.
+    /// A toolbar button while something covers the page: back to the tab first, then its job there.
     private func onTab(_ job: () -> Void) {
-        pane.close()
+        closeCovers()
         job()
     }
 
@@ -399,16 +448,16 @@ struct ContentView: View {
         HStack {
             // (with the chat open, back and forward only close it, back to the page as it was: Tim, 11-15, "that's
             // the behaviour people will expect")
-            Button { if pane.shown { pane.close() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
-                .disabled(!pane.shown && !browser.canGoBack)
-                .accessibilityLabel(pane.shown ? backToTab : "Back")
+            Button { if covered { closeCovers() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
+                .disabled(!covered && !browser.canGoBack)
+                .accessibilityLabel(covered ? backToTab : "Back")
             Spacer()
-            Button { if pane.shown { pane.close() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
-                .disabled(!pane.shown && !browser.canGoForward)
-                .accessibilityLabel(pane.shown ? backToTab : "Forward")
+            Button { if covered { closeCovers() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
+                .disabled(!covered && !browser.canGoForward)
+                .accessibilityLabel(covered ? backToTab : "Forward")
             Spacer()
             // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
-            Button { if pane.shown { pane.close() } else { pane.open() } } label: {
+            Button { if pane.shown { pane.close() } else { closeCovers(); pane.open() } } label: {
                 ChatGlyph(activity: pane.activity).frame(width: 24, height: 24)
                     .padding(5)
                     .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.trifGreen.opacity(pane.shown ? 0.2 : 0)))
@@ -416,6 +465,10 @@ struct ContentView: View {
             }
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
+            Spacer()
+            // (the page: back to it from whatever covers it; in the middle, a little bigger)
+            Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil) }
+                .accessibilityLabel(backToTab)
             Spacer()
             // (the mods' button is a switch, on or, with all paused, off: Tim, 11-15; the robot is the chat's now)
             Button { onTab { showMods = true } } label: {
@@ -503,6 +556,23 @@ struct RobotGlyph: View {
             }
             .frame(width: s, height: s)
         }
+    }
+}
+
+/// The toolbar's page button, in the middle and a little bigger: a page, in a soft green circle (or, to compare,
+/// `-pageletter`: the site's letter).
+struct PageGlyph: View {
+    var letter: String? = nil
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.trifGreen.opacity(0.16)).frame(width: 40, height: 40)
+            if let letter, !letter.isEmpty {
+                Text(letter).font(.system(size: 19, weight: .bold, design: .rounded))
+            } else {
+                Image(systemName: "doc.text").font(.system(size: 19, weight: .medium))
+            }
+        }
+        .frame(width: 40, height: 40)
     }
 }
 
@@ -770,17 +840,22 @@ extension Color {
 // MARK: the bars as the page scrolls (Tim, 11-15: "a little more dynamism … like chrome mobile")
 
 /// The address bar and the toolbar following the page's scrolling, as Chrome's and Safari's do on iPhone: scrolling
-/// down shrinks the address bar to a small line with the site (no buttons) and slides the toolbar away; scrolling up,
-/// reaching the top, a tap on the small line, or a page starting to load brings both back. They move with the finger
-/// (`progress`, 0 full to 1 compact), and settle fully one way or the other when it lets go.
-/// The page isn't resized meanwhile: it lies under the bars, and what they cover is told to it (WKWebView's
-/// obscuredContentInsets, iOS 26) once, when they've settled, so its fixed headers and footers stay clear of them.
-/// Before iOS 26 the bars stay full and the page sits between them (`moves` false).
+/// down shrinks the address bar to a small line with the site and slides the toolbar away; scrolling up, reaching
+/// the top, a tap on the small line, or a page starting to load brings both back. `progress` (0 full, 1 compact)
+/// follows the scrolling, but no faster than the whole way in about 0.22 s, easing in and out (11-15: a fast flick
+/// moved them in one jump), and settles fully one way or the other once the finger is off.
+/// The page is never resized for them: it lies under both bars, from the small line to the foot, the whole time, and
+/// WebKit is told what they cover as they move, every frame (obscuredContentInsets, iOS 26), so the page's fixed
+/// headers and footers (x.com's tab bar) move with them and are never covered or left floating. The page's own
+/// viewport, for vh units, is told the range once (setMinimumViewportInset: compact … full). Before iOS 26 the bars
+/// stay full and the page sits between them (`moves` false).
 /// Its own object: per-frame changes redraw the two bars, not the app's main view.
 @MainActor
 final class BarState: NSObject, ObservableObject {
     static let compactHeight: CGFloat = 26
     static var moves: Bool { if #available(iOS 26, *) { return true } else { return false } }
+    /// The bars' fastest: the whole way in this long.
+    static let quickest: CGFloat = 0.22
 
     @Published private(set) var progress: CGFloat = 0
     @Published private(set) var loading = false
@@ -798,23 +873,27 @@ final class BarState: NSObject, ObservableObject {
     private var lastY: CGFloat = 0
     private var held = false
     private var settleTask: Task<Void, Never>?
+    /// Where the scrolling says the bars should be; `progress` goes there at its own pace (tick).
+    private var target: CGFloat = 0
+    private var speed: CGFloat = 0
+    private var link: CADisplayLink?
 
     func measured(full: CGFloat) {
         let e = max(full - BarState.compactHeight, 0)
         guard abs(e - extra) > 0.5 else { return }
         extra = e
-        applyInsets()
+        applyInsets(range: true)
     }
     func measured(toolbar: CGFloat) {
         guard abs(toolbar - toolbarHeight) > 0.5 else { return }
         toolbarHeight = toolbar
         insets.set(toolbar: toolbar)
-        applyInsets()
+        applyInsets(range: true)
     }
     func measured(bottom: CGFloat) {
         guard abs(bottom - bottomHeight) > 0.5 else { return }
         bottomHeight = bottom
-        applyInsets()
+        applyInsets(range: true)
     }
 
     /// Follows the shown tab's web view (a tab switch, a page loaded).
@@ -834,13 +913,15 @@ final class BarState: NSObject, ObservableObject {
         ]
         sv.panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
         settleTask?.cancel()
+        stop()
+        target = 0
         progress = 0
-        applyInsets()
+        applyInsets(range: true)
     }
 
     /// The bars full again (a load starting, the address being typed, a tap on the small line).
     func expand() { settle(to: 0) }
-    /// While the address is being typed, the bars stay full.
+    /// While the address is being typed, or the chat is open, the bars stay full.
     func hold(_ h: Bool) { held = h; if h { expand() } }
 
     private func scrolled(_ sv: UIScrollView) {
@@ -849,14 +930,14 @@ final class BarState: NSObject, ObservableObject {
         guard BarState.moves, !held else { return }
         let top = -sv.adjustedContentInset.top
         // (a page with little or nothing to scroll keeps its bars)
-        if sv.contentSize.height < sv.bounds.height + 120 { if progress != 0 { settle(to: 0) }; return }
+        if sv.contentSize.height < sv.bounds.height + 120 { if target != 0 { settle(to: 0) }; return }
         // (at the top, or pulled down past it: full)
-        if y <= top + 1 { if progress != 0 { if sv.isTracking { progress = 0 } else { settle(to: 0) } }; return }
+        if y <= top + 1 { if target != 0 { settle(to: 0) }; return }
         // (only the person's own scrolling: not a page scrolling itself, not the bounce at the bottom)
         guard sv.isTracking || sv.isDecelerating else { return }
         if y >= sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom - 1 { return }
-        let p = min(max(progress + (y - lastY) / max(toolbarHeight, 44), 0), 1)
-        if p != progress { progress = p }
+        let t = min(max(target + (y - lastY) / max(toolbarHeight, 44), 0), 1)
+        if t != target { target = t; run() }
         if !sv.isTracking { settleSoon() }
     }
 
@@ -871,24 +952,65 @@ final class BarState: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard let self, !Task.isCancelled, let sv = self.webView?.scrollView, !sv.isTracking else { return }
             if sv.isDecelerating { self.settleSoon(); return }
-            self.settle(to: self.progress > 0.5 ? 1 : 0)
+            self.settle(to: self.target > 0.5 ? 1 : 0)
         }
     }
 
-    private func settle(to target: CGFloat) {
+    private func settle(to t: CGFloat) {
         settleTask?.cancel()
-        if progress != target { withAnimation(.easeOut(duration: 0.22)) { progress = target } }
+        target = t
+        run()
+    }
+
+    // MARK: moving the bars, a frame at a time
+
+    private func run() {
+        guard link == nil, progress != target else { return }
+        let l = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        l.add(to: .main, forMode: .common)
+        link = l
+    }
+    private func stop() {
+        link?.invalidate()
+        link = nil
+        speed = 0
+    }
+
+    /// One frame: toward `target`, closely enough to follow a slow scroll, never faster than `quickest`, speeding up
+    /// and slowing down smoothly.
+    @objc private func tick(_ l: CADisplayLink) {
+        let dt = CGFloat(max(min(l.targetTimestamp - l.timestamp, 1.0 / 30), 1.0 / 240))
+        let diff = target - progress
+        if abs(diff) < 0.002 {
+            progress = target
+            applyInsets()
+            stop()
+            return
+        }
+        let fastest = 1 / BarState.quickest
+        // (the speed that would close the gap in about 50 ms, capped; reached within about 60 ms; slowing to stop)
+        let wanted = max(min(diff / 0.05, fastest), -fastest)
+        let accel = fastest / 0.06 * dt
+        speed = speed + max(min(wanted - speed, accel), -accel)
+        var p = progress + speed * dt
+        if (diff > 0 && p > target) || (diff < 0 && p < target) { p = target }
+        progress = min(max(p, 0), 1)
         applyInsets()
     }
 
-    /// What the settled bars cover, told to the page (only when it changes: each change lays the page out again).
-    private func applyInsets() {
+    /// What the bars cover now, told to WebKit (every frame they move); with `range`, also the viewport's range
+    /// (compact … full, for the page's vh units), when a bar's size changes.
+    private func applyInsets(range: Bool = false) {
         insets.set(top: extra, bottom: bottomHeight)
         guard let wv = webView else { return }
         if #available(iOS 26, *) {
-            let p: CGFloat = progress >= 0.5 ? 1 : 0
-            let e = UIEdgeInsets(top: extra * (1 - p), left: 0, bottom: max(bottomHeight - toolbarHeight * p, 0), right: 0)
+            let p = progress
+            let e = UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * p, 0) * 2).rounded() / 2, right: 0)
             if wv.obscuredContentInsets != e { wv.obscuredContentInsets = e }
+            if range {
+                wv.setMinimumViewportInset(UIEdgeInsets(top: 0, left: 0, bottom: max(bottomHeight - toolbarHeight, 0), right: 0),
+                                           maximumViewportInset: UIEdgeInsets(top: extra, left: 0, bottom: bottomHeight, right: 0))
+            }
         }
     }
 }

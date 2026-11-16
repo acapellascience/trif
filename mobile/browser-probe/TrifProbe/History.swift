@@ -180,3 +180,148 @@ struct HistoryView: View {
         }
     }
 }
+
+// MARK: the address screen (Tim, 11-15: "like Chrome")
+
+/// What a tap on the address bar opens, over the page (the toolbar stays under it): the address field at the top
+/// with the whole address, all selected so typing replaces it, and Cancel; the current page, with Copy and Edit;
+/// then the history, newest first, narrowed to what matches the typing (title or address), all on the phone. Go
+/// opens what's typed: an address, or a search on Google (Browser.address(for:)).
+struct AddressScreen: View {
+    @EnvironmentObject var browser: Browser
+    @ObservedObject var history: HistoryStore
+    let close: () -> Void
+    @State private var text = ""
+    @State private var editTick = 0
+    @State private var copied = false
+
+    private var current: String { browser.webView.url?.absoluteString ?? "" }
+    private var typing: Bool { !text.isEmpty && text != current }
+    private var shown: [HistoryEntry] {
+        let q = typing ? text.trimmingCharacters(in: .whitespaces).lowercased() : ""
+        var out: [HistoryEntry] = []
+        var seen = Set<String>()
+        for e in history.entries.reversed() {
+            if !q.isEmpty && !e.url.lowercased().contains(q) && !e.title.lowercased().contains(q) { continue }
+            // (one row for an address, whatever follows its #)
+            guard seen.insert(e.url.components(separatedBy: "#")[0]).inserted else { continue }
+            out.append(e)
+            if out.count >= 200 { break }
+        }
+        return out
+    }
+
+    private func open(_ s: String) {
+        browser.go(s)
+        close()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                AddressField(text: $text, editTick: editTick, placeholder: "Search or type URL") { open(text) }
+                    .frame(height: 38)
+                    .padding(.horizontal, 10)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemBackground)))
+                Button("Cancel", action: close)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            List {
+                if !typing, !current.isEmpty {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(browser.title.isEmpty ? (browser.webView.url?.host ?? current) : browser.title).lineLimit(1)
+                            Text(current).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer(minLength: 4)
+                        Button {
+                            UIPasteboard.general.string = current
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            copied = true
+                        } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(copied ? "Copied" : "Copy link")
+                        Button { text = current; editTick += 1 } label: { Image(systemName: "pencil") }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Edit link")
+                    }
+                }
+                Section {
+                    ForEach(shown) { e in
+                        Button { open(e.url) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(e.title.isEmpty ? e.host : e.title).lineLimit(1)
+                                Text(e.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                } header: {
+                    if !typing { Text("History") }
+                }
+            }
+            .listStyle(.plain)
+            .scrollDismissesKeyboard(.immediately)
+        }
+        .background(Color(.systemBackground))
+        .onAppear { text = current }
+    }
+}
+
+/// The address field: a UITextField, so the whole address can be selected when it opens (typing replaces it), and
+/// Edit can put the cursor at its end. URL keyboard, Go.
+struct AddressField: UIViewRepresentable {
+    @Binding var text: String
+    /// Changed by Edit: the field shows `text` with the cursor at its end, nothing selected.
+    var editTick: Int
+    var placeholder: String
+    var go: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let f = UITextField()
+        f.placeholder = placeholder
+        f.font = .preferredFont(forTextStyle: .subheadline)
+        f.keyboardType = .webSearch
+        f.returnKeyType = .go
+        f.autocapitalizationType = .none
+        f.autocorrectionType = .no
+        f.spellCheckingType = .no
+        f.clearButtonMode = .whileEditing
+        f.textContentType = .URL
+        f.delegate = context.coordinator
+        f.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        f.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        f.accessibilityLabel = "Address"
+        DispatchQueue.main.async {
+            f.text = text
+            f.becomeFirstResponder()
+            f.selectAll(nil)
+        }
+        return f
+    }
+
+    func updateUIView(_ f: UITextField, context: Context) {
+        context.coordinator.parent = self
+        if f.text != text { f.text = text }
+        if context.coordinator.tick != editTick {
+            context.coordinator.tick = editTick
+            DispatchQueue.main.async {
+                f.becomeFirstResponder()
+                let end = f.endOfDocument
+                f.selectedTextRange = f.textRange(from: end, to: end)
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: AddressField
+        var tick: Int
+        init(_ p: AddressField) { parent = p; tick = p.editTick }
+        @objc func changed(_ f: UITextField) { parent.text = f.text ?? "" }
+        func textFieldShouldReturn(_ f: UITextField) -> Bool { parent.go(); return false }
+    }
+}

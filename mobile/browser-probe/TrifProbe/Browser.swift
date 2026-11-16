@@ -417,18 +417,30 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     // MARK: going places
 
     func go(_ text: String) {
-        var entry = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if entry.isEmpty { return }
-        if !entry.contains("://") {
-            if entry.contains(" ") || !entry.contains(".") {
-                entry = "https://duckduckgo.com/?q=" + (entry.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? entry)
-            } else {
-                entry = "https://" + entry
-            }
-        }
-        guard let url = URL(string: entry) else { status = "That isn't an address."; return }
+        guard let url = Browser.address(for: text) else { status = "That isn't an address."; return }
         picked = nil
         webView.load(URLRequest(url: url))
+    }
+
+    /// What the address field's text means (Tim, 11-15, as Chrome): a search on Google when it has a space, or no dot
+    /// and isn't localhost or an IP address; otherwise an address, https:// added when it has no scheme (http:// for
+    /// localhost). What's typed goes to Google only then, at Go: nothing is looked up while typing.
+    nonisolated static func address(for text: String) -> URL? {
+        let entry = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entry.isEmpty { return nil }
+        let lower = entry.lowercased()
+        if lower.range(of: "^[a-z][a-z0-9+.-]*://", options: .regularExpression) != nil { return URL(string: entry) }
+        if ["about:", "data:", "trifprobe:"].contains(where: { lower.hasPrefix($0) }) { return URL(string: entry) }
+        let hostPart = String(lower.split(separator: "/", maxSplits: 1).first ?? "")
+        let host = hostPart.replacingOccurrences(of: ":\\d+$", with: "", options: .regularExpression)
+        let local = host == "localhost" || host.hasSuffix(".localhost")
+        let ip = host.range(of: "^\\d{1,3}(\\.\\d{1,3}){3}$", options: .regularExpression) != nil || host.hasPrefix("[")
+        if entry.contains(" ") || (!entry.contains(".") && !local && !ip) {
+            var allowed = CharacterSet.urlQueryAllowed
+            allowed.remove(charactersIn: "+&=#?/")
+            return URL(string: "https://www.google.com/search?q=" + (entry.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""))
+        }
+        return URL(string: (local ? "http://" : "https://") + entry)
     }
 
     func reload() { picked = nil; webView.reload() }

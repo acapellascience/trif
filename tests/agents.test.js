@@ -7,12 +7,19 @@ const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, privDir } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, privDir, windowsShims } = require('./fake-extension');
 const claude = require('../helper/lib/agents/claude');
 const codex = require('../helper/lib/agents/codex');
 const agents = require('../helper/lib/agents');
 const { diffSnapshots } = require('../helper/lib/runs');
 const { redact } = require('../helper/lib/logins');
+
+// Windows: a stand-in agent is found as the .cmd beside it (fake-extension.js windowsShims), a file's place in
+// the workspace is said with its own slashes, and there are no signals, file modes or sandbox settings.
+const WIN = process.platform === 'win32';
+const exe = (dir, name) => path.join(dir, WIN ? `${name}.cmd` : name);
+const inWs = (...parts) => path.join(...parts);
+const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const cleanups = [];
 test.after(async () => {
@@ -158,6 +165,7 @@ function makeHome({ fake = true, config = {} } = {}) {
   const cfg = { ...config, env: { PATH: bin, ...(config.env || {}) } };
   fs.mkdirSync(privDir(home), { recursive: true });
   fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify(cfg));
+  windowsShims(home);
   return { home, bin };
 }
 
@@ -290,7 +298,7 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
     { kind: 'session', sessionId: 'abc' },
     { kind: 'text', text: 'Hello' },
     { kind: 'tool', name: 'Bash', summary: 'trif reload --tab 3' },
-    { kind: 'tool', name: 'Write', summary: 'sites/a.com/m.js' },
+    { kind: 'tool', name: 'Write', summary: inWs('sites', 'a.com', 'm.js') },
     { kind: 'tool', name: 'Read', summary: '/elsewhere/x' },
     { kind: 'done', ok: true, result: 'ok!', costUsd: 0.5, sessionId: 'abc' },
   ]);
@@ -539,7 +547,7 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.deepEqual(ev, [
     { kind: 'session', sessionId: 'th1' },
     { kind: 'tool', name: 'Bash', summary: 'trif tabs' },
-    { kind: 'tool', name: 'Edit', summary: 'sites/a.com/m.js' },
+    { kind: 'tool', name: 'Edit', summary: inWs('sites', 'a.com', 'm.js') },
     { kind: 'text', text: 'All done.' },
     { kind: 'done', ok: true, result: 'All done.', costUsd: null, sessionId: 'th1' },
   ]);
@@ -641,7 +649,7 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing', as
   assert.equal(r.result.default, 'claude');
   const c = r.result.agents.find((a) => a.id === 'claude');
   assert.deepEqual(c, {
-    id: 'claude', name: 'Claude Code', path: path.join(bin, 'claude'), available: true, version: '9.9.9', note: '',
+    id: 'claude', name: 'Claude Code', path: exe(bin, 'claude'), available: true, version: '9.9.9', note: '',
     canLogin: true, canLogout: true, loginFix: claude.loginFix, loggedIn: false, efforts: claude.efforts,
   });
   const x = r.result.agents.find((a) => a.id === 'codex');
@@ -653,7 +661,7 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing', as
   await ext.waitForSocket();
   const s = await sockRequest(ext.sock, { id: 'l', cmd: 'agent.list' });
   assert.equal(s.ok, true);
-  assert.equal(s.result.agents[0].path, path.join(bin, 'claude'));
+  assert.equal(s.result.agents[0].path, exe(bin, 'claude'));
   // Unknown extension requests get an error response.
   const bad = await extRequest(ext, 'agent.fly');
   assert.equal(bad.ok, false);
@@ -677,7 +685,7 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
     { kind: 'session', sessionId: 'sess-new-1' },
     { kind: 'text', text: 'Hiding the banner now.' },
     { kind: 'tool', name: 'Bash', summary: 'trif reload --tab 12' },
-    { kind: 'tool', name: 'Edit', summary: 'sites/example.com/fake.js' },
+    { kind: 'tool', name: 'Edit', summary: inWs('sites', 'example.com', 'fake.js') },
     { kind: 'text', text: 'Done: the banner is hidden.' },
   ]);
   assert.equal(evs.filter((e) => e.kind === 'done').length, 1);
@@ -698,7 +706,11 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   assert.ok(!a.some((x) => /hide the banner|example\.com/.test(x)), JSON.stringify(a));
   for (const f of ['--output-format', 'stream-json', '--verbose', '--strict-mcp-config']) assert.ok(a.includes(f), f);
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'default');
-  assert.equal(JSON.parse(call.settings).sandbox.enabled, true);
+  // (Windows: no sandbox of Claude Code's to switch on, and no shell: the run is behind TRIF's fence, tests/windows-runs.test.js)
+  if (WIN) {
+    assert.deepEqual(JSON.parse(call.settings), { permissions: { deny: ['WebFetch', 'WebSearch'] } });
+    assert.equal(a[a.indexOf('--tools') + 1], 'Read,Edit,Write,Glob,Grep');
+  } else assert.equal(JSON.parse(call.settings).sandbox.enabled, true);
   assert.equal(path.dirname(call.settingsFile), path.join(home, 'boxes', `${runId}.agent`), 'beside the mailbox, not in it');
   assert.ok(!fs.existsSync(call.settingsFile), 'removed after the run');
   assert.equal(a[a.indexOf('--setting-sources') + 1], 'project');
@@ -737,8 +749,12 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, never an
   const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && !['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_TMPDIR'].includes(k));
   assert.deepEqual(leaked, []);
   // (CLAUDE_CODE_TMPDIR is TRIF's: the run's own temporary folder, not the /tmp/claude-<uid> every session shares.)
-  assert.match(env.CLAUDE_CODE_TMPDIR, /^\/tmp\/trif-[\w-]{1,8}$/);
-  assert.equal(env.TMPDIR, env.CLAUDE_CODE_TMPDIR);
+  // (Windows: no shell, so no commands of Claude Code's to give a temporary folder)
+  if (WIN) assert.deepEqual([env.CLAUDE_CODE_TMPDIR, env.TMPDIR], [undefined, undefined]);
+  else {
+    assert.match(env.CLAUDE_CODE_TMPDIR, /^\/tmp\/trif-[\w-]{1,8}$/);
+    assert.equal(env.TMPDIR, env.CLAUDE_CODE_TMPDIR);
+  }
   // config.json's key (no keyring here to move it to): sent by the run's key proxy; the agent gets a
   // placeholder and the proxy's address, never the key or an inherited base URL.
   assert.ok(!JSON.stringify(callFor(bin, 'ENVDUMP')).includes('from-config'));
@@ -757,7 +773,7 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, never an
   assert.equal(env.TRIF_RUN_SCREENSHOTS, path.join(privDir(home), 'screenshots', 'example.com'));
   assert.ok(/^[0-9a-f]{32}$/.test(env.TRIF_RUN_TOKEN));
   assert.equal(env.TRIF_SOCK, undefined);
-  assert.deepEqual(env.PATH.split(':').slice(0, 2), [path.join(home, 'bin'), bin]);
+  assert.deepEqual(env.PATH.split(path.delimiter).slice(0, 2), [path.join(home, 'bin'), bin]);
 });
 
 test('agent.stop kills the run (SIGTERM, then SIGKILL for a stubborn agent); done says stopped', async () => {
@@ -774,7 +790,8 @@ test('agent.stop kills the run (SIGTERM, then SIGKILL for a stubborn agent); don
     assert.equal(done.ok, false);
     assert.equal(done.stopped, true);
     assert.equal(done.sessionId, 'sess-new-1');
-    if (word === 'STUBBORN') assert.ok(Date.now() - t0 >= 350, 'waited for the SIGKILL grace');
+    // (Windows has no signal an agent could ignore: its processes are ended at once, platform.js killTree)
+    if (word === 'STUBBORN' && !WIN) assert.ok(Date.now() - t0 >= 350, 'waited for the SIGKILL grace');
     const pid = callFor(bin, word).pid;
     await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, { message: `${word} agent gone` });
     // No error event for a stop the user asked for.
@@ -1154,7 +1171,7 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
   const { home, bin } = makeHome();
   let r = await runCli(['agent', 'list'], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`^claude +Claude Code 9\\.9\\.9 +${bin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude +default$`, 'm'));
+  assert.match(r.stdout, new RegExp(`^claude +Claude Code 9\\.9\\.9 +${reEsc(exe(bin, 'claude'))} +default$`, 'm'));
   assert.match(r.stdout, /^codex +Codex: not found +not found$/m);
 
   r = await runCli(['agent', 'run', '--url', 'https://example.com/', '--tab', '12', 'x'], { home });
@@ -1172,7 +1189,7 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
     'Hiding the banner now.',
     '',
     '  [Bash] trif reload --tab 12',
-    '  [Edit] sites/example.com/fake.js',
+    `  [Edit] ${inWs('sites', 'example.com', 'fake.js')}`,
     'Done: the banner is hidden.',
     '',
     'done: ok ($0.0123)',
@@ -1488,7 +1505,8 @@ test('run mailbox: whatever a request in it says, it\'s the run\'s; links aren\'
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
   const box = call.env.TRIF_RUN_BOX;
-  assert.equal(fs.statSync(box).mode & 0o777, 0o700);
+  // (Windows has no file modes: the mailbox is the user's by the folder it's in)
+  if (!WIN) assert.equal(fs.statSync(box).mode & 0o777, 0o700);
 
   // The CLI, with only the mailbox (no token): still the run's, limited to its site.
   let res = await runCli(['tabs', '--json'], { home, env: { TRIF_RUN_BOX: box } });
@@ -1904,7 +1922,8 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
       supported_reasoning_levels: [{ effort: 'low', description: 'Fast' }, { effort: 'high', description: 'Deep' }, { effort: 'ultra', description: 'Delegates' }] },
   ] };
   fs.writeFileSync(path.join(bin, 'catalog.json'), JSON.stringify(catalog));
-  fs.writeFileSync(path.join(bin, 'codex'), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.166.0"; exit 0; fi\nif [ "$1 $2" = "debug models" ]; then /bin/cat "${bin}/catalog.json"; exit 0; fi\nexit 1\n`);
+  // (a Node script, as the stand-in Claude Code is: Windows starts it through the .cmd made beside it)
+  fs.writeFileSync(path.join(bin, 'codex'), `#!${process.execPath}\nconst a = process.argv.slice(2);\nif (a[0] === '--version') console.log('codex-cli 0.166.0');\nelse if (a[0] === 'debug' && a[1] === 'models') process.stdout.write(require('fs').readFileSync(require('path').join(__dirname, 'catalog.json')));\nelse process.exitCode = 1;\n`);
   fs.chmodSync(path.join(bin, 'codex'), 0o755);
   const ext = startHost(home);
   await ext.waitForSocket();

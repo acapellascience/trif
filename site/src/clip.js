@@ -50,16 +50,6 @@ export const CLIP_WORDS = {
   bad: 'This link doesn’t hold a TRIF Home Screen icon, so nothing was made.',
 };
 
-export const CLIP = page(CLIP_WORDS.title, `
-<h1>${CLIP_WORDS.heading}</h1>
-<div class="card">
-  <p id="ready" class="clip-line" hidden>${CLIP_WORDS.ready}</p>
-  <p id="none" class="clip-line">${CLIP_WORDS.none}</p>
-  <p id="bad" class="clip-line error" hidden>${CLIP_WORDS.bad}</p>
-  <button id="again" type="button" hidden>${CLIP_WORDS.again}</button>
-  <p id="debug" class="note" hidden></p>
-</div>`, { script: '/clip.js', style: '.clip-line { margin: 0 0 14px; } .clip-line:last-of-type { margin-bottom: 0; } #again { margin-top: 6px; }' });
-
 // The page's script: the # part read and cleared, the profile parsed (DOMParser: XML only) and checked, then the
 // download. checkClip's own source, so the page and the tests check the same way.
 export const CLIP_JS = `(() => {
@@ -115,3 +105,18 @@ export const CLIP_JS = `(() => {
   hand();
 })();
 `;
+
+// The script's address carries a hash of the script, so a phone that loaded the page before a deploy fetches the new
+// script with the new page instead of a cached old one (both are cached for 5 minutes).
+const CLIP_VERSION = (() => { let h = 0x811c9dc5; for (let i = 0; i < CLIP_JS.length; i++) h = Math.imul(h ^ CLIP_JS.charCodeAt(i), 0x01000193) >>> 0; return h.toString(16); })();
+
+export const CLIP = page(CLIP_WORDS.title, `
+<h1>${CLIP_WORDS.heading}</h1>
+<div class="card">
+  <p id="ready" class="clip-line" hidden>${CLIP_WORDS.ready}</p>
+  <p id="none" class="clip-line">${CLIP_WORDS.none}</p>
+  <p id="bad" class="clip-line error" hidden>${CLIP_WORDS.bad}</p>
+  <button id="again" type="button" hidden>${CLIP_WORDS.again}</button>
+  <p id="debug" class="note" hidden></p>
+</div>`, { script: `/clip.js?v=${CLIP_VERSION}`, style: '.clip-line { margin: 0 0 14px; } .clip-line:last-of-type { margin-bottom: 0; } #again { margin-top: 6px; }' });
+

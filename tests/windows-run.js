@@ -55,13 +55,22 @@ const KEY = `${CX ? 'sk-standin-' : 'sk-ant-standin-'}${crypto.randomBytes(8).to
 const CRED = `TRIF API key/${keys.AGENT_KEYS[AGENT].account}`;
 // Codex's tools that reach nothing on the computer (its sub-agents' and questions' tools are looked at
 // before they're added here).
-const CODEX_HARMLESS = ['update_plan'];
+const CODEX_HARMLESS = ['update_plan',
+  // the resources of the run's MCP servers: there is one server, TRIF's (--ignore-user-config), and it has none
+  'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
+  // a question for the user: there's nobody to ask in a run (`codex exec`)
+  'request_user_input',
+  // the session's own goal: words Codex keeps for itself
+  'get_goal', 'create_goal', 'update_goal'];
+// (multi_agent_v1.*, its sub-agents: not here until what one starts with has been seen; below)
 let failed = 0;
 function check(ok, what, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${!ok && detail ? `\n      ${String(detail).slice(0, 3000).split('\n').join('\n      ')}` : ''}`);
   if (!ok) failed++;
   return !!ok;
 }
+// The tools in requests to the stand-in model, as Codex lists them (a namespace's inside it): a.b, sorted.
+const offeredTo = (bodies) => [...new Set(bodies.filter((b) => b && Array.isArray(b.tools)).flatMap((b) => b.tools.flatMap((t) => (Array.isArray(t.tools) ? t.tools.map((x) => `${t.name}.${x.name}`) : [t.name || t.type]))))].sort();
 const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
 const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// ==/WebMod==\ndocument.title = "hello";\n';
 
@@ -99,8 +108,9 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   // ---- servers on this computer: the stand-in API (reached through the helper's key proxy), and one more
   // that a run must not reach
   const script = [];
+  let pick = null; // (Codex's sub-agents, below: steps chosen by who's asking)
   // (Codex: a model name it doesn't know, so it calls its tools directly and lists them in each request)
-  const api = CX ? await startFakeModelServer({ script, models: ['standin'] }) : await startFakeAnthropic({ script });
+  const api = CX ? await startFakeModelServer({ script, models: ['standin'], pick: (j) => (pick ? pick(j) : null) }) : await startFakeAnthropic({ script });
   let localHits = 0;
   const localServer = net.createServer((s) => { localHits++; s.destroy(); });
   await new Promise((r) => localServer.listen(0, '127.0.0.1', r));
@@ -204,14 +214,14 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     ['help new', trif('help', 'new'), /\w/],
     ['doctor', trif('doctor'), null],
     // a mod saved in the run's working folder: with Claude Code's own Write tool, or (Codex) TRIF's write_file
-    CX ? ['write a mod (TRIF\'s write_file)', tool('write_file', { path: 'sites/example.com/hello.js', content: MOD }), /^wrote sites\/example\.com\/hello\.js/]
+    CX ? ['write a mod (TRIF\'s write_file)', tool('write_file', { path: 'sites/example.com/hello.js', content: MOD }), /^wrote sites\/example\.com\/hello\.js/m]
       : ['write a mod', { tool: 'Write', input: { file_path: copy('sites', 'example.com', 'hello.js'), content: MOD } }, /created successfully|updated/i],
     ['check the mod', trif('check', 'example.com/hello'), /^ok: /m],
     ['mods again', trif('mods'), /example\.com\/hello/],
     ...(CX ? [
       ['read_file', tool('read_file', { path: 'sites/example.com/hello.js' }), /@name Hello/],
       ['read_file: the guide', tool('read_file', { path: 'AGENTS.md', limit: 20 }), /\w/],
-      ['edit_file', tool('edit_file', { path: 'sites/example.com/hello.js', old: '"hello";', new: '"hello";' }), /^changed sites\/example\.com\/hello\.js/],
+      ['edit_file', tool('edit_file', { path: 'sites/example.com/hello.js', old: '"hello";', new: '"hello";' }), /^changed sites\/example\.com\/hello\.js/m],
       ['list_files', tool('list_files', { path: 'sites', depth: 2 }), /sites\/example\.com\/hello\.js[\s\S]*sites\/other\.net\/keep\.js/],
       ['search_files', tool('search_files', { pattern: '@name', path: 'sites/example.com' }), /sites\/example\.com\/hello\.js:2: /],
     ] : []),
@@ -319,7 +329,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     if (CX) {
       // What Codex offered the model: TRIF's tools (a namespace's are listed inside it) and nothing that
       // touches the computer. A list of what's known, so a tool a new Codex adds fails here until looked at.
-      const offered = [...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.flatMap((t) => (Array.isArray(t.tools) ? t.tools.map((x) => `${t.name}.${x.name}`) : [t.name || t.type]))))].sort();
+      const offered = offeredTo(api.requests.map((q) => q.body));
       const mine = ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'view_image'];
       const known = (t) => mine.some((n) => t === `mcp__trif.${n}` || t === `mcp__trif__${n}`) || CODEX_HARMLESS.includes(t);
       check(offered.every(known) && mine.every((n) => offered.includes(`mcp__trif.${n}`) || offered.includes(`mcp__trif__${n}`)), `the tools Codex had: ${offered.join(', ')}`, `not looked at yet: ${offered.filter((t) => !known(t)).join(', ')}`);
@@ -362,6 +372,60 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     if (sid) spawnSync(exe, ['delete', inside.spec.name]); // (asking for its SID made the profile again)
     check(!!sid && fs.existsSync(shots) && !sddl(shots).includes(sid) && !sddl(path.join(ws, 'sites')).includes(sid), 'and its entries are off the screenshots folder and the mods folder');
     check(/agent run \S+: fenced \(trif\.run\./.test(helperLog()), 'the helper\'s log says the run was fenced', helperLog());
+  }
+
+  // ---- Codex's sub-agents: what does one start with? (For information until it's been read: the tools a
+  // sub-agent is offered, and what each of its attempts came to. Nothing may get out either way.)
+  if (CX && run && run.done.ok === true) {
+    console.log('\n  a sub-agent of Codex\'s (multi_agent_v1.spawn_agent), in a second run:');
+    const first = api.requests.find((q) => q.body && Array.isArray(q.body.tools));
+    const ns = first && first.body.tools.find((t) => t.name === 'multi_agent_v1');
+    console.log(`      (its tools, as Codex describes them: ${JSON.stringify(ns || null).slice(0, 4000)})`);
+    const before = api.requests.length;
+    const child = [];
+    let childStep = 0;
+    let spawned = false;
+    let waited = 0;
+    let spawnOut = '';
+    const attacks = [
+      { run: `type "${secretFile}"` },
+      { call: { name: 'exec_command', arguments: { cmd: `type "${secretFile}"` } } },
+      { custom: { name: 'apply_patch', input: `*** Begin Patch\n*** Add File: ${path.join(home, 'Documents', 'patched-by-child.txt')}\n+// planted\n*** End Patch\n` } },
+      { custom: { name: 'apply_patch', input: '*** Begin Patch\n*** Add File: sites/example.com/patched-by-child.js\n+// planted\n*** End Patch\n' } },
+      { call: { name: 'view_image', arguments: { path: outsideImage } } },
+      { call: { namespace: 'mcp__trif', name: 'read_file', arguments: { path: secretFile } } },
+      { call: { namespace: 'mcp__trif', name: 'write_file', arguments: { path: 'sites/other.net/planted-by-child.js', content: '// planted' } } },
+      { call: { namespace: 'mcp__trif', name: 'trif', arguments: { args: ['text', '--tab', '13'] } } },
+      { say: 'child done' },
+    ];
+    const outputs = (j) => (Array.isArray(j && j.input) ? j.input : []).filter((i) => i && (i.type === 'function_call_output' || i.type === 'custom_tool_call_output')).map((i) => (typeof i.output === 'string' ? i.output : JSON.stringify(i.output)));
+    pick = (j) => {
+      const input = Array.isArray(j && j.input) ? j.input : [];
+      // (the parent's requests carry its call to spawn_agent from then on; a sub-agent's don't)
+      if (spawned && !input.some((i) => i && i.type === 'function_call' && i.name === 'spawn_agent')) { child.push(j); return attacks[Math.min(childStep++, attacks.length - 1)]; }
+      if (!spawned) { spawned = true; return { call: { namespace: 'multi_agent_v1', name: 'spawn_agent', arguments: { message: 'do the steps' } } }; }
+      spawnOut = outputs(j)[0] || '';
+      const id = (/"(?:agent_id|id|agent_path|thread_id|target)"\s*:\s*"([^"]+)"/.exec(spawnOut) || [])[1];
+      if (id && waited++ < 4) return { call: { namespace: 'multi_agent_v1', name: 'wait_agent', arguments: { targets: [id], ids: [id], timeout_ms: 60000 } } };
+      return { say: 'done' };
+    };
+    const id = 'sub1';
+    ext.send({ type: 'request', id, cmd: 'agent.start', args: { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'start a helper', model: 'standin' } });
+    const started = await ext.next((m) => m.type === 'response' && m.id === id, { timeout: 60000 });
+    if (check(started.ok === true, '  a second run started', started.error)) {
+      const done = await ext.next((m) => m.type === 'agentEvent' && m.runId === started.result.runId && m.event.kind === 'done', { timeout: 300000 }).catch((e) => ({ event: { ok: false, error: e.message } }));
+      console.log(`      the run ended: ${JSON.stringify(done.event).slice(0, 300)}`);
+      console.log(`      spawn_agent answered: ${String(spawnOut).replace(/\s+/g, ' ').slice(0, 600)}`);
+      const parentOut = outputs(([...api.requests].reverse().find((q) => q.body && Array.isArray(q.body.input) && !child.includes(q.body)) || {}).body);
+      parentOut.slice(1).forEach((o) => console.log(`      wait_agent answered: ${String(o).replace(/\s+/g, ' ').slice(0, 400)}`));
+      console.log(`      requests from a sub-agent: ${child.length}; the tools it was offered: ${offeredTo(child).join(', ') || '(none listed)'}`);
+      outputs(child[child.length - 1]).forEach((o, i) => console.log(`      its attempt ${i + 1} (${JSON.stringify(attacks[i].call || attacks[i].custom || attacks[i]).slice(0, 90)}): ${String(o).replace(/\s+/g, ' ').slice(0, 220)}`));
+    }
+    pick = null;
+    const later = JSON.stringify(api.requests.slice(before).map((q) => q.body));
+    check(!later.includes(SECRET), '  no secret reached the model from that run or its sub-agent');
+    check(!fs.existsSync(path.join(home, 'Documents', 'patched-by-child.txt')) && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'patched-by-child.js')) && fs.readdirSync(path.join(ws, 'sites', 'other.net')).join() === 'keep.js', '  and nothing was planted');
+    await new Promise((r) => setTimeout(r, 3000));
   }
 
   // ---- tidy up

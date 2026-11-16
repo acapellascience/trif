@@ -7,11 +7,12 @@
 // {call: {name, arguments}} calls a tool by name (`namespace` too, for a tool offered inside one),
 // {custom: {name, input}} a free-form one (apply_patch).
 // Every request is kept in `requests` ({method, url, headers, body}). `echoAuth`: /models answers say the
-// Authorization header they came with (as `auth`), to check where a key goes.
+// Authorization header they came with (as `auth`), to check where a key goes. `pick(body)`: a step chosen
+// by what was asked (a sub-agent's requests come between its parent's), or nothing for the script's next.
 
 const http = require('http');
 
-function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b'], echoAuth = false } = {}) {
+function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b'], echoAuth = false, pick = null } = {}) {
   const requests = [];
   let step = 0;
   const server = http.createServer((req, res) => {
@@ -27,7 +28,7 @@ function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b
       if (req.url.endsWith('/api/tags')) return send(200, { models: models.map((m) => ({ name: m, model: m })) });
       if (req.method === 'GET' && req.url.endsWith('/models')) return send(200, { object: 'list', data: models.map((m) => ({ id: m, object: 'model' })), ...(echoAuth ? { auth: req.headers.authorization || '' } : {}) });
       if (req.method !== 'POST' || !req.url.endsWith('/responses')) return send(404, { error: { message: 'not found' } });
-      const s = script[Math.min(step++, script.length - 1)];
+      const s = (pick && pick(json)) || script[Math.min(step++, script.length - 1)];
       const tools = (json && Array.isArray(json.tools) ? json.tools : []).map((t) => t && (t.name || t.type));
       const n = step;
       let item;

@@ -1,56 +1,228 @@
 #!/usr/bin/env node
 'use strict';
-// Writes the iPhone app's icon, TrifProbe/Assets.xcassets/AppIcon.appiconset/icon-1024.png: the robot's head as
-// the whole icon, as the Safari app's (scripts/render-icon.js renderMac: the square in the rim's green, the face
-// inset by the rim, so iOS's own rounded mask becomes the head's outline), at 1024 px, without an alpha channel
-// (iOS fills transparent parts black). One size is all iOS 17 and later need. The PNG is kept in the repository,
-// so building doesn't need this; run it again when the robot changes:
+// Writes the iPhone app's icons, TrifProbe/Assets.xcassets/AppIcon.appiconset/: light (Any), dark and tinted, each
+// 1024 px (one size is all iOS 17 and later need), approved by Tim 11-16.
+//
+// The robot is robot-shaded.svg's (scripts/render-icon.js shadedSvg), with its body outline replaced by iOS's own
+// icon mask: the gradient rim is stroked centred exactly on the mask edge at twice the scaled rim width, so after
+// iOS clips the outer half the visible rim is uniform all round.
+//
+// iOS's mask (measured): UIKit's continuous-corner rounded rect (PaintCode's reverse-engineered bezier, "Drawing
+// Code for iOS 7 Rounded Rectangles"), corner radius 0.26 x side on iOS 26 (the 192 px home-screen icons of an iOS
+// 26.3 simulator fit it to 0.17 px RMS); iOS 7-18 used the same curve at 0.225 x side.
+//
+// The three, as Apple asks: light RGB without alpha (iOS fills transparent parts black); dark with the face left
+// transparent (iOS's own dark gradient shows through); tinted fully opaque grayscale (iOS maps luminance to the
+// tint). Drawn as SVG, rendered by headless Chrome for Testing (tests/e2e/lib/chrome.js findChrome; muted, its own
+// profile and process group, killed past 1.5 GB or 30 s). The PNGs are kept in the repository, so building doesn't
+// need this; run it again when the robot changes:
 //
 //   node mobile/browser-probe/make-icon.js
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
-const { renderMac } = require('../../scripts/render-icon');
+const { spawn, execFileSync } = require('child_process');
+const { findChrome } = require('../../tests/e2e/lib/chrome');
 
-const SIZE = 1024;
+const RADIUS = 0.26; // iOS 26's corner (0.225 for iOS 7-18)
 const dir = path.join(__dirname, 'TrifProbe', 'Assets.xcassets', 'AppIcon.appiconset');
 
-/** An RGBA PNG (renderMac's: one IDAT, filter 0 on every row) as an RGB one. */
-function withoutAlpha(rgba) {
+const S = 1024;
+// robot-shaded.svg's geometry (render-icon.js HEAD, EYES, shadedSvg), in its 128 space.
+const HEAD = { c: 64, outer: 56, inner: 46 };
+const MID = (HEAD.outer + HEAD.inner) / 2; // 51: the rim's centre line, the squircle robot-shaded.svg draws
+const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, blur: 1.5 };
+// TRIF's squircle (its rim's centre line) goes onto iOS's outline: 51 units -> half the icon.
+const K = (S / 2) / MID; // 10.039
+const RIM = (HEAD.outer - HEAD.inner) * K; // 100.39 visible; stroked at twice that, half of it outside the mask
+
+const COLOURS = {
+  light: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: '#18181a', corners: true },
+  // Dark: the same robot with the face left transparent, so iOS's own dark gradient shows through (Apple:
+  // "Provide your dark app icon with a transparent background"). Our face is already that dark.
+  dark: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: 'none', corners: false },
+  // Tinted: fully opaque grayscale; iOS maps luminance to the tint over its own dark tile, so black is "no
+  // paint" (the face stays the tile's dark), white is full tint. The greys keep the colours' own falloff
+  // (relative luminance of the two rim stops 0.57 -> 0.25, the eye stops 0.77 -> 0.42), brightened to white.
+  tinted: { rim: ['#ffffff', '#b4b4b4'], eye: ['#ffffff', '#c8c8c8'], glow: [1, 1, 1], face: '#000000', corners: true },
+};
+
+const f = (v) => +v.toFixed(2);
+
+/** iOS's icon mask as an SVG path: UIKit's continuous corners (PaintCode's coefficients, top-right corner, in
+ * radii from the corner: [dx from the right, dy from the top]), rotated for the other three corners. */
+function maskPath(size = S, ratio = RADIUS) {
+  const r = Math.min(ratio * size, size / 2 / 1.52866483);
+  const TR = [ // [cmd, ...points] after the start point (1.52866483, 0)
+    ['L', [1.52866471, 0]],
+    ['C', [1.08849323, 0], [0.86840689, 0], [0.66993427, 0.065496]],
+    ['L', [0.63149399, 0.074911]],
+    ['C', [0.37282392, 0.16905899], [0.16906013, 0.37282401], [0.07491176, 0.63149399]],
+    ['C', [0, 0.86840701], [0, 1.08849299], [0, 1.52866483]],
+  ];
+  const pt = ([dx, dy], q) => { // top-right local -> absolute, then rotate q quarter turns clockwise about the centre
+    let x = size - dx * r, y = dy * r;
+    for (let i = 0; i < q; i++) [x, y] = [size - y, x];
+    return `${f(x)} ${f(y)}`;
+  };
+  let d = `M${pt([0, 1.52866483], 3)}`; // the top-left corner's end on the top edge
+
+  for (let q = 0; q < 4; q++) for (const [cmd, ...ps] of TR) d += ` ${cmd}${ps.map((p) => pt(p, q)).join(' ')}`;
+  return `${d} Z`;
+}
+
+/** A superellipse as polygon points, spaced evenly by angle (shadedSvg's eyes). */
+function squircle(cx, cy, a, b, n, count = 720) {
+  const pts = [];
+  for (let i = 0; i < count; i++) {
+    const t = (i / count) * 2 * Math.PI, c = Math.cos(t), s = Math.sin(t);
+    const r = (Math.abs(c / a) ** n + Math.abs(s / b) ** n) ** (-1 / n);
+    pts.push(`${f(cx + r * c)},${f(cy + r * s)}`);
+  }
+  return pts.join(' ');
+}
+
+function iconSvg(variant) {
+  const { rim, eye, glow, face, corners } = COLOURS[variant];
+  const X = (v) => S / 2 + (v - HEAD.c) * K;
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">`,
+    `  <!-- TRIF iPhone app icon (${variant}), make-icon.js: iOS mask continuous corners r=${RADIUS}*side; rim ${f(RIM)} visible (stroke ${f(2 * RIM)}); eyes x${f(K)} -->`,
+    '  <defs>',
+    `    <linearGradient id="r" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${S}" y2="${S}"><stop offset="0" stop-color="${rim[0]}"/><stop offset="1" stop-color="${rim[1]}"/></linearGradient>`,
+    `    <radialGradient id="e" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="${eye[0]}"/><stop offset="1" stop-color="${eye[1]}"/></radialGradient>`,
+    `    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="${f(EYES.blur * K)}" result="b"/><feColorMatrix in="b" type="matrix" values="${glow.map((c) => `0 0 0 0 ${c}`).join('  ')}  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`,
+    '  </defs>',
+    // The square's corners, outside the mask, in the rim's gradient: iOS clips them; opaque so the PNG has no alpha.
+    corners ? `  <rect width="${S}" height="${S}" fill="url(#r)"/>` : null,
+    `  <path d="${maskPath()}" fill="${face}" stroke="url(#r)" stroke-width="${f(2 * RIM)}"/>`,
+    `  <g filter="url(#h)">${EYES.xs.map((ex) => `<polygon points="${squircle(X(ex), X(EYES.cy), EYES.a * K, EYES.b * K, EYES.n)}" fill="url(#e)"/>`).join('')}</g>`,
+    '</svg>',
+    '',
+  ].filter((l) => l !== null).join('\n');
+}
+
+/** One SVG (or HTML) file -> PNG, in headless Chrome under a 1.5 GB / 30 s watchdog on its own process group. */
+function shoot(src, png, w = S, h = S, transparent = true) {
+  const profile = fs.mkdtempSync(path.join(path.dirname(png), '.chrome-'));
+  return new Promise((resolve, reject) => {
+    const p = spawn(findChrome(), ['--headless=new', '--mute-audio', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
+      '--no-default-browser-check', `--user-data-dir=${profile}`, '--force-device-scale-factor=1', `--window-size=${w},${h}`,
+      ...(transparent ? ['--default-background-color=00000000'] : []), `--screenshot=${png}`, `file://${src}`],
+    { detached: true, stdio: 'ignore' });
+    const started = Date.now();
+    const dog = setInterval(() => {
+      let kb = 0;
+      try {
+        for (const line of execFileSync('ps', ['-A', '-o', 'pgid=,rss=']).toString().split('\n')) {
+          const [g, rss] = line.trim().split(/\s+/).map(Number);
+          if (g === p.pid) kb += rss;
+        }
+      } catch { /* ps gone */ }
+      if (kb > 1.5 * 1024 * 1024 || Date.now() - started > 30000) {
+        try { process.kill(-p.pid, 'SIGKILL'); } catch { /* exited */ }
+        reject(new Error(`chrome killed: ${Math.round(kb / 1024)} MB, ${Date.now() - started} ms`));
+      }
+    }, 200);
+    p.on('exit', () => {
+      clearInterval(dog);
+      try { process.kill(-p.pid, 'SIGKILL'); } catch { /* group gone */ }
+      fs.rmSync(profile, { recursive: true, force: true });
+      fs.existsSync(png) ? resolve(png) : reject(new Error(`no screenshot for ${src}`));
+    });
+  });
+}
+
+// ---- PNG in and out (8-bit, not interlaced: what Chrome writes), no dependencies ----
+
+/** A PNG -> { width, height, channels, pixels } (unfiltered rows, no filter bytes). */
+function readPng(buf) {
+  let width = 0, height = 0, type = 0;
   const idat = [];
-  for (let o = 8; o < rgba.length;) {
-    const len = rgba.readUInt32BE(o), type = rgba.toString('latin1', o + 4, o + 8);
-    if (type === 'IDAT') idat.push(rgba.subarray(o + 8, o + 8 + len));
+  for (let o = 8; o < buf.length;) {
+    const len = buf.readUInt32BE(o), kind = buf.toString('latin1', o + 4, o + 8), data = buf.subarray(o + 8, o + 8 + len);
+    if (kind === 'IHDR') {
+      width = data.readUInt32BE(0); height = data.readUInt32BE(4); type = data[9];
+      if (data[8] !== 8 || data[12] !== 0) throw new Error('only 8-bit, not interlaced');
+    }
+    if (kind === 'IDAT') idat.push(data);
     o += 12 + len;
   }
+  const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[type];
+  if (!channels) throw new Error(`PNG colour type ${type}`);
   const raw = zlib.inflateSync(Buffer.concat(idat));
-  const out = Buffer.alloc(SIZE * (1 + SIZE * 3));
-  for (let y = 0; y < SIZE; y++) {
-    const i = y * (1 + SIZE * 4), j = y * (1 + SIZE * 3);
-    for (let x = 0; x < SIZE; x++) {
-      const a = raw[i + 1 + x * 4 + 3] / 255;
-      for (let c = 0; c < 3; c++) out[j + 1 + x * 3 + c] = Math.round(raw[i + 1 + x * 4 + c] * a); // (on black, should any pixel not be opaque)
+  const stride = width * channels, px = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (stride + 1)], row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? px[y * stride + x - channels] : 0, b = y ? px[(y - 1) * stride + x] : 0;
+      const c = x >= channels && y ? px[(y - 1) * stride + x - channels] : 0;
+      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+      const pred = [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f];
+      px[y * stride + x] = (row[x] + pred) & 0xff;
     }
   }
+  return { width, height, channels, pixels: px };
+}
+
+/** { width, height, channels, pixels } -> a PNG (filter 0 rows). */
+function writePng({ width, height, channels, pixels }) {
+  const type = { 1: 0, 3: 2, 4: 6 }[channels], stride = width * channels;
+  const raw = Buffer.alloc(height * (stride + 1));
+  for (let y = 0; y < height; y++) pixels.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   const crcTable = new Int32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c; });
   const crc = (b) => { let c = -1; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; };
-  const chunk = (type, data) => {
+  const chunk = (kind, data) => {
     const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
+    const td = Buffer.concat([Buffer.from(kind), data]);
     const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
     return Buffer.concat([len, td, c]);
   };
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(SIZE, 0); ihdr.writeUInt32BE(SIZE, 4); ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
-  return Buffer.concat([rgba.subarray(0, 8), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(out, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = type;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
 }
 
-fs.mkdirSync(dir, { recursive: true });
-fs.writeFileSync(path.join(dir, 'icon-1024.png'), withoutAlpha(renderMac(SIZE)));
-fs.writeFileSync(path.join(dir, 'Contents.json'), `${JSON.stringify({
-  images: [{ filename: 'icon-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' }],
-  info: { author: 'xcode', version: 1 },
-}, null, 2)}\n`);
-fs.writeFileSync(path.join(dir, '..', 'Contents.json'), `${JSON.stringify({ info: { author: 'xcode', version: 1 } }, null, 2)}\n`);
-console.log(`wrote ${path.relative(process.cwd(), dir)}/icon-1024.png`);
+/** RGB(A) -> RGB (alpha dropped: the light icon is opaque), RGBA (opaque where there was no alpha), or L
+ * (luminance, ITU-R 601, as the tinted one is gray). */
+function convert(img, to) {
+  const n = img.width * img.height, c = img.channels, out = Buffer.alloc(n * to);
+  for (let i = 0; i < n; i++) {
+    const [r, g, b] = [img.pixels[i * c], img.pixels[i * c + 1], img.pixels[i * c + 2]];
+    const a = c === 4 ? img.pixels[i * c + 3] : 255;
+    if (to === 4) { out[i * 4] = r; out[i * 4 + 1] = g; out[i * 4 + 2] = b; out[i * 4 + 3] = a; } else if (to === 3) { out[i * 3] = r; out[i * 3 + 1] = g; out[i * 3 + 2] = b; } else out[i] = Math.round((r * 299 + g * 587 + b * 114) / 1000);
+  }
+  return { ...img, channels: to, pixels: out };
+}
+
+module.exports = { maskPath, iconSvg, RADIUS, readPng, writePng };
+
+if (require.main === module) {
+  (async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-icon-'));
+    fs.mkdirSync(dir, { recursive: true });
+    const files = { light: ['icon-light-1024.png', 3], dark: ['icon-dark-1024.png', 4], tinted: ['icon-tinted-1024.png', 1] };
+    for (const [v, [name, channels]] of Object.entries(files)) {
+      const svg = path.join(tmp, `icon-${v}.svg`), png = path.join(tmp, `icon-${v}.png`);
+      fs.writeFileSync(svg, iconSvg(v));
+      await shoot(svg, png);
+      const img = readPng(fs.readFileSync(png));
+      if (img.channels < 3 || img.width !== S || img.height !== S) throw new Error(`${v}: unexpected screenshot (${img.width}x${img.height}, ${img.channels} channels)`);
+      fs.writeFileSync(path.join(dir, name), writePng(convert(img, channels)));
+      console.log('wrote', name);
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+    for (const old of ['icon-1024.png']) fs.rmSync(path.join(dir, old), { force: true });
+    fs.writeFileSync(path.join(dir, 'Contents.json'), `${JSON.stringify({
+      images: [
+        { filename: 'icon-light-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' },
+        { appearances: [{ appearance: 'luminosity', value: 'dark' }], filename: 'icon-dark-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' },
+        { appearances: [{ appearance: 'luminosity', value: 'tinted' }], filename: 'icon-tinted-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' },
+      ],
+      info: { author: 'xcode', version: 1 },
+    }, null, 2)}\n`);
+    fs.writeFileSync(path.join(dir, '..', 'Contents.json'), `${JSON.stringify({ info: { author: 'xcode', version: 1 } }, null, 2)}\n`);
+  })().catch((e) => { console.error(e); process.exit(1); });
+}

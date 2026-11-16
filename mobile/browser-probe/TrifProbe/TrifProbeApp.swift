@@ -145,6 +145,13 @@ extension Model {
                     await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in f(store, sel) { k.resume() } }
                     out = "flushed in \(Int(Date().timeIntervalSince(t0) * 1000)) ms"
                 } else { out = "no flush" }
+            } else if c == "dump" {
+                // (every cookie's name, domain, path, expiry and flags to Documents/cookies.tsv: never a value)
+                let all = await store.allCookies()
+                let lines = all.map { k in "\(k.domain)\t\(k.name)\t\(k.path)\t\(k.expiresDate.map { String(Int($0.timeIntervalSince1970)) } ?? "session")\t\(k.isHTTPOnly ? "httponly" : "")\t\(k.isSecure ? "secure" : "")\t\(k.sameSitePolicy?.rawValue ?? "")" }
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                try? lines.sorted().joined(separator: "\n").write(to: docs.appendingPathComponent("cookies.tsv"), atomically: true, encoding: .utf8)
+                out = "\(all.count) cookies"
             } else if c == "bench" {
                 // (300 flushes by the path in use: how long each takes, and that no cookie changed or went)
                 let sig = { (l: [HTTPCookie]) in Set(l.map { "\($0.name)|\($0.domain)|\($0.path)|\($0.value.hashValue)|\($0.expiresDate?.timeIntervalSince1970 ?? 0)" }) }

@@ -14,15 +14,15 @@ Chats run with Claude Code (fenced: docs/WINDOWS.md). What a person can read abo
 | # | Text | Where |
 |---|---|---|
 | 1 | `<Agent> can’t be used from the panel on Windows yet` | `trif doctor`, an information line for an agent that's installed but that TRIF can't fence there (Codex, the open model), followed by its path in brackets (`helper/lib/platform.js` `panelRunsOff`) |
-| 2 | `TRIF can’t keep <Agent>’s commands to the site you’re fixing on Windows yet. Use Claude Code here, or <Agent> in a terminal in <workspace>: mods it writes show up here as usual.` | the side panel, under the existing title "<Agent> isn’t available", when that agent is the one picked; Settings' agent list |
-| 3 | `<Agent> can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there. Use Claude Code, or <Agent> in a terminal in <workspace>` | the error if a chat with that agent is started anyway (`trif agent run --agent codex`) |
+| 2 | `TRIF can’t keep <Agent>’s commands to the site you’re fixing on Windows yet. Use another coding agent here, or <Agent> in a terminal in <workspace>: mods it writes show up here as usual.` | the side panel, under the existing title "<Agent> isn’t available", when that agent is the one picked; Settings' agent list |
+| 3 | `<Agent> can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there. Use another coding agent, or <Agent> in a terminal in <workspace>` | the error if a chat with that agent is started anyway (`trif agent run --agent codex`) |
 | 4 | `logging in from the panel isn't available on Windows yet: open a terminal in <workspace>, start your coding agent there and log in` | the error from the panel's Log in button and `trif agent login` on Windows |
 | 5 | `the fence for chats from the panel can be built here (Windows' C# compiler)` | `trif doctor` on Windows, an ok line |
 | 5b | `Windows' C# compiler (csc.exe, part of .NET Framework 4) isn't on this computer, so chats from the panel can't start: TRIF builds its fence for them with it` — fix: `turn on ".NET Framework 4.8 Advanced Services" in "Turn Windows features on or off"` | `trif doctor` on Windows, a warning |
 | 5c | `couldn't prepare Claude Code's run: TRIF's fence for this run couldn't be made (<why>)` | the chat, when the fence can't be made (the first half is an existing text) |
 | 5d | `couldn't prepare Claude Code's run: Windows' C# compiler (csc.exe, part of .NET Framework 4) isn't on this computer, so TRIF can't build its fence for agent runs` · `… couldn't build TRIF's fence for agent runs: <why>` | the chat, when the launcher can't be built |
 
-(1–3 name the agents by their own names, as TRIF's messages about agents already do.)
+(1–3 name the agent the message is about by its own name, as TRIF's messages about agents already do, and no other agent: 2 and 3 say "another coding agent".)
 
 What the agent reads, not the user: the `trif` tool's description and the file tools' (`helper/mcp.js`), the
 "There is no shell in this chat…" line added to a run's context on Windows (`helper/lib/agents/index.js`),

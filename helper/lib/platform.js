@@ -29,8 +29,8 @@ function panelRunsOff(platform = process.platform, home = '~/.trif', agentId = n
   const who = name || 'This agent';
   return {
     title: `${who} can’t be used from the panel on Windows yet`,
-    text: `TRIF can’t keep ${who}’s commands to the site you’re fixing on Windows yet. Use Claude Code here, or ${who} in a terminal in ${home}: mods it writes show up here as usual.`,
-    error: `${who} can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there. Use Claude Code, or ${who} in a terminal in ${home}`,
+    text: `TRIF can’t keep ${who}’s commands to the site you’re fixing on Windows yet. Use another coding agent here, or ${who} in a terminal in ${home}: mods it writes show up here as usual.`,
+    error: `${who} can't be used from the panel on Windows yet: TRIF can't keep its commands to the site there. Use another coding agent, or ${who} in a terminal in ${home}`,
   };
 }
 

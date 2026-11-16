@@ -518,7 +518,9 @@ test('windows: chats from the panel for the agents TRIF can fence there; another
   assert.equal(platform.panelRunsOff('win32', home, 'claude', 'Claude Code'), null);
   const off = platform.panelRunsOff('win32', home, 'codex', 'Codex');
   assert.equal(off.title, 'Codex can’t be used from the panel on Windows yet');
-  assert.match(off.text, /^TRIF can’t keep Codex’s commands to the site you’re fixing on Windows yet\. Use Claude Code here, or Codex in a terminal in C:\\Users\\Tim\\\.trif/);
+  assert.match(off.text, /^TRIF can’t keep Codex’s commands to the site you’re fixing on Windows yet\. Use another coding agent here, or Codex in a terminal in C:\\Users\\Tim\\\.trif/);
+  assert.match(off.error, /TRIF can't keep its commands to the site there\. Use another coding agent, or Codex in a terminal in /);
+  for (const said of [off.title, off.text, off.error]) assert.doesNotMatch(said, /Claude/, 'a message about one agent names no other');
   for (const sys of ['darwin', 'linux']) assert.equal(platform.panelRunsOff(sys, home, 'codex', 'Codex'), null);
   const ws = tempDir('wx-');
   const getWorkspace = () => P.workspace(ws);

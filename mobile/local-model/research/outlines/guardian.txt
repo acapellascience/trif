@@ -1,0 +1,200 @@
+Latest news, sport and opinion from the Guardian | www.theguardian.com/international
+#bannerandheader 390x460
+  header[data-component="header"] 390x460 “Sign in Film Emma Fogarty and Colin Farrell on the”
+    section 390x52 ×2
+      div[data-component="topbar"] 390x52
+        gu-island[name="TopBar"] 390x52
+          div.dcr-lypmm 390x52
+    gu-island[name="Titlepiece"] 390x168
+      nav.dcr-lypmm 390x168 “Int The Guardian - Back to home The Guardian News ”
+        a 207x72
+        ul 319x34
+        #header-veggie-burger 40x40
+        #header-expanded-menu-root 370x43
+          #header-expanded-menu (fixed) 390x844 “News Opinion Sport Culture Lifestyle Search input ”
+        div[data-testid="sub-nav"] 380x40
+          ul[role="list"] 380x28
+#maincontent 390x24462
+  #news 390x2694
+    h2 274x38 “News”
+    #container-news 370x2616
+      ul 370x560 ×5
+        li 370x560
+      ul.dcr-guxhjm 370x576
+        li 370x576
+  span 390x286 ×9
+    aside.ad-slot-container.undefined.dcr-0 390x286
+      #dfp-ad--top-above-nav--mobile 300x286
+  #in-focus 390x771
+    h2 274x32 “In focus”
+    #container-in-focus 370x714
+      ul 370x452 ×2
+        li 370x452
+  section[data-component="cop31"] 390x390
+    h2 274x32 “Cop31”
+    gu-island[name="ScrollableMedium"] 370x310
+      ul 390x310
+        li.dcr-idhxvk 154x310 ×4
+  #features 390x1007
+    h2 274x38 “Features”
+    #container-features 370x945
+      ul 370x937
+        li 370x463 ×2
+  #more-features 390x959
+    h2 274x32 “More features”
+    #container-more-features 370x887
+      ul 370x275 ×3
+        li 370x120 ×2
+  #opinion 390x803
+    h2 274x38 “Opinion”
+    #container-opinion 370x741
+      ul 370x414 ×2
+        li 370x414
+  #more-opinion 390x358
+    h2 274x32 “More opinion”
+    #container-more-opinion 370x302
+      gu-island[name="ScrollableMedium"] 370x294
+        ul 390x294
+          li.dcr-idhxvk 154x294 ×4
+  #editorials 390x214
+    h2 274x32 “Editorials”
+    #container-editorials 370x158
+      ul 370x150
+        li 370x60 ×2
+  #cartoon 390x474
+    h2 274x32 “Cartoon”
+    #container-cartoon 370x402
+      ul 370x394
+        li 370x394
+  #sport 390x2458
+    h2 274x38 “Sport”
+    #container-sport 370x2397
+      ul 370x699 ×2
+        li 370x699
+      ul.dcr-guxhjm 370x680 ×2
+        li 370x680
+  #more-sport 390x280
+    h2 274x32 “More sport”
+    #container-more-sport 370x208
+      gu-island[name="ScrollableSmall"] 370x200
+        ul 390x200
+          li 328x92 ×4
+  #more-top-stories 390x1281
+    h2 274x38 “More top stories”
+    #container-more-top-stories 370x1219
+      ul 370x504 ×3
+        li 370x504
+  #uk-news 390x267
+    h2 274x32 “UK news”
+    #container-uk-news 370x211
+      gu-island[name="ScrollableSmall"] 370x203
+        ul 390x203
+          li 328x94 ×4
+  #world-news 390x250
+    h2 274x32 “World news”
+    #container-world-news 370x194
+      gu-island[name="ScrollableSmall"] 370x186
+        ul 390x186
+          li 328x85 ×4
+  #secure-messaging 390x87
+    a 390x87
+      section 390x87
+  #culture 390x1075
+    h2 274x38 “Culture”
+    #container-culture 370x1013
+      ul 370x1005
+        li 370x531 ×2
+  #what-to-watch 390x378
+    h2 274x32 “What to watch”
+    #container-what-to-watch 370x322
+      gu-island[name="ScrollableMedium"] 370x314
+        ul 390x314
+          li.dcr-idhxvk 154x314 ×4
+  #what-to-listen-to 390x382
+    h2 274x32 “What to listen to”
+    #container-what-to-listen-to 370x325
+      gu-island[name="ScrollableMedium"] 370x317
+        ul 390x317
+          li.dcr-idhxvk 154x317 ×4
+  #what-to-read 390x316
+    h2 274x32 “What to read”
+    #container-what-to-read 370x260
+      gu-island[name="ScrollableSmall"] 370x252
+        ul 390x252
+          li 328x118 ×4
+  #what-to-play 390x334
+    h2 274x32 “What to play”
+    #container-what-to-play 370x278
+      gu-island[name="ScrollableSmall"] 370x270
+        ul 390x270
+          li 328x127 ×4
+  #more-culture 390x380
+    h2 274x32 “More culture”
+    #container-more-culture 370x308
+      gu-island[name="ScrollableMedium"] 370x300
+        ul 390x300
+          li.dcr-idhxvk 154x300 ×4
+  #lifestyle 390x1007
+    h2 274x38 “Lifestyle”
+    #container-lifestyle 370x945
+      ul 370x937
+        li 370x463 ×2
+  #food 390x355
+    h2 274x32 “Food”
+    #container-food 370x298
+      gu-island[name="ScrollableMedium"] 370x290
+        ul 390x290
+          li.dcr-idhxvk 154x290 ×4
+  section[data-component="fashion-&-beauty"] 390x387
+    h2 274x32 “Fashion & beauty”
+    gu-island[name="ScrollableMedium"] 370x323
+      ul 390x323
+        li.dcr-idhxvk 154x323 ×4
+  #relationships 390x278
+    h2 274x32 “Relationships”
+    #container-relationships 370x222
+      gu-island[name="ScrollableSmall"] 370x214
+        ul 390x214
+          li 328x99 ×4
+  section[data-component="health-&-fitness"] 390x264
+    h2 274x32 “Health & fitness”
+    gu-island[name="ScrollableSmall"] 370x200
+      ul 390x200
+        li 328x92 ×4
+  #more-lifestyle 390x410
+    h2 274x32 “More lifestyle”
+    #container-more-lifestyle 370x338
+      gu-island[name="ScrollableMedium"] 370x330
+        ul 390x330
+          li.dcr-idhxvk 154x330 ×4
+  #documentary 390x439
+    h2 274x38 “Documentary”
+    #container-documentary 370x361
+      ul 370x353
+        li 370x353
+  #you-may-have-missed 390x480
+    h2 274x38 “You may have missed”
+    #container-you-may-have-missed 370x418
+      gu-island[name="ScrollableFeature"] 370x410
+        ul 390x410
+          li.dcr-idhxvk 328x410 ×3
+  #take-part 390x267
+    h2 274x32 “Take part”
+    #container-take-part 370x211
+      gu-island[name="ScrollableSmall"] 370x203
+        ul 390x203
+          li 328x93 ×4
+  #newsletters 390x332
+    h2 274x32 “Newsletters”
+    #container-newsletters 370x260
+      gu-island[name="ScrollableSmall"] 370x252
+        ul 390x252
+          li 328x118 ×4
+  #in-pictures 390x540
+    h2 274x38 “In pictures”
+    #container-in-pictures 370x478
+      ul 370x470
+        li 370x470
+  #most-viewed 390x1759
+    h2.dcr-xblqqf 274x38 “Most popular”
+    #container-most-viewed 370x1697

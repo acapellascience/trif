@@ -4,7 +4,8 @@
 //   - Claude API: Anthropic's Messages API, streamed (server-sent events), tools as tool_use / tool_result.
 //   - OpenAI API: the Responses API (GPT and Codex models), streamed, tools as function calls; store: false.
 //   - OpenRouter: its OpenAI-compatible chat completions, streamed, tools as tool_calls; any model it lists.
-//   - On this iPhone: a stand-in that streams a canned reply (no model runs on the phone yet: waiting on research).
+//   - On this iPhone: a small model on the phone itself (LocalModels.swift, LocalLlama.swift); in the Simulator, where
+//     none can run, a stand-in with a canned reply too.
 //
 // Keys (APIKeys): pasted once in the panel's Settings, kept in the Keychain on this iPhone only (not synced, not in
 // backups that leave it), never shown again, never logged, never in diagnostics, and sent only to that engine's own
@@ -116,7 +117,8 @@ struct PanelEngine {
 
     static let all: [PanelEngine] = [
         PanelEngine(id: "iphone", name: "On this iPhone", keyName: nil, host: nil,
-                    models: [PanelModel(id: "stand-in", name: "Stand-in", description: "No model runs on this iPhone yet: a canned reply, to try the chat end to end.", images: false)], defaultModel: "stand-in"),
+                    models: LocalModels.all.map { PanelModel(id: $0.id, name: $0.name, description: "\($0.note) \(LocalModels.size($0.size)).", images: false) } + PanelEngine.standIn,
+                    defaultModel: LocalModels.suggested.id),
         PanelEngine(id: "claude-api", name: "Claude API", keyName: "Anthropic", host: "api.anthropic.com",
                     models: ["claude-opus-5-5": "Claude Opus 5.5", "claude-sonnet-5-5": "Claude Sonnet 5.5", "claude-haiku-5-5": "Claude Haiku 5.5", "claude-fable-5-2": "Claude Fable 5.2"]
                         .sorted { order($0.key) < order($1.key) }
@@ -130,6 +132,14 @@ struct PanelEngine {
         PanelEngine(id: "openrouter", name: "OpenRouter", keyName: "OpenRouter", host: "openrouter.ai",
                     models: [PanelModel(id: "openrouter/auto", name: "Auto (OpenRouter picks)", images: false)], defaultModel: "openrouter/auto"),
     ]
+    /// (the Simulator, where no model can run: the stand-in too, to try the chat end to end)
+    static var standIn: [PanelModel] {
+        #if targetEnvironment(simulator)
+        return [PanelModel(id: "stand-in", name: "Stand-in", description: "No model runs in the Simulator: a canned reply, to try the chat end to end.", images: false)]
+        #else
+        return []
+        #endif
+    }
     private static func order(_ id: String) -> Int { ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"].firstIndex(of: id) ?? 9 }
     static func named(_ id: String?) -> PanelEngine? { all.first { $0.id == id } }
 
@@ -146,12 +156,12 @@ struct PanelEngine {
         return URL(string: "https://\(host ?? "")\(path)")!
     }
 
-    @MainActor func conversation() -> PanelConversation {
+    @MainActor func conversation(model: String) -> PanelConversation {
         switch id {
         case "claude-api": return AnthropicConversation(engine: self)
         case "openai-api": return ResponsesConversation(engine: self)
         case "openrouter": return ChatCompletionsConversation(engine: self)
-        default: return StandInConversation()
+        default: return model == "stand-in" ? StandInConversation() : LocalConversation(model: LocalModels.named(model) ?? LocalModels.suggested)
         }
     }
 }
@@ -411,10 +421,10 @@ final class ChatCompletionsConversation: PanelConversation {
     }
 }
 
-// MARK: On this iPhone (a stand-in for now)
+// MARK: the stand-in (the Simulator only: no model can run there)
 
-/// No model runs on the phone yet (the research decides which): a canned reply, streamed, with a small style mod for
-/// the page, so the whole chat can be tried, Add this mod? included.
+/// A canned reply, with a small style mod for the page, so the whole chat can be tried in the Simulator, Add this mod?
+/// included. (On a phone, On this iPhone is LocalModels.swift's LocalConversation.)
 @MainActor
 final class StandInConversation: PanelConversation {
     var takesImages: Bool { false }
@@ -427,7 +437,7 @@ final class StandInConversation: PanelConversation {
         try await Task.sleep(nanoseconds: 700_000_000)
         let origin = page.isEmpty ? "https://example.com" : page
         let text = """
-        This is a stand-in: no model runs on this iPhone yet. When one does, it answers here, with the page in hand.
+        This is a stand-in: no model runs in the Simulator. On an iPhone, the model on it answers here, with the page in hand.
 
         Meanwhile, here's a small style mod for this site, to try Add this mod?: it underlines the links.
 

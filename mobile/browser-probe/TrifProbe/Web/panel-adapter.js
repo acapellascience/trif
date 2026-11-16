@@ -279,6 +279,66 @@
     if (b && !document.getElementById('settings')?.hidden) { b.click(); b.click(); }
     post({ type: 'statusChanged' });
   }
+  // ---- Settings: the models that run on this iPhone (On this iPhone's), downloaded only when asked --------------
+  // One row each: its name, size and what it's for, whether it suits this iPhone; Download (then its size asked
+  // about once more), Pause, Resume, Delete, as its state is. Looked at again each second while one downloads.
+  let modelsTimer = null;
+  let asking = null; // the model whose download is being asked about
+  async function paintModels() {
+    const box = document.getElementById('phone-models');
+    if (!box) return;
+    let st;
+    try { st = await app({ type: 'local.models' }); } catch (e) { return; }
+    const was = box.dataset.ready || '';
+    const ready = st.models.filter((m) => m.state === 'ready').map((m) => m.id).join(',');
+    box.dataset.ready = ready;
+    box.replaceChildren();
+    const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+    const btn = (text, onClick) => { const b = el('button', 'btn', text); b.type = 'button'; b.addEventListener('click', onClick); return b; };
+    box.append(el('p', 'sites-title', 'Model on this iPhone'), el('p', 'note', st.memory));
+    const act = async (msg) => {
+      try { await app(msg); } catch (e) { const n = box.querySelector(`[data-model="${msg.model}"] .model-why`); if (n) { n.textContent = String(e?.message ?? e); n.hidden = false; } return; }
+      paintModels();
+    };
+    for (const m of st.models) {
+      const row = el('div', 'phone-model');
+      row.dataset.model = m.id;
+      row.append(el('p', 'model-name', `${m.name} · ${m.size}${m.suggested ? ' · suggested for this iPhone' : ''}`));
+      row.append(el('p', 'note', m.fits ? m.note : `${m.note} This iPhone has too little memory for it.`));
+      const line = el('p', 'actions');
+      const say = (t) => line.append(el('span', 'model-state', t), ' ');
+      if (asking === m.id && m.state === 'none') {
+        say(`Download ${m.size}? Best on Wi-Fi; it goes on in the background.`);
+        line.append(btn('Download', () => { asking = null; act({ type: 'local.download', model: m.id }); }), ' ', btn('Cancel', () => { asking = null; paintModels(); }));
+      } else if (m.state === 'none') {
+        if (m.fits) line.append(btn('Download', () => { asking = m.id; paintModels(); }));
+      } else if (m.state === 'downloading') {
+        say(`Downloading… ${Math.round((m.progress || 0) * 100)}%`);
+        line.append(btn('Pause', () => act({ type: 'local.pause', model: m.id })));
+      } else if (m.state === 'paused') {
+        say('Paused');
+        line.append(btn('Resume', () => act({ type: 'local.download', model: m.id })), ' ', btn('Delete', () => act({ type: 'local.delete', model: m.id })));
+      } else if (m.state === 'checking') {
+        say('Checking it…');
+      } else if (m.state === 'ready') {
+        say('✓ On this iPhone');
+        line.append(btn('Delete', () => act({ type: 'local.delete', model: m.id })));
+      } else if (m.state === 'failed') {
+        say(`Couldn’t download it: ${m.why}.`);
+        line.append(btn('Try again', () => act({ type: 'local.download', model: m.id })));
+      }
+      const why = el('p', 'note error model-why');
+      why.hidden = true;
+      row.append(line, why);
+      box.append(row);
+    }
+    // (a model ready or gone: the panel lists its agents again, as after a key)
+    if (was !== ready && box.dataset.painted) afterKeys();
+    box.dataset.painted = '1';
+    clearTimeout(modelsTimer);
+    if (st.models.some((m) => m.state === 'downloading' || m.state === 'checking') && !document.getElementById('settings')?.hidden) modelsTimer = setTimeout(paintModels, 1000);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const settings = document.getElementById('settings');
     const anchor = document.getElementById('model-note');
@@ -287,6 +347,13 @@
     box.id = 'phone-keys';
     box.className = 'phone-keys';
     (document.getElementById('effort-row') || anchor).after(box);
+    const models = document.createElement('div');
+    models.id = 'phone-models';
+    models.className = 'phone-keys';
+    box.after(models);
     paintKeys();
+    paintModels();
+    // (Settings opened: the models' state looked at again)
+    document.getElementById('settings-btn')?.addEventListener('click', () => setTimeout(paintModels, 50));
   });
 })();

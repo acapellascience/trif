@@ -1,0 +1,17 @@
+Hacker News | news.ycombinator.com/
+center 390x2058
+  #hnmain 390x2058
+    tbody 390x2058
+      tr 390x58 ×2
+        td 390x58
+          table 390x58
+            tbody 386x54
+            tr 386x54
+            td 319x54
+            span.pagetop 309x48
+      #bigbox 390x1879
+        td 390x1879
+          table 390x1879
+            tbody 390x1879
+            tr.athing.submission 390x39 ×22
+            td.title 348x39

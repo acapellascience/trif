@@ -1,0 +1,49 @@
+lfm3-1.7b full B1-feed-toggle INVALID Private field '#content' must be declared in an enclosing class
+lfm3-1.7b full B2-wiki-wordcount raw-ok fixed-ok fail no new element with a word count (real 11818) boxErr: TRIF sandbox: "#mw-content-text p, div.mw-content-ltr m{ display: block; text-align: left; }" isn't a valid selector
+lfm3-1.7b full B3-hn-hide-buttons INVALID Unexpected token ':'
+lfm3-1.7b full S1-wiki-footer raw-ok fixed-ok fail footer visible, heading visible 
+lfm3-1.7b full S2-wiki-bigger raw-ok fixed-ok PASS paragraph font 16px -> 25.6px boxErr: TRIF sandbox: that needs the site-data power (// @powers site-data in the mod's header, which the user approves)
+lfm3-1.7b full S3-wiki-green-links raw-ok fixed-ok fail link colours 51,102,204 | 51,102,204 | 51,102,204 | 51,102,204 | 51,102,204 
+lfm3-1.7b full S4-hn-filter raw-ok fixed-ok fail matching stories shown 2/2, others shown 28/28 
+lfm3-1.7b full S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+lfm3-1.7b full S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+lfm3-1.7b full S7-guardian-opinion INVALID Unexpected token '{'
+lfm3-1.7b full S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+lfm3-1.7b full S9-feed-filter INVALID Unexpected identifier 'the'
+lfm3-1.7b local B1-feed-toggle INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local B2-wiki-wordcount INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local B3-hn-hide-buttons INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local S1-wiki-footer INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local S2-wiki-bigger raw-bad fixed-ok PASS paragraph font 16px -> 25.6px 
+lfm3-1.7b local S3-wiki-green-links INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local S4-hn-filter INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local S5-hn-grey-bar INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local S6-guardian-ads INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+lfm3-1.7b local S7-guardian-opinion raw-bad fixed-ok fail opinion true, more-opinion true, news true, features true 
+lfm3-1.7b local S8-feed-banners INVALID Unexpected token ':'
+lfm3-1.7b local S9-feed-filter raw-bad fixed-ok fail buy posts shown 1/1, others shown 5/5 
+lfm3-1.7b localgbnf B1-feed-toggle raw-ok fixed-ok PASS sidebar visible true -> click false -> click true; button above timeline: true 
+lfm3-1.7b localgbnf B2-wiki-wordcount INVALID .textContent
+lfm3-1.7b localgbnf B3-hn-hide-buttons INVALID Identifier 'storyRows' has already been declared
+lfm3-1.7b localgbnf S1-wiki-footer raw-ok fixed-ok fail footer visible, heading visible 
+lfm3-1.7b localgbnf S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 16px boxErr: articleDiv.findAll(...).each is not a function
+lfm3-1.7b localgbnf S3-wiki-green-links raw-ok fixed-ok fail link colours 51,102,204 | 51,102,204 | 51,102,204 | 51,102,204 | 51,102,204 
+lfm3-1.7b localgbnf S4-hn-filter INVALID Private field '#hnmain' must be declared in an enclosing class
+lfm3-1.7b localgbnf S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+lfm3-1.7b localgbnf S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+lfm3-1.7b localgbnf S7-guardian-opinion INVALID Unexpected identifier 'time'
+lfm3-1.7b localgbnf S8-feed-banners INVALID Unexpected identifier 'they'
+lfm3-1.7b localgbnf S9-feed-filter INVALID .textContent
+lfm3-1.7b localjson S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+lfm3-1.7b localjson S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 16px 
+lfm3-1.7b localjson S3-wiki-green-links INVALID "filter"[0].hideIfText must be text, 1 to 500 characters
+lfm3-1.7b localjson S4-hn-filter raw-ok fixed-ok fail matching stories shown 0/2, others shown 0/28 
+lfm3-1.7b localjson S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+lfm3-1.7b localjson S6-guardian-ads raw-ok fixed-ok fail ads shown 2/42, news visible 
+lfm3-1.7b localjson S7-guardian-opinion raw-ok fixed-ok fail opinion true, more-opinion false, news true, features true 
+lfm3-1.7b localjson S8-feed-banners raw-ok fixed-ok fail cookie true, banner false, feed true 
+lfm3-1.7b localjson S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+lfm3-1.7b full: valid raw 8/12, valid after repair 8/12, does the job 3/12 (style 3/9, boxed 0/3), mean wall 42103 ms
+lfm3-1.7b local: valid raw 0/12, valid after repair 3/12, does the job 1/12 (style 1/9, boxed 0/3), mean wall 31937 ms
+lfm3-1.7b localgbnf: valid raw 6/12, valid after repair 6/12, does the job 2/12 (style 1/9, boxed 1/3), mean wall 13272 ms
+lfm3-1.7b localjson: valid raw 8/9, valid after repair 8/9, does the job 1/9 (style 1/9, boxed 0/0), mean wall 5666 ms

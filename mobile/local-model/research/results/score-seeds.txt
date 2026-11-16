@@ -1,0 +1,40 @@
+minicpm5-2b-s11 local2json S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+minicpm5-2b-s11 local2json S2-wiki-bigger raw-ok fixed-ok PASS paragraph font 16px -> 17.6px 
+minicpm5-2b-s11 local2json S3-wiki-green-links raw-ok fixed-ok PASS link colours 27,94,32 | 27,94,32 | 27,94,32 | 27,94,32 | 27,94,32 
+minicpm5-2b-s11 local2json S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+minicpm5-2b-s11 local2json S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+minicpm5-2b-s11 local2json S6-guardian-ads raw-ok fixed-ok fail ads shown 2/42, news visible 
+minicpm5-2b-s11 local2json S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+minicpm5-2b-s11 local2json S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+minicpm5-2b-s11 local2json S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+minicpm5-2b-s23 local2json S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+minicpm5-2b-s23 local2json S2-wiki-bigger raw-ok fixed-ok PASS paragraph font 16px -> 18.4px 
+minicpm5-2b-s23 local2json S3-wiki-green-links raw-ok fixed-ok fail link colours 51,102,204 | 51,102,204 | 51,102,204 | 51,102,204 | 51,102,204 
+minicpm5-2b-s23 local2json S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+minicpm5-2b-s23 local2json S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+minicpm5-2b-s23 local2json S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+minicpm5-2b-s23 local2json S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+minicpm5-2b-s23 local2json S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+minicpm5-2b-s23 local2json S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+qwen35-2b-s11 local2json S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-2b-s11 local2json S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 16px 
+qwen35-2b-s11 local2json S3-wiki-green-links raw-ok fixed-ok PASS link colours 0,102,51 | 0,102,51 | 0,102,51 | 0,102,51 | 0,102,51 
+qwen35-2b-s11 local2json S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-2b-s11 local2json S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-2b-s11 local2json S6-guardian-ads raw-ok fixed-ok fail ads shown 2/42, news visible 
+qwen35-2b-s11 local2json S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-2b-s11 local2json S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-2b-s11 local2json S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+qwen35-2b-s23 local2json S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-2b-s23 local2json S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 16px 
+qwen35-2b-s23 local2json S3-wiki-green-links raw-ok fixed-ok PASS link colours 34,102,51 | 34,102,51 | 34,102,51 | 34,102,51 | 34,102,51 
+qwen35-2b-s23 local2json S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-2b-s23 local2json S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-2b-s23 local2json S6-guardian-ads raw-ok fixed-ok fail ads shown 2/42, news visible 
+qwen35-2b-s23 local2json S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-2b-s23 local2json S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-2b-s23 local2json S9-feed-filter raw-ok fixed-ok PASS buy posts shown 0/1, others shown 5/5 
+minicpm5-2b-s11 local2json: valid raw 9/9, valid after repair 9/9, does the job 6/9 (style 6/9, boxed 0/0), mean wall 7044 ms
+minicpm5-2b-s23 local2json: valid raw 9/9, valid after repair 9/9, does the job 6/9 (style 6/9, boxed 0/0), mean wall 7315 ms
+qwen35-2b-s11 local2json: valid raw 9/9, valid after repair 9/9, does the job 5/9 (style 5/9, boxed 0/0), mean wall 8026 ms
+qwen35-2b-s23 local2json: valid raw 9/9, valid after repair 9/9, does the job 6/9 (style 6/9, boxed 0/0), mean wall 7787 ms

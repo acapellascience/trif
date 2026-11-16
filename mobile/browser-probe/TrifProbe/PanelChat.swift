@@ -153,6 +153,18 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "reloadTab":
             browser?.reload()
             return (["reloaded": true], nil)
+        case "local.models":
+            return (LocalModels.shared.describe(), nil)
+        case "local.download":
+            guard let m = LocalModels.named(d["model"] as? String) else { return (nil, "no such model") }
+            if let why = LocalModels.shared.download(m) { return (nil, why) }
+            return (["downloading": true], nil)
+        case "local.pause":
+            if let m = LocalModels.named(d["model"] as? String) { LocalModels.shared.pause(m) }
+            return (["paused": true], nil)
+        case "local.delete":
+            if let m = LocalModels.named(d["model"] as? String) { LocalModels.shared.delete(m) }
+            return (["deleted": true], nil)
         case "run.start":
             return startRun(d)
         case "run.go":
@@ -173,7 +185,12 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             if e.keyName != nil {
                 a["loggedIn"] = APIKeys.has(e.id)
                 a["loginFix"] = e.keyFix
-            } else { a["loggedIn"] = true; a["note"] = "A stand-in for now: no model runs on this iPhone yet." }
+            } else {
+                // (no model downloaded yet: logged out, as an engine without its key; the stand-in in the Simulator)
+                a["loggedIn"] = !LocalModels.shared.readyModels.isEmpty || !PanelEngine.standIn.isEmpty
+                a["loginFix"] = "download a model in Settings, under Model on this iPhone"
+                a["note"] = "Runs on this iPhone: free, and nothing leaves it. Style mods, about half a minute each."
+            }
             if e.keyName != nil { a["efforts"] = e.models.first?.efforts ?? [] }
             return a
         }
@@ -272,13 +289,16 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         guard let e = PanelEngine.named(d["agent"] as? String ?? "iphone") ?? PanelEngine.named("iphone") else { return (nil, "no such engine") }
         if e.keyName != nil, !APIKeys.has(e.id) { return (nil, "No \(e.keyName!) API key yet: add it in Settings, under API keys.") }
         let model = (d["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? e.defaultModel ?? ""
+        if e.id == "iphone", model != "stand-in", let m = LocalModels.named(model) ?? Optional(LocalModels.suggested), !LocalModels.shared.isReady(m) {
+            return (nil, "\(m.name) isn't on this iPhone yet: download it in Settings, under Model on this iPhone.")
+        }
         var sid = d["sessionId"] as? String ?? ""
         var isNew = false
         if sid.isEmpty || sessions[sid]?.engine != e.id {
             // (a session the app doesn't have any more, the app closed meanwhile: a new one, told what was said)
             if sid.isEmpty || sessions[sid] == nil { isNew = true }
             sid = "trif-\(UUID().uuidString.prefix(12))"
-            let conv = e.conversation()
+            let conv = e.conversation(model: model)
             if let c = conv as? ChatCompletionsConversation { c.images = (liveModels[e.id] ?? []).first { $0.id == model }?.images ?? false }
             sessions[sid] = (e.id, conv)
         }
@@ -312,8 +332,15 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             var ok = true
             var lastTokens = 0
             do {
-                let (first, image) = await self.firstMessage(run, conv)
-                conv.addUser(first, image: image)
+                if let local = conv as? LocalConversation {
+                    // (the model on this iPhone: the page's outline and the person's words, as its own prompt has them)
+                    local.onStep = { [weak self] line in self?.step(run, line) }
+                    local.set(url: run.url, outline: await self.outline(run) ?? "(no outline: the page isn't ready)", request: run.prompt)
+                    self.lastLocalRequest = run.prompt
+                } else {
+                    let (first, image) = await self.firstMessage(run, conv)
+                    conv.addUser(first, image: image)
+                }
                 let tools = conv.usesTools ? self.tools(images: conv.takesImages) : []
                 let system = self.system(conv)
                 var steps = 0
@@ -358,6 +385,21 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     }
 
     static let maxSteps = 15
+
+    // MARK: Not right? Ask Claude (the model on this iPhone's replies end with it)
+
+    /// The link in a reply (the panel's markdown takes http(s) links only; this one is never loaded: it's caught here).
+    static let askClaudeLink = "https://ask-claude.trif.invalid/"
+    /// The last request the model on this iPhone answered, for Ask Claude.
+    private var lastLocalRequest = ""
+    /// Set by the pane: the same request to Claude, in its chat, with the page.
+    var onAskClaude: (String) -> Void = { _ in }
+    private func caught(_ url: URL) -> Bool {
+        guard url.host == "ask-claude.trif.invalid" else { return false }
+        report.log("panel", "Ask Claude, after the model on this iPhone")
+        onAskClaude(lastLocalRequest)
+        return true
+    }
 
     /// The whole mod files in a reply: its code blocks with a header, else the header to the end.
     nonisolated static func modFiles(_ text: String) -> [String] {
@@ -619,11 +661,13 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if url.scheme == PanelSchemeHandler.scheme { return .allow }
+        if caught(url) { return .cancel }
         // (a link in a reply: in a new tab of TRIF's, never in here)
         if ["http", "https"].contains(url.scheme ?? ""), action.navigationType == .linkActivated { browser?.newTab(url.absoluteString) }
         return .cancel
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = action.request.url, caught(url) { return nil }
         if let url = action.request.url, ["http", "https"].contains(url.scheme ?? "") { browser?.newTab(url.absoluteString) }
         return nil
     }

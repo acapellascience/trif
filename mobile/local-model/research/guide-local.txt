@@ -1,0 +1,66 @@
+A mod is one file: a header, then the mod. There are two kinds.
+
+**Style mod** (use it whenever it can do the job: hiding, restyling, recolouring, resizing, renaming text,
+dropping items that contain words). The header has `// @style`; after it comes one JSON object with any of:
+
+- "css": CSS text. To recolour a background use `background-color`, never the `background` shorthand. No
+  `url()` except `data:`, no `@import`.
+- "hide": a list of selectors to hide.
+- "filter": a list of `{ "items": selector, "hideIfText": "words" }` (or `"hideIfRegex": "a|b"`): hides each
+  item whose text contains the words (case-insensitive).
+- "replace": a list of `{ "in": selector, "find": "text", "with": "text" }`.
+
+**Boxed mod** (only when it needs new elements or logic: a button, a counter, a toggle). The header has
+`// @boxed`; after it comes JavaScript that uses only TRIF's API (no `window`, `document`, `fetch`):
+`page.find(sel)`, `page.findAll(sel)`, `page.create(tag)`, `trif.css(text)`, `trif.observe(sel, (el) => ...)`
+(each matching element, now and later). Elements have `text`, `setText(t)`, `hide()`, `show()`,
+`style('display')` (read), `find`, `findAll`, `closest`, `next()`, `append`, `prepend`, `before`, `after`,
+`on('click', fn)`, `classes.add('trif-box-...')`. Classes and ids you make start with `trif-box-`.
+
+Selectors: take them from the page outline. Each outline line starts with a selector for that part of
+the page (`#footer`, `aside.sidebar`, `article[data-testid="post"]`, `tr.athing`). Use those, or plain tag
+names. Never make up class names, ids or data-testid values that are not in the outline. Selectors can't
+contain `{`, `}`, `;` or `@`.
+
+Example. Outline:
+```
+Example News | news.example/
+header.top-bar (sticky) 390x60 “Example News Menu”
+main 390x3000
+  div.story-list 390x2800
+    div.story 390x120 ×20
+  aside#newsletter 390x300 “Get our newsletter”
+footer 390x400 “About Contact”
+```
+"Hide the newsletter box, make the top bar dark, and drop stories about football":
+```js
+// ==WebMod==
+// @name        Calmer Example News
+// @description Hides the newsletter box, darkens the top bar, drops football stories
+// @match       https://news.example/*
+// @style
+// ==/WebMod==
+{
+  "css": "header.top-bar { background-color: #222 !important; color: #eee !important }",
+  "hide": ["aside#newsletter"],
+  "filter": [{ "items": "div.story", "hideIfText": "football" }]
+}
+```
+"Add a button that hides and shows the newsletter box":
+```js
+// ==WebMod==
+// @name        Newsletter toggle
+// @description A button that hides and shows the newsletter box
+// @match       https://news.example/*
+// @boxed
+// ==/WebMod==
+const box = page.find('aside#newsletter');
+if (!box) return;
+const btn = page.create('button');
+btn.setText('Hide newsletter');
+btn.on('click', () => {
+  if (box.style('display') === 'none') { box.show(); btn.setText('Hide newsletter'); }
+  else { box.hide(); btn.setText('Show newsletter'); }
+});
+box.before(btn);
+```

@@ -125,6 +125,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let p = PanelChat(browser: browser!, report: report)
         p.onActivity = { [weak self] a in self?.panelActivity = a; self?.refreshActivity() }
         p.isShown = { [weak self] in self?.shown ?? false }
+        // (Not right? Ask Claude, after the model on this iPhone: the same request in Claude's chat, with the page)
+        p.onAskClaude = { [weak self] request in
+            guard let self else { return }
+            self.choose(more: false, service: .claude)
+            self.shown = false
+            self.open { [weak self] in if !request.isEmpty { await self?.fill(request) } }
+        }
         return p
     }()
     private var panelActivity: ChatActivity = .idle
@@ -473,6 +480,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard shown else { return }
         shown = false
         blur(cur)
+        // (the model on this iPhone let go with the robot view: its memory back for the page)
+        if more { LocalRunner.shared.unload() }
     }
 
     /// The keyboard away from a chat's message box (so it doesn't come up over the tab).

@@ -40,6 +40,7 @@ shared = project.main_group.new_group('Shared (from the repository)')
   '../../extension/sidepanel.css',
   '../../extension/switch.css',
   '../../extension/vendor/ses.umd.min.js',
+  '../local-model/local-guide.txt',
 ].each { |rel| resources << shared.new_file(rel) }
 # (a folder reference: the pages stay a folder named "pages" inside the app)
 pages = shared.new_file('../shared/pages')
@@ -50,6 +51,10 @@ panel = shared.new_file('../shared/gen/panel')
 panel.last_known_file_type = 'folder'
 resources << panel
 target.add_resources(resources)
+# (and the framework itself in the app, on device builds: the pbxproj's "Embed llama.framework (devices)" script)
+embed = target.new_shell_script_build_phase('Embed llama.framework (devices)')
+embed.shell_script = File.read(File.join(here, 'embed-llama.sh'))
+embed.always_out_of_date = '1'
 
 target.build_configurations.each do |config|
   s = config.build_settings
@@ -68,6 +73,10 @@ target.build_configurations.each do |config|
   s['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
   s.delete('ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME') # (no accent colour in the catalog: the app sets its tint itself)
   s['INFOPLIST_KEY_CFBundleDisplayName'] = 'TRIF Probe'
+  # (the model on this iPhone: llama.cpp's framework from Vendor/ (fetch-llama.sh), for devices only: it has no
+  # Simulator slice)
+  s['FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]'] = '$(inherited) $(PROJECT_DIR)/Vendor/llama.xcframework/ios-arm64'
+  s['OTHER_LDFLAGS[sdk=iphoneos*]'] = '$(inherited) -framework llama'
   s['INFOPLIST_KEY_UIApplicationSceneManifest_Generation'] = 'YES'
   s['INFOPLIST_KEY_UILaunchScreen_Generation'] = 'YES'
   s['INFOPLIST_KEY_UISupportedInterfaceOrientations'] = 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'

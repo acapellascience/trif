@@ -1,0 +1,53 @@
+Bicycle - Wikipedia | en.wikipedia.org/wiki/Bicycle
+#mw-mf-viewport 390x844
+  #mw-mf-page-center 390x3772
+    header.header-container.header-chrome 390x55 “Search User menu”
+      div.minerva-header 358x55
+        nav.navigation-drawer.toggle-list.view-border-box 32x44 “Home Random Nearby Create account Log in Settings ”
+          #main-menu-input 32x44
+        form[role="search"] 133x44 “Search”
+        nav[aria-label="User navigation"] 48x54 “User menu”
+          #minerva-user-menu-checkbox 60x44
+    #content 390x2980
+      div.pre-content.heading-holder 358x149
+        div.page-heading 358x37
+          #firstHeading 358x37 “Bicycle”
+        #p-associated-pages 358x30
+        nav.page-actions-menu 358x50 “Language Save View source Share”
+          #p-views 358x48
+            a[role="button"] 44x44
+            #ca-bookmark 44x44
+            #ca-edit 44x44
+            #ca-share 44x44
+      #bodyContent 358x2798
+        #mw-content-text 358x2798
+          div.mw-content-ltr.mw-parser-output 358x2798
+            section 358x2028 ×12
+            div[role="note"] 358x53
+            #mwBg 358x53
+            p 358x158 ×2
+            b 355x44 “push-bike”
+            #mwIw 326x44 “motor-assisted”
+            #mwDg 358x906
+            tbody 350x899
+            tr 350x268 ×5
+            figure.mw-default-size.mw-default-audio-height 250x63
+            a[role="button"] 250x30
+            #mwKw 358x238
+            #mwUg 358x211
+            #mwXg 358x58
+            div.mw-heading.mf-collapsible-heading 358x58
+            #Etymology 336x33 “Etymology”
+            #mwkg 358x58
+            div.mw-heading.mf-collapsible-heading 358x58
+            #History 336x33 “History”
+    #footer 390x737 “Last edited 2 months ago by Yojo98 Page was render”
+      a.last-modified-bar 390x48
+      div.post-content.footer-content 358x640
+        #mw-data-after-content 358x320
+          div.read-more-container 358x320
+        div.minerva-footer-logo 358x55
+          #footer-icons 114x44
+        #footer-info 358x84
+          #footer-info-copyright 350x56
+        #footer-places 358x112

@@ -39,6 +39,7 @@ final class Model: ObservableObject {
         self.report = report
         self.browser = browser
         self.pane = ClaudePane(report: report, browser: browser)
+        LocalModels.shared.wake() // (a model download iOS kept going while the app was away)
         self.modsPanel = ModsPanel(browser: browser)
         // (Point TRIF at this: the chat opens, with the tab's data and then the part pointed at in its message box)
         let pane = self.pane

@@ -1,0 +1,22 @@
+TRIF probe: plain page | /Users/tim/WebMods-worktrees/ios-poc/mobile/shared/pages/plain.html
+#promo-banner (sticky) 390x47 “Subscribe now for 50% off. Close”
+header.site-header 390x47 “Home Explore Messages Profile”
+  nav[aria-label="Main"] 390x46 “Home Explore Messages Profile”
+#content 390x1642
+  section[aria-label="Timeline"] 358x931
+    article[data-testid="post"] 358x149 ×5
+      h2 328x24 “Post number 1”
+      p 328x45 “Something a person you follow wrote, at some lengt”
+    article[data-testid="promoted-post"] 358x127
+      h2 328x24 “A product you did not ask about”
+  aside.sidebar 358x346
+    section[aria-label="Trending"] 358x212
+      h3 330x26 “Trending now”
+      ul 330x112
+    section.who-to-follow 358x122
+      h3 330x26 “Who to follow”
+  #compose 358x38 “Post”
+  x-widget 358x42
+  #inner-frame 360x72
+div[role="dialog"] (fixed) 390x138 “We value your privacy, which is why we track you. ”
+  p 358x45 “We value your privacy, which is why we track you.”

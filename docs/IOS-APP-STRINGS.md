@@ -291,6 +291,22 @@ and isn't listed. Only what's new or reads differently on the phone:
 | Its list, one line per chat | — | {site} · {the conversation's title} (No site for a new tab), with Writing a reply or Replied under the one that is; a check on the one shown |
 | The robot button | opened the one chat | opens the shown tab's own chat (a new one if it has none), never another tab's working one; its dots show while any chat writes |
 
+## On this iPhone: the model on the phone (added 11-16, from the research)
+
+| Where | Old | New |
+|---|---|---|
+| On this iPhone's note under the agent | A stand-in for now: no model runs on this iPhone yet. | Runs on this iPhone: free, and nothing leaves it. Style mods, about half a minute each. |
+| No model downloaded yet (the panel's login notice, its own words) | — | On this iPhone isn’t logged in. To log in, download a model in Settings, under Model on this iPhone. |
+| Its models (Settings → Model) | Stand-in | MiniCPM5 2B · Qwen3.5 2B · Qwen3.5 4B, each: Style mods. The best of the small ones in TRIF's tests. / Style mods. Reads pages about twice as fast; gets fewer right. / Style mods, and boxed mods (experimental). Needs 6 GB of memory. (then its size). In the Simulator only, the stand-in too: No model runs in the Simulator: a canned reply, to try the chat end to end. |
+| Settings, a block of its own under API keys | — | **Model on this iPhone** · This iPhone has {n} GB of memory; {size} free for files. · one per model: {name} · {size}[ · suggested for this iPhone], its note[ This iPhone has too little memory for it.] |
+| A model's state and buttons | — | Download → Download {size}? Best on Wi-Fi; it goes on in the background. Download · Cancel · Downloading… {n}% Pause · Paused Resume · Delete · Checking it… · ✓ On this iPhone Delete · Couldn’t download it: {why}. Try again |
+| Why a download failed | — | the download didn't match its checksum, so it was deleted · the server answered {code} · the download couldn't be kept · There isn't room for it: it needs {size}, and {size} is free. |
+| The run's steps (the panel's tool lines) | — | Reading the page… (about half a minute on this iPhone) · Writing… |
+| Its reply | — | Here's a {style/boxed} mod for {host}, written on this iPhone: (the mod) · Not right? Ask Claude (a link: the same request in Claude's chat, with the page) |
+| When it couldn't | — | The model on this iPhone couldn't write a mod for that ({the reply isn't JSON / the reply has no rules / no mod in the reply}). Not right? Ask Claude |
+| Its errors (the panel's error lines, after "On this iPhone: ") | — | {model} isn't on this iPhone yet: download it in Settings, under Model on this iPhone. · the model on this iPhone needs a real iPhone: the Simulator can't run it · the model couldn't be loaded ({file}) · the model stopped while reading ({code}) · the reply's shape couldn't be set up · the page is too long for the model ({n} tokens) |
+| The stand-in's reply (the Simulator only now) | This is a stand-in: no model runs on this iPhone yet. When one does, it answers here, with the page in hand. | This is a stand-in: no model runs in the Simulator. On an iPhone, the model on it answers here, with the page in hand. |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

@@ -147,6 +147,26 @@ function handler(log = []) {
     const url = new URL(req.url, 'http://localhost');
     const [, engine, ...rest] = url.pathname.split('/');
     const path = `/${rest.join('/')}`;
+    // (the model downloads' stand-in: 40 MB of a fixed pattern for any /models/<file>, about 8 MB a second, with
+    // ranges so a paused download resumes; its SHA-256 isn't the real model's, so the app's check refuses it)
+    if (engine === 'models' && req.method === 'GET') {
+      const size = 40 * 1024 * 1024;
+      const m = /bytes=(\d+)-/.exec(req.headers.range || '');
+      const from = m ? Number(m[1]) : 0;
+      res.writeHead(m ? 206 : 200, { 'Content-Type': 'application/octet-stream', 'Content-Length': size - from, 'Accept-Ranges': 'bytes', ETag: '"mock-model-1"', ...(m ? { 'Content-Range': `bytes ${from}-${size - 1}/${size}` } : {}) });
+      let at = from;
+      const chunk = Buffer.alloc(256 * 1024, 7);
+      const pump = () => {
+        if (res.destroyed) return;
+        if (at >= size) { res.end(); return; }
+        const n = Math.min(chunk.length, size - at);
+        res.write(chunk.subarray(0, n));
+        at += n;
+        setTimeout(pump, 30);
+      };
+      pump();
+      return;
+    }
     if (url.pathname === '/log') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(log)); return; }
     const key = engine === 'claude-api' ? req.headers['x-api-key'] : String(req.headers.authorization || '').replace(/^Bearer /, '');
     const shape = engine === 'claude-api' ? 'anthropic' : 'openai';

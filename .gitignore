@@ -4,3 +4,4 @@ node_modules/
 dist/
 tests/e2e/.browsers
 tests/perf/.work
+mobile/browser-probe/Vendor/

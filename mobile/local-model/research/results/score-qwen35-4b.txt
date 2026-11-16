@@ -1,0 +1,85 @@
+qwen35-4b full B1-feed-toggle INVALID document; .setAttribute; .textContent; .addEventListener; .getAttribute; .style.…
+qwen35-4b full B2-wiki-wordcount raw-bad fixed-ok fail no new element with a word count (real 11818) 
+qwen35-4b full B3-hn-hide-buttons raw-bad fixed-ok fail 0 new controls in story rows 
+qwen35-4b full S1-wiki-footer raw-bad fixed-ok PASS footer hidden, heading visible 
+qwen35-4b full S2-wiki-bigger raw-bad fixed-ok fail paragraph font 16px -> 16px 
+qwen35-4b full S3-wiki-green-links raw-bad fixed-ok PASS link colours 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 
+qwen35-4b full S4-hn-filter raw-bad fixed-ok fail matching stories shown 2/2, others shown 28/28 
+qwen35-4b full S5-hn-grey-bar raw-bad fixed-ok fail top bar background 255,102,0 
+qwen35-4b full S6-guardian-ads INVALID Invalid or unexpected token
+qwen35-4b full S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b full S8-feed-banners raw-bad fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b full S9-feed-filter raw-bad fixed-ok fail buy posts shown 1/1, others shown 5/5 
+qwen35-4b local B1-feed-toggle raw-ok fixed-ok PASS sidebar visible true -> click false -> click true; button above timeline: true 
+qwen35-4b local B2-wiki-wordcount raw-ok fixed-ok fail no new element with a word count (real 11818) boxErr: article.text is not a function
+qwen35-4b local B3-hn-hide-buttons raw-ok fixed-ok fail 30 new controls; clicking the first hid its story: false ("1.How to make almost anything (cba.mit.e"); stories still shown 29 
+qwen35-4b local S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-4b local S2-wiki-bigger raw-bad fixed-ok fail paragraph font 16px -> 16px 
+qwen35-4b local S3-wiki-green-links INVALID this file has no // ==WebMod== header, so it isn't a mod TRIF can read
+qwen35-4b local S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-4b local S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-4b local S6-guardian-ads INVALID the rules aren't valid JSON: Expected ',' or ']' after array element in JSON at position 104 (line 5 column 30)
+qwen35-4b local S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b local S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b local S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+qwen35-4b local2 B1-feed-toggle raw-ok fixed-ok PASS sidebar visible true -> click false -> click true; button above timeline: false 
+qwen35-4b local2 B2-wiki-wordcount raw-ok fixed-ok fail no new element with a word count (real 11818) boxErr: content.text is not a function
+qwen35-4b local2 B3-hn-hide-buttons raw-ok fixed-ok PASS 30 new controls; clicking the first hid its story: true ("1.HideHow to make almost anything (cba.m"); stories still shown 29 
+qwen35-4b local2 S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-4b local2 S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 19.2px 
+qwen35-4b local2 S3-wiki-green-links raw-ok fixed-ok PASS link colours 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 
+qwen35-4b local2 S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-4b local2 S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-4b local2 S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+qwen35-4b local2 S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b local2 S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b local2 S9-feed-filter raw-ok fixed-ok PASS buy posts shown 0/1, others shown 5/5 
+qwen35-4b local2gbnf B1-feed-toggle raw-ok fixed-ok PASS sidebar visible true -> click false -> click true; button above timeline: true 
+qwen35-4b local2gbnf B2-wiki-wordcount raw-ok fixed-ok fail no new element with a word count (real 11818) 
+qwen35-4b local2gbnf B3-hn-hide-buttons raw-ok fixed-ok PASS 30 new controls; clicking the first hid its story: true ("1.HideHow to make almost anything (cba.m"); stories still shown 29 
+qwen35-4b local2gbnf S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-4b local2gbnf S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 19.2px 
+qwen35-4b local2gbnf S3-wiki-green-links raw-ok fixed-ok PASS link colours 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 
+qwen35-4b local2gbnf S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-4b local2gbnf S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-4b local2gbnf S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+qwen35-4b local2gbnf S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b local2gbnf S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b local2gbnf S9-feed-filter raw-ok fixed-ok PASS buy posts shown 0/1, others shown 5/5 
+qwen35-4b local2json S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-4b local2json S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 16px 
+qwen35-4b local2json S3-wiki-green-links raw-ok fixed-ok PASS link colours 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 
+qwen35-4b local2json S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-4b local2json S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-4b local2json S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+qwen35-4b local2json S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b local2json S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b local2json S9-feed-filter raw-ok fixed-ok PASS buy posts shown 0/1, others shown 5/5 
+qwen35-4b localgbnf B1-feed-toggle raw-ok fixed-ok PASS sidebar visible true -> click false -> click true; button above timeline: true 
+qwen35-4b localgbnf B2-wiki-wordcount raw-ok fixed-ok fail no new element with a word count (real 11818) boxErr: el.text is not a function
+qwen35-4b localgbnf B3-hn-hide-buttons raw-ok fixed-ok PASS 30 new controls; clicking the first hid its story: true ("1.HideHow to make almost anything (cba.m"); stories still shown 29 
+qwen35-4b localgbnf S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-4b localgbnf S2-wiki-bigger INVALID the rules aren't valid JSON: Expected ',' or '}' after property value in JSON at position 441 (line 2 column 440)
+qwen35-4b localgbnf S3-wiki-green-links raw-ok fixed-ok PASS link colours 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 | 0,100,0 
+qwen35-4b localgbnf S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-4b localgbnf S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-4b localgbnf S6-guardian-ads raw-ok fixed-ok PASS ads shown 0/42, news visible 
+qwen35-4b localgbnf S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b localgbnf S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b localgbnf S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+qwen35-4b localjson S1-wiki-footer raw-ok fixed-ok PASS footer hidden, heading visible 
+qwen35-4b localjson S2-wiki-bigger raw-ok fixed-ok fail paragraph font 16px -> 16px 
+qwen35-4b localjson S3-wiki-green-links INVALID "css": a quoted string that isn't closed on its line
+qwen35-4b localjson S4-hn-filter raw-ok fixed-ok PASS matching stories shown 0/2, others shown 28/28 
+qwen35-4b localjson S5-hn-grey-bar raw-ok fixed-ok fail top bar background 255,102,0 
+qwen35-4b localjson S6-guardian-ads raw-ok fixed-ok fail ads shown 2/42, news visible 
+qwen35-4b localjson S7-guardian-opinion raw-ok fixed-ok PASS opinion false, more-opinion false, news true, features true 
+qwen35-4b localjson S8-feed-banners raw-ok fixed-ok PASS cookie false, banner false, feed true 
+qwen35-4b localjson S9-feed-filter raw-ok fixed-ok fail buy posts shown 1/1, others shown 5/5 
+qwen35-4b full: valid raw 1/12, valid after repair 10/12, does the job 4/12 (style 4/9, boxed 0/3), mean wall 28572 ms
+qwen35-4b local: valid raw 9/12, valid after repair 10/12, does the job 5/12 (style 4/9, boxed 1/3), mean wall 18892 ms
+qwen35-4b local2: valid raw 12/12, valid after repair 12/12, does the job 9/12 (style 7/9, boxed 2/3), mean wall 20017 ms
+qwen35-4b local2gbnf: valid raw 12/12, valid after repair 12/12, does the job 9/12 (style 7/9, boxed 2/3), mean wall 19933 ms
+qwen35-4b local2json: valid raw 9/9, valid after repair 9/9, does the job 7/9 (style 7/9, boxed 0/0), mean wall 17382 ms
+qwen35-4b localgbnf: valid raw 11/12, valid after repair 11/12, does the job 8/12 (style 6/9, boxed 2/3), mean wall 20745 ms
+qwen35-4b localjson: valid raw 8/9, valid after repair 8/9, does the job 4/9 (style 4/9, boxed 0/0), mean wall 23570 ms

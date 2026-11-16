@@ -189,7 +189,8 @@ Built on the probe, toward something to use every day:
   the run started on: read_page, try_mod (style or boxed, TRIF's runtime, no powers, taken off by reloading the tab
   when another is tried or the run ends), screenshot (models that take pictures); their results go to the model
   marked as the website's data, not instructions; at most 15 steps. The mods in the replies go to Add this mod?.
-  On this iPhone is a stand-in (a canned reply with a small style mod) until the on-device engine is in.
+  On this iPhone runs a small model on the phone itself (mobile/local-model/README.md: llama.cpp, the models, the
+  research, a Mac harness); in the Simulator, where it can't run, a stand-in (a canned reply with a small style mod) too.
   Testing: `node mobile/mock-api.js 8379` and the app with `-apibase http://localhost:8379` (a loopback address only)
   and the key `sk-test-not-a-real-key`; never a real key. The mock follows a script (read_page, try_mod, the mod;
   "loop" for the step cap, "slow" to try Stop) and refuses a turn that lost its thinking block or reasoning item.

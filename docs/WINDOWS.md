@@ -296,15 +296,20 @@ account, no paid call).
   Windows (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`): nothing to download, no native
   module. It makes an AppContainer for one run (its own identity, a SID), gives that identity entries on
   exactly the run's folders, starts the command inside with no capabilities at all (so: no network, and
-  no file, pipe or registry key that doesn't name the run), in a job (what it leaves behind ends with it;
-  no clipboard), and takes the entries out again afterwards.
+  no file or pipe that doesn't name the run), in a job (so that anything it left running would end with
+  it), and takes the entries out again afterwards.
 - `run.js` lays out what a run sees, all inside the user's profile folder as on a real computer (a working
   folder, a mailbox, a screenshots folder, TRIF's code as `setup --copy` leaves it, node as nvm has it;
   and the rest of a home folder, an ssh key, the private folder, the live workspace, another run's
   mailbox and working folder, a server and a pipe as the helper makes them, another program with a canary
   on its command line, a registry value, the clipboard), then tries everything from inside.
 
-What was **seen** (the run is linked in the report; every row below is one attempt or more):
+What was **seen**: 65 checks, each passing, as a plain AppContainer and again as a less-privileged one
+with `registryRead`; run by the runner's own account (an administrator) and again by an ordinary user
+made for it (`fence-standard-user`: not an administrator, same results, so making the container and its
+entries needs no rights a normal person lacks).
+[The run](https://github.com/acapellascience/trif/actions/runs/43847087712): "every guarantee held, and
+everything a run needs worked", in both. Every row below is one attempt or more:
 
 | | From inside the fence |
 |---|---|
@@ -314,6 +319,8 @@ What was **seen** (the run is linked in the report; every row below is one attem
 | Network | refused: the internet (`EACCES`), a name lookup, `fetch`, a question to a name server over UDP (no answer), a server on this computer (127.0.0.1 and `localhost`), the helper's pipe |
 | Private folder | refused: reading `config.json`, listing the folder, another site's screenshot, writing into it |
 | Other runs | refused: reading or writing another run's mailbox, reading its working folder, listing the mailboxes' folder |
+| Other programs | refused: another program's command line (asked of WMI, and of the kernel with the least right there is), opening it to read its memory (where its environment is), the clipboard. Outside the fence the same small program (`spy.cs`) got all three: the canaries came back |
+| Afterwards | from outside: nothing changed that shouldn't have; the server, the UDP socket and the pipe on this computer heard nothing; the run's entries were on its folders while it ran and gone after |
 
 Found on the way, each of which a real build has to respect:
 
@@ -329,6 +336,8 @@ Found on the way, each of which a real build has to respect:
   its own commands. `cmd.exe` starts, and can start node, but not another `cmd.exe`; node can't start any
   child (`EPERM`). So "wrap the agent's shell commands" (the `CLAUDE_CODE_SHELL_PREFIX` route) has
   nothing to run them with. What does run is one node program: TRIF's own.
+- **It can't start programs**, so the job has nothing to end: node inside couldn't leave a process
+  behind (`EPERM`). "What it leaves running ends with it" is how the launcher is built, not something seen.
 - **The user's variables are readable** (`reg query HKCU\Environment` from inside worked; a value under
   `HKCU\Software` didn't). People keep API keys in user variables on Windows. Nothing inside the fence can
   send them anywhere, but a run that could run `reg.exe` there could write one into a mod. See the
@@ -364,8 +373,9 @@ What's given up, plainly:
 - The registry hole above is real but out of reach: reading it takes running a program inside the fence,
   and the only program there is TRIF's CLI.
 
-**Codex: not from the panel on Windows yet.** Codex has no switch for its shell and no place to put
-TRIF's fence; its own sandboxes either refuse TRIF's profile (good), need an administrator and then leak
+**Codex: not from the panel on Windows yet.** TRIF knows no way to take Codex's shell away or to put a
+fence of TRIF's under it (its long feature list is worth one more look for a switch before ruling that
+out); its own sandboxes either refuse TRIF's profile (good), need an administrator and then leak
 name lookups and local servers (and didn't start inside the profile folder at all), or need a Windows the
 runners don't have. The honest choices are: leave Codex (and open models, which run through it) off in the
 panel on Windows, saying why; or offer it only where `mxc` is there, once that can be tried on a real

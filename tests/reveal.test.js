@@ -17,7 +17,8 @@ const stub = (dir) => {
   fs.writeFileSync(sh, `require('fs').appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n');\n`);
   return { sh, log };
 };
-const waitFor = async (f) => { for (let i = 0; i < 100; i++) { if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8'); await new Promise((r) => setTimeout(r, 30)); } return ''; };
+// (until the stand-in has written its line: the file is there a moment before its text is)
+const waitFor = async (f) => { for (let i = 0; i < 300; i++) { try { const t = fs.readFileSync(f, 'utf8'); if (t.endsWith('\n')) return t; } catch { /* not yet */ } await new Promise((r) => setTimeout(r, 30)); } return ''; };
 
 test('the file: the mod\'s own, by its id, in the sites folder; anything else refused', () => {
   const home = tempDir('trif-reveal-');

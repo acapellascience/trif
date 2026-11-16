@@ -177,7 +177,7 @@ async function codex(base, where = 'inside the user\'s profile folder') {
   console.log(`codex: ${bin}`);
   show('codex --version', runTool(bin, ['--version']).stdout);
   // (whether its shell can be switched off, as Claude Code's Bash can: what it calls its features)
-  if (!where.startsWith('outside')) show('codex features list', runTool(bin, ['features', 'list']).stdout + runTool(bin, ['features', 'list']).stderr, 6000);
+  if (!where.startsWith('outside')) show('codex features list (those about its shell, tools and sandboxes)', (runTool(bin, ['features', 'list']).stdout || '').split(/\r?\n/).filter((l) => /shell|exec|tool|sandbox|mxc|unified|apply_patch|mcp/i.test(l)).join('\n'), 8000);
   // The same layout as run.js, smaller: a working folder, a mailbox, a secret elsewhere, the private folder.
   const CANARY = `CANARY-${rand(8)}`;
   const home = path.join(base, 'cx', 'home');

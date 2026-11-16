@@ -143,11 +143,24 @@ export function modToUserScript(mod) {
   // the values to its `trif`; a free mod's CSS is a script of TRIF's before its code, its values in its wrapper)
   const style = styleOf(mod);
   const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.siteOk) && mod.siteOk.length ? { ...args, site: mod.siteOk } : args, ...(style ? { style } : {}) };
-  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
-  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
-  const js = [{ code: wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null) }];
-  if (style && style.css) js.unshift({ code: styleSectionCode(mod.id, style.css) });
+  // (each piece only where it belongs: a phone mod in the phone view's tab, any other mod everywhere else: phoneGate)
+  const gate = (code) => phoneGate(isPhoneMod(mod), code);
+  if (inSandboxWorld(mod)) return { ...base, js: [{ code: gate(sandboxModCode(mod.id, String(mod.code ?? ''), powers)) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  if (mod.sandboxed) return { ...base, js: [{ code: gate(sandboxPageCode(mod.id, String(mod.code ?? ''), powers)) }], world: 'MAIN' };
+  const js = [{ code: gate(wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null)) }];
+  if (style && style.css) js.unshift({ code: gate(styleSectionCode(mod.id, style.css)) });
   return { ...base, js, world: 'MAIN' };
+}
+
+// The phone view (phone.js, docs/MOBILE-EDIT.md) is a TRIF of its own: in its tab only phone mods run, and phone
+// mods run nowhere else. A mod registers for its pages as any does (user scripts can't be given a tab), and its
+// code waits behind a test of the page's own document: the phone tab's rules mark its documents with a
+// `Server-Timing: trif-phone` entry (phone.js phoneRules), which the Performance timeline shows in every world,
+// at once. Each wrapper is one expression statement (wrapModCode, styleSectionCode, sandboxModCode,
+// sandboxPageCode), so `if (…) ` before it keeps the mod's own line numbers.
+export const PHONE_MARK_TEST = "((n) => !!n && Array.isArray(n.serverTiming) && n.serverTiming.some((e) => e.name === 'trif-phone'))(globalThis.performance && performance.getEntriesByType('navigation')[0])";
+export function phoneGate(phone, code) {
+  return `if (${phone ? '' : '!'}${PHONE_MARK_TEST}) ${code}`;
 }
 
 /** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
@@ -283,7 +296,8 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     // (a sandboxed mod run as a page script registers differently: a hash of its own)
     // (and one whose sites' approved powers changed: they're in its registration)
     const withHash = Array.isArray(reg.siteOk) && reg.siteOk.length ? `:site:${quickHash(reg.siteOk.join('|'))}` : '';
-    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}` } : withHash ? { ...reg, hash: `${reg.hash ?? ''}${withHash}` } : reg);
+    // (`:gate`: registered with its phone view gate, phoneGate: one registered before has none, and goes again)
+    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}:gate` } : { ...reg, hash: `${reg.hash ?? ''}${withHash}:gate` });
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
@@ -1030,8 +1044,17 @@ export function renameInOrder(modOrder, renames) {
 // Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
 // (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.
 
+// Phone mods' folders, sites/phone~<site>/ (helper/lib/scope.js, docs/MOBILE-EDIT.md): a site's phone twin, a
+// site of its own for lists, chats and runs, on the same pages. A run's scope can be one (from the phone view).
+export const PHONE_PREFIX = 'phone~';
+export const isPhoneSite = (s) => String(s || '').startsWith(PHONE_PREFIX);
+export const phoneBase = (s) => (isPhoneSite(s) ? String(s).slice(PHONE_PREFIX.length) : String(s || ''));
+/** Whether a mod is a phone mod: its folder is a phone twin (the helper says so too: `phone`). */
+export const isPhoneMod = (mod) => !!mod && (mod.phone === true || isPhoneSite(String(mod.id || '').split('/')[0]));
+
 /** "x.com" is in scope "x.com", and so is "api.x.com"; "notx.com" isn't. */
 export function hostInScope(hostname, scope) {
+  scope = phoneBase(scope); // (a phone twin's pages are its site's)
   const h = String(hostname || '').toLowerCase().replace(/\.$/, '');
   return !!scope && (h === scope || h.endsWith('.' + scope));
 }
@@ -1077,6 +1100,7 @@ const SHARED_SUFFIXES = new Set([
 
 /** The registrable domain for a host or site name: "www.news.bbc.co.uk" -> "bbc.co.uk", "x.com" -> "x.com". */
 export function scopeFor(host) {
+  if (isPhoneSite(String(host || '').trim().toLowerCase())) return PHONE_PREFIX + scopeFor(phoneBase(String(host).trim().toLowerCase()));
   const h = String(host || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
   if (!h || !h.includes('.') || /^[\d.]+$/.test(h) || h.includes(':') || h.startsWith('[')) return h;
   const labels = h.split('.');
@@ -1162,7 +1186,7 @@ export function sensitiveHit(host, list = null, pending = []) {
 export function sensitiveSites({ list = null, pending = [], hosts = [] } = {}) {
   const memo = new Map();
   const hit = (h) => { const k = cleanHostName(h); if (!memo.has(k)) memo.set(k, sensitiveHit(k, list, pending)); return memo.get(k); };
-  const scopeOf = (h) => hit(h)?.scope || scopeFor(h);
+  const scopeOf = (h) => (isPhoneSite(h) ? PHONE_PREFIX + (hit(phoneBase(h))?.scope || scopeFor(phoneBase(h))) : hit(h)?.scope || scopeFor(h));
   const splits = new Set();
   const consider = (h) => { const x = hit(h); if (x && x.scope !== scopeFor(x.scope)) splits.add(x.scope); };
   for (const x of sensitiveList(list)) if (!x.pattern.includes('*')) consider(x.pattern);

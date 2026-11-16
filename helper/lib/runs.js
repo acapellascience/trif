@@ -10,7 +10,7 @@ const { envVar } = require('./env');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
-const { scopeFor, scopeOf, runScope, cleanSplits } = require('./scope');
+const { scopeFor, scopeOf, runScope, cleanSplits, isPhoneSite } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
@@ -480,7 +480,9 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
   // the run's scope: held.js), with the version before running meanwhile.
   // (a sensitive host's own site, mail.google.com, is another site to a google.com run, and the other way
   // round: scope.js scopeOf with the sites of their own the extension sent)
-  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && n !== ALL_SITES_DIR);
+  // (A run from the phone view, scope phone~x.com: its phone twin's folder only; every desktop folder, all-sites/
+  // too, is read-only to it, the site's own desktop mods there for reference: lib/scope.js)
+  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && (n !== ALL_SITES_DIR || isPhoneSite(scope)));
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.

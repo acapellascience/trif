@@ -196,7 +196,21 @@ async function harness(browser) {
     await browser.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sid);
     for (const type of ['mousePressed', 'mouseReleased']) await browser.cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1, buttons: type === 'mousePressed' ? 1 : 0 }, sid);
   };
-  return { sw, E, page, ask, shot, click, target, panelTab };
+  // "Allow User Scripts", as the user turns it on in chrome://extensions, through that page's own API
+  // (developerPrivate), as the e2e does. (Its addHostPermission doesn't give an extension's optional hosts: it
+  // answers yes and changes nothing, checked in Chrome 156. So a site's access comes from extensionCopy.)
+  const extensionsPage = async (expr) => {
+    const { targetId } = await browser.cdp.send('Target.createTarget', { url: `chrome://extensions/?id=${browser.extensionId}` });
+    const sid = await browser._attach(targetId);
+    await sleep(1000);
+    const r = await browser.cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, sid);
+    await browser.cdp.send('Target.closeTarget', { targetId }).catch(() => {});
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+  const id = JSON.stringify(browser.extensionId);
+  const allowUserScripts = () => extensionsPage(`new Promise((res, rej) => chrome.developerPrivate.updateExtensionConfiguration({ extensionId: ${id}, userScriptsAccess: true }, () => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(true)))`);
+  return { sw, E, page, ask, shot, click, target, panelTab, allowUserScripts };
 }
 
 const waitFor = async (what, fn, ms = 15000) => {

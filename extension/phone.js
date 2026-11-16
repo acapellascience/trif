@@ -179,6 +179,13 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
     const want = phoneBounds({ frame, screen, home });
     if (['left', 'top', 'width', 'height'].some((k) => finite(want[k]) && Math.abs(want[k] - win[k]) > 1)) {
       await chrome.windows.update(windowId, want).catch((e) => log(`phone window: ${e?.message ?? e}`));
+      // (the page takes the new size a moment later: until it has the phone's width, or a second and a half)
+      const width = PHONE.viewport.width;
+      for (let i = 0; i < 15; i++) {
+        const now = await pageSize(tabId);
+        if (now && Math.abs(now.w - width) <= 1) return now;
+        await new Promise((r) => setTimeout(r, 100));
+      }
     }
     return pageSize(tabId);
   }

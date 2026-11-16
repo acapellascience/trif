@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND, PHONE_PREFIX, isPhoneMod,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
@@ -279,8 +279,8 @@ async function init() {
   chrome.tabs.onDetached.addListener(() => followActiveTab());
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (view.site && changes[chatKey(view.site)]) {
-      view.chat = normalizeChat(changes[chatKey(view.site)].newValue);
+    if (view.site && changes[chatKey(chatSite())]) {
+      view.chat = normalizeChat(changes[chatKey(chatSite())].newValue);
       render();
     }
     if (changes.agentEffort) { view.efforts = changes.agentEffort.newValue || {}; renderModels(); }
@@ -341,7 +341,7 @@ async function setTab(tab) {
     view.site = site;
     view.chat = emptyChat();
     if (site) {
-      const key = chatKey(site);
+      const key = chatKey(chatSite());
       view.chat = normalizeChat((await chrome.storage.local.get(key))[key]);
       if (view.site !== site) return; // switched again meanwhile
     }
@@ -474,7 +474,7 @@ function breakCard(li, m) {
   const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : '';
   if (state) li.append(' ', el('span', 'break-state', state));
   const acts = el('div', 'break-actions');
-  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
+  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: chatSite(), text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
   const undo = button('Undo fix', '', (e) => undoFix(m.mod, e.currentTarget));
   const fix = button(m.afterFix ? 'Try again' : 'Fix it', m.afterFix ? 'break-fix' : 'go break-fix', async (e) => {
     const b = e.currentTarget;
@@ -502,7 +502,7 @@ function breakCard(li, m) {
 function clickjackCard(li, m) {
   li.classList.add('break-card');
   const acts = el('div', 'break-actions');
-  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
+  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: chatSite(), text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
   const mod = (view.status?.mods || []).find((x) => x.id === m.mod);
   if (mod && mod.enabled === false) { li.append(' ', el('span', 'break-state', 'Turned off.')); return; }
   const show = button('Show code', '', () => openCodeView(m.mod));
@@ -521,7 +521,7 @@ async function undoFix(id, b) {
   if (b) b.disabled = true;
   try { await request({ type: 'mod.undo', ids: [id], site: view.site, tab: view.tab?.id }); } catch (e) {
     if (b) b.disabled = false;
-    request({ type: 'chat.note', site: view.site, text: `Couldn't undo the fix: ${e?.message ?? e}` }).catch(() => {});
+    request({ type: 'chat.note', site: chatSite(), text: `Couldn't undo the fix: ${e?.message ?? e}` }).catch(() => {});
   }
 }
 
@@ -651,7 +651,7 @@ function messageNode(m) {
         undo.remove();
       } catch (e) {
         undo.disabled = false;
-        request({ type: 'chat.note', site: view.site, text: `Couldn't restore ${m.undo}: ${e?.message ?? e}` }).catch(() => {});
+        request({ type: 'chat.note', site: chatSite(), text: `Couldn't restore ${m.undo}: ${e?.message ?? e}` }).catch(() => {});
       }
     });
     li.append(' ', undo);
@@ -672,7 +672,7 @@ function messageNode(m) {
       const on = button('Turn on', '', async () => {
         on.disabled = true;
         try { await request({ type: 'mod.enable', id: m.waitMod, enabled: true, tab: view.tab?.id }); show.remove(); on.replaceWith('It\'s on.'); refreshStatus(); }
-        catch (e) { on.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't turn it on: ${e?.message ?? e}` }).catch(() => {}); }
+        catch (e) { on.disabled = false; request({ type: 'chat.note', site: chatSite(), text: `Couldn't turn it on: ${e?.message ?? e}` }).catch(() => {}); }
       });
       li.append(' ', show, ' ', on);
     }
@@ -686,7 +686,7 @@ function messageNode(m) {
         undo.remove();
       } catch (e) {
         undo.disabled = false;
-        request({ type: 'chat.note', site: view.site, text: `Couldn't undo: ${e?.message ?? e}` }).catch(() => {});
+        request({ type: 'chat.note', site: chatSite(), text: `Couldn't undo: ${e?.message ?? e}` }).catch(() => {});
       }
     });
     li.append(' ', undo);
@@ -869,7 +869,7 @@ function allowUserScripts() {
 
 /** Every mod paused (Settings): a notice saying so, with Resume, and the checkbox follows. */
 function setPaused(paused) {
-  return request({ type: 'mods.pause', paused, tab: view.tab?.id }).then(refreshStatus, (e) => request({ type: 'chat.note', site: view.site, text: `Couldn't ${paused ? 'pause' : 'resume'} mods: ${e?.message ?? e}` }).catch(() => {}));
+  return request({ type: 'mods.pause', paused, tab: view.tab?.id }).then(refreshStatus, (e) => request({ type: 'chat.note', site: chatSite(), text: `Couldn't ${paused ? 'pause' : 'resume'} mods: ${e?.message ?? e}` }).catch(() => {}));
 }
 function renderPausedAll() {
   const paused = !!view.status?.paused;
@@ -1067,7 +1067,7 @@ const login = createLogin({ request, changed: () => render(), succeeded: () => {
 // so it doesn't sit there as if it still applied (and the login notice doesn't come back for it).
 function answerLoginError() {
   if (!loginLine(view.site ? view.chat.messages.at(-1) : null)) return;
-  request({ type: 'chat.note', site: view.site, text: `${login.current?.name || 'Your agent'} is logged in now: send your message again.` }).catch(() => {});
+  request({ type: 'chat.note', site: chatSite(), text: `${login.current?.name || 'Your agent'} is logged in now: send your message again.` }).catch(() => {});
 }
 
 function actions(...children) {
@@ -1128,7 +1128,7 @@ function groupHeading(g) {
       if (sw.hasAttribute('aria-busy') || on === !groupOff(g)) return;
       sw.setAttribute('aria-busy', 'true');
       try { await request({ type: 'mods.group', site: view.site, group: g, enabled: on, tab: view.tab?.id }); await refreshStatus(); } catch (e) {
-        request({ type: 'chat.note', site: view.site, text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
+        request({ type: 'chat.note', site: chatSite(), text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
       } finally { sw.removeAttribute('aria-busy'); }
     };
     // (Off, then On: on at the right, as on the mods' switches: Tim, 11-13)
@@ -1272,7 +1272,9 @@ function renderMods() {
   // the order TRIF ships them in (display only: lib.js orderMods).
   // (a sensitive site is one of its own: mail.google.com lists only its own mods, google.com none of them)
   const scope = siteScope();
-  const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope], sensNow()) || m.held?.site === site) : [], view.defaultOrder[scope]);
+  // (the phone view lists its own mods, the phone twin's, and a desktop panel never lists them: phone.js)
+  const phone = inPhone();
+  const listed = orderMods(site && status ? status.mods.filter((m) => isPhoneMod(m) === phone && (limitToSites(m, [scope], sensNow()) || m.held?.site === site)) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
   // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then sandboxed mods, then page scripts,
   // each in its own order.
@@ -2680,7 +2682,7 @@ function codeViewDialog() {
   d.addEventListener('cancel', (e) => { if (codeView.editing && codeView.dirty) e.preventDefault(); });
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, details, detailsTab, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor, copyTo, item,
+  codeView.parts = { toPhone, name, chip, where, details, detailsTab, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor, copyTo, item,
     editBtn, eUndo, eRedo, eCancel, eSave, editBox, gutter, area, problems, saved, moreWrap };
   wireEditor(area, gutter);
   return codeView.parts;
@@ -2717,10 +2719,12 @@ function openCodeView(id, { error = null, tab = 'code' } = {}) {
     b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
   }
   P.saved.hidden = true;
+  // (Send to iPhone: phone mods only, the phone twin's: phone.js)
+  P.toPhone.hidden = !IS_MAC || !isPhoneMod({ id });
   // "Copy to {host}" for each sensitive site of its own under this mod's site (mail.google.com for a
   // google.com mod): the parent's mods never run there, so the user brings one over (it starts off there)
   const home = sensNow().scopeOf(site);
-  const hosts = site === 'all-sites' || sensNow().isSensitive(home) ? [] : sensNow().splits.filter((x) => scopeFor(x) === scopeFor(site) && x !== home);
+  const hosts = site === 'all-sites' || isPhoneMod({ id }) || sensNow().isSensitive(home) ? [] : sensNow().splits.filter((x) => scopeFor(x) === scopeFor(site) && x !== home);
   P.copyTo.replaceChildren(...hosts.map((host) => {
     const b = P.item(`Copy to ${host}`, 'cv-copy-host', () => copyModTo(id, host));
     b.disabled = !connected;
@@ -3223,7 +3227,21 @@ async function exportMod() {
 // window of its own beside it (which this panel isn't: it stays with the user's window). In that panel the
 // button is pressed, and a line under the bar says what the window is, with Back to desktop.
 let lastPhoneLine = '';
+/** Whether the tab shown is in the phone view: then this panel is the phone's own TRIF (its mods, its chat). */
+const inPhone = () => !!view.phone?.phone && view.phone.tabId === view.tab?.id;
+/** The chat's site: the phone view's chats are its own, under the site's phone twin (phone~x.com). */
+const chatSite = () => (view.site && inPhone() ? PHONE_PREFIX + view.site : view.site);
 async function refreshPhone() {
+  const was = chatSite();
+  await refreshPhoneState();
+  // (the phone view found after the tab's chat was read: the phone's own chat instead)
+  if (view.site && chatSite() !== was) {
+    const key = chatKey(chatSite());
+    view.chat = normalizeChat((await chrome.storage.local.get(key))[key]);
+    render();
+  }
+}
+async function refreshPhoneState() {
   const tabId = view.tab?.id;
   if (!Number.isInteger(tabId) || SAFARI) { view.phone = null; return; }
   try {
@@ -3249,7 +3267,7 @@ function renderPhone() {
   ui.phoneBtn.setAttribute('aria-label', ui.phoneBtn.title);
   ui.phoneNote.hidden = !on;
   document.body.classList.toggle('phone-view', on);
-  if (on) ui.phoneNoteText.textContent = `Phone view: ${site} sees an ${view.phone.device || 'iPhone'}. Mods you make here are for TRIF on your phone.`;
+  if (on) ui.phoneNoteText.textContent = `Phone view: ${site} sees an ${view.phone.device || 'iPhone'}. Only its phone mods run here, and the mods you make here are for TRIF on your phone.`;
 }
 
 async function togglePhone() {
@@ -3262,7 +3280,7 @@ async function togglePhone() {
     else await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
     await refreshPhone();
   } catch (e) {
-    request({ type: 'chat.note', site: view.site, text: `${on ? 'Couldn’t go back to desktop' : 'Couldn’t open the phone view'}: ${e?.message ?? e}` }).catch(() => {});
+    request({ type: 'chat.note', site: chatSite(), text: `${on ? 'Couldn’t go back to desktop' : 'Couldn’t open the phone view'}: ${e?.message ?? e}` }).catch(() => {});
   } finally { ui.phoneBtn.disabled = false; renderPhone(); }
 }
 ui.phoneBtn?.addEventListener('click', togglePhone);
@@ -3288,7 +3306,8 @@ function siteOwnMods() {
   const scope = siteScope();
   if (!scope) return [];
   const sens = sensNow();
-  return (view.status?.mods || []).filter((m) => { const f = m.id.split('/')[0]; return f !== 'all-sites' && sens.scopeOf(f.replace(/^www\./, '')) === scope; });
+  const want = inPhone() ? PHONE_PREFIX + scope : scope; // (the phone view: its own mods, in the phone twin's folder)
+  return (view.status?.mods || []).filter((m) => { const f = m.id.split('/')[0]; return f !== 'all-sites' && sens.scopeOf(f.replace(/^www\./, '').replace(/^phone~www\./, PHONE_PREFIX)) === want; });
 }
 
 async function loadSiteFiles() {
@@ -3334,10 +3353,10 @@ ui.importFile?.addEventListener('change', async () => {
 ui.exportSite?.addEventListener('click', async () => {
   ui.modsMenu.hidden = true;
   try {
-    const r = await request({ type: 'mod.exportSite', site: siteScope(), ids: siteOwnMods().map((m) => m.id) });
+    const r = await request({ type: 'mod.exportSite', site: inPhone() ? PHONE_PREFIX + siteScope() : siteScope(), ids: siteOwnMods().map((m) => m.id) });
     if (r?.cancelled) return;
-    request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${r.where}.` }).catch(() => {});
-  } catch (e) { request({ type: 'chat.note', site: view.site, text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }
+    request({ type: 'chat.note', site: chatSite(), text: `Exported ${r.ids.length} ${r.site.startsWith(PHONE_PREFIX) ? 'phone ' : ''}mod${r.ids.length === 1 ? '' : 's'} for ${r.site.replace(PHONE_PREFIX, '')} to the folder "${r.dir}" in ${r.where}.` }).catch(() => {});
+  } catch (e) { request({ type: 'chat.note', site: chatSite(), text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }
 });
 
 // A small card for the import's questions (which site; a copy or Replace), and Log out's: resolves the
@@ -3367,7 +3386,7 @@ function askCard(title, text, choices, head = 'Import mod') {
 }
 
 async function importModFile(file) {
-  const note = (text) => request({ type: 'chat.note', site: view.site, text }).catch(() => {});
+  const note = (text) => request({ type: 'chat.note', site: chatSite(), text }).catch(() => {});
   if (file.size > 4 * 1024 * 1024) return note(`Couldn't import ${file.name}: it's bigger than a mod can be (4 MB).`);
   const text = await file.text();
   let site = '';
@@ -3945,7 +3964,7 @@ async function panelCommand(text) {
   const m = /^\/(\S+)\s*(.*)$/s.exec(text);
   if (!m) return false;
   const [, cmd, arg] = m;
-  const note = (t) => request({ type: 'chat.note', site: view.site, text: t });
+  const note = (t) => request({ type: 'chat.note', site: chatSite(), text: t });
   if (cmd === 'model') {
     const { id, info } = currentAgent();
     const names = (view.modelLists[id]?.models || []).map((x) => x.id).join(', ');
@@ -3994,7 +4013,7 @@ async function startRun(text, extra = {}) {
   const chat = view.chat;
   const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
   const { runId } = await request({
-    type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
+    type: 'agent.start', site: chatSite(), tabId: view.tab.id, url: view.tab.url, prompt: text,
     sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined, effort: chosenEffort(agent) || undefined, ...extra,
   });
   view.myRuns.set(runId, null);
@@ -4010,7 +4029,7 @@ async function stop() {
 
 async function newChat() {
   if (!view.site) return;
-  await request({ type: 'chat.clear', site: view.site }).catch((e) => console.warn('[TRIF] clear failed', e));
+  await request({ type: 'chat.clear', site: chatSite() }).catch((e) => console.warn('[TRIF] clear failed', e));
   ui.input.focus();
 }
 

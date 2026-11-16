@@ -106,16 +106,21 @@ test('tab locks leave the phone view\'s rules alone (foreign), and count their o
   assert.deepEqual(rules.map((r) => r.id), [1000000, 1000001]);
 });
 
-test('the agent is told the tab is the phone view, and how a phone mod differs', () => {
+test('the agent is told the chat is the phone view: its own folder, the desktop mods to read, rebuilt for the phone', () => {
   const agents = require('../helper/lib/agents');
-  const text = agents.contextText({ url: 'https://x.com/home', tabId: 7, scope: 'x.com', browser: 'Chrome', phone: { device: 'iPhone', width: 390 } });
-  assert.match(text, /Tab 7 is TRIF's phone view/);
-  assert.match(text, /@device phone/);
-  assert.match(text, /Phone mods" in AGENTS\.md/);
+  const text = agents.contextText({ url: 'https://x.com/home', tabId: 7, scope: 'phone~x.com', browser: 'Chrome', phone: { device: 'iPhone', width: 390 } });
+  assert.match(text, /This chat is in TRIF's phone view/);
+  assert.match(text, /Tab 7 is a window 390 px wide/);
+  assert.match(text, /sites\/phone~x\.com\/ \(`trif new phone~x\.com <name>`\), the only folder you can write/);
+  assert.match(text, /desktop mods in sites\/x\.com\/ are there to read/);
+  assert.match(text, /without assuming the same selectors/);
+  assert.match(text, /limited to x\.com's phone view/);
+  assert.match(text, /sites\/x\.com\/files\//);
   assert.doesNotMatch(agents.contextText({ url: 'https://x.com/home', tabId: 7, scope: 'x.com', browser: 'Chrome' }), /phone view/);
-  assert.match(agents.reminderText({ url: 'https://x.com/home', tabId: 7, phone: { device: 'iPhone' } }), /phone view \(iPhone\)/);
+  assert.match(agents.reminderText({ url: 'https://x.com/home', tabId: 7, phone: { device: 'iPhone' } }), /phone view \(iPhone\): phone mods only/);
   const guide = fs.readFileSync(path.join(__dirname, '..', 'helper', 'workspace', 'AGENTS.md'), 'utf8');
   assert.match(guide, /^### Phone mods$/m);
+  assert.match(guide, /read it for the idea, then build it again/);
 });
 
 test('@device phone is read from the header', () => {
@@ -148,5 +153,129 @@ test('Send to iPhone: a copy named as Export names it, to AirDrop, else shown in
     assert.throws(() => tophone.copyForPhone({ modsDir }, list, 'x.com/other', { env }), /no mod/);
     assert.equal(tophone.airdropCommand('/f.js', 'linux'), null);
     assert.equal(tophone.airdropCommand('/f.js', 'darwin')[0], 'osascript');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+// ---- the phone view as a TRIF of its own: phone mods in sites/phone~<site>/ (docs/MOBILE-EDIT.md)
+
+test('scope: a phone twin is a site of its own for folders and runs, on its site\'s pages (helper and extension agree)', async () => {
+  const scope = require('../helper/lib/scope');
+  const lib = await load('lib.js');
+  for (const S of [scope, lib]) {
+    assert.equal(S.scopeFor('phone~x.com'), 'phone~x.com');
+    assert.equal(S.scopeFor('phone~www.bbc.co.uk'), 'phone~bbc.co.uk');
+    assert.notEqual(S.scopeFor('phone~x.com'), S.scopeFor('x.com'));
+    assert.equal(S.hostInScope('api.x.com', 'phone~x.com'), true, 'its pages are the site\'s');
+    assert.equal(S.hostInScope('x.com', 'phone~notx.com'), false);
+    assert.equal(S.patternInScope('*://*.x.com/*', 'phone~x.com'), true, 'so a phone mod for the site isn\'t held as reaching other sites');
+  }
+  assert.equal(scope.scopeOf('phone~mail.google.com', ['mail.google.com']), 'phone~mail.google.com');
+  assert.equal(scope.scopeOf('phone~docs.google.com', ['mail.google.com']), 'phone~google.com');
+  assert.equal(scope.runScope('x.com', 'phone~x.com'), 'phone~x.com');
+  assert.equal(scope.runScope('api.x.com', 'phone~x.com'), 'phone~x.com');
+  assert.equal(scope.runScope('x.com', 'x.com'), 'x.com');
+  const sens = lib.sensitiveSites({});
+  assert.equal(sens.scopeOf('phone~x.com'), 'phone~x.com');
+  assert.equal(lib.isPhoneMod({ id: 'phone~x.com/a' }), true);
+  assert.equal(lib.isPhoneMod({ id: 'x.com/a' }), false);
+});
+
+test('phone mods: their folder\'s @match is the site\'s, marked phone; desktop ones aren\'t', () => {
+  const mods = require('../helper/lib/mods');
+  assert.deepEqual(mods.defaultMatches('phone~x.com'), ['*://x.com/*', '*://*.x.com/*']);
+  const p = mods.buildMod({ site: 'phone~x.com', file: '/w/sites/phone~x.com/a.js', code: '// x' }).mod;
+  assert.equal(p.id, 'phone~x.com/a');
+  assert.equal(p.phone, true);
+  assert.deepEqual(p.matches, ['*://x.com/*', '*://*.x.com/*']);
+  assert.equal('phone' in mods.buildMod({ site: 'x.com', file: '/w/sites/x.com/a.js', code: '// x' }).mod, false);
+});
+
+test('the gate: desktop mods never run in the phone tab, phone mods only there (every kind of mod)', async () => {
+  const lib = await load('lib.js');
+  const vm = require('vm');
+  const run = (code, phone) => {
+    const ctx = { ran: [], window: {}, console, performance: { getEntriesByType: () => [{ serverTiming: phone ? [{ name: 'cdn' }, { name: 'trif-phone' }] : [{ name: 'cdn' }] }] } };
+    ctx.globalThis = ctx;
+    vm.runInNewContext(code, ctx);
+    return ctx.ran.length;
+  };
+  for (const kind of [{}, { sandboxed: true }, { sandboxed: true, unsandboxed: true }]) {
+    for (const [id, phoneMod] of [['x.com/a', false], ['phone~x.com/a', true]]) {
+      const us = lib.modToUserScript({ id, matches: ['*://x.com/*'], code: 'ran.push(1)', ...kind });
+      for (const js of us.js) {
+        assert.ok(js.code.startsWith(lib.phoneGate(phoneMod, '')), `${id} ${JSON.stringify(kind)}: gated`);
+        // (the gate itself, on its own: whether what follows runs)
+        const gateOnly = lib.phoneGate(phoneMod, 'ran.push(1);');
+        assert.equal(run(gateOnly, true), phoneMod ? 1 : 0, `${id} in the phone tab`);
+        assert.equal(run(gateOnly, false), phoneMod ? 0 : 1, `${id} in a desktop tab`);
+      }
+    }
+  }
+  // a free mod's whole wrapper, run: its code runs only where it belongs
+  const free = (id) => lib.modToUserScript({ id, matches: ['*://x.com/*'], code: 'ran.push(1)' }).js[0].code;
+  assert.equal(run(free('x.com/a'), false), 1);
+  assert.equal(run(free('x.com/a'), true), 0);
+  assert.equal(run(free('phone~x.com/a'), true), 1);
+  assert.equal(run(free('phone~x.com/a'), false), 0);
+});
+
+test('a run from the phone view writes only its phone twin\'s folder; the desktop mods are there to read', () => {
+  const os = require('os');
+  const { runLimits } = require('../helper/lib/runs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phone-ws-'));
+  const priv = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phone-private-'));
+  try {
+    const modsDir = path.join(home, 'sites');
+    for (const d of ['x.com', 'phone~x.com', 'all-sites', 'other.example']) fs.mkdirSync(path.join(modsDir, d), { recursive: true });
+    fs.writeFileSync(path.join(modsDir, 'x.com', 'hide-reposts.js'), '// the desktop one');
+    const ws = { home, modsDir, private: priv };
+    const box = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phone-box-'));
+    const phone = runLimits(ws, { scope: 'phone~x.com', box, screenshots: box });
+    assert.deepEqual([...phone.locked].sort(), ['all-sites', 'other.example', 'x.com'].map((d) => path.join('sites', d)), 'the phone run: every desktop folder read-only');
+    const desk = runLimits(ws, { scope: 'x.com', box, screenshots: box });
+    assert.deepEqual([...desk.locked].sort(), ['other.example', 'phone~x.com'].map((d) => path.join('sites', d)), 'a desktop run: the phone twin read-only');
+    // (read-only, not hidden: the run's readable folders include the workspace, the desktop mods in it)
+    assert.ok(phone.readable.some((r) => modsDir.startsWith(r) || fs.realpathSync(modsDir).startsWith(r)));
+  } finally { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(priv, { recursive: true, force: true }); }
+});
+
+test('phone mods made before the phone folder (@device phone in a desktop folder) move to it, once', () => {
+  const os = require('os');
+  const { movePhoneMods } = require('../helper/lib/phonemods');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phone-move-'));
+  try {
+    const modsDir = path.join(home, 'sites');
+    const priv = path.join(home, 'private');
+    const put = (rel, text) => { const f = path.join(modsDir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+    const phoneMod = '// ==WebMod==\n// @name Bottom bar\n// @device phone\n// ==/WebMod==\n';
+    put('x.com/bottom-bar.js', phoneMod);
+    put('x.com/desk.js', '// ==WebMod==\n// @name Desk\n// ==/WebMod==\n');
+    put('phone~x.com/bottom-bar.js', '// already there');
+    const r = movePhoneMods(modsDir, priv);
+    assert.deepEqual(r.moved, [{ from: 'x.com/bottom-bar', to: 'phone~x.com/bottom-bar-2' }]);
+    assert.equal(fs.readFileSync(path.join(modsDir, 'phone~x.com', 'bottom-bar-2.js'), 'utf8'), phoneMod);
+    assert.ok(fs.existsSync(path.join(modsDir, 'x.com', 'desk.js')));
+    assert.equal(fs.readFileSync(path.join(modsDir, 'phone~x.com', 'bottom-bar.js'), 'utf8'), '// already there', 'nothing overwritten');
+    put('x.com/later.js', phoneMod);
+    assert.deepEqual(movePhoneMods(modsDir, priv), { moved: [], skipped: true }, 'once');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('Export and Send to iPhone take phone mods from the phone folder', async () => {
+  const os = require('os');
+  const share = require('../helper/lib/share');
+  const tophone = require('../helper/lib/tophone');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phone-share-'));
+  try {
+    const modsDir = path.join(home, 'sites');
+    fs.mkdirSync(path.join(modsDir, 'phone~x.com'), { recursive: true });
+    const file = path.join(modsDir, 'phone~x.com', 'bar.js');
+    fs.writeFileSync(file, '// a phone mod');
+    const list = [{ id: 'phone~x.com/bar', file }];
+    const site = share.exportSite({ modsDir }, list, 'phone~x.com', { to: path.join(home, 'out') });
+    assert.deepEqual(site.ids, ['phone~x.com/bar']);
+    assert.equal(path.basename(site.dir), 'phone~x.com mods');
+    const r = await tophone.sendToPhone({ modsDir }, list, 'phone~x.com/bar', { env: { TRIF_PHONE_OUTBOX: path.join(home, 'outbox'), TRIF_AIRDROP: 'shown' } });
+    assert.equal(fs.readFileSync(r.file, 'utf8'), '// a phone mod');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });

@@ -185,3 +185,47 @@ test('the phone view, TRIF as installed, on a site without access: refused, noth
     pages.server.close();
   }
 });
+
+// The phone view is a TRIF of its own: in its tab only phone mods run, and phone mods nowhere else. The mods are
+// registered here as TRIF registers them (lib.js modToUserScript: the free mod's wrapper and its gate, in the
+// page's world; and a script in a user script world, as boxed mods are, with the same gate).
+test('desktop mods never run in the phone view, phone mods only there', { skip, timeout: 900000 }, async () => {
+  const lib = await import(require('url').pathToFileURL(require('path').join(__dirname, '..', 'extension', 'lib.js')).href);
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
+  try {
+    const h = await harness(browser);
+    await h.allowUserScripts();
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    const mark = (who) => `(document.documentElement.dataset.ran = (document.documentElement.dataset.ran || '') + ${JSON.stringify(who + ' ')})`;
+    const scripts = [
+      lib.modToUserScript({ id: '127.0.0.1/desk', matches: ['*://127.0.0.1/*'], code: mark('desktop') }),
+      lib.modToUserScript({ id: 'phone~127.0.0.1/bar', matches: ['*://127.0.0.1/*'], code: mark('phone') }),
+      { id: 'phone-world', matches: ['*://127.0.0.1/*'], runAt: 'document_start', world: 'USER_SCRIPT', worldId: 'phone-test', js: [{ code: lib.phoneGate(true, mark('phone-world')) }] },
+      { id: 'desk-world', matches: ['*://127.0.0.1/*'], runAt: 'document_start', world: 'USER_SCRIPT', worldId: 'phone-test', js: [{ code: lib.phoneGate(false, mark('desktop-world')) }] },
+    ];
+    await h.E((list) => chrome.userScripts.register(list), scripts);
+    const { phoneTab, deskTab } = await h.E(async (u) => {
+      const w = await chrome.windows.create({ url: u, width: 1200, height: 800 });
+      const d = await chrome.tabs.create({ windowId: w.id, url: u, active: false });
+      return { phoneTab: w.tabs[0].id, deskTab: d.id };
+    }, pages.url('/detect'));
+    await waitFor('the pages', async () => (await h.page(phoneTab, 'document.readyState === "complete"')) && h.page(deskTab, 'document.readyState === "complete"'));
+    const ran = (tab) => h.page(tab, '(document.documentElement.dataset.ran || "").trim().split(" ").sort().join(" ")');
+    assert.equal(await ran(phoneTab), 'desktop desktop-world', 'before the phone view: a desktop tab');
+    await h.ask({ type: 'phone.open', tabId: phoneTab, screen: null });
+    await waitFor('the phone page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
+    assert.equal(await ran(phoneTab), 'phone phone-world', 'the phone view: phone mods only');
+    await h.E((id) => chrome.tabs.reload(id), deskTab);
+    await waitFor('the desktop page', () => h.page(deskTab, 'document.readyState === "complete" && !!window.__seen'));
+    assert.equal(await ran(deskTab), 'desktop desktop-world', 'a desktop tab of the same page meanwhile: desktop mods only');
+    await h.ask({ type: 'phone.close', tabId: phoneTab });
+    await waitFor('back to desktop', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && !window.__seen.uaPhone'));
+    assert.equal(await ran(phoneTab), 'desktop desktop-world', 'back to desktop: desktop mods again');
+  } finally {
+    await browser.close();
+    pages.server.close();
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
+});

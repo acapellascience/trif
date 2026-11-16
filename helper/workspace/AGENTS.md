@@ -238,16 +238,18 @@ where the user finds it on the TRIF setup page).
 
 ### Phone mods
 
-The panel's "Edit for mobile" puts the user's tab in TRIF's phone view: a window as wide as a phone where the
-site sees an iPhone (Safari's user agent, touch, no hover), so it shows its mobile layout; `trif tabs` marks
-that tab `phone`. A mod made there is for TRIF on the user's phone:
+The panel's "Edit for mobile" opens TRIF's phone view: the user's tab in a window as wide as a phone, where the
+site sees an iPhone (Safari's user agent, touch, no hover) and shows its mobile layout. It's a TRIF of its own:
 
-- Investigate and screenshot that tab (`--tab`), not a desktop one: the mobile layout's elements differ.
-- Add `// @device phone` to the header. TRIF on the phone runs it; desktop TRIF runs it too, in every tab of
-  the site, so make it act only where the mobile layout is (check for its elements, or
-  `matchMedia('(max-width: 600px)')`, and return).
-- Style sheets in the phone view still see a mouse (`@media (hover: hover)` matches there and not on the
-  phone): don't key a mod on hover or pointer media queries.
+- Phone mods live in the site's phone twin, `sites/phone~<site>/` (`trif new phone~x.com <name>`): a chat in
+  the phone view can write there and nowhere else. Only phone mods run in the phone view, and they never run in
+  a desktop tab. Their `@match` is the site's own (`*://x.com/*`).
+- The site's desktop mods (`sites/<site>/`) are there to read, never to change, from the phone view. Asked to
+  bring one to the phone ("the hide-reposts filter from the desktop"), read it for the idea, then build it again
+  for the mobile page: look at the phone tab (`trif tabs` marks it `phone`; `--tab`), and assume nothing about
+  its selectors, elements, routes or data: the mobile layout is a different page.
+- Style sheets in the phone view still see a mouse (`@media (hover: hover)` matches there and not on the phone):
+  don't key a mod on hover or pointer media queries.
 
 ## The CLI
 

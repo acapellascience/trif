@@ -27,13 +27,14 @@ const SLICE_MAX = 8 * 1024 * 1024;
 const DISK_MARGIN = 64 * 1024 * 1024; // (what stays free after a file)
 const IMPORTED = 'imported.json';
 // (a host name, a single label too: localhost is a site TRIF can be on)
-const SITE_RE = /^(?:all-sites|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)$/;
+// (and a site's phone twin, phone~x.com: phone mods, lib/scope.js)
+const SITE_RE = /^(?:all-sites|(?:phone~)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)$/;
 
 /** Where exports go: ~/Downloads (TRIF_DOWNLOADS, for tests). */
 function downloadsDir(env = process.env) { return envVar('DOWNLOADS', env) || path.join(os.homedir(), 'Downloads'); }
 
 function checkSite(site) {
-  const s = String(site || '').trim().toLowerCase().replace(/^www\./, '');
+  const s = String(site || '').trim().toLowerCase().replace(/^www\./, '').replace(/^phone~www\./, 'phone~');
   if (!SITE_RE.test(s)) throw new ShareError(`"${String(site).slice(0, 80)}" isn't a site (a host name like x.com)`);
   return s;
 }

@@ -3,6 +3,7 @@
 // The `trif` command. Talks to the helper (host.js) over $TRIF_HOME/helper.sock.
 // Exit codes: 0 ok, 1 command error, 2 helper not running.
 
+const { isPhoneSite, phoneBase } = require('./lib/scope');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -1097,6 +1098,10 @@ const handlers = {
     let text = tpl;
     // all-sites mods run everywhere until the agent narrows the @match lines.
     if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');
+    // (a phone mod, `trif new phone~x.com <mod>`: the site's own pages, and marked as made for the phone)
+    if (isPhoneSite(site)) {
+      text = text.replace(/^(\/\/ @match\s+\S*?)\{\{site\}\}/gm, `$1${phoneBase(site)}`).replace(/^(\/\/ ==\/WebMod==)$/m, '// @device      phone\n$1');
+    }
     text = text.replace(/\{\{site\}\}/g, site).replace(/\{\{mod\}\}/g, mod).replace(/\{\{name\}\}/g, titleCase(mod));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);

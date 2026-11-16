@@ -56,6 +56,12 @@ const ws = workspace();
 ws.ownSock = ownSock(ws.home);
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
 const logger = createLogger(ws.log, { stderr: true });
+// Phone mods from before they had a folder of their own (`@device phone` in a desktop folder): to the site's
+// phone twin, once (lib/phonemods.js)
+try {
+  const r = require('./lib/phonemods').movePhoneMods(ws.modsDir, ws.private);
+  for (const m of r.moved) logger.info(`moved the phone mod ${m.from} to ${m.to}: the phone view has a folder of its own now`);
+} catch (e) { logger.warn(`phone mods: ${e.message}`); }
 
 // Protect the native messaging channel: anything that tries to print goes to the log instead.
 console.log = (...a) => logger.info(...a);

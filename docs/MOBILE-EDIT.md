@@ -229,10 +229,43 @@ though Mozilla's documentation says it doesn't) with the rules gone. What's what
   finds the phone's tab (`resolveTab` takes the phone windows; `trif tabs` lists it with `phone: "iPhone"`), and
   `trif screenshot --tab <id>` captures it at phone size.
 - **The mod**: checked and held as usual: the phone view changes what the site sees, not how TRIF judges a
-  mod. `@device phone` is parsed (`helper/lib/mods.js`, into the mod's `device`); nothing acts on it yet.
-  Desktop TRIF runs it in every tab of the site, which is why the agent is told to make it bail out on the
-  desktop layout. Later, if wanted: run `@device phone` mods only in phone tabs on desktop (the runtime would
-  check the same marker), and show a small phone tag in the mods list.
+  mod. Since 7b, phone mods have a folder of their own and run only in the phone view.
+
+## 7b. Phone mods, a sandbox of their own (Tim, 2026-11-16)
+
+Tim's tests on X: almost nothing ports from a desktop mod to the mobile page. So the phone view is a TRIF of its
+own.
+
+- **The folder: the site's phone twin, `sites/phone~<site>/`** (`sites/phone~x.com/hide-reposts.js`, id
+  `phone~x.com/hide-reposts`). Not a separate `phone/` tree: everything TRIF does for a mod folder (checks, holds,
+  what was allowed and seen, history, the trash, backups, the trif-mods backup, `trif` commands, the run's
+  writable and read-only folders) goes by folders under `sites/`, and a twin gets all of it unchanged. What makes
+  it a site of its own is one rule in `helper/lib/scope.js` (and its copy in `extension/lib.js`): `phone~x.com`
+  is its own scope (`scopeFor`, `scopeOf`, `runScope`), on x.com's pages (`hostInScope`). Its mods' default
+  `@match` is the site's (`*://x.com/*`); the helper marks them `phone: true`. `@device phone` is informational
+  now (`trif new phone~x.com <mod>` still writes it).
+- **Who runs where.** Every mod's code waits behind a gate (`lib.js phoneGate`, in every wrapper: free, style
+  section, boxed in TRIF's world, boxed as a page script): a phone mod runs only where the page has the phone
+  view's marker (the same `Server-Timing: trif-phone` the page script reads), any other mod only where it hasn't.
+  User scripts can't be given a tab, so this is how "desktop mods never in the phone window, phone mods never on
+  the desktop" holds. Mods registered before re-register once (their hash gains `:gate`).
+- **The phone's panel** lists only the phone twin's mods; a desktop panel never lists them. Its chat is its own
+  (`chat:phone~x.com`), and so is its history. Export all mods (from the phone's panel) and a phone mod's Export
+  and Send to iPhone take the phone twin's files; Send to iPhone shows only on phone mods.
+- **The agent in the phone view**: its run's scope is `phone~x.com`, so it can write only `sites/phone~x.com/`;
+  every desktop folder, `sites/x.com/` and `all-sites/` included, is read-only to it (`runs.js runLimits`), and
+  readable. Its context says so, and to take a desktop mod's idea and rebuild it for the mobile page without
+  assuming the same selectors or data; AGENTS.md "Phone mods" says the same. A desktop run can read phone mods and
+  not write them. A phone run can switch only phone mods (`trif enable/disable`), a desktop run only desktop ones.
+  Page commands from a phone run work on the site's tabs, as any run's.
+- **Moving the ones made before**: a mod in a desktop folder with `@device phone` (what the phone view's agent was
+  told to add on the first branch) moves to the site's phone twin when the helper starts, once (a marker in the
+  private folder, `lib/phonemods.js`); a name taken there gets `-2`. The helper log says what moved.
+- **Proposed, not built: phone mods reaching the phone by themselves.** The helper could mirror `sites/phone~*/`
+  (only those folders, copies, never `~/.trif` itself) to `iCloud Drive/TRIF/` on each change, and the iPhone app
+  would watch that folder (section 8, "the iCloud folder"): a mod made in the phone view is on the phone a few
+  seconds later, held like any mod from outside. A setting, off by default (it puts the mods in Apple's iCloud).
+  The app's side is the watched folder below; the Mac's side about forty lines in the helper.
 
 ## 8. Send to phone
 

@@ -126,9 +126,10 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.), unless its header says 
   the groups `rules`, `sandboxed`, `page`): only what people see says style, boxed and free mods. A mod's
   hash is taken with its header's `@style`/`@boxed` lines spelled `@rules`/`@sandboxed`, so switching
   spelling alone keeps its hash (what was allowed for it, holds, the extension's `unsandboxedOk`).
-- `@device phone` (or `desktop`): made in the phone view ("Edit for mobile", docs/MOBILE-EDIT.md) for TRIF on
-  a phone. Parsed into `device` (absent when the header doesn't say; not in the hash's metadata). Nothing acts
-  on it yet: the mod runs wherever its `@match` says.
+- `@device phone` (or `desktop`): informational, parsed into `device`. What makes a phone mod is its folder: a
+  site's phone twin, `sites/phone~<site>/` (docs/MOBILE-EDIT.md "Phone mods, a sandbox of their own"): its own
+  site for scope, runs, holds and lists, on the site's pages (default `@match` the site's), sent as `phone: true`,
+  run only in the phone view (and every other mod only outside it: extension/lib.js `phoneGate`).
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/detox-timeline`). The helper parses headers; the extension never parses.

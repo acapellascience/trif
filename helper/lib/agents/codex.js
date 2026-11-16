@@ -68,9 +68,34 @@ const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TO
 const TOKEN_FILE = 'key-proxy-token';
 function tokenFile(agentDir) { return path.join(agentDir, TOKEN_FILE); }
 /** The provider field that has Codex send the run's key-proxy token (with the provider's other fields). */
-function proxyAuth(agentDir) {
+function proxyAuth(agentDir, platform = process.platform) {
   if (!agentDir) throw new Error('no run folder for the key proxy\'s token');
+  // (Windows has no /bin/cat: this Node prints the file, lib/win/print-file.js)
+  if (platform === 'win32') return `auth = { command = ${tomlKey(process.execPath)}, args = [${tomlKey(path.join(__dirname, '..', 'win', 'print-file.js'))}, ${tomlKey(tokenFile(agentDir))}] }`;
   return `auth = { command = "/bin/cat", args = [${tomlKey(tokenFile(agentDir))}] }`;
+}
+
+// ---------------------------------------------------------------- Windows: no shell
+//
+// Codex's own sandbox on Windows can't take TRIF's profile without an administrator ("unelevated
+// restricted-token sandbox cannot enforce deny-read restrictions": no session starts with it), so there a
+// run gets none of Codex's tools that touch the computer, and TRIF's own in their place (docs/WINDOWS.md
+// "Codex: where it stands"; seen with Codex 0.169 on windows-latest, tests/windows-fence/agents.js):
+//   - no shell: `shell_tool` and the features around it off (exec_command and write_stdin go);
+//   - no `view_image` of its own (left on, it reads any picture the user can);
+//   - `sandbox_mode="read-only"` with approval_policy="never": Codex refuses every `apply_patch` itself
+//     ("writing is blocked by read-only sandbox"), which no feature switch takes away;
+//   - the `trif` MCP server (helper/mcp.js), whose `trif` and file tools (read_file, write_file, edit_file,
+//     list_files, search_files, view_image) each run a program inside TRIF's fence (lib/win/fence.js), the
+//     run's AppContainer. Under approval_policy="never" Codex refuses an MCP tool unless its server's
+//     config approves it: default_tools_approval_mode. (Its tools may take as long as `trif verify` does.)
+// As with Claude Code's file tools there, what holds Codex's own tools is Codex (its config and its
+// refusal), not the fence: tests/windows-run.js attacks each on every CI run.
+const WINDOWS_FEATURES_OFF = ['shell_tool', 'unified_exec', 'unified_exec_tty', 'shell_snapshot', 'view_image'];
+function windowsConfig(fence) {
+  const m = fence.mcp;
+  return ['-c', 'sandbox_mode="read-only"', ...WINDOWS_FEATURES_OFF.flatMap((f) => ['-c', `features.${f}=false`]),
+    '-c', `mcp_servers.trif={ command = ${tomlKey(m.command)}, args = [${m.args.map(tomlKey).join(', ')}], default_tools_approval_mode = "approve", startup_timeout_sec = 30, tool_timeout_sec = 330 }`];
 }
 
 /**
@@ -154,15 +179,17 @@ const adapter = {
   // through the run's key proxy (agentkeys.js). `proxyToken`: the key proxy's token, for a provider in
   // `config` that uses proxyAuth (codex-oss). Either way the token goes into a file in `agentDir` (the
   // run's own folder, see proxyAuth), never into args.
-  command({ bin, prompt, sessionId, model, effort, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [], keyProxy = null, proxyToken = null, agentDir = '' }) {
+  // `fence` (Windows, runs.js _fence): no profile, no shell, TRIF's tools inside its fence (windowsConfig).
+  command({ bin, prompt, sessionId, model, effort, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [], keyProxy = null, proxyToken = null, agentDir = '', fence = null }) {
     const token = proxyToken || (keyProxy && keyProxy.token) || null;
     const viaProxy = keyProxy ? require('../agentkeys').codexProviderArgs(keyProxy.url, proxyAuth(agentDir)) : [];
     if (token && !agentDir) throw new Error('no run folder for the key proxy\'s token');
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config, ...viaProxy,
+      '-c', 'approval_policy="never"',
+      ...(fence ? windowsConfig(fence) : ['-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`]), ...config, ...viaProxy,
       '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`,
-      ...(tmp ? ['-c', `shell_environment_policy.set={ TMPDIR = ${tomlKey(tmp)}, TMPPREFIX = ${tomlKey(`${tmp}/zsh`)} }`] : []),
+      ...(tmp && !fence ? ['-c', `shell_environment_policy.set={ TMPDIR = ${tomlKey(tmp)}, TMPPREFIX = ${tomlKey(`${tmp}/zsh`)} }`] : []),
       '-c', 'web_search="disabled"', ...FEATURES_OFF.flatMap((f) => ['-c', `features.${f}=false`])];
     if (model) args.push('-m', model);
     // The user's effort setting (the panel's Settings, per agent); none: the model's default
@@ -176,7 +203,8 @@ const adapter = {
     // (A site folder that is a link out of the mods folder isn't made read-only, runs.js runLimits: it
     // isn't writable either, since the sandbox checks where it leads.)
     const writableHere = (p) => writable.some((w) => p === w || p.startsWith(w.endsWith('/') ? w : `${w}/`));
-    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => !d.link && (readOnly.includes(d.real) || !writableHere(d.real))).map((d) => d.rel),
+    // (Windows: the fence makes every other site's folder in the run's copy read-only, fence.js specFor)
+    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => !d.link && (fence || readOnly.includes(d.real) || !writableHere(d.real))).map((d) => d.rel),
       ...(token ? { files: [{ path: tokenFile(agentDir), content: token }] } : {}) };
   },
 
@@ -330,5 +358,10 @@ adapter.permissionsToml = permissionsToml;
 adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
 adapter.proxyAuth = proxyAuth;
+adapter.windowsConfig = windowsConfig;
+adapter.WINDOWS_FEATURES_OFF = WINDOWS_FEATURES_OFF;
+// Windows runs: TRIF's fenced file tools beside `trif` (helper/mcp.js `files`), since Codex has none of its
+// own left there.
+adapter.fencedFiles = true;
 adapter.tokenFile = tokenFile;
 adapter.orgMessages = orgMessages;

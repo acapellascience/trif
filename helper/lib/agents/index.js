@@ -248,7 +248,9 @@ function contextText({ url, tabId, scope, browser, agentLevel, noShell = false }
     ' Reply briefly in plain language; your replies appear in a narrow chat panel: before your first command, one line saying what you\'re about to change; then don\'t narrate your steps as you go, and end with a sentence or two on what changed (AGENTS.md "5. Report"), more only if the user asks.' +
     " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question." +
     // (Windows runs: no shell, lib/win/fence.js; `trif` is a tool, helper/mcp.js)
-    (noShell ? ' There is no shell in this chat. Wherever AGENTS.md says to run `trif <words>`, call the `trif` tool with those words as its `args` (one item per word, as they are: no quoting, pipes or redirection). Look at and change files with your own file tools, with paths relative to the folder you\'re in (sites/…); there is no `ls`, `cd` or `cat`.' : '');
+    (noShell ? ' There is no shell in this chat. Wherever AGENTS.md says to run `trif <words>`, call the `trif` tool with those words as its `args` (one item per word, as they are: no quoting, pipes or redirection). ' +
+      (noShell === 'files' ? 'Look at and change files with the read_file, write_file, edit_file, list_files and search_files tools beside it (view_image shows you a screenshot `trif screenshot` made)' : 'Look at and change files with your own file tools') +
+      ', with paths relative to the folder you\'re in (sites/…); there is no `ls`, `cd` or `cat`.' : '');
 }
 
 // One-line reminder for later messages of a session (agents without a system prompt flag).

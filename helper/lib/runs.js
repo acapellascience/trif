@@ -839,7 +839,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, noShell: this.platform === 'win32' };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, noShell: this.platform === 'win32' ? (adapter.fencedFiles ? 'files' : true) : false };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -858,7 +858,7 @@ class Runs {
     try {
       fs.mkdirSync(run.agentDir, { mode: 0o700 });
       // Windows: the run's fence, and the `trif` tool that starts TRIF's commands inside it (_fence).
-      const fenced = this.platform === 'win32' ? this._fence(run, limits, env) : {};
+      const fenced = this.platform === 'win32' ? this._fence(run, limits, env, { files: !!adapter.fencedFiles }) : {};
       cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options, ...fenced });
       for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
     } catch (e) {
@@ -931,10 +931,10 @@ class Runs {
   /**
    * Windows: the run's fence (lib/win/fence.js). Makes its container and its entries on the run's folders,
    * and returns what the agent's adapter needs to offer `trif` as a tool: {fence: {mcp: {command, args}}},
-   * helper/mcp.js with a config in the run's own folder. Throws when the fence can't be made: no fence, no
+   * helper/mcp.js with a config in the run's own folder (`files`: with TRIF's file tools too). Throws when the fence can't be made: no fence, no
    * run.
    */
-  _fence(run, limits, env) {
+  _fence(run, limits, env, { files = false } = {}) {
     const fence = require('./win/fence');
     const l = fence.launcher(run.ws);
     if (l.error) throw new Error(l.error);
@@ -948,7 +948,9 @@ class Runs {
     const why = fence.prepare(l, specFile);
     if (why) throw new Error(`TRIF's fence for this run couldn't be made (${why})`);
     const configFile = path.join(run.agentDir, 'trif-tool.json');
-    fs.writeFileSync(configFile, JSON.stringify({ launcher: { file: l.file, prefix: l.prefix }, spec: specFile, node: realOrResolved(process.execPath), nodeFlags: fence.NODE_FLAGS, cli: path.join(root, 'helper', 'cli.js'), version: require('./paths').VERSION }), { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(configFile, JSON.stringify({ launcher: { file: l.file, prefix: l.prefix }, spec: specFile, node: realOrResolved(process.execPath), nodeFlags: fence.NODE_FLAGS, cli: path.join(root, 'helper', 'cli.js'), version: require('./paths').VERSION,
+      // (an agent with no file tools of its own that can be held to the run's folders, Codex: TRIF's, done inside the fence too)
+      ...(files ? { files: path.join(root, 'helper', 'lib', 'win', 'fenced-files.js') } : {}) }), { mode: 0o600, flag: 'wx' });
     this.logger.info(`agent run ${run.id}: fenced (${fence.containerName(run.id)})`);
     return { fence: { mcp: { command: realOrResolved(process.execPath), args: [path.join(root, 'helper', 'mcp.js'), configFile] } } };
   }

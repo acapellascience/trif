@@ -34,6 +34,19 @@ function why(e, p, changing = false) {
   return `${slashes(rel(p))}: ${e && e.message ? e.message : e}`;
 }
 
+// Files agents read as instructions (agents/claude.js INSTRUCTION_FILES): these tools don't write them, as
+// Claude Code's rules don't let its own (a mod's folder is for mods). By name as Windows reads it: whatever
+// the case, a trailing dot or space, or a stream after a colon.
+const INSTRUCTION_NAMES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'agents.override.md']);
+const INSTRUCTION_DIRS = new Set(['.claude', '.codex']);
+function instructionFile(file) {
+  const parts = rel(file).split(/[\\/]/).map((x) => x.toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''));
+  return INSTRUCTION_NAMES.has(parts[parts.length - 1]) || parts.some((x) => INSTRUCTION_DIRS.has(x));
+}
+function notInstructions(file) {
+  if (instructionFile(file)) throw new Error(`${slashes(rel(file))}: this chat can't write files that agents read as instructions`);
+}
+
 function resolve(p) {
   if (typeof p !== 'string' || !p || p.includes('\0')) throw new Error('`path` must be a file or folder name, e.g. sites/x.com/hide-banner.js');
   return path.resolve(process.cwd(), p);
@@ -70,6 +83,7 @@ const OPS = {
     const file = resolve(p);
     if (typeof content !== 'string') throw new Error('`content` must be the file\'s whole text');
     if (content.length > MAX_WRITE) throw new Error('too big for one file');
+    notInstructions(file);
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, content);
@@ -79,6 +93,7 @@ const OPS = {
   edit({ path: p, old, new: next, all = false }) {
     const file = resolve(p);
     if (typeof old !== 'string' || !old || typeof next !== 'string') throw new Error('`old` (the text to replace, exactly as it is in the file) and `new` must be text');
+    notInstructions(file);
     let text;
     try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new Error(why(e, file)); }
     const count = text.split(old).length - 1;
@@ -149,4 +164,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { handle, OPS, MAX_IMAGE };
+module.exports = { handle, OPS, MAX_IMAGE, instructionFile };

@@ -13,6 +13,11 @@ function isWindows(platform = process.platform) { return platform === 'win32'; }
 // start without a shell, with `trif` as a tool whose program runs in TRIF's own AppContainer
 // (lib/win/fence.js, helper/mcp.js).
 const WINDOWS_RUN_AGENTS = ['claude'];
+// Codex is wired the same way (agents/codex.js windowsConfig) and joins the list once its real run is green
+// on CI (tests/windows-run.js codex). Until then only that test starts it: TRIF_WINDOWS_CODEX_RUNS=1.
+function windowsRunAgents(env = process.env) {
+  return require('./env').envVar('WINDOWS_CODEX_RUNS', env) === '1' ? [...WINDOWS_RUN_AGENTS, 'codex'] : WINDOWS_RUN_AGENTS;
+}
 
 /**
  * Side-panel agent runs of `agentId` (and `trif agent run`) where TRIF can't confine them: a message
@@ -25,7 +30,7 @@ const WINDOWS_RUN_AGENTS = ['claude'];
  * (Without `agentId`: whether no agent at all can run from the panel, which is nowhere now.)
  */
 function panelRunsOff(platform = process.platform, home = '~/.trif', agentId = null, name = null) {
-  if (!isWindows(platform) || !agentId || WINDOWS_RUN_AGENTS.includes(agentId)) return null;
+  if (!isWindows(platform) || !agentId || windowsRunAgents().includes(agentId)) return null;
   const who = name || 'This agent';
   return {
     title: `${who} can’t be used from the panel on Windows yet`,
@@ -123,4 +128,4 @@ function renameRetry(from, to, { platform = process.platform, tries = 20, delayM
 /** The node program's file name: node.exe on Windows. */
 function nodeExeName(platform = process.platform) { return isWindows(platform) ? 'node.exe' : 'node'; }
 
-module.exports = { isWindows, panelRunsOff, panelLoginOff, WINDOWS_RUN_AGENTS, spawnable, cmdQuote, killTree, systemExe, openUrl, renameRetry, nodeExeName };
+module.exports = { isWindows, panelRunsOff, panelLoginOff, WINDOWS_RUN_AGENTS, windowsRunAgents, spawnable, cmdQuote, killTree, systemExe, openUrl, renameRetry, nodeExeName };

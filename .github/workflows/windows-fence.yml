@@ -96,3 +96,20 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
       - name: A fenced run, end to end
         run: node tests/windows-run.js
+
+  # The same with the real Codex (a stand-in for OpenAI's API): its shell and its own file tools off, trif
+  # and TRIF's file tools inside the fence. Informs until it's green; then Codex joins the panel's agents on
+  # Windows (helper/lib/platform.js) and this job counts.
+  run-codex:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Codex
+        run: npm install -g @openai/codex
+      - name: A fenced run of Codex, end to end
+        run: node tests/windows-run.js codex

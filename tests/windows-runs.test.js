@@ -95,6 +95,48 @@ test('Claude Code on Windows: no Bash among its tools, the trif tool, rules rela
   assert.equal(JSON.parse(mac.files[0].content).sandbox.enabled, true);
 });
 
+// ------------------------------------------------------------------ Codex without a shell
+
+test('Codex on Windows: no profile and no shell; read-only, so its own apply_patch is refused; no view_image of its own; the trif server approved, with time for its tools; the token printed by Node', () => {
+  const codex = require('../helper/lib/agents/codex');
+  const mcpServer = { command: 'C:\\n\\node.exe', args: ['C:\\t\\helper\\mcp.js', 'C:\\b\\r1.agent\\trif-tool.json'] };
+  const c = codex.command({ bin: 'C:\\npm\\codex.cmd', prompt: 'hide it', agentDir: 'C:\\b\\r1.agent', readable: ['C:\\b\\r1.ws'], writable: ['C:\\b\\r1.ws\\sites'], denied: ['C:\\Users\\t'], tmp: 'C:\\b\\r1\\tmp',
+    lockedDirs: [{ literal: 'C:\\b\\r1.ws\\sites\\y.com', real: 'C:\\b\\r1.ws\\sites\\y.com', rel: 'sites/y.com' }, { literal: 'C:\\b\\r1.ws\\sites\\l.com', real: 'D:\\elsewhere', rel: 'sites/l.com', link: true }],
+    fence: { mcp: mcpServer } });
+  const config = c.args.filter((a, i) => c.args[i - 1] === '-c');
+  assert.ok(!config.some((x) => /^(default_permissions|permissions)=/.test(x)), 'no permission profile: no session starts with one there');
+  assert.ok(config.includes('sandbox_mode="read-only"') && config.includes('approval_policy="never"'));
+  for (const f of ['shell_tool', 'unified_exec', 'unified_exec_tty', 'shell_snapshot', 'view_image']) assert.ok(config.includes(`features.${f}=false`), f);
+  assert.ok(config.includes('web_search="disabled"') && config.includes('features.apps=false'), 'and what\'s off everywhere');
+  assert.ok(!config.some((x) => /^shell_environment_policy\.set=/.test(x)), 'no temporary folder for commands there are none of');
+  const server = config.find((x) => x.startsWith('mcp_servers.trif='));
+  assert.equal(server, 'mcp_servers.trif={ command = "C:\\\\n\\\\node.exe", args = ["C:\\\\t\\\\helper\\\\mcp.js", "C:\\\\b\\\\r1.agent\\\\trif-tool.json"], default_tools_approval_mode = "approve", startup_timeout_sec = 30, tool_timeout_sec = 330 }');
+  assert.equal(config.filter((x) => x.startsWith('mcp_servers.')).length, 1, 'that server and no other (--ignore-user-config)');
+  assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules'));
+  assert.deepEqual(c.locked, ['sites/y.com'], 'the fence holds other sites\' folders');
+  assert.equal(c.stdin, 'hide it');
+  assert.equal(codex.fencedFiles, true);
+  // the key proxy's token: a file Node prints, there being no /bin/cat
+  assert.equal(codex.proxyAuth('C:\\b\\r1.agent', 'win32'), `auth = { command = ${JSON.stringify(process.execPath)}, args = [${JSON.stringify(path.join(__dirname, '..', 'helper', 'lib', 'win', 'print-file.js'))}, ${JSON.stringify(codex.tokenFile('C:\\b\\r1.agent'))}] }`);
+  assert.match(codex.proxyAuth('/b/r1.agent', 'darwin'), /command = "\/bin\/cat"/);
+  const dir = tempDir('pf-');
+  fs.writeFileSync(path.join(dir, 'token'), 'tok-123');
+  assert.equal(require('child_process').spawnSync(process.execPath, [path.join(__dirname, '..', 'helper', 'lib', 'win', 'print-file.js'), path.join(dir, 'token')], { encoding: 'utf8' }).stdout, 'tok-123');
+  // elsewhere, as before: its profile, its shell
+  const mac = codex.command({ bin: '/x/codex', prompt: 'p', readable: ['/w'], writable: ['/w/sites'], tmp: '/b/tmp' });
+  const macConfig = mac.args.filter((a, i) => mac.args[i - 1] === '-c');
+  assert.ok(macConfig.includes('default_permissions="trif-run"') && !macConfig.some((x) => /^(sandbox_mode|mcp_servers|features\.shell_tool)/.test(x)));
+  // what the run is told: the file tools by name
+  const agents = require('../helper/lib/agents');
+  assert.match(agents.contextText({ url: 'https://x.com/', scope: 'x.com', noShell: 'files' }), /no shell in this chat.*call the `trif` tool.*read_file, write_file, edit_file, list_files and search_files tools beside it/);
+  assert.match(agents.contextText({ url: 'https://x.com/', scope: 'x.com', noShell: true }), /with your own file tools, with paths relative/);
+  assert.ok(!/no shell/.test(agents.contextText({ url: 'https://x.com/', scope: 'x.com' })));
+  // not from the panel until its real run is green on CI: only the test that proves it switches it on
+  const platform = require('../helper/lib/platform');
+  assert.deepEqual(platform.windowsRunAgents({}), ['claude']);
+  assert.deepEqual(platform.windowsRunAgents({ TRIF_WINDOWS_CODEX_RUNS: '1' }), ['claude', 'codex']);
+});
+
 // ------------------------------------------------------------------ the trif tool's server
 
 function client(config, opts) {
@@ -216,6 +258,13 @@ test('file tools for an agent with none of its own (Codex on Windows): read, wri
   // (what it may open is the fence's to say, on Windows: here the words it uses when the fence says no)
   const files = require('../helper/lib/win/fenced-files');
   assert.equal(files.handle({ op: 'nope' }).ok, false);
+  // files agents read as instructions aren't written, by any spelling Windows takes for one
+  for (const p of ['sites/x.com/CLAUDE.md', 'sites/x.com/agents.md', 'sites/AGENTS.override.md', 'sites/x.com/.claude/settings.json', 'sites/x.com/.CODEX/config.toml', 'sites/x.com/CLAUDE.md.', 'sites/x.com/claude.md::$DATA', 'sites/x.com/CLAUDE.local.md ']) {
+    assert.deepEqual(await call('write_file', { path: p, content: 'planted' }), { text: `${p}: this chat can't write files that agents read as instructions`, bad: true }, p);
+  }
+  assert.equal((await call('edit_file', { path: 'sites/x.com/AGENTS.md', old: 'a', new: 'b' })).text, 'sites/x.com/AGENTS.md: this chat can\'t write files that agents read as instructions');
+  assert.ok(!fs.existsSync(path.join(work, 'sites', 'x.com', 'CLAUDE.md')) && !fs.existsSync(path.join(work, 'sites', 'x.com', '.claude')));
+  assert.equal(files.instructionFile(path.join(process.cwd(), 'sites', 'x.com', 'claude-notes.md')), false);
 });
 
 // ------------------------------------------------------------------ a run, with stand-ins

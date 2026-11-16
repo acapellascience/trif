@@ -8,6 +8,10 @@
 //   - the real Claude Code (from npm), talking to a stand-in for Anthropic's API through the helper's key
 //     proxy: a made-up API key in the real Windows Credential Manager, no account, no paid call. The
 //     stand-in asks for exactly the tool calls scripted here;
+//   - or, with `codex` as an argument, the real Codex the same way (a stand-in for OpenAI's API): no shell
+//     and none of its own tools that touch the computer, `trif` and TRIF's file tools from helper/mcp.js
+//     (agents/codex.js windowsConfig). Codex isn't offered in the panel on Windows until this is green
+//     (platform.js windowsRunAgents), so this run switches it on for itself;
 //   - the helper builds the fence's launcher with Windows' own C# compiler, makes the run's AppContainer,
 //     and starts Claude Code without a shell, with `trif` as a tool (helper/mcp.js).
 //
@@ -37,13 +41,21 @@ if (process.env.GITHUB_ACTIONS !== 'true' && !process.argv.includes('--yes-this-
 const REPO = path.resolve(__dirname, '..');
 const { FakeExtension } = require('./fake-extension');
 const { startFakeAnthropic } = require('./fake-anthropic-server');
+const { startFakeModelServer } = require('./fake-model-server');
 const { buildSpy } = require('./windows-fence/build');
 const { findExecutable } = require(path.join(REPO, 'helper', 'lib', 'agents', 'util'));
 const keys = require(path.join(REPO, 'helper', 'lib', 'agentkeys'));
 const fence = require(path.join(REPO, 'helper', 'lib', 'win', 'fence'));
 
+const AGENT = process.argv.includes('codex') ? 'codex' : 'claude';
+const CX = AGENT === 'codex';
+const NAME = CX ? 'Codex' : 'Claude Code';
 const SECRET = `CANARY-${crypto.randomBytes(8).toString('hex')}`;
-const KEY = `sk-ant-standin-${crypto.randomBytes(8).toString('hex')}`;
+const KEY = `${CX ? 'sk-standin-' : 'sk-ant-standin-'}${crypto.randomBytes(8).toString('hex')}`;
+const CRED = `TRIF API key/${keys.AGENT_KEYS[AGENT].account}`;
+// Codex's tools that reach nothing on the computer (its sub-agents' and questions' tools are looked at
+// before they're added here).
+const CODEX_HARMLESS = ['update_plan'];
 let failed = 0;
 function check(ok, what, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${!ok && detail ? `\n      ${String(detail).slice(0, 3000).split('\n').join('\n      ')}` : ''}`);
@@ -54,8 +66,8 @@ const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.w
 const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// ==/WebMod==\ndocument.title = "hello";\n';
 
 (async () => {
-  const claude = findExecutable('claude', String(process.env.PATH || '').split(';').filter(Boolean), { platform: 'win32' });
-  if (!check(!!claude, `Claude Code is installed (${claude || 'not on PATH'})`)) process.exit(1);
+  const agentBin = findExecutable(AGENT, String(process.env.PATH || '').split(';').filter(Boolean), { platform: 'win32' });
+  if (!check(!!agentBin, `${NAME} is installed (${agentBin || 'not on PATH'})`)) process.exit(1);
 
   // ---- a scratch profile folder, and TRIF set up in it as a user would have it
   const S = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-run-')));
@@ -71,21 +83,24 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   const code = path.join(ws, 'app');
   // What no run may see: a secret elsewhere in the home folder, one in TRIF's settings; another site's mods.
   const secretFile = put(path.join(home, 'Documents', 'secret.txt'), `${SECRET} home`);
+  const outsideImage = path.join(home, 'Documents', 'photo.png'); // (a real one-pixel picture)
+  fs.writeFileSync(outsideImage, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
   const cfgFile = path.join(priv, 'config.json');
   fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')), secret: `${SECRET} settings` }));
   put(path.join(ws, 'sites', 'other.net', 'keep.js'), '// ==WebMod==\n// @name Keep\n// @match https://other.net/*\n// ==/WebMod==\n');
   // The made-up API key, in the real Credential Manager, saved as `trif agent key` saves one.
   let savedKey = false;
   try {
-    if ((await keys.hasAgentKey('claude', {})).stored) throw new Error('this computer already has an Anthropic key saved by TRIF: not touching it');
-    await keys.setAgentKey('claude', KEY, {});
+    if ((await keys.hasAgentKey(AGENT, {})).stored) throw new Error(`this computer already has an ${keys.AGENT_KEYS[AGENT].name} key saved by TRIF: not touching it`);
+    await keys.setAgentKey(AGENT, KEY, {});
     savedKey = true;
   } catch (e) { check(false, 'a made-up API key saved in Credential Manager', e.message); process.exit(1); }
 
   // ---- servers on this computer: the stand-in API (reached through the helper's key proxy), and one more
   // that a run must not reach
   const script = [];
-  const anthropic = await startFakeAnthropic({ script });
+  // (Codex: a model name it doesn't know, so it calls its tools directly and lists them in each request)
+  const api = CX ? await startFakeModelServer({ script, models: ['standin'] }) : await startFakeAnthropic({ script });
   let localHits = 0;
   const localServer = net.createServer((s) => { localHits++; s.destroy(); });
   await new Promise((r) => localServer.listen(0, '127.0.0.1', r));
@@ -94,7 +109,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   // ---- the real helper, with a stand-in extension
   const ext = new FakeExtension({ home: ws, hostJs: path.join(code, 'helper', 'host.js'), env: {
     ...env, PATH: process.env.PATH, TRIF_HOME: '', TRIF_BOX_ROOT: '', TRIF_KEYCHAIN_BIN: '', TRIF_FENCE_BIN: '' /* (the real fence, not the unit tests' stand-in) */, TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'),
-    TRIF_ANTHROPIC_URL: anthropic.url, TRIF_AGENT_TIMEOUT_MS: '240000', TRIF_AGENT_KILL_GRACE_MS: '400',
+    ...(CX ? { TRIF_OPENAI_URL: `${api.url}/v1`, TRIF_WINDOWS_CODEX_RUNS: '1' } : { TRIF_ANTHROPIC_URL: api.url }), TRIF_AGENT_TIMEOUT_MS: '240000', TRIF_AGENT_KILL_GRACE_MS: '400',
   } });
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   const tabs = [{ id: 12, windowId: 1, active: true, url: 'https://example.com/page', title: 'Example' }, { id: 13, windowId: 1, active: false, url: 'https://other.net/page', title: 'Other' }];
@@ -126,13 +141,13 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       inside.guide = js(`require('fs').appendFileSync(${JSON.stringify(path.join(inside.spec.cwd, 'AGENTS.md'))}, 'x'); return 'written'`);
       inside.ownSite = js(`const f = ${JSON.stringify(path.join(inside.spec.cwd, 'sites', 'example.com', 'from-inside.txt'))}; require('fs').mkdirSync(require('path').dirname(f), { recursive: true }); require('fs').writeFileSync(f, 'x'); return 'written'`);
       inside.loopback = js(`return await new Promise((res, rej) => { const s = require('net').connect({ host: '127.0.0.1', port: ${localPort} }); s.setTimeout(3000, () => rej(new Error('timeout'))); s.on('connect', () => res('connected')); s.on('error', rej); })`);
-      inside.proxy = js(`const u = new URL(${JSON.stringify(anthropic.url)}); return await new Promise((res, rej) => { const s = require('net').connect({ host: u.hostname, port: Number(u.port) }); s.setTimeout(3000, () => rej(new Error('timeout'))); s.on('connect', () => res('connected')); s.on('error', rej); })`);
+      inside.proxy = js(`const u = new URL(${JSON.stringify(api.url)}); return await new Promise((res, rej) => { const s = require('net').connect({ host: u.hostname, port: Number(u.port) }); s.setTimeout(3000, () => rej(new Error('timeout'))); s.on('connect', () => res('connected')); s.on('error', rej); })`);
       inside.internet = js(`return await new Promise((res, rej) => { const s = require('net').connect({ host: '1.1.1.1', port: 443 }); s.setTimeout(4000, () => rej(new Error('timeout'))); s.on('connect', () => res('connected')); s.on('error', rej); })`);
       inside.dns = js(`return await new Promise((res, rej) => { require('dns').lookup('example.com', (e, a) => (e ? rej(e) : res(a))); setTimeout(() => rej(new Error('timeout')), 6000); })`);
-      inside.cred = exec([spy, 'cred', 'TRIF API key/anthropic']);
+      inside.cred = exec([spy, 'cred', CRED]);
       inside.helperProcess = exec([spy, 'cmdline', String(ext.child.pid)]);
       inside.clip = exec([spy, 'clip']);
-      inside.credOutside = String(spawnSync(spy, ['cred', 'TRIF API key/anthropic'], { encoding: 'utf8' }).stdout || '').trim();
+      inside.credOutside = String(spawnSync(spy, ['cred', CRED], { encoding: 'utf8' }).stdout || '').trim();
     } catch (e) { inside.error = e.stack || e.message; }
   };
   ext.handlers = {
@@ -157,8 +172,13 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   try { await ext.waitForSocket(20000); } catch (e) { ok = check(false, 'the helper started', `${e.message}\n${ext.stderr}\n${helperLog()}`); }
 
   // ---- what the stand-in model asks for, in order
-  const trif = (...args) => ({ tool: 'mcp__trif__trif', input: { args } });
+  // (Codex is offered an MCP server's tools as a namespace: mcp__trif, tool trif)
+  const tool = (name, args) => ({ call: { namespace: 'mcp__trif', name, arguments: args } });
+  const trif = (...args) => (CX ? tool('trif', { args }) : { tool: 'mcp__trif__trif', input: { args } });
+  const plant = (file) => ({ custom: { name: 'apply_patch', input: `*** Begin Patch\n*** Add File: ${file}\n+// planted\n*** End Patch\n` } });
   const BY = {
+    files: /this chat can't|nothing there|not permitted|EPERM|EACCES/i,
+    codex: /unsupported call|unsupported custom tool|rejected|blocked|not (allowed|available|supported|found)|denied|unknown|no such/i,
     trif: /^trif: |usage: trif|not available inside a side-panel agent run|inside a side-panel agent run|limited to|isn't one of this run's|unknown|no such|\(exit status [1-9]/im,
     claude: /was blocked|haven't granted|requested permissions|not allowed|denied by your permission settings|outside/i,
     notool: /No such tool available|not available|denied|permission/i,
@@ -183,11 +203,19 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     ['mods', trif('mods'), /example\.com\/probe/],
     ['help new', trif('help', 'new'), /\w/],
     ['doctor', trif('doctor'), null],
-    // a mod saved with Claude Code's own Write tool, in the run's working folder
-    ['write a mod', { tool: 'Write', input: { file_path: copy('sites', 'example.com', 'hello.js'), content: MOD } }, /created successfully|updated/i],
+    // a mod saved in the run's working folder: with Claude Code's own Write tool, or (Codex) TRIF's write_file
+    CX ? ['write a mod (TRIF\'s write_file)', tool('write_file', { path: 'sites/example.com/hello.js', content: MOD }), /^wrote sites\/example\.com\/hello\.js/]
+      : ['write a mod', { tool: 'Write', input: { file_path: copy('sites', 'example.com', 'hello.js'), content: MOD } }, /created successfully|updated/i],
     ['check the mod', trif('check', 'example.com/hello'), /^ok: /m],
     ['mods again', trif('mods'), /example\.com\/hello/],
-    ['run code with standard input', { tool: 'mcp__trif__trif', input: { args: ['check', '-'], stdin: 'let a = 1;\n' } }, null],
+    ...(CX ? [
+      ['read_file', tool('read_file', { path: 'sites/example.com/hello.js' }), /@name Hello/],
+      ['read_file: the guide', tool('read_file', { path: 'AGENTS.md', limit: 20 }), /\w/],
+      ['edit_file', tool('edit_file', { path: 'sites/example.com/hello.js', old: '"hello";', new: '"hello";' }), /^changed sites\/example\.com\/hello\.js/],
+      ['list_files', tool('list_files', { path: 'sites', depth: 2 }), /sites\/example\.com\/hello\.js[\s\S]*sites\/other\.net\/keep\.js/],
+      ['search_files', tool('search_files', { pattern: '@name', path: 'sites/example.com' }), /sites\/example\.com\/hello\.js:2: /],
+    ] : []),
+    ['run code with standard input', CX ? tool('trif', { args: ['check', '-'], stdin: 'let a = 1;\n' }) : { tool: 'mcp__trif__trif', input: { args: ['check', '-'], stdin: 'let a = 1;\n' } }, null],
   ];
   refusals = [
     // through the tool: its words are arguments, never commands; another site's tab; a file elsewhere
@@ -195,8 +223,30 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     ['the tool: a word with a command in it', trif('status', `$(type "${secretFile}")`, '`whoami`', '| more'), 'any'],
     ['the tool: another site\'s tab', trif('text', '--tab', '13'), 'trif'],
     ['the tool: check a file elsewhere', trif('check', secretFile), 'trif'],
-    ['the tool: a command that isn\'t for runs', trif('agent', 'key', '--agent', 'claude'), 'trif'],
+    ['the tool: a command that isn\'t for runs', trif('agent', 'key', '--agent', AGENT), 'trif'],
     ['the tool: another workspace', trif('--home', path.join(home, 'Documents'), 'status'), 'any'],
+    ...(CX ? [
+    // TRIF's file tools, done inside the fence
+    ['read_file: a file elsewhere in the home folder', tool('read_file', { path: secretFile }), 'files'],
+    ['read_file: TRIF\'s settings', tool('read_file', { path: cfgFile }), 'files'],
+    ['read_file: the live workspace', tool('read_file', { path: path.join(ws, 'AGENTS.md') }), 'files'],
+    ['read_file: out of the working folder by ..', tool('read_file', { path: path.join('..', '..', '..', 'TRIF', 'config.json') }), 'files'],
+    ['search_files: the home folder', tool('search_files', { pattern: 'CANARY', path: home }), 'any'],
+    ['list_files: a folder elsewhere in the home folder', tool('list_files', { path: path.join(home, 'Documents') }), 'files'],
+    ['view_image: a picture elsewhere in the home folder', tool('view_image', { path: outsideImage }), 'files'],
+    ['write_file: another site\'s folder', tool('write_file', { path: 'sites/other.net/planted.js', content: '// planted' }), 'files'],
+    ['edit_file: another site\'s mod', tool('edit_file', { path: 'sites/other.net/keep.js', old: 'Keep', new: 'Kept' }), 'files'],
+    ['write_file: the guide', tool('write_file', { path: 'AGENTS.md', content: 'planted' }), 'files'],
+    ['write_file: a file agents read as instructions, in its own site\'s folder', tool('write_file', { path: 'sites/example.com/CLAUDE.md', content: 'planted' }), 'files'],
+    ['write_file: the live mods folder', tool('write_file', { path: path.join(ws, 'sites', 'example.com', 'direct.js'), content: '// direct' }), 'files'],
+    // Codex's own tools: none that touches the computer
+    ['Codex\'s apply_patch, in its own site\'s folder', plant('sites/example.com/patched.js'), 'codex'],
+    ['Codex\'s apply_patch, elsewhere in the home folder', plant(path.join(home, 'Documents', 'patched.txt')), 'codex'],
+    ['a shell command (shell)', { run: `type "${secretFile}"` }, 'codex'],
+    ['a shell command (exec_command)', { call: { name: 'exec_command', arguments: { cmd: `type "${secretFile}"` } } }, 'codex'],
+    ['a shell command (shell_command)', { call: { name: 'shell_command', arguments: { command: `type "${secretFile}"` } } }, 'codex'],
+    ['Codex\'s own view_image, a picture elsewhere in the home folder', { call: { name: 'view_image', arguments: { path: outsideImage } } }, 'codex'],
+    ] : [
     // Claude Code's own file tools
     ['Read a file elsewhere in the home folder', { tool: 'Read', input: { file_path: secretFile } }, 'claude'],
     ['Read TRIF\'s settings', { tool: 'Read', input: { file_path: cfgFile } }, 'claude'],
@@ -209,6 +259,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     // no shell
     ['a shell command', { bash: `type "${secretFile}"` }, 'notool'],
     ['a web page', { tool: 'WebFetch', input: { url: 'https://example.com/', prompt: 'x' } }, 'notool'],
+    ]),
   ];
   script.length = 0;
   script.push(...steps.map((x) => x[1]), ...refusals.map((x) => x[1]), { say: 'done' });
@@ -221,10 +272,10 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     const request = async (cmd, args) => { const id = `s${++n}`; ext.send({ type: 'request', id, cmd, args }); return ext.next((m) => m.type === 'response' && m.id === id, { timeout: 60000 }); };
     const listed = await request('agent.list', {});
     const agents = (listed.result && listed.result.agents) || [];
-    const c = agents.find((a) => a.id === 'claude');
-    check(!!c && c.available, `agent.list: Claude Code is available for panel chats on Windows (${c ? `${c.path} ${c.version || ''}` : 'not listed'})`, JSON.stringify(agents));
-    for (const a of agents.filter((x) => x.id !== 'claude' && x.path)) console.log(`      (${a.name}: ${a.available ? 'available' : `not available: ${a.note}`})`);
-    const started = await request('agent.start', { agent: 'claude', site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps', model: 'claude-haiku-stand-in' });
+    const c = agents.find((a) => a.id === AGENT);
+    check(!!c && c.available, `agent.list: ${NAME} is available for panel chats on Windows (${c ? `${c.path} ${c.version || ''}` : 'not listed'})`, JSON.stringify(agents));
+    for (const a of agents.filter((x) => x.id !== AGENT && x.path)) console.log(`      (${a.name}: ${a.available ? 'available' : `not available: ${a.note}`})`);
+    const started = await request('agent.start', { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps', model: CX ? 'standin' : 'claude-haiku-stand-in' });
     if (check(started.ok === true, 'agent.start', started.error)) {
       plan(path.join(boxes, `${started.result.runId}.ws`));
       const done = await ext.next((m) => m.type === 'agentEvent' && m.runId === started.result.runId && m.event.kind === 'done', { timeout: 300000 }).catch((e) => ({ event: { ok: false, error: e.message } }));
@@ -233,10 +284,11 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     }
   }
   // (a tool's answer comes back as text, or as a list of text parts)
-  const results = anthropic.toolResults().map((r) => { try { const j = JSON.parse(r); return Array.isArray(j) ? j.map((p) => (p && p.text) || '').join('\n') : r; } catch { return r; } });
+  const parts = (list) => list.map((p) => (p && p.text) || '').join('\n');
+  const results = (CX ? api.toolOutputs() : api.toolResults()).map((r) => { try { const j = JSON.parse(r); return Array.isArray(j) ? parts(j) : j && Array.isArray(j.content) ? parts(j.content) : r; } catch { return r; } });
   const info = () => `--- the run's events\n${run ? run.events.map((e) => JSON.stringify(e).slice(0, 300)).join('\n').slice(-3000) : '(no run)'}\n--- helper.log\n${helperLog()}`;
   if (run) {
-    check(run.done.ok === true, 'the run finished: Claude Code, with no shell, the trif tool and the fence', `${JSON.stringify(run.done)}\n${info()}`);
+    check(run.done.ok === true, `the run finished: ${NAME}, with no shell, the trif tool and the fence`, `${JSON.stringify(run.done)}\n${info()}`);
     check(results.length === steps.length + refusals.length, `every step got an answer (${results.length} of ${steps.length + refusals.length})`, info());
     console.log('\n  the trif commands a run uses, through the tool, inside the fence:');
     const TROUBLE = /\bEPERM\b|\bEACCES\b|operation not permitted|permission denied|cannot find module|trif-fence:/i;
@@ -258,17 +310,26 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     check(!!(ext.lastMods() || []).find((m) => m.id === 'example.com/hello'), 'and reached the browser');
     check(fs.existsSync(path.join(ws, 'sites', 'example.com', 'probe.js')), 'so did the mod `trif new` made, from inside the fence');
     check(fs.readdirSync(path.join(ws, 'sites', 'other.net')).join() === 'keep.js', 'another site\'s folder is as it was');
-    check(fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8').length > 100 && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'CLAUDE.md')) && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'direct.js')) && !fs.existsSync(path.join(ws, 'sites', 'example.com-planted.js')), 'the guides and the mods folder hold nothing planted');
-    check(!fs.existsSync(path.join(home, 'Documents', 'shot.png')), 'nothing was saved elsewhere in the home folder');
-    const requests = JSON.stringify(anthropic.requests.map((q) => q.body));
+    check(fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8').length > 100 && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'CLAUDE.md')) && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'direct.js')) && !fs.existsSync(path.join(ws, 'sites', 'example.com-planted.js')) && !fs.existsSync(path.join(ws, 'sites', 'example.com', 'patched.js')), 'the guides and the mods folder hold nothing planted');
+    check(!fs.existsSync(path.join(home, 'Documents', 'shot.png')) && !fs.existsSync(path.join(home, 'Documents', 'patched.txt')), 'nothing was saved elsewhere in the home folder');
+    const requests = JSON.stringify(api.requests.map((q) => q.body));
     check(!requests.includes(SECRET), 'no secret reached the model');
     check(!requests.includes(KEY) && !JSON.stringify(run.events).includes(KEY) && !helperLog().includes(KEY), 'the API key is in no request body, event or log');
-    check(anthropic.requests.some((q) => q.headers['x-api-key'] === KEY), 'the key proxy added the key (from Credential Manager) to the requests');
-    const tools = [...new Set(anthropic.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.map((t) => t.name)))].sort();
+    check(api.requests.some((q) => (CX ? q.headers.authorization === `Bearer ${KEY}` : q.headers['x-api-key'] === KEY)), 'the key proxy added the key (from Credential Manager) to the requests');
+    if (CX) {
+      // What Codex offered the model: TRIF's tools (a namespace's are listed inside it) and nothing that
+      // touches the computer. A list of what's known, so a tool a new Codex adds fails here until looked at.
+      const offered = [...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.flatMap((t) => (Array.isArray(t.tools) ? t.tools.map((x) => `${t.name}.${x.name}`) : [t.name || t.type]))))].sort();
+      const mine = ['trif', 'read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'view_image'];
+      const known = (t) => mine.some((n) => t === `mcp__trif.${n}` || t === `mcp__trif__${n}`) || CODEX_HARMLESS.includes(t);
+      check(offered.every(known) && mine.every((n) => offered.includes(`mcp__trif.${n}`) || offered.includes(`mcp__trif__${n}`)), `the tools Codex had: ${offered.join(', ')}`, `not looked at yet: ${offered.filter((t) => !known(t)).join(', ')}`);
+      for (const q of api.requests) { if (q.body && Array.isArray(q.body.tools)) { console.log(`      (as it listed them: ${JSON.stringify(q.body.tools.map((t) => ({ type: t.type, name: t.name, tools: Array.isArray(t.tools) ? t.tools.map((x) => x.name) : undefined }))).slice(0, 1500)})`); break; } }
+    }
+    const tools = CX ? [] : [...new Set(api.requests.filter((q) => q.body && Array.isArray(q.body.tools)).flatMap((q) => q.body.tools.map((t) => t.name)))].sort();
     // (DeferredToolPlaceholder: Claude Code's own stand-in for a tool whose description it sends later; shown below)
     const extra = tools.filter((t) => !['Edit', 'Glob', 'Grep', 'Read', 'Write', 'mcp__trif__trif', 'DeferredToolPlaceholder'].includes(t));
-    check(extra.length === 0 && ['Edit', 'Glob', 'Grep', 'Read', 'Write', 'mcp__trif__trif'].every((t) => tools.includes(t)), `the tools Claude Code had: ${tools.join(', ')}`);
-    for (const q of anthropic.requests) { const d = q.body && Array.isArray(q.body.tools) && q.body.tools.find((t) => t.name === 'DeferredToolPlaceholder'); if (d) { console.log(`      DeferredToolPlaceholder: ${JSON.stringify(d).slice(0, 500)}`); break; } }
+    if (!CX) check(extra.length === 0 && ['Edit', 'Glob', 'Grep', 'Read', 'Write', 'mcp__trif__trif'].every((t) => tools.includes(t)), `the tools Claude Code had: ${tools.join(', ')}`);
+    for (const q of CX ? [] : api.requests) { const d = q.body && Array.isArray(q.body.tools) && q.body.tools.find((t) => t.name === 'DeferredToolPlaceholder'); if (d) { console.log(`      DeferredToolPlaceholder: ${JSON.stringify(d).slice(0, 500)}`); break; } }
 
     // ---- programs started in the run's own container, while it was going
     console.log('\n  from a program in the run\'s own container (the helper\'s launcher and spec), while the run was going:');
@@ -283,7 +344,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
         ['internet', 'the internet (1.1.1.1:443)'], ['dns', 'a name lookup (example.com)']]) {
         check(refused(inside[k]), `  refused: ${what} (${String(inside[k]).replace(/\s+/g, ' ').slice(0, 80)})`);
       }
-      check(/CRED\[sk-ant-standin/.test(inside.credOutside) || inside.credOutside.includes(KEY), '  (outside the container the same program reads the API key in Credential Manager)', inside.credOutside.replace(KEY, '<the key>'));
+      check(inside.credOutside.includes(`CRED[${KEY.slice(0, 10)}`) || inside.credOutside.includes(KEY), '  (outside the container the same program reads the API key in Credential Manager)', inside.credOutside.replace(KEY, '<the key>'));
       check(/CRED-ERROR/.test(inside.cred) && !inside.cred.includes(KEY), `  refused: the API key in Credential Manager (${inside.cred.replace(/\s+/g, ' ').slice(0, 80)})`);
       check(/OPEN-LIMITED-ERROR|WMI-ERROR/.test(inside.helperProcess) && !/KERNEL\[/.test(inside.helperProcess), `  refused: the helper's command line (${inside.helperProcess.replace(/\s+/g, ' ').slice(0, 80)})`);
       check(/CLIPBOARD-ERROR|no answer/.test(inside.clip), `  refused: the clipboard (${inside.clip.replace(/\s+/g, ' ').slice(0, 80)})`);
@@ -305,9 +366,9 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
 
   // ---- tidy up
   await ext.close().catch(() => {});
-  await anthropic.close();
+  await api.close();
   localServer.close();
-  if (savedKey) { try { await keys.removeAgentKey('claude', {}); } catch (e) { console.log(`(the made-up key couldn't be removed: ${e.message})`); } }
+  if (savedKey) { try { await keys.removeAgentKey(AGENT, {}); } catch (e) { console.log(`(the made-up key couldn't be removed: ${e.message})`); } }
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* left in the temp folder */ }
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all passed'}`);
   process.exit(failed ? 1 : 0);

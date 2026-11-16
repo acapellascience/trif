@@ -201,6 +201,9 @@ extension Model {
         if step["resethint"] != nil { UserDefaults.standard.removeObject(forKey: "fullScreenHinted") }
         if step["fullscreen"] != nil { browser.toggleFullScreen(); out = "full screen: \(browser.fullScreen), note: \(browser.status)" }
         if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
+        if step["chats"] != nil, let p = Model.pane { out = p.views.map { "\($0 === p.cur ? "*" : " ") \($0.site.isEmpty ? "-" : $0.site) \($0.activity.rawValue) \($0.webView.url?.path ?? "nothing")" }.joined(separator: "\n") }
+        if let i = step["showchat"] as? Int, let p = Model.pane, i < p.views.count { p.show(p.views[i]) }
+        if step["memwarn"] != nil { NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: UIApplication.shared) }
         if step["closechat"] != nil { Model.pane?.close() }
         if step["newchat"] != nil { Model.pane?.home() }
         if step["chatback"] != nil { Model.pane?.back() }

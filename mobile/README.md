@@ -160,6 +160,16 @@ Built on the probe, toward something to use every day:
   without the 16 KB guide. Project chats still show in Recents on both services (user reports, 11-16), so this
   groups them, it doesn't hide them. Unchecked on real logged-in pages: Claude's `/project/<id>` and ChatGPT's
   `/g/g-p-<id>-<name>/project` composers. The stand-in: serve.js answers `/project/<id>` with chat.html.
+- **More than one chat** (ClaudePane: ChatView, viewFor, release; 11-16, Tim approved). Up to three chat pages, each
+  its own web view (sharing the sign-ins) with its own conversation, reply watcher and pending fill; all stay in the
+  view tree (the shown one on top), so a reply goes on being written while another chat shows. The robot opens the
+  shown tab's site's chat (on the chosen service), or a new one; a reply done in a chat that isn't showing still
+  goes to Add this mod? (or a notification in the background). The top bar's list (two or more open) switches
+  between them, marking the one writing. A fourth releases the least recently used chat that isn't writing (never
+  a working one; its conversation is kept by address, so opening it again loads it); a memory warning releases every
+  idle chat that isn't shown. Each is logged in the diagnostics ("chats") with the count and the memory left
+  (os_proc_available_memory, 0 in the Simulator). The double-fill record, the viewer and fill rules, projects,
+  reload and back are each chat's own. Dev steps: chats, showchat, memwarn.
 - **More: the side panel's own chat, on an API key or this iPhone** (PanelChat.swift, PanelEngines.swift,
   Web/panel-adapter.js, Web/panel-phone.css; 11-16). The robot view's switch is Claude · ChatGPT · More. More is the
   desktop side panel itself: `node mobile/prepare.js` copies extension/sidepanel.html and every module it imports

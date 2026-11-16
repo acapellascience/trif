@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 import WebKit
+import os
 
 /// Which chat the pane shows: Claude, or ChatGPT (Codex on the web works on code repositories, not on a page
 /// someone is looking at, so ChatGPT is its side's chat). Each keeps its own sign-in (the app's one cookie store).
@@ -48,6 +49,69 @@ enum ChatService: String, CaseIterable, Identifiable {
 /// in it waiting to be read (a quiet mark).
 enum ChatActivity: String { case idle, working, replied }
 
+/// One chat page (Tim, 11-16: more than one chat at a time): its own web view, conversation, reply watcher and pending
+/// fill. The pane keeps up to three (ClaudePane.maxViews); a working one keeps running while another is shown.
+@MainActor
+final class ChatView: Identifiable {
+    let id = UUID()
+    let webView: WKWebView
+    /// Claude or ChatGPT: the one it was opened on.
+    var service: ChatService
+    /// The site its conversation is for (each site keeps its own conversation).
+    var site = ""
+    var started = false
+    var loading = false { willSet { changed() } }
+    var canGoBack = false { willSet { changed() } }
+    var canGoForward = false { willSet { changed() } }
+    var activity: ChatActivity = .idle { willSet { changed() } didSet { activityChanged() } }
+    /// It shows a project's page that isn't TRIF's project yet (the top bar offers to use it).
+    var projectPage = false { willSet { changed() } }
+    /// "Adding the page…" while the tab's data goes into its box.
+    var adding = false { willSet { changed() } }
+    var title = "" { willSet { changed() } }
+    /// A load asked for hasn't put its page in yet (until it commits): the page there is the one before.
+    var navigating = false
+    /// The address last asked for: the conversation it's about to show, before it has loaded.
+    var requested: URL?
+    /// Which fill is current: a reload makes the one under way stop, and starts it again after.
+    var fillGeneration = 0
+    var lastPrepared: ClaudePane.Prepared?
+    var refill: ClaudePane.Prepared?
+    var workingSince = Date.distantPast
+    /// The instructions went in a new chat's first message: its address, once it has one, is noted.
+    var contextNext = false
+    /// The page went into a new chat in TRIF's project without the guide (the project has it).
+    var projectFill = false
+    /// The tab the person was on when they sent: a notification's tap goes back to it.
+    var sentTab: UUID?
+    /// The things put into its message box, one after another.
+    var chain: Task<Void, Never>?
+    var lastUsed = Date()
+    var watches: [NSKeyValueObservation] = []
+    var fitTask: Task<Void, Never>?
+    var changed: () -> Void = {}
+    var activityChanged: () -> Void = {}
+    init(webView: WKWebView, service: ChatService) { self.webView = webView; self.service = service }
+
+    /// The conversation shown, as kept (no query or fragment), or nil for a new chat that has no address of its own yet.
+    var conversation: String? { ClaudePane.conversation(of: webView.url) }
+    /// One of the chat's own pages: a conversation or a new chat (not a file, a link or a sign-in page it went to).
+    var onChatPage: Bool {
+        guard let u = webView.url, let home = URL(string: service.home), u.host == home.host else { return false }
+        let p = u.path
+        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
+    }
+    /// For the chats' list: its site and a short title.
+    var label: String {
+        var t = title
+        for cut in [" - Claude", " | Claude", " – Claude", "ChatGPT - ", " - ChatGPT", "Claude"] { t = t.replacingOccurrences(of: cut, with: "") }
+        t = t.trimmingCharacters(in: .whitespaces)
+        if t.count > 26 { t = String(t.prefix(25)) + "…" }
+        let s = site.isEmpty ? "No site" : site
+        return t.isEmpty || t == "New chat" ? s : "\(s) · \(t)"
+    }
+}
+
 @MainActor
 final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     static var home: String { ChatService.claude.home }
@@ -59,71 +123,74 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     @Published private(set) var more = UserDefaults.standard.bool(forKey: "chatMore")
     private(set) lazy var panel: PanelChat = {
         let p = PanelChat(browser: browser!, report: report)
-        p.onActivity = { [weak self] a in self?.activity = a }
+        p.onActivity = { [weak self] a in self?.panelActivity = a; self?.refreshActivity() }
         p.isShown = { [weak self] in self?.shown ?? false }
         return p
     }()
+    private var panelActivity: ChatActivity = .idle
     /// Claude, ChatGPT or More.
     func choose(more m: Bool, service s: ChatService? = nil) {
         if m != more {
             more = m
             UserDefaults.standard.set(m, forKey: "chatMore")
             report.log("claude", m ? "switched to More (the side panel's chat)" : "switched back to \(s?.rawValue ?? service.rawValue)")
-            if m { panel.start() } else if shown, !started { start() }
+            if m { panel.start() } else if shown { showFor(tabSite) }
         }
         if let s, !m { use(s) }
     }
     /// The shown tab changed: the side panel follows it, as on desktop.
     func tabChanged() { if more { panel.pushTab() } }
 
-    @Published var popup: WKWebView?
-    @Published var loading = false
-    /// The chat's own history (its page's back and forward): the chat's ‹ and the toolbar's arrows while it shows.
-    @Published private(set) var canGoBack = false
-    @Published private(set) var canGoForward = false
-    func back() { if canGoBack { webView.goBack() } }
+    // MARK: the chats (Tim, 11-16: up to three at once)
 
-    /// Reload, the chat's own (Tim, 11-16: "if anything goes wrong there, you're stuck"): the same address, never a
+    static let maxViews = 3
+    /// The chat pages, oldest first; the shown one is `cur`.
+    @Published private(set) var views: [ChatView] = []
+    @Published private(set) var cur: ChatView!
+
+    @Published var popup: WKWebView?
+    var webView: WKWebView { cur.webView }
+    var loading: Bool { get { cur.loading } set { cur.loading = newValue } }
+    var canGoBack: Bool { cur.canGoBack }
+    var canGoForward: Bool { cur.canGoForward }
+    var site: String { cur.site }
+    var projectPage: Bool { cur.projectPage }
+    var adding: Bool { cur.adding }
+    func back() { if cur.canGoBack { cur.webView.goBack() } }
+    func forward() { if cur.webView.canGoForward { cur.webView.goForward() } }
+
+    /// Reload, the shown chat's own (Tim, 11-16: "if anything goes wrong there, you're stuck"): the same address, never a
     /// new chat. A reply being written is watched again once it has loaded (didFinish: chat.js resume); the tab's data
     /// being put in its box is put in again, once.
     func reloadChat() {
-        report.log("claude", "\(service.rawValue): reloaded")
-        fillGeneration += 1
-        if adding, let p = lastPrepared { refill = p }
-        loading = true
-        navigating = true
-        webView.reload()
+        let v = cur!
+        report.log("claude", "\(v.service.rawValue): reloaded")
+        v.fillGeneration += 1
+        if v.adding, let p = v.lastPrepared { v.refill = p }
+        v.loading = true
+        v.navigating = true
+        v.webView.reload()
     }
-    /// Which fill is current: a reload makes the one under way stop, and starts it again after.
-    private var fillGeneration = 0
-    private var lastPrepared: Prepared?
-    private var refill: Prepared?
-    func forward() { if webView.canGoForward { webView.goForward() } }
     /// The chat is showing, full screen over the tab.
     @Published private(set) var shown = false
+    /// The chat button's state, over all the chats: working if any is, else replied if any has a reply waiting.
     @Published private(set) var activity: ChatActivity = .idle
-    private var workingSince = Date.distantPast
+    private func refreshActivity() {
+        let all = views.map(\.activity) + [panelActivity]
+        let a: ChatActivity = all.contains(.working) ? .working : all.contains(.replied) ? .replied : .idle
+        if a != activity { activity = a }
+    }
 
-    let webView: WKWebView
     private let report: Report
     private weak var browser: Browser?
-    private var started = false
 
     init(report: Report, browser: Browser) {
         self.report = report
         self.browser = browser
-        let config = WKWebViewConfiguration()
-        config.applicationNameForUserAgent = Browser.safariSuffix
-        config.preferences.javaScriptCanOpenWindowsAutomatically = true
-        // (Add to TRIF under each mod in a reply, and filling the message box: Web/chat.js, main frame only)
-        config.userContentController.addUserScript(WKUserScript(source: Browser.resource("chat", "js"), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
-        webView = WKWebView(frame: .zero, configuration: config)
         super.init()
-        config.userContentController.add(self, contentWorld: ClaudePane.chatWorld, name: "trif")
-        webView.navigationDelegate = self
-        // (the chat page stays put in its frame: claude.ai and chatgpt.com scroll their conversation inside
-        // themselves, so the web view's own scrolling only ever hid the top of the chat, after the keyboard
-        // or a send moved it: Tim, 11-14)
+        let first = makeView(service)
+        views = [first]
+        cur = first
         // (development) `xcrun simctl spawn <device> notifyutil -p com.trif.probe.dumpchat`: the chat's layout and
         // scroll positions to Documents/chat-dom.html, without a relaunch (dumpComposer)
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
@@ -131,13 +198,6 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let pane = Unmanaged<ClaudePane>.fromOpaque(observer).takeUnretainedValue()
             Task { @MainActor in await pane.dumpComposer() }
         }, "com.trif.probe.dumpchat" as CFString, nil, .deliverImmediately)
-        // (but a page taller than the pane, as a sign-in page is (Google's "Sign in to continue"), scrolls as any page
-        // does: the web view's scrolling is on exactly while its page is taller or wider than the pane. Tim, 11-15:
-        // with it always off, signing in on a small iPhone was nearly impossible)
-        let sv = webView.scrollView
-        sv.isScrollEnabled = false
-        sv.bounces = false
-        sv.contentInsetAdjustmentBehavior = .never
         // (the keyboard gone, however it went (Tim, 11-16: the chat's page stayed pushed up, its message box mid-screen
         // over an empty half, after the keyboard closed): the chat's page back in its frame, now and once it has
         // settled; doing it again changes nothing)
@@ -146,13 +206,6 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 MainActor.assumeIsolated { self?.settleLayout() }
             }
         }
-        scrollWatches = [
-            sv.observe(\.contentSize, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.fitScrolling() } },
-            sv.observe(\.bounds, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.fitScrolling() } },
-        ]
-        webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
-        webView.isInspectable = true
         // (in the background while a reply is being written: ReplyInBackground below)
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.wentToBackground() }
@@ -164,20 +217,106 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let info = n.userInfo ?? [:]
             MainActor.assumeIsolated { self?.notificationTapped(info) }
         }
-        // (the conversation the pane is on, kept, so the app reopens it: Tim, 11-14)
-        urlWatch = webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
-            let url = wv.url
-            Task { @MainActor in self?.remember(url) }
+        // (memory: the idle chats that aren't showing go first)
+        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.memoryWarning() }
         }
-        historyWatches = [
-            webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in let v = wv.canGoBack; Task { @MainActor in self?.canGoBack = v } },
-            webView.observe(\.canGoForward, options: [.new]) { [weak self] wv, _ in let v = wv.canGoForward; Task { @MainActor in self?.canGoForward = v } },
-        ]
     }
 
-    private var urlWatch: NSKeyValueObservation?
-    private var historyWatches: [NSKeyValueObservation] = []
-    private var scrollWatches: [NSKeyValueObservation] = []
+    /// A chat page of its own (they share the app's sign-ins: the default data store).
+    private func makeView(_ s: ChatService) -> ChatView {
+        let config = WKWebViewConfiguration()
+        config.applicationNameForUserAgent = Browser.safariSuffix
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // (Add to TRIF under each mod in a reply, and filling the message box: Web/chat.js, main frame only)
+        config.userContentController.addUserScript(WKUserScript(source: Browser.resource("chat", "js"), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
+        let wv = WKWebView(frame: .zero, configuration: config)
+        config.userContentController.add(self, contentWorld: ClaudePane.chatWorld, name: "trif")
+        let v = ChatView(webView: wv, service: s)
+        v.changed = { [weak self] in self?.objectWillChange.send() }
+        v.activityChanged = { [weak self] in self?.refreshActivity() }
+        wv.navigationDelegate = self
+        wv.uiDelegate = self
+        wv.allowsBackForwardNavigationGestures = true
+        wv.isInspectable = true
+        // (the chat page stays put in its frame: claude.ai and chatgpt.com scroll their conversation inside
+        // themselves, so the web view's own scrolling only ever hid the top of the chat, after the keyboard
+        // or a send moved it: Tim, 11-14)
+        // (but a page taller than the pane, as a sign-in page is (Google's "Sign in to continue"), scrolls as any page
+        // does: the web view's scrolling is on exactly while its page is taller or wider than the pane. Tim, 11-15:
+        // with it always off, signing in on a small iPhone was nearly impossible)
+        let sv = wv.scrollView
+        sv.isScrollEnabled = false
+        sv.bounces = false
+        sv.contentInsetAdjustmentBehavior = .never
+        v.watches = [
+            sv.observe(\.contentSize, options: [.new]) { [weak self, weak v] _, _ in Task { @MainActor in if let v { self?.fitScrolling(v) } } },
+            sv.observe(\.bounds, options: [.new]) { [weak self, weak v] _, _ in Task { @MainActor in if let v { self?.fitScrolling(v) } } },
+            // (the conversation it's on, kept, so the app reopens it: Tim, 11-14)
+            wv.observe(\.url, options: [.new]) { [weak self, weak v] w, _ in let url = w.url; Task { @MainActor in if let v { self?.remember(v, url) } } },
+            wv.observe(\.title, options: [.new]) { [weak v] w, _ in let t = w.title ?? ""; Task { @MainActor in v?.title = t } },
+            wv.observe(\.canGoBack, options: [.new]) { [weak v] w, _ in let b = w.canGoBack; Task { @MainActor in v?.canGoBack = b } },
+            wv.observe(\.canGoForward, options: [.new]) { [weak v] w, _ in let b = w.canGoForward; Task { @MainActor in v?.canGoForward = b } },
+        ]
+        return v
+    }
+    private func view(of wv: WKWebView) -> ChatView? { views.first { $0.webView === wv } }
+
+    /// The chat for a site (and the chosen service): its own if it has one; else a new one while there are fewer than
+    /// three; else the one least recently used that isn't writing a reply, released for it (its conversation is kept
+    /// by address, so opening it again loads it). All three writing: the shown one stays.
+    private func viewFor(_ s: String) -> ChatView {
+        if let v = views.first(where: { $0.site == s && $0.service == service }) { return v }
+        if views.count < ClaudePane.maxViews {
+            // (the first chat page, not yet used: it's this site's)
+            if views.count == 1, !views[0].started { views[0].service = service; views[0].site = s; return views[0] }
+            let v = makeView(service)
+            v.site = s
+            views.append(v)
+            report.log("claude", "a chat for \(s.isEmpty ? "no site" : s): \(views.count) chat pages now")
+            logMemory("a chat page added")
+            return v
+        }
+        guard let old = views.filter({ $0.activity != .working && $0 !== cur }).min(by: { $0.lastUsed < $1.lastUsed })
+                ?? views.filter({ $0.activity != .working }).min(by: { $0.lastUsed < $1.lastUsed }) else {
+            report.log("claude", "all \(views.count) chats are writing replies: the shown one stays")
+            return cur
+        }
+        release(old, why: "a fourth chat was needed")
+        let v = makeView(service)
+        v.site = s
+        views.append(v)
+        return v
+    }
+    /// A chat page let go (its conversation stays kept by address: opening it again loads it).
+    private func release(_ v: ChatView, why: String) {
+        v.webView.stopLoading()
+        v.chain?.cancel()
+        views.removeAll { $0 === v }
+        if cur === v, let other = views.last { cur = other }
+        report.log("claude", "a chat page let go (\(v.site.isEmpty ? "no site" : v.site), \(why)): \(views.count) left")
+        logMemory("a chat page let go")
+        refreshActivity()
+    }
+    private func memoryWarning() {
+        let idle = views.filter { $0 !== cur && $0.activity != .working }
+        for v in idle { release(v, why: "a memory warning") }
+        logMemory("a memory warning: \(idle.count) idle chat page(s) let go")
+    }
+    private func logMemory(_ what: String) {
+        Diagnostics.shared.log("chats", "\(what): \(views.count) chat page(s), \(views.filter { $0.activity == .working }.count) writing; \(os_proc_available_memory() / 1_048_576) MB of memory left to the app")
+    }
+    /// Shows a chat from the chats' list.
+    func show(_ v: ChatView) {
+        guard views.contains(where: { $0 === v }) else { return }
+        cur = v
+        v.lastUsed = Date()
+        if v.activity == .replied { v.activity = .idle; Task { _ = await chatJS(v, "showReply()") } }
+        if !v.started { start(v) }
+        report.log("claude", "\(v.service.rawValue): the chat for \(v.site.isEmpty ? "no site" : v.site) shown")
+    }
+    /// The chats in progress, for the list: those that have loaded something.
+    var openViews: [ChatView] { views.filter(\.started) }
 
     /// Whether a page is bigger than the web view showing it (then it scrolls as a document does).
     nonisolated static func scrolls(_ sv: UIScrollView) -> Bool {
@@ -189,27 +328,26 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// (decided a moment after the page's size stops changing, and with a margin each way, so a page whose height
     /// follows the pane's, as the chats' do while the keyboard comes and goes, can't flip it back and forth on every
     /// layout: 11-15, an update loop on Tim's phone was looked for here too)
-    private var fitTask: Task<Void, Never>?
-    private func fitScrolling() {
-        fitTask?.cancel()
-        fitTask = Task { @MainActor [weak self] in
+    private func fitScrolling(_ v: ChatView) {
+        v.fitTask?.cancel()
+        v.fitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled, let self else { return }
-            let sv = self.webView.scrollView
+            let sv = v.webView.scrollView
             let over = max(sv.contentSize.height - sv.bounds.height, sv.contentSize.width - sv.bounds.width)
             let on = sv.isScrollEnabled ? over > 1 : over > 24
             if sv.isScrollEnabled != on {
                 sv.isScrollEnabled = on
                 sv.bounces = on
             }
-            self.clampOffset()
+            self.clampOffset(v)
         }
     }
 
     /// The page's offset inside its frame, kept within what it can be: none when it fits (the chats scroll inside
     /// themselves), and never past its end (WebKit can leave the page pushed up once the keyboard has gone).
-    private func clampOffset() {
-        let sv = webView.scrollView
+    private func clampOffset(_ v: ChatView) {
+        let sv = v.webView.scrollView
         guard !sv.isTracking, !sv.isDecelerating else { return }
         let maxY = max(0, sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
         let maxX = max(0, sv.contentSize.width - sv.bounds.width)
@@ -219,46 +357,37 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// After the keyboard goes (or the chat comes back): the page's layout as it should be, now and a moment later.
     func settleLayout() {
-        webView.setNeedsLayout()
-        clampOffset()
-        fitScrolling()
+        let v = cur!
+        v.webView.setNeedsLayout()
+        clampOffset(v)
+        fitScrolling(v)
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
-            self?.clampOffset()
+            self?.clampOffset(v)
             // (the page told its window's size again: a chat that measured itself with the keyboard up lays out again)
-            _ = try? await self?.webView.evaluateJavaScript("window.dispatchEvent(new Event('resize')); 1", in: nil, in: ClaudePane.chatWorld)
+            _ = try? await v.webView.evaluateJavaScript("window.dispatchEvent(new Event('resize')); 1", in: nil, in: ClaudePane.chatWorld)
         }
     }
-    /// The site the chat's conversation is for: the shown tab's (follow). Each site keeps its own conversation,
-    /// so switching tabs, or going to another site, brings that site's chat back (Tim, 11-15: the chat follows the tab).
-    @Published private(set) var site = ""
-    /// The shown tab's site; the chat goes to its conversation the next time it opens (not while a reply is being
-    /// written, or waits to be read: that conversation stays until then).
+    /// The shown tab's site; the chat button opens its chat (Tim, 11-15: the chat follows the tab).
     private var tabSite = ""
     private func lastKey(_ s: ChatService, _ site: String) -> String { site.isEmpty ? "lastChat.\(s.rawValue)" : "lastChat.\(s.rawValue).\(site)" }
     /// A conversation's address (claude.ai/chat/…, chatgpt.com/c/…), kept for its chat and site; nothing else is.
-    private func remember(_ url: URL?) {
-        guard let url, let home = URL(string: service.home), url.host == home.host,
+    private func remember(_ v: ChatView, _ url: URL?) {
+        guard let url, let home = URL(string: v.service.home), url.host == home.host,
               url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
         c?.fragment = nil
         if let s = c?.url?.absoluteString {
-            UserDefaults.standard.set(s, forKey: lastKey(service, site))
-            if contextNext { contextNext = false; noteContext(s) }
+            UserDefaults.standard.set(s, forKey: lastKey(v.service, v.site))
+            if v.contextNext { v.contextNext = false; noteContext(s) }
         }
     }
 
     // MARK: which conversations have TRIF's instructions
 
-    /// The conversation shown, as kept (no query or fragment), or nil for a new chat that has no address of its own yet.
-    private var conversation: String? {
-        guard let url = webView.url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return nil }
-        var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        c?.query = nil
-        c?.fragment = nil
-        return c?.url?.absoluteString
-    }
+    /// The conversation the shown chat is on.
+    private var conversation: String? { cur.conversation }
     /// The conversations TRIF's full instructions were sent in (by address; the last 300).
     private static let contextKey = "chatsWithInstructions"
     private func hasContext(_ conv: String) -> Bool { (UserDefaults.standard.stringArray(forKey: ClaudePane.contextKey) ?? []).contains(conv) }
@@ -269,129 +398,118 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         if list.count > 300 { list.removeFirst(list.count - 300) }
         UserDefaults.standard.set(list, forKey: ClaudePane.contextKey)
     }
-    /// The instructions went in a new chat's first message: its address, once it has one, is noted.
-    private var contextNext = false
-    /// Where the pane opens: the site's conversation, else a new one.
-    private var resumeURL: URL? {
-        UserDefaults.standard.string(forKey: lastKey(service, site)).flatMap(URL.init(string:)) ?? URL(string: service.start)
+    /// Where a chat opens: its site's conversation, else a new one.
+    private func resumeURL(_ v: ChatView) -> URL? {
+        UserDefaults.standard.string(forKey: lastKey(v.service, v.site)).flatMap(URL.init(string:)) ?? URL(string: v.service.start)
     }
 
-    /// Loads an address in the chat, marked as loading at once (a fill waits for it: waitForPage).
-    private func go(_ url: URL) {
-        loading = true
-        navigating = true
-        requested = url
-        webView.load(URLRequest(url: url))
-    }
-    /// The address last asked for: the conversation the chat is about to show, before it has loaded.
-    private var requested: URL?
-    /// A load asked for hasn't put its page in yet (until it commits): the page there is the one before.
-    private var navigating = false
-
-    /// Loads the chat the first time it's opened (not before: the browser is useful without it).
-    func start() {
-        guard !started else { return }
-        site = tabSite
-        guard let url = resumeURL else { return }
-        started = true
-        go(url)
+    /// Loads an address in a chat, marked as loading at once (a fill waits for it: waitForPage).
+    private func go(_ v: ChatView, _ url: URL) {
+        v.loading = true
+        v.navigating = true
+        v.requested = url
+        v.webView.load(URLRequest(url: url))
     }
 
-    /// The shown tab's site changed (another tab, or another site in it): the chat goes to that site's
-    /// conversation (a new one if it has none) when it next opens. Nothing loads in the background meanwhile.
+    /// Loads a chat the first time it's shown (not before: the browser is useful without it).
+    private func start(_ v: ChatView) {
+        guard !v.started, let url = resumeURL(v) else { return }
+        v.started = true
+        go(v, url)
+    }
+    /// (the first chat, loaded: the dev steps' and the projects' way in)
+    func start() { start(cur) }
+
+    /// The shown tab's site changed (another tab, or another site in it): the chat button opens that site's chat next
+    /// (a new one if it has none). Nothing loads in the background meanwhile.
     func follow(site new: String) { tabSite = new }
 
-    /// To the shown tab's site's conversation, if the chat is on another's and nothing is going on in it.
-    /// The chat's page is one of its own: a conversation or a new chat (not a file, a link or a sign-in page it went to).
-    var onChatPage: Bool {
-        guard let u = webView.url, let home = URL(string: service.home), u.host == home.host else { return false }
-        let p = u.path
-        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
+    /// The shown chat is on one of its own pages.
+    var onChatPage: Bool { cur.onChatPage }
+
+    /// The chat for the shown tab's site, shown (a working chat for another site keeps running behind it).
+    private func showFor(_ s: String) {
+        let v = viewFor(s)
+        if v !== cur { report.log("claude", "\(service.rawValue): the chat for \(s.isEmpty ? "no site" : s)") }
+        cur = v
+        v.lastUsed = Date()
+        start(v)
     }
 
-    private func catchUp() {
-        // (the chat follows the tab's site only from one of its own pages: one that went to a file, a link or a sign-in
-        // stays there, for its ‹ to bring back; 11-16)
-        guard started, site != tabSite, activity == .idle, onChatPage || webView.url == nil else { return }
-        site = tabSite
-        guard let url = resumeURL else { return }
-        if webView.url?.absoluteString.hasPrefix(url.absoluteString) == true { return }
-        report.log("claude", "\(service.rawValue): the chat for \(site.isEmpty ? "no site" : site)")
-        go(url)
-    }
-
-    /// The chat button: the chat, full screen. In a chat that isn't writing a reply, the tab's data goes into the
-    /// message box (fillContext); at a reply waiting to be read, it opens there. `then`: one more thing to put in
-    /// the message box after (Point TRIF at this).
+    /// The chat button: the chat for the shown tab's site, full screen. In a chat that isn't writing a reply, the tab's
+    /// data goes into the message box (fillContext); at a reply waiting to be read, it opens there. `then`: one more
+    /// thing to put in the message box after (Point TRIF at this).
     func open(then extra: (() async -> Void)? = nil) {
         Diagnostics.shared.mark("opening the chat")
         // (More: the side panel's chat, which has its own context and fills nothing)
         if more {
-            if activity == .replied { activity = .idle }
+            if panelActivity == .replied { panelActivity = .idle; refreshActivity() }
             shown = true
             panel.start()
             report.log("claude", "More: opened")
             return
         }
-        let was = activity
         let already = shown
-        if was == .replied { activity = .idle }
-        if was == .idle { catchUp() }
-        start()
+        if !already { showFor(tabSite) }
+        let v = cur!
+        let was = v.activity
+        if was == .replied { v.activity = .idle }
         shown = true
-        report.log("claude", "\(service.rawValue): opened\(was == .idle ? "" : " (\(was.rawValue))")")
+        report.log("claude", "\(v.service.rawValue): opened\(was == .idle ? "" : " (\(was.rawValue))")")
         // (the tab's data starts being gathered now, while the chat's page gets ready: 11-15)
         Diagnostics.shared.mark("opening the chat: gathering the page")
-        let ready = was == .idle && !already ? prepare() : nil
+        let ready = was == .idle && !already ? prepare(v) : nil
         Diagnostics.shared.mark("opening the chat: the chat's page")
-        queue { [weak self] in
+        queue(v) { [weak self] in
             guard let self else { return }
-            if was == .replied { _ = await self.chatJS("showReply()") }
-            else if let ready { await self.fillContext(ready) }
+            if was == .replied { _ = await self.chatJS(v, "showReply()") }
+            else if let ready { await self.fillContext(v, ready) }
             if let extra { await extra() } // (chat.js fill waits for the message box itself)
         }
     }
 
-    /// Back to the tab (the chat keeps running behind it: a reply goes on being written).
+    /// Back to the tab (the chats keep running behind it: a reply goes on being written).
     func close() {
         guard shown else { return }
         shown = false
-        blur()
+        blur(cur)
     }
 
-    /// The keyboard away from the chat's message box (so it doesn't come up over the tab).
-    private func blur() {
-        webView.endEditing(true)
-        Task { _ = try? await webView.callAsyncJavaScript("document.activeElement && document.activeElement.blur && document.activeElement.blur(); return 1;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) }
+    /// The keyboard away from a chat's message box (so it doesn't come up over the tab).
+    private func blur(_ v: ChatView) {
+        v.webView.endEditing(true)
+        Task { _ = try? await v.webView.callAsyncJavaScript("document.activeElement && document.activeElement.blur && document.activeElement.blur(); return 1;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) }
     }
 
-    /// Start over: a new conversation for this site (and the one kept forgotten), with the full instructions.
+    /// Start over: a new conversation for the shown chat's site (and the one kept forgotten), with the full instructions.
     func home() {
-        UserDefaults.standard.removeObject(forKey: lastKey(service, site))
-        activity = .idle
-        guard let url = URL(string: service.start) else { return }
-        go(url)
-        guard let ready = prepare() else { return }
-        queue { [weak self] in await self?.fillContext(ready) }
+        let v = cur!
+        UserDefaults.standard.removeObject(forKey: lastKey(v.service, v.site))
+        v.activity = .idle
+        v.started = true
+        guard let url = URL(string: v.service.start) else { return }
+        go(v, url)
+        guard let ready = prepare(v) else { return }
+        queue(v) { [weak self] in await self?.fillContext(v, ready) }
     }
 
-    /// The things put into the message box, one after another (a fill waits for the one before).
-    private var chain: Task<Void, Never>?
-    private func queue(_ op: @escaping @MainActor () async -> Void) {
-        let before = chain
-        chain = Task { @MainActor in
+    /// The things put into a chat's message box, one after another (a fill waits for the one before).
+    private func queue(_ v: ChatView, _ op: @escaping @MainActor () async -> Void) {
+        let before = v.chain
+        v.chain = Task { @MainActor in
             await before?.value
             await op()
         }
     }
 
-
-    private func chatJS(_ call: String) async -> String? {
-        try? await webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.\(call) : null;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) as? String
+    private func chatJS(_ v: ChatView, _ call: String) async -> String? {
+        try? await v.webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.\(call) : null;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) as? String
     }
+    /// (the shown chat's: chat.js's state, for the dev steps)
+    func chatState() async -> String? { await chatJS(cur, "state()") }
 
     /// The conversation an address is (kept without query or fragment), or nil for a new chat.
-    private static func conversation(of url: URL?) -> String? {
+    static func conversation(of url: URL?) -> String? {
         guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") else { return nil }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
@@ -409,26 +527,28 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
     /// The conversation it'll be for is the one the chat is showing or loading: a follow-up if TRIF's instructions
     /// are already in it, else the instructions. The text and the screenshot are gathered side by side.
-    private func prepare() -> Prepared? {
+    private func prepare(_ v: ChatView) -> Prepared? {
         guard let browser else { return nil }
-        let conv = ClaudePane.conversation(of: loading ? requested : webView.url)
+        let conv = ClaudePane.conversation(of: v.loading ? v.requested : v.webView.url)
         let followUp = conv.map(hasContext) ?? false
         let sw = Stopwatch("\(followUp ? "the follow-up" : "the instructions") for \(browser.host.isEmpty ? "a new tab" : browser.host)")
         let shot = Task { @MainActor in await browser.quickScreenshot() }
         // (a new chat in TRIF's project, which has TRIF's instructions: the page only; once sent, the chat counts as
         // having them, as the project does)
-        let inProject = !followUp && conv == nil && service.projectHasGuide
-        if inProject { projectFill = true }
+        let inProject = !followUp && conv == nil && v.service.projectHasGuide
+        if inProject { v.projectFill = true }
         let text = Task { @MainActor in followUp ? await browser.feedbackForChat(conv: conv, sw) : await browser.pageForChat(conv: conv, sw, guideInProject: inProject) }
         return Prepared(followUp: followUp, conv: conv, text: text, shot: shot, watch: sw)
     }
 
-    /// The last fill not yet sent, for this chat service: its conversation ("new" for a new chat), and the tab and page
-    /// it was of. Cleared at a send. Kept between launches (a reload of the chat's page must not fill again).
+    /// The last fill not yet sent, for a chat (its service and site): its conversation ("new" for a new chat), and the
+    /// tab and page it was of. Cleared at a send. Kept between launches (a reload of the chat's page must not fill again).
     struct FillRecord: Codable { var conv: String; var page: String; var at: Date }
-    private var lastFill: FillRecord? {
-        get { UserDefaults.standard.data(forKey: "lastFill.\(service.rawValue)").flatMap { try? JSONDecoder().decode(FillRecord.self, from: $0) } }
-        set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "lastFill.\(service.rawValue)") }
+    private func lastFill(_ v: ChatView) -> FillRecord? {
+        UserDefaults.standard.data(forKey: "lastFill.\(v.service.rawValue).\(v.site)").flatMap { try? JSONDecoder().decode(FillRecord.self, from: $0) }
+    }
+    private func setLastFill(_ v: ChatView, _ r: FillRecord?) {
+        UserDefaults.standard.set(r.flatMap { try? JSONEncoder().encode($0) }, forKey: "lastFill.\(v.service.rawValue).\(v.site)")
     }
     /// The tab and its page (its address without the fragment): another tab or another page is a new fill.
     static func pageKey(_ b: Browser) -> String {
@@ -437,9 +557,6 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         return "\(b.current.id.uuidString) \(c?.url?.absoluteString ?? "")"
     }
 
-    /// "Adding the page…" over the chat while the tab's data goes into its box.
-    @Published private(set) var adding = false
-
     /// The tab's data into the message box (Tim, 11-15: "full instructions if it's a new chat, the feedback data
     /// if it's not"): in a conversation without TRIF's instructions, how mods are written and the page
     /// (Browser.pageForChat, as TRIF instruction.txt); in one that has them, the page as it is now, what changed,
@@ -447,12 +564,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// TRIF follow-up.txt). The text goes in first, the screenshot when it's ready (11-15: it all took 10 to 15 s on
     /// Instagram). Nothing when the message box isn't there (signed out) or already has something in it. The
     /// person sends it themselves.
-    private func fillContext(_ ready: Prepared) async {
+    private func fillContext(_ v: ChatView, _ ready: Prepared) async {
         let sw = ready.watch
-        let generation = fillGeneration
-        lastPrepared = ready
-        adding = true
-        defer { if generation == fillGeneration { adding = false } }
+        let generation = v.fillGeneration
+        let name = v.service.rawValue
+        v.lastPrepared = ready
+        v.adding = true
+        defer { if generation == v.fillGeneration { v.adding = false } }
         // (only into one of the chat's own pages with its message box there: not waiting for the page to finish
         // loading (claude.ai takes seconds more after its box is usable: 11-16, a new chat took 5 s to fill), but
         // looking for the box every 150 ms, 20 s at most (the person may go back to the conversation from a file
@@ -460,148 +578,151 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // (and only with the conversation itself in front: the message box shown and usable, nothing over it. While a
         // viewer is open (a file, an artifact: 11-16, Tim tapped a .js and Claude's viewer covered the box), the wait
         // goes on, however long, for as long as the chat is shown: closing the viewer lets the fill go in)
+        let inFront = { [weak self] in (self?.shown ?? false) && self?.cur === v }
         var st: [String: Any] = [:]
         var waited = 0
         var saidViewer = false
         while waited < 133 {
-            if !navigating, onChatPage {
-                st = (Browser.parse(await chatJS("state()")) as? [String: Any]) ?? [:]
+            if !v.navigating, v.onChatPage {
+                st = (Browser.parse(await chatJS(v, "state()")) as? [String: Any]) ?? [:]
                 if st["usable"] as? Bool == true { break }
             }
             let over = st["viewer"] as? String
             if let over, !saidViewer {
                 saidViewer = true
-                report.log("claude", "\(service.rawValue): \(over) is over the message box: the fill waits for it to close")
+                report.log("claude", "\(name): \(over) is over the message box: the fill waits for it to close")
             }
             try? await Task.sleep(nanoseconds: 150_000_000)
-            if over == nil || !shown { waited += 1 }
-            if !shown && activity != .idle { break }
-            if generation != fillGeneration { break }
+            if over == nil || !inFront() { waited += 1 }
+            if !inFront() && v.activity != .idle { break }
+            if generation != v.fillGeneration { break }
         }
         sw.lap("the chat ready")
-        guard generation == fillGeneration else { return } // (the chat reloaded meanwhile: filled after it, instead)
-        guard onChatPage, st["editor"] as? Bool == true, st["usable"] as? Bool == true else {
+        guard generation == v.fillGeneration else { return } // (the chat reloaded meanwhile: filled after it, instead)
+        guard v.onChatPage, st["editor"] as? Bool == true, st["usable"] as? Bool == true else {
             if let over = st["viewer"] as? String {
-                report.log("claude", "\(service.rawValue): \(over) stayed over the message box, nothing filled")
+                report.log("claude", "\(name): \(over) stayed over the message box, nothing filled")
                 Diagnostics.shared.log("chat", "the page's data wasn't put in: \(over) was over the chat's message box")
                 return
             }
-            report.log("claude", "\(service.rawValue): no message box (\(onChatPage ? "signed out?" : "not on a conversation")), nothing filled")
-            Diagnostics.shared.log("chat", "the page's data wasn't put in: the chat \(onChatPage ? "had no message box" : "wasn't on a conversation") for 20 s")
+            report.log("claude", "\(name): no message box (\(v.onChatPage ? "signed out?" : "not on a conversation")), nothing filled")
+            Diagnostics.shared.log("chat", "the page's data wasn't put in: the chat \(v.onChatPage ? "had no message box" : "wasn't on a conversation") for 20 s")
             return
         }
         if st["working"] as? Bool == true { return }
-        guard let browser, shown || activity == .idle else { return }
+        guard let browser, inFront() || v.activity == .idle else { return }
         // (once per page: 11-16, leaving the chat and coming back put the page in a second time. What's in the box
         // is looked at (TRIF's tiles or text, or the person's own) and so is the record of the last fill, which
         // outlives a reload of the chat's page)
-        let convKey = conversation ?? "new"
+        let convKey = v.conversation ?? "new"
         let page = ClaudePane.pageKey(browser)
-        let record = lastFill
+        let record = lastFill(v)
         let same = record.map { $0.conv == convKey && $0.page == page } ?? false
         var ours = st["trif"] as? Int ?? 0
         if ours == 0, st["has"] as? Bool != true, same {
             // (the record says it's in, unsent, but the box looks empty: a page that puts its draft back a moment
             // after it loads is given that moment)
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            st = (Browser.parse(await chatJS("state()")) as? [String: Any]) ?? st
+            st = (Browser.parse(await chatJS(v, "state()")) as? [String: Any]) ?? st
             ours = st["trif"] as? Int ?? 0
         }
         if ours > 0 {
-            if same { report.log("claude", "\(service.rawValue): the page is already in the message box, unsent: not again"); return }
-            if st["others"] as? Bool == true { report.log("claude", "\(service.rawValue): the message box has the person's own things too: left as it is"); return }
-            let r = try? await webView.callAsyncJavaScript("return globalThis.__trifChat ? await globalThis.__trifChat.clearTrif() : 1;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld)
+            if same { report.log("claude", "\(name): the page is already in the message box, unsent: not again"); return }
+            if st["others"] as? Bool == true { report.log("claude", "\(name): the message box has the person's own things too: left as it is"); return }
+            let r = try? await v.webView.callAsyncJavaScript("return globalThis.__trifChat ? await globalThis.__trifChat.clearTrif() : 1;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld)
             let left = (r as? NSNumber)?.intValue ?? 1
-            report.log("claude", "\(service.rawValue): the tab changed since the last fill: the old one taken out\(left > 0 ? " (not all of it: \(left) left, so nothing added)" : "")")
+            report.log("claude", "\(name): the tab changed since the last fill: the old one taken out\(left > 0 ? " (not all of it: \(left) left, so nothing added)" : "")")
             if left > 0 { return }
         } else if st["has"] as? Bool == true {
-            report.log("claude", "\(service.rawValue): the message box already has something in it: left as it is"); return
+            report.log("claude", "\(name): the message box already has something in it: left as it is"); return
         }
-        let conv = conversation
+        let conv = v.conversation
         if st["context"] as? Bool == true, let conv { noteContext(conv) }
         // (the conversation turned out to have the instructions after all, seen on its page: the follow-up instead)
         let followUp = conv.map(hasContext) ?? false
         var text = await ready.text.value
         if followUp && !ready.followUp { text = await browser.feedbackForChat(conv: conv, sw) }
         if let text {
-            await fill(text, as: followUp ? "TRIF follow-up.txt" : "TRIF instruction.txt")
+            await fill(v, text, as: followUp ? "TRIF follow-up.txt" : "TRIF instruction.txt")
             sw.lap("text into the message box")
         }
         if let shot = await ready.shot.value {
-            await fill("", png: shot, picture: "TRIF screenshot.jpg")
+            await fill(v, "", png: shot, picture: "TRIF screenshot.jpg")
             sw.lap("screenshot into the message box", "\(shot.count / 1000) kB JPEG")
         }
-        lastFill = FillRecord(conv: convKey, page: page, at: Date())
+        setLastFill(v, FillRecord(conv: convKey, page: page, at: Date()))
         await browser.noteBaseline()
         sw.lap("the page's layout, for next time")
         sw.done()
     }
 
-    /// From Web/chat.js: an Add to TRIF tap; the person's send; a reply done, with the mod files in it.
+    /// From Web/chat.js, in any of the chats: an Add to TRIF tap; the person's send; a reply done, with the mod files in it.
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let d = message.body as? [String: Any], let type = d["type"] as? String else { return }
+        guard let d = message.body as? [String: Any], let type = d["type"] as? String, let wv = message.webView, let v = view(of: wv) else { return }
+        let name = v.service.rawValue
         switch type {
         case "mod":
             guard let text = d["text"] as? String else { return }
-            report.log("claude", "\(service.rawValue): Add to TRIF tapped (\(text.count) characters)")
+            report.log("claude", "\(name): Add to TRIF tapped (\(text.count) characters)")
             browser?.offer(text: text)
         case "sent":
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
-            report.log("claude", "\(service.rawValue): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
-            if d["withInstructions"] as? Bool == true || projectFill { if let conv = conversation { noteContext(conv) } else { contextNext = true } }
-            projectFill = false
-            lastFill = nil
-            activity = .working
-            workingSince = Date()
-            sentTab = browser?.current.id
+            report.log("claude", "\(name): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
+            if d["withInstructions"] as? Bool == true || v.projectFill { if let conv = v.conversation { noteContext(conv) } else { v.contextNext = true } }
+            v.projectFill = false
+            setLastFill(v, nil)
+            v.activity = .working
+            v.workingSince = Date()
+            v.lastUsed = Date()
+            v.sentTab = browser?.current.id
             askToNotify()
-            if shown { close() } else { blur() }
-            let since = workingSince
+            if shown && cur === v { close() } else { blur(v) }
+            let since = v.workingSince
             // (a reply that never says it's done, a page that went away: the dots stop after 16 minutes)
-            Task { @MainActor [weak self] in
+            Task { @MainActor [weak v] in
                 try? await Task.sleep(nanoseconds: 16 * 60 * 1_000_000_000)
-                guard let self, self.activity == .working, self.workingSince == since else { return }
-                self.activity = .idle
+                guard let v, v.activity == .working, v.workingSince == since else { return }
+                v.activity = .idle
             }
         case "done":
             // (the mods: the reply's new code blocks with a whole mod file in each)
-            handleDone(d, d["mods"] as? [String] ?? [])
+            handleDone(v, d, d["mods"] as? [String] ?? [])
         case "viewer":
             // (the chat's own viewer opened, on a file the person tapped: the mod it shows, to Add this mod?; or, when no
             // code could be read off it, a line in the diagnostics, so the next report shows what was there)
             let text = d["text"] as? String ?? ""
-            let name = d["name"] as? String ?? ""
-            let what = "\(d["why"] as? String ?? "a viewer")\(name.isEmpty ? "" : " on \(name)") at \(d["path"] as? String ?? "?")"
+            let file = d["name"] as? String ?? ""
+            let what = "\(d["why"] as? String ?? "a viewer")\(file.isEmpty ? "" : " on \(file)") at \(d["path"] as? String ?? "?")"
             if text.isEmpty {
-                report.log("claude", "\(service.rawValue): \(what), no mod's code read off it")
-                if name.lowercased().hasSuffix(".js") { Diagnostics.shared.log("chat files", "\(service.rawValue)'s viewer opened \(what), and no mod's code could be read off it") }
+                report.log("claude", "\(name): \(what), no mod's code read off it")
+                if file.lowercased().hasSuffix(".js") { Diagnostics.shared.log("chat files", "\(name)'s viewer opened \(what), and no mod's code could be read off it") }
                 return
             }
-            report.log("claude", "\(service.rawValue): \(what): its code read (\(text.count) characters), to Add this mod?")
+            report.log("claude", "\(name): \(what): its code read (\(text.count) characters), to Add this mod?")
             guard let browser else { return }
             Task { @MainActor in
                 let offered = await browser.offerFromChat([text])
-                if let conv = self.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
+                if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             }
         default: break
         }
     }
 
-    /// A reply done, with the mod files in its code blocks: offered with Add this mod?. None: the chat button's
-    /// replied mark.
-    private func handleDone(_ d: [String: Any], _ texts: [String]) {
-        report.log("claude", "\(service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")), \(texts.count) mod file(s) in it")
+    /// A reply done, with the mod files in its code blocks: offered with Add this mod? (whichever chat is showing, or
+    /// none). None: the chat button's replied mark.
+    private func handleDone(_ v: ChatView, _ d: [String: Any], _ texts: [String]) {
+        report.log("claude", "\(v.service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")) for \(v.site.isEmpty ? "no site" : v.site), \(texts.count) mod file(s) in it")
         let late = d["why"] as? String == "late"
-        guard activity == .working || late else { return }
-        guard let browser else { activity = .idle; endBackground(); return }
+        guard v.activity == .working || late else { return }
+        guard let browser else { v.activity = .idle; endBackgroundIfIdle(); return }
         Task { @MainActor in
             let offered = await browser.offerFromChat(texts)
-            if let conv = self.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
+            if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
-            if UIApplication.shared.applicationState == .background { self.notifyDone(offered) } // (not inactive: an alert of the system's over the app)
-            self.endBackground()
-            if late { if !offered.isEmpty, self.activity == .replied { self.activity = .idle }; return }
-            self.activity = !offered.isEmpty || self.shown ? .idle : .replied
+            if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) } // (not inactive: an alert of the system's over the app)
+            if late { if !offered.isEmpty, v.activity == .replied { v.activity = .idle }; self.endBackgroundIfIdle(); return }
+            v.activity = !offered.isEmpty || (self.shown && self.cur === v) ? .idle : .replied
+            self.endBackgroundIfIdle()
         }
     }
 
@@ -614,10 +735,9 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
     private var backgroundSince: Date?
-    /// The tab the person was on when they sent: a notification's tap goes back to it.
-    private var sentTab: UUID?
     static let replyNote = "trif.reply"
     static let stillNote = "trif.reply.still"
+    private var working: [ChatView] { views.filter { $0.activity == .working } }
 
     /// Notifications asked for once, at the first send (not at launch). Refused: nothing else changes.
     private func askToNotify() {
@@ -632,14 +752,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     private func wentToBackground() {
         backgroundSince = Date()
-        guard activity == .working, bgTask == .invalid else { return }
+        guard !working.isEmpty, bgTask == .invalid else { return }
         let start = Date()
         bgTask = UIApplication.shared.beginBackgroundTask(withName: "TRIF: a reply being written") { [weak self] in
             // (iOS calls this on the main thread just before the time is up: the time is given back here, at once)
             MainActor.assumeIsolated {
                 guard let self else { return }
-                Diagnostics.shared.log("background", "iOS's background time ran out after \(Int(Date().timeIntervalSince(start))) s, the reply still being written")
-                if self.activity == .working { self.notifyStillWriting() }
+                Diagnostics.shared.log("background", "iOS's background time ran out after \(Int(Date().timeIntervalSince(start))) s, \(self.working.count) reply(s) still being written")
+                for v in self.working { self.notifyStillWriting(v) }
                 self.endBackground()
             }
         }
@@ -648,10 +768,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, self.bgTask != .invalid else { return }
             let left = UIApplication.shared.backgroundTimeRemaining
-            Diagnostics.shared.log("background", "a reply is being written: background time asked for, \(left > 100_000 ? "no limit given yet" : "\(Int(left)) s left")")
+            Diagnostics.shared.log("background", "\(self.working.count) reply(s) being written: background time asked for, \(left > 100_000 ? "no limit given yet" : "\(Int(left)) s left")")
         }
     }
 
+    /// iOS's background time given back once no chat is writing any more.
+    private func endBackgroundIfIdle() { if working.isEmpty { endBackground() } }
     private func endBackground() {
         guard bgTask != .invalid else { return }
         let t = bgTask
@@ -668,47 +790,50 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let away = backgroundSince.map { Date().timeIntervalSince($0) } ?? 0
         backgroundSince = nil
         endBackground()
-        guard activity == .working else { return }
-        // (after a while away iOS will have stopped the chat's page: its reply may have been cut off mid-stream, or
+        // (after a while away iOS will have stopped the chats' pages: a reply may have been cut off mid-stream, or
         // finished on the chat's side without the page hearing. If, a moment after coming back, nothing is being
         // written, the conversation is loaded again and the reply read from it (chat.js resume). A page iOS ended
         // is loaded again anyway: webViewWebContentProcessDidTerminate.)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard let self, self.activity == .working, away > 20, self.conversation != nil else { return }
-            let st = (Browser.parse(await self.chatJS("state()")) as? [String: Any]) ?? [:]
-            if st["replying"] as? Bool == true { return }
-            Diagnostics.shared.log("background", "back after \(Int(away)) s; the reply isn't being written any more: its conversation loaded again to read it")
-            self.webView.reload()
+        for v in working {
+            Task { @MainActor [weak self, weak v] in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, let v, v.activity == .working, away > 20, v.conversation != nil else { return }
+                let st = (Browser.parse(await self.chatJS(v, "state()")) as? [String: Any]) ?? [:]
+                if st["replying"] as? Bool == true { return }
+                Diagnostics.shared.log("background", "back after \(Int(away)) s; the reply isn't being written any more: its conversation loaded again to read it")
+                v.webView.reload()
+            }
         }
     }
 
-    private func notify(_ title: String, _ body: String, id: String, kind: String, quiet: Bool = false) {
+    private func notify(_ title: String, _ body: String, id: String, kind: String, tab: UUID?, quiet: Bool = false) {
         let c = UNMutableNotificationContent()
         c.title = title
         c.body = body
-        c.userInfo = ["kind": kind, "tab": sentTab?.uuidString ?? ""]
+        c.userInfo = ["kind": kind, "tab": tab?.uuidString ?? ""]
         if quiet { c.interruptionLevel = .passive } else { c.sound = .default }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
     }
 
-    private var noteSite: String { site.isEmpty ? (browser?.site ?? "") : site }
+    private func noteSite(_ v: ChatView) -> String { v.site.isEmpty ? (browser?.site ?? "") : v.site }
 
-    private func notifyDone(_ offered: [InstalledMod]) {
+    private func notifyDone(_ v: ChatView, _ offered: [InstalledMod]) {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [ClaudePane.stillNote])
-        let place = noteSite.isEmpty ? "" : " for \(noteSite)"
+        let s = noteSite(v)
+        let place = s.isEmpty ? "" : " for \(s)"
         if offered.count == 1 {
-            notify("Your mod is ready", "\(offered[0].name)\(place): tap to add it.", id: ClaudePane.replyNote, kind: "mod")
+            notify("Your mod is ready", "\(offered[0].name)\(place): tap to add it.", id: ClaudePane.replyNote, kind: "mod", tab: v.sentTab)
         } else if offered.count > 1 {
-            notify("Your mods are ready", "\(offered.count) mods\(place): tap to add them.", id: ClaudePane.replyNote, kind: "mod")
+            notify("Your mods are ready", "\(offered.count) mods\(place): tap to add them.", id: ClaudePane.replyNote, kind: "mod", tab: v.sentTab)
         } else {
-            notify("\(service.rawValue) replied", noteSite.isEmpty ? "Tap to read the reply." : "On \(noteSite): tap to read the reply.", id: ClaudePane.replyNote, kind: "replied")
+            notify("\(v.service.rawValue) replied", s.isEmpty ? "Tap to read the reply." : "On \(s): tap to read the reply.", id: ClaudePane.replyNote, kind: "replied", tab: v.sentTab)
         }
         Diagnostics.shared.log("notify", "the reply's notification: \(offered.count) mod(s)")
     }
 
-    private func notifyStillWriting() {
-        notify("Still writing", "\(service.rawValue) is still writing\(noteSite.isEmpty ? "" : " for \(noteSite)"). Open TRIF to get your mod when it's done.", id: ClaudePane.stillNote, kind: "working", quiet: true)
+    private func notifyStillWriting(_ v: ChatView) {
+        let s = noteSite(v)
+        notify("Still writing", "\(v.service.rawValue) is still writing\(s.isEmpty ? "" : " for \(s)"). Open TRIF to get your mod when it's done.", id: ClaudePane.stillNote, kind: "working", tab: v.sentTab, quiet: true)
     }
 
     /// A tap on one of these notifications: the tab it was sent from; then its mod's Add this mod? (already waiting
@@ -717,6 +842,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard let browser else { return }
         if let id = (info["tab"] as? String).flatMap(UUID.init(uuidString:)), let tab = browser.tabs.first(where: { $0.id == id }), tab !== browser.current {
             browser.select(tab)
+            follow(site: browser.site)
         }
         switch info["kind"] as? String {
         case "replied": open()
@@ -727,20 +853,24 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
     }
 
-    /// Puts text (and a PNG) into the chat's message box as a paste, for the person to send (Web/chat.js fill).
+    /// Puts text (and a PNG) into the shown chat's message box as a paste, for the person to send (Web/chat.js fill).
     @discardableResult
     func fill(_ text: String, png: Data? = nil, pdf: Data? = nil, picture: String = "TRIF screenshot.png", as file: String? = nil) async -> String {
+        await fill(cur, text, png: png, pdf: pdf, picture: picture, as: file)
+    }
+    @discardableResult
+    private func fill(_ v: ChatView, _ text: String, png: Data? = nil, pdf: Data? = nil, picture: String = "TRIF screenshot.png", as file: String? = nil) async -> String {
         var said = "failed"
         do {
-            let r = try await webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null, pdf || null, picture) : 'not loaded';",
-                                                          arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "pdf": pdf?.base64EncodedString() ?? "", "name": file ?? "", "picture": picture], in: nil, contentWorld: ClaudePane.chatWorld)
+            let r = try await v.webView.callAsyncJavaScript("return await globalThis.__trifChat ? globalThis.__trifChat.fill(text, png, name || null, pdf || null, picture) : 'not loaded';",
+                                                            arguments: ["text": text, "png": png?.base64EncodedString() ?? "", "pdf": pdf?.base64EncodedString() ?? "", "name": file ?? "", "picture": picture], in: nil, contentWorld: ClaudePane.chatWorld)
             said = r as? String ?? "failed (\(String(describing: r)))"
         } catch {
             said = "failed: \((error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription)"
         }
-        // (filling focuses the message box; if the person has gone back to the tab meanwhile, no keyboard over it)
-        if !shown { blur() }
-        report.log("claude", "\(service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : ", a picture")\(pdf == nil ? "" : ", a \(pdf!.count / 1000) kB PDF")): \(said)")
+        // (filling focuses the message box; if the person has gone back to the tab, or another chat, no keyboard over it)
+        if !(shown && cur === v) { blur(v) }
+        report.log("claude", "\(v.service.rawValue): filled the message box (\(text.count) characters\(png == nil ? "" : ", a picture")\(pdf == nil ? "" : ", a \(pdf!.count / 1000) kB PDF")): \(said)")
         return said
     }
 
@@ -753,24 +883,21 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
     }
 
-    /// Switches the pane to the other chat (remembered), and loads it.
+    /// Switches to the other chat service (remembered): the shown tab's site's chat on it, loaded.
     func use(_ s: ChatService) {
         guard s != service else { return }
         service = s
         UserDefaults.standard.set(s.rawValue, forKey: "chatService")
         report.log("claude", "switched to \(s.rawValue)")
-        started = true
-        activity = .idle
-        site = tabSite
-        guard let url = resumeURL else { return }
-        go(url)
-        if shown, let ready = prepare() { queue { [weak self] in await self?.fillContext(ready) } }
+        showFor(tabSite)
+        let v = cur!
+        if shown, v.activity == .idle, let ready = prepare(v) { queue(v) { [weak self] in await self?.fillContext(v, ready) } }
     }
 
-    /// Where the pane went, without what the address carries after ? (sign-in steps put secrets there).
-    private func note(_ what: String, _ url: URL?) {
+    /// Where a chat went, without what the address carries after ? (sign-in steps put secrets there).
+    private func note(_ what: String, _ url: URL?, _ v: ChatView? = nil) {
         guard let url = url else { return }
-        report.log("claude", "\(service.rawValue), \(what): \(url.scheme ?? "")://\(url.host ?? "")\(url.path)")
+        report.log("claude", "\((v?.service ?? service).rawValue), \(what): \(url.scheme ?? "")://\(url.host ?? "")\(url.path)")
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
@@ -781,11 +908,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
         let scheme = url.scheme ?? ""
         if !["http", "https", "about", "blob", "data"].contains(scheme) {
-            note("an address for another app, not followed", url)
+            note("an address for another app, not followed", url, view(of: webView))
             return .cancel
         }
         if ModDownloads.wanted(navigationAction) { return .download }
-        if navigationAction.targetFrame?.isMainFrame ?? false { note("going to", url) }
+        if navigationAction.targetFrame?.isMainFrame ?? false { note("going to", url, view(of: webView)) }
         return .allow
     }
 
@@ -800,23 +927,21 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download); if webView === popup { popup = nil } }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download); if webView === popup { popup = nil } }
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { if webView === self.webView { loading = true } }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { view(of: webView)?.loading = true }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        guard webView === self.webView else { return }
-        navigating = false
-        projectPage = service.isProjectPage(webView.url) && webView.url?.absoluteString != service.project?.absoluteString
+        guard let v = view(of: webView) else { return }
+        v.navigating = false
+        v.projectPage = v.service.isProjectPage(webView.url) && webView.url?.absoluteString != v.service.project?.absoluteString
     }
-    /// The page went into a new chat in TRIF's project without the guide (the project has it).
-    private var projectFill = false
-    /// The chat shows a project's page that isn't TRIF's project yet (the top bar offers to use it).
-    @Published var projectPage = false
     /// ⋯'s Keep TRIF chats in a project: the chat, at the service's projects (TRIF's instructions on the clipboard).
     func openProjects() {
         UIPasteboard.general.string = ClaudePane.projectInstructions
-        start()
+        showFor(tabSite)
+        let v = cur!
+        v.started = true
         shown = true
-        if let u = URL(string: service.projectsPage) { go(u) }
-        report.log("claude", "\(service.rawValue): to its projects, TRIF's instructions copied")
+        if let u = URL(string: v.service.projectsPage) { go(v, u) }
+        report.log("claude", "\(v.service.rawValue): to its projects, TRIF's instructions copied")
     }
     /// What goes in a project's instructions: how TRIF mods are written, and how to answer (agent-facing words).
     static var projectInstructions: String {
@@ -831,33 +956,36 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
     /// The project shown, used for TRIF's chats from now on.
     func useShownProject(hasGuide: Bool) {
-        guard let u = webView.url, service.isProjectPage(u) else { return }
+        let v = cur!
+        guard let u = v.webView.url, v.service.isProjectPage(u) else { return }
         var c = URLComponents(url: u, resolvingAgainstBaseURL: false)
         c?.query = nil; c?.fragment = nil
-        service.useProject(c?.url, hasGuide: hasGuide)
-        projectPage = false
-        report.log("claude", "\(service.rawValue): TRIF's chats start in a project now\(hasGuide ? ", which has TRIF's instructions" : "")")
+        v.service.useProject(c?.url, hasGuide: hasGuide)
+        v.projectPage = false
+        report.log("claude", "\(v.service.rawValue): TRIF's chats start in a project now\(hasGuide ? ", which has TRIF's instructions" : "")")
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if webView === self.webView { loading = false }
-        note(webView === self.webView ? "loaded" : "loaded in a window it opened", webView.url)
+        let v = view(of: webView)
+        v?.loading = false
+        note(v != nil ? "loaded" : "loaded in a window it opened", webView.url, v)
+        guard let v else { return }
         // (the chat's page loaded again while a reply was being written, its process ended say: watched again)
-        if webView === self.webView, activity == .working { Task { _ = await chatJS("resume()") } }
+        if v.activity == .working { Task { _ = await chatJS(v, "resume()") } }
         // (reloaded while the tab's data was going in: in again)
-        if webView === self.webView, let p = refill {
-            refill = nil
-            queue { [weak self] in await self?.fillContext(p) }
+        if let p = v.refill {
+            v.refill = nil
+            queue(v) { [weak self] in await self?.fillContext(v, p) }
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if webView === self.webView { loading = webView.isLoading }
+        view(of: webView)?.loading = webView.isLoading
         if !Browser.stoppedNotFailed(error) { report.log("claude", "failed: \(error.localizedDescription)") }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if webView === self.webView { loading = webView.isLoading }
+        view(of: webView)?.loading = webView.isLoading
         if !Browser.stoppedNotFailed(error) { report.log("claude", "failed to load: \(error.localizedDescription)") }
     }
 
@@ -868,7 +996,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             browser?.offer(link)
             return nil
         }
-        note("opened a window for", navigationAction.request.url)
+        note("opened a window for", navigationAction.request.url, view(of: webView))
         let child = WKWebView(frame: .zero, configuration: configuration)
         child.navigationDelegate = self
         child.uiDelegate = self
@@ -877,9 +1005,9 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         return child
     }
 
-    /// The chat's page process ended (memory): loaded again, and noted in the diagnostics log.
+    /// A chat's page process ended (memory): loaded again, and noted in the diagnostics log.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        Diagnostics.shared.log("ended", "WebKit ended the chat pane's page process at \(Diagnostics.place(webView.url)); loading it again.")
+        Diagnostics.shared.log("ended", "WebKit ended a chat page's process at \(Diagnostics.place(webView.url)) (\(views.count) chat pages); loading it again.")
         if webView.url != nil { webView.reload() }
     }
 
@@ -905,6 +1033,23 @@ struct ChatScreen: View {
                     .opacity(pane.canGoBack ? 1 : 0)
                     .accessibilityLabel("Back")
                     .accessibilityHidden(!pane.canGoBack)
+                }
+                // (the chats in progress, up to three (Tim, 11-16): each one's site and a short title, the one writing a
+                // reply marked; one is shown, the others keep running behind it)
+                if !pane.more, pane.openViews.count > 1 {
+                    Menu {
+                        ForEach(pane.openViews) { v in
+                            Button { pane.show(v) } label: {
+                                Label(v.label, systemImage: v.activity == .working ? "ellipsis.bubble" : v.activity == .replied ? "bubble.left.fill" : v === pane.cur ? "checkmark" : "bubble.left")
+                                if v.activity == .working { Text("Writing a reply") } else if v.activity == .replied { Text("Replied") }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "square.stack").overlay(alignment: .topTrailing) {
+                            if pane.openViews.contains(where: { $0.activity == .working && $0 !== pane.cur }) { Circle().fill(Color.trifGreen).frame(width: 7, height: 7).offset(x: 3, y: -2) }
+                        }
+                    }
+                    .accessibilityLabel("Chats, \(pane.openViews.count) open")
                 }
                 Spacer(minLength: 4)
                 // (Claude · ChatGPT · More: the third, the side panel's own chat, on an API key or this iPhone)
@@ -944,7 +1089,16 @@ struct ChatScreen: View {
             if pane.more {
                 WebViewHost(webView: pane.panel.webView)
             } else {
-            WebViewHost(webView: pane.webView)
+            // (every chat page stays in the view tree, so a reply goes on being written and watched; the shown one on top)
+            ZStack {
+                ForEach(pane.views) { v in
+                    WebViewHost(webView: v.webView)
+                        .opacity(v === pane.cur ? 1 : 0)
+                        .allowsHitTesting(v === pane.cur)
+                        .accessibilityHidden(v !== pane.cur)
+                        .zIndex(v === pane.cur ? 1 : 0)
+                }
+            }
                 .overlay(alignment: .top) {
                     if pane.adding {
                         HStack(spacing: 6) {

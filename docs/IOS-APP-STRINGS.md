@@ -283,6 +283,14 @@ and isn't listed. Only what's new or reads differently on the phone:
 | On this iPhone's reply (the stand-in, until a model runs on the phone) | — | This is a stand-in: no model runs on this iPhone yet. When one does, it answers here, with the page in hand. / Meanwhile, here's a small style mod for this site, to try Add this mod?: it underlines the links. (the mod: Underlined links · Underlines every link (from the stand-in on this iPhone)) |
 | Not shown on the phone (panel-phone.css) | the robot's power switch, the mods list, the agent level menu, Settings' instructions, updates, Tim's mods, sites, sensitive sites, Report a problem · Setup and status | — (the Mods tab has the mods; the app's tools are fixed) |
 
+## More than one chat at a time (added 11-16, Tim approved)
+
+| Where | Old | New |
+|---|---|---|
+| The chat's top bar, with two or three chats open | — | a button (two stacked squares) with a small green dot while another chat is writing a reply; accessibility: Chats, {n} open |
+| Its list, one line per chat | — | {site} · {the conversation's title} (No site for a new tab), with Writing a reply or Replied under the one that is; a check on the one shown |
+| The robot button | opened the one chat | opens the shown tab's own chat (a new one if it has none), never another tab's working one; its dots show while any chat writes |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

@@ -1,0 +1,197 @@
+#!/usr/bin/env node
+'use strict';
+// What the coding agents themselves do on Windows, tried for real on a windows-latest runner (docs/WINDOWS.md
+// "The sandbox"). Exploration: it prints what it finds and never fails the job.
+//
+//   Claude Code   started as TRIF starts it, against a stand-in for Anthropic's API (no account, no paid
+//                 call) that asks for one Bash command: how the command is run (which shell), and what a
+//                 CLAUDE_CODE_SHELL_PREFIX program is handed, since that's where a fence would go.
+//   Codex         `codex sandbox` (no model): its own Windows sandbox, each kind it has, with TRIF's
+//                 permission profile, running the same probe as the AppContainer prototype.
+//
+// Windows only, GitHub Actions only (or --yes-this-computer).
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const { spawn, spawnSync } = require('child_process');
+
+if (process.platform !== 'win32') { console.error('windows-fence agents: Windows only'); process.exit(2); }
+if (process.env.GITHUB_ACTIONS !== 'true' && !process.argv.includes('--yes-this-computer')) { console.error('windows-fence agents: runs on GitHub Actions; elsewhere pass --yes-this-computer.'); process.exit(2); }
+
+const REPO = path.resolve(__dirname, '..', '..');
+const SYSROOT = process.env.SystemRoot || 'C:\\Windows';
+const sys = (n) => path.join(SYSROOT, 'System32', n);
+const rand = (n = 6) => crypto.randomBytes(n).toString('hex');
+const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
+const show = (label, text, max = 3000) => console.log(`--- ${label}\n${String(text || '').trim().slice(0, max)}\n`);
+const { findExecutable } = require(path.join(REPO, 'helper', 'lib', 'agents', 'util'));
+
+function which(name) {
+  const dirs = String(process.env.PATH || '').split(';').filter(Boolean);
+  return findExecutable(name, dirs, { platform: 'win32' });
+}
+// A .cmd shim (npm's) can't be spawned by itself: through cmd.exe, as the helper would have to.
+function runTool(file, args, opts = {}) {
+  const viaCmd = /\.(cmd|bat)$/i.test(file);
+  const q = (a) => (/[\s"&|<>^()%!]/.test(a) ? `"${String(a).replace(/"/g, '""')}"` : a);
+  const r = viaCmd
+    ? spawnSync(process.env.ComSpec || sys('cmd.exe'), ['/d', '/s', '/c', `"${[file, ...args].map(q).join(' ')}"`], { encoding: 'utf8', timeout: 180000, windowsVerbatimArguments: true, ...opts })
+    : spawnSync(file, args, { encoding: 'utf8', timeout: 180000, ...opts });
+  return { status: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), error: r.error ? r.error.message : null };
+}
+
+async function claudeCode(base) {
+  console.log('\n================ Claude Code');
+  const bin = which('claude');
+  if (!bin) { console.log('claude not found on PATH'); return; }
+  console.log(`claude: ${bin}`);
+  show('claude --version', runTool(bin, ['--version']).stdout);
+  const { startFakeAnthropic } = require(path.join(REPO, 'tests', 'fake-anthropic-server'));
+  const work = path.join(base, 'claude-ws');
+  put(path.join(work, 'sites', 'x.com', 'a.js'), '// a');
+  put(path.join(work, 'AGENTS.md'), '# guide');
+  const log = path.join(base, 'prefix.log');
+  // The prefix program: a sh script (Claude Code's Bash tool is Git Bash here) that writes down what it was
+  // handed, then runs it.
+  const prefix = path.join(base, 'prefix.sh');
+  fs.writeFileSync(prefix, `#!/bin/sh\n{ printf 'ARGC %s\\n' "$#"; i=0; for a in "$@"; do i=$((i+1)); printf 'ARG%s <<%s>>\\n' "$i" "$a"; done; printf 'CWD %s\\n' "$(pwd)"; printf 'SHELL0 %s\\n' "$0"; } >> '${log.replace(/\\/g, '/')}'\neval "$@"\n`);
+  for (const [label, extraEnv, script] of [
+    ['no prefix: which shell runs a command', {}, [{ bash: 'echo "shell: $0 $BASH_VERSION"; uname -s; pwd; echo "comspec=$COMSPEC"' }, { say: 'done' }]],
+    ['with CLAUDE_CODE_SHELL_PREFIX', { CLAUDE_CODE_SHELL_PREFIX: prefix.replace(/\\/g, '/') }, [{ bash: 'echo prefixed-ok && pwd' }, { bash: 'cd sites && ls' }, { say: 'done' }]],
+  ]) {
+    const api = await startFakeAnthropic({ script });
+    const cfg = path.join(base, `claude-config-${rand()}`);
+    fs.mkdirSync(cfg, { recursive: true });
+    const env = { ...process.env, ANTHROPIC_BASE_URL: api.url, ANTHROPIC_API_KEY: 'trif-stand-in-key', CLAUDE_CONFIG_DIR: cfg, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...extraEnv };
+    for (const k of Object.keys(env)) if (/^(CLAUDECODE|CLAUDE_CODE_ENTRYPOINT)$/.test(k)) delete env[k];
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
+      '--tools', 'Read,Edit,Write,Glob,Grep,Bash', '--disable-slash-commands', '--allowedTools', 'Bash(echo:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(uname:*)', 'Bash(pwd:*)', '--model', 'claude-haiku-stand-in'];
+    const r = await new Promise((resolve) => {
+      const viaCmd = /\.(cmd|bat)$/i.test(bin);
+      const child = viaCmd ? spawn(process.env.ComSpec || sys('cmd.exe'), ['/d', '/s', '/c', `""${bin}" ${args.map((a) => (/[\s()*:,]/.test(a) ? `"${a}"` : a)).join(' ')}"`], { cwd: work, env, windowsVerbatimArguments: true })
+        : spawn(bin, args, { cwd: work, env });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+      const t = setTimeout(() => { try { spawnSync(sys('taskkill.exe'), ['/PID', String(child.pid), '/T', '/F']); } catch { /* gone */ } }, 120000);
+      child.on('close', (status) => { clearTimeout(t); resolve({ status, stdout, stderr }); });
+      child.on('error', (e) => { clearTimeout(t); resolve({ status: null, stdout, stderr: stderr + e.message }); });
+      child.stdin.end('run the command');
+    });
+    console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
+    const init = r.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const sysInit = init.find((m) => m.type === 'system' && m.subtype === 'init');
+    if (sysInit) console.log(`tools offered: ${(sysInit.tools || []).join(', ')}\ncwd: ${sysInit.cwd}; permissionMode: ${sysInit.permissionMode}; version: ${sysInit.claude_code_version || ''}`);
+    show('tool results the model got', api.toolResults().join('\n----\n'));
+    const result = init.find((m) => m.type === 'result');
+    if (result) show('result', JSON.stringify({ subtype: result.subtype, is_error: result.is_error, result: String(result.result || '').slice(0, 300), denials: result.permission_denials }));
+    else show('stdout (no result line)', r.stdout.slice(-1500));
+    if (r.stderr.trim()) show('stderr', r.stderr.slice(-1500));
+    await api.close();
+  }
+  show('what the prefix program was handed (prefix.log)', fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '(nothing: the prefix was never run)', 6000);
+}
+
+function codexProfile(layout) {
+  const { permissionsToml } = (() => {
+    // (codex.js keeps permissionsToml to itself: the same table, from its command())
+    const codex = require(path.join(REPO, 'helper', 'lib', 'agents', 'codex'));
+    const c = codex.command({ bin: 'codex', prompt: 'x', readable: layout.readable, writable: layout.writable, readOnly: layout.readOnly, denied: layout.denied, tmp: layout.tmp });
+    const i = c.args.findIndex((a) => a.startsWith('permissions='));
+    return { permissionsToml: c.args[i] };
+  })();
+  return permissionsToml;
+}
+
+async function codex(base) {
+  console.log('\n================ Codex');
+  const bin = which('codex');
+  if (!bin) { console.log('codex not found on PATH'); return; }
+  console.log(`codex: ${bin}`);
+  show('codex --version', runTool(bin, ['--version']).stdout);
+  show('codex sandbox --help', runTool(bin, ['sandbox', '--help']).stdout + runTool(bin, ['sandbox', '--help']).stderr);
+  // The same layout as run.js, smaller: a working folder, a mailbox, a secret elsewhere, the private folder.
+  const CANARY = `CANARY-${rand(8)}`;
+  const home = path.join(base, 'cx', 'home');
+  put(path.join(home, 'secret.txt'), `${CANARY} home`);
+  const priv = path.join(base, 'cx', 'private');
+  put(path.join(priv, 'config.json'), `${CANARY} private`);
+  const stage = path.join(base, 'cx', 'boxes', 'r1.ws');
+  put(path.join(stage, 'AGENTS.md'), '# guide');
+  put(path.join(stage, 'sites', 'x.com', 'own.js'), '// own');
+  put(path.join(stage, 'sites', 'y.com', 'other.js'), '// other');
+  const box = path.join(base, 'cx', 'boxes', 'r1');
+  fs.mkdirSync(path.join(box, 'tmp'), { recursive: true });
+  const app = path.join(base, 'cx', 'app');
+  fs.cpSync(__dirname, path.join(app, 'fence-test'), { recursive: true });
+  const probe = path.join(app, 'fence-test', 'probe.js');
+  const profileCanary = path.join(os.homedir(), `trif-fence-canary-${rand()}.txt`);
+  fs.writeFileSync(profileCanary, `${CANARY} profile`);
+  const net = require('net');
+  let hits = 0;
+  const server = net.createServer((s) => { hits++; s.destroy(); });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  const ops = [
+    { id: 'read its working folder', expect: 'allow', op: 'read', path: path.join(stage, 'AGENTS.md') },
+    { id: 'write a mod for its site', expect: 'allow', op: 'write', path: path.join(stage, 'sites', 'x.com', 'new.js') },
+    { id: 'write its mailbox', expect: 'allow', op: 'write', path: path.join(box, 'req.json') },
+    { id: 'read a file elsewhere in the home folder (listed as denied)', expect: 'deny', op: 'read', path: path.join(home, 'secret.txt') },
+    { id: 'read TRIF\'s private folder (listed as denied)', expect: 'deny', op: 'read', path: path.join(priv, 'config.json') },
+    { id: 'read a file in the real profile folder (listed as denied)', expect: 'deny', op: 'read', path: profileCanary },
+    { id: 'list the real profile folder (not listed)', expect: 'info', op: 'list', path: os.homedir() },
+    { id: 'change another site\'s mod (read-only)', expect: 'deny', op: 'append', path: path.join(stage, 'sites', 'y.com', 'other.js') },
+    { id: 'change the guide', expect: 'deny', op: 'append', path: path.join(stage, 'AGENTS.md') },
+    { id: 'write elsewhere in the home folder', expect: 'deny', op: 'write', path: path.join(home, 'planted.txt') },
+    { id: 'write the real profile folder', expect: 'deny', op: 'write', path: path.join(os.homedir(), `trif-fence-planted-${rand()}.txt`) },
+    { id: 'connect to the internet (1.1.1.1:443)', expect: 'deny', op: 'tcp', host: '1.1.1.1', port: 443 },
+    { id: 'look up a name (example.com)', expect: 'deny', op: 'dns', host: 'example.com' },
+    { id: 'connect to a server on this computer (127.0.0.1)', expect: 'deny', op: 'tcp', host: '127.0.0.1', port },
+    { id: 'who it is (whoami /groups)', expect: 'info', op: 'whoami' },
+  ];
+  const cfgFile = path.join(box, 'probe.json');
+  fs.writeFileSync(cfgFile, JSON.stringify({ ops }));
+  const nodeDir = path.dirname(process.execPath);
+  const permissions = codexProfile({ readable: [stage, app, nodeDir], writable: [path.join(stage, 'sites'), box], readOnly: [path.join(stage, 'sites', 'y.com')], denied: [home, priv, profileCanary], tmp: path.join(box, 'tmp') });
+  show('TRIF\'s permission profile for this layout', permissions, 1500);
+  const codexHome = path.join(base, 'codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
+  const env = { ...process.env, CODEX_HOME: codexHome };
+  for (const kind of ['unelevated', 'elevated', 'mxc']) {
+    console.log(`\n>>> windows.sandbox = "${kind}"`);
+    if (kind === 'elevated') {
+      const s = runTool(bin, ['sandbox', 'setup', '--elevated'], { env, timeout: 240000 });
+      show('codex sandbox setup --elevated', `exit ${s.status}\n${s.stdout}\n${s.stderr}`, 2000);
+    }
+    const args = ['-c', `windows.sandbox="${kind}"`, '-c', 'default_permissions="trif-run"', '-c', permissions, 'sandbox', '-P', 'trif-run', '-C', stage, '--', process.execPath, probe, cfgFile];
+    const r = runTool(bin, args, { env, cwd: stage });
+    const m = /FENCE-PROBE (\{.*\})/.exec(r.stdout);
+    if (!m) { show(`the probe didn't finish (exit ${r.status})`, `${r.stdout.slice(-1500)}\n${r.stderr.slice(-2500)}\n${r.error || ''}`, 4000); continue; }
+    const got = JSON.parse(m[1]);
+    for (const o of ops) {
+      const res = got[o.id] || { ok: false, why: 'not run' };
+      const through = !!res.ok;
+      const verdict = o.expect === 'info' ? 'info' : (o.expect === 'allow') === through ? 'PASS' : 'FAIL';
+      const detail = through ? (res.got !== undefined ? String(res.got).replace(/\s+/g, ' ').slice(0, o.op === 'whoami' ? 1500 : 100) : '') : String(res.why || '').slice(0, 100);
+      console.log(`  ${verdict.padEnd(4)} ${through ? 'got through' : 'refused    '}  ${o.id}${detail ? `  — ${detail}` : ''}`);
+    }
+    console.log(`  (outside) the server on this computer saw ${hits} connection(s)`);
+    hits = 0;
+    for (const f of [path.join(stage, 'sites', 'x.com', 'new.js'), path.join(box, 'req.json')]) fs.rmSync(f, { force: true });
+    if (r.stderr.trim()) show('stderr', r.stderr, 1200);
+  }
+  server.close();
+  fs.rmSync(profileCanary, { force: true });
+}
+
+(async () => {
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-agents-')));
+  console.log(`scratch ${base}`);
+  console.log(spawnSync(sys('cmd.exe'), ['/d', '/c', 'ver'], { encoding: 'utf8' }).stdout.trim());
+  try { await claudeCode(base); } catch (e) { console.log(`Claude Code: ${e.stack || e.message}`); }
+  try { await codex(base); } catch (e) { console.log(`Codex: ${e.stack || e.message}`); }
+  process.exit(0);
+})();

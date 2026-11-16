@@ -53,7 +53,7 @@ function build(base) {
   return exe;
 }
 
-function fence(exe, spec, { timeout = 120000 } = {}) {
+function fence(exe, spec, { timeout = 420000 } = {}) {
   const file = path.join(os.tmpdir(), `trif-fence-spec-${rand()}.json`);
   fs.writeFileSync(file, JSON.stringify(spec));
   const t = Date.now();
@@ -206,7 +206,8 @@ function fence(exe, spec, { timeout = 120000 } = {}) {
   const leftPid = path.join(box, 'left.pid');
   ops.push({ id: 'leave a process behind', g: 'others', expect: 'info', op: 'exec', file: node, args: ['-e', `const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' }); c.unref(); require('fs').writeFileSync(${JSON.stringify(leftPid)}, String(c.pid));`] });
   const cfgFile = path.join(box, 'probe.json');
-  fs.writeFileSync(cfgFile, JSON.stringify({ ops }));
+  const outFile = path.join(box, 'probe-out.json');
+  fs.writeFileSync(cfgFile, JSON.stringify({ ops, out: outFile }));
 
   const envInside = {
     SystemRoot: SYSROOT, SystemDrive: process.env.SystemDrive || 'C:', windir: SYSROOT, ComSpec: sys('cmd.exe'),
@@ -226,7 +227,8 @@ function fence(exe, spec, { timeout = 120000 } = {}) {
   };
   const specFor = (mode, { stat = false, flags = [], command = null, name = `trif.run.${rand()}`, revoke = true } = {}) => ({
     // (a capability name per mode and for the "on the way" entries, which stay: so each try starts clean)
-    name, capability: `trifRunCode.${mode}${stat ? '.stat' : ''}`, lpac: mode === 'lpac', revoke, cwd: stage, env: envInside,
+    name, capability: `trifRunCode.${mode}${stat ? '.stat' : ''}`, lpac: mode !== 'appcontainer', revoke, cwd: stage, env: envInside,
+    ...(mode === 'lpac+registryRead' ? { capabilities: ['registryRead'] } : {}),
     grant: [
       { path: app, rights: 'r', to: 'capability' },
       { path: nodeDir, rights: 'r', to: 'capability' },
@@ -241,14 +243,14 @@ function fence(exe, spec, { timeout = 120000 } = {}) {
   });
 
   const results = {};
-  for (const mode of ['appcontainer', 'lpac']) {
-    console.log(`\n================ ${mode === 'lpac' ? 'less-privileged AppContainer (lpac)' : 'AppContainer'}`);
+  for (const mode of ['appcontainer', 'lpac', 'lpac+registryRead']) {
+    console.log(`\n================ ${mode === 'appcontainer' ? 'AppContainer' : mode === 'lpac' ? 'less-privileged AppContainer (lpac)' : 'lpac with Windows\' registryRead capability'}`);
+    fs.rmSync(outFile, { force: true });
     // How node has to be started for a script inside the profile folder to load.
     const hello = fence(exe, specFor(mode, { command: `"${node}" -p "'node-ok ' + process.version"` }));
     console.log(`node -p inside: ${hello.status === 0 ? hello.stdout.trim() : `FAILED status ${hello.status} ${hello.stderr.trim().slice(0, 300)}`} (${hello.ms} ms)`);
     let how = null;
-    for (const v of [{ label: 'as it is', flags: [], stat: false }, { label: 'with --preserve-symlinks --preserve-symlinks-main', flags: ['--preserve-symlinks', '--preserve-symlinks-main'], stat: false },
-      { label: 'with "read attributes" on the folders on the way', flags: [], stat: true }]) {
+    for (const v of [{ label: 'as it is', flags: [], stat: false }, { label: 'with --preserve-symlinks --preserve-symlinks-main', flags: ['--preserve-symlinks', '--preserve-symlinks-main'], stat: false }]) {
       const r = fence(exe, specFor(mode, { ...v, command: `"${node}" ${v.flags.join(' ')} "${path.join(app, 'fence-test', 'hello.js')}"` }));
       const ok = r.status === 0 && r.stdout.includes('script-ok');
       console.log(`a script in the profile folder, ${v.label}: ${ok ? 'runs' : `doesn't (${(r.stderr.trim().split(/\r?\n/).find((l) => /Error|EPERM|EACCES/.test(l)) || r.stderr.trim().slice(0, 200) || `exit ${r.status}`)})`} (${r.ms} ms)`);
@@ -259,8 +261,13 @@ function fence(exe, spec, { timeout = 120000 } = {}) {
     const name = `trif.run.${rand()}`;
     const r = fence(exe, specFor(mode, { ...how, name }));
     const m = /FENCE-PROBE (\{.*\})/.exec(r.stdout);
-    if (!m) { console.log(`FAIL  the probe didn't finish: status ${r.status}\n${r.stdout.slice(-1500)}\n${r.stderr.slice(-1500)}`); failed++; continue; }
-    const got = JSON.parse(m[1]);
+    let got = null;
+    if (m) got = JSON.parse(m[1]);
+    else {
+      console.log(`FAIL  the probe didn't finish: status ${r.status} ${r.error ? r.error.message : ''}\n${r.stdout.slice(-1500)}\n${r.stderr.slice(-1500)}`);
+      failed++;
+      try { got = JSON.parse(fs.readFileSync(outFile, 'utf8')); console.log('(what it got to before that:)'); } catch { continue; }
+    }
     results[mode] = got;
     console.log(`the probe ran in ${r.ms} ms\n`);
     let group = '';
@@ -271,7 +278,7 @@ function fence(exe, spec, { timeout = 120000 } = {}) {
       if (verdict === 'FAIL') failed++;
       if (o.g !== group) { group = o.g; console.log(`  [${group}]`); }
       const detail = through ? (res.got !== undefined ? String(res.got).replace(/\s+/g, ' ').slice(0, o.op === 'env' || o.op === 'whoami' ? 1800 : 110) : '') : String(res.why || '').replace(/\s+/g, ' ').slice(0, 110);
-      console.log(`  ${verdict.padEnd(4)} ${through ? 'got through' : 'refused    '}  ${o.id}${detail ? `  — ${detail}` : ''}`);
+      console.log(`  ${verdict.padEnd(4)} ${through ? 'got through' : 'refused    '}  ${o.id}${detail ? `  — ${detail}` : ''}${res.ms > 3000 ? `  (${res.ms} ms)` : ''}`);
       if (through && typeof res.got === 'string' && res.got.includes(CANARY) && o.expect === 'deny') console.log('        (the canary came back)');
     }
     // From outside: nothing it shouldn't have changed did, the servers saw nobody, nothing was left running.

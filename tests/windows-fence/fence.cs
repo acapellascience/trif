@@ -9,6 +9,7 @@
 //   name        the AppContainer profile's name, one per run ("trif.run.<id>"): its SID is the run's own
 //   capability  a made-up capability name; its SID is given to every run, for what all runs may read
 //               (TRIF's code, node)
+//   capabilities  more capability names, Windows' own (an lpac needs "registryRead" for node to start)
 //   lpac        true: a less-privileged AppContainer (no ALL APPLICATION PACKAGES: what Windows lets
 //               every packaged app read, most of HKCU included, is closed too)
 //   grant       [{path, rights: "r"|"rw"|"stat", to: "run"|"capability", inherit: true|false}]
@@ -181,6 +182,10 @@ static class Fence {
     SecurityIdentifier run = new SecurityIdentifier(sid);
     IntPtr capSid = capName != null ? CapabilitySid(capName) : IntPtr.Zero;
     SecurityIdentifier cap = capName != null ? new SecurityIdentifier(capSid) : null;
+    List<IntPtr> capSids = new List<IntPtr>();
+    if (capSid != IntPtr.Zero) capSids.Add(capSid);
+    object more;
+    if (spec.TryGetValue("capabilities", out more) && more != null) { foreach (object o in (IEnumerable)more) capSids.Add(CapabilitySid(Convert.ToString(o))); }
 
     List<object[]> mine = new List<object[]>(); // the run's own entries, to take out again
     foreach (Dictionary<string, object> g in List(spec, "grant")) {
@@ -201,12 +206,15 @@ static class Fence {
     IntPtr capsArray = IntPtr.Zero;
     SECURITY_CAPABILITIES sc = new SECURITY_CAPABILITIES();
     sc.AppContainerSid = sid;
-    if (capSid != IntPtr.Zero) {
-      capsArray = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
-      SID_AND_ATTRIBUTES sa = new SID_AND_ATTRIBUTES();
-      sa.Sid = capSid; sa.Attributes = SE_GROUP_ENABLED;
-      Marshal.StructureToPtr(sa, capsArray, false);
-      sc.Capabilities = capsArray; sc.CapabilityCount = 1;
+    if (capSids.Count > 0) {
+      int each = Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES));
+      capsArray = Marshal.AllocHGlobal(each * capSids.Count);
+      for (int i = 0; i < capSids.Count; i++) {
+        SID_AND_ATTRIBUTES sa = new SID_AND_ATTRIBUTES();
+        sa.Sid = capSids[i]; sa.Attributes = SE_GROUP_ENABLED;
+        Marshal.StructureToPtr(sa, IntPtr.Add(capsArray, each * i), false);
+      }
+      sc.Capabilities = capsArray; sc.CapabilityCount = (uint)capSids.Count;
     }
     IntPtr scPtr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SECURITY_CAPABILITIES)));
     Marshal.StructureToPtr(sc, scPtr, false);

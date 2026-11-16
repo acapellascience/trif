@@ -32,6 +32,8 @@ jobs:
         node: [18, 22]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # (shipped-history.json's test reads old versions)
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -62,7 +64,7 @@ jobs:
         run: |
           out=$(npx --yes @puppeteer/browsers install chrome@stable --path tests/e2e/.browsers | tail -1)
           echo "$out"
-          bin="${out#* }"
+          bin="$(cygpath -w "$PWD")\\${out#* }"
           test -f "$bin" || { echo "Chrome for Testing not found after installing it: $bin"; exit 1; }
           echo "TRIF_E2E_CHROME=$bin" >> "$GITHUB_ENV"
       - name: Browser check (Chrome loads the extension; the extension reaches the helper)
@@ -99,3 +101,20 @@ jobs:
           node-version: 22
       - name: The fence, and attempts to get out of it
         run: node tests/windows-fence/run.js
+
+  # Exploration, never failing: what Claude Code and Codex themselves do on Windows (which shell runs a
+  # command, what a CLAUDE_CODE_SHELL_PREFIX program is handed, Codex's own sandboxes with TRIF's profile).
+  # Claude Code talks to a stand-in for the API: no account, no paid call.
+  agents:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code and Codex
+        run: npm install -g @anthropic-ai/claude-code @openai/codex
+      - name: What the agents do here
+        run: node tests/windows-fence/agents.js

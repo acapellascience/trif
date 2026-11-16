@@ -25,7 +25,7 @@ function connect(target, ms = 4000) {
   });
 }
 function run(file, args, opts = {}) {
-  const r = spawnSync(file, args, { encoding: 'utf8', timeout: 30000, windowsHide: true, ...opts });
+  const r = spawnSync(file, args, { encoding: 'utf8', timeout: 15000, windowsHide: true, ...opts });
   return { status: r.status, error: r.error ? short(r.error) : null, stdout: String(r.stdout || '').slice(0, 2000), stderr: String(r.stderr || '').slice(0, 600) };
 }
 
@@ -82,7 +82,11 @@ const OPS = {
 
 (async () => {
   for (const o of cfg.ops) {
+    const t = Date.now();
     try { out[o.id] = await OPS[o.op](o); } catch (e) { out[o.id] = { ok: false, why: short(e) }; }
+    out[o.id].ms = Date.now() - t;
+    // (as it goes, where the fence lets it write: what was tried is known even if a later attempt hangs)
+    if (cfg.out) { try { fs.writeFileSync(cfg.out, JSON.stringify(out)); } catch { /* not writable */ } }
   }
   process.stdout.write(`\nFENCE-PROBE ${JSON.stringify(out)}\n`);
 })();

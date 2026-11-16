@@ -318,6 +318,7 @@ struct ContentView: View {
             .accessibilityHidden(pane.shown)
             PullActionsView(pull: bars.pull, insets: bars.insets)
             TopBar(bars: bars, full: addressBar, compact: compactBar)
+                .modifier(PullShift(pull: bars.pull))
                 .accessibilityHidden(pane.shown)
             BottomBars(bars: bars) {
                 // (the notes over the page's foot, above the bars: they come and go without moving anything)
@@ -1287,8 +1288,9 @@ final class PullActions: ObservableObject {
     func cancel() { distance = 0; startX = nil; choice = .reload }
 }
 
-/// The three choices in the gap a pull opens at the top of the page: the chosen one in a soft circle that slides
-/// between them, its name under it; the reload arrow drawn round as the pull nears far enough.
+/// The three choices in the gap a pull opens above the address bar, where the bar was (Tim, 11-16: as Chrome's, the
+/// bar itself comes down with the finger: PullShift): the chosen one in a soft circle that slides between them, its
+/// name under it; the reload arrow drawn round as the pull nears far enough.
 struct PullActionsView: View {
     @ObservedObject var pull: PullActions
     @ObservedObject var insets: BarInsets
@@ -1301,13 +1303,12 @@ struct PullActionsView: View {
                 item(.reload, "arrow.clockwise", "Reload")
                 item(.close, "xmark", "Close Tab")
             }
-            .padding(.top, 10)
             .frame(maxWidth: .infinity)
-            .frame(height: max(pull.distance, 0), alignment: .top)
-            .background(Color(.systemBackground))
+            .frame(height: max(pull.distance, 0), alignment: .bottom)
+            .padding(.bottom, 0)
+            .background(.bar)
             .clipped()
             .opacity(Double(min(1, pull.distance / 40)))
-            .padding(.top, BarState.compactHeight + insets.top)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
@@ -1333,6 +1334,17 @@ struct PullActionsView: View {
             Text(label).font(.caption.weight(.semibold)).foregroundStyle(Color.trifGreen).opacity(chosen && pull.armed ? 1 : 0)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// The address bar moved down with a pull at the page's top, by as much as the page has come down: the choices show
+/// in the room it leaves above it; let go, and it springs back up.
+struct PullShift: ViewModifier {
+    @ObservedObject var pull: PullActions
+    func body(content: Content) -> some View {
+        content
+            .offset(y: max(pull.distance, 0))
+            .animation(pull.distance == 0 ? .spring(response: 0.3, dampingFraction: 0.85) : nil, value: pull.distance)
     }
 }
 

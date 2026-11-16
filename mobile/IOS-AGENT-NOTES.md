@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (214 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (217 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -82,7 +82,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Safety.swift: safe mode, AppDelegate (shortcut, notifications, background downloads' events). Diagnostics.swift:
   diagnostics log, hang watchdog (`Diagnostics.hangs`), cookie keeper. Report.swift: report.json. Pages.swift: test pages
   scheme. Checks.swift, OnDevice.swift: the probe's old checks.
-- make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale). make-project.rb: regenerates the project
+- make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
+  `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).
 
 ## Tim's decisions
@@ -104,6 +105,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   OpenAI API, OpenRouter; keys in the Keychain, this device only.
 - On this iPhone: MiniCPM5-2B suggested on 4 GB, Qwen3.5-2B offered; Qwen3.5-4B on 6 GB+, and on 4 GB behind "Show bigger
   models"; style JSON by default, boxed only when picked; downloads only when asked, with a visible bar everywhere.
+- App icon face (Tim 11-16, option A): Apple's continuous-corner curve scaled down, `continuous(100.39, 100.39, 823.22,
+  214.04)`, not the mask moved in (its inner corners were too sharp). Rim = square minus face (even-odd, rim gradient),
+  face on top (#18181a light, #000 tinted, none in dark); rim 100.4 at the sides, 120.5 on the diagonal. iOS's mask
+  makes the outer edge. The approved mockups' tinted greys (brightened) are NOT used: tinted stays the grayscale.
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
@@ -136,4 +141,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - ChatGPT logged out: picture-only file inputs (a text file → "not a supported image"), `/uc/` conversations,
   li[data-message-role] messages, pauses mid-reply with no stop button.
 - Swift type-checker timeouts in long SwiftUI modifier chains: split them (columnBase / columnLinks).
+- Simulator Home Screen icon style: long-press empty space, then Edit at (344, 22) pt (y 15 misses: status strip),
+  Customize; Default / Dark / Clear / Tinted, and Tinted's Light / Dark row at y 618. Screenshots lag ~2 s behind taps.
+  The SE is left in Tinted · Light (as found). A reinstall refreshes the icon (no cache problem seen).
+- The icon's light PNG drops alpha: ~3k seam pixels between rim and face render partly transparent in Chrome; their
+  colour is the blend, so dropping alpha is right (don't composite onto black).
 - zsh doesn't split `$FILES`: use an array for commit-by-path lists.

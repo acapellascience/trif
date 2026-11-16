@@ -43,10 +43,11 @@ const COLOURS = {
   // Dark: the same robot with the face left transparent, so iOS's own dark gradient shows through (Apple:
   // "Provide your dark app icon with a transparent background"). Our face is already that dark.
   dark: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: 'none', corners: false },
-  // Tinted: fully opaque grayscale; iOS maps luminance to the tint over its own dark tile, so black is "no
-  // paint" (the face stays the tile's dark), white is full tint. The greys keep the colours' own falloff
-  // (relative luminance of the two rim stops 0.57 -> 0.25, the eye stops 0.77 -> 0.42), brightened to white.
-  tinted: { rim: ['#ffffff', '#b4b4b4'], eye: ['#ffffff', '#c8c8c8'], glow: [1, 1, 1], face: '#000000', corners: true },
+  // Tinted: fully opaque grayscale; iOS maps luminance to the tint over its own dark tile, so black is "no paint"
+  // (the face stays the tile's dark), white is full tint. Tim, 11-16: the light colour art itself, grayscaled
+  // (Rec. 709 luminance of the rendered pixels, so it stays tied to the colours), with the face black; a version
+  // brightened towards white was much too white on his phone.
+  tinted: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6], face: '#000000', corners: true },
 };
 
 const f = (v) => +v.toFixed(2);
@@ -186,13 +187,13 @@ function writePng({ width, height, channels, pixels }) {
 }
 
 /** RGB(A) -> RGB (alpha dropped: the light icon is opaque), RGBA (opaque where there was no alpha), or L
- * (luminance, ITU-R 601, as the tinted one is gray). */
+ * (Rec. 709 luminance: the tinted icon, the colour art grayscaled). */
 function convert(img, to) {
   const n = img.width * img.height, c = img.channels, out = Buffer.alloc(n * to);
   for (let i = 0; i < n; i++) {
     const [r, g, b] = [img.pixels[i * c], img.pixels[i * c + 1], img.pixels[i * c + 2]];
     const a = c === 4 ? img.pixels[i * c + 3] : 255;
-    if (to === 4) { out[i * 4] = r; out[i * 4 + 1] = g; out[i * 4 + 2] = b; out[i * 4 + 3] = a; } else if (to === 3) { out[i * 3] = r; out[i * 3 + 1] = g; out[i * 3 + 2] = b; } else out[i] = Math.round((r * 299 + g * 587 + b * 114) / 1000);
+    if (to === 4) { out[i * 4] = r; out[i * 4 + 1] = g; out[i * 4 + 2] = b; out[i * 4 + 3] = a; } else if (to === 3) { out[i * 3] = r; out[i * 3 + 1] = g; out[i * 3 + 2] = b; } else out[i] = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b); // (Rec. 709 luminance)
   }
   return { ...img, channels: to, pixels: out };
 }

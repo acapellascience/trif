@@ -48,7 +48,7 @@ iPhone side (needs ios-poc free):
 - Two rules the store settles, now in PHONE-LINK.md section 3: the helper listens only while on AND (a phone is
   paired OR a window is open); a key gone from the keyring means a new key on the next turn-on and the old phones
   dropped.
-- CI: see below.
+- CI green for 7dcd239 on the second attempt (two unrelated browser tests flaked on the first): see CI below.
 
 ## Earlier rounds
 
@@ -58,7 +58,10 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
-- Round 2: CI_LINE_ROUND_2
+- Round 2, 7dcd239: success on the second attempt, https://github.com/acapellascience/trif/actions/runs/43961575804
+  (attempt 1 failed on two browser tests this branch's work doesn't touch: the clickjacking guard's timing check,
+  "a press: 5.58 ms on average", and the phone view's "desktop mods never run in the phone view", `window.__ask is
+  not a function`; every phone-link test passed in both attempts; `gh run rerun <id> --failed` cleared it)
 - Round 1, c8898a4: success, https://github.com/acapellascience/trif/actions/runs/43959884729
 
 ## Next step
@@ -113,6 +116,8 @@ back and a closed socket; a paired phone gets `hello`/`pong`; removal closes the
   in the adapter's `agent.start` beside the API engines.
 - macOS's firewall, when the user has it on, may ask "accept incoming connections?" for `node` the first time the
   listener binds. Step 4 should bind only when the link is on, and step 9's strings may need a line about it.
+- CI takes about 9 minutes. If it fails on browser tests only (not `phone-link-*`), look at the names with
+  `gh run view <id> --log-failed | grep "not ok"` and rerun with `gh run rerun <id> --failed` before digging.
 - Commits end with the Co-Authored-By line the loop prompt gives (Tim's rule), by path, never `-a`.
 
 ## For Tim (decisions)

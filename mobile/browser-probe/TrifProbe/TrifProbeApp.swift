@@ -967,8 +967,16 @@ final class BarState: NSObject, ObservableObject {
 
     /// The bars full again (a load starting, the address being typed, a tap on the small line).
     func expand() { settle(to: 0) }
-    /// While the address is being typed, or the chat is open, the bars stay full.
-    func hold(_ h: Bool) { held = h; if h { expand() } }
+    /// While something covers the page (the chat, the tabs, Mods, the address screen) the bars stay full; when it
+    /// goes, they go back to where they were (11-16: they stayed full, and x.com's own header, which hides as the
+    /// page scrolls down until it scrolls up again, stayed hidden behind the full address bar).
+    private var heldFrom: CGFloat?
+    func hold(_ h: Bool) {
+        guard h != held else { return }
+        held = h
+        if h { heldFrom = target; expand() }
+        else { settle(to: heldFrom ?? 0); heldFrom = nil }
+    }
 
     private func scrolled(_ sv: UIScrollView) {
         let y = sv.contentOffset.y

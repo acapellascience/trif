@@ -171,7 +171,19 @@ test('export asks where (helper/lib/choosefolder.js): the system chooser by plat
   assert.deepStrictEqual(args.slice(0, 2), ['-e', 'activate']);
   assert.match(args[3], /^POSIX path of \(choose folder with prompt "Where should TRIF save “A \\"b\\"”\?" default location \(POSIX file "\/Users\/me\/Downloads"\)\)$/);
   assert.strictEqual(chooserCommand('Where?', '/home/me/Downloads', 'linux')[0], 'zenity');
-  assert.match(chooserCommand("It's here?", 'C:\\Users\\me', 'win32')[1].join(' '), /Description = 'It''s here\?'/);
+  // Windows: the folder browser from Windows PowerShell, a constant script; the prompt and the folder go in
+  // on its stdin, never in its command line; nothing chosen is a cancel; no PowerShell: the fallback
+  const { windowsChooser, WINDOWS_CHOOSER } = require('../helper/lib/choosefolder');
+  const calls = [];
+  const run = (answer) => (script, input) => { calls.push({ script, input }); return Promise.resolve(answer); };
+  assert.strictEqual(await windowsChooser("It's “here”?", 'C:\\Users\\Zo\u00eb\\Downloads', { run: run({ code: 0, stdout: 'D:\\Mods\\', stderr: '' }) }), 'D:\\Mods');
+  assert.deepStrictEqual(calls[0], { script: WINDOWS_CHOOSER, input: { prompt: "It's “here”?", start: 'C:\\Users\\Zo\u00eb\\Downloads' } });
+  assert.ok(!WINDOWS_CHOOSER.includes('here'), 'the script is the same whatever is asked');
+  assert.strictEqual(await windowsChooser('Where?', 'C:\\x', { run: run({ code: 0, stdout: '', stderr: '' }) }), null);
+  assert.strictEqual(await windowsChooser('Where?', 'C:\\x', { fallback: 'C:\\dl', run: run({ code: null, stdout: '', stderr: 'spawn ENOENT' }) }), 'C:\\dl');
+  assert.strictEqual(await windowsChooser('Where?', 'C:\\x', { fallback: 'C:\\dl', run: run({ code: null, stdout: '', stderr: 'no answer within 600 s' }) }), null);
+  // (what goes to PowerShell's stdin is ASCII: it reads it in the console's code page)
+  assert.strictEqual(require('../helper/lib/win/powershell').inputLine({ start: 'C:\\Users\\Zo\u00eb' }), '{"start":"C:\\\\Users\\\\Zo\\u00eb"}\n');
 });
 
 test('a site\'s export takes its www. folder too (sites/www.google.com for google.com), names kept apart', () => {

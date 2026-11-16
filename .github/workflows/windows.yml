@@ -1,8 +1,11 @@
-# TRIF on Windows (Phase 1: helper, setup, doctor, CLI, keyring; no side-panel runs). Runs on GitHub's
-# windows-latest runners: the unit tests (tests/windows.test.js runs Windows' own code paths for real
-# there, with real named pipes; test files that need macOS or Linux report themselves skipped), then
-# tests/windows-smoke.js, which sets TRIF up the way a user does (registry keys under HKCU, the user's
-# Path, Credential Manager) on the runner, starts the helper as Chrome does and talks to it over its pipe.
+# TRIF on Windows: no side-panel runs yet (docs/WINDOWS.md). Runs on GitHub's windows-latest runners:
+#   - the unit tests (tests/windows.test.js runs Windows' own code paths for real there, with real named
+#     pipes; tests that need what Windows doesn't have report themselves skipped, with why);
+#   - tests/windows-smoke.js, which sets TRIF up the way a user does (registry keys under HKCU, the user's
+#     Path, Credential Manager) on the runner, in a profile folder with a space, letters outside ASCII and
+#     a % in its name, starts the helper as Chrome does and talks to it over its pipe;
+#   - tests/windows-browser.js (Node 22 only): Chrome for Testing loads the unpacked extension, and the
+#     extension reaches the helper through the registry key and trif-host.bat, as for a user.
 # Nothing is published, uploaded or signed, and no secrets are used.
 name: windows
 
@@ -53,3 +56,32 @@ jobs:
       - name: Smoke test (setup, registry, named pipes, Credential Manager)
         if: always()
         run: node tests/windows-smoke.js
+      - name: Chrome for Testing, for the browser check
+        if: always() && matrix.node != 18
+        shell: bash
+        run: |
+          out=$(npx --yes @puppeteer/browsers install chrome@stable --path tests/e2e/.browsers | tail -1)
+          echo "$out"
+          bin="${out#* }"
+          test -f "$bin" || { echo "Chrome for Testing not found after installing it: $bin"; exit 1; }
+          echo "TRIF_E2E_CHROME=$bin" >> "$GITHUB_ENV"
+      - name: Browser check (Chrome loads the extension; the extension reaches the helper)
+        if: always() && matrix.node != 18
+        run: node tests/windows-browser.js
+      - name: Browser check, in a profile folder with letters outside ASCII
+        if: always() && matrix.node != 18
+        run: node tests/windows-browser.js --unicode
+      # For now, to see what's left: the tests marked macOS/Linux only, run anyway. Never fails the job.
+      - name: (information) the macOS/Linux-only tests, run on Windows
+        if: always() && matrix.node != 18
+        continue-on-error: true
+        env:
+          TRIF_TEST_POSIX_ON_WINDOWS: 1
+        run: node --test --test-timeout=180000 --test-reporter=tap > posix-on-windows.tap 2>&1; grep -cE "^ok " posix-on-windows.tap; grep -E "^not ok " posix-on-windows.tap; exit 0
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.node != 18
+        with:
+          name: posix-on-windows
+          path: posix-on-windows.tap
+          if-no-files-found: ignore

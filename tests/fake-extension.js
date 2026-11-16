@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { encode, Decoder } = require('../helper/lib/framing');
+const pipes = require('../helper/lib/win/pipes');
 
 const REPO = path.resolve(__dirname, '..');
 
@@ -17,8 +18,10 @@ const HOST_JS = path.join(REPO, 'helper', 'host.js');
 const CLI_JS = path.join(REPO, 'helper', 'cli.js');
 
 // Short temp dirs: unix socket paths are limited to ~104 bytes on macOS.
+// (The system's own real path: on Windows the temp folder often comes in its short form,
+// C:\Users\RUNNER~1\..., which only the native call writes out in full, as the helper's own checks do.)
 function tempDir(prefix = 'wm-') {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
 // The private folder of a test workspace (paths.js privateDir: <workspace>-private for a TRIF_HOME),
@@ -117,10 +120,14 @@ class FakeExtension {
     this.exited = new Promise((resolve) => this.child.on('exit', (code, signal) => resolve({ code, signal })));
   }
 
-  get sock() { return path.join(this.home, 'helper.sock'); }
+  // (Windows: the named pipe that <home>\helper.pipe names, lib/win/pipes.js; none yet: one nothing answers on)
+  get sock() { return pipes.usesPipes() ? pipes.defaultEndpoint(this.home) : path.join(this.home, 'helper.sock'); }
 
   // This host's own socket, served whether or not it owns helper.sock (helper/lib/helpers.js).
-  get ownSock() { return path.join(this.home, `helper-${this.child.pid}.sock`); }
+  get ownSock() {
+    if (pipes.usesPipes()) return pipes.readMarker(pipes.ownMarker(this.home, this.child.pid)) || pipes.nobodyName();
+    return path.join(this.home, `helper-${this.child.pid}.sock`);
+  }
 
   send(msg) { this.child.stdin.write(encode(msg)); }
 
@@ -199,10 +206,11 @@ class FakeExtension {
     return null;
   }
 
-  async waitForSocket(timeout = 5000, sock = this.sock) {
+  async waitForSocket(timeout = 5000, sock = null) {
     const net = require('net');
     await waitFor(() => new Promise((resolve) => {
-      const s = net.connect(sock);
+      // (looked up each time: on Windows the helper names its pipe once it listens; 'own': this host's own)
+      const s = net.connect(sock === 'own' ? this.ownSock : sock || this.sock);
       s.on('connect', () => { s.destroy(); resolve(true); });
       s.on('error', () => resolve(false));
     }), { timeout, message: 'helper socket' });

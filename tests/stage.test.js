@@ -44,7 +44,7 @@ function setup({ scope = 'x.com', splits = ['mail.x.com'] } = {}) {
   fs.mkdirSync(box);
   const warnings = [];
   const logger = { info() {}, warn: (m) => warnings.push(m) };
-  const stage = new Stage({ ws, dir: path.join(box, 'r1.ws'), scope, splits, liveReal: fs.realpathSync(sites), settings: '{"permissions":{}}\n', logger }).create();
+  const stage = new Stage({ ws, dir: path.join(box, 'r1.ws'), scope, splits, liveReal: fs.realpathSync.native(sites), settings: '{"permissions":{}}\n', logger }).create();
   return { home, sites, ws, stage, outside, warnings, s: (...p) => path.join(stage.sites, ...p), l: (...p) => path.join(sites, ...p) };
 }
 
@@ -292,7 +292,7 @@ test('stage: the sandboxes write the run\'s copy, never the mods folder; Claude 
   const box = path.join(home, 'boxes', 'r1');
   fs.mkdirSync(box);
   const lim = runLimits(ws, { scope: 'x.com', splits: ['mail.x.com'], box, screenshots: box, stage });
-  const live = fs.realpathSync(sites);
+  const live = fs.realpathSync.native(sites);
   assert.equal(lim.writable[0], stage.sites);
   assert.ok(!lim.writable.includes(live));
   assert.equal(lim.workspace, stage.dir);
@@ -304,7 +304,7 @@ test('stage: the sandboxes write the run\'s copy, never the mods folder; Claude 
   const fsb = settings.sandbox.filesystem;
   assert.ok(fsb.allowWrite.includes(stage.sites));
   assert.ok(!fsb.allowWrite.some((p) => p === live || p.startsWith(live + path.sep)));
-  for (const p of [live, path.join(fs.realpathSync(home), 'allowed.json'), path.join(fs.realpathSync(home), 'held.json')]) assert.ok(fsb.denyWrite.includes(p), p);
+  for (const p of [live, path.join(fs.realpathSync.native(home), 'allowed.json'), path.join(fs.realpathSync.native(home), 'held.json')]) assert.ok(fsb.denyWrite.includes(p), p);
   assert.ok(fsb.allowRead.includes(stage.dir));
   assert.ok(c.args.includes(`Edit(/${stage.sites}/**)`) && c.args.includes(`Read(/${stage.dir}/**)`), c.args.join(' '));
   assert.ok(settings.permissions.deny.includes(`Edit(/${path.join(stage.sites, 'y.com')}/**)`));

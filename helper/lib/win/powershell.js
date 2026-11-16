@@ -7,7 +7,9 @@
 //   execution policy doesn't apply to it (it does to .ps1 files, which the default policy refuses).
 //   The script is always one of ours and constant: nothing the user typed, and never a secret.
 // - Anything variable (a key, a folder) goes in on STDIN, one JSON line, never in argv or the
-//   environment: any same-user process can read another's command line and environment.
+//   environment: any same-user process can read another's command line and environment. The line is
+//   plain ASCII (letters outside it as \uXXXX, which ConvertFrom-Json reads back): PowerShell reads its
+//   stdin in the console's code page, not UTF-8, so a folder like C:\Users\Zoë would arrive garbled.
 // - windowsHide: the browser starts the helper without a console, and a console program started from it
 //   would otherwise flash a window of its own.
 //
@@ -24,6 +26,11 @@ function powershellBin({ env = process.env, bin = null } = {}) {
   if (forced) return forced.endsWith('.js') ? { file: process.execPath, prefix: [forced] } : { file: forced, prefix: [] };
   const root = env.SystemRoot || env.SYSTEMROOT || env.windir || 'C:\\Windows';
   return { file: path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), prefix: [] };
+}
+
+/** `input` as one JSON line in ASCII. */
+function inputLine(input) {
+  return `${JSON.stringify(input).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)}\n`;
 }
 
 function encode(script) {
@@ -62,7 +69,7 @@ function runPowerShell(script, input, { env = process.env, bin = null, timeout =
     child.on('error', (e) => finish({ code: null, stdout: '', stderr: e.message }));
     child.on('close', (code) => finish({ code, stdout, stderr }));
     child.stdin.on('error', () => { /* it may exit before reading */ });
-    child.stdin.end(input === undefined ? undefined : `${JSON.stringify(input)}\n`);
+    child.stdin.end(input === undefined ? undefined : inputLine(input));
   });
 }
 
@@ -71,7 +78,7 @@ function runPowerShellSync(script, input, { env = process.env, bin = null, timeo
   const { file, prefix } = powershellBin({ env, bin });
   try {
     const r = spawnSyncFn(file, [...prefix, ...psArgs(script)], {
-      input: input === undefined ? '' : `${JSON.stringify(input)}\n`, encoding: 'utf8', timeout, windowsHide: true, env: process.env,
+      input: input === undefined ? '' : inputLine(input), encoding: 'utf8', timeout, windowsHide: true, env: process.env,
     });
     if (r.error) return { code: null, stdout: '', stderr: r.error.message };
     return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
@@ -86,4 +93,4 @@ function psComplaint(r) {
   return (lines[0] || (r.code === null ? 'couldn\'t run PowerShell' : `exit status ${r.code}`)).slice(0, 300);
 }
 
-module.exports = { powershellBin, psArgs, encode, runPowerShell, runPowerShellSync, psComplaint };
+module.exports = { powershellBin, psArgs, encode, inputLine, runPowerShell, runPowerShellSync, psComplaint };

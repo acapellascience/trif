@@ -45,10 +45,17 @@ async function waitFor(fn, ms = 15000) {
 }
 
 const reg = (args) => spawnSync(path.join(process.env.SystemRoot, 'System32', 'reg.exe'), args, { encoding: 'utf8' });
+// What the registry holds, read independently of TRIF's own code and whatever the letters: Windows
+// PowerShell, answering in UTF-8 (reg.exe prints in the console's code page).
+function powershell(script) {
+  const exe = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const full = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); ${script}`;
+  const r = spawnSync(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(full, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 60000 });
+  return r.status === 0 ? String(r.stdout || '') : null;
+}
 function regDefault(key) {
-  const r = reg(['query', key, '/ve']);
-  const m = /REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(r.stdout || '');
-  return r.status === 0 && m ? m[1].trim() : null;
+  const v = powershell(`$k = Get-Item -LiteralPath 'Registry::${key.replace(/^HKCU\\/, 'HKEY_CURRENT_USER\\')}' -ErrorAction SilentlyContinue; if ($k) { [Console]::Out.Write([string]$k.GetValue('')) }`);
+  return v ? v.trim() : null;
 }
 
 // Runs a .cmd/.bat the way Command Prompt would: cmd.exe /d /s /c ""file" args".
@@ -67,7 +74,11 @@ function runCmd(file, args, env) {
 }
 
 (async () => {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-smoke-'));
+  // A profile folder like many people's: a space, letters outside ASCII (an accent, and ones no Western
+  // code page has) and a percent sign. Everything below must work in it: the wrappers (cmd.exe reads a
+  // .bat in the console's code page), the registry values, the user's Path, the manifests.
+  const profile = path.join(fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-smoke-'))), 'Zo\u00eb \u7528\u6237 100%');
+  fs.mkdirSync(profile);
   const env = {
     ...process.env,
     USERPROFILE: profile,
@@ -101,8 +112,23 @@ function runCmd(file, args, env) {
     check(v && v.toLowerCase() === manifest.toLowerCase(), `${b}: ${key} names it`, `it says ${v}`);
     try { check(JSON.parse(fs.readFileSync(manifest, 'utf8')).path === bat, `${b}: the manifest runs trif-host.bat`); } catch (e) { check(false, `${b}: manifest readable`, e.message); }
   }
-  const userPath = (() => { const r = reg(['query', 'HKCU\\Environment', '/v', 'Path']); return r.stdout || ''; })();
+  const userPath = powershell("[Console]::Out.Write([string][Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))") || '';
   check(userPath.toLowerCase().includes(bin.toLowerCase()), '~\\.trif\\bin is on the user\'s Path', userPath);
+
+  check(/^[\x00-\x7f]*$/.test(fs.readFileSync(bat, 'utf8')) && /^[\x00-\x7f]*$/.test(fs.readFileSync(cmd, 'utf8')), 'the wrappers are plain ASCII, whatever the profile folder is called');
+  // (For the record, not a check: what cmd.exe makes of such a path written into a .bat as it is, in UTF-8,
+  // without and with `chcp 65001` first. It's why the wrappers name their files from %~dp0.)
+  {
+    const probeJs = path.join(profile, 'probe.js');
+    fs.writeFileSync(probeJs, 'process.stdout.write("PROBE-RAN");');
+    for (const [name, lines] of [['as it is', []], ['after chcp 65001', ['chcp 65001 >nul 2>&1']]]) {
+      const probe = path.join(os.tmpdir(), `trif-probe-${Date.now()}.bat`);
+      fs.writeFileSync(probe, ['@echo off', ...lines, `"${process.execPath}" "${probeJs.replace(/%/g, '%%')}"`, ''].join('\r\n'));
+      const r = await runCmd(probe, [], env);
+      console.log(`INFO  a .bat naming ${probeJs} in UTF-8, ${name}: ${r.stdout.includes('PROBE-RAN') ? 'runs' : `doesn't run (${(r.stderr || r.stdout).trim().split(/\r?\n/)[0] || `exit ${r.status}`})`}`);
+      fs.rmSync(probe, { force: true });
+    }
+  }
 
   // 3. the helper, started as Chrome starts it
   const origin = 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/';

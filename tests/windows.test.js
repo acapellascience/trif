@@ -118,6 +118,38 @@ test('windows wrappers: @echo off first, CRLF, paths quoted with % doubled; a sh
   assert.equal(launchers.parseLauncher('#!/bin/sh\nexec node x\n'), null);
 });
 
+test('windows wrappers: a profile folder with letters outside ASCII: the files stay ASCII (cmd.exe reads them in the console\'s code page)', () => {
+  const node = 'C:\\Program Files\\nodejs\\node.exe';
+  const binDir = 'C:\\Users\\Zo\u00eb \u7528\u6237\\.trif\\bin';
+  const profile = 'C:\\Users\\Zo\u00eb \u7528\u6237';
+  const host = `${profile}\\.trif\\app\\helper\\host.js`;
+  const where = { binDir, profile };
+  const file = `${binDir}\\trif-host.bat`;
+  // inside the workspace: from the wrapper's own folder, always
+  const bat = launchers.hostBatContent(node, host, null, where);
+  assert.equal(bat, '@echo off\r\n"C:\\Program Files\\nodejs\\node.exe" "%~dp0..\\app\\helper\\host.js" %*\r\n');
+  assert.ok(/^[\x00-\x7f]*$/.test(bat));
+  assert.deepEqual(launchers.parseLauncher(bat, { file, profile }), { node, script: host, home: null });
+  assert.equal(launchers.parseLauncher(bat), null, 'without the wrapper\'s own path, %~dp0 names nothing');
+  // Node inside the profile folder (nvm, Volta): from %USERPROFILE%
+  const nvm = `${profile}\\AppData\\Roaming\\nvm\\v22.1.0\\node.exe`;
+  const viaProfile = launchers.cliCmdContent(nvm, `${profile}\\.trif\\app\\helper\\cli.js`, null, where);
+  assert.equal(viaProfile, '@echo off\r\nsetlocal\r\n"%USERPROFILE%\\AppData\\Roaming\\nvm\\v22.1.0\\node.exe" "%~dp0..\\app\\helper\\cli.js" %*\r\n');
+  assert.equal(launchers.parseLauncher(viaProfile, { file, profile }).node, nvm);
+  // (an ASCII path inside the profile stays as written: only what cmd.exe would misread is rewritten)
+  assert.match(launchers.hostBatContent('C:\\Users\\tim\\nvm\\node.exe', host, null, { binDir, profile: 'C:\\Users\\tim' }), /^@echo off\r\n"C:\\Users\\tim\\nvm\\node\.exe" /);
+  // anywhere else: as it is, after chcp 65001
+  const far = launchers.hostBatContent('D:\\Outils \u00e9t\u00e9\\node.exe', host, null, where);
+  assert.equal(far, `@echo off\r\n${launchers.UTF8_LINE}\r\n"D:\\Outils \u00e9t\u00e9\\node.exe" "%~dp0..\\app\\helper\\host.js" %*\r\n`);
+  assert.equal(launchers.parseLauncher(far, { file, profile }).node, 'D:\\Outils \u00e9t\u00e9\\node.exe');
+  // a workspace elsewhere: TRIF_HOME is the wrapper's folder's parent
+  const other = launchers.cliCmdContent(node, 'D:\\\u00e9t\u00e9\\trif\\app\\helper\\cli.js', 'D:\\\u00e9t\u00e9\\trif', { binDir: 'D:\\\u00e9t\u00e9\\trif\\bin', profile });
+  assert.equal(other, '@echo off\r\nsetlocal\r\nif not defined TRIF_HOME set "TRIF_HOME=%~dp0.."\r\n"C:\\Program Files\\nodejs\\node.exe" "%~dp0..\\app\\helper\\cli.js" %*\r\n');
+  assert.equal(launchers.parseLauncher(other, { file: 'D:\\\u00e9t\u00e9\\trif\\bin\\trif.cmd' }).home, 'D:\\\u00e9t\u00e9\\trif');
+  // a % in a folder's name is doubled, never in %~dp0 itself
+  assert.match(launchers.hostBatContent(node, 'C:\\w\\app 100%\\host.js', null, { binDir: 'C:\\w\\bin' }), /"%~dp0\.\.\\app 100%%\\host\.js" %\*/);
+});
+
 // ------------------------------------------------------------------ registry
 
 test('windows registry: reg.exe add/query/delete of a key\'s default value; System32\'s reg.exe; any language', () => {
@@ -130,10 +162,15 @@ test('windows registry: reg.exe add/query/delete of a key\'s default value; Syst
   assert.equal(registry.getDefault(key, opts).value, 'C:\\Users\\Tim\\AppData\\Local\\TRIF\\NativeMessagingHosts\\chrome\\com.webmods.helper.json');
   assert.equal(registry.deleteKey(key, opts), null);
   assert.match(registry.deleteKey(key, opts), /unable to find/);
-  // "(Default)" is translated ("(Standard)" in German): matched by the type instead.
+  // Read from an export (UTF-16), not from what `reg query` prints (the console's code page, and
+  // "(Default)" translated): a profile folder with letters outside ASCII comes back as it is.
   const de = makeFakeReg({ label: '(Standard)' });
-  registry.setDefault('HKCU\\Software\\X', 'C:\\a b\\c.json', { run: de.run });
-  assert.equal(registry.getDefault('HKCU\\Software\\X', { run: de.run }).value, 'C:\\a b\\c.json');
+  registry.setDefault('HKCU\\Software\\X', 'C:\\Users\\Zo\u00eb \u7528\u6237\\a b\\c.json', { run: de.run });
+  assert.equal(registry.getDefault('HKCU\\Software\\X', { run: de.run }).value, 'C:\\Users\\Zo\u00eb \u7528\u6237\\a b\\c.json');
+  assert.equal(de.calls[1].args[0], 'export');
+  assert.ok(!fs.existsSync(de.calls[1].args[2]), 'the export file is removed');
+  assert.equal(registry.exportedDefault(Buffer.from('Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\X]\r\n"Other"="1"\r\n\r\n')), null);
+  assert.equal(registry.exportedDefault(Buffer.from('Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\X]\r\n\r\n[HKEY_CURRENT_USER\\Software\\X\\Sub]\r\n@="a subkey\'s"\r\n')), null);
   // A reg.exe that can't start.
   assert.match(registry.setDefault('HKCU\\Software\\X', 'v', { run: () => ({ error: new Error('spawn ENOENT') }) }), /ENOENT/);
 });
@@ -250,8 +287,10 @@ test('windows setup: wrappers, manifests + registry keys, PATH, no /usr/local/bi
   assert.ok(r.ok, text);
   const ws = P.workspace(home, { platform: 'win32' });
   const bat = fs.readFileSync(ws.hostWrapper, 'utf8');
-  assert.deepEqual(launchers.parseLauncher(bat), { node: r.nodePath, script: path.join(P.REPO_ROOT, 'helper', 'host.js'), home });
-  assert.equal(launchers.parseLauncher(fs.readFileSync(ws.cliWrapper, 'utf8')).script, path.join(P.REPO_ROOT, 'helper', 'cli.js'));
+  // (as Windows writes them: this test's folders have / on macOS and Linux)
+  const slashes = (o) => JSON.parse(JSON.stringify(o).replace(/\\\\/g, '/'));
+  assert.deepEqual(slashes(launchers.parseLauncher(bat, { file: ws.hostWrapper, profile: homedir })), slashes({ node: r.nodePath, script: path.join(P.REPO_ROOT, 'helper', 'host.js'), home }));
+  assert.equal(slashes(launchers.parseLauncher(fs.readFileSync(ws.cliWrapper, 'utf8'), { file: ws.cliWrapper, profile: homedir }).script), slashes(path.join(P.REPO_ROOT, 'helper', 'cli.js')));
   assert.match(fs.readFileSync(ws.cliShWrapper, 'utf8'), /^#!\/bin\/sh\n/);
   for (const old of ['webmods', 'webmods-host', 'trif-host']) assert.ok(!fs.existsSync(path.join(ws.bin, old)), `no ${old} on Windows`);
   // One manifest per browser in %LOCALAPPDATA%\TRIF, each browser's key naming it.

@@ -199,7 +199,7 @@ async function doctor(opts = {}) {
     add('fail', `host wrapper ${ws.hostWrapper} is not executable`, `chmod +x ${ws.hostWrapper}   (or ${setupFix})`);
   } else {
     // (Windows: trif-host.bat, win/launchers.js.)
-    const w = (win ? require('./win/launchers').parseLauncher : parseWrapper)(fs.readFileSync(ws.hostWrapper, 'utf8'));
+    const w = win ? require('./win/launchers').parseLauncher(fs.readFileSync(ws.hostWrapper, 'utf8'), { file: ws.hostWrapper, profile: opts.homedir || require('os').homedir() }) : parseWrapper(fs.readFileSync(ws.hostWrapper, 'utf8'));
     if (!w) {
       add('fail', `host wrapper ${ws.hostWrapper} doesn't look like a TRIF wrapper`, setupFix);
     } else if (!isExecutable(w.node)) {

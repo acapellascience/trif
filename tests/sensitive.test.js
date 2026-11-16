@@ -174,7 +174,7 @@ function withHome(h, fn) {
   try { return fn(); } finally { process.env.HOME = old; }
 }
 function runHome() {
-  const h = fs.realpathSync(tempDir('trif-sens-'));
+  const h = fs.realpathSync.native(tempDir('trif-sens-'));
   const trif = path.join(h, '.trif');
   const box = path.join(h, 'Library', 'Caches', 'TRIF', 'boxes', 'r1');
   for (const d of ['google.com', 'mail.google.com', 'maps.google.com', 'x.com'].map((s) => path.join(trif, 'sites', s))) fs.mkdirSync(d, { recursive: true });
@@ -185,7 +185,7 @@ function runHome() {
 
 test('the sandbox: a run on mail.google.com can\'t write sites/google.com/, and a google.com run can\'t write sites/mail.google.com/', () => {
   const { h, ws, box } = runHome();
-  const sites = fs.realpathSync(ws.modsDir);
+  const sites = fs.realpathSync.native(ws.modsDir);
   const lim = (s) => withHome(h, () => runLimits(ws, { scope: s, splits: ['mail.google.com'], box, screenshots: path.join(ws.private, 'screenshots', s) }));
   const mail = lim('mail.google.com');
   assert.ok(mail.readOnly.includes(path.join(sites, 'google.com')), mail.readOnly.join());

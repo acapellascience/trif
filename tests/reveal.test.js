@@ -10,10 +10,11 @@ const path = require('path');
 const { modFile, revealCommand, reveal } = require('../helper/lib/reveal');
 const { runCli, writeMod, tempDir } = require('./fake-extension');
 
+// (a .js stand-in, which reveal.js runs with this Node: a script can't be spawned by itself on Windows)
 const stub = (dir) => {
   const log = path.join(dir, 'opened.log');
-  const sh = path.join(dir, 'fake-open.sh');
-  fs.writeFileSync(sh, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n`, { mode: 0o755 });
+  const sh = path.join(dir, 'fake-open.js');
+  fs.writeFileSync(sh, `require('fs').appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n');\n`);
   return { sh, log };
 };
 const waitFor = async (f) => { for (let i = 0; i < 100; i++) { if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8'); await new Promise((r) => setTimeout(r, 30)); } return ''; };
@@ -45,6 +46,17 @@ test('what opens it, by platform: open -R / open on a Mac, xdg-open on its folde
   assert.throws(() => revealCommand('/a.js', 'folder', 'aix'), /doesn't know how to open folders on aix/);
 });
 
+test('Windows: Explorer by its full path with the path quoted its way; "Open in editor" is Notepad, never the .js file\'s default app', () => {
+  const env = { SystemRoot: 'C:\\Windows' };
+  const file = 'C:\\Users\\Tim B\\.trif\\sites\\x.com\\a.js';
+  assert.deepStrictEqual(revealCommand(file, 'folder', 'win32', env), ['C:\\Windows\\explorer.exe', [`/select,"${file}"`], { windowsVerbatimArguments: true }]);
+  // (a .js file's default app on Windows is Windows Script Host, which would run the mod on the computer)
+  const [cmd, args] = revealCommand(file, 'editor', 'win32', env);
+  assert.strictEqual(cmd, 'C:\\Windows\\System32\\notepad.exe');
+  assert.deepStrictEqual(args, [`"${file}"`]);
+  assert.ok(!/explorer|wscript|cscript|cmd/i.test(cmd));
+});
+
 test('reveal runs it (stubbed), and trif reveal does the same without the browser; refused inside a run', async () => {
   const home = tempDir('trif-reveal-');
   const file = writeMod(home, 'x.com', 'hide.js', '// ==WebMod==\n// @name Hide\n// ==/WebMod==\n');
@@ -57,7 +69,7 @@ test('reveal runs it (stubbed), and trif reveal does the same without the browse
   assert.strictEqual(cli.code, 0, cli.stderr);
   assert.match(cli.stdout, /opened x\.com\/hide\.js/);
   const opened = (await waitFor(s.log)).trim();
-  assert.ok(opened.endsWith(path.join('sites', 'x.com', 'hide.js')) && /^(open|xdg-open) /.test(opened), opened);
+  assert.ok(opened.replace(/"$/, '').endsWith(path.join('sites', 'x.com', 'hide.js')) && /^(open|xdg-open|\S+notepad\.exe) /.test(opened), opened);
   const bad = await runCli(['reveal', 'x.com/nope'], { home, env: { TRIF_REVEAL_CMD: s.sh } });
   assert.notStrictEqual(bad.code, 0);
   assert.match(bad.stderr, /no mod x\.com\/nope/);

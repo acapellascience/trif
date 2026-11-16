@@ -17,9 +17,11 @@ const { nativeRegKeys } = require('../browsers');
 const { systemExe } = require('../platform');
 
 /** Writes the three wrappers; `write(file, content)` is setup's writeIfChanged. */
-function writeWrappers(ws, { nodePath, hostJs, cliJs, home, write }) {
-  write(ws.hostWrapper, launchers.hostBatContent(nodePath, hostJs, home));
-  write(ws.cliWrapper, launchers.cliCmdContent(nodePath, cliJs, home));
+function writeWrappers(ws, { nodePath, hostJs, cliJs, home, write, profile = require('os').homedir() }) {
+  // (paths inside the workspace from the wrappers' own folder, so the files stay ASCII: launchers.js)
+  const where = { binDir: ws.bin, profile };
+  write(ws.hostWrapper, launchers.hostBatContent(nodePath, hostJs, home, where));
+  write(ws.cliWrapper, launchers.cliCmdContent(nodePath, cliJs, home, where));
   write(ws.cliShWrapper, launchers.cliShContent(nodePath, cliJs, home));
 }
 

@@ -68,7 +68,8 @@ function makeFakePowerShell(dir) {
 
 /**
  * A fake reg.exe as a spawnSync stand-in (win/registry.js's `run` option): keys in a Map, every call in
- * `calls`. Answers like reg.exe: `add <key> /ve /t REG_SZ /d <v> /f`, `query <key> /ve`, `delete <key> /f`.
+ * `calls`. Answers like reg.exe: `add <key> /ve /t REG_SZ /d <v> /f`, `query <key> /ve`, `export <key> <file> /y`
+ * (a UTF-16 .reg file, as reg.exe writes), `delete <key> /f`.
  */
 function makeFakeReg({ label = '(Default)' } = {}) {
   const keys = new Map();
@@ -85,6 +86,13 @@ function makeFakeReg({ label = '(Default)' } = {}) {
     if (op === 'query') {
       if (!keys.has(k)) return { status: 1, stdout: '', stderr: 'ERROR: The system was unable to find the specified registry key or value.\r\n' };
       return { status: 0, stdout: `\r\n${key}\r\n    ${label}    REG_SZ    ${keys.get(k)}\r\n\r\n`, stderr: '' };
+    }
+    if (op === 'export') {
+      if (!keys.has(k)) return { status: 1, stdout: '', stderr: 'ERROR: The system was unable to find the specified registry key or value.\r\n' };
+      const full = key.replace(/^HKCU\\/i, 'HKEY_CURRENT_USER\\');
+      const text = `Windows Registry Editor Version 5.00\r\n\r\n[${full}]\r\n@="${keys.get(k).replace(/([\\"])/g, '\\$1')}"\r\n\r\n`;
+      require('fs').writeFileSync(args[2], Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]));
+      return { status: 0, stdout: 'The operation completed successfully.\r\n', stderr: '' };
     }
     if (op === 'delete') {
       if (!keys.delete(k)) return { status: 1, stdout: '', stderr: 'ERROR: The system was unable to find the specified registry key or value.\r\n' };

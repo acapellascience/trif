@@ -60,17 +60,36 @@ function setDefault(key, value, opts) {
 
 /**
  * The key's default value: {value, error}. value null when the key or its value isn't there.
- * reg.exe prints `    (Default)    REG_SZ    C:\...` (the "(Default)" word is translated, so it's
- * matched by the type instead).
+ * Read from `reg.exe export`, which writes a file in UTF-16: what `reg.exe query` prints is in the
+ * console's code page, where a path like C:\Users\Zoë\… comes out garbled (and letters the code page
+ * doesn't have, as "?").
  */
 function getDefault(key, opts) {
-  const r = reg(['query', key, '/ve'], opts);
-  if (r.code !== 0) return { value: null, error: null };
-  for (const line of String(r.out).split(/\r?\n/)) {
-    const m = /^\s+\S.*?\s{2,}REG_(?:EXPAND_)?SZ(?:\s{2,}(.*))?$/.exec(line);
-    if (m) return { value: (m[1] || '').trim() || null, error: null };
+  const fs = require('fs');
+  const os = require('os');
+  const file = path.join(os.tmpdir(), `trif-reg-${process.pid}-${require('crypto').randomBytes(6).toString('hex')}.reg`);
+  try {
+    const r = reg(['export', key, file, '/y'], opts);
+    if (r.code !== 0) return { value: null, error: null };
+    let buf;
+    try { buf = fs.readFileSync(file); } catch { return { value: null, error: null }; }
+    return { value: exportedDefault(buf), error: null };
+  } finally {
+    try { fs.rmSync(file, { force: true }); } catch { /* left in the temp folder */ }
   }
-  return { value: null, error: null };
+}
+
+/** The default value (`@="…"`) of the first key in an exported .reg file's bytes, or null. */
+function exportedDefault(buf) {
+  // (UTF-16LE with a byte order mark, as regedit version 5 files are; anything else, as UTF-8)
+  const text = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe ? buf.slice(2).toString('utf16le') : buf.toString('utf8');
+  let seenKey = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\[.*\]$/.test(line)) { if (seenKey) break; seenKey = true; continue; }
+    const m = /^@="((?:[^"\\]|\\.)*)"$/.exec(line);
+    if (seenKey && m) return m[1].replace(/\\(.)/g, '$1') || null;
+  }
+  return null;
 }
 
 /** Deletes the key (tests, and uninstalling by hand). Returns null, or why it failed. */
@@ -79,4 +98,4 @@ function deleteKey(key, opts) {
   return r.code === 0 ? null : complaint(r);
 }
 
-module.exports = { SOFTWARE, regBin, fullKey, reg, setDefault, getDefault, deleteKey };
+module.exports = { SOFTWARE, regBin, fullKey, reg, setDefault, getDefault, exportedDefault, deleteKey };

@@ -9,7 +9,8 @@
 const test = require('node:test');
 
 module.exports = function posixOnly(reason) {
-  if (process.platform !== 'win32') return test;
+  // (TRIF_TEST_POSIX_ON_WINDOWS=1: run them there anyway, to see which already pass)
+  if (process.platform !== 'win32' || process.env.TRIF_TEST_POSIX_ON_WINDOWS) return test;
   const skip = `macOS/Linux only: ${reason}`;
   const skipped = (name, ...rest) => test(name, { skip }, () => {});
   for (const hook of ['before', 'after', 'beforeEach', 'afterEach']) skipped[hook] = () => {};

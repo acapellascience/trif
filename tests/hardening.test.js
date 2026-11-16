@@ -32,12 +32,14 @@ test('names: a site folder or mod file with a line break, control character or d
   const { modsDir } = workspace();
   fs.writeFileSync(path.join(modsDir, 'x.com', 'fine.js'), '1;');
   fs.writeFileSync(path.join(modsDir, 'x.com', 'my mod (2).js'), '1;'); // (people name their own files)
-  for (const bad of [`a${LS}b`, `a${PS}b`, 'a\nb', 'a\rb', 'a\u0085b', 'a\u202eb', 'a\ufeffb']) fs.writeFileSync(path.join(modsDir, 'x.com', `${bad}.js`), '1;');
+  // (Windows' file names can't hold a line feed or carriage return at all; the rest they can)
+  const bads = [`a${LS}b`, `a${PS}b`, ...(process.platform === 'win32' ? [] : ['a\nb', 'a\rb']), 'a\u0085b', 'a\u202eb', 'a\ufeffb'];
+  for (const bad of bads) fs.writeFileSync(path.join(modsDir, 'x.com', `${bad}.js`), '1;');
   fs.mkdirSync(path.join(modsDir, `evil${LS}.example`));
   fs.writeFileSync(path.join(modsDir, `evil${LS}.example`, 'm.js'), '1;');
   const scanned = mods.scanMods(modsDir);
   assert.deepEqual(scanned.mods.map((m) => m.id).sort(), ['x.com/fine', 'x.com/my mod (2)']);
-  assert.equal(scanned.warnings.length, 8);
+  assert.equal(scanned.warnings.length, bads.length + 1);
   for (const w of scanned.warnings) { assert.match(w.warning, /^ignored: the (file|folder) has a line break/); assert.ok(!pc.unsafeName(path.basename(w.file)), 'shown without the character'); }
   assert.equal(mods.listModFiles(modsDir).length, 2);
 });

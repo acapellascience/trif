@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A29AA1047D0CE50330DE05FB /* page-bridge.js in Resources */ = {isa = PBXBuildFile; fileRef = FEF3B39C86D5BD79493F1971 /* page-bridge.js */; };
 		060F96FDA720E9F20A571D12 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD414BE0D298FB88CE3CB250 /* Assets.xcassets */; };
 		066931474CC5139D68D2F470 /* Browser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C92814A95137C3CC4B0A8C2F /* Browser.swift */; };
 		17237858CB0A046A273784DC /* Checks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67596316AFDF35B8CF90704 /* Checks.swift */; };
@@ -42,6 +43,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		FEF3B39C86D5BD79493F1971 /* page-bridge.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; name = "page-bridge.js"; path = "../shared/gen/page-bridge.js"; sourceTree = "<group>"; };
 		CD414BE0D298FB88CE3CB250 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0A12BEDEC58A35DA53AE569B /* sandbox-runtime.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "sandbox-runtime.js"; path = "../shared/gen/sandbox-runtime.js"; sourceTree = "<group>"; };
 		1FD4645E79F7F18C7685F439 /* mod-guide.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "mod-guide.txt"; path = "../shared/gen/mod-guide.txt"; sourceTree = "<group>"; };
@@ -124,6 +126,7 @@
 		9D58C528C16A0F0B14F9746D /* Shared (from the repository) */ = {
 			isa = PBXGroup;
 			children = (
+				FEF3B39C86D5BD79493F1971 /* page-bridge.js */,
 				004A90B030B6D40CBFD9BFB1 /* switch.css */,
 				F3AE0E965F44D6509BCBAEFA /* sidepanel.css */,
 				196B0CD9E4AA8F552805DCC7 /* panel-kit.js */,
@@ -224,6 +227,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				060F96FDA720E9F20A571D12 /* Assets.xcassets in Resources */,
+				A29AA1047D0CE50330DE05FB /* page-bridge.js in Resources */,
 				64CAEA4CF2EA4789ECADED2E /* style-mirror.js in Resources */,
 				043D2B26F4CBFC81026002AE /* switch.css in Resources */,
 				1E813C508DF4C8DECF355AB3 /* sidepanel.css in Resources */,

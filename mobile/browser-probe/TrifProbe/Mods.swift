@@ -350,6 +350,16 @@ final class ModStore: ObservableObject {
             out.append(WKUserScript(source: Browser.resource("ses.umd.min", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
             out.append(WKUserScript(source: Browser.resource("sandbox-runtime", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
         }
+        // (the page's side of a boxed mod's site-data power, trif.filterResponse: desktop's own bridge (mobile/shared/gen/
+        // page-bridge.js), in the page's world at its start, only on the pages of boxed mods allowed site-data (a held
+        // change's version before: the power in the grant its script carries). It wraps fetch and XMLHttpRequest only
+        // once such a mod asks for a filter; what a filter gives back is checked in the box world (remove or reorder
+        // only), and anything else leaves the site's response as it was.)
+        let bridged = list.filter { m, script, world, _ in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
+        if !bridged.isEmpty {
+            let pairs = bridged.map { [$0.0.matches, $0.0.excludes] }
+            out.append(WKUserScript(source: Browser.resource("page-bridge", "js") + "(\(Browser.jsonText(pairs)));", injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        }
         for (m, script, world, at) in list {
             let off = (m.multiSite ? m.offSites : []) + groupsOff.filter { $0.value.contains(m.tier) }.map(\.key)
             let source = off.isEmpty ? script : "(function () { const h = location.hostname.replace(/^www\\./, ''); if (\(Browser.jsonText(Array(Set(off)).sorted())).some((s) => h === s || h.endsWith('.' + s))) return;\n\(script)\n})();"

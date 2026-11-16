@@ -220,7 +220,9 @@ time, for a headless Simulator: write the app's Documents/step.json, then
 `{"pagejs": "…"}`, `{"go": "…"}`, `{"newtab": "…"}`, `{"select": n}`, `{"close": n}`, `{"back": 1}`,
 `{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"cancelOffer": 1}`, `{"status": 1}`, and
 for the chat `{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`, `{"chat": 1}` (shown, what
-it's doing, its address), `{"closechat": 1}`.
+it's doing, its address), `{"closechat": 1}`; `{"boxjs": "…"}` (in the boxed mods' world: `return JSON.stringify(globalThis.__trifSandbox.errors)`),
+`{"approve": "<mod id>|*"}` (Allow on waiting mods). shared/pages/feed.html draws a feed from feed.json by fetch and by
+XMLHttpRequest, for a boxed mod's site-data power (trif.filterResponse).
 
 The chat can't be signed in to in the Simulator: `-chathome http://localhost:8377/chat.html` (with
 `node mobile/serve.js`) gives it a stand-in (shared/pages/chat.html) with claude.ai's message box, send and stop
@@ -246,6 +248,7 @@ Screenshots from 11-15 are in browser-probe/shots/ (not committed).
 node mobile/prepare.js          # remakes shared/gen/ (sandbox runtime, checks, the mod reader, the Mods tab's kit, the guide)
 TRIF_BROWSER_TESTS=1 node mobile/test/smoke.js   # the Safari probe and the browser probe's JS checks, in Chrome for Testing
 TRIF_BROWSER_TESTS=1 node mobile/test/chat.test.js   # the app's chat script against the stand-in chat: fill, send, the reply until done, its mods
+TRIF_BROWSER_TESTS=1 node mobile/test/bridge.test.js   # the page side of site-data (gen/page-bridge.js): only where a mod matches, then filtered responses
 ruby mobile/browser-probe/make-project.rb   # rewrites the Xcode project (gem install xcodeproj)
 ```
 

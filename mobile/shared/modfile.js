@@ -115,7 +115,9 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
     script = `(function () { ${guard}\n` +
       'if (!globalThis.__trifSandbox) { if (typeof globalThis.__trifStartSandbox !== "function") return; globalThis.__trifStartSandbox(); }\n' +
       `${ran}\nglobalThis.__trifSandbox.run(${JSON.stringify(id)}, ${JSON.stringify(String(mod.code))}, ${JSON.stringify(grant)});\n})();`;
-    world = 'box'; at = 'end';
+    // (one that filters the site's data starts with the page, as on desktop, so its filter is there before the
+    // page's first requests; the others when the page has been read)
+    world = 'box'; at = (mod.powers || []).includes('site-data') ? 'start' : 'end';
   } else {
     // (its errors kept on the page, for the chat and the Mods tab: Browser.modErrors)
     script = `(async function () { ${guard}\n${ran}\n${String(mod.code)}\n})().catch((e) => { (window.__trifModErrors = window.__trifModErrors || []).push(${JSON.stringify(id)} + ": " + ((e && e.message) || e)); console.error("TRIF mod ${id}:", e); });`;

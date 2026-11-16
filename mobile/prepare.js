@@ -88,8 +88,24 @@ function guideFile() {
     `### Powers (BOXED.md): filtering a feed's data\n\n${asking}\n\n${siteData}\n`;
 }
 
+// page-bridge.js: the page's side of the boxed powers that need one (site-data's trif.filterResponse first: a
+// feed's JSON filtered before the site draws it), desktop's own (extension/runtime.js pageBridge), for the page's
+// world; behind a test of the address (mobile/shared/modfile.js matchesUrl), so it starts only on the pages of the
+// mods the app hands it: `(mods)` with [[matches, excludes], …]. As on desktop, it wraps fetch and XMLHttpRequest
+// only once a mod allowed site-data asks for a filter.
+const BRIDGE_OUT = path.join(__dirname, 'shared', 'gen', 'page-bridge.js');
+async function bridgeFile() {
+  const rt = await import(pathToFileURL(path.join(ROOT, 'extension', 'runtime.js')).href);
+  const own = fs.readFileSync(path.join(__dirname, 'shared', 'modfile.js'), 'utf8');
+  const m = /^function matchesUrl\(url, patterns\) \{[\s\S]*?^\}$/m.exec(own);
+  if (!m) throw new Error('modfile.js: no matchesUrl');
+  return '// Made by mobile/prepare.js from extension/runtime.js (pageBridge) and mobile/shared/modfile.js (matchesUrl): don\'t edit.\n' +
+    `(function (mods) {\n${m[0]}\nif (!mods.some((x) => matchesUrl(location.href, x[0]) && !matchesUrl(location.href, x[1]))) return;\n` +
+    `try { (${rt.pageBridge.toString()})(); }\ncatch (e) { console.error('[TRIF] bridge failed', e); }\n})`;
+}
+
 async function main() {
-  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()]];
+  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()]];
   for (const [file, text] of files) {
     if (process.argv.includes('--check')) {
       if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) { console.error(`${path.relative(ROOT, file)} is out of date: run node mobile/prepare.js`); process.exit(1); }
@@ -102,4 +118,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { runtimeFile, checksFile, modsFile, kitFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT };
+module.exports = { runtimeFile, checksFile, modsFile, kitFile, bridgeFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT };

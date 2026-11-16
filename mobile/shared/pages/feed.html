@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIF probe: a feed</title>
+<!-- A page like a timeline that draws itself from JSON (feed.json), fetched once with fetch and once with
+     XMLHttpRequest, a moment after it has loaded (so a boxed mod has started): for a boxed mod's site-data power,
+     trif.filterResponse, which filters the JSON before the page draws it. Served by mobile/serve.js. -->
+<style>body{font:16px -apple-system,system-ui,sans-serif;margin:16px}li{margin:4px 0}</style>
+</head>
+<body>
+<h1>Feed</h1>
+<h2>By fetch</h2><ul id="fetch"></ul>
+<h2>By XMLHttpRequest</h2><ul id="xhr"></ul>
+<script>
+const draw = (id, data) => { const ul = document.getElementById(id); ul.textContent = ''; for (const e of data.entries) { const li = document.createElement('li'); li.textContent = `${e.text}${e.promoted ? ' (promoted)' : ''}`; li.dataset.id = e.id; ul.append(li); } ul.dataset.done = '1'; };
+window.loadFeed = () => {
+  fetch('feed.json?by=fetch', { cache: 'no-store' }).then((r) => r.json()).then((d) => draw('fetch', d), (e) => { document.getElementById('fetch').textContent = String(e); });
+  const x = new XMLHttpRequest();
+  x.open('GET', 'feed.json?by=xhr');
+  x.onload = () => { try { draw('xhr', JSON.parse(x.responseText)); } catch (e) { document.getElementById('xhr').textContent = String(e); } };
+  x.send();
+};
+addEventListener('load', () => setTimeout(window.loadFeed, 800));
+</script>
+</body>
+</html>

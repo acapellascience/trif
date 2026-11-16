@@ -124,6 +124,13 @@ extension Model {
         if let js = step["modsjs"] as? String {
             do { out = "\(try await panel.webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
         }
+        if let js = step["boxjs"] as? String {
+            let r = await browser.call(js, in: Browser.boxWorld)
+            out = r.text ?? "error: \(r.error ?? "?")"
+        }
+        if let id = step["approve"] as? String {
+            for m in browser.mods.mods where m.held && (id == "*" || m.id == id) { browser.approveMod(m.id) }
+        }
         if let js = step["pagejs"] as? String {
             let r = await browser.call(js, in: .page)
             out = r.text ?? "error: \(r.error ?? "?")"

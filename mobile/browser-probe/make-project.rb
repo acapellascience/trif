@@ -36,6 +36,7 @@ shared = project.main_group.new_group('Shared (from the repository)')
   '../shared/gen/mod-guide.txt',
   '../shared/gen/mods.js',
   '../shared/gen/panel-kit.js',
+  '../shared/gen/page-bridge.js',
   '../../extension/sidepanel.css',
   '../../extension/switch.css',
   '../../extension/vendor/ses.umd.min.js',

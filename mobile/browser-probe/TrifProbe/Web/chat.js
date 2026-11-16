@@ -5,18 +5,15 @@
 //     a tap hands the block's text to the app, which shows its Add this mod? sheet (the BUTTON path);
 //   - fill(text, png): puts text (and a picture) into the message box, as a paste, for the person to send;
 //   - the person's send (the send button, or Return in the message box) told to the app, which goes back to
-//     the tab; then the reply watched until it's done (for the chat button's dots and its replied mark), and, only
-//     while PICKUP is 'auto', the mod files in its code blocks (ones that weren't there before the send) handed to
-//     the app, which asks Add this mod? about each (Tim, 11-15) (the AUTO path).
+//     the tab; then the reply watched until it's done (for the chat button's dots and its replied mark), and the mod
+//     files in its code blocks (ones that weren't there before the send) handed to the app, which asks Add this mod?
+//     about each (Tim, 11-15; kept, 11-16) (the AUTO path).
 // It reads only what the page shows: never the sites' own internal routes (their APIs), never a session token or
 // cookie (Tim, 11-16: nothing against Claude's or ChatGPT's terms). A .js file in a reply comes to TRIF only when
 // the person taps it (a download the app catches: ModDownloads). It never sends a message, never reads the
 // conversation except code blocks and whether a reply is still being written, and keeps nothing.
 (() => {
   if (globalThis.__trifChat) return;
-  // How a reply's mods reach the app: 'auto' (handed over when the reply is done, and a block that turns up later on
-  // the same conversation) or 'button' (only an Add to TRIF tap). The app sets it (ClaudePane.pickup) before this runs.
-  const PICKUP = globalThis.__trifChatPickup === 'button' ? 'button' : 'auto';
   const post = (m) => { try { return window.webkit.messageHandlers.trif.postMessage(m); } catch (e) { return null; } };
   const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 20 && r.height > 10; };
 
@@ -332,12 +329,11 @@
     // (one more look once the page has gone quiet: nothing else wakes this up when nothing changes)
     w.timer = setTimeout(() => settle(w), !busy && w.saw ? 1300 : busy ? 4000 : 6100);
   }
-  /** The reply's done: told to the app (the dots stop), with its new mod files only on the auto path. */
+  /** The reply's done: told to the app (the dots stop), with its new mod files. */
   function finish(w, why) {
     stopWatch();
     last = { seen: w.seen, path: location.pathname };
-    const mods = PICKUP === 'auto' ? autoPickup(w.seen) : [];
-    post({ type: 'done', why, mods, stop: w.saw, pickup: PICKUP });
+    post({ type: 'done', why, mods: autoPickup(w.seen), stop: w.saw });
   }
   /** (AUTO path) The mod files in code blocks that weren't there before the send, the latest of each (by its header);
    *  all of them then count as seen. */
@@ -354,7 +350,7 @@
   let lateSig = '';
   let lateTimer = 0;
   function late() {
-    if (PICKUP !== 'auto' || !last || watch || sending || replying() || location.pathname !== last.path) return;
+    if (!last || watch || sending || replying() || location.pathname !== last.path) return;
     const fresh = modBlocks().filter((b) => !last.seen.has(b.raw));
     const sig = fresh.map((b) => b.raw).join('\n');
     // (offered once it's the same on two looks, the second a moment later even if nothing else changes)

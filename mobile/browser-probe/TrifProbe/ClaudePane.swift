@@ -32,12 +32,6 @@ enum ChatActivity: String { case idle, working, replied }
 @MainActor
 final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     static var home: String { ChatService.claude.home }
-    /// How a reply's mods come to the app (Web/chat.js PICKUP): `.auto`, its code blocks handed over when the reply is
-    /// done (and Add to TRIF under each); `.button`, only by the person's Add to TRIF tap. One switch, both paths kept
-    /// apart (11-16: Tim is weighing `.button`, as OpenAI's terms forbid programmatically extracting output).
-    enum Pickup: String { case auto, button }
-    static let pickup: Pickup = ProcessInfo.processInfo.arguments.contains("-pickupbutton") ? .button : .auto
-
     /// TRIF in the chat (Web/chat.js; Tim, 11-13): its own world beside Claude's or ChatGPT's page.
     static let chatWorld = WKContentWorld.world(name: "trif-chat")
     @Published var service: ChatService = ChatService(rawValue: UserDefaults.standard.string(forKey: "chatService") ?? "") ?? .claude
@@ -82,7 +76,6 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         config.applicationNameForUserAgent = Browser.safariSuffix
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         // (Add to TRIF under each mod in a reply, and filling the message box: Web/chat.js, main frame only)
-        config.userContentController.addUserScript(WKUserScript(source: "globalThis.__trifChatPickup = '\(ClaudePane.pickup.rawValue)';", injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
         config.userContentController.addUserScript(WKUserScript(source: Browser.resource("chat", "js"), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
@@ -462,14 +455,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 self.activity = .idle
             }
         case "done":
-            // (the mods: the reply's code blocks, on the auto path only; on the button path none, each comes by its tap)
+            // (the mods: the reply's new code blocks with a whole mod file in each)
             handleDone(d, d["mods"] as? [String] ?? [])
         default: break
         }
     }
 
-    /// A reply done, with the mod files in its code blocks (auto path): offered with Add this mod?. None (the button
-    /// path, or a reply without one): the chat button's replied mark.
+    /// A reply done, with the mod files in its code blocks: offered with Add this mod?. None: the chat button's
+    /// replied mark.
     private func handleDone(_ d: [String: Any], _ texts: [String]) {
         report.log("claude", "\(service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")), \(texts.count) mod file(s) in it")
         let late = d["why"] as? String == "late"

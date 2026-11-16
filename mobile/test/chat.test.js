@@ -118,7 +118,7 @@ test('the chat script: a chat with no stop button to see, done once the reply ha
   }
 });
 
-test('the chat script: a file a reply attaches is never read (no request at all); a button-only chat hands mods over only by a tap', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script: a file a reply attaches is never read (no request at all)', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
   // (Tim, 11-16: nothing against Claude's or ChatGPT's terms: no internal routes, no session token, no reading a
   // reply's files; a file comes only when the person taps it, as a download the app catches)
   const h = handler(() => {});
@@ -141,7 +141,6 @@ test('the chat script: a file a reply attaches is never read (no request at all)
     asked.length = 0;
     const file = await ask('as a file please', 1);
     assert.deepEqual(file.mods, [], 'an attached file is not read');
-    assert.equal(file.pickup, 'auto');
     const both = await ask('file and block, the same mod', 2);
     assert.equal(both.mods.length, 1, 'the code block only');
     assert.deepEqual(asked, [], `the chat script asked for nothing: ${asked.join(', ')}`);
@@ -150,17 +149,6 @@ test('the chat script: a file a reply attaches is never read (no request at all)
       assert.equal(src.includes(route), false, `chat.js has no ${route}`);
     }
 
-    // The button path (ClaudePane.pickup = .button): done carries no mods; the person's Add to TRIF tap does.
-    await page.goto(`${base}/chat.html`);
-    await page.addScriptTag({ content: `${STUB} globalThis.__trifChatPickup = 'button';` });
-    await page.addScriptTag({ content: CHAT });
-    const done = await ask('Make the headings green', 1);
-    assert.equal(done.pickup, 'button');
-    assert.deepEqual(done.mods, []);
-    await page.waitForFunction(() => (document.querySelector('.trif-add') ? [1] : null));
-    await page.click('.trif-add');
-    const [mod] = await waitPost(page, 'mod');
-    assert.match(mod.text, /@name\s+Calmer feed[\s\S]*==\/WebMod==/);
   } finally {
     if (browser) await browser.close();
     server.close();

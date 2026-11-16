@@ -3,20 +3,32 @@
 // what each command does, its options, and short copy-pasteable examples.
 
 const P = require('./paths');
+const S = require('./preinstalled');
+
+// The sites Tim has mods for, from PREINSTALLED ("Google, X, … and timsrobot.com"), and those TRIF doesn't
+// turn on for when they're added.
+const words = (list) => (list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`);
+const STARTER_SITES = words(S.starterSites().map(S.siteName));
+const STARTER_OFF = S.starterSites().filter((s) => !S.SITES_ON.includes(s));
 
 const COMMANDS = {
   setup: {
-    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples] [--verbose] [--no-wait]',
+    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
-    details: `First time: npx trif setup   (needs Node 18 or newer).
+    details: `First time: npx timsrobot setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
 workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
-refreshes AGENTS.md and CLAUDE.md there from those files, adds the mods TRIF ships (Google, X, Amazon,
-Instagram; some on, some off) the first time, and each new one a later version brings, switched off
-(each once: never again after you delete one, never over your own file; --no-examples skips them),
-updates the ones you haven't changed (a changed one is offered the new version), writes bin/trif-host
+refreshes AGENTS.md and CLAUDE.md there from those files. Tim's mods (the mods TRIF ships, for
+${STARTER_SITES}; each starts off) are added only for the sites you choose: on the
+setup page in your browser (a checklist, site by site, or "Start with none"), later in Settings in the
+panel or with the "Add Tim's mods" link on a site's panel, or here: --examples adds every site's,
+--examples x.com,google.com those sites', --no-examples none. Adding a site's turns TRIF on for it${STARTER_OFF.length ? ` (not
+${words(STARTER_OFF)})` : ''}. A site you added gets each new mod a later version brings for it, switched off (each
+once: never again after you delete one, never over your own file), and setup updates the ones you
+haven't changed (a changed one is offered the new version); a site you didn't add gets nothing. A
+workspace from before 0.2.5 counts as having added every site it has mods for. It writes bin/trif-host
 and bin/trif wrappers with an absolute node path (and the same as bin/webmods-host and bin/webmods, their
 names before 0.2.0), writes the native messaging host manifest for each
 browser (default: every browser whose profile folder exists) allowing every TRIF extension ID (plus
@@ -35,7 +47,7 @@ agent for the side panel, and writes .claude/settings.json (what Claude Code may
 Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;
 --bin-dir DIR links the CLI there instead of /usr/local/bin.
 Run it again after upgrading TRIF, moving the repo or upgrading Node.`,
-    examples: ['npx trif setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'node helper/cli.js setup --copy'],
+    examples: ['npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
   },
   status: {
     usage: 'trif status [TAB]',
@@ -71,20 +83,31 @@ Exit code 1 if anything failed. Fix problems top-down.`,
     examples: ['trif tabs'],
   },
   run: {
-    usage: "trif run [TAB] [--timeout MS] '<code>' | -f file.js | -",
-    summary: 'run JavaScript in the page and print the result',
-    details: `Runs in the page's own JavaScript world (same window as the site and its mods), inside an async
-function, so await works. A single expression is returned automatically (REPL-style); for several
-statements write a function body and use return. -f runs a file; - reads the code from stdin.
-The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come back as outerHTML
-(first 2000 chars). Default timeout 10000 ms.`,
+    usage: "trif run [TAB] [--box | --page] [--timeout MS] '<code>' | -f file.js | -",
+    summary: 'run JavaScript on the page and print the result',
+    details: `Inside an async function, so await works. A single expression is returned automatically
+(REPL-style); for several statements write a function body and use return. -f runs a file; - reads the
+code from stdin. The result is printed as pretty JSON, or as-is if it's a string. Default timeout 10000 ms.
+
+Where it runs:
+  --box   TRIF's box: the API a boxed mod has (page, trif: BOXED.md), plus what's typed in the page's
+          fields (el.value) and the page's data behind an element (el.pageData('props.x')). It can read
+          the page and change what it shows; it can't send, click, type or navigate. Nothing is paused and
+          the user isn't asked. Elements come back as a short description (<button#id.class>).
+  --page  the page's own JavaScript world (document, window, the site's own code and its mods'). From a
+          chat, this pauses the site's posting in every tab until the tab reloads, and may ask the user
+          first. DOM nodes come back as outerHTML (first 2000 chars).
+In a chat (a side-panel run) the box is the default: use it for looking around, and --page only for what
+needs the page's own code. From a terminal the page's world is the default.`,
     examples: [
-      "trif run 'document.title'",
-      "trif run --url x.com 'document.querySelectorAll(\"article\").length'",
-      "trif run 'const a = [...document.links].map(l => l.href); return a.slice(0, 20)'",
-      "trif run 'await (await fetch(\"/api/me\")).json()'",
+      "trif run 'page.title'",
+      "trif run 'page.findAll(\"article\").length'",
+      "trif run 'page.findAll(\"a\").slice(0, 20).map((a) => a.attr(\"href\"))'",
+      "trif run 'page.find(\"[data-testid=tweet]\").pageData(\"props\")'",
+      "trif run --page 'document.title'",
+      "trif run --page 'Object.keys(window).filter((k) => k.startsWith(\"__\"))'",
       'trif run -f probe.js',
-      "echo 'location.href' | trif run -",
+      "echo 'page.url' | trif run -",
     ],
   },
   reload: {
@@ -98,6 +121,53 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     summary: 'open a URL in a new background tab and wait for it to load; prints the tab id',
     details: 'https:// is added when the URL has no scheme.',
     examples: ['trif open example.com'],
+  },
+  reject: {
+    usage: 'trif reject <site>/<mod>',
+    summary: "don't allow a waiting change to a mod: the version before is put back (a mod that never ran goes to the trash); refused inside a run",
+    examples: ['trif reject all-sites/dark-everywhere'],
+  },
+  history: {
+    usage: 'trif history <site>/<mod>',
+    summary: "what side-panel runs changed in a mod (kept 30 days), newest first",
+    examples: ['trif history x.com/hide-reposts'],
+  },
+  export: {
+    usage: 'trif export <site>/<mod> [--to <dir>]',
+    summary: "copy a mod's file to ~/Downloads (or --to) as <site>-<mod>.js, to share it; refused inside a run",
+    examples: ['trif export x.com/hide-reposts'],
+  },
+  import: {
+    usage: 'trif import <file> [--site <site>] [--replace | --as-copy]',
+    summary: "add a mod from a file: its site from its @match (or --site); never over a mod without --replace (which keeps the old one in history) or --as-copy; held like any mod from outside; refused inside a run",
+    examples: ['trif import ~/Downloads/x.com-hide-reposts.js'],
+  },
+  files: {
+    usage: 'trif files <site>',
+    summary: "list the files the user added for a site (sites/<site>/files/): data for its mods, never run as one",
+    examples: ['trif files x.com'],
+  },
+  add: {
+    usage: 'trif add <file> --site <site>',
+    summary: "add a file to a site's files (sites/<site>/files/, up to 50 MB, never over another); refused inside a run",
+    examples: ['trif add ~/Music/ding.opus --site x.com'],
+  },
+  reveal: {
+    usage: 'trif reveal <site>/<mod> [--editor]',
+    summary: "show a mod's file in Finder (its folder elsewhere), or with --editor open it in the system's app for .js; refused inside a run",
+    examples: ['trif reveal x.com/hide-reposts', 'trif reveal x.com/hide-reposts --editor'],
+  },
+  undo: {
+    usage: 'trif undo <site>/<mod>',
+    summary: "put back the version before a side-panel run's last change (a mod it created goes to the trash); refused inside a run",
+    details: 'Each undo keeps what it replaced, so undoing can be undone the same way; trif history lists what is kept.',
+    examples: ['trif undo x.com/hide-reposts'],
+  },
+  close: {
+    usage: 'trif close --tab <id> | --url <part of its address> [--force]',
+    summary: 'close a tab (one you opened with trif open); not the one the user is looking at, unless --force',
+    details: 'Tabs a side-panel run opened with trif open are closed when the run ends anyway.',
+    examples: ['trif close --tab 123'],
   },
   navigate: {
     usage: 'trif navigate [TAB] <url>',
@@ -191,9 +261,10 @@ responses you want to grep.`,
     examples: ['trif request --url x.com 12', 'trif request 12 -o /tmp/timeline.json'],
   },
   errors: {
-    usage: 'trif errors [TAB]',
-    summary: 'errors thrown by mods in that page (check after every reload)',
-    examples: ['trif errors --url example.com'],
+    usage: 'trif errors [TAB] [--page]',
+    summary: 'errors thrown by mods in that page (check after every reload); --page: the page\'s own errors',
+    details: "TRIF's runtime only runs on sites where a mod is on or recording is on, so elsewhere neither list has anything; reload after switching one on to catch errors from the page's start.",
+    examples: ['trif errors --url example.com', 'trif errors --page'],
   },
   logs: {
     usage: 'trif logs [TAB]',
@@ -211,9 +282,15 @@ yourself also releases it. Not available to agents inside a side-panel run.`,
   },
   check: {
     usage: 'trif check <file|site/mod>',
-    summary: 'check that a mod file parses (compiles it without running it)',
-    details: 'Prints the syntax error and where it is, or "ok". Use it instead of node --check.',
+    summary: 'check that a mod parses, and what TRIF reads in it that would make it wait for the user\'s OK',
+    details: 'Prints the syntax error and where it is, or "ok", then each thing TRIF reads in the code that would make the mod wait for the user\'s OK (sending, clicking for the user, loading from addresses it builds, code it can\'t read), the lines, and how to avoid it where there\'s a way. Use it instead of node --check. A style mod: its rules checked. A boxed mod (@boxed): it never waits; instead it lists what the sandbox wouldn\'t give it (window, document, fetch, real elements\' methods, ...), which would fail when it runs.',
     examples: ['trif check sites/x.com/hide-reposts.js', 'trif check x.com/hide-reposts'],
+  },
+  verify: {
+    usage: 'trif verify <site>/<mod> [TAB]',
+    summary: 'after saving a mod: check it, reload the tab, and say whether it runs there, with its errors and logs',
+    details: 'One step for what you do after every save: trif check, a wait until the browser has the version you saved, trif reload, whether the mod runs on that page (or why not: held for the user\'s OK, switched off, its @match), then trif errors and trif logs for the tab. Then look at the page yourself (trif sweep, trif run, trif screenshot) for what you set out to change.',
+    examples: ['trif verify x.com/hide-reposts --tab 12'],
   },
   enable: {
     usage: 'trif enable <site>/<mod> [--site HOST] [TAB]',
@@ -291,7 +368,7 @@ shipped before (what the user's copy started from), for merging.
 The user's choice: not available inside a side-panel run (the panel's "Merge with my agent" starts a
 chat in which the agent proposes the merge first and makes it once the user agrees; the update is settled
 when the user's copy has the new @version).`,
-    examples: ['trif mod-update x.com/plain-x', 'trif mod-update x.com/plain-x --use-new', 'trif mod-update x.com/plain-x --keep'],
+    examples: ['trif mod-update x.com/detox-timeline', 'trif mod-update x.com/detox-timeline --use-new', 'trif mod-update x.com/detox-timeline --keep'],
   },
   mods: {
     usage: 'trif mods',
@@ -301,17 +378,23 @@ TRIF, version N", and "update available" when a newer version is waiting (trif m
     examples: ['trif mods', 'trif mods --json'],
   },
   new: {
-    usage: 'trif new <site> <mod>',
-    summary: 'create sites/<site>/<mod>.js from a template and print its path',
+    usage: 'trif new <site> <mod> [--style | --boxed]',
+    summary: 'create sites/<site>/<mod>.js from a template and print its path (--style: a style mod, data instead of code; --boxed: a boxed mod, JavaScript in TRIF\'s sandbox)',
     details: `<site> is a hostname (x.com, news.ycombinator.com); <mod> is a kebab-case name. The template has
-the header plus helpers for injecting CSS and handling elements that appear later.`,
-    examples: ['trif new example.com hide-banner'],
+the header plus helpers for injecting CSS and handling elements that appear later. --style makes a style
+mod: CSS, things to hide, text to replace and items to filter, as data that TRIF's own code runs, so it
+never waits for the user's OK (see "Style mods" in TECHNIQUES.md). --boxed makes a boxed mod: JavaScript
+that runs in TRIF's sandbox with only TRIF's API (page, trif, element stand-ins, timers), so it never waits
+for the user's OK either (see BOXED.md). Without either, a free mod: JavaScript in the
+page with everything it has. Write the lowest that does the job: style, then boxed, then free. (--rules
+and --sandboxed are the old names of --style and --boxed, and still work.)`,
+    examples: ['trif new example.com hide-banner --style', 'trif new example.com bouncing-logo --boxed', 'trif new example.com hide-banner'],
   },
   'install-example': {
     usage: 'trif install-example <site>/<mod> [--force]',
     summary: 'copy a ready-made example mod into the workspace',
     details: 'Run without an argument to list the available examples. --force overwrites an existing mod.',
-    examples: ['trif install-example x.com/plain-x'],
+    examples: ['trif install-example x.com/detox-timeline'],
   },
   agent: {
     usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts] | agent key [opts]',
@@ -346,6 +429,16 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
       'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key',
       'trif agent key --agent codex --set-key'],
   },
+  explain: {
+    usage: 'trif explain [TERM]',
+    summary: 'what a word the side panel shows means: a tier, power, chip, tag, warning or agent level',
+    details: `With no TERM, every term, by group. With one (its id or its label, case aside: read-drafts, Ask first,
+@migrate, changes requests), its line (the sentence the panel, the approval card and trif status show),
+its explanation (what the panel's "more" shows the user) and notes for you: when to use it, what's
+refused, the narrower ways round. Two terms with one name (Off: an agent level and a face) both show;
+agent-levels/off picks one. Works without the browser, and in side-panel runs.`,
+    examples: ['trif explain', 'trif explain read-drafts', 'trif explain "Ask first"', 'trif explain agent-levels/off', 'trif explain sound --json'],
+  },
   help: {
     usage: 'trif help [command]',
     summary: 'this help, or details and examples for one command',
@@ -355,11 +448,11 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example', 'mod-update']],
-  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
-  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'export', 'import', 'files', 'add', 'install-example', 'mod-update']],
+  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
+  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'verify', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
-  ['', ['help']],
+  ['', ['explain', 'help']],
 ];
 
 function pad(s, n) { return s.length >= n - 1 ? s + '\n' + ' '.repeat(n + 2) : s + ' '.repeat(n - s.length); }

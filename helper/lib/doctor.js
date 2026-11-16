@@ -6,10 +6,11 @@ const path = require('path');
 const { envVar } = require('./env');
 const { spawnSync } = require('child_process');
 const P = require('./paths');
-const { browserTable, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
+const { browserTable, browsersSetUp, manifestFiles, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
 const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
-const { scanMods, planModsMessage } = require('./mods');
+const { browserFamily, browserLabel } = require('./browsers');
+const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
 const { isExecutable } = require('./setup');
 const { isWindows, panelRunsOff } = require('./platform');
 const { firefoxAddonUrl } = require('./update');
@@ -34,7 +35,7 @@ function isInside(child, parent) {
 
 /**
  * Is the host wrapper's script a sensible one? Copy installs run <home>/app/helper/host.js (whichever
- * copy of the CLI is asking, e.g. `npx trif doctor`); link installs run this checkout's host.js.
+ * copy of the CLI is asking, e.g. `npx timsrobot doctor`); link installs run this checkout's host.js.
  * Returns null when fine, else { status, title, fix? }.
  */
 function checkWrapperScript(script, ws) {
@@ -142,7 +143,7 @@ async function doctor(opts = {}) {
   // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
   const setupFix = P.isGitCheckout()
     ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
-    : 'run: npx trif setup   (or: trif setup)';
+    : 'run: npx timsrobot setup   (or: trif setup)';
   let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node
@@ -230,14 +231,18 @@ async function doctor(opts = {}) {
   } else {
     // Native host manifests
     let targets;
+    let withManifest;
     if (opts.nativeDir) {
-      targets = [{ key: 'custom', label: opts.nativeDir, nativeDir: path.resolve(opts.nativeDir), detected: true }];
+      targets = [{ key: 'custom', label: opts.nativeDir, nativeDirs: [path.resolve(opts.nativeDir)], detected: true }];
+      withManifest = targets.filter((t) => fs.existsSync(manifestFiles(t)[0]));
     } else {
-      targets = browserTable(opts.homedir, platform, opts.env).filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
+      const table = browserTable(opts.homedir, platform, opts.env);
+      // Set up: a manifest in one of its folders (browsers.js browsersSetUp: Chrome's folder alone, written
+      // for Arc, isn't Chrome set up). Else, detected: setup would set it up, and its failure is above.
+      withManifest = browsersSetUp(table).filter((b) => !b.safari);
+      targets = table.filter((b) => !b.safari && (b.detected || withManifest.includes(b)));
     }
     const safari = !opts.nativeDir && browserTable(opts.homedir, platform, opts.env).find((b) => b.safari && b.detected);
-    // Set up: a manifest there (else, detected: setup would set it up, and its failure is above).
-    const withManifest = targets.filter((t) => fs.existsSync(path.join(t.nativeDir, `${P.HOST_NAME}.json`)));
     for (const t of withManifest.length ? withManifest : targets) {
       if (t.firefox) setUp.firefox = true;
       else if (t.key !== 'custom' && !setUp.chromium.includes(t.label)) setUp.chromium.push(t.label);
@@ -253,9 +258,19 @@ async function doctor(opts = {}) {
         `fix them (32 letters a-p each) in ${path.join(ws.home, 'config.json')}`);
     }
     for (const t of targets) {
-      const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
+      // The manifest the browser reads (Arc: Chrome's folder's; setup also writes one in its own).
+      const file = manifestFiles(t)[0];
       const fix = `${setupFix}${t.key !== 'custom' ? ` --browser ${t.key}` : ''}`;
-      if (!fs.existsSync(file)) { add('fail', `${t.label}: native host manifest missing (${file})`, fix); continue; }
+      if (!fs.existsSync(file)) {
+        // A browser whose profile folder is there but which setup never did, while others are set up: one
+        // installed (or first opened) after setup, which updates don't add (they keep the browsers set up),
+        // one setup was told to leave out (--browser), or one long gone that left its folder. Not a problem
+        // unless TRIF is meant to work in it. (Set up, but not where it reads: Arc, by an older setup.)
+        const elsewhere = withManifest.includes(t);
+        if ((withManifest.length || safari) && t.key !== 'custom' && !elsewhere) add('info', `${t.label}: not set up (only needed if you use TRIF in ${t.label})`, fix);
+        else add('fail', `${t.label}: native host manifest missing (${file})${elsewhere ? `, where ${t.label} reads it` : ''}`, fix);
+        continue;
+      }
       let m;
       try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
         add('fail', `${t.label}: native host manifest is not valid JSON (${file})`, fix); continue;
@@ -339,10 +354,10 @@ async function doctor(opts = {}) {
     if (!info.extension) {
       add('fail', 'the helper is running but the extension never said hello', `reload the extension at ${EXT_URL} (or restart Chrome) and run trif doctor again; check ${ws.log}`);
     } else {
-      const firefox = info.extension.browser === 'Firefox';
-      add('ok', `extension v${info.extension.version} on ${info.extension.browser || 'Chrome'} ${info.extension.chrome}`);
+      const firefox = browserFamily(info.extension) === 'firefox';
+      add('ok', `extension v${info.extension.version} on ${browserLabel(info.extension)}`);
       if (info.extension.userScripts) add('ok', firefox ? 'user scripts are allowed' : '"Allow User Scripts" is on');
-      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', 'click the TRIF toolbar button in Firefox, then "Allow user scripts", then reload your tabs');
+      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', `click the TRIF toolbar button in ${info.extension.browser || 'Firefox'}, then "Allow user scripts", then reload your tabs`);
       else add('fail', '"Allow User Scripts" is OFF, so mods can\'t run', `open ${EXT_URL}, turn on "Allow User Scripts", then reload your tabs`);
     }
     for (const e of (info.modsApplied && info.modsApplied.errors) || []) {
@@ -355,12 +370,28 @@ async function doctor(opts = {}) {
 
   // Mods
   const { mods, problems, warnings } = scanMods(ws.modsDir);
-  const plan = planModsMessage(mods);
+  const plan = planMods(mods);
   const modProblems = [...problems, ...plan.errors];
+  // The helper also leaves mods out for an extension too old to take more than 1 MB of them (limit 'extension').
+  if (info) for (const e of info.modErrors || []) if (e.limit === 'extension') modProblems.push(e);
+  const mb = (n) => `${n / (1024 * 1024)} MB`;
+  const advice = {
+    mod: `make the mod smaller: keep sounds, pictures and other big data out of its code (a mod can be up to ${mb(MAX_MOD_BYTES)})`,
+    total: `remove mods you don't use, or make big ones smaller: all of them together can be up to ${mb(MAX_MODS_BYTES)}`,
+    extension: info?.extension && browserFamily(info.extension) === 'firefox' ? 'update the add-on: about:addons, the gear, Check for Updates'
+      : info?.extension && browserFamily(info.extension) === 'safari' ? 'build and open TRIF.app from this version' : `update the extension: reload TRIF on ${EXT_URL}`,
+  };
   if (fs.existsSync(ws.modsDir)) {
     if (!modProblems.length) add('ok', `${plural(mods.length, 'mod')} in ${ws.modsDir}`);
-    for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, p.error.includes('1 MB') ? 'make the mod smaller (move data out, or split it)' : 'check the file');
+    for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, advice[p.limit] || 'check the file');
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
+  }
+  // The mods feed (new versions of Tim's mods between releases, lib/modsfeed.js): its last check's problem.
+  let feed = null;
+  try { feed = require('./modsfeed').status(ws); } catch { /* not checked */ }
+  if (feed && feed.problem) {
+    add('warn', `Tim's mods: the last check for their new versions (the mods feed${feed.checkedAt ? `, ${new Date(feed.checkedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''}) failed: ${feed.problem}`,
+      "nothing changed because of it; it's checked again with TRIF's update check (trif update checks now)");
   }
 
   // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside

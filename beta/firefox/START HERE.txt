@@ -22,7 +22,7 @@ Install (about 2 minutes)
 2. Open Terminal and paste these two lines (change the path if this folder isn't in Downloads):
 
      cd ~/Downloads/trif-beta-firefox
-     npx --yes --package ./trif-{{VERSION}}.tgz trif setup --browser firefox
+     npx --yes --package ./timsrobot-{{VERSION}}.tgz trif setup --browser firefox
 
    It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
    ignore its note about PATH.

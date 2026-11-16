@@ -5,9 +5,12 @@ unlisted item gets **the same review** as a public one. Unlisted only hides it f
 
 ## Expect a long, manual review
 
-The permission set includes `userScripts`, `nativeMessaging`, the `<all_urls>` host permission,
-`tabs` and `scripting`. That combination is about as broad as an extension gets. The dashboard will
-warn that broad host permissions trigger an in-depth review. Plan for **several business days, up to
+The permission set includes `userScripts`, `nativeMessaging`, `tabs`, `scripting` and `activeTab`. Host
+access is optional: `optional_host_permissions: ["<all_urls>"]`, nothing required, so the install prompt
+has no "all your data on all websites" line, and TRIF asks for each site (its domain and subdomains) when
+the user turns TRIF on there (see §4). That's narrower than before (`<all_urls>` was required until this
+change), but `userScripts` plus `nativeMessaging` is still broad, and the dashboard may still flag the
+optional `<all_urls>` as a broad host permission. Plan for **several business days, up to
 two or three weeks** for the first submission, possibly with a follow-up email asking for
 clarification. Submit with **"Publish automatically after review" turned off** (deferred publishing)
 so you control when beta testers get it.
@@ -22,8 +25,8 @@ under the **minimum functionality** policy, or "couldn't verify functionality".
 
 Mitigations:
 - **Make the helper installable by a stranger before submitting.** Today the repo has no git remote
-  and the npm package `trif` isn't published (the name was free on npm on 2026-11-01). The
-  setup page and listing say `npx trif setup`, so that command must work for the reviewer.
+  and the npm package `timsrobot` isn't published (npm refused `trif` on 2026-11-05 as too close to other names). The
+  setup page and listing say `npx timsrobot setup`, so that command must work for the reviewer.
   Either publish the npm package, or host a tarball or public repo and change the instructions.
 - Say clearly in the **listing description** (already done in `listing.md`) that a separately
   installed helper and a coding agent are required.
@@ -74,18 +77,21 @@ Mitigations:
 - Consider raising `minimum_chrome_version` to `"138"`. Then every user gets the same, documented
   switch instead of a Developer-mode requirement.
 
-## 4. Permission scope: `<all_urls>`, `tabs`, `scripting` (medium)
+## 4. Permission scope: optional `<all_urls>`, `tabs`, `scripting`, `activeTab` (medium-low)
 
-- `<all_urls>` is needed, because mods can target any site the user chooses. The justification in
-  `listing.md` explains this. Expect it to be the main reason for the in-depth review rather than a
-  rejection.
-- **`tabs` may be redundant.** With the `<all_urls>` host permission, Chrome already exposes
-  `tab.url` and `tab.title` for web pages. Granting `tabs` adds the separate "Read your browsing
-  history" install warning, and reviewers do reject unneeded permissions. Before submitting, try
-  removing `tabs` and check: the side panel following the site, `trif tabs`, tab selection by URL,
-  finding the setup tab (`chrome.tabs.query({url: <extension page>})`), and screenshots. If
-  everything works, drop it and its justification. If something needs it, note what in the
-  justification.
+- The user picks Permissive or Restrictive on the setup page (and can switch in the panel's settings).
+  Permissive requests `<all_urls>` from that click, so Chrome's own prompt says what it means. Restrictive
+  asks for one site (`*://*.<site>/*`) when the user clicks Connect in the panel there, and "Disconnect from
+  <site>" gives it back. Say so if asked: mods can be for any site the user picks, hence the wide
+  optional entry. Users who installed while `<all_urls>` was required keep it (Chrome keeps a granted
+  permission that moves to optional). A block list keeps TRIF off chosen sites whatever access it has.
+- **`tabs` is needed now.** Without host access, Chrome hides `tab.url` and `tab.title` of sites TRIF
+  isn't allowed on unless it has `tabs`, and the side panel must know the site of the current tab to offer turning TRIF on
+  there; `trif tabs` and tab selection by URL need them too. It brings the "Read your browsing history"
+  install warning; the justification in `listing.md` says why.
+- `activeTab` (no install warning) is for screenshots: Chrome's `captureVisibleTab` wants `<all_urls>` or
+  `activeTab`, a site's own access isn't enough. The toolbar button opens the side panel from
+  `action.onClicked` so that its click grants it.
 - `scripting` is used for page text and debugging reads. Its justification is specific. Keep it.
 
 ## 5. Privacy disclosures must match the code (medium)
@@ -105,7 +111,8 @@ Mitigations:
 The extension also does tab automation for the agent: open, navigate, reload, screenshot, record
 network requests.
 
-**Copy windows (`trif screenshot --copy`).** For a tab that isn't showing, Chrome can't capture it
+**Copy windows (`trif screenshot --copy`).** (Only with access to every site, i.e. for users who installed
+TRIF when `<all_urls>` was required: a new user's TRIF refuses `--copy`, see §4.) For a tab that isn't showing, Chrome can't capture it
 without switching tabs, so when the agent asks for a copy the extension opens a new, unfocused window
 at the edge of the screen (`chrome.windows.create`), loads the same URL there (with the user's cookies,
 like any tab), captures it with `captureVisibleTab` and closes it, usually within a couple of seconds.
@@ -159,7 +166,7 @@ holding these steps.
 TRIF runs site customizations ("mods") written by the user's own coding agent. It needs a small helper program on the computer (macOS or Linux, Node.js 18+). Without the helper, the extension only shows its setup page. The steps below take about 3 minutes, and the main path needs no AI account.
 
 1. Install the extension, then install the helper in a terminal:
-     npx trif setup
+     npx timsrobot setup
    (or: <alternative install instructions / tarball URL>)
    Quit and reopen Chrome.
 2. A "TRIF setup" page opens (or click the toolbar icon, then "Setup"). Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" and switch it on. The setup page ticks off "Install the helper" and "Allow user scripts".

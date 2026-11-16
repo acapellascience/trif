@@ -58,10 +58,15 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   assert.match(providerToml(c.args), /name = "LM Studio \(TRIF\)", base_url = "http:\/\/127\.0\.0\.1:1234\/v1"/);
   assert.deepEqual(c.args.slice(-3), ['-m', 'qwen/qwen3-coder-30b', '-']);
 
-  // OpenRouter: Codex gets no key and no key variable: its base_url is the run's key proxy (prepare).
-  om = { ...oss.resolve({ provider: 'openrouter' }, null, 'qwen/qwen3-coder'), proxyUrl: 'http://127.0.0.1:5555/0123abcd/v1' };
-  c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS });
-  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:5555/0123abcd/v1", wire_api = "responses", supports_websockets = false }');
+  // OpenRouter: Codex gets no key and no key variable: its base_url is the run's key proxy (prepare), and
+  // the proxy's token is in a file in the run's folder, which Codex reads (`auth`): not in argv.
+  const TOKEN = 'f'.repeat(64);
+  om = { ...oss.resolve({ provider: 'openrouter' }, null, 'qwen/qwen3-coder'), proxyUrl: 'http://127.0.0.1:5555/v1', proxyToken: TOKEN };
+  c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS, agentDir: '/boxes/r1.agent' });
+  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:5555/v1", wire_api = "responses", auth = { command = "/bin/cat", args = ["/boxes/r1.agent/key-proxy-token"] }, supports_websockets = false }');
+  assert.deepEqual(c.files, [{ path: '/boxes/r1.agent/key-proxy-token', content: TOKEN }]);
+  assert.ok(!c.args.join(' ').includes(TOKEN) && !c.stdin.includes(TOKEN));
+  assert.throws(() => oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS }), /no run folder for the key proxy's token/);
   assert.ok(!c.args.some((a) => /env_key/.test(a)));
   assert.ok(c.args.includes(EXCLUDE));
   assert.deepEqual(c.args.slice(-3), ['-m', 'qwen/qwen3-coder', '-']);
@@ -77,9 +82,10 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   assert.equal(oss.modelNote(om), "(This chat's model is big-model, served by llm.example.com. Codex CLI is only the program running it: its built-in instructions are written for OpenAI's models. Asked which model you are, that's the answer: big-model.)");
   assert.match(oss.modelNote(oss.resolve({ provider: 'openrouter' }, null, 'moonshotai/kimi-k2')), /^\(This chat's model is moonshotai\/kimi-k2, served by OpenRouter\. /);
   assert.match(oss.modelNote(oss.resolve({ provider: 'ollama' })), /model is gpt-oss:20b, running on this computer in Ollama\./);
-  // The plain Codex option is untouched by all this.
+  // The plain Codex option is untouched by all this (no web search either: codex.js, every run).
   const plain = require('../helper/lib/agents/codex').command({ bin: 'codex', prompt: 'P', ...LIMITS });
-  assert.ok(!plain.args.some((a) => /trif-open|web_search/.test(a)));
+  assert.ok(!plain.args.some((a) => /trif-open/.test(a)));
+  assert.equal(plain.args.filter((a) => a === 'web_search="disabled"').length, 1);
 });
 
 test('settings: resolve (defaults, a run\'s own choice, model), keyring accounts, validation; never a key', () => {
@@ -239,8 +245,9 @@ test('keyring: macOS `security` (written through -i on stdin, as hex: never in a
 });
 
 // A fake codex: `--version`; `exec` dumps argv and env to <dir>/calls, asks its base_url for /models (the
-// key proxy, whose stand-in upstream echoes the Authorization header it got) and plays a run that leaks
-// what came back on stdout and stderr, to check the helper redacts it.
+// key proxy, whose stand-in upstream echoes the Authorization header it got; with the token its provider's
+// `auth` command prints, as Codex 0.166 does, kept in calls/token-<pid>) and plays a run that leaks what
+// came back on stdout and stderr, to check the helper redacts it.
 const FAKE_CODEX = `#!${process.execPath}
 'use strict';
 const fs = require('fs');
@@ -256,7 +263,14 @@ const base = (/base_url = "([^"]+)"/.exec(prov) || [])[1] || '';
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 (async () => {
   let got = '';
-  try { const r = await fetch(base + '/models'); got = (await r.json()).auth || ''; } catch (e) { got = 'unreachable ' + e.message; }
+  const auth = /auth = . command = "([^"]+)", args = ."([^"]+)". ./.exec(prov); // auth = { command = "…", args = ["…"] }
+  const headers = {};
+  if (auth) {
+    const token = require('child_process').execFileSync(auth[1], [auth[2]], { encoding: 'utf8' }).trim();
+    fs.writeFileSync(path.join(calls, 'token-' + process.pid), token);
+    headers.authorization = 'Bearer ' + token;
+  }
+  try { const r = await fetch(base + '/models', { headers }); got = (await r.json()).auth || ''; } catch (e) { got = 'unreachable ' + e.message; }
   say({ type: 'thread.started', thread_id: 'th-oss-1' });
   say({ type: 'item.completed', item: { id: 'i0', type: 'error', message: 'Model metadata for \`x\` not found. Defaulting to fallback metadata' } });
   say({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'leaking ' + got } });
@@ -278,7 +292,7 @@ function makeHome(config = {}) {
 }
 function lastCall(bin) {
   const dir = path.join(bin, 'calls');
-  const names = fs.readdirSync(dir).sort();
+  const names = fs.readdirSync(dir).filter((f) => !f.startsWith('token-')).sort();
   return JSON.parse(fs.readFileSync(path.join(dir, names[names.length - 1]), 'utf8'));
 }
 let reqN = 0;
@@ -382,7 +396,12 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   assert.ok(!call.argv.some((a) => /env_key/.test(a)));
   assert.ok(call.argv.includes(EXCLUDE));
   const base = /base_url = "([^"]+)"/.exec(providerToml(call.argv))[1];
-  assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1$/);
+  // (no secret in the address, which is in Codex's argv: the proxy's token, from a file of the run's)
+  assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/v1$/);
+  const tokenFile = fs.readdirSync(path.join(bin, 'calls')).find((f) => f.startsWith('token-'));
+  const token = fs.readFileSync(path.join(bin, 'calls', tokenFile), 'utf8');
+  assert.match(token, /^[0-9a-f]{64}$/);
+  assert.ok(!JSON.stringify(call).includes(token), 'the proxy\'s token is in no argv or environment');
   assert.deepEqual(call.argv.slice(call.argv.indexOf('-m'), call.argv.indexOf('-m') + 2), ['-m', 'qwen/qwen3-coder']);
   // The proxy added the key on the way to the provider.
   const viaProxy = srv.requests.filter((x) => x.url === '/v1/models');
@@ -413,7 +432,7 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   const r3 = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: '-P-FAIL', openModel: { provider: 'custom', baseUrl: 'http://127.0.0.1:9/v1' }, model: 'm1' });
   const d3 = await waitDone(ext, r3.result.runId);
   assert.equal(d3.ok, false);
-  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1"/);
+  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/v1", wire_api = "responses", auth = /);
   assert.ok(!JSON.stringify(eventsOf(ext, r3.result.runId)).includes(FAKE_KEY));
   assert.ok(!fs.readFileSync(path.join(privDir(home), 'runs', `${r3.result.runId}.jsonl`), 'utf8').includes(FAKE_KEY));
 });
@@ -460,6 +479,10 @@ test('`trif agent open-model`: --set-key from stdin (never argv), --remove-key; 
   assert.equal(res.code, 0, res.stderr);
   assert.match(res.stdout, /provider {2}ollama .*not set up yet/);
   assert.doesNotMatch(res.stdout, /API key/);
+  // A local server has no key: removing one (as the README's uninstall steps do) is fine, not an error.
+  res = await runCli(['agent', 'open-model', '--remove-key'], { home, env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /^There was no API key saved\.$/m);
   res = await runCli(['agent', 'open-model', '--provider', 'openrouter', '--model', 'z-ai/glm-5.3'], { home, env });
   assert.equal(res.code, 0, res.stderr);
   assert.match(res.stdout, /API key {3}none yet: trif agent open-model --set-key/);
@@ -661,20 +684,31 @@ test('codex-oss prepare: a proxy only with a saved key, read afresh each run; th
   const prep = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
   assert.deepEqual(prep.env, {});
   assert.ok(prep.unsetEnv.includes('OPENAI_API_KEY') && prep.unsetEnv.includes('ANTHROPIC_API_KEY'));
-  assert.deepEqual(prep.secrets, [FAKE_KEY]);
   assert.equal(prep.state.openModel.baseUrl, `${srv.url}/v1`); // (messages name the real server)
   const proxied = prep.options.openModel.proxyUrl;
+  const token = prep.options.openModel.proxyToken;
   cleanups.push(() => prep.cleanup());
-  assert.match(proxied, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1$/);
-  assert.ok(!JSON.stringify(oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, ...prep.options }).args).includes(FAKE_KEY));
-  const ok = await fetch(`${proxied}/models`);
+  // The address has no secret in it (it goes in Codex's argv); the token is what opens the proxy, and it
+  // goes into a file of the run's (redacted from logs too).
+  assert.match(proxied, /^http:\/\/127\.0\.0\.1:\d+\/v1$/);
+  assert.match(token, /^[0-9a-f]{64}$/);
+  assert.deepEqual(prep.secrets, [FAKE_KEY, token]);
+  const cmd = oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, agentDir: '/boxes/r2.agent', ...prep.options });
+  assert.ok(!JSON.stringify(cmd.args).includes(FAKE_KEY) && !JSON.stringify(cmd.args).includes(token));
+  assert.deepEqual(cmd.files, [{ path: '/boxes/r2.agent/key-proxy-token', content: token }]);
+  const noToken = await fetch(`${proxied}/models`);
+  assert.equal(noToken.status, 401, 'the address alone opens nothing');
+  assert.match((await noToken.json()).error.message, /doesn't carry the run's token/);
+  assert.equal((await fetch(`${proxied}/models`, { headers: { authorization: `Bearer ${'0'.repeat(64)}` } })).status, 401);
+  const ok = await fetch(`${proxied}/models`, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(ok.status, 200);
+  assert.ok(!srv.requests.some((x) => String(x.headers.authorization || '').includes(token)), 'the token stays between Codex and the proxy');
   await prep.cleanup();
   await assert.rejects(fetch(`${proxied}/models`));
   // Read afresh: a key replaced, then removed, counts for the next run at once.
   await keyring.setKey(account, 'replaced-key-0123456789', { env });
   const p2 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
-  assert.deepEqual(p2.secrets, ['replaced-key-0123456789']);
+  assert.deepEqual(p2.secrets, ['replaced-key-0123456789', p2.options.openModel.proxyToken]);
   await p2.cleanup();
   await keyring.removeKey(account, { env });
   const p3 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
@@ -687,7 +721,7 @@ test('codex-oss prepare: a proxy only with a saved key, read afresh each run; th
   await keyring.setKey(`custom:127.0.0.1:${refusing.address().port}`, FAKE_KEY, { env });
   const warned = [];
   const p4 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `http://127.0.0.1:${refusing.address().port}/v1`, model: 'm' }), env, logger: { warn: (m) => warned.push(m), info() {} } });
-  assert.equal((await fetch(`${p4.options.openModel.proxyUrl}/responses`, { method: 'POST', body: '{}' })).status, 401);
+  assert.equal((await fetch(`${p4.options.openModel.proxyUrl}/responses`, { method: 'POST', body: '{}', headers: { authorization: `Bearer ${p4.options.openModel.proxyToken}` } })).status, 401);
   assert.deepEqual(warned, ['open model: the model server refused the API key (401)']);
   await p4.cleanup();
   // No key (a local server): no proxy, the keyring isn't asked.
@@ -805,17 +839,23 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   fs.copyFileSync(path.join(__dirname, 'procargs-probe.py'), probe);
   const q = (s) => `'${s}'`;
   const node = process.execPath;
+  // The real interpreter, not /usr/bin/python3: with Xcode installed that's a launcher that stalls in the
+  // sandbox (it wants the user cache folder, which runs can't use), past Codex's 10 s for a command.
+  let py = 'python3';
+  try { py = require('child_process').execFileSync('python3', ['-I', '-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim() || py; } catch { /* python3 as is */ }
   const script = [
     { run: `${q(node)} ${q(CLI_JS)} tabs` },
     // (2>&1: curl's error and its output in one stream, in the order curl wrote them.)
     { run: 'curl -sS -m 5 -o /dev/null -w "%{http_code}" https://example.com 2>&1; echo " curl=$?"' },
     { run: 'LOCAL' }, // filled in below: curl to the model server itself
     { run: `cat ${q(path.join(privDir(home), 'config.json'))}; echo " cat=$?"` },
-    { run: `echo '// mine' > ${q(path.join(home, 'sites', 'example.com', 'oss-probe.js'))} && echo WROTE-OWN` },
-    { run: `echo x > ${q(path.join(home, 'sites', 'other.org', 'oss-probe.js'))}; echo " other=$?"` },
+    // (its working folder is its own copy of the workspace, stage.js: the mods folder itself it can't write)
+    { run: `echo '// mine' > sites/example.com/oss-probe.js && echo WROTE-OWN` },
+    { run: `echo x > sites/other.org/oss-probe.js; echo " other=$?"` },
+    { run: `echo x > ${q(path.join(home, 'sites', 'example.com', 'live-probe.js'))}; echo " live=$?"` },
     { run: 'echo "key=[$TTEST_OR_API_KEY]"; env | grep -c TTEST_OR_API_KEY' },
     // Every same-user process's argv and environment (KERN_PROCARGS2, which the sandbox allows): no key.
-    { run: `python3 -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length} ${sha(MESSAGE)} ${MESSAGE.length}` },
+    { run: `${q(py)} -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length} ${sha(MESSAGE)} ${MESSAGE.length}` },
     { say: 'Done: probed.' },
   ];
   const srv = await startFakeModelServer({ script });
@@ -852,6 +892,9 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   assert.match(out, /operation not permitted[^\n]*other\.org/i, info); // (stderr and stdout can come in either order)
   assert.match(out, /^ other=1$/m, info);
   assert.ok(!fs.existsSync(path.join(home, 'sites', 'other.org', 'oss-probe.js')));
+  assert.match(out, /operation not permitted[^\n]*live-probe/i, info);
+  assert.match(out, /^ live=1$/m, info);
+  assert.ok(!fs.existsSync(path.join(home, 'sites', 'example.com', 'live-probe.js')));
   assert.match(out, /key=\[\]\n0/, info);
   const scan = /procargs scanned=(\d+) key=(\d+) canary=(\d+) prompt=(\d+)/.exec(out);
   assert.ok(scan, info);
@@ -876,4 +919,26 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   assert.equal(d2.ok, true, JSON.stringify(eventsOf(ext, r2.result.runId)));
   assert.equal(d2.sessionId, done.sessionId);
   await waitFor(() => srv.requests.length > before);
+});
+
+test('a model\'s context window: from OpenRouter\'s list, else a cautious default; Codex compacts the chat at 40% of it', async () => {
+  const list = { data: [{ id: 'moonshotai/kimi-k2.7-code', context_length: 262144 }, { id: 'tiny/model', context_length: 8000 }] };
+  const fetchImpl = async (url) => {
+    assert.equal(url, 'https://openrouter.ai/api/v1/models');
+    return { ok: true, json: async () => list };
+  };
+  assert.equal(await oss.contextWindow({ provider: 'openrouter', model: 'moonshotai/kimi-k2.7-code' }, { fetchImpl }), 262144);
+  assert.equal(await oss.contextWindow({ provider: 'openrouter', model: 'not/listed-model' }, { fetchImpl }), 65536);
+  assert.equal(await oss.contextWindow({ provider: 'openrouter', model: 'down/model' }, { fetchImpl: async () => { throw new Error('offline'); } }), 65536);
+  assert.equal(await oss.contextWindow({ provider: 'ollama', model: 'qwen3-coder:30b' }, { fetchImpl: () => assert.fail('no lookup for local models') }), 65536);
+  const om = oss.resolve({ provider: 'openrouter' }, null, 'moonshotai/kimi-k2.7-code');
+  const args = oss.providerArgs({ ...om, contextWindow: 262144 });
+  assert.ok(args.includes('model_context_window=262144'));
+  assert.ok(args.includes(`model_auto_compact_token_limit=${Math.floor(262144 * 0.4)}`));
+  // (a tiny window still leaves Codex something to work with)
+  assert.ok(oss.providerArgs({ ...om, contextWindow: 8000 }).includes('model_auto_compact_token_limit=8192'));
+  assert.ok(!oss.providerArgs(om).some((a) => /model_context_window/.test(a)), 'unknown: nothing said');
+  // The provider's error, when a chat is too long anyway, in the user's terms.
+  const raw = '{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\\"error\\":{\\"code\\":400,\\"message\\":\\"This model\'s maximum context length is 262144 tokens. However, you requested 126417 output tokens and your prompt contains 148903 input tokens"}}"}}}';
+  assert.equal(oss.friendlyFor(om)(raw), 'This chat has grown longer than moonshotai/kimi-k2.7-code can hold. Start a new chat (the + button) and say what you were working on.');
 });

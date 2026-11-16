@@ -1,8 +1,157 @@
 # Changelog
 
-What's new in each TRIF release (called WebMods before 0.2.0). The text under a version is what the side
-panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
-needs a section here for the version it releases.
+What's new in each TRIF release (called WebMods before 0.2.0). From 0.2.6 on, each version starts with a
+short summary, at most 5 points: that's what the side panel shows under "What's new", with a link to the
+rest, which goes under "### More" (and on the GitHub release). It's written for people using TRIF.
+`node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
+summary is too long.
+
+## 0.3.1
+
+- **Edit a mod's code in the panel.** TRIF checks it before saving; an edit that lets the mod do more
+  waits for your OK.
+- **A click on something a mod hid is stopped**, and TRIF says which mod did it.
+- **Tim's mods get fixes between releases**, signed like TRIF's updates. One you changed is never replaced.
+- **TRIF names your browser**: Brave, Edge, Opera, Vivaldi and Arc aren't all called Chrome any more.
+- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
+
+### More
+
+- The code card's Edit has Undo and Redo, shows the line of anything that stops a save, and never
+  overwrites a change made meanwhile in another editor or by your agent. Undo after saving puts the
+  version before back; History keeps it too.
+- The click guard covers style mods and boxed mods: when you press a button or link that a mod's styles
+  made invisible or moved, the press doesn't reach the page. A control the site itself made invisible
+  still works. The mod's row says "stopped a click".
+- If the fixes for Tim's mods can't be fetched or checked, Settings says why, and so does `trif doctor`.
+- Firefox's forks are named too, in the panel, `trif status`, `trif doctor` and problem reports.
+
+## 0.3.0
+
+- **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do
+  only what you allow; free mods can do anything. Most of Tim's mods are now style or boxed.
+- **TRIF asks for each site**, not every site at once. Block a site to keep TRIF away; sensitive sites, like
+  email and banking, start blocked.
+- **Safer agents.** A mod that can post or send for you waits for your OK, and a tab your agent ran code in
+  can't post as you until it reloads.
+- **Mods from outside your chat start off**, Tim's too, until you turn them on.
+- **Every mod's code and history**, with Restore; export, import, and mods that break offer a fix.
+
+### More
+
+- **Boxed mods ask for powers** (sound, a search box, reading what the site sends…). A row's icons say what
+  its mod can do; a site's mods that could together send what they read ask once, for the site.
+- **Your agent on each site:** Off, Look, Ask first or Run code, on the chat's line. Your agent looks
+  around in TRIF's box, where its code can't send or act.
+- **Mods that break** show it on their row, and your agent offers to fix them (Undo fix if it didn't help).
+- **Export** a mod, or a site's mods, to a folder you choose; **import** one by dropping its file on the
+  panel. Other files you drop go to your agent.
+- **Mods from outside** (a terminal agent, a file, another browser, TRIF's updates) start off, marked "new"
+  or "updated". What your chat makes starts on, or waits: Settings, "Mods your chat makes".
+- **Site access:** installing TRIF used to give it "all your data on all websites". Now your browser asks
+  for each site when you turn TRIF on there. If TRIF had every site, it gives that up once: allow each site
+  again when you next use it. Your browser also says TRIF can "block content on any page": only blocking,
+  never reading, so a tab your agent ran code in can't post as you.
+- Under Fix: **Disconnect** gives a site's access back; **Block** keeps TRIF away (the panel turns red;
+  Settings lists blocked sites).
+- Without access to every site, screenshots are of the tab you're on, after you click TRIF's button there.
+- **No agent?** Robotless mode runs your mods without one. Log out of your agent in Settings.
+- **The panel:** colours for each kind of mod, the robot's face for each state, a mods list you can resize.
+- **Oppish** (new, Google, off to start): opa lopittople whopimsopy.
+- Faster replies (Settings → Effort). Your agent works on a copy of your mods, which TRIF brings in after.
+- Fixes from a security review: docs/SECURITY.md. In Arc, TRIF's panel opens in a window of its own.
+
+## 0.2.7
+
+- **Songs in profile pictures.** Tune Composer (new, off to start) makes little NES-style tunes, in any
+  time signature. Style Encoder puts yours in your profile picture, and Profile Styler plays a profile's
+  song from a speaker button.
+- **Styles survive X's JPEGs**, and carry three fonts: for your name, your handle and all other text.
+- **Post Styler** shows posts in their authors' colours and fonts.
+- **Detox Timeline** also tidies profiles' Reposts and Subscriptions tabs.
+
+### More
+
+- Pictures styled before still read. Older Profile Stylers ignore the new code instead of misreading it.
+- A tune in 4/4 plays in older Profile Stylers too; other time signatures need this version.
+- The speaker never starts by itself, and stops when you leave the profile.
+
+## 0.2.6
+
+- **Google search works again.** Google changed its results page, and AI Banisher started hiding the
+  results along with the AI Overview. It's fixed.
+- **At work:** if your company's Codex or Claude Code settings won't let TRIF use its sandbox, TRIF asks
+  before going on without it.
+
+## 0.2.5
+
+- **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they
+  had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with
+  its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif status` and
+  `trif doctor` say which one and what to do. A change to one mod now sends only that mod to the browser,
+  which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
+  this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
+  it.)
+- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once `@elonmusk`
+  is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
+  That makes it about 2 MB, so it needs this version.
+  It's also smoother: the boss fight and heavy firing stay at 60 frames a second with your other X mods
+  on. Its Gravity mode is gone (the X key's bombs stay).
+- **You choose which of Tim's mods to add.** A new setup puts none of them on your computer until you
+  tick their sites on the setup page. Each mod has its own switch in the side panel; add other sites'
+  later in Settings there, or from the link on that site's panel. One you deleted can be brought back in
+  Settings too. If you already have Tim's mods, nothing changes.
+- **New for X, off until you switch them on: people's own colours.** Style Encoder stamps a style you
+  pick into the corner of the next profile picture you upload (X's round crop hides it). Profile Styler
+  then shows each styled profile in its owner's colours, and Post Styler their posts and people cards.
+  To find the styles they load people's profile pictures again from X's image server.
+- Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
+  Rainbow Rave's and Follow Status's rainbows no longer jump at their edges.
+- Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:
+  if you have it, it stays as it is, without updates.
+- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
+  message to send again) instead of showing the agent's error twice.
+- Each tab keeps its own draft in the side panel's message box.
+- The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.
+
+## 0.2.4
+
+- **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name "trif", so the package is
+  called timsrobot (after timsrobot.com). Once it's installed you still type `trif`, as before.
+
+## 0.2.3
+
+- **New mods, off until you switch them on:** X-Flyer flies a fighter over X (Shift+S, or the rocket
+  button) to blast the timeline; Follow status marks the people on X who follow you back; Three-Column
+  Feed lays Instagram's home feed out three posts wide.
+- The mods TRIF ships for X, Amazon, Instagram and Google are updated, with new names and short
+  descriptions. DVD Logo also finds Google's newer logo and bounces it off its real edges.
+  If you changed one, the side panel offers the new version; yours stays until you choose.
+- Plain X is now **Detox Timeline** (`x.com/detox-timeline`). If yours was unchanged, it's replaced, and it
+  stays on if it was on; if you changed it, yours stays as it is, and Detox Timeline arrives switched off.
+- Your agent now keeps mod descriptions short (4 to 9 words).
+- **A model you pick stays in that chat.** Picking a model for one site's chat used to make it the model of
+  every site you chatted on next, without saying so. Now each chat keeps its own, new chats start on the
+  agent's default, and a small line over the message box always says which agent and model this chat
+  uses (click it to change them).
+- **Open models handle long chats.** A long chat with an open model could stop with a "maximum context
+  length" error. TRIF now tells it how much the model holds, so the chat gets summarized well before it
+  outgrows it; and if a chat ever does, you're told to start a new one instead of seeing the raw error.
+
+## 0.2.1
+
+- **Side-panel agents are kept on a tighter leash.** In 0.2.0:
+  - a Claude Code run could search files anywhere in your home folder (its search tools weren't limited
+    the way its file reading was), and on a Mac that made "node would like to access…" prompts pop up;
+  - Claude Code runs also had a dozen more tools than TRIF uses (among them sending messages to your other
+    Claude sessions and notifications to you), and could write into the folder where your other Claude
+    sessions keep their scratch files;
+  - Codex runs could search the web, read other users' folders and other disks, and read and write the
+    computer's shared temporary folders, where other programs (Claude Code sessions among them) keep
+    their files.
+
+  Now Claude Code runs only get the tools TRIF needs, and both agents' searches, reads and writes stay
+  within what TRIF allows: no web search, no shared temporary folders, no other users' folders or disks.
 
 ## 0.2.0
 
@@ -37,7 +186,7 @@ needs a section here for the version it releases.
   where other programs could read it. Your agent can read your skill folders (read only), but never
   TRIF's settings, logs or other sites' screenshots, and one chat can't widen the next one's limits.
   `trif screenshot --copy` won't reload one-time links, and checks where the copy ends up.
-- **The mods that come with TRIF have new names.** Plain X is now **Timeline Detox**; on Instagram,
+- **The mods that come with TRIF have new names.** Plain X is now **Detox Timeline**; on Instagram,
   **Only Following** and **Hide AI**. On Google, four mods are now two: **AI Banisher** (no AI Overview,
   AI Mode or Gemini promo) and **Just Results** (no sponsored results or extra sections). Each is on if
   either of the two it replaces was. If you changed one of those, yours stays as it is.
@@ -58,16 +207,16 @@ needs a section here for the version it releases.
   (no browser data, keys or documents), can't read your API keys, other chats' logs or other sites'
   screenshots, and has no internet access of its own, so a web page it reads can't talk it into
   sending your data anywhere. Claude Code 2.1.285 or newer is needed.
-- **The mods that come with WebMods get fixes.** Plain X and the Google, Amazon and Instagram mods now
+- **The mods that come with WebMods get fixes.** Detox Timeline and the Google, Amazon and Instagram mods now
   update with WebMods. If you never changed one, it just gets the new version. If you (or your agent)
   changed it, yours is left alone and the side panel offers the new version on that mod: use it (yours
   goes to the trash, with Undo), keep yours, or have your agent merge the two, keeping your changes.
   Each says which version it is ("from WebMods, version 1").
 - An agent working on one site can no longer see which other sites you have open, or switch on, from
   its own site, a mod that runs everywhere.
-- Plain X no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
+- Detox Timeline no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
   back to Home.
-- If X changes how its timeline data looks, Plain X shows the timeline unfiltered rather than an empty
+- If X changes how its timeline data looks, Detox Timeline shows the timeline unfiltered rather than an empty
   one, and some rarer X responses no longer break.
 - Two browsers installing an update at the same moment no longer trip over each other, and installing an
   update from Safari no longer leaves WebMods stopped in Safari until you log in again.
@@ -91,7 +240,7 @@ needs a section here for the version it releases.
 - The model picker shows the models your agent offers: for Codex, the ones your account can use.
 - Chrome setup is easier: setup opens the extension's folder in Finder, ready to drag onto
   chrome://extensions, and Chrome no longer needs a restart.
-- Plain X starts with every filter off, for the plainest timeline. Its logo follows X's light or dark
+- Detox Timeline starts with every filter off, for the plainest timeline. Its logo follows X's light or dark
   theme, and menus on the search page no longer hide behind it.
 - New commands for agents and terminals: `webmods update` and `webmods report`.
 

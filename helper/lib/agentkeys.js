@@ -13,7 +13,9 @@
 //                it); a claude.ai login is set aside for these runs, as the key always did
 //   Codex        a custom provider `trif-openai` whose base_url is the proxy (`/v1`, bearer), Responses
 //                API, as for open models (agents/codex-oss.js): OPENAI_BASE_URL isn't enough, Codex
-//                would still want the key itself
+//                would still want the key itself. The proxy wants the run's token, which Codex reads
+//                from a file in the run's folder (agents/codex.js proxyAuth), so the address in Codex's
+//                argv opens nothing by itself
 // keys found in config.json `env` move to the keyring (migrateKeys: setup, and every helper on start) and
 // leave config.json. Without a keyring at all (Linux without secret-tool) a key left in config.json is
 // still used, through the proxy too: config.json is in the private folder now, unreadable to runs.
@@ -139,17 +141,21 @@ async function prepareAgentKey(agentId, { ws, env = process.env, logger = null }
   let said = false;
   const onStatus = (status) => { if (status === 401 && !said && logger) { said = true; logger.warn(`${s.name} refused the API key (401)`); } };
   let proxy;
-  try { proxy = await startKeyProxy({ target, key: k.value, style: s.style, logger, onStatus }); } catch (e) { throw new Error(`couldn't start the key proxy for ${s.name}: ${e.message}`); }
-  const prep = { env: {}, secrets: [k.value], options: {}, cleanup: () => proxy.close(), state: { apiKey: { account: s.account, source: k.source } } };
+  // (Codex: token mode, so the address in its argv opens nothing: agents/codex.js proxyAuth)
+  try { proxy = await startKeyProxy({ target, key: k.value, style: s.style, logger, onStatus, token: agentId === 'codex' }); } catch (e) { throw new Error(`couldn't start the key proxy for ${s.name}: ${e.message}`); }
+  const prep = { env: {}, secrets: [k.value, ...(proxy.token ? [proxy.token] : [])], options: {}, cleanup: () => proxy.close(), state: { apiKey: { account: s.account, source: k.source } } };
   if (agentId === 'claude') prep.env = { ANTHROPIC_BASE_URL: proxy.url, ANTHROPIC_API_KEY: PLACEHOLDER };
-  else prep.options = { config: codexProviderArgs(proxy.url) };
+  else prep.options = { keyProxy: { url: proxy.url, token: proxy.token } };
   return prep;
 }
 
 const tomlStr = (v) => JSON.stringify(String(v));
-/** The -c values that send a plain Codex run's requests through the key proxy. */
-function codexProviderArgs(url) {
-  return ['-c', `model_providers.${CODEX_PROVIDER}={ name = "OpenAI (TRIF)", base_url = ${tomlStr(url)}, wire_api = "responses", supports_websockets = false }`,
+/**
+ * The -c values that send a plain Codex run's requests through the key proxy. `auth`: the provider field
+ * that sends the proxy's token (agents/codex.js proxyAuth, which calls this).
+ */
+function codexProviderArgs(url, auth) {
+  return ['-c', `model_providers.${CODEX_PROVIDER}={ name = "OpenAI (TRIF)", base_url = ${tomlStr(url)}, wire_api = "responses", supports_websockets = false${auth ? `, ${auth}` : ''} }`,
     '-c', `model_provider="${CODEX_PROVIDER}"`];
 }
 

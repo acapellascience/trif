@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { request, HelperError } = require('./client');
 const pipes = require('./win/pipes');
+const { browserFamily, browserLabel } = require('./browsers');
 
 const SOCK_RE = /^helper-(\d+)\.sock$/;
 
@@ -54,15 +55,25 @@ function browserName(info) {
   return (info && info.extension && info.extension.browser) || 'Chrome';
 }
 
+function byName(helpers, want) {
+  const withExt = helpers.filter((h) => h.info.extension);
+  const named = withExt.filter((h) => browserName(h.info).toLowerCase() === want);
+  if (named.length) return named;
+  const family = { chrome: 'chromium', chromium: 'chromium', firefox: 'firefox' }[want];
+  return family ? withExt.filter((h) => browserFamily(h.info.extension) === family) : [];
+}
+
 function describeHelper(h) {
   const e = h.info.extension;
-  const what = e ? `${browserName(h.info)} ${e.chrome}` : 'a browser that hasn\'t said hello yet';
+  const what = e ? browserLabel({ ...e, browser: browserName(h.info) }) : 'a browser that hasn\'t said hello yet';
   return `${what} (pid ${h.pid}${h.info.role === 'primary' ? ', the default' : ''})`;
 }
 
 /**
- * The socket for `--browser <choice>`: a browser name ("firefox", "chrome") or a helper's pid. Throws a
- * HelperError naming the connected browsers when nothing (or more than one helper) matches.
+ * The socket for `--browser <choice>`: a browser name ("firefox", "brave") or a helper's pid. Throws a
+ * HelperError naming the connected browsers when nothing (or more than one helper) matches. With no
+ * browser of that name, "chrome" stands for any Chromium browser and "firefox" for any Firefox one (a
+ * script written when TRIF called them all so).
  */
 async function pickHelper(home, choice) {
   const want = String(choice).trim().toLowerCase();
@@ -70,7 +81,7 @@ async function pickHelper(home, choice) {
   const connected = helpers.length ? `Connected: ${helpers.map(describeHelper).join(', ')}.` : 'No browser is connected.';
   const matches = /^\d+$/.test(want)
     ? helpers.filter((h) => h.pid === Number(want))
-    : helpers.filter((h) => h.info.extension && browserName(h.info).toLowerCase() === want);
+    : byName(helpers, want);
   if (matches.length === 1) return matches[0].sock;
   // With nothing connected at all the CLI's usual "helper isn't running" message (exit 2) fits; otherwise
   // say which browsers are there.

@@ -78,7 +78,7 @@ test('windows browsers: user data folders under %LOCALAPPDATA%/%APPDATA%, manife
   assert.deepEqual(t.map((b) => b.key), ['chrome', 'chromium', 'brave', 'edge', 'firefox']);
   assert.deepEqual(t.filter((b) => b.detected).map((b) => b.key), ['chrome', 'firefox']);
   const chrome = t.find((b) => b.key === 'chrome');
-  assert.equal(chrome.nativeDir, path.join(env.LOCALAPPDATA, 'TRIF', 'NativeMessagingHosts', 'chrome'));
+  assert.equal(chrome.nativeDirs[0], path.join(env.LOCALAPPDATA, 'TRIF', 'NativeMessagingHosts', 'chrome'));
   assert.ok(t.find((b) => b.key === 'firefox').firefox);
   assert.ok(!t.some((b) => b.safari), 'no Safari on Windows');
   assert.deepEqual(B.nativeRegKeys(chrome, { env: {} }), ['HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webmods.helper']);
@@ -144,7 +144,7 @@ test('windows setup steps: each browser\'s key points at its manifest; Brave tak
   const t = B.browserTable(homedir, 'win32', env);
   const fake = makeFakeReg();
   const opts = { env: {}, run: fake.run };
-  const manifest = (b) => { fs.mkdirSync(b.nativeDir, { recursive: true }); const f = path.join(b.nativeDir, 'com.webmods.helper.json'); fs.writeFileSync(f, '{}'); return f; };
+  const manifest = (b) => { fs.mkdirSync(b.nativeDirs[0], { recursive: true }); const f = path.join(b.nativeDirs[0], 'com.webmods.helper.json'); fs.writeFileSync(f, '{}'); return f; };
   const chrome = t.find((b) => b.key === 'chrome');
   const brave = t.find((b) => b.key === 'brave');
   const cf = manifest(chrome);
@@ -257,7 +257,7 @@ test('windows setup: wrappers, manifests + registry keys, PATH, no /usr/local/bi
   // One manifest per browser in %LOCALAPPDATA%\TRIF, each browser's key naming it.
   for (const key of ['chrome', 'firefox']) {
     const b = B.browserTable(homedir, 'win32', env).find((x) => x.key === key);
-    const file = path.join(b.nativeDir, 'com.webmods.helper.json');
+    const file = path.join(b.nativeDirs[0], 'com.webmods.helper.json');
     const m = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(m.path, ws.hostWrapper);
     assert.equal(m.type, 'stdio');

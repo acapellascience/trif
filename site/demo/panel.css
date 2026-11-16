@@ -1,0 +1,66 @@
+/* The homepage demo's additions to the real side panel (shim.js puts the next recorded prompt in the message box). */
+
+/* Dark, like the page around it, whatever the visitor's system is set to: the panel's colours are
+   light-dark() pairs, which follow color-scheme. (Its one light-only rule, the sleeping robot's
+   opacity, is put back to the dark values.) */
+:root { color-scheme: dark; }
+/* Text at the size it's set: iPhone Safari's text autosizing otherwise enlarges the chat when the sheet
+   is swiped away (squashed to its bar) and brought back. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body.site-off .bar-robot svg { opacity: 0.45; }
+body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
+
+/* The panel's own suggestions ("Hide distractions"…) would only get "this demo replays recordings":
+   the recorded prompt waiting in the message box takes their place. */
+#empty .chips { display: none; }
+
+/* Send pulses while a recorded prompt waits for it, so it's clear what to do (shim.js). */
+html.demo-hint-send #send:not([hidden], :disabled) { animation: demo-send-pulse 1.6s ease-out infinite; }
+/* ...but not in the pause before it starts typing itself in: Send waits for it (shim.js) */
+html.demo-waiting #send { pointer-events: none; opacity: 0.45; animation: none !important; box-shadow: none !important; }
+@keyframes demo-send-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.demo-hint-send #send:not([hidden], :disabled) { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 60%, transparent); }
+}
+
+/* Until every recording has played, the message box holds the next recorded prompt and can't be typed in
+   or focused (on a phone: no keyboard, no zooming in on it); Send replays it (shim.js). */
+html.demo-guided #input { pointer-events: none; caret-color: transparent; }
+/* Stop does nothing to a recorded chat (it plays to its end: shim.js), so it's shown locked */
+#stop { pointer-events: none; opacity: 0.45; }
+/* The robot has locked the chat (shim.js: after the last of its replies to typing) */
+html.demo-locked .composer { opacity: 0.5; pointer-events: none; }
+/* On a phone, everything the visitor could still focus (the settings) is at least 16px, or the phone zooms
+   the page in on it. */
+html.demo-phone #input { font-size: 16px; }
+html.demo-phone :is(input, select, textarea) { font-size: 16px; }
+
+/* On a phone nothing in the panel pans the page under it: only what has something to scroll right now
+   (shim.js marks it) can be panned; every other swipe is the panel's own (it moves the sheet: shim.js). */
+html.demo-phone, html.demo-phone body { touch-action: none; }
+html.demo-phone .demo-scrolls-y { touch-action: pan-y; }
+html.demo-phone .demo-scrolls-x { touch-action: pan-x; }
+
+/* Scrolling inside the panel stays inside it: the page under the demo doesn't scroll along when a list
+   reaches its end (shim.js also stops swipes on the parts that don't scroll at all). */
+html, body { overscroll-behavior: none; }
+* { overscroll-behavior: contain; }
+
+/* On a phone the panel is a short sheet (40% of the screen): everything a little tighter, so the chat
+   keeps some room and the message box and Send stay in view. */
+html.demo-phone .bar { padding: 5px 8px 5px 12px; }
+html.demo-phone .mods { margin: 6px 10px 0; padding: 5px 10px; }
+html.demo-phone .mod-list { max-height: calc(34vh - 30px); }
+html.demo-phone .mod-list li { padding: 3px 0; }
+html.demo-phone .chat { padding: 8px 12px 2px; }
+html.demo-phone .composer { margin: 4px 10px 8px; }
+/* The message box fits its text (shim.js sizes it: Safari can't yet), and the sheet grows to make room
+   (tab.js); past eight lines it scrolls. */
+html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size: calc(8lh + 14px); overflow-y: auto; }
+/* The waiting prompt, two lines at a time: it scrolls with a finger (and follows the typing), but still
+   can't be focused (shim.js), and 16px, so a phone never zooms in on it. */
+html.demo-phone.demo-guided #input { pointer-events: auto; overflow-y: auto; font-size: 16px;
+  max-block-size: calc(8lh + 14px); -webkit-user-select: none; user-select: none; }

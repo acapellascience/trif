@@ -1,19 +1,104 @@
 # timsrobot.com
 
-The report form's website: a Cloudflare Worker that serves `timsrobot.com` (a home page) and
+The report form's website: a Cloudflare Worker that serves `timsrobot.com` (a home page, with a demo) and
 `timsrobot.com/report` (the form), and emails each report to the maintainer from `reports@timsrobot.com`.
 It also answers for `webmods.dev`, the address from before 0.2.0 (when TRIF was called WebMods), redirecting
 every request there to the same path on `timsrobot.com`, so older installs' "Report a problem" still works.
 
 - `src/index.js`: routes. `GET /`, `GET /report`, `GET /report.js`, and `POST /report` (JSON: `what`,
-  `site`, `email`, `details`, plus `website`, a hidden field only bots fill in).
+  `site`, `email`, `details`, plus `website`, a hidden field only bots fill in). `GET /windows`,
+  `GET /windows.js` and `POST /windows`: the Windows waitlist (below).
 - `src/pages.js`: the pages and the form's script. Nothing is loaded from anywhere else.
 - `src/report.js`: checking a report and writing its email (tested in `tests/site.test.js`).
+- `src/demo.js`: the home page's demo (below).
+- `src/notes.js`: `/notes/<slug>`, Tim's longer posts from X, for people who aren't on X (below).
+
+## The demo
+
+The home page has a "Try the demo" tab on its right edge (shown by `demo.js`; without script there's no
+tab). It opens the real TRIF side panel docked to the right of the page itself, like the browser's side
+panel (the page moves over; at phone width it's a sheet over the bottom of the page).
+
+- The side panel is the extension's own files, served from `extension/` through the `EXTENSION` assets
+  binding (`wrangler.toml [assets]`) at `/demo/ext/…`; only the files the panel loads are served
+  (`EXTENSION_FILES` in `src/demo.js`, which a test checks against what the panel loads). The Worker adds two
+  lines to `sidepanel.html`: `demo/panel.css` and `demo/shim.js`.
+- `demo/shim.js` stands in for the extension's background: it provides the `chrome.*` calls the panel makes
+  and answers its messages from made-up state (helper connected, Claude Code logged in, timsrobot.com, the
+  robot on). Nothing leaves the page; its state lasts across reloads in the tab's sessionStorage.
+- The mod switches are real: a switch reloads the home page as `/?mods=a,b`, and the Worker adds only mods
+  from its bundled list (the demo's own mods, `demo/mods/`, listed in `DEMO_ORDER` in `build-demo.js`;
+  TRIF doesn't ship them); other names are ignored. The panel opens again after the reload where it was.
+- Someone running the real TRIF gets the demo like anyone else: the extension never marks a page, so the
+  site can't tell, and TRIF has no mods for timsrobot.com unless they make some.
+- Chats are examples (`demo/chats/`), written from the real sessions that made these mods and checked
+  against the mods' code. The next example's prompt waits in the message box; Send plays it, sped up, then
+  switches its mod on (the page reloads with it). Once they've all played, anything typed gets a note
+  saying so.
+
+`site/demo/`, its mods included, is bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
+a test checks it's up to date).
 
 The side panel's "Report a problem" (and `trif report --open`) opens `/report#r=<report>&s=<site>`.
 Browsers never send what's after the `#` to the server, so nothing leaves the computer until Send.
 
 Reports are limited to 5 a minute per address, 64 KB each.
+
+## The Worker's files
+
+Besides what's in its code, the Worker serves files from its assets binding (`ASSETS`, wrangler.toml
+`[assets]`): the extension's side panel files the demo shows (under `ext/`: only `EXTENSION_FILES` in
+`src/demo.js`) and the notes' pictures and videos (`site/public/notes/`). They're staged into `site/.assets/`
+(not in git) by `node site/build-demo.js --stage` (`stage-assets.js`), which `wrangler.toml [build]` runs before
+every `wrangler deploy` (and `wrangler dev`). The Worker runs first for every request (`run_worker_first`), so a
+file there is only served when `src/index.js` asks for it. Locally, `dev.js` and the tests read the folders
+in place (`local-assets.js`, which answers byte ranges like the real binding).
+
+## Notes
+
+`timsrobot.com/notes/<slug>` is one of Tim's longer posts from X, ported so people who aren't on X can read
+it: plain HTML in the site's look, no script, and nothing loaded from X or anywhere else. Each note is a folder,
+`site/notes/<slug>/`:
+
+- `article.json`: the article, read out of its page on X (or its preview) by `site/notes/extract.js`, in the
+  browser you read X in:
+  `node helper/cli.js run --tab <id> --timeout 30000 -f site/notes/extract.js > site/notes/<slug>/article.json`
+- `note.json`: what X doesn't say: `x` (the post's address on X; until it's set, the page says the link is
+  coming), `date` (`YYYY-MM-DD`), and optionally `image` (the picture for the link preview card; by default the
+  first one shaped like a card).
+
+Then:
+
+```sh
+node site/shoot-posts.js <slug>    # the embedded posts, as pictures (needs Chrome for Testing: npm run browsers:install)
+node site/build-notes.js           # fetches the pictures and videos (once), writes src/notes-data.js
+```
+
+- **Pictures** are X's own (`name=large`), copied into `site/public/notes/<slug>/`.
+- **Videos** are re-encoded for the web: H.264 at most 1280 wide (960 for long ones), AAC, the index first so
+  they start at once, each under 14 MB (Cloudflare serves files up to 25 MB), with a still from each as its
+  poster. They play with the browser's own controls, never by themselves.
+- **Embedded posts** are pictures, not X's embed (which would load X, and its tracking, for every reader, and
+  often shows nothing to someone who isn't logged in): each post's card from X's public embed page, logged out,
+  in the dark theme, at 2x (`post-<id>.png`), in a TRIF-green frame, linking to the post on X. Its alt text is
+  the post's words.
+
+Run them again after an edit to the article (a new `article.json`): only what isn't there yet is fetched. A
+test checks `src/notes-data.js` is up to date, that the page loads only its own files, and that the text
+survives word for word.
+
+## The Windows waitlist
+
+`timsrobot.com/windows` (linked from the home page's footer) takes an email address and emails it to the
+maintainer, the same way as reports (from `reports@timsrobot.com`, to `REPORT_TO`), with Reply-To set to
+the address. There's no database: the maintainer's inbox is the list. To pull it, search the inbox for
+the subject **`TRIF Windows waitlist:`**; each email's subject ends with the address. Remove anyone who
+asks (at reports@timsrobot.com) before announcing.
+
+`POST /windows` takes JSON (`email`, `website`) from the page's script, or a plain form post when the
+script doesn't run (answered with a thanks page). It uses the same checks as reports: the hidden
+`website` field, this site's Origin only, at most 4 KB, and the same rate limit (5 a minute per address,
+counted apart from reports).
 
 ## Try it locally
 
@@ -21,7 +106,10 @@ Reports are limited to 5 a minute per address, 64 KB each.
 node site/dev.js
 ```
 
-Then open http://127.0.0.1:8787/report. Reports are printed in the terminal instead of emailed.
+Then open http://localhost:8787/report (or /windows). Reports and waitlist signups are printed in the
+terminal instead of emailed. Use `localhost`, not `127.0.0.1`: the server checks that posts come from
+`http://localhost:<port>`. The demo is the tab on http://localhost:8787/; the notes are at
+http://localhost:8787/notes/<slug>.
 
 ## Deploy
 
@@ -33,6 +121,9 @@ Moving from the WebMods-era Worker (`webmods-site`, which served `webmods.dev`):
 `timsrobot-site`, a new one, so it needs its own `REPORT_TO` secret, and `webmods.dev` can only belong to one
 Worker. First remove `webmods.dev` from `webmods-site` (dashboard → Workers → webmods-site → Settings →
 Domains & Routes) or delete that Worker (`npx wrangler delete --name webmods-site`), then deploy this one.
+
+`wrangler deploy` first runs `node build-demo.js --stage` (`wrangler.toml [build]`), which bundles the demo
+and stages the Worker's files (above).
 
 ```sh
 cd site

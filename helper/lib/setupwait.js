@@ -8,6 +8,7 @@
 // Safari has no wait: its bridge runs on its own, and its app is built by hand (README).
 
 const { listHelpers } = require('./helpers');
+const { browserFamily } = require('./browsers');
 
 const POLL_MS = 1000;
 const TIMEOUT_MS = 10 * 60 * 1000;
@@ -27,7 +28,7 @@ async function probe(home) {
   const withExt = (await listHelpers(home)).filter((h) => h.info && h.info.extension);
   const on = withExt.find((h) => h.info.extension.userScripts);
   const h = on || withExt[0];
-  return { connected: !!h, userScripts: !!on, browser: h ? h.info.extension.browser || 'Chrome' : null };
+  return { connected: !!h, userScripts: !!on, browser: h ? h.info.extension.browser || 'Chrome' : null, family: h ? browserFamily(h.info.extension) : null };
 }
 
 /**
@@ -59,7 +60,7 @@ async function waitForBrowser({ targets, print, probe: check, trif = 'trif', sle
     print(`✓ Connected (${state.browser})`);
   }
   if (!state.userScripts) {
-    print(state.browser === 'Firefox'
+    print((state.family || (state.browser === 'Firefox' ? 'firefox' : null)) === 'firefox'
       ? 'Now click “Allow user scripts” on the TRIF setup tab that just opened, then Allow.'
       : 'Now flip “Allow User Scripts” on the TRIF setup tab that just opened.');
     while (!stopped && now() < until) {

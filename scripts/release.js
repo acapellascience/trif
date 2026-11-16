@@ -6,12 +6,30 @@
 //                                             half goes into the keychain, the public half into
 //                                             helper/lib/release-key.js (commit it).
 //   node scripts/release.js 0.1.2 [--dry-run] [--skip-tests]
+//   node scripts/release.js refresh-feed [--dry-run]
+//                                             between releases: sign updates/latest.json again with
+//                                             today's time, nothing else changed. Installs refuse a
+//                                             feed signed more than 8 weeks ago (helper/lib/update.js),
+//                                             so one is due when there's been no release for ~6 weeks.
+//                                             Then commit and push updates/ on main. Signs the mods feed
+//                                             (updates/mods.json) again too.
+//   node scripts/release.js mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>]
+//                                             between releases: new versions of Tim's mods without a
+//                                             release. Writes updates/mods.json (+ .sig, the release key)
+//                                             with every shipped mod whose file at HEAD differs from the
+//                                             last release's (its tag), each with its new @version (which
+//                                             must be newer), sha256, size and the TRIF it needs (--min-trif,
+//                                             else the last release), and the commit the helper fetches
+//                                             the files at (helper/lib/modsfeed.js). Then asks before
+//                                             committing and pushing it on main. An empty feed (nothing
+//                                             changed, or --only of none) withdraws what an earlier one had.
 //
 // A release: checks everything first (clean main branch, a CHANGELOG.md section for the version and no
 // "## Unreleased" one, keys, GitHub login, package.json's repository matching the git remote), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
 // Chrome and Firefox extensions and the npm package, has Mozilla sign the Firefox add-on (unlisted),
 // makes the two beta zips, and writes the update feeds: updates/latest.json (+ .sig, signed with the
-// release key) for the helper, updates/firefox.json for Firefox. Then it asks before publishing
+// release key) for the helper, updates/firefox.json for Firefox, and updates/mods.json (+ .sig), the mods
+// feed, empty: the release ships every mod as it is. Then it asks before publishing
 // anything: a commit and tag, a GitHub release with the files, and the feeds (pushed last, once the files
 // they point at exist). The release holds the signed add-on twice: trif-firefox-<version>.xpi for the
 // Firefox feed, and trif-firefox.xpi, the name GitHub's releases/latest/download/ link (in the README and
@@ -20,11 +38,18 @@
 // --dry-run does everything up to publishing, into dist/release/<version>, and changes no tracked file
 // (no Mozilla signing, so no .xpi; feeds are signed only if the release key is there).
 //
-// Keychain entries (service names; `security add-generic-password -s <name> -a "$USER" -w`):
+// Keychain entries (service names; add one with `security add-generic-password -s <name> -a "$USER" -w`,
+// -w last, so security asks for the value and it's in no process's arguments):
 //   trif-amo-issuer, trif-amo-secret   addons.mozilla.org API key and secret
 //   trif-release-key                   the release signing key (made by `keygen`)
 // Each is also found under its name from before 0.2.0, when TRIF was called WebMods (webmods-amo-issuer,
 // webmods-amo-secret, webmods-release-key), so existing keychains keep working without renaming.
+//
+// No secret goes in a command's arguments or environment, which any process of the same user can read
+// while the command runs (`ps`, sysctl KERN_PROCARGS2): keygen gives the key to `security -i` on its stdin;
+// web-ext reads the addons.mozilla.org key and secret from the keychain itself (scripts/web-ext-amo.cjs,
+// its config file), so they're not in its environment.
+// TRIF_KEYCHAIN_BIN (tests): a stand-in for /usr/bin/security (tests/fake-keychain.js).
 
 const fs = require('fs');
 const path = require('path');
@@ -56,14 +81,17 @@ function sh(file, args, opts = {}) {
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function writeJson(file, v) { fs.writeFileSync(file, JSON.stringify(v, null, 2) + '\n'); }
 
+const securityBin = () => process.env.TRIF_KEYCHAIN_BIN || 'security';
+
 /** A keychain item's value by its name, or else by its name before 0.2.0 (LEGACY_SERVICES); null if neither. */
 function keychain(service) {
   const v = keychainItem(service);
   return v !== null || !LEGACY_SERVICES[service] ? v : keychainItem(LEGACY_SERVICES[service]);
 }
 
-function keychainItem(service) {
-  const r = spawnSync('security', ['find-generic-password', '-s', service, '-w'], { encoding: 'utf8' });
+/** opts.keychain: a keychain file instead of the default keychain search (a throwaway one, to try this). */
+function keychainItem(service, { keychain: file = null } = {}) {
+  const r = spawnSync(securityBin(), ['find-generic-password', '-s', service, '-w', ...(file ? [file] : [])], { encoding: 'utf8' });
   if (r.status !== 0) return null;
   const out = r.stdout.replace(/\n$/, '');
   // `security -w` prints a value with line breaks in it (the PEM key) as hex.
@@ -72,6 +100,26 @@ function keychainItem(service) {
     if (text.startsWith('-----BEGIN')) return text;
   }
   return out;
+}
+
+/**
+ * What `security -i` reads to save `value` as the item `service`/`account`: the command on its stdin, not
+ * in argv; the value as hex (-X), so it needs no quoting and may have line breaks (the PEM key).
+ */
+function keychainWriteInput(service, account, value, { keychain: file = null } = {}) {
+  for (const v of [service, account, file || '']) if (/["\\\n]/.test(v)) throw new Error(`can't pass ${JSON.stringify(v)} to security -i`);
+  return `add-generic-password -U -s "${service}" -a "${account}" -X ${Buffer.from(value, 'utf8').toString('hex')}${file ? ` "${file}"` : ''}\n`;
+}
+
+/** Save `value` in the keychain (replacing one there), then read it back. Throws an Error that never holds it. */
+function saveKeychainItem(service, value, { account = process.env.USER || 'trif', keychain: file = null } = {}) {
+  const hex = Buffer.from(value, 'utf8').toString('hex');
+  const scrub = (t) => String(t || '').split(value).join('[the key]').split(hex).join('[the key]').trim();
+  const r = spawnSync(securityBin(), ['-i'], { input: keychainWriteInput(service, account, value, { keychain: file }), encoding: 'utf8' });
+  if (r.error) throw new Error(`couldn't run security: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(scrub(r.stderr) || `security exited with ${r.status}`);
+  // (security -i can exit 0 when a command in it failed: what counts is that the item is there now)
+  if (keychainItem(service, { keychain: file }) !== value) throw new Error(`${service} isn't in the keychain afterwards${r.stderr ? ` (${scrub(r.stderr)})` : ''}`);
 }
 
 // ---------------------------------------------------------------- pure parts (tested)
@@ -95,6 +143,48 @@ function unreleasedSection(text) {
   return changelogSection(text, 'Unreleased');
 }
 
+// What the side panel shows under "What's new" is a version's short summary: the part of its section before
+// the first "### " heading (the full notes, "### More", go on the GitHub release). The panel has little room,
+// and an update's notes are drawn by the version people already have, so they're kept short: at most
+// SUMMARY_ITEMS points and SUMMARY_BYTES, with a link to the full notes.
+const SUMMARY_ITEMS = 5;
+const SUMMARY_BYTES = 700;
+
+/** A section's summary: its text before the first "### " heading, trimmed. */
+function changelogSummary(section) {
+  const lines = String(section || '').split('\n');
+  const end = lines.findIndex((l) => /^### /.test(l));
+  return (end === -1 ? lines : lines.slice(0, end)).join('\n').trim();
+}
+
+/**
+ * Markdown with the file's line wrapping taken out: a line that goes on a paragraph or list item joins the
+ * one before it (the panel keeps line breaks, so wrapped lines would stop halfway across it).
+ */
+function unwrapMarkdown(md) {
+  const out = [];
+  for (const line of String(md).split('\n')) {
+    const starts = /^\s*$/.test(line) || /^\s*([-*+]|\d+\.)\s/.test(line) || /^#/.test(line) || /^\s*>/.test(line);
+    if (!starts && out.length && !/^\s*$/.test(out[out.length - 1])) out[out.length - 1] += ' ' + line.trim();
+    else out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Why a summary is too long for the panel, or null. */
+function summaryProblem(summary, version) {
+  if (!summary) return `the "## ${version}" section has no summary: start it with a few short points (what the side panel shows), then the rest under "### More"`;
+  const items = summary.split('\n').filter((l) => /^\s*([-*+]|\d+\.)\s/.test(l)).length;
+  const bytes = Buffer.byteLength(unwrapMarkdown(summary));
+  if (items > SUMMARY_ITEMS || bytes > SUMMARY_BYTES) return `the "## ${version}" summary (before "### More") has ${items} points and ${bytes} bytes: keep it to ${SUMMARY_ITEMS} short points and ${SUMMARY_BYTES} bytes (the side panel shows it; the details go under "### More")`;
+  return null;
+}
+
+/** What the side panel shows: the summary, unwrapped, then a link to the full notes. */
+function panelNotes(section, { repo, version }) {
+  return `${unwrapMarkdown(changelogSummary(section))}\n\n[All of what's new in ${version}](https://github.com/${repo}/releases/tag/v${version})`;
+}
+
 /** "owner/name" of a GitHub remote URL (https or ssh), or null. */
 function remoteRepo(url) {
   const m = /^(?:(?:git\+)?https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
@@ -114,9 +204,31 @@ function repoMismatch(pkgRepo, remoteUrl) {
     `then: git remote set-url origin https://github.com/${pkgRepo}.git`;
 }
 
-/** latest.json's exact bytes for a release. */
-function latestFeed({ version, published, notes, url, sha256, size }) {
-  return Buffer.from(JSON.stringify({ version, published, notes, package: { url, sha256, size } }, null, 2) + '\n');
+/**
+ * latest.json's exact bytes for a release. `signed`: when it's signed (an ISO time; installs refuse a feed
+ * signed more than 8 weeks ago, helper/lib/update.js feedTooOld; releases before 0.3.0 ignore it).
+ */
+function latestFeed({ version, published, signed, notes, url, sha256, size }) {
+  return Buffer.from(JSON.stringify({ version, published, signed, notes, package: { url, sha256, size } }, null, 2) + '\n');
+}
+
+/**
+ * updates/latest.json signed again at `now`: the same release, with a new `signed` time. Only a feed the
+ * release key signed (`sig`, checked against `pub`) is re-signed. Returns {feed, sig} (bytes, text).
+ */
+function refreshFeed(bytes, sig, { pub, priv, now = new Date() }) {
+  let ok = false;
+  try { ok = crypto.verify(null, bytes, pub, Buffer.from(String(sig).trim(), 'base64')); } catch { ok = false; }
+  if (!ok) throw new Error("updates/latest.json isn't signed by the release key (helper/lib/release-key.js): not signing it again");
+  const f = JSON.parse(bytes.toString('utf8'));
+  if (!f || !f.package) throw new Error('updates/latest.json has no package');
+  const feed = latestFeed({ version: f.version, published: f.published, signed: now.toISOString(), notes: f.notes, url: f.package.url, sha256: f.package.sha256, size: f.package.size });
+  return { feed, sig: signBytes(feed, priv) };
+}
+
+/** The day a feed signed at `signed` (ISO) stops being accepted (helper/lib/update.js FEED_MAX_AGE_MS). */
+function feedStaleOn(signed) {
+  return new Date(Date.parse(signed) + require('../helper/lib/update').FEED_MAX_AGE_MS).toISOString().slice(0, 10);
 }
 
 function signBytes(bytes, privateKeyPem) {
@@ -134,6 +246,63 @@ function firefoxFeed(existing, { id, version, url, sha256 }) {
 
 function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 
+// ---------------------------------------------------------------- the mods feed (pure parts, tested)
+
+/**
+ * updates/mods.json's exact bytes (helper/lib/modsfeed.js reads it): `signed` (ISO; refused 8 weeks on, as
+ * latest.json), `release` (the TRIF release the mods are compared with), `commit` (the files are fetched at
+ * it), `mods` {id: {version, sha256, size, minTrif}}.
+ */
+function modsFeedBytes({ signed, release, commit, mods = {} }) {
+  const sorted = Object.fromEntries(Object.keys(mods).sort().map((id) => [id, mods[id]]));
+  return Buffer.from(JSON.stringify({ kind: require('../helper/lib/modsfeed').KIND, signed, release, commit, mods: sorted }, null, 2) + '\n');
+}
+
+/**
+ * The mods feed's entries: every shipped mod (`list`, not `retired`) whose file at `commit` differs from the
+ * one at `since` (the last release's tag). Returns {mods: {id: entry}, problems: [why], notes: [what]}:
+ * a problem stops a real run (a changed mod whose @version isn't newer: installs compare versions); a note
+ * is what's left out (a mod new since the release, which needs one; one not in `only`).
+ */
+function modsFeedEntries({ root = ROOT, commit, since, minTrif, only = null, list, retired = [] }) {
+  const show = (ref, file) => {
+    try { return execFileSync('git', ['show', `${ref}:${file}`], { cwd: root, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }); } catch { return null; }
+  };
+  const { parseHeader, isShippedSource } = require('../helper/lib/mods');
+  const { newer } = require('../helper/lib/modsfeed');
+  const gone = new Set(retired.map((r) => r.id));
+  const mods = {};
+  const problems = [];
+  const notes = [];
+  for (const { id } of list) {
+    if (gone.has(id)) continue;
+    const file = `examples/sites/${id}.js`;
+    const now = show(commit, file);
+    if (!now) continue;
+    const before = show(since, file);
+    if (before && before.equals(now)) continue;
+    const h = parseHeader(now.toString('utf8'));
+    if (!isShippedSource(h.source)) { problems.push(`${id}: not marked @source webmods at ${commit.slice(0, 7)}`); continue; }
+    if (!before) { notes.push(`${id}: new since ${since}, so it comes with the next release, not the mods feed`); continue; }
+    const was = parseHeader(before.toString('utf8')).version;
+    if (!newer(h.version, was)) { problems.push(`${id} changed since ${since}, but its @version (${h.version || 'none'}) isn't newer than that release's (${was || 'none'}): bump it`); continue; }
+    if (only && !only.includes(id)) { notes.push(`${id}: version ${h.version} left out (--only)`); continue; }
+    mods[id] = { version: String(h.version), sha256: crypto.createHash('sha256').update(now).digest('hex'), size: now.length, minTrif };
+  }
+  for (const id of only || []) if (!list.some((m) => m.id === id)) problems.push(`--only ${id}: not one of the mods TRIF ships`);
+  return { mods, problems, notes };
+}
+
+/** updates/mods.json signed again at `now`, the same mods (refresh-feed). Returns {feed, sig}. */
+function refreshModsFeed(bytes, sig, { pub, priv, now = new Date() }) {
+  let f;
+  try { require('../helper/lib/modsfeed').verifyModsFeed(bytes, sig, pub, { maxAge: Infinity }); f = JSON.parse(bytes.toString('utf8')); } catch (e) {
+    throw new Error(`updates/mods.json isn't a mods feed signed by the release key (${e.message}): not signing it again`);
+  }
+  const feed = modsFeedBytes({ signed: now.toISOString(), release: f.release, commit: f.commit, mods: f.mods || {} });
+  return { feed, sig: signBytes(feed, priv) };
+}
+
 // ---------------------------------------------------------------- keygen
 
 function keygen(force) {
@@ -143,8 +312,8 @@ function keygen(force) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
   const pub = publicKey.export({ type: 'spki', format: 'pem' });
-  const r = spawnSync('security', ['add-generic-password', '-U', '-s', KEY_SERVICE, '-a', process.env.USER || 'trif', '-w', priv], { encoding: 'utf8' });
-  if (r.status !== 0) fail(`couldn't save the key in the keychain: ${r.stderr.trim()}`);
+  // (On security's stdin, never in its argv: saveKeychainItem)
+  try { saveKeychainItem(KEY_SERVICE, priv); } catch (e) { fail(`couldn't save the key in the keychain: ${e.message}`); }
   const src = fs.readFileSync(KEY_FILE, 'utf8').replace(/module\.exports = [\s\S]*$/, `module.exports = ${JSON.stringify(pub)};\n`);
   fs.writeFileSync(KEY_FILE, src);
   const fp = crypto.createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex').slice(0, 16);
@@ -153,7 +322,132 @@ function keygen(force) {
   console.log(`  public:  ${path.relative(ROOT, KEY_FILE)} (commit it; it ships in the next release)`);
 }
 
+// ---------------------------------------------------------------- refresh-feed
+
+function refreshFeedCommand({ dryRun }) {
+  const latestPath = path.join(ROOT, 'updates', 'latest.json');
+  if (!fs.existsSync(latestPath) || !fs.existsSync(`${latestPath}.sig`)) fail('there is no updates/latest.json (+ .sig) to sign again: release first');
+  const pub = require(KEY_FILE);
+  if (!pub) fail('helper/lib/release-key.js has no public key');
+  const priv = keychain(KEY_SERVICE);
+  if (!priv && !dryRun) fail(`the keychain has no ${KEY_SERVICE} (or ${LEGACY_SERVICES[KEY_SERVICE]})`);
+  const bytes = fs.readFileSync(latestPath);
+  const sig = fs.readFileSync(`${latestPath}.sig`, 'utf8');
+  let out;
+  if (priv) {
+    try { out = refreshFeed(bytes, sig, { pub, priv }); } catch (e) { fail(e.message); }
+  } else {
+    // (dry run without the key: the feed as it would be, unsigned)
+    const f = JSON.parse(bytes.toString('utf8'));
+    out = { feed: latestFeed({ ...f, ...f.package, signed: new Date().toISOString() }), sig: null };
+    console.warn('release (dry run): no release key, so the feed is left unsigned');
+  }
+  const dir = dryRun ? path.join(DIST, 'release', 'refresh') : path.join(ROOT, 'updates');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'latest.json'), out.feed);
+  if (out.sig) fs.writeFileSync(path.join(dir, 'latest.json.sig'), out.sig);
+  const { version, signed } = JSON.parse(out.feed.toString('utf8'));
+  console.log(`${path.relative(ROOT, path.join(dir, 'latest.json'))}: TRIF ${version}, ${out.sig ? 'signed again' : 'with a new time, unsigned (no release key)'} (good until ${feedStaleOn(signed)}).`);
+  // The mods feed expires the same way: signed again with it.
+  const modsPath = path.join(ROOT, 'updates', 'mods.json');
+  if (fs.existsSync(modsPath) && fs.existsSync(`${modsPath}.sig`)) {
+    const mBytes = fs.readFileSync(modsPath);
+    let m;
+    if (priv) {
+      try { m = refreshModsFeed(mBytes, fs.readFileSync(`${modsPath}.sig`, 'utf8'), { pub, priv }); } catch (e) { fail(e.message); }
+    } else {
+      const f = JSON.parse(mBytes.toString('utf8'));
+      m = { feed: modsFeedBytes({ ...f, signed: new Date().toISOString() }), sig: null };
+    }
+    fs.writeFileSync(path.join(dir, 'mods.json'), m.feed);
+    if (m.sig) fs.writeFileSync(path.join(dir, 'mods.json.sig'), m.sig);
+    const n = Object.keys(JSON.parse(m.feed.toString('utf8')).mods || {}).length;
+    console.log(`${path.relative(ROOT, path.join(dir, 'mods.json'))}: ${n} mod${n === 1 ? '' : 's'}, ${m.sig ? 'signed again' : 'unsigned (no release key)'}.`);
+  }
+  if (dryRun) console.log('Dry run: updates/ unchanged.');
+  else console.log('Commit and push it on main: git add updates && git commit -m "Update feed signed again" && git push');
+}
+
+// ---------------------------------------------------------------- mods-feed
+
+async function modsFeedCommand({ dryRun, only, minTrif }) {
+  const pkg = readJson(path.join(ROOT, 'package.json'));
+  const repo = githubRepo(pkg);
+  const since = `v${pkg.version}`;
+  if (spawnSync('git', ['rev-parse', '--verify', '--quiet', `${since}^{commit}`], { cwd: ROOT }).status !== 0) fail(`there's no tag ${since} (the last release) to compare the mods with`);
+  const need = minTrif || pkg.version;
+  if (!/^\d+\.\d+\.\d+$/.test(need)) fail(`--min-trif "${need}" isn't a version like 0.3.0`);
+  if (compareVersions(need, pkg.version) > 0) console.warn(`release: --min-trif ${need} is newer than the last release (${pkg.version}): no install can use these until ${need} is out`);
+  const problems = [];
+  if (!repo) problems.push('package.json has no GitHub "repository"');
+  const pub = require(KEY_FILE);
+  const priv = keychain(KEY_SERVICE);
+  let keyOk = false;
+  if (!pub) problems.push('helper/lib/release-key.js has no public key (node scripts/release.js keygen)');
+  else if (!priv) problems.push(`the keychain has no ${KEY_SERVICE} (or ${LEGACY_SERVICES[KEY_SERVICE]})`);
+  else {
+    const probe = Buffer.from('trif');
+    try { keyOk = crypto.verify(null, probe, pub, crypto.sign(null, probe, priv)); } catch { keyOk = false; }
+    if (!keyOk) problems.push(`the keychain's ${KEY_SERVICE} doesn't match helper/lib/release-key.js`);
+  }
+  // (the files are fetched at HEAD: what's there must be committed, and main is where installs read the feed)
+  if (sh('git', ['status', '--porcelain', '--', 'examples', 'updates'])) problems.push('examples/ or updates/ has uncommitted changes: the feed points at the committed files');
+  const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch !== 'main') problems.push('not on the main branch (installs read the feed from main)');
+  const commit = sh('git', ['rev-parse', 'HEAD']);
+  const { PREINSTALLED, RETIRED } = require('../helper/lib/preinstalled');
+  const entries = modsFeedEntries({ commit, since, minTrif: need, only, list: PREINSTALLED, retired: RETIRED });
+  problems.push(...entries.problems);
+  if (problems.length && !dryRun) fail(`not ready:\n  - ${problems.join('\n  - ')}`);
+  for (const p of problems) console.warn(`release (dry run, would stop a real run): ${p}`);
+  for (const n of entries.notes) console.log(`  (${n})`);
+
+  const signed = new Date().toISOString();
+  const feed = modsFeedBytes({ signed, release: pkg.version, commit, mods: entries.mods });
+  const dir = dryRun ? path.join(DIST, 'release', 'mods-feed') : path.join(ROOT, 'updates');
+  fs.mkdirSync(dir, { recursive: true });
+  const feedPath = path.join(dir, 'mods.json');
+  fs.writeFileSync(feedPath, feed);
+  if (keyOk) fs.writeFileSync(`${feedPath}.sig`, signBytes(feed, priv));
+  else { fs.rmSync(`${feedPath}.sig`, { force: true }); console.warn('release (dry run): mods.json left unsigned (no release key)'); }
+  const ids = Object.keys(entries.mods);
+  console.log(`\n${path.relative(ROOT, feedPath)}: ${ids.length ? `${ids.length} mod${ids.length === 1 ? '' : 's'} newer than TRIF ${pkg.version}'s` : `no mods (installs drop what an earlier feed had)`}, at ${commit.slice(0, 7)}:`);
+  for (const id of ids) console.log(`  ${id}  version ${entries.mods[id].version}, ${entries.mods[id].size} bytes, for TRIF ${entries.mods[id].minTrif} and later`);
+  console.log(`Signed for ${signed}; installs accept it until ${feedStaleOn(signed)}.`);
+  if (dryRun) { console.log('Dry run: updates/ unchanged.'); return; }
+
+  const answer = await ask(`Publish the mods feed (${ids.length} mod${ids.length === 1 ? '' : 's'}) to github.com/${repo}, main? Installs pick it up within a day. Type "mods" to confirm: `);
+  const files = ['updates/mods.json', 'updates/mods.json.sig'];
+  if (answer !== 'mods') {
+    for (const f of files) {
+      if (spawnSync('git', ['ls-files', '--error-unmatch', f], { cwd: ROOT, stdio: 'ignore' }).status === 0) spawnSync('git', ['checkout', '--', f], { cwd: ROOT });
+      else fs.rmSync(path.join(ROOT, f), { force: true });
+    }
+    fail('not published; updates/mods.json is as it was');
+  }
+  sh('git', ['add', '--', ...files]);
+  sh('git', ['commit', '-m', ids.length ? `Mods feed: ${ids.map((id) => `${id} ${entries.mods[id].version}`).join(', ')}` : 'Mods feed: empty', '--', ...files]);
+  sh('git', ['push', 'origin', 'main'], { stdio: 'inherit' });
+  console.log(`\nPublished the mods feed. Installs of TRIF ${need} and later pick it up within a day.`);
+}
+
 // ---------------------------------------------------------------- release
+
+// web-ext's config file for signing: it reads the addons.mozilla.org key and secret from the keychain.
+const WEB_EXT_CONFIG = path.join(__dirname, 'web-ext-amo.cjs');
+
+/** `web-ext sign`'s arguments: no key or secret in them (WEB_EXT_CONFIG reads those). */
+function webExtSignArgs({ sourceDir, artifactsDir, amoBaseUrl = null }) {
+  return ['sign', '--no-config-discovery', '--config', WEB_EXT_CONFIG, '--channel', 'unlisted', '--source-dir', sourceDir, '--artifacts-dir', artifactsDir,
+    ...(amoBaseUrl ? ['--amo-base-url', amoBaseUrl] : [])];
+}
+
+/** web-ext's environment: this one without any WEB_EXT_API_* (a key or secret exported in the shell). */
+function webExtEnv(env = process.env) {
+  const out = { ...env };
+  for (const k of Object.keys(out)) if (/^WEB_EXT_API_/i.test(k)) delete out[k];
+  return out;
+}
 
 function ask(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -172,6 +466,8 @@ function preflight(version, { dryRun }) {
   // What a real release needs; a dry run only warns about them.
   const problems = [];
   if (unreleasedSection(changelog)) problems.push(`CHANGELOG.md still has a "## Unreleased" section: move what's in it into "## ${version}" (the panel shows that one) and delete it`);
+  const tooLong = summaryProblem(changelogSummary(notes), version);
+  if (tooLong) problems.push(tooLong);
   if (Buffer.byteLength(notes) > 3900) problems.push(`the "## ${version}" notes are ${Buffer.byteLength(notes)} bytes: keep them under 3900 (updaters before 0.2.0 cut them at 4000)`);
   if (!repo) problems.push('package.json has no GitHub "repository"');
   else {
@@ -190,12 +486,16 @@ function preflight(version, { dryRun }) {
     if (!keyOk) problems.push(`the keychain's ${KEY_SERVICE} doesn't match helper/lib/release-key.js`);
   }
   if (sh('git', ['status', '--porcelain'])) problems.push('the working tree has uncommitted changes');
-  if (sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']) !== 'main') problems.push('not on the main branch');
+  // main, or release-<version>: a release cut from an earlier commit than main (0.2.5: 0.2.4 plus a few
+  // changes, while main moved on). Installs read the feeds from main, so on a release branch they go live
+  // when the branch is merged into main, after this script.
+  const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch !== 'main' && branch !== `release-${version}`) problems.push(`not on the main branch (or release-${version})`);
   if (spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' }).status !== 0) problems.push("gh isn't logged in (gh auth login)");
   for (const s of [AMO_ISSUER, AMO_SECRET]) if (!keychain(s)) problems.push(`the keychain has no ${s} (or ${LEGACY_SERVICES[s]})`);
   if (problems.length && !dryRun) fail(`not ready:\n  - ${problems.join('\n  - ')}`);
   for (const p of problems) console.warn(`release (dry run, would stop a real release): ${p}`);
-  // Not checked here (it would need the network): README and listing say `npx trif setup`, which only
+  // Not checked here (it would need the network): README and listing say `npx timsrobot setup`, which only
   // works once `trif` is published on npm, by you. This script doesn't publish to npm.
   console.warn(`release: reminder: this doesn't publish to npm. \`npx ${pkg.name} setup\` needs "${pkg.name}" published there by you (npm view ${pkg.name}; npm publish ${'<'}the .tgz${'>'} after the release).`);
   return { pkg, repo, notes, priv: keyOk ? priv : null };
@@ -227,6 +527,14 @@ function bump(version, dir = ROOT) {
     lock.version = version;
     if (lock.packages && lock.packages['']) lock.packages[''].version = version;
     writeJson(lockFile, lock);
+  }
+  // (the README's install steps name the release they install)
+  const readmeFile = path.join(dir, 'README.md');
+  if (fs.existsSync(readmeFile)) {
+    const before = fs.readFileSync(readmeFile, 'utf8');
+    const after = before.replace(/timsrobot-\d+\.\d+\.\d+\.tgz/g, `timsrobot-${version}.tgz`)
+      .replace(/(These steps install the latest release, \*\*)\d+\.\d+\.\d+(\*\*)/, `$1${version}$2`);
+    if (after !== before) fs.writeFileSync(readmeFile, after);
   }
 }
 
@@ -292,7 +600,8 @@ async function release(version, { dryRun, skipTests }) {
 
   if (!skipTests) {
     console.log('running tests…');
-    const t = spawnSync(process.execPath, ['--test', '--test-concurrency=2', '--test-timeout=120000'], { cwd: src, stdio: 'inherit' });
+    // (10 minutes per test file: agents.test.js runs real Claude Code, and can take over 2)
+    const t = spawnSync(process.execPath, ['--test', '--test-concurrency=2', '--test-timeout=600000'], { cwd: src, stdio: 'inherit' });
     if (t.status !== 0) fail('tests failed');
   }
   for (const target of ['chrome', 'firefox']) sh(process.execPath, [path.join(src, 'scripts', 'build-extension.js'), target], { cwd: src });
@@ -314,8 +623,10 @@ async function release(version, { dryRun, skipTests }) {
     console.log('asking Mozilla to sign the Firefox add-on (takes a few minutes)…');
     const amo = path.join(out, 'amo');
     const webExt = path.join(ROOT, 'node_modules', '.bin', 'web-ext');
-    const r = spawnSync(webExt, ['sign', '--channel', 'unlisted', '--source-dir', path.join(builtDist, 'firefox'), '--artifacts-dir', amo], {
-      cwd: ROOT, stdio: 'inherit', env: { ...process.env, WEB_EXT_API_KEY: keychain(AMO_ISSUER), WEB_EXT_API_SECRET: keychain(AMO_SECRET) },
+    // (The key and secret: web-ext reads them from the keychain itself, through its config file, so
+    // they're in neither its arguments nor its environment. webExtSignArgs.)
+    const r = spawnSync(webExt, webExtSignArgs({ sourceDir: path.join(builtDist, 'firefox'), artifactsDir: amo }), {
+      cwd: ROOT, stdio: 'inherit', env: webExtEnv(),
     });
     const signed = fs.existsSync(amo) ? fs.readdirSync(amo).filter((f) => f.endsWith('.xpi')) : [];
     if (r.status !== 0 || signed.length !== 1) fail('Firefox signing failed (see above)');
@@ -328,8 +639,9 @@ async function release(version, { dryRun, skipTests }) {
 
   // Feeds, pointing at the release's files on GitHub.
   const base = `https://github.com/${repo || 'OWNER/trif'}/releases/download/v${version}`;
-  const published = new Date().toISOString().slice(0, 10);
-  const feed = latestFeed({ version, published, notes, url: `${base}/${tgzName}`, sha256: sha256(tgz), size: fs.statSync(tgz).size });
+  const signed = new Date().toISOString();
+  const published = signed.slice(0, 10);
+  const feed = latestFeed({ version, published, signed, notes: panelNotes(notes, { repo, version }), url: `${base}/${tgzName}`, sha256: sha256(tgz), size: fs.statSync(tgz).size });
   const feedsDir = dryRun ? path.join(out, 'updates') : path.join(ROOT, 'updates');
   fs.mkdirSync(feedsDir, { recursive: true });
   const latestPath = path.join(feedsDir, 'latest.json');
@@ -340,6 +652,11 @@ async function release(version, { dryRun, skipTests }) {
     fs.writeFileSync(latestPath, feed);
     console.warn('release (dry run): latest.json left unsigned (no release key)');
   }
+  // The mods feed, empty: this release ships every mod as it is (a mods feed from before would offer
+  // versions it already has, or, to installs of an older TRIF, versions made for this one).
+  const modsFeed = modsFeedBytes({ signed, release: version, commit: sh('git', ['rev-parse', 'HEAD']), mods: {} });
+  fs.writeFileSync(path.join(feedsDir, 'mods.json'), modsFeed);
+  if (priv) fs.writeFileSync(path.join(feedsDir, 'mods.json.sig'), signBytes(modsFeed, priv));
   if (xpi) {
     const ffPath = path.join(feedsDir, 'firefox.json');
     const existing = fs.existsSync(path.join(ROOT, 'updates', 'firefox.json')) ? readJson(path.join(ROOT, 'updates', 'firefox.json')) : null;
@@ -349,7 +666,8 @@ async function release(version, { dryRun, skipTests }) {
   const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips });
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
-  console.log(`\nWhat's new in ${version}:\n${notes}\n`);
+  console.log(`\nWhat's new in ${version} (the side panel's summary):\n${panelNotes(notes, { repo, version })}\n`);
+  console.log(`The feed is signed for ${signed}; installs accept it until ${feedStaleOn(signed)}.`);
   if (dryRun) {
     // The copy it built from holds the tests too; left there, `node --test` would find them.
     fs.rmSync(src, { recursive: true, force: true });
@@ -368,18 +686,24 @@ async function release(version, { dryRun, skipTests }) {
     spawnSync('git', ['clean', '-fq', '--', 'updates'], { cwd: ROOT }); // a first release's new ones gone
     fail('not published; the version bump and feeds were rolled back (the built files are still in dist/release)');
   }
-  sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY]);
+  sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY, 'README.md']); // (README: its install steps name the version)
   sh('git', ['commit', '-m', `Release ${version}`]);
   sh('git', ['tag', '-a', `v${version}`, '-m', `TRIF ${version}`]);
-  sh('git', ['push', 'origin', 'main', `v${version}`], { stdio: 'inherit' });
+  const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  sh('git', ['push', 'origin', branch, `v${version}`], { stdio: 'inherit' });
   const notesFile = path.join(out, 'notes.md');
   fs.writeFileSync(notesFile, notes + '\n');
   execFileSync('gh', ['release', 'create', `v${version}`, ...assets, '--repo', repo, '--title', `TRIF ${version}`, '--notes-file', notesFile], { cwd: ROOT, stdio: 'inherit' });
   // The feeds go live last: by now the files they point at exist.
   sh('git', ['add', 'updates']);
   sh('git', ['commit', '-m', `Update feeds for ${version}`]);
-  sh('git', ['push', 'origin', 'main'], { stdio: 'inherit' });
+  sh('git', ['push', 'origin', branch], { stdio: 'inherit' });
+  if (branch !== 'main') {
+    console.log(`\nReleased TRIF ${version} from ${branch}. The feeds are committed there: installs see the update once ${branch} is merged into main and main is pushed.`);
+    return;
+  }
   console.log(`\nPublished TRIF ${version}. Installs pick it up within a day (the panel offers it; Firefox updates the add-on itself).`);
+  console.log(`The feed is good until ${feedStaleOn(signed)}: release again before then, or run node scripts/release.js refresh-feed.`);
   console.log(`Beta zips for new testers: ${zips.map((z) => path.relative(ROOT, z)).join(', ')}`);
 }
 
@@ -387,9 +711,15 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const [cmd] = args.filter((a) => !a.startsWith('--'));
-  if (!cmd) fail('usage: node scripts/release.js keygen | <version> [--dry-run] [--skip-tests]');
+  if (!cmd) fail('usage: node scripts/release.js keygen | refresh-feed [--dry-run] | mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>] | <version> [--dry-run] [--skip-tests]');
+  const value = (flag) => { const i = args.indexOf(flag); return i === -1 ? null : args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : fail(`${flag} needs a value`); };
   if (cmd === 'keygen') keygen(flags.has('--force'));
+  else if (cmd === 'refresh-feed') refreshFeedCommand({ dryRun: flags.has('--dry-run') });
+  else if (cmd === 'mods-feed') {
+    const only = value('--only');
+    modsFeedCommand({ dryRun: flags.has('--dry-run'), only: only ? only.split(',').map((x) => x.trim()).filter(Boolean) : null, minTrif: value('--min-trif') }).catch((e) => fail(e.stack || e.message));
+  }
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { changelogSection, unreleasedSection, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

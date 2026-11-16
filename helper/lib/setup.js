@@ -4,7 +4,7 @@
 //
 // Install modes (where the wrappers point):
 //   link  the package itself (a git checkout: the maintainer's way of working)
-//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx trif setup`,
+//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx timsrobot setup`,
 //         whose package lives in npm's cache, which npm may delete)
 
 const fs = require('fs');
@@ -12,9 +12,9 @@ const os = require('os');
 const path = require('path');
 const { envVar } = require('./env');
 const P = require('./paths');
-const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
+const { selectBrowsers, manifestFiles, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
-const { preinstallMods, updateShippedMods, retireShippedMods } = require('./preinstalled');
+const { preinstallMods, updateShippedMods, retireShippedMods, starterSites, starterChoices, chooseNoStarter, siteOf, siteName } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 const { isWindows, renameRetry, nodeExeName } = require('./platform');
 const { firefoxAddonUrl } = require('./update');
@@ -105,8 +105,44 @@ ${env}  <key>RunAtLoad</key><true/>
  *
  * The agent from before 0.2.0 (LEGACY_SAFARI_AGENT_LABEL) is stopped first if it's loaded: both bridges
  * want the same port.
+ *
+ * `launchctl bootout` returns before launchd has finished removing the service, and a bootstrap right
+ * after it fails with "Bootstrap failed: 5: Input/output error". So after each bootout this waits (up to
+ * BOOTOUT_WAIT_MS) until `launchctl print` no longer finds the service, and a bootstrap failing with
+ * error 5 is tried again (BOOTSTRAP_TRIES in all, BOOTSTRAP_RETRY_MS apart). The detached script does
+ * the same. `run`, `runDetached` and `sleep` (synchronous, in ms) are injectable for tests.
  */
-function loadSafariAgent(plist, { changed = true, env = process.env, run, runDetached } = {}) {
+const BOOTOUT_WAIT_MS = 5000;
+const BOOTOUT_POLL_MS = 200;
+const BOOTSTRAP_TRIES = 5;
+const BOOTSTRAP_RETRY_MS = 1000;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// launchctl's "5: Input/output error": what a bootstrap racing a bootout gets.
+function isBootstrapIoError(r) {
+  return r.status === 5 || /\b5: Input\/output error/.test(`${r.stderr || ''}${r.stdout || ''}`);
+}
+
+// The detached script's form of the steps: the same waits and retries, in sh.
+function safariAgentScript(steps) {
+  const lc = (args) => ['launchctl', ...args].map(shq).join(' ');
+  const polls = Math.ceil(BOOTOUT_WAIT_MS / BOOTOUT_POLL_MS);
+  const lines = steps.map((args) => {
+    if (args[0] === 'bootout') {
+      return `${lc(args)}; i=0; while [ $i -lt ${polls} ] && ${lc(['print', args[1]])} >/dev/null 2>&1; do sleep ${BOOTOUT_POLL_MS / 1000}; i=$((i+1)); done`;
+    }
+    if (args[0] === 'bootstrap') {
+      return `i=1; until ${lc(args)}; do [ $? -eq 5 ] && [ $i -lt ${BOOTSTRAP_TRIES} ] || break; sleep ${BOOTSTRAP_RETRY_MS / 1000}; i=$((i+1)); done`;
+    }
+    return lc(args);
+  });
+  return `sleep 3; ${lines.join('; ')}`;
+}
+
+function loadSafariAgent(plist, { changed = true, env = process.env, run, runDetached, sleep = sleepSync } = {}) {
   const { spawnSync, spawn } = require('child_process');
   run = run || ((args) => spawnSync('launchctl', args, { encoding: 'utf8' }));
   runDetached = runDetached || ((script) => spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore' }).unref());
@@ -118,11 +154,20 @@ function loadSafariAgent(plist, { changed = true, env = process.env, run, runDet
   const steps = [...legacy, ...(loaded && !changed ? [['kickstart', '-k', target]]
     : [...(loaded ? [['bootout', target]] : []), ['bootstrap', domain, plist]])];
   if (envVar('SAFARI_BRIDGE', env)) {
-    runDetached(`sleep 3; ${steps.map((a) => ['launchctl', ...a].map(shq).join(' ')).join('; ')}`);
+    runDetached(safariAgentScript(steps));
     return { error: null, later: true };
   }
   for (const args of steps) {
-    const r = run(args);
+    let r = run(args);
+    if (args[0] === 'bootout') {
+      // Wait whether or not it reported success: a bootout that says 5 may still be removing the service.
+      for (let waited = 0; waited < BOOTOUT_WAIT_MS && run(['print', args[1]]).status === 0; waited += BOOTOUT_POLL_MS) sleep(BOOTOUT_POLL_MS);
+    } else if (args[0] === 'bootstrap') {
+      for (let tries = 1; r.status !== 0 && tries < BOOTSTRAP_TRIES && isBootstrapIoError(r); tries++) {
+        sleep(BOOTSTRAP_RETRY_MS);
+        r = run(args);
+      }
+    }
     if (r.status !== 0 && args[1] !== legacyTarget) return { error: (r.stderr || r.stdout || `launchctl ${args[0]} exited ${r.status}`).trim(), later: false };
   }
   return { error: null, later: false };
@@ -277,7 +322,7 @@ function rcFileHint() {
   return '~/.profile';
 }
 
-// Drop the folders npm/npx put on PATH for the duration of `npx trif setup` (npm's cache, which it
+// Drop the folders npm/npx put on PATH for the duration of `npx timsrobot setup` (npm's cache, which it
 // may delete, and its node-gyp shim): the helper and agents shouldn't keep using them.
 function cleanPath(pathValue) {
   const sep = path.sep;
@@ -335,7 +380,9 @@ function revealFolder(dir) {
 }
 
 /**
- * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto),
+ * opts: { home, browser, nativeDir, binDir, noLink, examples (add Tim's mods now: true for every site, or
+ *         [sites]), noExamples (none for the sites not chosen yet, and no updates this time),
+ *         mode: 'copy'|'link'|undefined (auto),
  *         reveal (show the extension folder in Finder for Chrome's Load unpacked),
  *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
  *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1),
@@ -443,6 +490,12 @@ function setup(opts = {}) {
   const extensionDir = path.join(root, 'extension');
   tell(`✓ TRIF ${P.VERSION} ${mode === 'copy' ? 'installed' : `linked to ${root}`} in ${homeRelative(home)}`);
 
+  // (TECHNIQUES.md beside it: the how-to half, read on demand, so every message doesn't carry it)
+  // (and BOXED.md: boxed mods and their powers, read only when writing one)
+  for (const doc of ['TECHNIQUES.md', 'BOXED.md']) {
+    const src = path.join(helperDir, 'workspace', doc);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(home, doc));
+  }
   const agentsSrc = path.join(helperDir, 'workspace', 'AGENTS.md');
   if (fs.existsSync(agentsSrc)) {
     fs.copyFileSync(agentsSrc, path.join(home, 'AGENTS.md'));
@@ -450,6 +503,13 @@ function setup(opts = {}) {
   } else {
     note(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   }
+  // The browsers being set up, by name ("your browser" when that can't be told).
+  const browserWord = () => {
+    let chosen = [];
+    try { chosen = opts.nativeDir ? [] : selectBrowsers(opts.browser); } catch { /* a bad --browser: reported below */ }
+    const names = [...new Set(chosen.map((t) => (t.firefox ? 'Firefox' : t.safari ? 'Safari' : 'Chrome')))];
+    return names.length === 1 ? names[0] : 'your browser';
+  };
   // What the browsers being set up call TRIF's panel (Chrome's side panel, Firefox's sidebar, Safari's).
   const panelWord = (() => {
     let chosen = [];
@@ -457,14 +517,31 @@ function setup(opts = {}) {
     const words = [...new Set(chosen.map((t) => (t.firefox ? 'sidebar' : t.safari ? 'panel' : 'side panel')))];
     return words.length ? words.join(' or ') : 'side panel';
   })();
+  // Tim's mods (preinstalled.js): only for the sites the user chose. A new workspace gets none here: the
+  // setup page asks, site by site, or --examples adds them now (every site, or the ones named) and
+  // --no-examples says none. The sites added (or copied by a setup before there was a choice) keep getting
+  // new mods and updates, as before.
+  const names = (sites) => { const n = sites.map(siteName); return n.length < 2 ? n.join('') : `${n.slice(0, -1).join(', ')} and ${n.at(-1)}`; };
+  if (opts.noExamples) {
+    chooseNoStarter(home);
+    say(`mods          Tim's mods: none added (--no-examples; Settings in the ${panelWord} adds them, or trif setup --examples)`);
+  }
   if (!opts.noExamples) {
     const examplesDir = envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(root, 'examples', 'sites');
-    const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir);
+    const add = opts.examples === true ? 'all' : Array.isArray(opts.examples) ? opts.examples : null;
+    const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir, undefined, undefined, { add });
     const off = added.filter((id) => !on.includes(id));
     if (on.length) say(`mods          preinstalled, on: ${on.join(', ')}`);
     if (off.length) say(`mods          preinstalled, off until you switch them on in the ${panelWord}: ${off.join(', ')}`);
     if (sites.length) say(`sites         TRIF starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
-    if (added.length) tell(`✓ Added the mods TRIF comes with${sites.length ? ` (it starts on for ${sites.join(', ')})` : ''}`);
+    if (added.length) tell(`✓ Added Tim's mods for ${names([...new Set(added.map(siteOf))])}${sites.length ? ` (TRIF starts on for ${sites.join(', ')})` : ''}`);
+    const choices = starterChoices(home);
+    const notAdded = starterSites().filter((s) => choices[s] !== 'added');
+    if (!Object.keys(choices).length) {
+      say(`mods          Tim's mods: none until you choose them, site by site, on the setup page in ${browserWord()} (or trif setup --examples)`);
+    } else if (notAdded.length) {
+      say(`mods          Tim's mods not added for ${names(notAdded)}: Settings in the ${panelWord} adds them (or trif setup --examples ${notAdded.join(',')})`);
+    }
     // Later versions of the shipped mods: unchanged copies are replaced, edited ones offered the new version.
     const vers = (m) => `${m.id}${m.version ? ` (version ${m.version})` : ''}`;
     try {
@@ -476,9 +553,10 @@ function setup(opts = {}) {
       }
       // Shipped mods folded into another one: unchanged copies go to the trash, edited ones stay (said once).
       const { removed, kept } = retireShippedMods(ws, examplesDir);
-      for (const m of removed) say(`mods          ${m.was} is now part of ${m.name}: the old copy is in the trash (trif restore ${m.id} brings it back)`);
+      const now = (m) => (m.renamed ? 'now called' : 'now part of'); // (a renamed mod, or one folded into another)
+      for (const m of removed) say(`mods          ${m.was} is ${now(m)} ${m.name}: the old copy is in the trash (trif restore ${m.id} brings it back)`);
       for (const m of kept) {
-        note(`mods          ${m.was} (${m.id}) is now part of ${m.name}. You changed your copy, so it's left as it is: it`);
+        note(`mods          ${m.was} (${m.id}) is ${now(m)} ${m.name}. You changed your copy, so it's left as it is: it`);
         note(`              keeps running, without updates. Delete it if ${m.name} does what you need.`);
       }
     } catch (e) {
@@ -529,7 +607,7 @@ function setup(opts = {}) {
   if (invalid.length) say(`              ignored config.json extensionIds entries that aren't extension IDs: ${invalid.map((x) => JSON.stringify(x)).join(', ')}`);
   let targets;
   if (opts.nativeDir) {
-    targets = [{ key: 'custom', label: 'custom', nativeDir: path.resolve(opts.nativeDir) }];
+    targets = [{ key: 'custom', label: 'custom', nativeDirs: [path.resolve(opts.nativeDir)] }];
   } else {
     targets = selectBrowsers(opts.browser, opts.homedir, platform, opts.env);
     if (!targets.length) {
@@ -578,26 +656,29 @@ function setup(opts = {}) {
       }
       continue;
     }
-    const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
+    // (Arc's go in two folders, the one it reads first: Chrome's. Browsers that share one, as Arc and Chrome
+    // do, write the same file.)
     const manifest = JSON.stringify(manifestFor(ws.hostWrapper, origins, { firefox: t.firefox }), null, 2) + '\n';
-    try {
-      fs.mkdirSync(t.nativeDir, { recursive: true });
-      const how = writeIfChanged(file, manifest);
-      manifests.push({ browser: t.key, file });
-      say(`native host   ${t.label}: ${file} (${how})`);
-      // Windows: the browser finds the manifest through its registry key (win/registry.js).
-      if (win && t.regKeys) {
-        const r = require('./win/setup').registerNativeHost(t, file, opts.regOpts);
-        if (r.error) { ok = false; note(`native host   ${t.label}: FAILED: ${r.error}`); }
-        else say(`              registered: ${r.keys.join(', ')}`);
+    for (const file of manifestFiles(t)) {
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const how = writeIfChanged(file, manifest);
+        manifests.push({ browser: t.key, file });
+        say(`native host   ${t.label}: ${file} (${how})`);
+        // Windows: the browser finds the manifest through its registry key (win/registry.js).
+        if (win && t.regKeys) {
+          const r = require('./win/setup').registerNativeHost(t, file, opts.regOpts);
+          if (r.error) { ok = false; note(`native host   ${t.label}: FAILED: ${r.error}`); }
+          else say(`              registered: ${r.keys.join(', ')}`);
+        }
+      } catch (e) {
+        ok = false;
+        note(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
       }
-    } catch (e) {
-      ok = false;
-      note(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
     }
   }
 
-  const setUp = targets.filter((t) => manifests.some((m) => m.browser === t.key)).map((t) => (t.key === 'custom' ? t.nativeDir : t.label));
+  const setUp = targets.filter((t) => manifests.some((m) => m.browser === t.key)).map((t) => (t.key === 'custom' ? t.nativeDirs[0] : t.label));
   if (setUp.length) tell(`✓ Set up for ${setUp.join(' and ')}`);
 
   // 5. CLI link (Windows: <home>\\bin goes on the user's PATH instead, win/setup.js userPathStep)
@@ -673,16 +754,17 @@ function setup(opts = {}) {
   // newest is on the latest GitHub release (scripts/release.js), from package.json's repository.
   const xpiUrl = firefoxAddonUrl();
   if (!targets.some((t) => !t.firefox && !t.safari)) {
+    // (The restart first, as in the Firefox START HERE: the add-on and its tab then come up in the new Firefox.)
+    note('  1. If Firefox was already running before this setup, quit it completely and reopen it.');
     if (xpiUrl) {
-      note('  1. Open this link in Firefox to install the TRIF add-on, and click Add:');
+      note('  2. Open this link in Firefox to install the TRIF add-on, and click Add:');
       note(`       ${xpiUrl}`);
       note('     (If Firefox downloads it instead, drag trif-firefox.xpi onto a Firefox window.)');
     } else {
-      note('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
+      note('  2. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
       note('     window, and click Add.');
     }
-    note('  2. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
-    note('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
+    note('  3. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
     note(`  4. Check everything with: ${trif} doctor`);
     if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
     sayThen();
@@ -695,35 +777,36 @@ function setup(opts = {}) {
   const openedChrome = revealed && !win && targets.some((t) => t.key === 'chrome') && openChromeExtensions().opened;
   note('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
   if (revealed && win) {
-    note('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
-    note('     folder from the Explorer window that just opened onto that page. (Or click "Load unpacked",');
-    note(`     click the address bar and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
-  } else if (revealed && openedChrome) {
-    note('     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right).');
-    note('     Then drag the "extension" folder from the Finder window that just opened onto that page. (Or click');
-    note(`     "Load unpacked", press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+    note('     open chrome://extensions and turn on "Developer mode" (top right), then drag the "extension"');
+    note('     folder from the Explorer window that just opened onto that page. If dragging doesn\'t work,');
+    note('     click "Load unpacked", click the address bar and paste the folder\'s path');
+    note(`     (it's on your clipboard): ${extensionDir}`);
   } else if (revealed) {
-    note('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
-    note('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
-    note(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+    note(openedChrome
+      ? '     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right),'
+      : '     open chrome://extensions and turn on "Developer mode" (top right),');
+    note('     then drag the "extension" folder from the Finder window that just opened onto that page. If');
+    note('     dragging doesn\'t work, click "Load unpacked", press Cmd-Shift-G and paste the folder\'s path');
+    note(`     (it's on your clipboard): ${extensionDir}`);
   } else {
     note('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
     note(`     and choose ${extensionDir}`);
   }
-  note(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
-  if (mode === 'copy') note('     and setup updates it in place. (A Web Store listing will replace this step later.)');
+  note(`     Its ID on that page should be ${P.EXTENSION_ID}.${mode === 'copy' ? ' Keep that folder: Chrome runs the extension' : ''}`);
+  if (mode === 'copy') note('     from it, and setup updates it in place. A Web Store listing will replace this step later.');
   note('  2. Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens,');
   note('     or "Details" on TRIF in chrome://extensions.');
   note(`  3. Check everything with: ${trif} doctor`);
   if (targets.some((t) => t.firefox)) {
     if (xpiUrl) {
-      note('  Firefox: open this link in Firefox to install the TRIF add-on:');
+      note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open this');
+      note('     link in Firefox to install the TRIF add-on:');
       note(`       ${xpiUrl}`);
-      note('     Then click "Allow user scripts" on the TRIF tab Firefox opens. Restart Firefox if it was');
-      note('     running before this setup.');
+      note('     Then click "Allow user scripts" on the TRIF tab Firefox opens.');
     } else {
-      note('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click "Allow user');
-      note('     scripts" on the TRIF tab it opens. Restart Firefox if it was running before this setup.');
+      note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open the');
+      note('     signed TRIF add-on (.xpi) in Firefox to install it, and click "Allow user scripts" on the TRIF');
+      note('     tab it opens.');
     }
   }
   if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }

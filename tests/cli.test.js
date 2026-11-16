@@ -166,10 +166,18 @@ test('run: expression detection, args forwarded, values printed', async () => {
   assert.equal(req.args.url, 'example');
   assert.equal(req.args.timeout, 10000);
 
+  assert.equal(req.args.world, 'page', 'from a terminal: the page\'s own world');
+
   r = await runCli(['run', '--tab', '12', 'const a = 1; return a'], { home });
   req = lastRequest(ext, 'run');
   assert.equal(req.args.expression, false);
   assert.equal(req.args.tab, 12);
+  // --box asks for TRIF's box; an extension from before it could (no boxRun in its hello) is said, not run in the page
+  r = await runCli(['run', '--box', 'page.title'], { home });
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /from before `trif run` could use TRIF's box.*trif run --page/s);
+  assert.notEqual(lastRequest(ext, 'run').args.code, 'page.title', 'not sent on');
+  assert.match((await runCli(['run', '--box', '--page', '1'], { home })).stderr, /--page or --box, not both/);
 
   r = await runCli(['run', 'obj'], { home });
   assert.equal(r.stdout, JSON.stringify({ a: 1, b: [1, 2] }, null, 2) + '\n');
@@ -207,6 +215,19 @@ test('run: page error gives exit 1 with the message; timeout gives exit 1', asyn
   r = await runCli(['run', '--timeout', '100', 'hang'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /timed out after 400ms/);
+});
+
+test('verify: check, reload, errors and logs in one step', async () => {
+  const { home } = await getShared();
+  const r = await runCli(['verify', 'example.com/banner', '--url', 'example.com'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /== check\nok: .*banner\.js parses/);
+  assert.match(r.stdout, /reloaded https:\/\/example\.com\//);
+  assert.match(r.stdout, /== errors\n.*example\.com\/banner: boom/);
+  assert.match(r.stdout, /== logs\n.*example\.com\/banner hello 42/);
+  const bad = await runCli(['verify', 'example.com/nope'], { home });
+  assert.equal(bad.code, 1);
+  assert.match(bad.stderr, /no mod example\.com\/nope/);
 });
 
 test('screenshot writes a PNG to -o and to the default folder', async () => {
@@ -280,6 +301,18 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   assert.match(r.stdout, /switched off by the user \(not running; trif enable example\.com\/banner turns it on\)/);
   r = await runCli(['mods', '--json'], { home });
   assert.equal(JSON.parse(r.stdout).mods[0].enabled, false);
+  // A mod TRIF ships switched off is off as TRIF ships it, not "switched off by the user".
+  const pre = path.join(home, 'preinstalled.json');
+  fs.writeFileSync(pre, JSON.stringify({ offered: ['example.com/banner'], startOff: ['example.com/banner'] }));
+  try {
+    r = await runCli(['status'], { home });
+    assert.match(r.stdout, /example\.com\/banner\s+off \(as TRIF ships it\)\n/);
+    assert.match(r.stdout, /off \(as TRIF ships it\) = a mod TRIF comes with, off until switched on/);
+    assert.doesNotMatch(r.stdout, /switched off by the user/);
+    r = await runCli(['mods'], { home });
+    assert.match(r.stdout, /^ {2}off, as TRIF ships it \(not running; trif enable example\.com\/banner turns it on\)$/m);
+    assert.doesNotMatch(r.stdout, /switched off by the user/);
+  } finally { fs.rmSync(pre, { force: true }); }
 
   // a file path works as the id; no reload → says how to see it
   r = await runCli(['enable', path.join(home, 'sites', 'example.com', 'banner.js')], { home });
@@ -360,7 +393,7 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   const r = await runCli(['new', 'Example.com', 'hide-banner'], { home });
   assert.equal(r.code, 0, r.stderr);
   const file = path.join(home, 'sites', 'example.com', 'hide-banner.js');
-  assert.equal(r.stdout.trim(), file);
+  assert.equal(r.stdout.trim(), path.join(fs.realpathSync(path.dirname(file)), 'hide-banner.js'));
   const text = fs.readFileSync(file, 'utf8');
   assert.match(text, /\/\/ @name {8}Hide Banner/);
   assert.match(text, /@match {7}\*:\/\/example\.com\/\*/);
@@ -369,6 +402,16 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   assert.equal((await runCli(['new', 'example.com', 'Bad Name!'], { home })).code, 1);
   // The template must be valid JS.
   assert.doesNotThrow(() => new Function(text));
+});
+
+test('new prints the real path when the workspace is reached through a link (an agent\'s run rules use real paths)', async () => {
+  const real = tempDir();
+  const link = path.join(tempDir(), 'linked-home');
+  fs.symlinkSync(real, link);
+  const r = await runCli(['new', 'example.com', 'via-link'], { home: link });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout.trim(), path.join(fs.realpathSync(real), 'sites', 'example.com', 'via-link.js'));
+  assert.ok(fs.existsSync(r.stdout.trim()));
 });
 
 test('new all-sites: one @match for every site', async () => {
@@ -385,28 +428,28 @@ test('install-example copies from the examples folder', async () => {
   const home = tempDir();
   const examples = tempDir();
   fs.mkdirSync(path.join(examples, 'x.com'));
-  fs.writeFileSync(path.join(examples, 'x.com', 'plain-x.js'), '// example\n');
+  fs.writeFileSync(path.join(examples, 'x.com', 'detox-timeline.js'), '// example\n');
   const env = { TRIF_EXAMPLES_DIR: examples };
   let r = await runCli(['install-example'], { home, env });
-  assert.match(r.stdout, /x\.com\/plain-x/);
-  r = await runCli(['install-example', 'x.com/plain-x'], { home, env });
+  assert.match(r.stdout, /x\.com\/detox-timeline/);
+  r = await runCli(['install-example', 'x.com/detox-timeline'], { home, env });
   assert.equal(r.code, 0, r.stderr);
-  const dest = path.join(home, 'sites', 'x.com', 'plain-x.js');
+  const dest = path.join(home, 'sites', 'x.com', 'detox-timeline.js');
   assert.equal(fs.readFileSync(dest, 'utf8'), '// example\n');
-  assert.equal((await runCli(['install-example', 'x.com/plain-x'], { home, env })).code, 1);
-  assert.equal((await runCli(['install-example', 'x.com/plain-x', '--force'], { home, env })).code, 0);
+  assert.equal((await runCli(['install-example', 'x.com/detox-timeline'], { home, env })).code, 1);
+  assert.equal((await runCli(['install-example', 'x.com/detox-timeline', '--force'], { home, env })).code, 0);
   r = await runCli(['install-example', 'x.com/nope'], { home, env });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /available: x\.com\/plain-x/);
+  assert.match(r.stderr, /available: x\.com\/detox-timeline/);
 });
 
 test('install-example finds the repo examples by default', async () => {
-  const src = path.join(REPO, 'examples', 'sites', 'x.com', 'plain-x.js');
+  const src = path.join(REPO, 'examples', 'sites', 'x.com', 'detox-timeline.js');
   if (!fs.existsSync(src)) return; // written by another agent; skip if not there yet
   const home = tempDir();
-  const r = await runCli(['install-example', 'x.com/plain-x'], { home });
+  const r = await runCli(['install-example', 'x.com/detox-timeline'], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.ok(fs.existsSync(path.join(home, 'sites', 'x.com', 'plain-x.js')));
+  assert.ok(fs.existsSync(path.join(home, 'sites', 'x.com', 'detox-timeline.js')));
 });
 
 // ------------------------------------------------------------------ setup and doctor
@@ -427,6 +470,12 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   assert.equal(fs.statSync(privDir(ws)).mode & 0o777, 0o700);
   assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
+  // the how-to half, beside it (read on demand, not pulled into every message by CLAUDE.md)
+  assert.ok(fs.existsSync(path.join(ws, 'TECHNIQUES.md')));
+  assert.doesNotMatch(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8'), /TECHNIQUES/);
+  // boxed mods and their powers: their own file, read only when writing one
+  assert.ok(fs.existsSync(path.join(ws, 'BOXED.md')));
+  assert.doesNotMatch(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8'), /BOXED/);
 
   const hostWrapper = path.join(ws, 'bin', 'trif-host');
   const host = fs.readFileSync(hostWrapper, 'utf8');
@@ -588,13 +637,40 @@ test('status: lists the sites TRIF is on for and marks mods waiting for theirs',
   cleanups.push(() => ext.close());
   ext.hello();
   ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'],
+    siteMode: 'restrictive', disconnected: ['google.com'], blockedSites: ['bank.com'], access: { all: false },
     mods: [{ id: 'bank.com/a', registered: false, enabled: true, sitesOff: true }] });
   await ext.waitForSocket();
   await ext.nextMods((mods) => mods.length === 1);
   const r = await runCli(['status'], { home });
   assert.match(r.stdout, /bank\.com\/a\s+waiting: TRIF is off on its site\n/);
-  assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site/);
+  assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site, or connects it/);
   assert.match(r.stdout, /^sites on {6}x\.com; TRIF is off everywhere else/m);
+  assert.doesNotMatch(r.stdout, /site mode/);
+  assert.match(r.stdout, /^disconnected  google\.com: on, but TRIF is disconnected there until the user connects it/m);
+  assert.match(r.stdout, /^blocked {7}bank\.com: blocked in TRIF; nothing from TRIF touches them \(only the user unblocks them/m);
+});
+
+test('status and mods: a mod off because new mods of its group start off says so, and who switches it on', async () => {
+  const home = tempDir();
+  writeMod(home, 'x.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');
+  writeMod(home, 'x.com', 'b.js', '// ==WebMod==\n// @name B\n// ==/WebMod==\n');
+  const ext = new FakeExtension({ home });
+  cleanups.push(() => ext.close());
+  ext.hello();
+  ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'], chatWait: true,
+    mods: [{ id: 'x.com/a', registered: false, enabled: false, newOff: 'new' }, { id: 'x.com/b', registered: false, enabled: false, newOff: 'update' }] });
+  await ext.waitForSocket();
+  await ext.nextMods((mods) => mods.length === 2);
+  let r = await runCli(['status'], { home });
+  assert.match(r.stdout, /^CHAT MODS {5}wait for the user: what the side panel's chat makes or changes runs only once they turn it on$/m);
+  assert.match(r.stdout, /x\.com\/a\s+off \(new: waiting for the user to look at it\)\n/);
+  assert.match(r.stdout, /x\.com\/b\s+off \(updated by TRIF: waiting for the user to look at it\)\n/);
+  assert.match(r.stdout, /off \(new\) = it came from outside the chat, so it started off; only the user switches it on/);
+  assert.doesNotMatch(r.stdout, /off = switched off by the user/);
+  r = await runCli(['mods'], { home });
+  assert.match(r.stdout, /^ {2}off: it came from outside the chat \(or TRIF updated it\), so it started off; not running until the user switches it on after looking at it \(side panel, or trif enable x\.com\/a in their terminal\)$/m);
+  r = await runCli(['mods', '--json'], { home });
+  assert.equal(JSON.parse(r.stdout).mods.find((m) => m.id === 'x.com/a').newOff, 'new');
 });
 
 test('inside a side-panel run, -f/-o/check paths are compared as the file system does: case, links, ..', async () => {
@@ -756,4 +832,22 @@ test('a mailbox request works where watching a folder fails (as in an agent run\
     clearInterval(helper);
     if (saved === undefined) delete process.env.TRIF_RUN_BOX; else process.env.TRIF_RUN_BOX = saved;
   }
+});
+
+test('check says what TRIF reads in a mod that would make it wait, the lines, and how to avoid it', async () => {
+  const home = tempDir();
+  const dir = path.join(home, 'sites', 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'keys.js'), 'document.body.style.color = "red";\ndispatchEvent(new KeyboardEvent("keydown", { key: "g" }));\n');
+  fs.writeFileSync(path.join(dir, 'plain.js'), 'document.body.style.color = "red";\ndispatchEvent(new CustomEvent("plain-reset"));\n');
+  let r = await runCli(['check', 'x.com/keys'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /waits for the user's OK/);
+  assert.match(r.stdout, /click, type or press keys/);
+  assert.match(r.stdout, /line 2: dispatchEvent\(new KeyboardEvent/);
+  assert.match(r.stdout, /how: to reach your own code, dispatch a CustomEvent/);
+  r = await runCli(['check', 'x.com/plain'], { home });
+  assert.match(r.stdout, /TRIF finds nothing in it that waits/);
+  r = await runCli(['check', 'x.com/keys', '--json'], { home });
+  assert.deepEqual(JSON.parse(r.stdout).powers.map((p) => p.key), ['acts']);
 });

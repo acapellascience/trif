@@ -5,7 +5,7 @@
 //
 //   codex exec <codex.js flags, the same permission profile>
 //              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses" … }
-//              -c model_provider="trif-open" -c web_search="disabled"
+//              -c model_provider="trif-open"
 //              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -   (message on stdin)
 //
 // (base_url: the provider's, or for a provider with a key, the run's key proxy: see "The API key".)
@@ -23,8 +23,9 @@
 // Keychain, item "TRIF open model key" / account `openrouter` or `custom:<host>`), set from the panel
 // (agent.openModel.setKey) or `trif agent open-model --set-key`; never in config.json, an environment
 // variable or the extension. Before each run the helper reads it into its own memory: Codex never gets it.
-// Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1, at a random path, which adds
-// the key and forwards to the provider; Codex's base_url is that proxy. (Anything in a process's
+// Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1, which adds the key and
+// forwards to the provider; Codex's base_url is that proxy. The proxy wants a token of the run's, which
+// Codex reads from a file in the run's own folder (codex.js proxyAuth): not in its argv, unlike the address. (Anything in a process's
 // environment or arguments is readable by any same-user process, sysctl KERN_PROCARGS2, sandbox or not:
 // that's why the key is in neither Codex's nor, any more, the user's shell's.) The sandbox keeps the
 // commands away from the Keychain (in the home folder, denied), config.json and the network (the proxy
@@ -66,6 +67,27 @@ const OPENROUTER_MODELS = [
 ];
 
 const MAX_MODEL = 200;
+
+// How much the model can hold. Codex knows only OpenAI's models ("Model metadata for … not found"), so for an
+// open model it never compacts a long chat, and the provider fills in a big answer size of its own: a long
+// chat then fails with "maximum context length" (seen: 149K tokens in, 126K asked for out, 262K window).
+// TRIF tells Codex the window (model_context_window) and has it compact the chat once it reaches
+// COMPACT_SHARE of it (model_auto_compact_token_limit), leaving the rest for the answer. OpenRouter publishes
+// each model's window; elsewhere, or when that list can't be had, DEFAULT_WINDOW.
+const DEFAULT_WINDOW = 65536, COMPACT_SHARE = 0.4, MIN_COMPACT = 8192;
+const windows = new Map(); // OpenRouter model id -> context length (this helper's lifetime)
+async function contextWindow(om, { fetchImpl = globalThis.fetch } = {}) {
+  if (om.provider !== 'openrouter') return DEFAULT_WINDOW;
+  if (!windows.has(om.model)) {
+    try {
+      const list = await getJson('https://openrouter.ai/api/v1/models', { timeout: 4000, fetchImpl });
+      for (const m of Array.isArray(list && list.data) ? list.data : []) {
+        if (m && typeof m.id === 'string' && Number.isFinite(m.context_length) && m.context_length > 0) windows.set(m.id, m.context_length);
+      }
+    } catch { /* offline, or the list moved: the default */ }
+  }
+  return windows.get(om.model) || DEFAULT_WINDOW;
+}
 
 function cleanUrl(u) {
   if (typeof u !== 'string' || !u.trim()) return '';
@@ -168,18 +190,26 @@ function localModel(om, names) {
 
 const tomlStr = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
 
-/** The -c values that point Codex at the provider. */
-function providerArgs(om) {
+/**
+ * The -c values that point Codex at the provider. `auth`: with a key proxy, the field that sends its token
+ * (codex.js proxyAuth: the token is in a file of the run's, never in these values).
+ */
+function providerArgs(om, auth = null) {
   // No env_key: Codex never has the key (the run's key proxy adds it; see "The API key" above).
   const fields = [`name = ${tomlStr(`${om.name} (TRIF)`)}`, `base_url = ${tomlStr(om.proxyUrl || om.baseUrl)}`, 'wire_api = "responses"'];
+  if (auth) fields.push(auth);
   // HTTPS only: Codex otherwise tries a WebSocket first, and a server without one (OpenRouter, Ollama)
   // costs a round of retries ("Reconnecting... n/5") before it falls back, sometimes minutes.
   fields.push('supports_websockets = false');
   // Local models can take minutes to load before the first token; and fail fast when nothing listens.
   if (om.server) fields.push('stream_idle_timeout_ms = 900000', 'request_max_retries = 1', 'stream_max_retries = 1');
-  const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
-    // OpenAI's hosted web search tool: no other provider has it.
-    '-c', 'web_search="disabled"'];
+  // (No web search: codex.js turns OpenAI's hosted tool off for every run; no other provider has it anyway.)
+  const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`];
+  // How much it holds, and when to compact the chat (see DEFAULT_WINDOW)
+  if (Number.isFinite(om.contextWindow) && om.contextWindow > 0) {
+    args.push('-c', `model_context_window=${om.contextWindow}`,
+      '-c', `model_auto_compact_token_limit=${Math.max(MIN_COMPACT, Math.floor(om.contextWindow * COMPACT_SHARE))}`);
+  }
   // (shell_environment_policy.exclude, keeping API key variables a shell profile still exports from the
   // commands: codex.js adds it to every Codex run.)
   return args;
@@ -196,11 +226,16 @@ function friendlyFor(om) {
   return (message) => {
     const m = String(message);
     if (/Model metadata for .* not found/i.test(m)) return null; // Codex's warning for every non-OpenAI model
+    // (the run's key proxy, not the provider: this Codex didn't send the run's token, keyproxy.js NO_TOKEN)
+    if (/key proxy: this request doesn.t carry the run.s token/.test(m)) return 'This Codex didn’t send the run’s key-proxy token, so TRIF’s key proxy refused its request: update Codex (brew upgrade codex, or npm install -g @openai/codex), then try again';
     if (/\b401\b|unauthori[sz]ed|invalid api key|no auth/i.test(m)) {
       if (om.keyed) return `${om.name} refused the API key (401): check it, or make a new one and save it in Settings (or \`trif agent open-model --set-key\`)`;
       return om.keyAccount ? `${om.name} wants an API key (401): ${keyHelp(om)}` : `${om.name} wants an API key (401)`;
     }
     if (/\b402\b|insufficient (credits|balance|funds)|payment required/i.test(m)) return `${om.name} says the account is out of credit (402)`;
+    if (/maximum context length|context[_ ]length[_ ]exceeded|context window|reduce the length of the (input|prompt)/i.test(m)) {
+      return `This chat has grown longer than ${om.model} can hold. Start a new chat (the + button) and say what you were working on.`;
+    }
     if (/not found, try pulling|model .*not found|\b404\b.*model|no such model/i.test(m)) {
       return om.provider === 'ollama' ? `${om.model} isn't installed in Ollama: run \`ollama pull ${om.model}\` in a terminal` : `${om.name} doesn't have the model ${om.model}: pick another in Settings (${oneLine(m, 160)})`;
     }
@@ -269,7 +304,7 @@ const adapter = {
   note: '',
   missing: 'Open models run through Codex, which isn\'t installed or can\'t be found. Install it (brew install codex), ' +
     'then run `trif setup` in the same terminal so the helper finds it. (No OpenAI account needed for open models.)',
-  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, modelNote, insecureKey, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
+  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, modelNote, insecureKey, providerArgs, contextWindow, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
 
   detect(opts) {
     const d = codex.detect(opts);
@@ -333,9 +368,11 @@ const adapter = {
     if (key) {
       let said = false;
       const onStatus = (status) => { if (status === 401 && !said && logger) { said = true; logger.warn(`open model: ${om.name} refused the API key (401)`); } };
-      try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
+      try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus, token: true }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
     }
-    const forCodex = proxy ? { ...om, proxyUrl: proxy.url } : om;
+    om.contextWindow = await contextWindow(om, { fetchImpl });
+    if (proxy) secrets.push(proxy.token); // (redacted from logs too)
+    const forCodex = proxy ? { ...om, proxyUrl: proxy.url, proxyToken: proxy.token } : om;
     return {
       env: {}, unsetEnv: [...PASSED_KEYS], secrets,
       state: { friendly: friendlyFor(om), openModel: om, providerName: om.name },
@@ -349,7 +386,8 @@ const adapter = {
   // ("I'm an OpenAI coding agent running inside Codex CLI"), from Codex's own instructions.
   command(opts) {
     const om = opts.openModel || resolve(null, null, opts.model);
-    return codex.command({ ...opts, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om) });
+    const auth = om.proxyToken ? codex.proxyAuth(opts.agentDir) : null;
+    return codex.command({ ...opts, effort: undefined, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om, auth), proxyToken: om.proxyToken || null });
   },
 
   parse(line, emit, state = {}) {
@@ -367,6 +405,7 @@ const adapter = {
   // No OpenAI login involved: nothing to check or log in to.
   loginFix: '',
   login: null,
+  logout: null,
 };
 
 // API key variables a shell profile commonly exports (doctor warns when one is in the environment).
@@ -498,10 +537,22 @@ adapter.setKey = async function setKey(ws, key, { env = process.env } = {}) {
   return { account: om.keyAccount, keyring: b ? b.name : null };
 };
 
-/** agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}. */
+// The same Codex, so an organization's Codex requirements can replace TRIF's permission profile here too:
+// stopped, or gone on with the user's consent for this agent (its own: `codex-oss`), as codex.js.
+adapter.settingsName = codex.settingsName;
+adapter.sandboxOverridden = codex.sandboxOverridden;
+adapter.orgBlocked = codex.orgBlocked;
+// (No "personal Codex login" in its messages: open models don't use one.)
+Object.assign(adapter, codex.orgMessages({ personal: false }));
+
+/**
+ * agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}.
+ * A provider without keys (a local server) has none to forget: {account: null, removed: false}, not an
+ * error (the README's uninstall steps run it whatever the provider).
+ */
 adapter.removeKey = async function removeKey(ws, { env = process.env } = {}) {
   const om = resolve(ws.config && ws.config.openModel);
-  if (!om.keyAccount) throw new Error(`${om.name} has no API key to remove`);
+  if (!om.keyAccount) return { account: null, removed: false };
   const r = await keyring.removeKey(om.keyAccount, { env });
   return { account: om.keyAccount, removed: r.removed };
 };

@@ -15,7 +15,7 @@ const { runLimits } = require('../helper/lib/runs');
 const { shippedHistory } = require('../scripts/shipped-history');
 
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
-const LIST = [{ id: 'x.com/plain-x', on: true }, { id: 'x.com/punk-fonts', on: false }];
+const LIST = [{ id: 'x.com/detox-timeline', on: true }, { id: 'x.com/punk-fonts', on: false }];
 const mod = (version, body = 'one') => `// ==WebMod==\n// @name Plain\n// @source webmods\n// @version ${version}\n// ==/WebMod==\n// ${body}\n`;
 
 const cleanups = [];
@@ -38,7 +38,7 @@ function world({ history = {} } = {}) {
     mine(id) { try { return fs.readFileSync(path.join(ws.modsDir, `${id}.js`), 'utf8'); } catch { return null; } },
     edit(id, code) { fs.writeFileSync(path.join(ws.modsDir, `${id}.js`), code); },
     setup() {
-      S.preinstallMods(home, ws.modsDir, examples, LIST, []);
+      S.preinstallMods(home, ws.modsDir, examples, LIST, [], { add: 'all' }); // (the user added Tim's mods)
       return S.updateShippedMods(home, ws.modsDir, examples, LIST);
     },
     rec(id) { return S.loadPreinstalled(home).shipped[id]; },
@@ -47,12 +47,12 @@ function world({ history = {} } = {}) {
 
 test('first setup records what it shipped and keeps a copy as the merge base', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.ship('x.com/punk-fonts', '// not marked as shipped\n');
   const r = w.setup();
   assert.deepStrictEqual(r, { updated: [], waiting: [] });
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(1)), version: '1' });
-  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(1));
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(1)), version: '1' });
+  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(1));
   // Only mods marked @source webmods are managed.
   assert.strictEqual(w.rec('x.com/punk-fonts'), undefined);
   assert.ok(fs.existsSync(path.join(w.ws.modsDir, 'x.com', 'punk-fonts.js')));
@@ -60,67 +60,76 @@ test('first setup records what it shipped and keeps a copy as the merge base', (
 
 test('unchanged copies get the new version silently; switches carry over (same id, startOff untouched)', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.ship('x.com/punk-fonts', mod(1, 'punk'));
   w.setup();
   const before = S.loadPreinstalled(w.home);
-  w.ship('x.com/plain-x', mod(2, 'two'));
+  w.ship('x.com/detox-timeline', mod(2, 'two'));
   const r = w.setup();
-  assert.deepStrictEqual(r.updated, [{ id: 'x.com/plain-x', version: '2', from: '1' }]);
-  assert.strictEqual(w.mine('x.com/plain-x'), mod(2, 'two'));
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(2, 'two')), version: '2' });
-  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(2, 'two'));
+  assert.deepStrictEqual(r.updated, [{ id: 'x.com/detox-timeline', version: '2', from: '1' }]);
+  assert.strictEqual(w.mine('x.com/detox-timeline'), mod(2, 'two'));
+  // (stamped as put in place by TRIF itself, for browsers whose new mods start off: autoUpdatedIds)
+  const { auto, ...rec } = w.rec('x.com/detox-timeline');
+  assert.deepStrictEqual(rec, { hash: sha1(mod(2, 'two')), version: '2' });
+  assert.ok(!Number.isNaN(Date.parse(auto)));
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), { 'x.com/detox-timeline': auto });
+  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2, 'two'));
   const after = S.loadPreinstalled(w.home);
   assert.deepStrictEqual([after.offered, after.startOff], [before.offered, before.startOff]);
   // No temp files left where the scanner looks.
-  assert.deepStrictEqual(fs.readdirSync(path.join(w.ws.modsDir, 'x.com')).sort(), ['plain-x.js', 'punk-fonts.js']);
-  // Again with nothing new: nothing happens.
+  assert.deepStrictEqual(fs.readdirSync(path.join(w.ws.modsDir, 'x.com')).sort(), ['detox-timeline.js', 'punk-fonts.js']);
+  // Again with nothing new: nothing happens, and the stamp stays (a browser may not have seen it yet).
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), { 'x.com/detox-timeline': auto });
+  // Edited since: it's the user's copy now, not TRIF's update.
+  w.edit('x.com/detox-timeline', mod(2, 'mine'));
+  w.setup();
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), {});
 });
 
 test('edited copies are never overwritten: the new version waits, kept beside the base', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  w.edit('x.com/plain-x', mod(1, 'mine'));
-  w.ship('x.com/plain-x', mod(2, 'two'));
+  w.edit('x.com/detox-timeline', mod(1, 'mine'));
+  w.ship('x.com/detox-timeline', mod(2, 'two'));
   const r = w.setup();
-  assert.deepStrictEqual(r, { updated: [], waiting: [{ id: 'x.com/plain-x', version: '2' }] });
-  assert.strictEqual(w.mine('x.com/plain-x'), mod(1, 'mine'));
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(1)), version: '1', pending: { hash: sha1(mod(2, 'two')), version: '2' } });
-  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(1));
-  assert.strictEqual(fs.readFileSync(S.newFile(w.home, 'x.com/plain-x'), 'utf8'), mod(2, 'two'));
+  assert.deepStrictEqual(r, { updated: [], waiting: [{ id: 'x.com/detox-timeline', version: '2' }] });
+  assert.strictEqual(w.mine('x.com/detox-timeline'), mod(1, 'mine'));
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(1)), version: '1', pending: { hash: sha1(mod(2, 'two')), version: '2' } });
+  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(1));
+  assert.strictEqual(fs.readFileSync(S.newFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2, 'two'));
   // Still waiting on the next setup; the user making it identical settles it.
-  assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/plain-x', version: '2' }]);
-  w.edit('x.com/plain-x', mod(2, 'two'));
+  assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/detox-timeline', version: '2' }]);
+  w.edit('x.com/detox-timeline', mod(2, 'two'));
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(2, 'two')), version: '2' });
-  assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/plain-x')));
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(2, 'two')), version: '2' });
+  assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/detox-timeline')));
 });
 
 test('a deleted shipped mod stays deleted', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  fs.unlinkSync(path.join(w.ws.modsDir, 'x.com', 'plain-x.js'));
-  w.ship('x.com/plain-x', mod(2));
+  fs.unlinkSync(path.join(w.ws.modsDir, 'x.com', 'detox-timeline.js'));
+  w.ship('x.com/detox-timeline', mod(2));
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
-  assert.strictEqual(w.mine('x.com/plain-x'), null);
+  assert.strictEqual(w.mine('x.com/detox-timeline'), null);
 });
 
 test('workspaces from before the record: copies matching any shipped version are updated, others wait', () => {
   const old = '// ==WebMod==\n// @name Plain\n// ==/WebMod==\n// old, unlabelled\n';
-  const w = world({ history: { 'x.com/plain-x': [sha1('// older still\n'), sha1(old)] } });
+  const w = world({ history: { 'x.com/detox-timeline': [sha1('// older still\n'), sha1(old)] } });
   // What setup used to leave: offered, copied, no record.
   fs.mkdirSync(path.join(w.ws.modsDir, 'x.com'), { recursive: true });
-  fs.writeFileSync(path.join(w.ws.modsDir, 'x.com', 'plain-x.js'), old);
+  fs.writeFileSync(path.join(w.ws.modsDir, 'x.com', 'detox-timeline.js'), old);
   fs.writeFileSync(path.join(w.ws.modsDir, 'x.com', 'punk-fonts.js'), '// punk, changed by the user\n');
-  fs.writeFileSync(path.join(w.home, 'preinstalled.json'), JSON.stringify({ offered: ['x.com/plain-x', 'x.com/punk-fonts'], startOff: ['x.com/punk-fonts'], sitesOn: ['x.com'] }));
-  w.ship('x.com/plain-x', mod(1));
+  fs.writeFileSync(path.join(w.home, 'preinstalled.json'), JSON.stringify({ offered: ['x.com/detox-timeline', 'x.com/punk-fonts'], startOff: ['x.com/punk-fonts'], sitesOn: ['x.com'] }));
+  w.ship('x.com/detox-timeline', mod(1));
   w.ship('x.com/punk-fonts', mod(1, 'punk'));
   const r = w.setup();
-  assert.deepStrictEqual(r.updated, [{ id: 'x.com/plain-x', version: '1', from: null }]);
-  assert.strictEqual(w.mine('x.com/plain-x'), mod(1));
+  assert.deepStrictEqual(r.updated, [{ id: 'x.com/detox-timeline', version: '1', from: null }]);
+  assert.strictEqual(w.mine('x.com/detox-timeline'), mod(1));
   // Edited (matches no shipped version): left alone, offered, with no known base.
   assert.deepStrictEqual(r.waiting, [{ id: 'x.com/punk-fonts', version: '1' }]);
   assert.strictEqual(w.mine('x.com/punk-fonts'), '// punk, changed by the user\n');
@@ -134,131 +143,133 @@ test('workspaces from before the record: copies matching any shipped version are
 test('the user\'s own file under a shipped name is never managed', () => {
   const w = world();
   fs.mkdirSync(path.join(w.ws.modsDir, 'x.com'), { recursive: true });
-  fs.writeFileSync(path.join(w.ws.modsDir, 'x.com', 'plain-x.js'), '// mine from the start\n');
-  w.ship('x.com/plain-x', mod(1));
+  fs.writeFileSync(path.join(w.ws.modsDir, 'x.com', 'detox-timeline.js'), '// mine from the start\n');
+  w.ship('x.com/detox-timeline', mod(1));
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { own: true });
-  w.ship('x.com/plain-x', mod(2));
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { own: true });
+  w.ship('x.com/detox-timeline', mod(2));
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
-  assert.strictEqual(w.mine('x.com/plain-x'), '// mine from the start\n');
+  assert.strictEqual(w.mine('x.com/detox-timeline'), '// mine from the start\n');
 });
 
 test('pendingUpdates: what the panel and the CLI show', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  w.edit('x.com/plain-x', mod(1, 'mine'));
-  w.ship('x.com/plain-x', mod(2));
+  w.edit('x.com/detox-timeline', mod(1, 'mine'));
+  w.ship('x.com/detox-timeline', mod(2));
   w.setup();
-  const asMod = (code) => ({ id: 'x.com/plain-x', code });
-  assert.deepStrictEqual(S.pendingUpdates(w.home, [asMod(mod(1, 'mine'))]), { 'x.com/plain-x': { version: '2', from: '1', modified: true } });
+  const asMod = (code) => ({ id: 'x.com/detox-timeline', code });
+  assert.deepStrictEqual(S.pendingUpdates(w.home, [asMod(mod(1, 'mine'))]), { 'x.com/detox-timeline': { version: '2', from: '1', modified: true } });
   // Back to what was shipped: nothing of the user's would be lost.
-  assert.deepStrictEqual(S.pendingUpdates(w.home, [asMod(mod(1))]), { 'x.com/plain-x': { version: '2', from: '1', modified: false } });
+  assert.deepStrictEqual(S.pendingUpdates(w.home, [asMod(mod(1))]), { 'x.com/detox-timeline': { version: '2', from: '1', modified: false } });
   assert.deepStrictEqual(S.pendingUpdates(w.home, [asMod(mod(2))]), {});
 });
 
 test('use the new version: the user\'s copy goes to the trash; restore brings it back and offers the update again', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  w.edit('x.com/plain-x', mod(1, 'mine'));
-  w.ship('x.com/plain-x', mod(2));
+  w.edit('x.com/detox-timeline', mod(1, 'mine'));
+  w.ship('x.com/detox-timeline', mod(2));
   w.setup();
-  const r = S.useNewVersion(w.ws, 'x.com/plain-x');
+  const r = S.useNewVersion(w.ws, 'x.com/detox-timeline');
   assert.strictEqual(r.version, '2');
-  assert.strictEqual(w.mine('x.com/plain-x'), mod(2));
+  assert.strictEqual(w.mine('x.com/detox-timeline'), mod(2));
   assert.strictEqual(fs.readFileSync(r.trashed, 'utf8'), mod(1, 'mine'));
-  assert.deepStrictEqual(listTrash(w.ws).map((t) => t.id), ['x.com/plain-x']);
-  assert.strictEqual(w.rec('x.com/plain-x').hash, sha1(mod(2)));
-  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(2));
-  assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/plain-x')));
-  assert.throws(() => S.useNewVersion(w.ws, 'x.com/plain-x'), /no new TRIF version/);
+  assert.deepStrictEqual(listTrash(w.ws).map((t) => t.id), ['x.com/detox-timeline']);
+  assert.strictEqual(w.rec('x.com/detox-timeline').hash, sha1(mod(2)));
+  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2));
+  assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/detox-timeline')));
+  // (the user's choice: not stamped as TRIF's own update, so it doesn't start off anywhere)
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), {});
+  assert.throws(() => S.useNewVersion(w.ws, 'x.com/detox-timeline'), /no new TRIF version/);
   // A setup in between doesn't spoil the undo.
   w.setup();
 
   // Undo (the panel's, or `trif restore`).
-  S.restoreMod(w.ws, 'x.com/plain-x');
-  assert.strictEqual(w.mine('x.com/plain-x'), mod(1, 'mine'));
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(1)), version: '1', pending: { hash: sha1(mod(2)), version: '2' } });
-  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(1));
-  assert.strictEqual(fs.readFileSync(S.newFile(w.home, 'x.com/plain-x'), 'utf8'), mod(2));
-  assert.deepStrictEqual(fs.readdirSync(path.join(w.ws.modsDir, 'x.com')), ['plain-x.js'], 'nothing left aside');
+  S.restoreMod(w.ws, 'x.com/detox-timeline');
+  assert.strictEqual(w.mine('x.com/detox-timeline'), mod(1, 'mine'));
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(1)), version: '1', pending: { hash: sha1(mod(2)), version: '2' } });
+  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(1));
+  assert.strictEqual(fs.readFileSync(S.newFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2));
+  assert.deepStrictEqual(fs.readdirSync(path.join(w.ws.modsDir, 'x.com')), ['detox-timeline.js'], 'nothing left aside');
 
   // Once the new version is edited, restore is the plain one again (refuses to overwrite).
-  S.useNewVersion(w.ws, 'x.com/plain-x');
-  w.edit('x.com/plain-x', mod(2, 'edited after'));
-  assert.throws(() => S.restoreMod(w.ws, 'x.com/plain-x'), /exists again/);
+  S.useNewVersion(w.ws, 'x.com/detox-timeline');
+  w.edit('x.com/detox-timeline', mod(2, 'edited after'));
+  assert.throws(() => S.restoreMod(w.ws, 'x.com/detox-timeline'), /exists again/);
 });
 
 test('keep mine: that version isn\'t offered again; a later one is', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  w.edit('x.com/plain-x', mod(1, 'mine'));
-  w.ship('x.com/plain-x', mod(2));
+  w.edit('x.com/detox-timeline', mod(1, 'mine'));
+  w.ship('x.com/detox-timeline', mod(2));
   w.setup();
-  assert.deepStrictEqual(S.keepMine(w.ws, 'x.com/plain-x'), { id: 'x.com/plain-x', version: '2' });
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(1)), version: '1', declined: sha1(mod(2)) });
-  assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/plain-x')));
+  assert.deepStrictEqual(S.keepMine(w.ws, 'x.com/detox-timeline'), { id: 'x.com/detox-timeline', version: '2' });
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(1)), version: '1', declined: sha1(mod(2)) });
+  assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/detox-timeline')));
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
-  assert.deepStrictEqual(S.pendingUpdates(w.home, [{ id: 'x.com/plain-x', code: mod(1, 'mine') }]), {});
-  w.ship('x.com/plain-x', mod(3));
-  assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/plain-x', version: '3' }]);
-  assert.strictEqual(w.mine('x.com/plain-x'), mod(1, 'mine'));
-  assert.strictEqual(w.rec('x.com/plain-x').pending.version, '3');
+  assert.deepStrictEqual(S.pendingUpdates(w.home, [{ id: 'x.com/detox-timeline', code: mod(1, 'mine') }]), {});
+  w.ship('x.com/detox-timeline', mod(3));
+  assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/detox-timeline', version: '3' }]);
+  assert.strictEqual(w.mine('x.com/detox-timeline'), mod(1, 'mine'));
+  assert.strictEqual(w.rec('x.com/detox-timeline').pending.version, '3');
 });
 
 test('merge: the prompt points at the three files; resolving makes the new version the base', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  w.edit('x.com/plain-x', mod(1, 'mine'));
-  w.ship('x.com/plain-x', mod(2));
+  w.edit('x.com/detox-timeline', mod(1, 'mine'));
+  w.ship('x.com/detox-timeline', mod(2));
   w.setup();
-  const m = S.mergeRequest(w.ws, 'x.com/plain-x');
+  const m = S.mergeRequest(w.ws, 'x.com/detox-timeline');
   assert.strictEqual(m.hash, sha1(mod(2)));
-  assert.match(m.prompt, /user's copy \(the only file to edit, later\): sites\/x\.com\/plain-x\.js/);
-  assert.match(m.prompt, /new version from TRIF \(read only\): \.shipped\/x\.com\/plain-x\.new\.js/);
-  assert.match(m.prompt, /shipped before \(version 1\).*: \.shipped\/x\.com\/plain-x\.js/);
-  assert.strictEqual(S.resolveMerge(w.home, 'x.com/plain-x', 'some other version'), false);
-  w.edit('x.com/plain-x', mod(2, 'merged'));
-  assert.strictEqual(S.resolveMerge(w.home, 'x.com/plain-x', m.hash), true);
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(2)), version: '2' });
-  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(2));
+  assert.match(m.prompt, /user's copy \(the only file to edit, later\): sites\/x\.com\/detox-timeline\.js/);
+  assert.match(m.prompt, /new version from TRIF \(read only\): \.shipped\/x\.com\/detox-timeline\.new\.js/);
+  assert.match(m.prompt, /shipped before \(version 1\).*: \.shipped\/x\.com\/detox-timeline\.js/);
+  assert.strictEqual(S.resolveMerge(w.home, 'x.com/detox-timeline', 'some other version'), false);
+  w.edit('x.com/detox-timeline', mod(2, 'merged'));
+  assert.strictEqual(S.resolveMerge(w.home, 'x.com/detox-timeline', m.hash), true);
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(2)), version: '2' });
+  assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2));
   // Merged copies are edited copies: the next version waits for the user again.
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
-  w.ship('x.com/plain-x', mod(3));
-  assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/plain-x', version: '3' }]);
+  w.ship('x.com/detox-timeline', mod(3));
+  assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/detox-timeline', version: '3' }]);
 });
 
 test('mergeSettled: waiting until the user\'s copy changed and has the new @version; then merged', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
-  w.edit('x.com/plain-x', mod(1, 'mine'));
-  w.ship('x.com/plain-x', mod(2));
+  w.edit('x.com/detox-timeline', mod(1, 'mine'));
+  w.ship('x.com/detox-timeline', mod(2));
   w.setup();
-  const m = S.mergeRequest(w.ws, 'x.com/plain-x');
+  const m = S.mergeRequest(w.ws, 'x.com/detox-timeline');
   assert.deepStrictEqual([m.version, m.before], ['2', sha1(mod(1, 'mine'))]);
-  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'waiting', 'the proposal changed nothing');
-  w.edit('x.com/plain-x', mod(1, 'mine, tweaked'));
-  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'waiting', 'changed, but not to the new version');
-  w.edit('x.com/plain-x', mod(2, 'mine and two'));
-  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'merged');
-  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(2)), version: '2' });
-  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'gone', 'nothing left to settle');
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/detox-timeline', m), 'waiting', 'the proposal changed nothing');
+  w.edit('x.com/detox-timeline', mod(1, 'mine, tweaked'));
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/detox-timeline', m), 'waiting', 'changed, but not to the new version');
+  w.edit('x.com/detox-timeline', mod(2, 'mine and two'));
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/detox-timeline', m), 'merged');
+  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(2)), version: '2' });
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/detox-timeline', m), 'gone', 'nothing left to settle');
   // Kept theirs meanwhile: gone too.
-  w.ship('x.com/plain-x', mod(3));
+  w.ship('x.com/detox-timeline', mod(3));
   w.setup();
-  const m3 = S.mergeRequest(w.ws, 'x.com/plain-x');
-  S.keepMine(w.ws, 'x.com/plain-x');
-  w.edit('x.com/plain-x', mod(3, 'x'));
-  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m3), 'gone');
+  const m3 = S.mergeRequest(w.ws, 'x.com/detox-timeline');
+  S.keepMine(w.ws, 'x.com/detox-timeline');
+  w.edit('x.com/detox-timeline', mod(3, 'x'));
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/detox-timeline', m3), 'gone');
 });
 
 test('runs can read .shipped (to merge) but not write it', () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
+  w.ship('x.com/detox-timeline', mod(1));
   w.setup();
   const real = (p) => fs.realpathSync(p);
   const shipped = real(path.join(w.home, S.SHIPPED_DIR));
@@ -298,6 +309,7 @@ test('RETIRED: each retired mod is gone from the examples, and the mod it went i
   assert.deepStrictEqual(S.RETIRED.map((r) => [r.id, r.into]), [
     ['www.google.com/hide-ai-mode', 'www.google.com/hide-ai-in-results'],
     ['www.google.com/hide-sponsored', 'www.google.com/hide-extra-sections'],
+    ['x.com/plain-x', 'x.com/detox-timeline'], // (0.2.3: a rename)
   ]);
 });
 
@@ -305,69 +317,73 @@ test('RETIRED: each retired mod is gone from the examples, and the mod it went i
 
 test('setup says what it updated and what waits; the helper and the CLI show the waiting update', async () => {
   const w = world();
-  w.ship('x.com/plain-x', mod(1));
-  w.ship('x.com/punk-fonts', mod(1, 'punk'));
+  w.ship('x.com/detox-timeline', mod(1));
+  w.ship('x.com/rainbow-rave', mod(1, 'punk'));
   const env = { TRIF_EXAMPLES_DIR: w.examples };
   const args = ['setup', '--verbose', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
-  let r = await runCli(args, { home: w.home, env });
+  let r = await runCli([...args, '--examples', 'x.com'], { home: w.home, env }); // (the first: the user adds X's)
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
-  w.ship('x.com/plain-x', mod(2));
-  w.ship('x.com/punk-fonts', mod(2, 'punk'));
-  w.edit('x.com/punk-fonts', mod(1, 'my punk'));
+  w.ship('x.com/detox-timeline', mod(2));
+  w.ship('x.com/rainbow-rave', mod(2, 'punk'));
+  w.edit('x.com/rainbow-rave', mod(1, 'my punk'));
   r = await runCli(args, { home: w.home, env });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
-  assert.match(r.stdout, /updated to the new version: x\.com\/plain-x \(version 2\)/);
-  assert.match(r.stdout, /new version waiting, not installed because you changed these: x\.com\/punk-fonts \(version 2\)/);
+  assert.match(r.stdout, /updated to the new version: x\.com\/detox-timeline \(version 2\)/);
+  assert.match(r.stdout, /new version waiting, not installed because you changed these: x\.com\/rainbow-rave \(version 2\)/);
 
   // trif mods / mod-update, without the browser.
   r = await runCli(['mods'], { home: w.home });
-  assert.match(r.stdout, /x\.com\/punk-fonts[\s\S]*update available \(you've changed it\): version 2: trif mod-update x\.com\/punk-fonts/);
+  assert.match(r.stdout, /x\.com\/rainbow-rave[\s\S]*update available \(you've changed it\): version 2: trif mod-update x\.com\/rainbow-rave/);
   assert.match(r.stdout, /from TRIF, version 2/);
   r = await runCli(['mods', '--json'], { home: w.home });
   const listed = JSON.parse(r.stdout).mods;
-  assert.deepStrictEqual(listed.find((m) => m.id === 'x.com/punk-fonts').update, { version: '2', from: '1', modified: true });
-  assert.strictEqual(listed.find((m) => m.id === 'x.com/plain-x').update, undefined);
-  r = await runCli(['mod-update', 'x.com/punk-fonts'], { home: w.home });
-  assert.match(r.stdout, /the new version: +.*\.shipped\/x\.com\/punk-fonts\.new\.js/);
+  assert.deepStrictEqual(listed.find((m) => m.id === 'x.com/rainbow-rave').update, { version: '2', from: '1', modified: true });
+  assert.strictEqual(listed.find((m) => m.id === 'x.com/detox-timeline').update, undefined);
+  r = await runCli(['mod-update', 'x.com/rainbow-rave'], { home: w.home });
+  assert.match(r.stdout, /the new version: +.*\.shipped\/x\.com\/rainbow-rave\.new\.js/);
 
   // The helper's mods message carries it, and drops it once the user chose.
   const ext = new FakeExtension({ home: w.home });
   cleanups.push(() => ext.close());
   const mods = await ext.nextMods((ms) => ms.length === 2);
-  const punk = mods.find((m) => m.id === 'x.com/punk-fonts');
+  const punk = mods.find((m) => m.id === 'x.com/rainbow-rave');
   assert.deepStrictEqual(punk.update, { version: '2', from: '1', modified: true });
   assert.deepStrictEqual([punk.source, punk.version], ['webmods', '1']);
-  assert.strictEqual(mods.find((m) => m.id === 'x.com/plain-x').update, undefined);
+  assert.strictEqual(mods.find((m) => m.id === 'x.com/detox-timeline').update, undefined);
+  // The one TRIF updated by itself carries its stamp (a browser where new page scripts start off switches it
+  // off once); the one waiting for the user doesn't.
+  assert.match(mods.find((m) => m.id === 'x.com/detox-timeline').autoUpdated || '', /^\d{4}-/);
+  assert.strictEqual(punk.autoUpdated, undefined);
   await ext.waitForSocket();
   r = await runCli(['status'], { home: w.home });
-  assert.match(r.stdout, /x\.com\/punk-fonts .*update available \(you've changed it\): version 2/);
+  assert.match(r.stdout, /x\.com\/rainbow-rave .*update available \(you've changed it\): version 2/);
 
   // Inside a side-panel run the choice isn't the agent's.
-  r = await runCli(['mod-update', 'x.com/punk-fonts', '--keep'], { home: w.home, env: { TRIF_RUN_TOKEN: 'x' } });
+  r = await runCli(['mod-update', 'x.com/rainbow-rave', '--keep'], { home: w.home, env: { TRIF_RUN_TOKEN: 'x' } });
   assert.strictEqual(r.code, 1);
   assert.match(r.stderr, /not available inside a side-panel agent run/);
 
   const since = ext.messages.length;
   const id = 'u1';
-  ext.send({ type: 'request', id, cmd: 'mod.update', args: { id: 'x.com/punk-fonts', choice: 'mine' } });
+  ext.send({ type: 'request', id, cmd: 'mod.update', args: { id: 'x.com/rainbow-rave', choice: 'mine' } });
   const resp = await ext.next((m) => m.type === 'response' && m.id === id);
-  assert.deepStrictEqual(resp.result, { id: 'x.com/punk-fonts', choice: 'mine', version: '2' });
-  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/punk-fonts' && !m.update), { since });
+  assert.deepStrictEqual(resp.result, { id: 'x.com/rainbow-rave', choice: 'mine', version: '2' });
+  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/rainbow-rave' && !m.update), { since });
 
   // A setup elsewhere (another browser's update) is noticed without any mod file changing.
-  w.ship('x.com/punk-fonts', mod(3, 'punk'));
+  w.ship('x.com/rainbow-rave', mod(3, 'punk'));
   r = await runCli(args, { home: w.home, env });
-  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/punk-fonts' && m.update && m.update.version === '3'), { since, timeout: 8000 });
+  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/rainbow-rave' && m.update && m.update.version === '3'), { since, timeout: 8000 });
 
   // Use the new version through the CLI; restore puts the user's copy back.
-  r = await runCli(['mod-update', 'x.com/punk-fonts', '--use-new'], { home: w.home });
+  r = await runCli(['mod-update', 'x.com/rainbow-rave', '--use-new'], { home: w.home });
   assert.strictEqual(r.code, 0, r.stderr);
   assert.match(r.stdout, /is now version 3; your copy is in the trash/);
-  assert.strictEqual(w.mine('x.com/punk-fonts'), mod(3, 'punk'));
-  r = await runCli(['restore', 'x.com/punk-fonts'], { home: w.home });
+  assert.strictEqual(w.mine('x.com/rainbow-rave'), mod(3, 'punk'));
+  r = await runCli(['restore', 'x.com/rainbow-rave'], { home: w.home });
   assert.strictEqual(r.code, 0, r.stderr);
-  assert.strictEqual(w.mine('x.com/punk-fonts'), mod(1, 'my punk'));
-  await waitFor(() => (ext.lastMods() || []).some((m) => m.id === 'x.com/punk-fonts' && m.update && m.update.version === '3'), { message: 'the update offered again' });
+  assert.strictEqual(w.mine('x.com/rainbow-rave'), mod(1, 'my punk'));
+  await waitFor(() => (ext.lastMods() || []).some((m) => m.id === 'x.com/rainbow-rave' && m.update && m.update.version === '3'), { message: 'the update offered again' });
 });
 
 test('the repo\'s own examples: a legacy workspace with unchanged copies gets them updated by setup', async () => {
@@ -377,17 +393,17 @@ test('the repo\'s own examples: a legacy workspace with unchanged copies gets th
   const ids = S.PREINSTALLED.map((p) => p.id);
   fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ offered: ids, startOff: [], sitesOn: S.SITES_ON }));
   const legacy = '// a version of plain-x WebMods once shipped\n';
-  history['x.com/plain-x'].push(sha1(legacy));
+  history['x.com/detox-timeline'].push(sha1(legacy));
   // Point setup at a copy of the examples whose history includes that version.
   const root = tempDir();
   fs.cpSync(path.join(REPO, 'examples'), path.join(root, 'examples'), { recursive: true });
   fs.writeFileSync(path.join(root, 'examples', 'shipped-history.json'), JSON.stringify(history));
   fs.mkdirSync(path.join(home, 'sites', 'x.com'), { recursive: true });
-  fs.writeFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), legacy);
+  fs.writeFileSync(path.join(home, 'sites', 'x.com', 'detox-timeline.js'), legacy);
   const r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link', '--link'], { home, env: { TRIF_EXAMPLES_DIR: path.join(root, 'examples', 'sites') } });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
-  assert.match(r.stdout, /updated to the new version: x\.com\/plain-x \(version \d+\)/);
-  assert.strictEqual(fs.readFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', 'x.com', 'plain-x.js'), 'utf8'));
+  assert.match(r.stdout, /updated to the new version: x\.com\/detox-timeline \(version \d+\)/);
+  assert.strictEqual(fs.readFileSync(path.join(home, 'sites', 'x.com', 'detox-timeline.js'), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', 'x.com', 'detox-timeline.js'), 'utf8'));
 });
 
 // ------------------------------------------------------------------ retired mods (folded into another)
@@ -404,7 +420,7 @@ const BANISH2 = gmod('AI Banisher', 2);
 
 // A workspace set up while both were shipped (version 1); `release()` ships the merged one and
 // retires the other (its example goes, as in the repo; its history stays).
-function retireWorld() {
+function retireWorld(retireList = RETIRE) {
   const w = world();
   fs.mkdirSync(path.join(w.examples, 'www.google.com'), { recursive: true });
   const history = {};
@@ -421,10 +437,10 @@ function retireWorld() {
       ship(INTO, BANISH2);
       fs.unlinkSync(path.join(w.examples, `${OLD}.js`));
       list = [{ id: INTO, on: true }];
-      retire = RETIRE;
+      retire = retireList;
     },
     setup() {
-      const pre = S.preinstallMods(w.home, w.ws.modsDir, w.examples, list, []);
+      const pre = S.preinstallMods(w.home, w.ws.modsDir, w.examples, list, [], { add: 'all' });
       const up = S.updateShippedMods(w.home, w.ws.modsDir, w.examples, list);
       return { pre, ...up, ...S.retireShippedMods(w.ws, w.examples, retire) };
     },
@@ -457,6 +473,23 @@ test('retired: an unchanged copy goes to the trash once the mod it went into has
   // Nothing more on the next setup; it doesn't come back.
   assert.deepStrictEqual(w.setup(), { pre: { added: [], on: [], sites: [] }, updated: [], waiting: [], removed: [], kept: [] });
   assert.strictEqual(w.mine(OLD), null);
+});
+
+test('retired: a rename is marked as one (setup says "now called", not "now part of")', () => {
+  const RENAME = [{ ...RETIRE[0], renamed: true }];
+  const w = retireWorld(RENAME);
+  w.setup();
+  w.release();
+  const r = w.setup();
+  assert.strictEqual(r.removed.length, 1);
+  assert.strictEqual(r.removed[0].renamed, true);
+  const w2 = retireWorld(RENAME);
+  w2.setup();
+  w2.edit(OLD, gmod('Hide AI Mode', 1, 'mine'));
+  w2.release();
+  assert.deepStrictEqual(w2.setup().kept, [{ id: OLD, into: INTO, was: 'Hide AI Mode', name: 'AI Banisher', renamed: true }]);
+  // The real one: Plain X became Detox Timeline; the Google merges stay merges.
+  assert.deepStrictEqual(S.RETIRED.filter((x) => x.renamed).map((x) => x.id), ['x.com/plain-x']);
 });
 
 test('retired: an edited copy is never touched, and setup says so once', () => {

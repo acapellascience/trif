@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { FakeExtension, writeMod, tempDir, waitFor, sleep, privDir } = require('./fake-extension');
-const { loadOrigins, recordOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS } = require('../helper/lib/origins');
+const { loadOrigins, recordOrigins, renameOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS } = require('../helper/lib/origins');
 
 const cleanups = [];
 test.after(async () => {
@@ -61,6 +61,21 @@ test('recordOrigins: no run drops a stale entry; nothing new or unchanged leaves
   // Recreated by another browser's run: the origin moves to it.
   assert.equal(recordOrigins(home, ['x.com/b'], [{ by: 'A', browser: 'Chrome', site: 'x.com' }], 6000), true);
   assert.deepStrictEqual(loadOrigins(home)['x.com/b'], { by: 'A', browser: 'Chrome', at: 6000 });
+});
+
+test('recordOrigins: live only for a file written while its run was going, not one that appeared after it ended', () => {
+  const home = tempDir();
+  const going = { by: 'A', browser: 'Chrome', site: 'x.com', startedAt: 1000, endedAt: null };
+  const ended = { by: 'A', browser: 'Chrome', site: 'x.com', startedAt: 1000, endedAt: 5000 };
+  recordOrigins(home, ['x.com/during'], [going], 6000, { 'x.com/during': 3000 });
+  recordOrigins(home, ['x.com/last'], [ended], 6000, { 'x.com/last': 4900 }); // the run's last write, scanned just after it ended
+  recordOrigins(home, ['x.com/late'], [ended], 6000, { 'x.com/late': 5600 }); // a terminal's, right after the run ended
+  recordOrigins(home, ['x.com/early'], [going], 6000, { 'x.com/early': 900 }); // there before the run started
+  recordOrigins(home, ['x.com/unknown'], [going], 6000); // no time known: not live
+  const o = loadOrigins(home);
+  assert.deepStrictEqual(Object.fromEntries(Object.entries(o).map(([id, v]) => [id, !!v.live])),
+    { 'x.com/during': true, 'x.com/last': true, 'x.com/late': false, 'x.com/early': false, 'x.com/unknown': false });
+  assert.deepStrictEqual(o['x.com/late'], { by: 'A', browser: 'Chrome', at: 6000 }, 'still counted for the run (another browser starts it off)');
 });
 
 test('loadOrigins: missing or junk file and bad entries are ignored', () => {
@@ -198,7 +213,7 @@ test('two browsers: a mod made by A\'s run carries origin A in both helpers\' mo
   const mk = JSON.parse(fs.readFileSync(marker, 'utf8'));
   assert.deepStrictEqual([mk.by, mk.browser, mk.site, mk.pid, mk.endedAt], ['A', 'Chrome', 'x.com', a.child.pid, null]);
 
-  const want = { by: 'A', browser: 'Chrome' };
+  const want = { by: 'A', browser: 'Chrome', live: true }; // (written while the run was going)
   const modsA = await a.nextMods((mods) => !!modIn(mods, 'x.com/rainbow'), { since: sinceA, timeout: 20000 });
   const modsB = await b.nextMods((mods) => !!modIn(mods, 'x.com/rainbow'), { since: sinceB, timeout: 20000 });
   assert.deepStrictEqual(modIn(modsA, 'x.com/rainbow').origin, want, 'the helper that ran it');
@@ -209,6 +224,12 @@ test('two browsers: a mod made by A\'s run carries origin A in both helpers\' mo
   await waitDone(a, runId);
   await waitFor(() => typeof JSON.parse(fs.readFileSync(marker, 'utf8')).endedAt === 'number', { timeout: 10000, message: 'marker endedAt' });
 
+  // Right after the run ended, a terminal agent writes one: counted for A's run (another browser starts it
+  // off), but not as written while it was going (live), so A's own chat exemption doesn't cover it either.
+  const s1a = a.messages.length;
+  writeMod(home, 'x.com', 'just-after.js', '// a terminal agent, right after the panel run');
+  const lateA = await a.nextMods((mods) => !!modIn(mods, 'x.com/just-after'), { since: s1a, timeout: 20000 });
+  assert.deepStrictEqual(modIn(lateA, 'x.com/just-after').origin, { by: 'A', browser: 'Chrome' });
   // Wait out the grace period, then a mod written with no run anywhere (terminal agent, by hand) has no origin.
   await sleep(ENDED_GRACE_MS + 500);
   const s2a = a.messages.length;
@@ -221,6 +242,41 @@ test('two browsers: a mod made by A\'s run carries origin A in both helpers\' mo
   assert.equal(loadOrigins(home)['x.com/by-hand'], undefined);
   // The run's mod keeps its origin.
   assert.deepStrictEqual(modIn(handB, 'x.com/rainbow').origin, want);
+});
+
+test('renameOrigins: a renamed mod keeps its origin (or none), even through a swap', () => {
+  const home = tempDir();
+  recordOrigins(home, ['x.com/a', 'x.com/b'], [{ by: 'B', browser: 'Firefox', site: 'x.com' }], 1000);
+  recordOrigins(home, ['x.com/stale'], [{ by: 'C', browser: 'Edge', site: 'x.com' }], 1000);
+  assert.equal(renameOrigins(home, []), false);
+  // a -> c keeps B; an origin-less mod renamed over a stale entry drops it.
+  assert.equal(renameOrigins(home, [{ from: 'x.com/a', to: 'x.com/c' }, { from: 'x.com/none', to: 'x.com/stale' }]), true);
+  assert.deepStrictEqual(loadOrigins(home), { 'x.com/b': { by: 'B', browser: 'Firefox', at: 1000 }, 'x.com/c': { by: 'B', browser: 'Firefox', at: 1000 } });
+  recordOrigins(home, ['x.com/d'], [{ by: 'D', browser: 'Arc', site: 'x.com' }], 2000);
+  renameOrigins(home, [{ from: 'x.com/c', to: 'x.com/d' }, { from: 'x.com/d', to: 'x.com/c' }]);
+  assert.deepStrictEqual([loadOrigins(home)['x.com/c'].by, loadOrigins(home)['x.com/d'].by], ['D', 'B']);
+});
+
+test('a mod renamed while another browser\'s run is going keeps its own origin; a new file gets the run\'s', async () => {
+  const { home } = makeHome();
+  writeMod(home, 'x.com', 'wobble.js', '// ==WebMod==\n// @name Wobble\n// ==/WebMod==\n// made by hand\n');
+  const ext = startHost(home);
+  ext.hello({ browser: 'Chrome', installId: 'A' });
+  await ext.waitForSocket(15000);
+  await ext.nextMods((mods) => !!modIn(mods, 'x.com/wobble'), { timeout: 15000 });
+  await sleep(300);
+  // Firefox (B) has a run going on x.com (this test process stands in for its helper).
+  markRunActive(home, { runId: 'rB1', by: 'B', browser: 'Firefox', site: 'x.com' });
+  const since = ext.messages.length;
+  fs.renameSync(path.join(home, 'sites', 'x.com', 'wobble.js'), path.join(home, 'sites', 'x.com', 'jelly.js'));
+  writeMod(home, 'x.com', 'new.js', '// made during the run');
+  const mods = await ext.nextMods((m) => !!modIn(m, 'x.com/jelly') && !!modIn(m, 'x.com/new'), { since, timeout: 15000 });
+  assert.equal(modIn(mods, 'x.com/wobble'), undefined, 'the old id is gone');
+  assert.equal(path.basename(modIn(mods, 'x.com/jelly').file), 'jelly.js', 'the new file name is sent');
+  assert.equal(modIn(mods, 'x.com/jelly').name, 'Wobble');
+  assert.equal(modIn(mods, 'x.com/jelly').origin, undefined, 'renamed: still nobody\'s run');
+  assert.deepStrictEqual(modIn(mods, 'x.com/new').origin, { by: 'B', browser: 'Firefox', live: true }, 'a new file is the run\'s (written while it was going)');
+  markRunEnded(home, 'rB1');
 });
 
 test('a run on a host whose extension sent no install id isn\'t marked', async () => {

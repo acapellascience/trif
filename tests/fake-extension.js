@@ -9,6 +9,10 @@ const path = require('path');
 const { encode, Decoder } = require('../helper/lib/framing');
 
 const REPO = path.resolve(__dirname, '..');
+
+// Tests that run agents in this process read Claude Code's managed settings from a folder with none,
+// never the system's (agents/claude-managed.js).
+if (!process.env.TRIF_CLAUDE_MANAGED_DIR) process.env.TRIF_CLAUDE_MANAGED_DIR = path.join(os.tmpdir(), 'trif-tests-no-claude-managed');
 const HOST_JS = path.join(REPO, 'helper', 'host.js');
 const CLI_JS = path.join(REPO, 'helper', 'cli.js');
 
@@ -59,6 +63,9 @@ function testEnv(home, extra = {}) {
     // Never the real Keychain (lib/keyring.js): a tool that isn't there, unless a test brings a fake one.
     TRIF_KEYCHAIN_BIN: path.join(home, 'no-keychain', 'security'),
     ...windowsEnv(path.join(home, 'fakehome')),
+    // Never the real Claude Code managed settings (agents/claude-managed.js): a folder with none, unless a
+    // test brings some.
+    TRIF_CLAUDE_MANAGED_DIR: path.join(home, 'no-claude-managed'),
     ...extra,
   };
 }
@@ -88,14 +95,17 @@ async function waitFor(fn, { timeout = 5000, interval = 25, message = 'condition
 }
 
 class FakeExtension {
-  constructor({ home, env = {} }) {
+  // (`hostJs`: another copy of TRIF's helper/host.js than this checkout's, e.g. tests/run-sandbox.test.js's)
+  constructor({ home, env = {}, hostJs = HOST_JS }) {
     this.home = home;
-    this.messages = [];      // every message received from the host
+    this.messages = [];      // every message received from the host (a set in parts as the mods message it makes)
+    this.parts = [];         // the modsPart messages received
+    this.assembling = null;
     this.badFrames = [];     // anything that wasn't valid framing/JSON
     this.handlers = {};      // cmd -> (args, msg) => result | Promise<result>; throw to answer ok:false
     this.autoRespond = true;
     this.waiters = [];
-    this.child = spawn(process.execPath, [HOST_JS, 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/'], {
+    this.child = spawn(process.execPath, [hostJs, 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/'], {
       env: testEnv(home, env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -114,11 +124,37 @@ class FakeExtension {
 
   send(msg) { this.child.stdin.write(encode(msg)); }
 
-  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser, installId } = {}) {
-    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}), ...(installId ? { installId } : {}) });
+  // (Without `features`, an extension from before sets of mods could come in parts: 0.2.4 and older.)
+  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser, installId, features } = {}) {
+    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}), ...(installId ? { installId } : {}), ...(features ? { features } : {}) });
   }
 
   _onMessage(msg) {
+    // A mods set in parts is joined back like the extension does (simply: in order, or it's a bad frame),
+    // and recorded as the {type:"mods"} message it was, with `parts` (how many it came in).
+    if (msg.type === 'modsPart') {
+      this.parts.push(msg);
+      if (msg.i === 0) this.assembling = { set: msg.set, data: [] };
+      if (!this.assembling || this.assembling.set !== msg.set || this.assembling.data.length !== msg.i) {
+        this.badFrames.push(`mods part ${msg.i} of set ${msg.set} out of order`);
+        this.assembling = null;
+        return;
+      }
+      this.assembling.data.push(msg.data);
+      if (this.assembling.data.length < msg.n) return;
+      msg = { ...JSON.parse(this.assembling.data.join('')), parts: msg.n, set: msg.set };
+      this.assembling = null;
+    }
+    // Mods sent without their code (`same`, to an extension whose hello has 'modsSame') get it back from the
+    // last set, as the extension does; `sameIds` says which they were.
+    if (msg.type === 'mods' && Array.isArray(msg.mods)) {
+      const had = new Map((this._hadMods || []).map((m) => [m.id, m]));
+      const sameIds = msg.mods.filter((m) => m.same).map((m) => m.id);
+      if (sameIds.length) {
+        msg = { ...msg, sameIds, mods: msg.mods.map((m) => (m.same ? (had.get(m.id)?.hash === m.hash ? { ...m, same: undefined, code: had.get(m.id).code } : (this.badFrames.push(`mod ${m.id} sent as same, not here`), m)) : m)) };
+      }
+      this._hadMods = msg.mods;
+    }
     this.messages.push(msg);
     this.waiters = this.waiters.filter((w) => {
       if (w.pred(msg)) { clearTimeout(w.timer); w.resolve(msg); return false; }

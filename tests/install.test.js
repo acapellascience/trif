@@ -11,9 +11,9 @@ const { runCli, tempDir, testEnv, REPO, privDir } = require('./fake-extension');
 const P = require('../helper/lib/paths');
 const { installApp, chooseMode, cleanPath, loadSafariAgent } = require('../helper/lib/setup');
 const L = require('../helper/lib/lock');
-const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON } = require('../helper/lib/preinstalled');
+const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON, starterSites, starterChoices, chooseNoStarter, installStarter, starterOffer, resolveSites, updateShippedMods: updateShipped } = require('../helper/lib/preinstalled');
 const { checkWrapperScript } = require('../helper/lib/doctor');
-const { browserTable } = require('../helper/lib/browsers');
+const { browserTable, manifestFiles, browsersSetUp } = require('../helper/lib/browsers');
 
 const DEV_ORIGIN = 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/';
 const OTHER_ID = 'abcdefghijklmnopabcdefghijklmnop';
@@ -39,7 +39,7 @@ function runOtherCli(cliJs, args, home, env = {}) {
   });
 }
 
-// A package folder like npm's (no .git): what `npx trif` runs from.
+// A package folder like npm's (no .git): what `npx timsrobot` runs from.
 function fakePackage(root) {
   const pkg = path.join(root, 'pkg', 'node_modules', 'trif');
   const r = installApp(REPO, pkg);
@@ -52,8 +52,8 @@ function fakePackage(root) {
 
 test('package: npm metadata, files allowlist and one version everywhere', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
-  assert.equal(pkg.name, 'trif');
-  assert.deepEqual(pkg.bin, { trif: 'helper/cli.js', webmods: 'helper/cli.js' }, '`webmods` stays an alias');
+  assert.equal(pkg.name, 'timsrobot');
+  assert.deepEqual(pkg.bin, { timsrobot: 'helper/cli.js', trif: 'helper/cli.js', webmods: 'helper/cli.js' }, '`npx timsrobot` runs the bin named like the package; `webmods` stays an alias');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.engines.node, '>=18');
   for (const f of ['helper/', 'extension/', 'examples/', 'docs/PROTOCOL.md']) assert.ok(pkg.files.includes(f), f);
@@ -100,6 +100,8 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
   assert.equal(wrapperScript(path.join(ws, 'bin', 'trif')), path.join(app, 'helper', 'cli.js'));
   assert.equal(fs.statSync(path.join(app, 'helper', 'cli.js')).mode & 0o777, fs.statSync(path.join(REPO, 'helper', 'cli.js')).mode & 0o777);
   assert.equal(fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8'), fs.readFileSync(path.join(app, 'helper', 'workspace', 'AGENTS.md'), 'utf8'));
+  assert.equal(fs.readFileSync(path.join(ws, 'TECHNIQUES.md'), 'utf8'), fs.readFileSync(path.join(app, 'helper', 'workspace', 'TECHNIQUES.md'), 'utf8'));
+  assert.equal(fs.readFileSync(path.join(ws, 'BOXED.md'), 'utf8'), fs.readFileSync(path.join(app, 'helper', 'workspace', 'BOXED.md'), 'utf8'));
   assert.match(r.stdout, new RegExp(`app {11}${esc(app)} \\(v${esc(P.VERSION)}, created, copied from`));
   assert.match(r.stdout, new RegExp(`choose ${esc(path.join(app, 'extension'))}\n`));
   assert.match(r.stdout, /Web Store listing will replace this step/);
@@ -295,46 +297,113 @@ test('installApp: never touches another live install\'s folders or swaps while i
 
 test('Safari bridge agent: restarted in place when loaded, loaded afresh when changed, later and detached from inside the bridge', () => {
   const calls = [];
+  const sleeps = [];
+  const sleep = (ms) => sleeps.push(ms);
   const uid = process.getuid();
   const target = `gui/${uid}/com.timsrobot.trif.safari-bridge`;
   const legacyTarget = `gui/${uid}/dev.webmods.safari-bridge`;
-  // loaded: whether the agent is loaded; legacy: whether the one from before 0.2.0 is.
-  const fake = (loaded, fail, legacy = false) => (args) => {
-    calls.push(args);
-    if (args[0] === 'print') return { status: (args[1] === legacyTarget ? legacy : loaded) ? 0 : 113 };
-    return fail === args[0] ? { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' } : { status: 0 };
+  // loaded: whether the agent is loaded; legacy: whether the one from before 0.2.0 is. A bootout unloads
+  // its service (even one that reports failing) unless lingers says how many prints still find it.
+  const fake = (loaded, fail, legacy = false, lingers = 0) => {
+    const up = { [target]: loaded, [legacyTarget]: legacy };
+    let left = 0;
+    return (args) => {
+      calls.push(args);
+      if (args[0] === 'print') {
+        if (up[args[1]] && left > 0 && --left === 0) up[args[1]] = false;
+        return { status: up[args[1]] ? 0 : 113 };
+      }
+      if (args[0] === 'bootout') { if (lingers) left = lingers; else up[args[1]] = false; }
+      return fail === args[0] ? { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' } : { status: 0 };
+    };
   };
   const prints = [['print', target], ['print', legacyTarget]];
+  const bootstrap = ['bootstrap', `gui/${uid}`, '/p.plist'];
 
-  assert.deepEqual(loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(true) }), { error: null, later: false });
+  assert.deepEqual(loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(true), sleep }), { error: null, later: false });
   assert.deepEqual(calls.splice(0), [...prints, ['kickstart', '-k', target]]);
 
-  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true) });
-  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  // After a bootout, the bootstrap waits until launchctl no longer finds the service.
+  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true), sleep });
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['print', target], bootstrap]);
+  assert.deepEqual(sleeps.splice(0), []);
+  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true, null, false, 3), sleep });
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['print', target], ['print', target], ['print', target], bootstrap]);
+  assert.deepEqual(sleeps.splice(0), [200, 200]);
+  // ... but not forever: about 5 s, then the bootstrap is tried anyway.
+  assert.deepEqual(loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true, null, false, 1000), sleep }), { error: null, later: false });
+  assert.equal(sleeps.splice(0).reduce((a, b) => a + b, 0), 5000);
+  assert.deepEqual(calls.splice(0).at(-1), bootstrap);
 
-  loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(false) });
-  assert.deepEqual(calls.splice(0), [...prints, ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(false), sleep });
+  assert.deepEqual(calls.splice(0), [...prints, bootstrap]);
 
-  assert.match(loadSafariAgent('/p.plist', { env: {}, run: fake(false, 'bootstrap') }).error, /Input\/output error/);
-  calls.splice(0);
+  // A bootstrap failing with error 5 (it raced the bootout) is tried again a second later ...
+  {
+    let n = 0;
+    const base = fake(true);
+    const flaky = (args) => (args[0] === 'bootstrap' && ++n === 1 ? (calls.push(args), { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' }) : base(args));
+    assert.deepEqual(loadSafariAgent('/p.plist', { changed: true, env: {}, run: flaky, sleep }), { error: null, later: false });
+    assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['print', target], bootstrap, bootstrap]);
+    assert.deepEqual(sleeps.splice(0), [1000]);
+  }
+  // ... up to 5 tries in all, then the error is reported.
+  assert.match(loadSafariAgent('/p.plist', { env: {}, run: fake(false, 'bootstrap'), sleep }).error, /Bootstrap failed: 5: Input\/output error/);
+  assert.equal(calls.splice(0).filter((a) => a[0] === 'bootstrap').length, 5);
+  assert.deepEqual(sleeps.splice(0), [1000, 1000, 1000, 1000]);
+  // Another error isn't retried.
+  const r122 = loadSafariAgent('/p.plist', { env: {}, sleep, run: (args) => (calls.push(args), args[0] === 'print' ? { status: 113 } : { status: 122, stderr: 'Bootstrap failed: 122: Path had bad ownership/permissions\n' }) });
+  assert.match(r122.error, /122/);
+  assert.equal(calls.splice(0).filter((a) => a[0] === 'bootstrap').length, 1);
+  assert.deepEqual(sleeps.splice(0), []);
 
   // An upgrade from 0.1.x: the old agent is stopped first (it holds the port), and its failing doesn't matter.
-  const r0 = loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(false, 'bootout', true) });
+  const r0 = loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(false, 'bootout', true), sleep });
   assert.deepEqual(r0, { error: null, later: false });
-  assert.deepEqual(calls.splice(0), [...prints, ['bootout', legacyTarget], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', legacyTarget], ['print', legacyTarget], bootstrap]);
 
   // Inside a host the bridge started (an update installed from Safari): nothing now, a detached script later.
   const scripts = [];
-  const r = loadSafariAgent('/p p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s) });
+  const r = loadSafariAgent('/p p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s), sleep });
   assert.deepEqual(r, { error: null, later: true });
   assert.deepEqual(calls.splice(0), prints);
   assert.equal(scripts.length, 1);
-  assert.equal(scripts[0], `sleep 3; "launchctl" "bootout" "${target}"; "launchctl" "bootstrap" "gui/${uid}" "/p p.plist"`);
+  const waitGone = (t) => `i=0; while [ $i -lt 25 ] && "launchctl" "print" "${t}" >/dev/null 2>&1; do sleep 0.2; i=$((i+1)); done`;
+  const retry = (plist) => `i=1; until "launchctl" "bootstrap" "gui/${uid}" "${plist}"; do [ $? -eq 5 ] && [ $i -lt 5 ] || break; sleep 1; i=$((i+1)); done`;
+  assert.equal(scripts[0], `sleep 3; "launchctl" "bootout" "${target}"; ${waitGone(target)}; ${retry('/p p.plist')}`);
   // An older bridge (0.1.x, updating to this version) says so as WEBMODS_SAFARI_BRIDGE.
-  const r2 = loadSafariAgent('/p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '9' }, run: fake(false, null, true), runDetached: (s) => scripts.push(s) });
+  const r2 = loadSafariAgent('/p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '9' }, run: fake(false, null, true), runDetached: (s) => scripts.push(s), sleep });
   assert.deepEqual(r2, { error: null, later: true });
-  assert.equal(scripts[1], `sleep 3; "launchctl" "bootout" "${legacyTarget}"; "launchctl" "bootstrap" "gui/${uid}" "/p.plist"`);
+  assert.equal(scripts[1], `sleep 3; "launchctl" "bootout" "${legacyTarget}"; ${waitGone(legacyTarget)}; ${retry('/p.plist')}`);
   calls.splice(0);
+  assert.deepEqual(sleeps, []);
+});
+
+test('Safari bridge agent: the detached script waits out the bootout and retries a bootstrap failing with 5', { skip: process.platform === 'win32' }, () => {
+  // A fake launchctl on PATH: print finds the service twice more after the bootout; bootstrap fails
+  // with 5 twice, then works. The script's leading "sleep 3" is dropped to keep the test quick.
+  const dir = tempDir();
+  const log = path.join(dir, 'log');
+  fs.writeFileSync(path.join(dir, 'launchctl'), `#!/bin/sh
+echo "$*" >> "${log}"
+n() { c=$(cat "${dir}/$1" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "${dir}/$1"; echo $c; }
+case "$1" in
+  print) [ $(n print) -le 2 ] && exit 0; exit 113 ;;
+  bootstrap) [ $(n bootstrap) -le 2 ] && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; }; exit 0 ;;
+esac
+exit 0
+`, { mode: 0o755 });
+  const uid = process.getuid();
+  const t = `gui/${uid}/com.timsrobot.trif.safari-bridge`;
+  let script;
+  loadSafariAgent('/p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '1' }, run: (a) => ({ status: a[1] === t ? 0 : 113 }), runDetached: (s) => { script = s; } });
+  const r = spawnSync('/bin/sh', ['-c', script.replace(/^sleep 3; /, '')], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n'), [
+    `bootout ${t}`, `print ${t}`, `print ${t}`, `print ${t}`,
+    `bootstrap gui/${uid} /p.plist`, `bootstrap gui/${uid} /p.plist`, `bootstrap gui/${uid} /p.plist`,
+  ]);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------------ extension IDs
@@ -405,22 +474,76 @@ test('doctor: which host.js the wrapper may run', () => {
   assert.match(checkWrapperScript('/somewhere/else/helper/host.js', ws).title, /not this copy/);
 });
 
+// Rainbow Rave for Google, Amazon and Instagram waits for a later release: not shipped, not packaged.
+test('the other sites\' Rainbow Raves aren\'t shipped in 0.2.0 (X\'s is), and aren\'t in the package', () => {
+  const ids = PREINSTALLED.map((p) => p.id);
+  for (const s of ['www.google.com', 'amazon.com', 'www.instagram.com']) {
+    assert.ok(!ids.includes(`${s}/rainbow-rave`), s);
+    assert.ok(!fs.existsSync(path.join(REPO, 'examples', 'sites', s, 'rainbow-rave.js')), s);
+    assert.ok(fs.existsSync(path.join(REPO, 'unreleased', 'sites', s, 'rainbow-rave.js')), `${s}: kept for later`);
+  }
+  assert.ok(ids.includes('x.com/rainbow-rave'));
+  const files = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).files;
+  assert.ok(!files.some((f) => f.startsWith('unreleased')), 'unreleased/ isn\'t packaged');
+});
+
+
+test('TRIF\'s own home page: two shipped mods that drive its demo, off, TRIF not started there, no default order', () => {
+  const { DEFAULT_ORDER } = require('../helper/lib/preinstalled');
+  assert.deepStrictEqual(PREINSTALLED.filter((p) => p.id.startsWith('timsrobot.com/')),
+    [{ id: 'timsrobot.com/skip-to-sandbox', on: false }, { id: 'timsrobot.com/random-mods', on: false }]);
+  assert.ok(!SITES_ON.some((s) => /timsrobot/.test(s)));
+  assert.ok(!DEFAULT_ORDER['timsrobot.com']);
+  // Each default order lists shipped mods of its own site, each once.
+  for (const [site, ids] of Object.entries(DEFAULT_ORDER)) {
+    assert.deepStrictEqual([...new Set(ids)], ids, site);
+    for (const id of ids) assert.ok(id.startsWith(`${site}/`) && PREINSTALLED.some((p) => p.id === id), `${site}: ${id}`);
+  }
+  // Just those two: the demo's own mods live in site/demo/mods, not here.
+  assert.deepStrictEqual(fs.readdirSync(path.join(REPO, 'examples', 'sites', 'timsrobot.com')).sort(), ['random-mods.js', 'skip-to-sandbox.js']);
+});
+
+test('setup leaves home page mods already in a workspace alone (copies an earlier build put there, or the user\'s own)', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  const dir = path.join(sites, 'timsrobot.com');
+  fs.mkdirSync(dir, { recursive: true });
+  const files = { 'fireworks.js': '// ==WebMod==\n// @name Click Fireworks\n// @source trif\n// @version 1\n// ==/WebMod==\n', 'mine.js': '// my own\n' };
+  for (const [f, code] of Object.entries(files)) fs.writeFileSync(path.join(dir, f), code);
+  const ids = PREINSTALLED.map((p) => p.id);
+  const pre = { offered: [...ids, 'timsrobot.com/fireworks'], startOff: ['timsrobot.com/fireworks'], sitesOn: SITES_ON,
+    shipped: { 'timsrobot.com/fireworks': { version: '1' } } };
+  fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify(pre));
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
+  const { updateShippedMods } = require('../helper/lib/preinstalled');
+  updateShippedMods(home, sites, examples);
+  for (const [f, code] of Object.entries(files)) assert.strictEqual(fs.readFileSync(path.join(dir, f), 'utf8'), code, `${f} untouched`);
+  const st = loadPreinstalled(home);
+  assert.ok(st.startOff.includes('timsrobot.com/fireworks'), 'its switch stays as it was');
+  assert.deepStrictEqual(st.shipped['timsrobot.com/fireworks'], { version: '1' });
+});
+
 test('preinstalled mods: each once, switched on or off as listed; the start sites once; never over the user\'s file, never back after deleting it', async () => {
   const home = tempDir();
   const sites = path.join(home, 'sites');
   const examples = path.join(REPO, 'examples', 'sites');
-  const plainx = path.join(sites, 'x.com', 'plain-x.js');
+  const plainx = path.join(sites, 'x.com', 'detox-timeline.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo']);
+  assert.deepStrictEqual(off, ids, 'every one of Tim\'s mods starts off');
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
-  let r = preinstallMods(home, sites, examples);
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'no site added: nothing');
+  assert.strictEqual(fs.existsSync(sites), false);
+  let r = preinstallMods(home, sites, examples, undefined, undefined, { add: 'all' });
   assert.deepStrictEqual(r, { added: ids, on: ids.filter((id) => !off.includes(id)), sites: SITES_ON });
   for (const id of ids) assert.ok(fs.existsSync(path.join(sites, `${id}.js`)), id);
-  assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'plain-x.js'), 'utf8'));
+  assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'detox-timeline.js'), 'utf8'));
   const { shipped, ...rest } = loadPreinstalled(home);
-  assert.deepStrictEqual(rest, { offered: ids, startOff: off, sitesOn: SITES_ON });
+  const all = Object.fromEntries(starterSites().map((x) => [x, 'added']));
+  assert.deepStrictEqual(rest, { starter: all, skipped: [], readded: {}, offered: ids, startOff: off, sitesOn: SITES_ON });
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).starter, all, 'the choice is in the file');
   assert.deepStrictEqual(shipped, {}, 'recorded by updateShippedMods, not here');
   fs.unlinkSync(plainx);
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'deleted: not brought back');
@@ -430,28 +553,205 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const own = path.join(home2, 'sites', 'x.com', 'rainbow-rave.js');
   fs.mkdirSync(path.dirname(own), { recursive: true });
   fs.writeFileSync(own, '// mine');
-  r = preinstallMods(home2, path.join(home2, 'sites'), examples);
+  r = preinstallMods(home2, path.join(home2, 'sites'), examples, undefined, undefined, { add: 'all' });
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ids.filter((id) => id !== 'x.com/rainbow-rave'), 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
-  // Through setup, and --no-examples.
-  const home3 = tempDir();
-  let res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
+  // Through setup: a new workspace gets none until the user chooses (the setup page), unless --examples.
+  const home5 = tempDir();
+  let res = await runCli(['setup', '--verbose', '--native-dir', path.join(home5, 'native'), '--no-link'], { home: home5 });
   assert.strictEqual(res.code, 0, res.stderr);
-  assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
-  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
+  assert.match(res.stdout, /^mods {10}Tim's mods: none until you choose them, site by site, on the setup page in your browser \(or trif setup --examples\)$/m);
+  assert.strictEqual(fs.existsSync(path.join(home5, 'sites', 'x.com')), false, 'nothing of Tim\'s on disk');
+  assert.deepStrictEqual(loadPreinstalled(home5), { starter: {}, skipped: [], readded: {}, offered: [], startOff: [], sitesOn: [], shipped: {} });
+  const home3 = tempDir();
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link', '--examples'], { home: home3 });
+  assert.strictEqual(res.code, 0, res.stderr);
+  assert.deepStrictEqual(starterChoices(home3), all);
+  assert.doesNotMatch(res.stdout, /preinstalled, on:/);
+  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: www\.google\.com\/hide-ai-in-results, /);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
-  assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
+  assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'detox-timeline.js')));
   // A new workspace gets the merged Google mods, never the ones folded into them (preinstalled.js RETIRED).
-  assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js']);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js', 'oppish.js']);
   assert.ok(!loadPreinstalled(home3).offered.some((id) => /hide-ai-mode|hide-sponsored/.test(id)));
   assert.doesNotMatch(res.stdout, /is now part of/);
+  // A later setup (an update) keeps them coming, without --examples, and says nothing about choosing.
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
+  assert.doesNotMatch(res.stdout, /Tim's mods: none until|Tim's mods not added/);
+  // --no-examples: none, remembered; a later setup doesn't add them, and says where to.
   const home4 = tempDir();
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
+  assert.deepStrictEqual(starterChoices(home4), Object.fromEntries(starterSites().map((x) => [x, 'none'])));
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link'], { home: home4 });
+  assert.match(res.stdout, /^mods {10}Tim's mods not added for Google, X, Amazon, Instagram and timsrobot\.com: Settings in the side panel adds them \(or trif setup --examples google\.com,x\.com,amazon\.com,instagram\.com,timsrobot\.com\)$/m);
+  assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
+  // --examples with sites: those sites' (by scope, folder or name), nothing else; TRIF on for them.
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples', 'X,www.google.com'], { home: home4 });
+  assert.strictEqual(res.code, 0, res.stderr);
+  assert.match(res.stdout, /TRIF starts on for google\.com, x\.com \(/);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home4, 'sites')).sort(), ['www.google.com', 'x.com']);
+  assert.deepStrictEqual(loadPreinstalled(home4).sitesOn, ['google.com', 'x.com']);
+  assert.deepStrictEqual(starterChoices(home4), { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
+  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples', '--no-examples'], { home: home4 });
+  assert.notStrictEqual(res.code, 0);
+  assert.match(res.stderr, /use --examples or --no-examples, not both/);
+  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples', 'facebook.com'], { home: home4 });
+  assert.notStrictEqual(res.code, 0);
+  assert.match(res.stderr, /Tim has no mods for facebook\.com: the sites are google\.com, x\.com, amazon\.com, instagram\.com, timsrobot\.com/);
+  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples='], { home: home4 });
+  assert.notStrictEqual(res.code, 0);
+});
+
+test('Tim\'s mods by id (shipped.install {ids}): those of a site are added (off ones still off); the rest left out, never brought in by updates, offered until added', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  const of = (site) => PREINSTALLED.map((p) => p.id).filter((id) => id.split('/')[0].replace(/^www\./, '') === site);
+  // X without Rainbow Rave, all of Google's; the rest none.
+  const ticked = [...of('x.com').filter((id) => id !== 'x.com/rainbow-rave'), ...of('google.com')];
+  assert.throws(() => installStarter(home, sites, examples, [], { ids: [...ticked, 'x.com/evil'] }), /x\.com\/evil isn't one of Tim's mods/);
+  assert.ok(!fs.existsSync(sites), 'nothing added when one id is wrong');
+  const r = installStarter(home, sites, examples, [], { ids: ticked, othersNone: true });
+  assert.deepStrictEqual(r.added.sort(), [...ticked].sort());
+  assert.deepStrictEqual(r.sites, ['google.com', 'x.com']);
+  assert.ok(!fs.existsSync(path.join(sites, 'x.com', 'rainbow-rave.js')), 'left out: not on disk');
+  assert.ok(fs.existsSync(path.join(sites, 'x.com', 'space-shooter.js')));
+  const st = loadPreinstalled(home);
+  assert.ok(st.startOff.includes('x.com/space-shooter') && st.startOff.includes('x.com/follow-status'), 'ticked mods that start off still start off');
+  assert.deepStrictEqual(st.skipped, ['x.com/rainbow-rave']);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).skipped, ['x.com/rainbow-rave'], 'recorded in the file');
+  assert.deepStrictEqual(starterChoices(home), { 'x.com': 'added', 'google.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
+  // Settings offers it: the site is added, that mod isn't.
+  let x = starterOffer(home, examples).sites.find((s) => s.site === 'x.com');
+  assert.deepStrictEqual(x.mods.map((m) => [m.id, m.choice]), [['x.com/detox-timeline', 'added'], ['x.com/follow-status', 'added'], ['x.com/profile-styler', 'added'], ['x.com/post-styler', 'added'], ['x.com/style-encoder', 'added'], ['x.com/space-shooter', 'added'], ['x.com/rainbow-rave', 'skipped'], ['x.com/tune-composer', 'added']]);
+  // Later setups and updates never bring it in; a new mod for X still comes (off).
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
+  updateShipped(home, sites, examples);
+  assert.ok(!fs.existsSync(path.join(sites, 'x.com', 'rainbow-rave.js')));
+  const ex2 = tempDir();
+  fs.cpSync(examples, ex2, { recursive: true });
+  fs.writeFileSync(path.join(ex2, 'x.com', 'new-one.js'), '// ==WebMod==\n// @name New\n// @source trif\n// @version 1\n// ==/WebMod==\n');
+  assert.deepStrictEqual(preinstallMods(home, sites, ex2, [...PREINSTALLED, { id: 'x.com/new-one', on: false }]).added, ['x.com/new-one']);
+  // Adding X again (Settings' "Add the rest", or x.com's link) brings the one left out, switched off as listed.
+  const again = installStarter(home, sites, examples, ['x.com']);
+  assert.deepStrictEqual(again.added, ['x.com/rainbow-rave']);
+  assert.ok(loadPreinstalled(home).startOff.includes('x.com/rainbow-rave'));
+  assert.deepStrictEqual(loadPreinstalled(home).skipped, []);
+  x = starterOffer(home, examples).sites.find((s) => s.site === 'x.com');
+  assert.ok(x.mods.every((m) => m.choice === 'added'));
+  // Per mod, later: one of a site not added yet adds that site with just that mod.
+  const r2 = installStarter(home, sites, examples, [], { ids: ['amazon.com/simple-home'] });
+  assert.deepStrictEqual([r2.added, r2.sites], [['amazon.com/simple-home'], ['amazon.com']]);
+  assert.deepStrictEqual(loadPreinstalled(home).skipped, ['amazon.com/simple-shopping']);
+});
+
+test('Tim\'s mods: one the user deleted stays gone (updates too), Settings offers it, and adding the site brings it back fresh, switched as listed', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  installStarter(home, sites, examples, ['x.com'], { othersNone: true });
+  const rr = path.join(sites, 'x.com', 'rainbow-rave.js');
+  fs.writeFileSync(rr, fs.readFileSync(rr, 'utf8') + '// the user changed it\n');
+  updateShipped(home, sites, examples);
+  fs.unlinkSync(rr); // deleted in the panel
+  const choice = (h = home) => Object.fromEntries(starterOffer(h, examples, undefined, undefined, { modsDir: path.join(h, 'sites') }).sites.find((s) => s.site === 'x.com').mods.map((m) => [m.id, m.choice]));
+  assert.strictEqual(choice()['x.com/rainbow-rave'], 'deleted');
+  assert.strictEqual(choice()['x.com/detox-timeline'], 'added');
+  assert.deepStrictEqual(preinstallMods(home, sites, examples).added, [], 'setup doesn\'t bring it back');
+  updateShipped(home, sites, examples);
+  assert.ok(!fs.existsSync(rr));
+  // "Add the rest" (or the site's link): a fresh copy, off as listed, recorded for updates; the browsers switch it once per stamp.
+  const r = installStarter(home, sites, examples, ['x.com']);
+  assert.deepStrictEqual([r.added, r.on], [['x.com/rainbow-rave'], []]);
+  assert.strictEqual(fs.readFileSync(rr, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'rainbow-rave.js'), 'utf8'));
+  const st = loadPreinstalled(home);
+  assert.ok(st.startOff.includes('x.com/rainbow-rave'));
+  assert.match(st.readded['x.com/rainbow-rave'], /^\d{4}-/);
+  assert.strictEqual(st.shipped['x.com/rainbow-rave'].hash, require('crypto').createHash('sha1').update(fs.readFileSync(rr)).digest('hex'));
+  assert.strictEqual(choice()['x.com/rainbow-rave'], 'added');
+  // Every one of them comes back off.
+  fs.unlinkSync(path.join(sites, 'x.com', 'detox-timeline.js'));
+  assert.deepStrictEqual(installStarter(home, sites, examples, ['x.com']).on, []);
+  assert.ok(loadPreinstalled(home).startOff.includes('x.com/detox-timeline'));
+
+  // From before 0.2.5: deleted on purpose then. Setup leaves it gone; Settings just offers it.
+  const old = tempDir();
+  installStarter(old, path.join(old, 'sites'), examples, 'all');
+  const pre = JSON.parse(fs.readFileSync(path.join(old, 'preinstalled.json'), 'utf8'));
+  delete pre.starter;
+  fs.writeFileSync(path.join(old, 'preinstalled.json'), JSON.stringify(pre));
+  fs.unlinkSync(path.join(old, 'sites', 'x.com', 'follow-status.js'));
+  assert.deepStrictEqual(preinstallMods(old, path.join(old, 'sites'), examples).added, []);
+  assert.strictEqual(choice(old)['x.com/follow-status'], 'deleted');
+  assert.ok(!fs.existsSync(path.join(old, 'sites', 'x.com', 'follow-status.js')));
+});
+
+test('Tim\'s mods, site by site: added ones get their mods, new ones and updates; the others nothing; a workspace from before the choice counts as added', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  assert.deepStrictEqual(resolveSites('x.com, www.google.com,Instagram,x'), ['x.com', 'google.com', 'instagram.com']);
+  assert.throws(() => resolveSites('example.com'), /Tim has no mods for example\.com/);
+  // What the setup page shows: every site, ticked to start where TRIF starts on, each with its mods.
+  let offer = starterOffer(home, examples);
+  assert.strictEqual(offer.chosen, false);
+  assert.deepStrictEqual(offer.sites.map((x) => [x.site, x.name, x.suggested, x.choice]), [
+    ['google.com', 'Google', true, null], ['x.com', 'X', true, null], ['amazon.com', 'Amazon', true, null],
+    ['instagram.com', 'Instagram', true, null], ['timsrobot.com', 'timsrobot.com', false, null]]);
+  assert.deepStrictEqual(offer.sites.flatMap((x) => x.mods.map((m) => m.id)).sort(), PREINSTALLED.map((p) => p.id).sort(), 'every mod, from PREINSTALLED');
+  assert.deepStrictEqual(offer.sites.find((x) => x.site === 'x.com').mods.map((m) => [m.name, m.on]),
+    [['Detox Timeline', false], ['Follow Status', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false], ['X-Flyer', false], ['Rainbow Rave', false], ['Tune Composer', false]], 'X\'s in the panel\'s order');
+  assert.ok(offer.sites.every((x) => x.mods.every((m) => m.name && typeof m.description === 'string')));
+  assert.match(offer.sites.find((x) => x.site === 'timsrobot.com').note, /demo/);
+
+  // "Add these" with X and Google ticked: theirs, TRIF on for them, none recorded for the rest.
+  const r = installStarter(home, sites, examples, ['x.com', 'google.com'], { othersNone: true });
+  const of = (site) => PREINSTALLED.map((p) => p.id).filter((id) => id.split('/')[0].replace(/^www\./, '') === site);
+  assert.deepStrictEqual(r.added.sort(), [...of('x.com'), ...of('google.com')].sort());
+  assert.deepStrictEqual(r.sites, ['google.com', 'x.com']);
+  assert.deepStrictEqual(fs.readdirSync(sites).sort(), ['www.google.com', 'x.com']);
+  assert.deepStrictEqual(starterChoices(home), { 'x.com': 'added', 'google.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
+  assert.ok(loadPreinstalled(home).shipped['x.com/detox-timeline']?.hash, 'recorded for updates');
+  offer = starterOffer(home, examples);
+  assert.strictEqual(offer.chosen, true);
+  assert.deepStrictEqual(offer.sites.filter((x) => x.choice === 'added').map((x) => x.site), ['google.com', 'x.com']);
+  // A later setup (preinstallMods without `add`): nothing for the sites not added.
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
+  // A new shipped mod for an added site comes (as listed: off); one for a site not added doesn't.
+  const later = [...PREINSTALLED, { id: 'x.com/new-one', on: false }, { id: 'amazon.com/new-one', on: false }];
+  const ex2 = tempDir();
+  fs.cpSync(examples, ex2, { recursive: true });
+  for (const id of ['x.com/new-one', 'amazon.com/new-one']) fs.writeFileSync(path.join(ex2, `${id}.js`), '// ==WebMod==\n// @name New\n// @source trif\n// @version 1\n// ==/WebMod==\n');
+  assert.deepStrictEqual(preinstallMods(home, sites, ex2, later), { added: ['x.com/new-one'], on: [], sites: [] });
+  assert.ok(loadPreinstalled(home).startOff.includes('x.com/new-one'));
+  // Settings' Add, later: that site's mods and TRIF on for it; "none" never undoes it.
+  const r2 = installStarter(home, sites, examples, ['amazon.com']);
+  assert.deepStrictEqual([r2.added, r2.sites], [of('amazon.com'), ['amazon.com']]);
+  assert.strictEqual(chooseNoStarter(home)['amazon.com'], 'added');
+  // timsrobot.com isn't in SITES_ON: its mods come, TRIF isn't turned on for it.
+  const r3 = installStarter(home, sites, examples, ['timsrobot.com']);
+  assert.deepStrictEqual([r3.added, r3.sites], [of('timsrobot.com'), []]);
+
+  // A workspace from before the choice (0.2.4: setup copied every site's): every site it has counts as
+  // added, and keeps getting updates and new mods; a site that's new since (timsrobot.com) isn't added.
+  const old = tempDir();
+  const oldIds = PREINSTALLED.map((p) => p.id).filter((id) => !id.startsWith('timsrobot.com/'));
+  fs.writeFileSync(path.join(old, 'preinstalled.json'), JSON.stringify({ offered: oldIds, startOff: [], sitesOn: SITES_ON }));
+  assert.deepStrictEqual(starterChoices(old), { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'added', 'instagram.com': 'added' });
+  assert.strictEqual(starterOffer(old, examples).chosen, true, 'the setup page doesn\'t ask again');
+  assert.deepStrictEqual(starterOffer(old, examples).sites.filter((x) => x.choice !== 'added').map((x) => x.site), ['timsrobot.com'], 'offered in Settings');
+  assert.deepStrictEqual(preinstallMods(old, path.join(old, 'sites'), ex2, later).added, ['x.com/new-one', 'amazon.com/new-one']);
+  assert.ok(!fs.existsSync(path.join(old, 'sites', 'timsrobot.com')));
+  assert.strictEqual(chooseNoStarter(old)['x.com'], 'added');
+  // Written back with the record (and still read the same).
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(old, 'preinstalled.json'), 'utf8')).starter,
+    { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'added', 'instagram.com': 'added', 'timsrobot.com': 'none' });
+  updateShipped(old, path.join(old, 'sites'), examples);
 });
 
 // ------------------------------------------------------------------ Firefox
@@ -471,8 +771,8 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.equal(fx.allowed_origins, undefined);
   assert.equal(fx.path, path.join(ws, 'bin', 'trif-host'));
   const chrome = browserTable(fakehome).find((b) => b.key === 'chrome');
-  assert.deepEqual(readManifest(chrome.nativeDir).allowed_origins, [DEV_ORIGIN]);
-  assert.match(r.stdout, /Firefox: open this link in Firefox to install the TRIF add-on:\n {7}https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi\n/);
+  assert.deepEqual(readManifest(chrome.nativeDirs[0]).allowed_origins, [DEV_ORIGIN]);
+  assert.match(r.stdout, /Firefox: if it was running before this setup, quit it completely and reopen it\. Then open this\n {5}link in Firefox to install the TRIF add-on:\n {7}https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi\n/);
 
   let d = await runCli(['doctor'], { home: ws });
   assert.match(d.stdout, /ok {4}Firefox: native host manifest/);
@@ -481,13 +781,143 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.match(d.stdout, new RegExp(`FAIL {2}Firefox: .*allowed_extensions doesn't include ${esc(P.FIREFOX_EXTENSION_ID)}`));
 });
 
+test('doctor: a browser whose profile folder is there but that setup didn\'t do is a note, not a failure, while others are set up', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  const r = await runCli(['setup', '--verbose', '--browser', 'arc', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  // Brave and Edge show up after setup (installed later; updates keep the browsers set up as they were).
+  const table = browserTable(fakehome);
+  for (const k of ['brave', 'edge']) fs.mkdirSync(table.find((b) => b.key === k).userData, { recursive: true });
+  let d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  assert.match(d.stdout, /- {5}Brave: not set up \(only needed if you use TRIF in Brave\)\n {6}fix: .*setup.* --browser brave/);
+  assert.match(d.stdout, /- {5}Microsoft Edge: not set up/);
+  assert.doesNotMatch(d.stdout, /FAIL.*native host manifest missing/);
+  // Nothing set up anywhere: then a missing manifest is the problem.
+  for (const f of manifestFiles(table.find((b) => b.key === 'arc'))) fs.rmSync(f);
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /FAIL {2}Brave: native host manifest missing/);
+});
+
 test('browserTable: Firefox has one native host folder for every profile', () => {
   const mac = browserTable('/H', 'darwin').find((b) => b.key === 'firefox');
-  assert.equal(mac.nativeDir, '/H/Library/Application Support/Mozilla/NativeMessagingHosts');
+  assert.deepEqual(mac.nativeDirs, ['/H/Library/Application Support/Mozilla/NativeMessagingHosts']);
   assert.equal(mac.firefox, true);
   const linux = browserTable('/H', 'linux').find((b) => b.key === 'firefox');
-  assert.equal(linux.nativeDir, '/H/.mozilla/native-messaging-hosts');
+  assert.deepEqual(linux.nativeDirs, ['/H/.mozilla/native-messaging-hosts']);
   assert.equal(browserTable('/H', 'darwin').find((b) => b.key === 'chrome').firefox, false);
+});
+
+test('browserTable: Arc\'s manifest goes in Chrome\'s folder (the one Arc reads, first) and its own; the others\' in their own', () => {
+  const t = (key, platform = 'darwin') => browserTable('/H', platform).find((b) => b.key === key);
+  const AS = '/H/Library/Application Support';
+  assert.deepEqual(t('arc').nativeDirs, [`${AS}/Google/Chrome/NativeMessagingHosts`, `${AS}/Arc/User Data/NativeMessagingHosts`]);
+  assert.deepEqual(manifestFiles(t('arc')), [`${AS}/Google/Chrome/NativeMessagingHosts/${P.HOST_NAME}.json`, `${AS}/Arc/User Data/NativeMessagingHosts/${P.HOST_NAME}.json`]);
+  assert.deepEqual(t('chrome').nativeDirs, [`${AS}/Google/Chrome/NativeMessagingHosts`]);
+  assert.deepEqual(t('brave').nativeDirs, [`${AS}/BraveSoftware/Brave-Browser/NativeMessagingHosts`]);
+  assert.deepEqual(t('edge').nativeDirs, [`${AS}/Microsoft Edge/NativeMessagingHosts`]);
+  assert.deepEqual(t('safari').nativeDirs, []);
+  assert.deepEqual(t('chrome', 'linux').nativeDirs, ['/H/.config/google-chrome/NativeMessagingHosts']);
+  assert.equal(t('arc', 'linux'), undefined);
+});
+
+test('browserTable: a Chromium folder holding only NativeMessagingHosts (Chrome\'s, after setup for Arc) isn\'t a browser detected', () => {
+  const home = tempDir();
+  const chrome = () => browserTable(home, 'darwin').find((b) => b.key === 'chrome');
+  assert.equal(chrome().detected, false);
+  fs.mkdirSync(chrome().userData, { recursive: true });
+  assert.equal(chrome().detected, true, 'an empty folder still counts, as before');
+  fs.mkdirSync(chrome().nativeDirs[0]);
+  fs.writeFileSync(path.join(chrome().userData, '.DS_Store'), '');
+  assert.equal(chrome().detected, false);
+  fs.mkdirSync(path.join(chrome().userData, 'Default'));
+  assert.equal(chrome().detected, true, 'a profile');
+  // Firefox's folders are apart: its profile folder is what counts.
+  const fx = () => browserTable(home, 'darwin').find((b) => b.key === 'firefox');
+  fs.mkdirSync(fx().nativeDirs[0], { recursive: true });
+  assert.equal(fx().detected, false);
+  fs.mkdirSync(fx().userData, { recursive: true });
+  assert.equal(fx().detected, true);
+});
+
+test('browsersSetUp: Chrome\'s manifest written for Arc is Arc\'s, unless Chrome is there too', () => {
+  const home = tempDir();
+  const table = () => browserTable(home, 'darwin');
+  const b = (key) => table().find((x) => x.key === key);
+  const keys = () => browsersSetUp(table()).map((x) => x.key);
+  const write = (file) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, '{}'); };
+  assert.deepEqual(keys(), []);
+  // An older setup for Arc: its own folder only.
+  fs.mkdirSync(path.join(b('arc').userData, 'Default'), { recursive: true });
+  write(manifestFiles(b('arc'))[1]);
+  assert.deepEqual(keys(), ['arc']);
+  // Setup for Arc now: Chrome's folder too, but Chrome isn't installed.
+  write(manifestFiles(b('arc'))[0]);
+  assert.deepEqual(keys(), ['arc']);
+  // Chrome installed (a profile): the same file is Chrome's too.
+  fs.mkdirSync(path.join(b('chrome').userData, 'Default'));
+  assert.deepEqual(keys(), ['chrome', 'arc']);
+  // Arc gone (its folder too): Chrome's manifest is Chrome's.
+  fs.rmSync(b('arc').userData, { recursive: true });
+  assert.deepEqual(keys(), ['chrome']);
+});
+
+test('setup for Arc writes the manifest to Chrome\'s folder and Arc\'s; doctor checks Chrome\'s, and leaves Chrome out', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  const arc = () => browserTable(fakehome).find((b) => b.key === 'arc');
+  fs.mkdirSync(path.join(arc().userData, 'Default'), { recursive: true }); // Arc, with a profile
+  const r = await runCli(['setup', '--verbose', '--no-link', '--no-examples'], { home: ws }); // (detected: Arc alone)
+  assert.equal(r.code, 0, r.stderr);
+  const [inChrome, own] = manifestFiles(arc());
+  assert.match(inChrome, /Google\/Chrome\/NativeMessagingHosts\//);
+  assert.deepEqual(readManifest(path.dirname(inChrome)).allowed_origins, [DEV_ORIGIN]);
+  assert.equal(fs.readFileSync(own, 'utf8'), fs.readFileSync(inChrome, 'utf8'));
+  assert.equal(readManifest(path.dirname(own)).path, path.join(ws, 'bin', 'trif-host'));
+  assert.match(r.stdout, new RegExp(`native host {3}Arc: ${esc(inChrome)} `));
+  assert.match(r.stdout, new RegExp(`native host {3}Arc: ${esc(own)} `));
+  assert.equal(browserTable(fakehome).find((b) => b.key === 'chrome').detected, false);
+
+  let d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  assert.doesNotMatch(d.stdout, /Google Chrome/, 'Chrome\'s folder is only Arc\'s here');
+  // Setup again (as an update does): still Arc alone, not Chrome too.
+  const again = await runCli(['setup', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(again.code, 0, again.stderr);
+  assert.match(again.stdout, /^✓ Set up for Arc$/m);
+
+  // Arc's own folder doesn't matter to Arc 1.169: without it, Arc is still fine.
+  fs.rmSync(own);
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  // Set up by an older setup, in Arc's own folder only: that's the "native messaging host not found".
+  fs.writeFileSync(own, fs.readFileSync(inChrome));
+  fs.rmSync(inChrome);
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, new RegExp(`FAIL {2}Arc: native host manifest missing \\(${esc(inChrome)}\\), where Arc reads it\n {6}fix: .*setup.* --browser arc`));
+  // A wrong one in Chrome's folder fails Arc too.
+  fs.writeFileSync(inChrome, JSON.stringify({ ...JSON.parse(fs.readFileSync(own, 'utf8')), allowed_origins: [] }));
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /FAIL {2}Arc: native host manifest .*allowed_origins doesn't include/);
+});
+
+test('setup for Chrome and Arc: one manifest in Chrome\'s folder for both; doctor checks both', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  for (const k of ['chrome', 'arc']) fs.mkdirSync(path.join(browserTable(fakehome).find((b) => b.key === k).userData, 'Default'), { recursive: true });
+  const r = await runCli(['setup', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^✓ Set up for Google Chrome and Arc$/m);
+  const d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Google Chrome: native host manifest/);
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
 });
 
 test('build-extension firefox: sidebar, background scripts, optional userScripts, gecko id', async () => {
@@ -526,7 +956,7 @@ test('setup prints a short summary by default, every detail with --verbose (-v);
   assert.equal(r.code, 0, r.stderr);
   const top = r.stdout.slice(0, r.stdout.indexOf('Next steps:'));
   assert.match(top, new RegExp(`^✓ TRIF ${esc(P.VERSION)} (installed|linked to .*) in .*\n`, 'm'));
-  assert.match(top, /^✓ Added the mods TRIF comes with \(it starts on for google\.com, x\.com, amazon\.com, instagram\.com\)$/m);
+  assert.doesNotMatch(top, /Added Tim's mods/, 'not without the user\'s choice');
   assert.match(top, /^✓ Set up for Google Chrome and Firefox$/m);
   // No agent on this test's PATH: a problem, so it shows.
   assert.match(top, /No coding agent found: install Claude Code/);
@@ -537,10 +967,12 @@ test('setup prints a short summary by default, every detail with --verbose (-v);
   assert.doesNotMatch(v.stdout, /^✓ /m);
   assert.match(v.stdout, /No coding agent found/);
   assert.match(v.stdout, /Next steps:/);
+  const x = await runCli([...args, '--examples', 'x.com'], { home: ws });
+  assert.match(x.stdout, /^✓ Added Tim's mods for X \(TRIF starts on for x\.com\)$/m);
 });
 
 test('setup calls the panel what the browser does: the sidebar in Firefox', async () => {
-  const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link'], { home: tempDir() });
+  const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link', '--examples'], { home: tempDir() });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /off until you switch them on in the sidebar: /);
   assert.doesNotMatch(r.stdout, /side panel/);
@@ -551,7 +983,7 @@ test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
-  assert.match(next, /1\. Open this link in Firefox to install the TRIF add-on, and click Add:/);
+  assert.match(next, /1\. If Firefox was already running before this setup, quit it completely and reopen it\.\n {2}2\. Open this link in Firefox to install the TRIF add-on, and click Add:/);
   assert.ok(next.includes(`       ${require('../helper/lib/update').firefoxAddonUrl()}\n`), 'the latest release\'s add-on');
   assert.match(next, /"Allow user scripts"/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked/);
@@ -661,4 +1093,12 @@ test('setup at a terminal shows the extension folder and opens chrome://extensio
     assert.doesNotMatch(calls, /chrome:\/\/extensions/);
   }
   assert.doesNotMatch(r.stdout, /Waiting for/);
+});
+
+test('Tim\'s mods: a single choice from a development build before 0.2.5 ("added" or "none") reads as that choice for every site', () => {
+  for (const c of ['added', 'none']) {
+    const home = tempDir();
+    fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ starter: c, offered: [], startOff: [], sitesOn: [] }));
+    assert.deepStrictEqual(starterChoices(home), Object.fromEntries(starterSites().map((x) => [x, c])));
+  }
 });

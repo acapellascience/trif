@@ -1,0 +1,147 @@
+{
+ "id": "shooter",
+ "prompt": "space shooter! gimme a ship that flies around using arrow keys and blasts the words off the page. robot is the enemy and chases you. make it drop bombs in gravity mode and explode stuff, and add sound effects!",
+ "secs": 236,
+ "mods": [
+  "shooter"
+ ],
+ "after": [],
+ "messages": [
+  {
+   "role": "user",
+   "text": "space shooter! gimme a ship that flies around using arrow keys and blasts the words off the page. robot is the enemy and chases you. make it drop bombs in gravity mode and explode stuff, and add sound effects!",
+   "t": 0
+  },
+  {
+   "role": "tool",
+   "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'return {title: document.title, n: document.body.innerText.length, w: innerWidth, h: innerHeight, bg: getComputedStyle(document.body).backgroundColor, sh: document.documentElement.scrollHeight}'",
+   "t": 5100
+  },
+  {
+   "role": "tool",
+   "text": "ran trif status | tail -15; trif new timsrobot.com shooter",
+   "t": 17000
+  },
+  {
+   "role": "tool",
+   "text": "read sites/timsrobot.com/robot.js",
+   "t": 20000
+  },
+  {
+   "role": "assistant",
+   "text": "Plan: every word becomes a target, the ship and its lasers are drawn on a see-through layer over the page, and Living Robot gets a chase mode that homes in on the ship. Health, damage and the explosions live in the shooter, so they work even with Living Robot off.",
+   "t": 26000
+  },
+  {
+   "role": "tool",
+   "text": "wrote sites/timsrobot.com/shooter.js",
+   "t": 64000
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/robot.js",
+   "t": 73000
+  },
+  {
+   "role": "tool",
+   "text": "ran trif check timsrobot.com/shooter && trif check timsrobot.com/robot && trif reload && trif run 'await new Promise(r=>setTimeout(r,1500)); const words=[...document.querySelectorAll(\".tss-w\")]; const t=words.find(w=>{const r=w.getBoundingClientRect(); return r.top>50&&r.width>20}); const r=t.getBo…",
+   "t": 77000
+  },
+  {
+   "role": "assistant",
+   "text": "Shooting works: 120 words became targets, and a test shot blew up \"Firefox\" and \"model\". Now the chase.",
+   "t": 83700
+  },
+  {
+   "role": "tool",
+   "text": "ran trif run 'const s=document.querySelector(\"svg.robot\"); const c=()=>{const r=s.getBoundingClientRect(); return [Math.round(r.left+r.width/2), Math.round(r.top+r.height/2)]}; const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); const a=c(); k(\"keydown\",\"ArrowLeft\"); await new P…",
+   "t": 85700
+  },
+  {
+   "role": "assistant",
+   "text": "He spots the ship, hops, and homes in on it, overshooting when it dodges. Now damage: lasers wear him down, and touching him blows the ship up.",
+   "t": 96700
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/shooter.js",
+   "t": 120700
+  },
+  {
+   "role": "tool",
+   "text": "wrote sites/timsrobot.com/_kill-test.js",
+   "t": 126700
+  },
+  {
+   "role": "tool",
+   "text": "ran trif reload && trif run -f sites/timsrobot.com/_kill-test.js; trif errors; trif screenshot -o shooter.png",
+   "t": 129700
+  },
+  {
+   "role": "tool",
+   "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/shooter.png",
+   "t": 138700
+  },
+  {
+   "role": "assistant",
+   "text": "He goes green, yellow, red and blows up, and \"ROBOT DESTROYED\" comes up. Now bombs for gravity mode, and the sound effects.",
+   "t": 143700
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/shooter.js",
+   "t": 173700
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/shooter.js",
+   "t": 177700
+  },
+  {
+   "role": "tool",
+   "text": "ran trif run 'const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\"g\"); await new Promise(r=>setTimeout(r,1500)); const b=[...document.querySelectorAll(\"[data-gm-body]\")]; const out={n:b.length, ours:b.filter(e=>e.id).map(e=>e.id), above:b.filter(e=>e.getBoundingClie…",
+   "t": 182700
+  },
+  {
+   "role": "assistant",
+   "text": "Pressing G sent everything flying off the top: gravity mode picked up the shooter's full-screen layer as a piece, and it shoved the rest up. Making gravity skip click-through layers.",
+   "t": 190700
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/gravity.js",
+   "t": 198900
+  },
+  {
+   "role": "tool",
+   "text": "ran trif check timsrobot.com/gravity && trif reload && trif run 'await new Promise(r=>setTimeout(r,1000)); const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\"g\"); await new Promise(r=>setTimeout(r,2000)); const b=[...document.querySelectorAll(\"…",
+   "t": 204700
+  },
+  {
+   "role": "tool",
+   "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/gravity.png",
+   "t": 212200
+  },
+  {
+   "role": "tool",
+   "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"r\"})); return document.querySelectorAll(\"[data-tss-dead]\").length'",
+   "t": 216200
+  },
+  {
+   "role": "assistant",
+   "text": "The page is now a space shooter. I added a new mod, **Space Shooter**, and gave Living Robot a chase mode.\n\n- **Flying:** the arrow keys fly the ship anywhere on screen. **Space** fires twin lasers: each press fires at once, and holding it keeps firing.\n- **Blasting:** any word you hit blows up into its letters, in its own font and colour, with sparks and a little screen shake. Once every word in a button or badge is gone, you can blast the box too. **R** brings everything back, and the top-left corner counts what you've blasted.\n- **The robot is the enemy:** when you fly or fire, he spots you, says something in his robot voice and hops, then chases the ship with momentum, so you can dodge and make him overshoot. Touch him and your ship blows up (it comes back blinking a moment later). Each hit takes 2 of his 100 health: he turns from green to yellow to red and gets faster as he's hurt. At zero he explodes and \"ROBOT DESTROYED\" flashes up. Shoot its letters too, and your ship flies off and the game starts over.\n- **Gravity mode (G):** space drops bombs instead, one at a time. A bomb blows up the first thing it lands on and flings the pieces around it. A direct hit on the robot takes 5, and he runs out from under bombs he sees coming.\n- **Sound effects:** a zap for each laser, deep booms for explosions (the robot's is the biggest), a whistle as a bomb falls, a clank when a laser hits him, and a whoosh as your ship flies off. They start after your first key press or click.\n\n**What I checked:** test shots blew up words and the counter went up, the robot chased the ship, and a test run destroyed him. With gravity on, bombs removed pieces and threw others around. No errors. I also fixed gravity mode picking up the shooter's drawing layer as a piece.\n\nTo undo it, switch off **Space Shooter** in the side panel, or ask me to.",
+   "t": 222200
+  }
+ ],
+ "touch": {
+  "prompt": "space shooter! gimme a ship i can drag around with my finger that blasts the words off the page. robot is the enemy and chases you. make it drop bombs in gravity mode and explode stuff, and add sound effects!",
+  "texts": {
+   "9": "ran trif run 'const s=document.querySelector(\"svg.robot\"); const c=()=>{const r=s.getBoundingClientRect(); return [Math.round(r.left+r.width/2), Math.round(r.top+r.height/2)]}; const p=(t,x,y)=>dispatchEvent(new PointerEvent(t,{pointerType:\"touch\",pointerId:7,clientX:x,clientY:y,bubbles:true})); const a=c(); p(\"pointerdown\",640,690); await new P…",
+   "18": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,1500)); const b=[...document.querySelectorAll(\"[data-gm-body]\")]; const out={n:b.length, ours:b.filter(e=>e.id).map(e=>e.id), above:b.filter(e=>e.getBoundingClie…",
+   "19": "Dropping the page sent everything flying off the top: gravity mode picked up the shooter's full-screen layer as a piece, and it shoved the rest up. Making gravity skip layers that let touches through.",
+   "21": "ran trif check timsrobot.com/gravity && trif reload && trif run 'await new Promise(r=>setTimeout(r,1000)); document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,2000)); const b=[...document.querySelectorAll(\"…",
+   "23": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-left\").click(); return document.querySelectorAll(\"[data-tss-dead]\").length'",
+   "24": "The page is a space shooter: drag the ship to fly and fire, blast the words, and fight the robot, who chases you. In gravity mode you drop bombs. New mod: **Space Shooter**."
+  }
+ }
+}

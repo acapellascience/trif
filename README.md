@@ -2,7 +2,7 @@
 
 Customize any website by asking your coding agent. Open the TRIF side panel in Chrome (or Firefox, or
 Safari), say what you want ("hide the trending sidebar", "only show people I follow"), and your agent
-writes a small mod that runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
+writes a small mod that runs every time that site loads. Mods are small files on your computer; switch each one off
 and on from the side panel.
 
 TRIF uses the coding agent you already have (Claude Code or Codex), on your own account, or an open model
@@ -33,16 +33,20 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## Install
 
+These steps install the latest release, **0.3.0**, from npm. GitHub's `main` branch is where work in progress
+lands: it can have features the release doesn't (and new bugs), so don't install from a checkout of it
+unless you're working on TRIF.
+
 1. **Install the helper.** In a terminal:
 
    ```sh
-   npx trif setup
+   npx timsrobot setup
    ```
 
-   If you were sent a file (`trif-0.2.0.tgz`) instead, run this from the folder it's in:
+   If you were sent a file (`timsrobot-0.3.0.tgz`) instead, run this from the folder it's in:
 
    ```sh
-   npx --yes --package ./trif-0.2.0.tgz trif setup
+   npx --yes --package ./timsrobot-0.3.0.tgz trif setup
    ```
 
    npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
@@ -57,18 +61,23 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
    settings** and turn on **Allow User Scripts**.
 
-4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
+4. **Pick Tim's mods, if you want them.** The same tab lists the mods Tim made for a few sites (X,
+   Google, Amazon, Instagram): tick the sites you want and click **Add these**, or **Start with none**.
+   Nothing of his is on your computer until you do, and you can add any site's later in **Settings** in
+   the side panel.
+
+5. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
 
 ### Firefox
 
-TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx trif setup`, so setup
-finds it (or run `npx trif setup --browser firefox`). Then open
+TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx timsrobot setup`, so setup
+finds it (or run `npx timsrobot setup --browser firefox`). If Firefox was open during setup, quit it
+completely and reopen it. Then open
 [trif-firefox.xpi](https://github.com/acapellascience/trif/releases/latest/download/trif-firefox.xpi)
 in Firefox and click **Add** to install the add-on (if Firefox downloads it instead, drag the file onto
 a Firefox window). On the TRIF tab Firefox opens, click **Allow user scripts** (the TRIF sidebar, from
 its toolbar button, offers it too).
-Restart Firefox if it was open during setup.
 
 Chrome and Firefox can both be open: they share your mods, and each sidebar or side panel chat works
 on its own browser. Switching a mod off is per browser.
@@ -81,7 +90,7 @@ this is for trying it out:
 
 1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
    `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.
-2. `npx trif setup --browser safari` starts the Safari bridge, a small background program
+2. `npx timsrobot setup --browser safari` starts the Safari bridge, a small background program
    Safari's extension talks to (Safari can't start the helper itself the way Chrome does). It starts again
    whenever you log in.
 3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick
@@ -110,9 +119,10 @@ up in the panel as usual. API keys you save with `trif agent key` go to Windows 
 ## Using it
 
 - TRIF is off on every site until you turn it on there: the side panel says "The robot is off."
-  and a "Fix <site>" button that turns it on. Until then nothing from TRIF runs on the site or reads
+  and a "Fix <site>" button that turns it on (the first time, your browser asks for that site's
+  permission: TRIF never asks for every site). Until then nothing from TRIF runs on the site or reads
   it, not even a mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The
-  power button at the top of the panel turns it back off.
+  power button at the top of the panel turns it on and off.
 - Go to a site, open the side panel, and tell it what to fix. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. Its trash icon
@@ -133,23 +143,25 @@ up in the panel as usual. API keys you save with `trif agent key` go to Windows 
 - Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
-### Mods that come with it
+### Tim's starter mods
 
-TRIF starts on for Google, X, Amazon and Instagram, with these mods. Each has a switch in the side
-panel on its site; the ones marked *(off)* wait for you to switch them on.
+Optional: the setup page asks, site by site, before adding them (or `trif setup --examples [sites]`;
+Settings in the side panel can add any site's later). They're small files in `~/.trif/sites` (style mods,
+boxed mods and a few free mods), which you can read first ([examples/sites](examples/sites)). TRIF starts on
+for each of Google, X, Amazon and Instagram you add, and the mods start off: switch each one on in the side
+panel on its site.
 
 - **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
-  or extra sections), and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD
-  screensaver.
-- **X:** **Timeline Detox**: Home is just the people you follow, newest first, with no ads or suggestions. It
+  or extra sections), DVD Logo (the logo on the home page bounces around like an old DVD screensaver), and
+  Oppish (Google in Oppish).
+- **X:** **Detox Timeline**: Home is just the people you follow, newest first, with no ads or suggestions. It
   starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
   menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
-  trends column, tidies post pages, and turns Explore into a plain search field. Punk Fonts *(off)* and
-  Rainbow Rave *(off)*, for fun.
+  trends column, tidies post pages, and turns Explore into a plain search field. Rainbow Rave, for fun.
 - **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and
   stars; no sponsored items, ads or recommendations).
 - **Instagram:** Only Following (no suggested posts or ads), Hide Reposts, Hide AI, and
-  Desaturate *(off)*: colours down to 35%.
+  Desaturate (colours down to 35%).
 
 ## Open models (experimental)
 
@@ -214,6 +226,13 @@ click the gear, then **Check for Updates**. From a terminal: `~/.trif/bin/trif u
 Updates are signed: TRIF installs only versions signed with its release key, so a copy from anywhere
 else is refused.
 
+Tim's mods can also get fixes between TRIF releases, checked along with TRIF's updates and signed the same
+way. With **Install updates automatically** on, a mod you haven't changed gets the new version (marked
+"updated", switched off until you turn it on); otherwise its row offers **Use the new version**. A mod you
+changed is never replaced, and a new version that can do more than the one TRIF shipped waits for your OK.
+If the check fails, Settings says why under the update status. `"checkForUpdates": false` in config.json
+stops both checks.
+
 ## If something's wrong
 
 ```sh
@@ -223,9 +242,9 @@ else is refused.
 checks every piece and says how to fix what's broken. Common fixes:
 
 - **"Helper isn't connected"**: quit the browser completely and reopen it. If that doesn't help, run
-  `npx trif setup` again, then restart the browser.
+  `npx timsrobot setup` again, then restart the browser.
 - **Mods don't run**: make sure **Allow User Scripts** is on (step 3), then reload the page.
-- **Claude Code isn't found**: install it, then run `npx trif setup` again in the same terminal.
+- **Claude Code isn't found**: install it, then run `npx timsrobot setup` again in the same terminal.
 - **"rg" Not Opened** while Codex works: a search tool that ships with Codex hasn't been checked by
   Apple. It's harmless: click Done (Codex works without it).
 
@@ -253,6 +272,13 @@ keys you saved from the Keychain first, while the command is still there: `~/.tr
   (on Linux, `~/.local/state/trif`; on Windows, `%LOCALAPPDATA%\TRIF`, and the registry keys named
   `com.webmods.helper` under `HKEY_CURRENT_USER\Software\…\NativeMessagingHosts`);
 - `~/Library/Caches/TRIF` (chats' mailboxes; on Linux `~/.cache/trif`);
+- the file that lets each browser start TRIF's helper, `com.webmods.helper.json`: in
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts` (Chrome's, which Arc reads too) and,
+  for Firefox, `~/Library/Application Support/Mozilla/NativeMessagingHosts` (for Chromium, Brave, Edge or
+  Arc, also in `NativeMessagingHosts` in that browser's folder in `~/Library/Application Support`, Arc's
+  in `Arc/User Data`; on Linux, in `~/.config/<browser>/NativeMessagingHosts` and
+  `~/.mozilla/native-messaging-hosts`);
+- `/usr/local/bin/trif`, if setup linked it there;
 - if you used Safari, its bridge: `launchctl bootout gui/$(id -u)/com.timsrobot.trif.safari-bridge`, then
   delete `~/Library/LaunchAgents/com.timsrobot.trif.safari-bridge.plist`.
 
@@ -265,6 +291,13 @@ you're on, and sends what it reads to its provider (Anthropic for Claude Code, O
 you picked for an open model; nobody for a model on your own computer) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).
 
+## Security
+
+How TRIF keeps an agent that reads the web, and the mods it writes, from acting as you, and what's still
+open: [docs/SECURITY.md](docs/SECURITY.md). A shorter brief for reviewers, on the three kinds of mod and
+what each one guarantees: [docs/SECURITY-TIERS.md](docs/SECURITY-TIERS.md). Found a hole? Please send it
+through [timsrobot.com/report](https://timsrobot.com/report), not a public issue.
+
 ## For developers
 
 How the pieces fit together, and the full CLI, are in [docs/PROTOCOL.md](docs/PROTOCOL.md). Run the tests
@@ -272,7 +305,7 @@ with `node --test --test-concurrency=2 --test-timeout=120000`.
 
 Before a release, also run the end-to-end browser suite, which installs the npm package into a scratch
 home and drives a throwaway Firefox (and Chrome for Testing) profile through setup, the panel, switches,
-Timeline Detox and real agent runs, saving screenshots:
+Detox Timeline and real agent runs, saving screenshots:
 `node tests/e2e/run.js firefox --agent --codex --upgrade-from <previous release .tgz>`. It never touches
 your real browsers, profiles or `~/.trif`. What it covers and what stays manual (Safari, a real X
 timeline, look and feel): [docs/TESTING.md](docs/TESTING.md).
@@ -313,12 +346,18 @@ Two things it doesn't do, both yours: **rename the GitHub repo** from `acapellas
 stops while the git remote and package.json disagree), then check that the old
 `raw.githubusercontent.com/acapellascience/WebMods/main/updates/…` URLs redirect, since installs from
 before the rename fetch updates there; and **publish `trif` on npm** (`npm publish` the release's .tgz),
-which `npx trif setup` above needs. The script also stops while CHANGELOG.md has a non-empty
+which `npx timsrobot setup` above needs. The script also stops while CHANGELOG.md has a non-empty
 "## Unreleased" section.
 
 It needs, on the releasing Mac: `gh auth login`; the addons.mozilla.org API key and secret in the
 keychain as `trif-amo-issuer` and `trif-amo-secret`; and the release signing key, made once with
 `node scripts/release.js keygen` (private half in the keychain as `trif-release-key`, public half in
 `helper/lib/release-key.js`). Back the private key up: installs only accept updates signed with it.
+Installs also refuse a feed signed more than 8 weeks ago, so with no release for about six weeks, run
+`node scripts/release.js refresh-feed` (it signs updates/latest.json and updates/mods.json again, nothing
+else changed) and push `updates/` on main. To ship a fixed or improved shipped mod without a release, bump
+its `@version`, commit it on main, and run `node scripts/release.js mods-feed` (`--dry-run` first; `--only
+<ids>` to pick): it signs updates/mods.json with every shipped mod changed since the last release, and asks
+before committing and pushing it.
 (Keychain items under their WebMods-era names, `webmods-amo-issuer`, `webmods-amo-secret` and
 `webmods-release-key`, are found too.)

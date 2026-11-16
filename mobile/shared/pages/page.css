@@ -1,0 +1,19 @@
+body { font: 16px/1.4 -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; background: #fafafa; }
+.site-banner { position: sticky; top: 0; z-index: 10; background: #ffd24d; padding: 12px 16px; font-weight: 600; }
+.site-header { background: #fff; border-bottom: 1px solid #ddd; }
+.main-nav { display: flex; gap: 16px; padding: 12px 16px; }
+main { padding: 0 16px; }
+.feed-item { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+.feed-item h2 { font-size: 17px; margin: 0 0 6px; }
+.feed-item.promoted { border-color: #c9a400; }
+.promoted-label, .post-meta { font-size: 13px; color: #666; }
+.sidebar section { background: #eef1f5; border-radius: 10px; padding: 10px 14px; margin: 12px 0; }
+.css-1dbjc4n { margin: 6px 0; }
+.r-1habvwh { background: #e9e4f5; padding: 10px; border-radius: 8px; }
+#compose { display: flex; gap: 8px; margin: 16px 0; }
+#compose input { flex: 1; font-size: 16px; padding: 8px; }
+x-widget { display: block; background: #e2f3e6; padding: 10px; border-radius: 8px; margin: 12px 0; }
+iframe { width: 100%; height: 70px; border: 1px solid #ccc; }
+.cookie-consent { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: #222; color: #fff; padding: 14px 16px; }
+.cookie-consent button { font-size: 15px; margin-right: 8px; padding: 6px 10px; }
+.filler { padding: 0 16px; color: #777; }

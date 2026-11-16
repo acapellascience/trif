@@ -13,6 +13,16 @@
 // flips it the way that page does, with chrome.developerPrivate.updateExtensionConfiguration
 // ({userScriptsAccess: true}) evaluated in chrome://extensions, after turning on developer mode in the
 // profile's Preferences.
+//
+// Site access. TRIF's sites are optional host permissions, which Chrome only grants through its own prompt,
+// and nothing in automation can answer that prompt (no flag, CDP command or developerPrivate call does it
+// for optional host permissions; checked in Chrome for Testing 156). So the driver loads a copy of the
+// extension whose manifest makes the sites the suite turns TRIF on for *required* host permissions
+// (`siteAccess`, by default SITE_ACCESS_HOSTS): to TRIF that's the same as a user who allowed those sites
+// (permissions.request for them says yes without a prompt; removing them is refused, which TRIF ignores),
+// and every other site (localhost, amazon.com, instagram.com) stays without access. `siteAccess: 'all'`
+// makes <all_urls> required instead: a user who installed TRIF when it was. The copy is in the scratch
+// home, next to the profile.
 
 const fs = require('fs');
 const path = require('path');
@@ -20,6 +30,53 @@ const { spawn } = require('child_process');
 const { sleep, waitFor, freePort, killMatching } = require('./util');
 
 const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
+// The sites the suite turns TRIF on for (scenario.js, homepage.js): each with its subdomains, as TRIF asks.
+const SITE_ACCESS_HOSTS = ['127.0.0.1', 'x.com', 'google.com', 'timsrobot.com'];
+
+// The test build's side panel can be made not to open, as in Arc (which has chrome.sidePanel but not
+// Chrome's side panel: open() resolves and nothing shows): with chrome.storage.local `e2eNoSidePanel`
+// true, sidePanel.open does just that. It runs before background.js (imported first), so the background's
+// clicks call this one.
+const NO_SIDE_PANEL = `// e2e only (tests/e2e/lib/chrome.js): sidePanel.open resolving without opening, as in Arc.
+let off = false;
+chrome.storage.local.get('e2eNoSidePanel').then((s) => { off = s.e2eNoSidePanel === true; });
+chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.e2eNoSidePanel) off = c.e2eNoSidePanel.newValue === true; });
+const open = chrome.sidePanel.open.bind(chrome.sidePanel);
+chrome.sidePanel.open = (o) => (off ? Promise.resolve() : open(o));
+`;
+
+// Chrome can't be asked which icon a tab's toolbar button shows (Firefox can: firefox.js actionIcon), so
+// the test build records each chrome.action.setIcon for a tab that the browser accepted (its 16 px path)
+// in chrome.storage.session `e2eIcons`, for the scenario to read. Also before background.js.
+const ICONS = `// e2e only (tests/e2e/lib/chrome.js): the icons the background set for tabs, as Chrome accepted them.
+const icons = {};
+const setIcon = chrome.action.setIcon.bind(chrome.action);
+chrome.action.setIcon = (d, done) => new Promise((res) => setIcon(d, () => {
+  const failed = chrome.runtime.lastError; // (read here: a tab closed meanwhile)
+  if (!failed && d) {
+    icons[d.tabId != null ? d.tabId : 'default'] = (d.path && (d.path[16] || d.path)) || 'imageData'; // (no tab: the default icon)
+    chrome.storage.session.set({ e2eIcons: { ...icons } });
+  }
+  if (done) done();
+  res();
+}));
+`;
+
+/** A copy of the extension in `to` with the test manifest described above. Returns `to`. */
+function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
+  fs.rmSync(to, { recursive: true, force: true });
+  fs.cpSync(from, to, { recursive: true });
+  const file = path.join(to, 'manifest.json');
+  const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // (as the extension asks for a site: lib.js siteOrigins, one pattern, just the address for an IP)
+  m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.map((h) => (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) ? `*://${h}/*` : `*://*.${h}/*`));
+  fs.writeFileSync(path.join(to, 'e2e-no-side-panel.js'), NO_SIDE_PANEL);
+  fs.writeFileSync(path.join(to, 'e2e-icons.js'), ICONS);
+  fs.writeFileSync(path.join(to, 'e2e-background.js'), `import './e2e-no-side-panel.js';\nimport './e2e-icons.js';\nimport './${m.background.service_worker}';\n`);
+  m.background = { ...m.background, service_worker: 'e2e-background.js' };
+  fs.writeFileSync(file, JSON.stringify(m, null, 2));
+  return to;
+}
 
 function findChrome() {
   if (process.env.TRIF_E2E_CHROME) return process.env.TRIF_E2E_CHROME;
@@ -81,7 +138,7 @@ class Cdp {
 }
 
 class ChromeDriver {
-  /** opts: { userDataDir, home (scratch HOME for Chrome and so the helper), extensionDir, headless, env } */
+  /** opts: { userDataDir, home (scratch HOME for Chrome and so the helper), extensionDir, headless, env, hosts (more to resolve to 127.0.0.1) } */
   constructor(opts) {
     this.opts = opts;
     this.name = 'Chrome';
@@ -93,7 +150,9 @@ class ChromeDriver {
   async start() {
     const bin = findChrome();
     if (!bin) throw new Error('Chrome for Testing not found: set TRIF_E2E_CHROME to its binary (…/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing)');
-    const { userDataDir, home, extensionDir, headless = true } = this.opts;
+    const { userDataDir, home, headless = true } = this.opts;
+    const extensionDir = testExtension(this.opts.extensionDir, path.join(path.dirname(userDataDir), 'TRIF-e2e-extension'), this.opts.siteAccess);
+    this.siteAccess = this.opts.siteAccess || SITE_ACCESS_HOSTS;
     // Developer mode on, before Chrome first reads the profile (needed for the user scripts switch).
     const prefsDir = path.join(userDataDir, 'Default');
     fs.mkdirSync(prefsDir, { recursive: true });
@@ -111,14 +170,15 @@ class ChromeDriver {
       '--disable-features=DisableLoadExtensionCommandLineSwitch',
       '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-component-update',
       '--disable-background-networking', '--password-store=basic', '--use-mock-keychain',
-      '--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1',
+      `--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1${(this.opts.hosts || []).map((h) => `, MAP ${h} 127.0.0.1`).join('')}`,
       '--ignore-certificate-errors',
       '--window-size=1280,900',
       'about:blank',
     ];
     // A screen bigger than the windows (headless defaults to 800x600, smaller than the 1280x900 windows), so
     // windows are placed as on a real display: `trif screenshot`'s copy window goes against its right edge.
-    if (headless) args.unshift('--headless=new', '--screen-info={0,0 2560x1440}');
+    // (headless: no sound out of the speakers either; the mods' Web Audio still runs)
+    if (headless) args.unshift('--headless=new', '--mute-audio', '--screen-info={0,0 2560x1440}');
     const env = { ...process.env, HOME: home };
     for (const k of Object.keys(env)) if (/^(TRIF|WEBMODS)_/.test(k)) delete env[k];
     Object.assign(env, this.opts.env || {});
@@ -181,6 +241,18 @@ class ChromeDriver {
   async installExtension() {
     await waitFor('the TRIF service worker', async () => (await this.targets()).find((t) => t.type === 'service_worker' && t.url.startsWith(this.origin)), { timeoutMs: 20000 });
     return EXTENSION_ID;
+  }
+
+  /**
+   * Clicks TRIF's toolbar button on the tab `ctx` shows, as Extensions.triggerAction does: TRIF's
+   * action.onClicked opens the side panel, and Chrome gives TRIF activeTab on that tab.
+   */
+  async clickToolbarButton(ctx) {
+    const { targetInfos } = await this.cdp.send('Target.getTargets', { filter: [{ type: 'tab' }] });
+    const page = (await this.targets()).find((t) => t.targetId === ctx);
+    const tab = targetInfos.find((t) => t.type === 'tab' && page && t.url === page.url);
+    if (!tab) throw new Error(`no tab target for ${page ? page.url : ctx}`);
+    await this.cdp.send('Extensions.triggerAction', { id: EXTENSION_ID, targetId: tab.targetId });
   }
 
   /** Turns on "Allow User Scripts" for TRIF, as the switch on chrome://extensions does. */
@@ -248,18 +320,21 @@ class ChromeDriver {
   async click(ctx, selector) {
     const sid = await this._attach(ctx);
     const [x, y] = await this.eval(ctx, `async (sel) => {
-      const el = document.querySelector(sel);
+      let el = document.querySelector(sel);
       if (!el) throw new Error('no element ' + sel);
       el.scrollIntoView({ block: 'center' });
       // Wait for the layout to settle (a notice appearing above can move the element mid-click), and for
-      // nothing to cover the element's centre.
+      // nothing to cover the element's centre. A list re-rendered meanwhile (the side panel relists its mods
+      // when TRIF comes on) replaces the element and can scroll it back out of view: find it and scroll to it again.
       const rect = () => JSON.stringify(el.getBoundingClientRect());
-      for (let i = 0, last = rect(); i < 20; i++) {
+      for (let i = 0, last = rect(); i < 40; i++) {
         await new Promise((r) => setTimeout(r, 150));
+        el = document.querySelector(sel) || el;
         const now = rect();
         const c = el.getBoundingClientRect();
         const hit = document.elementFromPoint(c.x + c.width / 2, c.y + c.height / 2);
         if (now === last && hit && (hit === el || el.contains(hit))) break;
+        if (!hit || (hit !== el && !el.contains(hit))) el.scrollIntoView({ block: 'center' });
         last = now;
       }
       const b = el.getBoundingClientRect();
@@ -270,11 +345,44 @@ class ChromeDriver {
     }
   }
 
+  /** A trusted right-button press and release at (x, y): what a press does, without a click's action. */
+  async rightPress(ctx, x, y) {
+    const sid = await this._attach(ctx);
+    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sid);
+    for (const type of ['mousePressed', 'mouseReleased']) await this.cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'right', clickCount: 1 }, sid);
+  }
+
+  /** A trusted press of `key` ('Escape') in the page `ctx`. */
+  async key(ctx, key) {
+    const sid = await this._attach(ctx);
+    const codes = { Escape: 27, Enter: 13, Tab: 9, ' ': 32, ArrowDown: 40, ArrowUp: 38 };
+    // (a character also types itself, as a real key press does)
+    const char = key.length === 1;
+    for (const type of [char ? 'keyDown' : 'rawKeyDown', 'keyUp']) {
+      await this.cdp.send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : char ? `Key${key.toUpperCase()}` : key, windowsVirtualKeyCode: codes[key] || (char ? key.toUpperCase().charCodeAt(0) : 0), ...(char && type === 'keyDown' ? { text: key } : {}) }, sid);
+    }
+  }
+
   /** Moves the mouse off whatever it last clicked (to the bottom left corner), so nothing shows hovered. */
   async pointerAway(ctx) {
     const sid = await this._attach(ctx);
     const h = await this.eval(ctx, 'async () => innerHeight');
     await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: h - 1 }, sid);
+  }
+
+  /** The page's prefers-color-scheme: 'light', 'dark', or '' for the system's. */
+  /** The page's viewport (CSS px), as a shorter side panel would be; null puts it back. */
+  async viewport(ctx, size) {
+    const sid = await this._attach(ctx);
+    if (size) await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 0, mobile: false }, sid);
+    else await this.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sid);
+    return true;
+  }
+
+  async colorScheme(ctx, value) {
+    const sid = await this._attach(ctx);
+    await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: value || '' }] }, sid);
+    return true;
   }
 
   async screenshot(ctx, file) {
@@ -299,4 +407,4 @@ class ChromeDriver {
   }
 }
 
-module.exports = { ChromeDriver, EXTENSION_ID, findChrome };
+module.exports = { ChromeDriver, Cdp, EXTENSION_ID, SITE_ACCESS_HOSTS, findChrome };

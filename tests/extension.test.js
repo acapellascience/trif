@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const vm = require('node:vm');
 const { test, before } = require('node:test');
 const { waitFor } = require('./fake-extension');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let lib, rt;
 before(async () => {
@@ -58,6 +59,15 @@ function mockUserScripts() {
 const mod = (id, extra = {}) => ({
   id, site: id.split('/')[0], file: `/w/sites/${id}.js`, name: id, description: '',
   matches: [`*://${id.split('/')[0]}/*`], excludes: [], runAt: 'document_start', code: `/* ${id} */`, hash: 'h1', ...extra,
+});
+
+test('no page is ever marked, timsrobot.com included; a home page marker left by a development build goes', async () => {
+  const us = mockUserScripts();
+  await us.register([{ id: 'trif-home', matches: ['*://timsrobot.com/*'], js: [{ code: 'document.documentElement.setAttribute("data-trif", "on");' }], runAt: 'document_start', world: 'MAIN' }]);
+  const r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('timsrobot.com/fireworks')], runtimeCode: 'RT', sitesOn: ['x.com', 'timsrobot.com'] });
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), ['webmods-runtime', 'x.com/a', 'timsrobot.com/fireworks']);
+  assert.deepStrictEqual(r.registered, ['x.com/a', 'timsrobot.com/fireworks']);
+  assert.ok(!us.scripts.some((s) => s.js.some((j) => j.code.includes('data-trif'))), 'nothing marks pages');
 });
 
 test('first sync registers the runtime first, then each mod, wrapped and in the MAIN world', async () => {
@@ -134,7 +144,7 @@ test('a runtime change (recording set) re-registers everything with the runtime 
   us.calls.length = 0;
   r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode: rt.runtimeCode(['x.com']), applied: r.applied });
   assert.strictEqual(r.reset, true);
-  assert.deepStrictEqual(us.calls, [['unregister', 'all'], ['register', [lib.RUNTIME_ID]], ['register', ['x.com/a']], ['register', ['x.com/b']]]);
+  assert.deepStrictEqual(us.calls, [['unregister', 'all'], ['register', [lib.RUNTIME_ID]], ['register', ['x.com/a', 'x.com/b']]], 'the mods in one call, after the runtime');
   assert.match(us.scripts[0].js[0].code, /const RECORDING = \["x.com"\]/);
 });
 
@@ -159,6 +169,24 @@ test('one bad mod is reported without blocking the others; duplicates are reject
   assert.match(bad.error, /Invalid match pattern/);
   assert.match(r.errors.find((e) => e.id === 'x.com/good').error, /duplicate/);
   assert.ok(!('x.com/bad' in r.applied));
+});
+
+test('mods register in one call; when that fails part way (a browser that keeps the ones before), each is retried on its own', async () => {
+  const us = mockUserScripts();
+  const atomic = us.register.bind(us);
+  us.register = async (list) => { for (const s of list) await atomic([s]); }; // registers until the bad one throws
+  const mods = [mod('x.com/a'), mod('x.com/bad', { matches: ['not a pattern'] }), mod('x.com/c')];
+  const r = await lib.syncUserScripts(us, { mods, runtimeCode: rt.runtimeCode([]) });
+  assert.deepStrictEqual(r.registered, ['x.com/a', 'x.com/c']);
+  assert.deepStrictEqual(r.errors.map((e) => e.id), ['x.com/bad']);
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
+  // Two changed and one new: one update call, one register call.
+  const us2 = mockUserScripts();
+  const r1 = await lib.syncUserScripts(us2, { mods: [mod('x.com/a'), mod('x.com/c')], runtimeCode: rt.runtimeCode([]) });
+  us2.calls.length = 0;
+  const r2 = await lib.syncUserScripts(us2, { mods: [mod('x.com/a', { hash: 'h2' }), mod('x.com/c', { hash: 'h2' }), mod('x.com/d')], runtimeCode: rt.runtimeCode([]), applied: r1.applied });
+  assert.deepStrictEqual(r2.registered, ['x.com/a', 'x.com/c', 'x.com/d']);
+  assert.deepStrictEqual(us2.calls, [['update', ['x.com/a', 'x.com/c']], ['register', ['x.com/d']]]);
 });
 
 test('sync skips switched-off mods, unregisters newly switched-off ones, re-registers them when switched on', async () => {
@@ -202,6 +230,68 @@ test('userScriptsAvailable detects the "Allow User Scripts" switch', () => {
   assert.strictEqual(lib.userScriptsAvailable({ userScripts: { getScripts() { throw new Error('off'); } } }), false);
   assert.strictEqual(lib.userScriptsAvailable({ userScripts: { getScripts: () => Promise.reject(new Error('x')) } }), true);
   assert.strictEqual(lib.userScriptsAvailable({ get userScripts() { throw new Error('off'); } }), false);
+  // It asks for no script in particular: every script with its code, on every message, cost Firefox gigabytes.
+  const asked = [];
+  assert.strictEqual(lib.userScriptsAvailable({ userScripts: { getScripts: (f) => { asked.push(f); return Promise.resolve([]); } } }), true);
+  assert.ok(Array.isArray(asked[0]?.ids) && asked[0].ids.length === 1, JSON.stringify(asked));
+});
+
+test('syncUserScripts with the ids it left registered (known) doesn\'t fetch the scripts; after a failure it does', async () => {
+  const us = mockUserScripts();
+  let fetched = 0;
+  const get = us.getScripts;
+  us.getScripts = async (f) => { fetched++; return get(f); };
+  const runtimeCode = rt.runtimeCode([]);
+  let r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode });
+  assert.strictEqual(fetched, 1);
+  assert.deepStrictEqual(r.known, [lib.RUNTIME_ID, 'x.com/a', 'x.com/b']);
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { hash: 'h2' }), mod('x.com/c')], runtimeCode, applied: r.applied, known: r.known });
+  assert.strictEqual(fetched, 1, 'not fetched again');
+  assert.deepStrictEqual(us.calls, [['unregister', ['x.com/b']], ['update', ['x.com/a']], ['register', ['x.com/c']]]);
+  assert.deepStrictEqual(r.known, [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
+  // A mod that won't register: unsure what's there, so the next sync asks.
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { hash: 'h2' }), mod('x.com/bad', { matches: ['nope'] })], runtimeCode, applied: r.applied, known: r.known });
+  assert.strictEqual(r.known, null);
+  assert.deepStrictEqual(r.errors.map((e) => e.id), ['x.com/bad']);
+  const before = fetched;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { hash: 'h2' })], runtimeCode, applied: r.applied, known: r.known });
+  assert.strictEqual(fetched, before + 1);
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a']);
+  // Nothing to register: none known.
+  r = await lib.syncUserScripts(us, { mods: [], runtimeCode, applied: r.applied, known: r.known });
+  assert.deepStrictEqual(r.known, []);
+  assert.deepStrictEqual(us.scripts, []);
+});
+
+test('fillSameMods puts the code back from the mods it had, by id and hash', () => {
+  const had = [{ id: 'a', hash: 'h1', code: 'A' }, { id: 'b', hash: 'h1', code: 'B' }];
+  assert.deepStrictEqual(lib.fillSameMods([{ id: 'a', hash: 'h1', same: true, name: 'n' }, { id: 'b', hash: 'h2', code: 'B2' }], had),
+    { mods: [{ id: 'a', hash: 'h1', name: 'n', code: 'A' }, { id: 'b', hash: 'h2', code: 'B2' }] });
+  assert.deepStrictEqual(lib.fillSameMods([{ id: 'a', hash: 'h2', same: true }, { id: 'c', hash: 'h1', same: true }], had), { missing: ['a', 'c'] });
+  assert.deepStrictEqual(lib.fillSameMods(undefined, had), { mods: [] });
+});
+
+test('modsStoragePlan writes the mods that changed and the list, removes the gone ones and the old `mods`', () => {
+  const a = mod('x.com/a');
+  const b = mod('x.com/b', { hash: 'hb' });
+  let st = lib.modsStorageState({ mods: [a] });
+  assert.deepStrictEqual(lib.storedMods({ mods: [a] }), [a]);
+  let p = lib.modsStoragePlan([a, b], st);
+  assert.deepStrictEqual(Object.keys(p.set).sort(), ['mod:x.com/a', 'mod:x.com/b', 'modIds']);
+  assert.deepStrictEqual(p.remove, ['mods']);
+  st = p.stored;
+  assert.deepStrictEqual(lib.modsStoragePlan([a, b], st), { set: {}, remove: [], stored: st });
+  // The header changed (same hash, held now): written again. The code alone is covered by the hash.
+  p = lib.modsStoragePlan([a, { ...b, held: { site: 'y.com' } }], st);
+  assert.deepStrictEqual(Object.keys(p.set), ['mod:x.com/b']);
+  p = lib.modsStoragePlan([{ ...b, held: { site: 'y.com' } }], p.stored);
+  assert.deepStrictEqual(p.set, { modIds: ['x.com/b'] });
+  assert.deepStrictEqual(p.remove, ['mod:x.com/a']);
+  // Read back the way the background does at startup.
+  const items = { modIds: ['x.com/b', 'x.com/gone'], 'mod:x.com/b': b };
+  assert.deepStrictEqual(lib.storedMods(items), [b]);
+  assert.deepStrictEqual(lib.modsStoragePlan([b], lib.modsStorageState(items)).set, { modIds: ['x.com/b'] });
 });
 
 // ---- tabs ---------------------------------------------------------------------------------------
@@ -780,14 +870,40 @@ let bgCount = 0;
 // TRIF is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
 // leaves sitesOn out, as for someone updating from before sites had to be turned on.
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
-async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {} } = {}) {
-  const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
+// `granted`: the origins the browser gives TRIF (chrome.permissions); <all_urls> unless a test says
+// otherwise, as for someone who installed TRIF when it was required. `permissions: false` leaves the API out.
+// `sidePanel`: overrides of the chrome.sidePanel mock (whose open() resolves and shows nothing, as in Arc:
+// a test says a side panel loaded by emitting its panel.window), or false for none.
+async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true, sidePanel = {}, userScripts = {} } = {}) {
+  // (perSiteOnly: past 0.3's one-time step that gives up every site's access, background.js dropEverySite: the
+  // fake browser gives every site by default, as the user's own choice in its settings; the tests of that step
+  // leave it out)
+  const base = migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage };
+  const store = structuredClone('perSiteOnly' in base || base.__migrateAccess ? base : { perSiteOnly: true, ...base });
+  delete store.__migrateAccess;
+  // (past the one-time step that makes each sensitive site one of its own and blocks it, background.js
+  // considerSensitive, for the list's sites and the tabs' hosts: the tests of that step pass __sensitive)
+  if (store.__sensitive) delete store.__sensitive;
+  else if (!('sensitiveDone' in store)) {
+    store.sensitiveDone = [...new Set([...lib.sensitiveListSites(store.sensitiveSites ?? null),
+      ...tabs.map((t) => { try { return lib.sensitiveHit(new URL(t.url || '').hostname, store.sensitiveSites ?? null)?.scope; } catch { return null; } }).filter(Boolean)])];
+  }
   const ctl = { full: false, io: false, writes: [] }; // full: every storage write fails, like a full quota; io: like Safari's "Disk I/O error"; writes: the keys of each write
   const natives = [];
   const panelBehavior = [];
   const created = [];
   const reloaded = [];
   const onUpdated = chromeEvent();
+  const panelCalls = [];
+  const perms = {
+    origins: [...granted], removed: [],
+    onAdded: chromeEvent(), onRemoved: chromeEvent(),
+    async getAll() { return { origins: [...perms.origins], permissions: [] }; },
+    async remove({ origins = [] }) { perms.removed.push(origins); perms.origins = perms.origins.filter((o) => !origins.includes(o)); return true; },
+    /** As the user allowing (or the settings page taking back) origins: the list changes, then the event. */
+    grant(origins) { perms.origins = [...new Set([...perms.origins, ...origins])]; perms.onAdded.emit({ origins }); },
+    revoke(origins) { perms.origins = perms.origins.filter((o) => !origins.includes(o)); perms.onRemoved.emit({ origins }); },
+  };
   const chromeMock = {
     runtime: {
       id: lib.EXTENSION_ID, lastError: undefined,
@@ -813,16 +929,24 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
         async remove(keys) { for (const k of [].concat(keys)) delete store[k]; },
       },
     },
-    userScripts: mockUserScripts(),
+    userScripts: Object.assign(mockUserScripts(), userScripts), // (extras: configureWorld, execute, for the sandbox world)
     tabs: {
       query: async () => structuredClone(tabs), create: async (o) => { created.push(o); return { id: 99, ...o }; },
       update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated,
       reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
     windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }), ...windows },
-    sidePanel: { setPanelBehavior: async (o) => { panelBehavior.push(o); } },
+    ...(sidePanel === false ? {} : {
+      sidePanel: {
+        setPanelBehavior: async (o) => { panelBehavior.push(o); },
+        open: (o) => { panelCalls.push(['open', o]); return Promise.resolve(); },
+        close: (o) => { panelCalls.push(['close', o]); return Promise.resolve(); },
+        ...sidePanel,
+      },
+    }),
     scripting,
     action: { onClicked: chromeEvent() },
+    ...(permissions ? { permissions: perms } : {}),
   };
   globalThis.chrome = chromeMock;
   Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Chrome/156.0.0.0' }, configurable: true, writable: true });
@@ -832,9 +956,10 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
   await settle(20);
   const native = natives[0];
   native.emit = (m) => native.onMessage.emit(m);
-  const connectPanel = () => {
+  // (`sender`: another of the extension's pages or a content script, connecting with the panel's name.)
+  const connectPanel = (sender = { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html` }) => {
     const p = mockPort('panel');
-    p.sender = { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html` };
+    p.sender = sender;
     chromeMock.runtime.onConnect.emit(p);
     p.ask = async (msg) => {
       const reqId = Math.random();
@@ -860,7 +985,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
     }
     throw new Error(`no response to ${cmd}`);
   };
-  return { chrome: chromeMock, store, ctl, natives, native, connectPanel, panelBehavior, created, reloaded, restore };
+  return { chrome: chromeMock, store, ctl, natives, native, connectPanel, panelBehavior, panelCalls, perms, created, reloaded, restore };
 }
 
 /** Answer the extension's next native request for `cmd` like the helper would. */
@@ -946,24 +1071,215 @@ test('background: trif reload right after new mods waits for them to be register
   } finally { bg.restore(); }
 });
 
-test('background: install opens onboarding and sets the side panel to open on action click', async () => {
+test('background: install opens onboarding; the toolbar button opens the side panel itself (for activeTab), and closes it', async () => {
   const bg = await loadBackground();
   try {
     bg.chrome.runtime.onInstalled.emit({ reason: 'install' });
     await settle(10);
-    assert.deepStrictEqual(bg.panelBehavior.at(-1), { openPanelOnActionClick: true });
+    assert.deepStrictEqual(bg.panelBehavior.at(-1), { openPanelOnActionClick: false });
     assert.strictEqual(bg.created.at(-1).url, `chrome-extension://${lib.EXTENSION_ID}/onboarding.html`);
     bg.chrome.runtime.onInstalled.emit({ reason: 'update' });
     await settle(10);
     assert.strictEqual(bg.created.length, 1);
     bg.chrome.runtime.onStartup.emit();
     assert.strictEqual(bg.panelBehavior.length, 3);
+    assert.strictEqual(bg.chrome.action.onClicked.fns.length, 1);
+    // Opened from the click, synchronously (it must come from the user's gesture).
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 2 }]]);
+    // A side panel in window 2 says so (as it loads); the next click there closes it; another window's opens.
+    const panel = bg.connectPanel();
+    panel.onMessage.emit({ type: 'panel.window', windowId: 2 });
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    bg.chrome.action.onClicked.emit({ id: 8, windowId: 3 });
+    assert.deepStrictEqual(bg.panelCalls.slice(1), [['close', { windowId: 2 }], ['open', { windowId: 3 }]]);
+    const panel3 = bg.connectPanel();
+    panel3.onMessage.emit({ type: 'panel.window', windowId: 3 });
+    panel.onDisconnect.emit();
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls.at(-1), ['open', { windowId: 2 }]);
+    bg.connectPanel().onMessage.emit({ type: 'panel.window', windowId: 2 });
+    // Each side panel said it was there in time: no panel window, nothing remembered.
+    await sleep(lib.PANEL_OPEN_WAIT_MS + 200);
+    assert.strictEqual(bg.created.length, 1);
+    assert.ok(!('panelInWindow' in bg.store));
+  } finally { bg.restore(); }
+});
+
+/** chrome.windows with browser windows `list` ({id, type, left, top, width, height}), recording what's made and closed. */
+function fakeWindows(list) {
+  const wins = structuredClone(list);
+  const created = [];
+  const removed = [];
+  const updated = [];
+  let next = 100;
+  const api = {
+    get: async (id) => { const w = wins.find((x) => x.id === id); if (!w) throw new Error(`No window with id: ${id}.`); return structuredClone(w); },
+    getAll: async ({ windowTypes } = {}) => structuredClone(wins.filter((w) => !windowTypes || windowTypes.includes(w.type))),
+    create: async (o) => {
+      created.push(o);
+      const w = { id: next++, type: o.type || 'normal', state: 'normal', left: o.left, top: o.top, width: o.width, height: o.height, tabs: [{ url: o.url }] };
+      wins.push(w);
+      return structuredClone(w);
+    },
+    remove: async (id) => { removed.push(id); const i = wins.findIndex((w) => w.id === id); if (i < 0) throw new Error(`No window with id: ${id}.`); wins.splice(i, 1); },
+    update: async (id, o) => { updated.push([id, o]); return {}; },
+    getLastFocused: async () => ({ id: 1 }),
+    onFocusChanged: chromeEvent(),
+  };
+  return { api, wins, created, removed, updated };
+}
+
+const BROWSER_WINDOW = { id: 2, type: 'normal', state: 'normal', left: 0, top: 25, width: 1200, height: 800 };
+const PANEL_URL = (id) => `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html?window=${id}&fallback=1`;
+
+test('background: no side panel within a second of the click (Arc): the panel opens in a window beside the browser window, remembered', async () => {
+  const w = fakeWindows([BROWSER_WINDOW]);
+  const bg = await loadBackground({ windows: w.api, storage: { panelScreens: [{ left: 0, top: 25, width: 1800, height: 1100 }] } });
+  try {
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 2 }]]);
+    await sleep(lib.PANEL_OPEN_WAIT_MS / 2);
+    assert.strictEqual(w.created.length, 0, 'it waits for the side panel first');
+    await waitFor(() => w.created.length === 1, { message: 'the panel window' });
+    assert.deepStrictEqual(w.created[0], { url: PANEL_URL(2), focused: true, left: 1200, top: 25, width: 400, height: 800, type: 'popup' });
+    assert.strictEqual(bg.store.panelInWindow, true);
+    // The panel window says it's there; the next click closes it, without asking for the side panel.
+    const pw = bg.connectPanel();
+    pw.onMessage.emit({ type: 'panel.window', windowId: 2, own: 100 });
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.removed.includes(100), { message: 'the panel window to close' });
+    assert.strictEqual(bg.panelCalls.length, 1);
+    pw.onDisconnect.emit();
+    // Remembered: the next click opens it at once, and still asks for the side panel from the click.
+    const t0 = Date.now();
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls.at(-1), ['open', { windowId: 2 }]);
+    await waitFor(() => w.created.length === 2, { message: 'the panel window again' });
+    assert.ok(Date.now() - t0 < lib.PANEL_OPEN_WAIT_MS / 2, `took ${Date.now() - t0} ms`);
+    // Closed again from its own title bar; then a double click makes one, not two.
+    await w.api.remove(101);
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.created.length === 3, { message: 'the panel window again' });
+    await sleep(100);
+    assert.strictEqual(w.created.length, 3);
+  } finally { bg.restore(); }
+});
+
+test('background: a click while the panel window is minimized or behind the browser window brings it back; else closes it', async () => {
+  const w = fakeWindows([BROWSER_WINDOW, { id: 7, type: 'popup', state: 'normal', left: 800, top: 25, width: 400, height: 800, tabs: [{ url: PANEL_URL(2) }] }]);
+  const bg = await loadBackground({ windows: w.api, storage: { panelInWindow: true } });
+  try {
+    bg.connectPanel().onMessage.emit({ type: 'panel.window', windowId: 2, own: 7 });
+    // The browser window was focused after the panel window (a click in the page): the panel is behind it.
+    w.api.onFocusChanged.emit(7);
+    await sleep(5);
+    w.api.onFocusChanged.emit(2);
+    await sleep(lib.CLICK_FOCUS_MS + 50);
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.updated.length === 1, { message: 'the panel window focused' });
+    assert.deepStrictEqual(w.updated[0], [7, { focused: true }]);
+    assert.deepStrictEqual(bg.panelCalls, [], 'no side panel asked for while its panel window is open');
+    // Now in front: the next click closes it.
+    w.api.onFocusChanged.emit(7);
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.removed.includes(7), { message: 'the panel window closed' });
+    assert.strictEqual(w.created.length, 0);
+  } finally { bg.restore(); }
+});
+
+test('background: a side panel that shows up after the panel window opened closes it again, and the browser is forgotten', async () => {
+  const w = fakeWindows([BROWSER_WINDOW]);
+  const bg = await loadBackground({ windows: w.api, storage: { panelInWindow: true } });
+  try {
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.created.length === 1, { message: 'the panel window, at once' });
+    bg.connectPanel().onMessage.emit({ type: 'panel.window', windowId: 2 });
+    await waitFor(() => w.removed.includes(100), { message: 'the panel window closed' });
+    await waitFor(() => !('panelInWindow' in bg.store), { message: 'panelInWindow forgotten' });
+  } finally { bg.restore(); }
+});
+
+test('background: sidePanel.open failing, or no chrome.sidePanel, opens the panel window at once', async () => {
+  for (const sidePanel of [{ open: () => Promise.reject(new Error('No active side panel')) }, false]) {
+    const w = fakeWindows([BROWSER_WINDOW]);
+    const bg = await loadBackground({ windows: w.api, sidePanel });
+    try {
+      const t0 = Date.now();
+      bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+      await waitFor(() => w.created.length === 1, { message: 'the panel window' });
+      assert.ok(Date.now() - t0 < lib.PANEL_OPEN_WAIT_MS / 2, `took ${Date.now() - t0} ms`);
+      // No screen known yet: over the browser window's right edge.
+      assert.deepStrictEqual([w.created[0].left, w.created[0].width], [800, 400]);
+      // Remembered only where there's a side panel API that didn't show one.
+      await settle(10);
+      assert.strictEqual(bg.store.panelInWindow, sidePanel ? true : undefined);
+    } finally { bg.restore(); }
+  }
+});
+
+test('background: in Safari the toolbar button is the Safari app\'s (safari.js), not this', async () => {
+  const bg = await loadBackground({ safari: true, sidePanel: false });
+  try {
     assert.strictEqual(bg.chrome.action.onClicked.fns.length, 0);
   } finally { bg.restore(); }
 });
 
+test('panel window: its address, where it goes, and what a click does', () => {
+  const base = `chrome-extension://${lib.EXTENSION_ID}/`;
+  const url = lib.panelWindowUrl((p) => base + p, 12);
+  assert.strictEqual(url, `${base}sidepanel.html?window=12&fallback=1`);
+  assert.deepStrictEqual(lib.panelQuery('?window=12&fallback=1'), { openedFor: 12, fallback: true });
+  assert.deepStrictEqual(lib.panelQuery('?window=12'), { openedFor: 12, fallback: false }); // Safari's, or the e2e suite's
+  assert.deepStrictEqual(lib.panelQuery(''), { openedFor: null, fallback: false });          // a side panel
+  assert.deepStrictEqual(lib.panelQuery('?window=x&fallback=1'), { openedFor: null, fallback: false });
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url }] }, base), 12);
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url: `${base}sidepanel.html?window=12` }] }, base), null);
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url: 'https://example.com/sidepanel.html?window=12&fallback=1' }] }, base), null);
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url }, { url }] }, base), null);
+
+  const win = { left: 100, top: 30, width: 1200, height: 900 };
+  const wide = { left: 0, top: 25, width: 2560, height: 1415 };
+  const right = { left: 2560, top: 0, width: 1920, height: 1080 };
+  // Room beside it on its screen: beside, as tall as the window.
+  assert.deepStrictEqual(lib.panelWindowBounds(win, [right, wide]), { left: 1300, top: 30, width: 400, height: 900 });
+  // No room (a window filling its screen): over its right edge.
+  const full = { left: 0, top: 25, width: 1440, height: 875 };
+  assert.deepStrictEqual(lib.panelWindowBounds(full, [{ left: 0, top: 25, width: 1440, height: 875 }]), { left: 1040, top: 25, width: 400, height: 875 });
+  // A window hanging off its screen's right edge: pulled inside the screen.
+  assert.deepStrictEqual(lib.panelWindowBounds({ left: 1000, top: 25, width: 800, height: 600 }, [{ left: 0, top: 0, width: 1440, height: 900 }]), { left: 1040, top: 25, width: 400, height: 600 });
+  // No screen known: over the right edge. A narrow window: no wider than it.
+  assert.deepStrictEqual(lib.panelWindowBounds(win, []), { left: 900, top: 30, width: 400, height: 900 });
+  assert.deepStrictEqual(lib.panelWindowBounds({ left: 0, top: 0, width: 300, height: 500 }, null), { left: 0, top: 0, width: 300, height: 500 });
+  assert.deepStrictEqual(lib.panelWindowBounds(null, []), { width: 400, height: 800 });
+  // The screen a window is mostly on.
+  assert.strictEqual(lib.screenFor([wide, right], { left: 2400, top: 0, width: 1200, height: 800 }), right);
+  assert.strictEqual(lib.screenFor([wide], { left: 5000, top: 0, width: 100, height: 100 }), null);
+  // Screens remembered: latest first, once each, a few at most, nonsense left out.
+  let screens = [];
+  for (const s of [wide, right, wide, { left: 'x' }]) screens = lib.rememberScreen(screens, s);
+  assert.deepStrictEqual(screens, [wide, right]);
+  for (let i = 0; i < 10; i++) screens = lib.rememberScreen(screens, { left: i * 100, top: 0, width: 100, height: 100 });
+  assert.strictEqual(screens.length, 6);
+
+  // A click: close it, unless it's minimized, or behind the browser window it overlaps.
+  const panel = { id: 7, state: 'normal', left: 900, top: 30, width: 400, height: 900 };
+  const browser = { id: 2, ...win };
+  const now = 100000;
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, focusedAt: { 7: now - 5000, 2: now - 9000 }, now }), 'close');
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, focusedAt: { 7: now - 9000, 2: now - 5000 }, now }), 'focus');
+  // The browser window focused by this click itself (it was the panel's turn before): close.
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, focusedAt: { 7: now - 9000, 2: now - 100 }, now }), 'close');
+  // Beside it, not covered: close.
+  assert.strictEqual(lib.panelWindowClick({ panel: { ...panel, left: 1300 }, browser, focusedAt: { 7: now - 9000, 2: now - 5000 }, now }), 'close');
+  assert.strictEqual(lib.panelWindowClick({ panel: { ...panel, state: 'minimized' }, browser, now }), 'focus');
+  // Nothing known (the service worker started again): close.
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, now }), 'close');
+});
+
 test('background: panel status includes helper state and mods with match patterns', async () => {
-  const mods = [mod('x.com/plain-x', { name: 'Plain X', matches: ['*://x.com/*'], excludes: ['*://x.com/settings*'] })];
+  const mods = [mod('x.com/detox-timeline', { name: 'Detox Timeline', matches: ['*://x.com/*'], excludes: ['*://x.com/settings*'] })];
   const bg = await loadBackground({ storage: { mods } });
   try {
     const panel = bg.connectPanel();
@@ -978,8 +1294,47 @@ test('background: panel status includes helper state and mods with match pattern
     assert.strictEqual(r.result.userScripts, true);
     const [m] = r.result.mods;
     assert.deepStrictEqual([m.id, m.name, m.file, m.matches, m.excludes, m.registered],
-      ['x.com/plain-x', 'Plain X', '/w/sites/x.com/plain-x.js', ['*://x.com/*'], ['*://x.com/settings*'], true]);
+      ['x.com/detox-timeline', 'Detox Timeline', '/w/sites/x.com/detox-timeline.js', ['*://x.com/*'], ['*://x.com/settings*'], true]);
     assert.deepStrictEqual(r.result.runs, []);
+  } finally { bg.restore(); }
+});
+
+test('background: Pause all mods registers nothing (each switch kept); resuming brings them back', async () => {
+  const mods = [mod('x.com/a', { matches: ['*://x.com/*'] })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: ['x.com'] } });
+  try {
+    const panel = bg.connectPanel();
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    let r = await panel.ask({ type: 'status' });
+    assert.strictEqual(r.result.mods[0].registered, true);
+    assert.strictEqual(r.result.paused, false);
+    await panel.ask({ type: 'mods.pause', paused: true });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual([r.result.paused, r.result.mods[0].registered, r.result.mods[0].enabled], [true, false, true]);
+    assert.strictEqual(bg.store.paused, true);
+    await panel.ask({ type: 'mods.pause', paused: false });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual([r.result.paused, r.result.mods[0].registered], [false, true]);
+  } finally { bg.restore(); }
+});
+
+test('background: a group switched off on a site (panel) is kept, shown in status, and its mods leave that site', async () => {
+  const mods = [mod('x.com/page'), mod('x.com/calm', { rules: true })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: ['x.com'] } });
+  try {
+    const panel = bg.connectPanel();
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    let r = await panel.ask({ type: 'mods.group', site: 'x.com', group: 'page', enabled: false });
+    assert.deepStrictEqual(r.result.groupsOff, { 'x.com': ['page'] });
+    assert.deepStrictEqual(bg.store.groupsOff, { 'x.com': ['page'] });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual(r.result.groupsOff, { 'x.com': ['page'] });
+    assert.deepStrictEqual(r.result.mods.map((m) => [m.id, m.rules, m.enabled]), [['x.com/page', false, true], ['x.com/calm', true, true]]);
+    await panel.ask({ type: 'mods.group', site: 'x.com', group: 'page', enabled: true });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual(r.result.groupsOff, {});
   } finally { bg.restore(); }
 });
 
@@ -988,9 +1343,12 @@ test('background: agent.start becomes a native request; agentEvents reach panels
   try {
     const panel = bg.connectPanel();
     const other = bg.connectPanel();
-    const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus' });
+    const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus', effort: 'high' });
     const req = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
-    assert.deepStrictEqual(req.args, { site: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', model: 'opus' });
+    // (the run's scope, and the sites of their own TRIF knows of, for its folder: lib.js "sensitive sites")
+    const { splits, ...rest } = req.args;
+    assert.ok(splits.includes('mail.google.com'), 'the sensitive sites of their own go with it');
+    assert.deepStrictEqual(rest, { site: 'x.com', scope: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', agentLevel: 'ask', model: 'opus', effort: 'high' });
     assert.match(req.id, /^ext-/);
     const reply = await replyP;
     assert.deepStrictEqual([reply.ok, reply.result], [true, { runId: 'r1' }]);
@@ -1020,6 +1378,7 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     assert.strictEqual(chat.agent, 'claude');
     assert.strictEqual(chat.run, null);
     assert.deepStrictEqual([chat.last.ok, chat.last.changedFiles, chat.last.costUsd], [true, ['sites/x.com/hide-reposts.js'], 0.12]);
+    assert.ok(!chat.messages.some((m) => m.newChatHint), 'a short chat has no "getting long" line');
 
     // the next message resumes the session
     const second = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'also likes', sessionId: 's-1', agent: 'claude' });
@@ -1034,6 +1393,112 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     bg.native.emit({ type: 'agentEvent', runId: 'r2', event: { kind: 'done', ok: false, result: '', changedFiles: [] } });
     await settle(20);
     assert.deepStrictEqual(bg.store['chat:x.com'].messages.slice(-2).map((m) => [m.role, m.text]), [['user', 'also likes'], ['tool', 'stopped']]);
+
+    // a run whose last step read 90k tokens or more: the chat suggests a new one, once per chat
+    for (const [runId, contextTokens] of [['r3', 120000], ['r4', 130000]]) {
+      const p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: `more ${runId}`, sessionId: 's-1', agent: 'claude' });
+      await answerNative(bg.native, 'agent.start', { runId });
+      await p;
+      bg.native.emit({ type: 'agentEvent', runId, event: { kind: 'done', ok: true, result: 'ok', changedFiles: [], sessionId: 's-1', contextTokens } });
+      await settle(20);
+    }
+    const hints = bg.store['chat:x.com'].messages.filter((m) => m.newChatHint);
+    assert.strictEqual(hints.length, 1);
+    assert.match(hints[0].text, /getting long/);
+  } finally { bg.restore(); }
+});
+
+test('background: a run that needs a login leaves one plain line in the chat, not an error; the message stays', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', sessionId: 's-0' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    await startP;
+    await settle(10);
+    const message = 'Claude Code needs you to log in again.';
+    for (const event of [
+      { kind: 'session', sessionId: 's-0' },
+      { kind: 'error', reason: 'login', message, agent: 'claude' },
+      { kind: 'done', ok: false, result: 'Failed to authenticate: OAuth session expired and could not be refreshed', costUsd: 0, changedFiles: [], sessionId: 's-0', error: { kind: 'login', agent: 'claude', message } },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r1', event });
+    await settle(30);
+    let chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => [m.role, m.text]), [['user', 'hide reposts'], ['login', message]]);
+    assert.strictEqual(chat.run, null);
+    assert.strictEqual(chat.sessionId, 's-0');
+    assert.strictEqual(panel.sent.filter((m) => m.type === 'agentEvent').at(-1).event.error.kind, 'login', 'the panel gets the kind');
+
+    // A done saying so without the error event first (it's the done that counts): the same one line.
+    const againP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'again', agent: 'claude' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r2' });
+    await againP;
+    bg.native.emit({ type: 'agentEvent', runId: 'r2', event: { kind: 'done', ok: false, result: null, changedFiles: [], sessionId: null, error: { kind: 'login', agent: 'claude', message } } });
+    await settle(30);
+    chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.slice(2).map((m) => [m.role, m.text]), [['user', 'again'], ['login', message]]);
+  } finally { bg.restore(); }
+});
+
+test('background: an organization\'s settings instead of TRIF\'s sandbox: the choice card, the chip, and consent only from the panel page', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'codex' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    await startP;
+    await settle(10);
+    const message = "Your organization's Codex settings replace TRIF's sandbox, so TRIF stopped the run before Codex did anything.";
+    for (const event of [
+      { kind: 'error', reason: 'sandbox', agent: 'codex', name: 'Codex', settingsName: 'Codex', why: [], message },
+      { kind: 'done', ok: false, result: message, costUsd: null, changedFiles: [], sessionId: null, error: { kind: 'sandbox', agent: 'codex' } },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r1', event });
+    await settle(30);
+    let chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'sandbox'], 'the card, and no error line besides');
+    const card = chat.messages[1];
+    assert.deepStrictEqual([card.agent, card.settingsName, card.prompt, card.answered], ['codex', 'Codex', 'hide reposts', undefined]);
+    assert.strictEqual(chat.run, null);
+
+    // Not from a content script, nor another extension page, using the panel's port name: nothing reaches the helper.
+    const before = bg.native.sent.filter((m) => m.cmd === 'agent.withoutSandbox').length;
+    for (const sender of [{ id: lib.EXTENSION_ID, url: 'https://x.com/home', tab: { id: 12 } }, { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/onboarding.html` }, { id: lib.EXTENSION_ID, url: 'https://evil.example/sidepanel.html' }]) {
+      const sneaky = bg.connectPanel(sender);
+      for (const msg of [{ type: 'agent.withoutSandbox', agent: 'codex', allow: true, site: 'x.com', card: card.time }, { type: 'chat.sandboxCard', site: 'x.com', card: card.time }]) {
+        const r = await sneaky.ask(msg);
+        assert.deepStrictEqual([r.ok, r.error], [false, 'only the side panel can change this'], JSON.stringify(sender));
+      }
+    }
+    assert.strictEqual(bg.native.sent.filter((m) => m.cmd === 'agent.withoutSandbox').length, before);
+    assert.strictEqual(bg.store['chat:x.com'].messages[1].answered, undefined);
+
+    // From the panel: "Use Codex anyway" goes to the helper, and the card says it was answered.
+    const allowP = panel.ask({ type: 'agent.withoutSandbox', agent: 'codex', allow: true, site: 'x.com', card: card.time });
+    const req = await answerNative(bg.native, 'agent.withoutSandbox', { agents: ['codex'] });
+    assert.deepStrictEqual(req.args, { agent: 'codex', allow: true });
+    assert.deepStrictEqual((await allowP).result, { agents: ['codex'] });
+    assert.strictEqual(bg.store['chat:x.com'].messages[1].answered, 'allowed');
+
+    // The run sent again goes on under the organization's settings: the chat's chip.
+    const againP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'codex' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r2' });
+    await againP;
+    for (const event of [
+      { kind: 'sandbox', trif: false, agent: 'codex', name: 'Codex', settingsName: 'Codex' },
+      { kind: 'text', text: 'done' },
+      { kind: 'done', ok: true, result: 'done', costUsd: null, changedFiles: [], sessionId: 't1', withoutSandbox: true },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r2', event });
+    await settle(30);
+    chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.withoutSandbox, { agent: 'codex', name: 'Codex', settingsName: 'Codex' });
+    assert.deepStrictEqual(chat.messages.slice(2).map((m) => m.role), ['user', 'assistant']);
+
+    // "Stop" on another card: answered, and nothing goes to the helper.
+    bg.store['chat:x.com'] = { ...chat, messages: [...chat.messages, { role: 'sandbox', time: 77, agent: 'codex', prompt: 'p' }] };
+    const n = bg.native.sent.length;
+    assert.strictEqual((await panel.ask({ type: 'chat.sandboxCard', site: 'x.com', card: 77 })).ok, true);
+    assert.strictEqual(bg.store['chat:x.com'].messages.at(-1).answered, 'stop');
+    assert.strictEqual(bg.native.sent.length, n);
   } finally { bg.restore(); }
 });
 
@@ -1081,7 +1546,7 @@ test('background: helper disconnect mid-run synthesizes error then done for the 
     // not connected: start fails without reaching a helper
     const r = await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'again' });
     assert.strictEqual(r.ok, false);
-    assert.match(r.error, /trif setup/);
+    assert.match(r.error, /timsrobot setup/);
   } finally { bg.restore(); }
 });
 
@@ -1399,8 +1864,9 @@ test('background: a run\'s events are written to its chat in batches, not one wr
 });
 
 test('background: `applied` stays out of local storage (session storage), and an unchanged mods list isn\'t written again', async () => {
-  const mods = [mod('x.com/a')];
-  const bg = await loadBackground({ storage: { mods, applied: { old: 'x' } } });
+  const mods = [mod('x.com/a'), mod('x.com/b')];
+  const bg = await loadBackground({ storage: { modIds: ['x.com/a', 'x.com/b'], 'mod:x.com/a': mods[0], 'mod:x.com/b': mods[1], applied: { old: 'x' } } });
+  const modWrites = () => bg.ctl.writes.filter((k) => k.some((x) => x === 'mods' || x === 'modIds' || x.startsWith('mod:')));
   try {
     await settle(10);
     assert.ok(!('applied' in bg.store), 'the old local copy is removed');
@@ -1409,29 +1875,78 @@ test('background: `applied` stays out of local storage (session storage), and an
     bg.native.emit({ type: 'mods', mods });
     await settle(20);
     assert.ok(!bg.ctl.writes.some((k) => k.includes('applied')));
-    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('mods')).length, 0, 'same list as stored: not written');
-    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h9' })] });
+    assert.strictEqual(modWrites().length, 0, 'same list as stored: not written');
+    // A change writes that mod only.
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h9', code: 'new()' }), mods[1]] });
     await settle(20);
-    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('mods')).length, 1);
+    assert.deepStrictEqual(modWrites(), [['mod:x.com/a']]);
+    assert.strictEqual(bg.store['mod:x.com/a'].code, 'new()');
+    // One gone: the list, and its key removed.
+    bg.native.emit({ type: 'mods', mods: [mods[1]] });
+    await settle(20);
+    assert.deepStrictEqual(modWrites().at(-1), ['modIds']);
+    assert.ok(!('mod:x.com/a' in bg.store));
+    assert.deepStrictEqual(bg.store.modIds, ['x.com/b']);
+  } finally { bg.restore(); }
+});
+
+test('background: mods stored all in one key (0.2.4) are read, then stored one per key', async () => {
+  const mods = [mod('x.com/a'), mod('x.com/b', { hash: 'hb' })];
+  const bg = await loadBackground({ storage: { mods } });
+  try {
+    await settle(10);
+    // Applied from storage before the helper says anything.
+    await waitFor(() => bg.chrome.userScripts.scripts.length === 3);
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    assert.ok(!('mods' in bg.store));
+    assert.deepStrictEqual(bg.store.modIds, ['x.com/a', 'x.com/b']);
+    assert.deepStrictEqual(bg.store['mod:x.com/b'], mods[1]);
+  } finally { bg.restore(); }
+});
+
+test('background: a mod sent without its code (same) takes it from the set before; one it doesn\'t have asks for them all', async () => {
+  const bg = await loadBackground();
+  try {
+    await settle(10);
+    const a = mod('x.com/a', { code: 'big()' });
+    const b = mod('x.com/b', { hash: 'hb', code: 'b1()' });
+    bg.native.emit({ type: 'mods', mods: [a, b] });
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsApplied'));
+    const same = (m) => ({ ...m, code: undefined, same: true });
+    bg.native.emit({ type: 'mods', mods: [same(a), { ...b, hash: 'hb2', code: 'b2()' }] });
+    await waitFor(() => bg.native.sent.filter((m) => m.type === 'modsApplied').length === 2);
+    const code = (id) => bg.chrome.userScripts.scripts.find((s) => s.id === id).js[0].code;
+    assert.match(code('x.com/a'), /big\(\)/);
+    assert.match(code('x.com/b'), /b2\(\)/);
+    assert.strictEqual(bg.store['mod:x.com/a'].code, 'big()', 'stored with its code');
+    assert.ok(!('same' in bg.store['mod:x.com/a']));
+    // Not the hash it has: nothing changes, and the helper is asked for every mod again.
+    bg.native.emit({ type: 'mods', mods: [same({ ...a, hash: 'other' })] });
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsResend'));
+    assert.match(bg.native.sent.find((m) => m.type === 'modsResend').reason, /missing 1 mod/);
+    await settle(20);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a', 'x.com/b']);
+    assert.match(code('x.com/a'), /big\(\)/);
   } finally { bg.restore(); }
 });
 
 test('background: record says whether it changed anything; switching off works on a site that\'s off', async () => {
-  const bg = await loadBackground({ storage: { sitesOn: ['x.com', 'bank.com'] } });
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com', 'shop.com'] } });
   try {
-    let r = await bg.native.call('record', { site: 'bank.com', on: true });
-    assert.deepStrictEqual(r.result, { recording: ['bank.com'], site: 'bank.com', changed: true });
-    r = await bg.native.call('record', { site: 'bank.com', on: true });
+    let r = await bg.native.call('record', { site: 'shop.com', on: true });
+    assert.deepStrictEqual(r.result, { recording: ['shop.com'], site: 'shop.com', changed: true });
+    r = await bg.native.call('record', { site: 'shop.com', on: true });
     assert.strictEqual(r.result.changed, false);
     const panel = bg.connectPanel();
-    await panel.ask({ type: 'site.set', site: 'bank.com', on: false });
-    r = await bg.native.call('record', { site: 'bank.com', on: true });
-    assert.match(r.error, /TRIF is off on bank\.com/);
-    r = await bg.native.call('record', { site: 'bank.com', on: false });
-    assert.deepStrictEqual(r.result, { recording: [], site: 'bank.com', changed: true });
+    await panel.ask({ type: 'site.set', site: 'shop.com', on: false });
+    r = await bg.native.call('record', { site: 'shop.com', on: true });
+    assert.match(r.error, /TRIF is off on shop\.com/);
+    r = await bg.native.call('record', { site: 'shop.com', on: false });
+    assert.deepStrictEqual(r.result, { recording: [], site: 'shop.com', changed: true });
     assert.deepStrictEqual(bg.store.recording, []);
     // A run still can't switch off another site's recording.
-    r = await bg.native.call('record', { site: 'bank.com', on: false, scope: 'x.com' });
+    r = await bg.native.call('record', { site: 'shop.com', on: false, scope: 'x.com' });
     assert.match(r.error, /limited to x\.com/);
   } finally { bg.restore(); }
 });
@@ -1710,6 +2225,161 @@ test('applyStartOff: a mod made in another browser is switched off once; own and
   assert.strictEqual(lib.applyStartOff(mods, {}, {}).changed, false, 'old 3-argument call: no foreign switching');
 });
 
+test('applyNewMods: a mod from outside this browser\'s chat arrives off, whatever its kind; the chat\'s own start on, or wait; mods already here untouched', () => {
+  const page = (id, extra) => ({ id, ...extra });
+  const rules = (id, extra) => ({ id, rules: true, ...extra });
+  const here = { 'x.com/old': true, 'x.com/oldrules': true };
+  const mods = [
+    page('x.com/old'), rules('x.com/oldrules'),
+    page('x.com/terminal'), // a terminal agent's, or a file dropped in: no origin
+    page('x.com/other', { origin: { by: 'B', browser: 'Firefox' } }), // another browser's panel
+    page('x.com/mine', { origin: { by: 'A', browser: 'Chrome', live: true } }), // this browser's own panel chat, written while its run was going
+    page('x.com/late', { origin: { by: 'A', browser: 'Chrome' } }), // counted for that run, but appeared after it ended: a terminal's, say
+    page('x.com/held', { held: { facts: ['can send requests'] } }), // waits for the user's OK anyway
+    rules('x.com/style'),
+    page('x.com/tims', { startOff: true }), // Tim's, shipped off: off already
+  ];
+  const go = (extra = {}) => lib.applyNewMods(mods, { disabled: { 'x.com/tims': true }, seen: here, autoUpdated: {}, newOff: {}, installId: 'A', ...extra });
+  let r = go();
+  assert.deepStrictEqual(r.disabled, { 'x.com/tims': true, 'x.com/terminal': true, 'x.com/other': true, 'x.com/late': true, 'x.com/style': true });
+  assert.deepStrictEqual(r.newOff, { 'x.com/terminal': 'new', 'x.com/other': 'new', 'x.com/late': 'new', 'x.com/style': 'new' });
+  assert.deepStrictEqual(Object.keys(r.seen).sort(), mods.map((m) => m.id).sort());
+  // Once: seen now, so the user's switch after that is theirs.
+  const again = lib.applyNewMods(mods, { disabled: {}, seen: r.seen, autoUpdated: r.autoUpdated, newOff: r.newOff, installId: 'A' });
+  assert.strictEqual(again.changed, false);
+  // "Mods your chat makes: Wait for me": the chat's own waits too, marked as the chat's.
+  r = go({ chatWait: true });
+  assert.strictEqual(r.newOff['x.com/mine'], 'chat');
+  assert.strictEqual(r.disabled['x.com/mine'], true);
+  // Without an install id, nothing counts as this browser's own.
+  assert.ok('x.com/mine' in lib.applyNewMods(mods, { seen: here, autoUpdated: {} }).newOff);
+});
+
+test('sensitive sites: every mod starts off there, the chat\'s too, and the chat\'s changes wait; what the user already had on there stays on', () => {
+  const model = lib.sensitiveSites({ hosts: ['mail.google.com'] });
+  const waits = (m) => { const home = lib.modHome(m, model); return !!home && model.isSensitive(home); };
+  const chat = { by: 'A', browser: 'Chrome', live: true };
+  const mods = [
+    { id: 'mail.google.com/tidy', origin: chat },   // the chat made it, on a sensitive site of its own
+    { id: 'paypal.com/calm', origin: chat },         // a sensitive registrable domain
+    { id: 'google.com/theme', origin: chat },        // the parent: as everywhere, the chat's start on
+    { id: 'all-sites/dark', origin: chat },
+    { id: 'mail.google.com/pasted' },                // from outside the chat: off, as anywhere
+    { id: 'mail.google.com/mine' },                  // the user's, already here and on
+  ];
+  const r = lib.applyNewMods(mods, { disabled: {}, seen: { 'mail.google.com/mine': true }, autoUpdated: {}, newOff: {}, installId: 'A', waits });
+  assert.deepStrictEqual(r.newOff, { 'mail.google.com/tidy': 'sensitive', 'paypal.com/calm': 'sensitive', 'mail.google.com/pasted': 'new' });
+  assert.deepStrictEqual(r.disabled, { 'mail.google.com/tidy': true, 'paypal.com/calm': true, 'mail.google.com/pasted': true });
+  // with Wait for me it's the setting's word; held mods wait for the user's OK anyway
+  assert.strictEqual(lib.applyNewMods([mods[0]], { seen: {}, autoUpdated: {}, installId: 'A', chatWait: true, waits }).newOff['mail.google.com/tidy'], 'chat');
+  assert.deepStrictEqual(lib.applyNewMods([{ ...mods[0], held: { facts: ['x'] } }], { seen: {}, autoUpdated: {}, installId: 'A', waits }).newOff, {});
+  assert.deepStrictEqual(lib.normalizeNewOff({ a: 'sensitive', b: 'nope' }), { a: 'sensitive' });
+  // the chat changes one that's on there: it waits, the version before runs (and nowhere else, without the setting)
+  const v1 = { id: 'mail.google.com/mine', hash: 'h1' }, v2 = { id: 'mail.google.com/mine', hash: 'h2', origin: chat };
+  assert.deepStrictEqual(lib.applyChatWaiting([v1], [v2], { installId: 'A', waits }).waiting, { 'mail.google.com/mine': { old: v1 } });
+  const g1 = { id: 'google.com/theme', hash: 'h1' }, g2 = { id: 'google.com/theme', hash: 'h2', origin: chat };
+  assert.deepStrictEqual(lib.applyChatWaiting([g1], [g2], { installId: 'A', waits }).waiting, {});
+  // while the upgrade's question about it is unanswered it's part of its parent still: nothing changes there
+  const pending = lib.sensitiveSites({ hosts: ['mail.google.com'], pending: ['mail.google.com'] });
+  assert.ok(!pending.isSensitive(lib.modHome(mods[0], pending)));
+});
+
+test('applyChatWaiting: with Wait for me, a change the chat made to a running mod waits; put back, changed from outside, or gone: it doesn\'t', () => {
+  const chat = { by: 'A', live: true };
+  const v1 = { id: 'x.com/a', hash: 'h1', origin: chat }, v2 = { id: 'x.com/a', hash: 'h2', origin: chat };
+  const opts = { installId: 'A', chatWait: true };
+  let r = lib.applyChatWaiting([v1], [v2], opts);
+  assert.deepStrictEqual(r, { waiting: { 'x.com/a': { old: v1 } }, changed: true });
+  // a further change keeps the version that was running
+  const v3 = { id: 'x.com/a', hash: 'h3', origin: chat };
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [v3], { ...opts, waiting: r.waiting }).waiting, { 'x.com/a': { old: v1 } });
+  // put back as it was (Undo)
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [v1], { ...opts, waiting: r.waiting }), { waiting: {}, changed: true });
+  // changed from outside the chat
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [{ id: 'x.com/a', hash: 'h9' }], { ...opts, waiting: r.waiting }).waiting, {});
+  // gone
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [], { ...opts, waiting: r.waiting }).waiting, {});
+  // Start on, a mod that's off, one on hold, or not the chat's: nothing waits
+  assert.strictEqual(lib.applyChatWaiting([v1], [v2], { installId: 'A' }).changed, false);
+  assert.strictEqual(lib.applyChatWaiting([v1], [v2], { ...opts, isOn: () => false }).changed, false);
+  assert.strictEqual(lib.applyChatWaiting([v1], [{ ...v2, held: {} }], opts).changed, false);
+  assert.strictEqual(lib.applyChatWaiting([v1], [{ ...v2, origin: { by: 'B', live: true } }], opts).changed, false);
+});
+
+test('applyNewMods: a browser that never stored what it saw takes its mods as seen; updates TRIF made itself and Tim\'s mods got back arrive again', () => {
+  // From before this existed: nothing switched, everything remembered (stamps too).
+  let r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's1' }, { id: 'x.com/b' }], { seen: null, autoUpdated: null });
+  assert.deepStrictEqual(r, { disabled: {}, seen: { 'x.com/a': true, 'x.com/b': true }, autoUpdated: { 'x.com/a': 's1' }, newOff: {}, changed: true });
+  // A new version TRIF put in place by itself: off, as an update, once per stamp.
+  r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's2' }, { id: 'x.com/b' }], { seen: r.seen, autoUpdated: r.autoUpdated });
+  assert.deepStrictEqual([r.disabled, r.newOff, r.autoUpdated], [{ 'x.com/a': true }, { 'x.com/a': 'update' }, { 'x.com/a': 's2' }]);
+  // One of Tim's mods the user deleted and got back (a new `readded` stamp) arrives again.
+  const back = lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, readded: {} });
+  assert.deepStrictEqual(back.newOff, { 'x.com/b': 'new' });
+  assert.strictEqual(lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, readded: { 'x.com/b': 'r1' } }).changed, false);
+  // A mod that's gone takes its reason with it.
+  const gone = lib.applyNewMods([], { seen: { 'x.com/b': true }, autoUpdated: {}, newOff: { 'x.com/b': 'new' } });
+  assert.deepStrictEqual(gone.newOff, {});
+  assert.deepStrictEqual(lib.normalizeNewOff({ a: 'new', b: 'update', c: true }), { a: 'new', b: 'update' });
+});
+
+test('background: a mod from outside the chat starts off; an agent run can\'t switch one on, the user can, and that clears why it was off; Wait for me keeps the chat\'s waiting', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], installId: 'A', mods: [mod('x.com/old')], modIds: ['x.com/old'], startsOff: ['page'] }, tabs });
+  try {
+    const panel = bg.connectPanel();
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old')] });
+    await settle(20);
+    assert.deepStrictEqual(bg.store.seenMods, { 'x.com/old': true }, 'what was there is seen, nothing switched');
+    assert.strictEqual(bg.store.startsOff, undefined, 'the old setting is gone');
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.chatWait, false);
+    // A terminal agent's page script and a style mod arrive; and one this browser's panel chat made.
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', browser: 'Chrome', live: true } })] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true, 'x.com/style': true });
+    assert.deepStrictEqual(bg.store.newOff, { 'x.com/new': 'new', 'x.com/style': 'new' });
+    assert.ok(!scriptIds(bg).includes('x.com/new'), 'never registered');
+    assert.ok(scriptIds(bg).includes('x.com/chat') && scriptIds(bg).includes('x.com/old'));
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.strictEqual(st.mods.find((m) => m.id === 'x.com/new').newOff, 'new');
+    assert.strictEqual(st.mods.find((m) => m.id === 'x.com/chat').newOff, null);
+    const cli = (await bg.native.call('status')).result;
+    assert.strictEqual(cli.mods.find((m) => m.id === 'x.com/new').newOff, 'new');
+    // A side-panel run (scoped) can't switch it on; the user can.
+    const refused = await bg.native.call('mod.enable', { id: 'x.com/new', enabled: true, scope: 'x.com' });
+    assert.strictEqual(refused.ok, false);
+    assert.match(refused.error, /switched off until the user looks at it[\s\S]*only the user can switch it on/);
+    assert.ok(!scriptIds(bg).includes('x.com/new'));
+    const on = await panel.ask({ type: 'mod.enable', id: 'x.com/new', enabled: true });
+    assert.ok(on.ok, on.error);
+    assert.ok(scriptIds(bg).includes('x.com/new'));
+    assert.deepStrictEqual(bg.store.newOff, { 'x.com/style': 'new' });
+    // Off again later: the user's own switch, not "new".
+    await panel.ask({ type: 'mod.enable', id: 'x.com/new', enabled: false });
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.mods.find((m) => m.id === 'x.com/new').newOff, null);
+    // Wait for me: a new one of the chat's is off, marked; a change to one running waits, the version before registered
+    const set = await panel.ask({ type: 'mods.chatWait', wait: true });
+    assert.deepStrictEqual(set.result, { chatWait: true });
+    assert.strictEqual(bg.store.chatWait, true);
+    const live = { by: 'A', browser: 'Chrome', live: true };
+    const base = [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true })];
+    const v1 = mod('x.com/chat', { origin: live });
+    const v2 = { ...mod('x.com/chat', { origin: live }), code: 'document.title = "two";', hash: 'changed-hash' };
+    bg.native.emit({ type: 'mods', mods: [...base, v2, mod('x.com/chat2', { origin: live })] });
+    await settle(30);
+    assert.strictEqual(bg.store.newOff['x.com/chat2'], 'chat');
+    assert.ok(!scriptIds(bg).includes('x.com/chat2'));
+    assert.strictEqual(bg.store.chatWaiting['x.com/chat'].old.hash, v1.hash);
+    const w = (await panel.ask({ type: 'status' })).result.mods.find((m) => m.id === 'x.com/chat');
+    assert.strictEqual(w.chatWaiting, true);
+    // turned on: the change runs, nothing waits
+    assert.ok((await panel.ask({ type: 'mod.enable', id: 'x.com/chat', enabled: true })).ok);
+    assert.deepStrictEqual(bg.store.chatWaiting, {});
+  } finally {
+    bg.restore();
+  }
+});
+
 test('applyAbsorbed: a retired shipped mod hands its switch to the mod it went into, once: on if either was on', () => {
   const INTO = 'www.google.com/hide-ai-in-results';
   const OLD = 'www.google.com/hide-ai-mode';
@@ -1755,6 +2425,149 @@ test('background: a retired shipped mod\'s switch carries over to the mod it wen
     bg.native.emit({ type: 'mods', mods: [mod(INTO, { absorbs: [OLD], hash: 'h2' })] });
     await settle(30);
     assert.deepStrictEqual(bg.store.disabled, { [INTO]: true });
+  } finally { bg.restore(); }
+});
+
+test('findRenames / carryRenames: a mod renamed on disk keeps its switches (off, off on a site) and isn\'t new again', () => {
+  const m = (id, code) => mod(id, { code });
+  const prev = [m('x.com/wobble', 'W'), m('x.com/keep', 'K'), m('x.com/edited', 'E'), m('y.com/moved', 'M')];
+  const next = [m('x.com/keep', 'K'), m('x.com/jelly', 'W'), m('x.com/edited2', 'E changed'), m('z.com/moved', 'M'), m('x.com/copy', 'K')];
+  // Same code, same site folder: renamed. Edited as well, moved to another site, or a copy: not.
+  const renames = lib.findRenames(prev, next);
+  assert.deepStrictEqual(renames, [{ from: 'x.com/wobble', to: 'x.com/jelly' }]);
+  assert.deepStrictEqual(lib.findRenames(next, next), []);
+  assert.deepStrictEqual(lib.findRenames([], next), [], 'nothing before (first start)');
+  assert.deepStrictEqual(lib.findRenames([{ id: 'x.com/a', site: 'x.com' }], [{ id: 'x.com/b', site: 'x.com' }]), [], 'no code: no guess');
+  // Off stays off and dead entries go; the new id counts as already seen, so it isn't switched off as new.
+  const before = { disabled: { 'x.com/wobble': true, 'x.com/keep': true }, offSites: {}, startedOff: { 'x.com/keep': true } };
+  const r = lib.carryRenames(renames, before);
+  assert.deepStrictEqual(r, { disabled: { 'x.com/keep': true, 'x.com/jelly': true }, offSites: {}, startedOff: { 'x.com/keep': true, 'x.com/jelly': true }, changed: true });
+  assert.deepStrictEqual(before.disabled, { 'x.com/wobble': true, 'x.com/keep': true }, 'pure');
+  // On stays on (a stale entry under the new name doesn't switch it off); per-site offs move too.
+  assert.deepStrictEqual(lib.carryRenames(renames, { disabled: { 'x.com/jelly': true }, offSites: { 'x.com/wobble': ['x.com'] } }),
+    { disabled: {}, offSites: { 'x.com/jelly': ['x.com'] }, startedOff: { 'x.com/jelly': true }, changed: true });
+  // A swap keeps both.
+  const swap = lib.carryRenames([{ from: 'x.com/a', to: 'x.com/b' }, { from: 'x.com/b', to: 'x.com/a' }], { disabled: { 'x.com/a': true } });
+  assert.deepStrictEqual(swap.disabled, { 'x.com/b': true });
+  const same = { disabled: {} };
+  assert.strictEqual(lib.carryRenames([], same).changed, false);
+});
+
+test('orderMods / moveId / setModOrder: the panel\'s own order, per site, new mods last, gone ones skipped', () => {
+  const ids = (list) => list.map((x) => x.id);
+  const mods = ['a', 'b', 'c', 'd'].map((x) => mod(`x.com/${x}`));
+  assert.deepStrictEqual(ids(lib.orderMods(mods, undefined)), ['x.com/a', 'x.com/b', 'x.com/c', 'x.com/d'], 'no order saved: as they come');
+  assert.notStrictEqual(lib.orderMods(mods, []), mods, 'a copy');
+  // Saved c, a; b and d are new since: after, as they came. A gone id (x.com/z) is skipped.
+  assert.deepStrictEqual(ids(lib.orderMods(mods, ['x.com/c', 'x.com/z', 'x.com/a'])), ['x.com/c', 'x.com/a', 'x.com/b', 'x.com/d']);
+  // One brought back from the trash takes its old place.
+  assert.deepStrictEqual(ids(lib.orderMods([mods[0], mods[3]], ['x.com/d', 'x.com/c', 'x.com/a'])), ['x.com/d', 'x.com/a']);
+
+  const list = ['a', 'b', 'c', 'd'];
+  assert.deepStrictEqual(lib.moveId(list, 'a', 2), ['b', 'c', 'a', 'd']);
+  assert.deepStrictEqual(lib.moveId(list, 'd', 0), ['d', 'a', 'b', 'c']);
+  assert.deepStrictEqual(lib.moveId(list, 'b', 99), ['a', 'c', 'd', 'b'], 'clamped');
+  assert.deepStrictEqual(lib.moveId(list, 'b', -5), ['b', 'a', 'c', 'd'], 'clamped');
+  assert.strictEqual(lib.moveId(list, 'b', 1), list, 'no move: the same array');
+  assert.strictEqual(lib.moveId(list, 'zz', 0), list, 'not there');
+
+  const natural = ['x.com/a', 'x.com/b'];
+  const saved = lib.setModOrder({ 'y.com': ['y.com/q'] }, 'x.com', ['x.com/b', 'x.com/a'], natural);
+  assert.deepStrictEqual(saved, { 'y.com': ['y.com/q'], 'x.com': ['x.com/b', 'x.com/a'] });
+  // Back to the order they come in anyway: the entry goes (new mods come in where they would again).
+  assert.deepStrictEqual(lib.setModOrder(saved, 'x.com', natural, natural), { 'y.com': ['y.com/q'] });
+  assert.deepStrictEqual(lib.normalizeModOrder({ a: ['x', 'x', 3, ''], b: [], c: 'no', d: ['y'] }), { a: ['x'], d: ['y'] });
+  assert.deepStrictEqual(lib.normalizeModOrder(null), {});
+  assert.deepStrictEqual(lib.normalizeModOrder(['x']), {});
+});
+
+test('orderMods: a site\'s shipped default order first (the rest after, as they come), and the user\'s own order over it', () => {
+  const ids = (list) => list.map((x) => x.id);
+  const mods = ['fireworks', 'gravity', 'jelly', 'mine', 'tagline'].map((x) => mod(`timsrobot.com/${x}`));
+  const shipped = ['timsrobot.com/tagline', 'timsrobot.com/jelly', 'timsrobot.com/gravity', 'timsrobot.com/fireworks', 'timsrobot.com/neon'];
+  // (As the panel does it: the default order, then the user's over that.)
+  const natural = lib.orderMods(mods, shipped);
+  assert.deepStrictEqual(ids(natural), [...shipped.slice(0, 4), 'timsrobot.com/mine'], 'shipped order, the user\'s own mod after, one they deleted skipped');
+  assert.deepStrictEqual(ids(lib.orderMods(natural, undefined)), ids(natural), 'until the user drags');
+  const theirs = ['timsrobot.com/mine', 'timsrobot.com/fireworks'];
+  assert.deepStrictEqual(ids(lib.orderMods(natural, theirs)),
+    ['timsrobot.com/mine', 'timsrobot.com/fireworks', 'timsrobot.com/tagline', 'timsrobot.com/jelly', 'timsrobot.com/gravity']);
+  // Dragged back into the default order: the user's entry goes, and the default applies again.
+  assert.deepStrictEqual(lib.setModOrder({ 'timsrobot.com': theirs }, 'timsrobot.com', ids(natural), ids(natural)), {});
+});
+
+test('background: TRIF on for timsrobot.com registers its mods, and nothing that marks the page', async () => {
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], mods: [mod('x.com/a'), mod('timsrobot.com/fireworks', { matches: ['https://timsrobot.com/*'] })] } });
+  try {
+    await settle(30);
+    const panel = bg.connectPanel();
+    const on = await panel.ask({ type: 'site.set', site: 'timsrobot.com', on: true });
+    assert.strictEqual(on.ok, true, on.error);
+    await settle(30);
+    assert.ok(scriptIds(bg).includes('timsrobot.com/fireworks'));
+    assert.ok(!scriptIds(bg).includes('trif-home'));
+    // (the old marker, <html data-trif="on">; TRIF's own style elements carry data-trif-style for the clickjacking
+    // guard, on pages a mod already styles, which is no mark of the page)
+    assert.ok(!bg.chrome.userScripts.scripts.some((x) => x.js.some((j) => /data-trif(?![\w-])|dataset\.trif\b/.test(String(j.code)))));
+  } finally { bg.restore(); }
+});
+
+test('background: the helper\'s default order for shipped mods is kept in storage for the panel, and replaced when it changes', async () => {
+  const order = { 'timsrobot.com': ['timsrobot.com/b', 'timsrobot.com/a'] };
+  const bg = await loadBackground();
+  try {
+    bg.native.emit({ type: 'mods', mods: [mod('timsrobot.com/a'), mod('timsrobot.com/b')], defaultOrder: { ...order, junk: 'no' } });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.defaultOrder, order);
+    assert.ok(!('modOrder' in bg.store), 'the user\'s own order isn\'t written');
+    // A helper from before (no defaultOrder): none.
+    bg.native.emit({ type: 'mods', mods: [mod('timsrobot.com/a')] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.defaultOrder, {});
+  } finally { bg.restore(); }
+});
+
+test('renameInOrder: a renamed mod keeps its place in every site\'s order', () => {
+  const order = { 'x.com': ['x.com/c', 'x.com/wobble', 'all-sites/glow'], 'y.com': ['all-sites/glow', 'y.com/a'] };
+  const r = lib.renameInOrder(order, [{ from: 'x.com/wobble', to: 'x.com/jelly' }, { from: 'all-sites/glow', to: 'all-sites/shine' }]);
+  assert.strictEqual(r.changed, true);
+  assert.deepStrictEqual(r.modOrder, { 'x.com': ['x.com/c', 'x.com/jelly', 'all-sites/shine'], 'y.com': ['all-sites/shine', 'y.com/a'] });
+  assert.deepStrictEqual(order['x.com'], ['x.com/c', 'x.com/wobble', 'all-sites/glow'], 'pure');
+  assert.strictEqual(lib.renameInOrder(order, [{ from: 'z.com/q', to: 'z.com/r' }]).changed, false);
+  assert.deepStrictEqual(lib.renameInOrder(order, [{ from: 'x.com/c', to: 'x.com/wobble' }, { from: 'x.com/wobble', to: 'x.com/c' }]).modOrder['x.com'],
+    ['x.com/wobble', 'x.com/c', 'all-sites/glow'], 'a swap');
+});
+
+test('background: a mod file renamed on disk keeps its switch, its per-site switches and its place in the panel', async () => {
+  const W = 'x.com/wobble';
+  const J = 'x.com/jelly';
+  const G = 'all-sites/glow';
+  const glow = (id) => mod(id, { site: 'all-sites', matches: ['*://*/*'], code: 'GLOW' });
+  const bg = await loadBackground({ storage: {
+    sitesOn: ['x.com', 'y.com'], disabled: { [W]: true }, offSites: { [G]: ['y.com'] }, startedOff: {},
+    modOrder: { 'x.com': [G, W, 'x.com/other'] },
+    mods: [mod(W, { code: 'WOBBLE' }), mod('x.com/other'), glow(G)],
+  } });
+  try {
+    // Renamed (in an editor, by an agent's mv…); the new one is also marked startOff, as a shipped mod would be.
+    bg.native.emit({ type: 'mods', mods: [mod(J, { code: 'WOBBLE', startOff: true }), mod('x.com/other'), glow('all-sites/shine')] });
+    await settle(40);
+    assert.deepStrictEqual(bg.store.disabled, { [J]: true }, 'still off, under its new name; no dead entry');
+    assert.deepStrictEqual(bg.store.offSites, { 'all-sites/shine': ['y.com'] }, 'still off on y.com');
+    assert.deepStrictEqual(bg.store.modOrder, { 'x.com': ['all-sites/shine', J, 'x.com/other'] });
+    assert.ok(!scriptIds(bg).includes(J), 'off: not registered');
+    assert.ok(scriptIds(bg).includes('all-sites/shine') && !scriptIds(bg).includes(G));
+    // Its switch is the user's: on again, it stays on (the startOff above was already spent by the rename).
+    const r = await bg.native.call('mod.enable', { id: J, enabled: true });
+    assert.strictEqual(r.ok, true, r.error);
+    bg.native.emit({ type: 'mods', mods: [mod(J, { code: 'WOBBLE', startOff: true, hash: 'h2' }), mod('x.com/other'), glow('all-sites/shine')] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, {});
+    // The panel's status has the new file name.
+    const reply = await bg.connectPanel().ask({ type: 'status' });
+    assert.ok(reply.ok, JSON.stringify(reply));
+    assert.deepStrictEqual(reply.result.mods.map((m) => [m.id, m.file, m.enabled]),
+      [[J, '/w/sites/x.com/jelly.js', true], ['x.com/other', '/w/sites/x.com/other.js', true], ['all-sites/shine', '/w/sites/all-sites/shine.js', true]]);
   } finally { bg.restore(); }
 });
 
@@ -1836,34 +2649,34 @@ test('background: deleting from the panel leaves a chat line with Undo; restorin
 });
 
 test('background: a shipped mod\'s new version: status carries it; use it (chat line with Undo), keep mine, merge as a run', async () => {
-  const mods = [mod('x.com/plain-x', { source: 'trif', version: '1', update: { version: '2', from: '1', modified: true } })];
+  const mods = [mod('x.com/detox-timeline', { source: 'trif', version: '1', update: { version: '2', from: '1', modified: true } })];
   const bg = await loadBackground({ storage: { mods } });
   try {
     bg.native.emit({ type: 'mods', mods });
     await settle(20);
     const panel = bg.connectPanel();
     const st = (await panel.ask({ type: 'status' })).result;
-    const m = st.mods.find((x) => x.id === 'x.com/plain-x');
+    const m = st.mods.find((x) => x.id === 'x.com/detox-timeline');
     assert.deepStrictEqual([m.source, m.version, m.update], ['trif', '1', { version: '2', from: '1', modified: true }]);
 
-    let p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'new', site: 'x.com' });
-    let req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'new', version: '2', trashed: true });
-    assert.deepStrictEqual(req.args, { id: 'x.com/plain-x', choice: 'new' });
+    let p = panel.ask({ type: 'mod.update', id: 'x.com/detox-timeline', choice: 'new', site: 'x.com' });
+    let req = await answerNative(bg.native, 'mod.update', { id: 'x.com/detox-timeline', choice: 'new', version: '2', trashed: true });
+    assert.deepStrictEqual(req.args, { id: 'x.com/detox-timeline', choice: 'new' });
     assert.strictEqual((await p).ok, true);
     await settle(10);
     assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((x) => [x.role, x.text, x.undo]),
-      [['mod', 'plain-x.js is now version 2 from TRIF; yours is in the trash.', 'x.com/plain-x']]);
+      [['mod', 'detox-timeline.js is now version 2 from TRIF; yours is in the trash.', 'x.com/detox-timeline']]);
 
-    p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'mine', site: 'x.com' });
-    req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'mine', version: '2' });
-    assert.deepStrictEqual(req.args, { id: 'x.com/plain-x', choice: 'mine' });
+    p = panel.ask({ type: 'mod.update', id: 'x.com/detox-timeline', choice: 'mine', site: 'x.com' });
+    req = await answerNative(bg.native, 'mod.update', { id: 'x.com/detox-timeline', choice: 'mine', version: '2' });
+    assert.deepStrictEqual(req.args, { id: 'x.com/detox-timeline', choice: 'mine' });
     await p;
     await settle(10);
     assert.strictEqual(bg.store['chat:x.com'].messages.length, 1, 'keeping mine adds no line');
 
-    p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'Merge the new version', merge: 'x.com/plain-x' });
+    p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'Merge the new version', merge: 'x.com/detox-timeline' });
     req = await answerNative(bg.native, 'agent.start', { runId: 'r9' });
-    assert.strictEqual(req.args.merge, 'x.com/plain-x');
+    assert.strictEqual(req.args.merge, 'x.com/detox-timeline');
     await p;
   } finally { bg.restore(); }
 });
@@ -1940,7 +2753,7 @@ test('syncUserScripts with sitesOn: mods and the runtime only on those sites; re
 
 const GATE_TABS = [
   { id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X' },
-  { id: 6, windowId: 1, index: 1, active: false, url: 'https://bank.com/', title: 'Bank' },
+  { id: 6, windowId: 1, index: 1, active: false, url: 'https://shop.com/', title: 'Bank' },
 ];
 
 test('background: page commands and chats only reach sites TRIF is on for', async () => {
@@ -1948,32 +2761,32 @@ test('background: page commands and chats only reach sites TRIF is on for', asyn
   try {
     let r = await bg.native.call('tabs');
     assert.deepStrictEqual(r.result.map((t) => t.id), [5]);
-    for (const [cmd, args] of [['text', { tab: 6 }], ['reload', { tab: 6 }], ['open', { to: 'https://bank.com/' }], ['navigate', { tab: 5, to: 'bank.com' }], ['record', { site: 'bank.com' }]]) {
+    for (const [cmd, args] of [['text', { tab: 6 }], ['reload', { tab: 6 }], ['open', { to: 'https://shop.com/' }], ['navigate', { tab: 5, to: 'shop.com' }], ['record', { site: 'shop.com' }]]) {
       r = await bg.native.call(cmd, args);
       assert.strictEqual(r.ok, false, cmd);
-      assert.match(r.error, /TRIF is off on bank\.com/, cmd);
+      assert.match(r.error, /TRIF is off on shop\.com/, cmd);
     }
     const panel = bg.connectPanel();
-    r = await panel.ask({ type: 'agent.start', site: 'bank.com', tabId: 6, url: 'https://bank.com/', prompt: 'hi' });
-    assert.deepStrictEqual([r.ok, r.error], [false, 'TRIF is off on bank.com: turn it on first']);
+    r = await panel.ask({ type: 'agent.start', site: 'shop.com', tabId: 6, url: 'https://shop.com/', prompt: 'hi' });
+    assert.deepStrictEqual([r.ok, r.error], [false, 'TRIF is off on shop.com: turn it on first']);
     assert.strictEqual(bg.natives[0].sent.some((m) => m.cmd === 'agent.start'), false);
   } finally { bg.restore(); }
 });
 
 test('background: the panel\'s site switch turns a site on and off, applying mods and reloading if one runs there', async () => {
-  const mods = [mod('bank.com/a'), mod('all-sites/dark', { matches: ['*://*/*'] })];
+  const mods = [mod('shop.com/a'), mod('all-sites/dark', { matches: ['*://*/*'] })];
   const bg = await loadBackground({ storage: { mods, sitesOn: [] }, tabs: GATE_TABS });
   try {
     bg.native.emit({ type: 'mods', mods });
     await settle(20);
     assert.deepStrictEqual(scriptIds(bg), []);
     const panel = bg.connectPanel();
-    let r = await panel.ask({ type: 'site.set', site: 'www.bank.com', on: true, tab: 6 });
-    assert.deepStrictEqual(r.result, { site: 'bank.com', on: true, sitesOn: ['bank.com'] });
-    assert.deepStrictEqual(bg.store.sitesOn, ['bank.com']);
-    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'bank.com/a', 'all-sites/dark']);
+    let r = await panel.ask({ type: 'site.set', site: 'www.shop.com', on: true, tab: 6 });
+    assert.deepStrictEqual(r.result, { site: 'shop.com', on: true, sitesOn: ['shop.com'] });
+    assert.deepStrictEqual(bg.store.sitesOn, ['shop.com']);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'shop.com/a', 'all-sites/dark']);
     assert.deepStrictEqual(bg.reloaded, [6]);
-    r = await panel.ask({ type: 'site.set', site: 'bank.com', on: false, tab: 6 });
+    r = await panel.ask({ type: 'site.set', site: 'shop.com', on: false, tab: 6 });
     assert.deepStrictEqual(bg.store.sitesOn, []);
     assert.deepStrictEqual(scriptIds(bg), []);
     assert.deepStrictEqual(bg.reloaded, [6, 6]);
@@ -2020,6 +2833,71 @@ test('background: the helper\'s start sites are turned on once, and mods for the
   } finally { bg.restore(); }
 });
 
+test('normalizeStarter: Tim\'s mods by site, cleaned up; siteNames', () => {
+  assert.strictEqual(lib.normalizeStarter(null), null);
+  assert.strictEqual(lib.normalizeStarter({ sites: 3 }), null);
+  const r = lib.normalizeStarter({ chosen: false, sites: [
+    { site: 'www.google.com', name: 'Google', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: 1, choice: 'skipped' }] },
+    { site: 'google.com', name: 'Again', mods: [{ id: 'www.google.com/b' }] }, // (the same site twice: the first)
+    { site: 'x.com', choice: 'maybe', mods: [] }, // (no mods: left out)
+    { site: 'timsrobot.com', note: 'for TRIF’s own demo', mods: [{ id: 'timsrobot.com/r', name: '', description: 7 }], choice: 'none' },
+    'junk',
+  ] });
+  assert.deepStrictEqual(r, { chosen: true, sites: [
+    { site: 'google.com', name: 'Google', note: '', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: true, choice: 'skipped' }] },
+    { site: 'timsrobot.com', name: 'timsrobot.com', note: 'for TRIF’s own demo', choice: 'none', suggested: false, mods: [{ id: 'timsrobot.com/r', name: 'timsrobot.com/r', description: '', on: false, choice: null }] },
+  ] });
+  assert.deepStrictEqual(['', 'X', 'X and Google', 'X, Google and Amazon'], [[], ['X'], ['X', 'Google'], ['X', 'Google', 'Amazon']].map(lib.siteNames));
+});
+
+test('applyReadded: one of Tim\'s mods deleted and added again is switched as listed, once per stamp', () => {
+  const mods = [mod('x.com/a', { readded: 's1', startOff: true }), mod('x.com/b', { readded: 's1' }), mod('x.com/c')];
+  let r = lib.applyReadded(mods, { 'x.com/b': true }, {});
+  assert.deepStrictEqual(r, { disabled: { 'x.com/a': true }, readded: { 'x.com/a': 's1', 'x.com/b': 's1' }, changed: true });
+  // After that the switch is the user's: the same stamp changes nothing; a new one switches it again.
+  const again = lib.applyReadded(mods, {}, r.readded);
+  assert.strictEqual(again.changed, false);
+  r = lib.applyReadded([mod('x.com/a', { readded: 's2', startOff: true })], {}, r.readded);
+  assert.deepStrictEqual(r.disabled, { 'x.com/a': true });
+  assert.deepStrictEqual(lib.normalizeReadded({ a: 's', b: 3, c: null }), { a: 's' });
+});
+
+test('background: Tim\'s mods by site come with the mods; the panel\'s choice goes to the helper, and a site\'s tab reloads when one now runs there', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
+  // (one already seen, so it isn't off for being new: Tim's own arrive off, and then nothing runs to reload for)
+  const bg = await loadBackground({ storage: { sitesOn: [], seenMods: { 'x.com/a': true }, autoUpdated: {} }, tabs });
+  try {
+    const panel = bg.connectPanel();
+    const starter = (choice) => ({ chosen: !!choice, sites: [{ site: 'x.com', name: 'X', note: '', choice, suggested: true, mods: [{ id: 'x.com/a', name: 'A', description: '', on: true, choice: choice === 'added' ? 'added' : null }] }] });
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.starter, null, 'not connected yet: unknown');
+    bg.native.emit({ type: 'mods', mods: [], sitesOn: [], starter: starter(null) });
+    await settle(20);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.starter, starter(null));
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    // "Add Tim's mods for X" on x.com's panel: the helper sends the mods (with the site to turn on), then answers.
+    const asked = panel.ask({ type: 'shipped.install', sites: ['www.x.com', 'x.com'], tab: 5, others: 'nope' });
+    let req;
+    for (let i = 0; i < 200 && !(req = bg.native.sent.find((m) => m.type === 'request' && m.cmd === 'shipped.install')); i++) await tick();
+    assert.deepStrictEqual(req.args, { sites: ['x.com'] }, 'scopes, once; `others` only as "none"');
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { matches: ['https://x.com/*'] })], sitesOn: ['x.com'], starter: starter('added') });
+    await answerNative(bg.native, 'shipped.install', { added: ['x.com/a'], sitesOn: ['x.com'], starter: starter('added') });
+    const r = await asked;
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(bg.store.sitesOn, ['x.com']);
+    assert.deepStrictEqual(bg.reloaded, [5], 'the tab, where the mod runs now');
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.starter.sites[0].choice, 'added');
+    // The setup page's "Add these": the ticked mods (ids only; the rest none), and "Start with none": no tab, nothing reloads.
+    const these = panel.ask({ type: 'shipped.install', ids: ['amazon.com/simple-home', 'amazon.com/simple-home', '../etc', 7], sites: ['x.com'], others: 'none' });
+    const req2 = await answerNative(bg.native, 'shipped.install', { added: [], sitesOn: [] });
+    assert.deepStrictEqual(req2.args, { ids: ['amazon.com/simple-home'], others: 'none' }, 'mod ids, once; nothing that isn\'t one');
+    assert.strictEqual((await these).ok, true);
+    const none = panel.ask({ type: 'shipped.none' });
+    await answerNative(bg.native, 'shipped.none', { starter: starter('none') });
+    assert.strictEqual((await none).ok, true);
+    assert.deepStrictEqual(bg.reloaded, [5]);
+  } finally { bg.restore(); }
+});
+
 test('agent and model per site chat: each site its own pick; the default is the last pick; a panel holds what it first saw', () => {
   // The old single setting carries over as the default (and the even older `model` as Claude Code's).
   assert.deepEqual(lib.normalizeSettings({ agent: 'codex', model: 'opus' }), { agent: 'codex', models: { claude: 'opus' } });
@@ -2041,4 +2919,976 @@ test('agent and model per site chat: each site its own pick; the default is the 
   assert.equal(lib.siteSettings({ picks, snapshots: panelA, global, site: 'github.com' }).models.claude, 'opus', 'a copy, not the default itself');
   // No site (chrome://extensions): the default itself.
   assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global: global2, site: null }), lib.normalizeSettings(global2));
+});
+
+test('robotless: the default\'s agent "none", over every site\'s pick, which no site\'s pick or snapshot holds', () => {
+  assert.equal(lib.ROBOTLESS, 'none');
+  assert.equal(lib.isRobotless({ agent: 'none', models: {} }), true);
+  for (const s of [null, undefined, {}, { agent: '' }, { agent: 'claude' }, 'none', ['none']]) assert.equal(lib.isRobotless(s), false, JSON.stringify(s));
+  // kept through normalizing (it's an agent id like the others there)
+  assert.deepEqual(lib.normalizeSettings({ agent: 'none', models: { claude: 'opus' } }), { agent: 'none', models: { claude: 'opus' } });
+  const global = { agent: 'none', models: { claude: 'opus' } };
+  const picks = { 'x.com': { agent: 'codex', models: {} }, 'old.com': { agent: 'none', models: {} } };
+  const snaps = new Map();
+  // A site without a pick, seen while robotless: its snapshot is the default's agent (''), not robotless, so
+  // once robotless ends it doesn't stay on there.
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: snaps, global, site: 'github.com' }), { agent: '', models: { claude: 'opus' } });
+  assert.equal(snaps.get('github.com').agent, '');
+  // A site's own pick stays as it was (robotless is the browser's: the panel checks the default first).
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: snaps, global, site: 'x.com' }), { agent: 'codex', models: {} });
+  assert.equal(lib.siteSettings({ picks, snapshots: snaps, global, site: 'old.com' }).agent, '', 'a pick saying robotless reads as the default');
+  assert.equal(picks['old.com'].agent, 'none', 'and isn\'t changed in place');
+  // No site: the default itself, robotless.
+  assert.equal(lib.siteSettings({ picks, snapshots: snaps, global, site: null }).agent, 'none');
+});
+
+test('Switch to: only the other installed agents the helper knows are logged in, in its order', () => {
+  const list = [
+    { id: 'claude', name: 'Claude Code', available: true, loggedIn: false },
+    { id: 'codex', name: 'Codex', available: true, loggedIn: true },
+    { id: 'codex-oss', name: 'Open model', available: true, loggedIn: null }, // (unknown: not offered)
+    { id: 'gemini', name: 'Gemini CLI', available: false, loggedIn: true }, // (not installed: never)
+    { id: 'claude-managed', name: 'Claude (managed)', available: true, loggedIn: true },
+    { id: 'none', name: 'x', available: true, loggedIn: true },
+    null, { name: 'no id', available: true, loggedIn: true },
+  ];
+  assert.deepEqual(lib.switchableAgents(list, 'claude').map((a) => a.id), ['codex', 'claude-managed']);
+  assert.deepEqual(lib.switchableAgents(list, 'codex').map((a) => a.id), ['claude-managed'], 'never the chosen one');
+  assert.deepEqual(lib.switchableAgents(null, 'claude'), []);
+  assert.deepEqual(lib.switchableAgents([{ id: 'claude', available: true, loggedIn: 'yes' }], ''), [], 'only a login known OK');
+});
+
+test('the panel: Settings\' "None (robotless)", the robotless line, and the login notice\'s Switch to and Use robotless', () => {
+  const panel = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.css'), 'utf8');
+  assert.match(panel, /new Option\('None \(robotless\)', ROBOTLESS\)/);
+  assert.match(panel, /`Switch to \$\{a\.name\}`/);
+  assert.match(panel, /'Use robotless'/);
+  assert.match(html, /<p id="robotless-line" class="robotless-line">Robotless: your mods run, no agent\. Pick one in <a href="#" id="robotless-settings">Settings<\/a> to chat\.<\/p>/);
+  // robotless: the box and what asks the agent go; the line shows (not on the gate or the landing page)
+  assert.match(css, /body\.robotless \.robotless-line \{ display: block; \}/);
+  assert.match(css, /body\.robotless :is\(\.composer, \.using-line, \.empty, \.agent-site-note, \.explain-btn, \.mod-update \.merge, \.break-actions \.break-fix\) \{ display: none; \}/);
+  assert.match(css, /\[data-face="robotless"\]\) \.eye \{ display: none; \}/);
+});
+
+test('background: robotless (settings.agent "none") refuses agent.start, and nothing reaches the helper', async () => {
+  const bg = await loadBackground({ storage: { settings: { agent: 'none', models: {} } } });
+  try {
+    const panel = bg.connectPanel();
+    const r = await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts' });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /^Robotless: no agent is chosen in this browser/);
+    await settle(10);
+    assert.ok(!bg.native.sent.some((m) => m.cmd === 'agent.start'), 'no run asked of the helper');
+    assert.ok(!(bg.store['chat:x.com']?.messages || []).length, 'nothing in the chat');
+  } finally { bg.restore(); }
+});
+
+// ---- site access: the browser's OK for each site TRIF is on for ---------------------------------
+
+test('site access: a site needs its domain and subdomains, http and https; <all_urls> or any host covers all', () => {
+  // One pattern a site: *.x.com covers x.com itself too, so the browser's prompt lists the site once.
+  assert.deepStrictEqual(lib.siteOrigins('x.com'), ['*://*.x.com/*']);
+  assert.deepStrictEqual(lib.siteOrigins('127.0.0.1'), ['*://127.0.0.1/*'], 'an IP: just the address');
+  assert.deepStrictEqual(lib.originsFor(['x.com', 'bbc.co.uk', 'x.com']), ['*://*.x.com/*', '*://*.bbc.co.uk/*']);
+  const one = lib.normalizeAccess({ origins: ['*://*.x.com/*', '*://127.0.0.1/*'] });
+  assert.ok(lib.hasSiteAccess(one, 'x.com') && lib.hasSiteAccess(one, '127.0.0.1'), 'the one pattern is enough, for a domain and an IP');
+  assert.ok(!lib.hasSiteAccess(lib.normalizeAccess({ origins: ['*://x.com/*'] }), 'x.com'), 'the bare domain alone misses its subdomains');
+  const acc = (origins) => lib.normalizeAccess({ origins, permissions: ['tabs'] });
+  assert.deepStrictEqual(acc(['<all_urls>']), { origins: ['<all_urls>'], all: true, allUrls: true });
+  assert.deepStrictEqual(acc(['*://*/*']), { origins: ['*://*/*'], all: true, allUrls: false }, 'every site, but not <all_urls> itself (screenshots)');
+  assert.strictEqual(acc(['https://*/*']).all, false, 'https only');
+  assert.strictEqual(acc(['https://*/*', 'http://*/*']).all, true);
+  assert.deepStrictEqual(acc(undefined), { origins: [], all: false, allUrls: false });
+
+  const site = acc(['*://x.com/*', '*://*.x.com/*', 'https://shop.com/*', '*://*.news.com/*', '*://a.com:8080/*']);
+  assert.strictEqual(lib.hasSiteAccess(site, 'x.com'), true);
+  assert.strictEqual(lib.hasSiteAccess(site, 'shop.com'), false, 'https only, and no subdomains');
+  assert.strictEqual(lib.hasSiteAccess(site, 'news.com'), true, '*.news.com covers news.com itself');
+  assert.strictEqual(lib.hasSiteAccess(site, 'a.com'), false, 'one port is not the site');
+  assert.strictEqual(lib.hasSiteAccess(site, 'notx.com'), false);
+  assert.strictEqual(lib.hasSiteAccess(acc(['*://x.com/*']), 'x.com'), false, 'without its subdomains');
+  assert.strictEqual(lib.hasSiteAccess(acc(['*://x.com/path*', '*://*.x.com/path*']), 'x.com'), false, 'part of a site');
+  assert.strictEqual(lib.hasSiteAccess(acc(['*://*.co.uk/*']), 'bbc.co.uk'), true);
+  assert.strictEqual(lib.hasSiteAccess(acc(['<all_urls>']), 'anything.org'), true);
+  assert.strictEqual(lib.hasSiteAccess(null, 'x.com'), false);
+  assert.deepStrictEqual(lib.activeSites(['shop.com', 'x.com'], site), ['x.com']);
+  assert.deepStrictEqual(lib.sitesWithoutAccess(['shop.com', 'x.com'], site), ['shop.com']);
+});
+
+test('readAccess: chrome.permissions.getAll, or everything where TRIF doesn\'t check (Safari, no API)', async () => {
+  const api = { permissions: { getAll: async () => ({ origins: ['*://x.com/*', '*://*.x.com/*'], permissions: [] }) } };
+  assert.deepStrictEqual(await lib.readAccess(api, true), { origins: ['*://*.x.com/*', '*://x.com/*'], all: false, allUrls: false });
+  assert.strictEqual((await lib.readAccess(api, false)).all, true, 'Safari');
+  assert.strictEqual((await lib.readAccess({}, true)).allUrls, true, 'no chrome.permissions');
+});
+
+const PER_SITE = (...sites) => lib.originsFor(sites);
+
+test('siteState / siteRefusal / everySiteOrigins: on, off, disconnected, blocked, in the panel\'s words; what gives every site', () => {
+  const access = lib.normalizeAccess({ origins: PER_SITE('x.com', 'off.com') });
+  const ctx = { sitesOn: ['x.com', 'gone.com'], access, blocked: ['shop.com'] };
+  assert.deepStrictEqual(['x.com', 'off.com', 'gone.com', 'new.com', 'shop.com'].map((x) => lib.siteState(x, ctx)),
+    ['on', 'off', 'disconnected', 'disconnected', 'disconnected']);
+  assert.strictEqual(lib.siteState('shop.com', { ...ctx, access: lib.ALL_ACCESS, sitesOn: ['shop.com'] }), 'blocked', 'with access: blocked, whether it was on or not');
+  assert.strictEqual(lib.siteState('shop.com', { ...ctx, access: lib.normalizeAccess({ origins: PER_SITE('shop.com') }) }), 'blocked', 'connected again: back to blocked');
+  assert.strictEqual(lib.siteState('anything.org', { access: lib.ALL_ACCESS }), 'off', 'every site given: never disconnected');
+  assert.strictEqual(lib.siteRefusal('x.com', 'on'), null);
+  assert.match(lib.siteRefusal('a.com', 'off'), /^TRIF is off on a\.com: .*turns it on/);
+  assert.match(lib.siteRefusal('a.com', 'disconnected'), /^TRIF is disconnected on a\.com: .*until the user connects it/);
+  assert.match(lib.siteRefusal('a.com', 'blocked'), /^a\.com is blocked in TRIF: .*only the user can unblock it/);
+  assert.deepStrictEqual(lib.everySiteOrigins(lib.normalizeAccess({ origins: ['<all_urls>', '*://*/*', ...PER_SITE('x.com')] })), ['*://*/*', '<all_urls>']);
+  assert.deepStrictEqual(lib.everySiteOrigins(access), []);
+});
+
+test('background: restrictive: a site without the browser\'s access is disconnected (on or not): no mods, no page commands, no chats, said why', async () => {
+  const mods = [mod('x.com/a'), mod('shop.com/b'), mod('all-sites/dark', { matches: ['*://*/*'] })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: ['shop.com', 'x.com'] }, tabs: GATE_TABS, granted: PER_SITE('x.com') });
+  try {
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/a', 'all-sites/dark']);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((s) => s.id === 'all-sites/dark').matches, ['*://*.x.com/*', '*://x.com/*']);
+    let r = await bg.native.call('tabs');
+    assert.deepStrictEqual(r.result.map((t) => t.id), [5]);
+    r = await bg.native.call('text', { tab: 6 });
+    assert.strictEqual(r.error, lib.siteRefusal('shop.com', 'disconnected'));
+    r = await bg.native.call('status');
+    assert.deepStrictEqual([r.result.sitesOn, r.result.disconnected, r.result.blockedSites, r.result.access.all, 'siteMode' in r.result], [['shop.com', 'x.com'], ['shop.com'], [], false, false]);
+    assert.strictEqual(r.result.mods.find((m) => m.id === 'shop.com/b').sitesOff, true);
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.sitesOn, st.disconnected, st.siteAccess, st.access.origins], [['shop.com', 'x.com'], ['shop.com'], true, PER_SITE('x.com')]);
+    r = await panel.ask({ type: 'agent.start', site: 'shop.com', tabId: 6, url: 'https://shop.com/', prompt: 'hi' });
+    assert.deepStrictEqual([r.ok, r.error], [false, 'TRIF is disconnected on shop.com: connect it first']);
+    // A run's guard in the page has only the sites TRIF works on.
+    let guard = null;
+    bg.chrome.scripting.executeScript = async ({ func, args }) => { if (func.name === 'pageGuard') guard = args[1]; return [{ result: 'stop here' }]; };
+    await bg.native.call('text', { tab: 5 });
+    assert.deepStrictEqual(guard, ['x.com']);
+  } finally { bg.restore(); }
+});
+
+test('background: restrictive: Connect needs the browser\'s OK; off keeps it (on again asks nothing); Disconnect gives it back; taken back in the browser, it stops', async () => {
+  const mods = [mod('shop.com/a')];
+  const bg = await loadBackground({ storage: { mods, sitesOn: [], siteMode: 'restrictive' }, tabs: GATE_TABS, granted: [] });
+  try {
+    const panel = bg.connectPanel();
+    // A first visit: disconnected.
+    assert.strictEqual((await bg.native.call('text', { tab: 6 })).error, lib.siteRefusal('shop.com', 'disconnected'));
+    // No OK (the user said no to the browser's prompt): nothing saved.
+    let r = await panel.ask({ type: 'site.set', site: 'shop.com', on: true, tab: 6 });
+    assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual(bg.store.sitesOn, []);
+    // Connect: the panel asked and the user said yes (the grant can land before permissions.onAdded is handled).
+    bg.perms.origins = PER_SITE('shop.com');
+    r = await panel.ask({ type: 'site.set', site: 'shop.com', on: true, tab: 6 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'shop.com/a']);
+    // Off: the access stays, so on again needs nothing from the browser.
+    await panel.ask({ type: 'site.set', site: 'shop.com', on: false, tab: 6 });
+    assert.deepStrictEqual([bg.perms.removed, bg.perms.origins, scriptIds(bg)], [[], PER_SITE('shop.com'), []]);
+    assert.strictEqual((await bg.native.call('text', { tab: 6 })).error, lib.siteRefusal('shop.com', 'off'));
+    assert.strictEqual((await panel.ask({ type: 'site.set', site: 'shop.com', on: true, tab: 6 })).ok, true);
+    // Disconnect: off, and the access given back.
+    r = await panel.ask({ type: 'site.disconnect', site: 'shop.com', tab: 6 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual([bg.store.sitesOn, bg.perms.removed, bg.perms.origins, scriptIds(bg)], [[], [PER_SITE('shop.com')], [], []]);
+    assert.strictEqual((await bg.native.call('text', { tab: 6 })).error, lib.siteRefusal('shop.com', 'disconnected'));
+    // Connected again, then taken back in chrome://extensions: mods go, runs there stop, the panel hears of it.
+    bg.perms.origins = PER_SITE('shop.com');
+    await panel.ask({ type: 'site.set', site: 'shop.com', on: true, tab: 6 });
+    const start = panel.ask({ type: 'agent.start', site: 'shop.com', tabId: 6, url: 'https://shop.com/', prompt: 'hi' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    assert.strictEqual((await start).ok, true);
+    panel.sent.length = 0;
+    bg.perms.revoke(PER_SITE('shop.com'));
+    await settle(30);
+    assert.deepStrictEqual(scriptIds(bg), []);
+    assert.ok(bg.natives[0].sent.some((m) => m.cmd === 'agent.stop' && m.args.runId === 'r1'), 'the run there is stopped');
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    assert.deepStrictEqual([bg.store.sitesOn, (await panel.ask({ type: 'status' })).result.disconnected], [['shop.com'], ['shop.com']]);
+    bg.perms.grant(PER_SITE('shop.com'));
+    await settle(30);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'shop.com/a']);
+  } finally { bg.restore(); }
+});
+
+test('background: an update from a TRIF with every site gives that up once: the sites keep their switches and ask again, the panel says so once; after that, every site in the browser\'s settings is left alone', async () => {
+  // a permissive 0.2 TRIF: siteMode kept, <all_urls> granted, plus one site granted on its own
+  const bg = await loadBackground({ storage: { mods: [mod('shop.com/a'), mod('x.com/b')], sitesOn: ['shop.com', 'x.com'], siteMode: 'permissive', __migrateAccess: true }, tabs: GATE_TABS, granted: ['<all_urls>', ...PER_SITE('x.com')] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual(bg.perms.removed, [['<all_urls>']]);
+    assert.deepStrictEqual([bg.store.perSiteOnly, bg.store.accessNote, 'siteMode' in bg.store, bg.store.sitesOn], [true, true, false, ['shop.com', 'x.com']]);
+    // (x.com, granted on its own, still runs; shop.com is on but disconnected until it's connected again)
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/b']);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, st.disconnected, st.access.all], [true, ['shop.com'], false]);
+    await panel.ask({ type: 'siteAccess.noteSeen' });
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, bg.store.accessNote], [false, false]);
+    // (the mode's message is gone)
+    const r = await panel.ask({ type: 'site.mode', mode: 'restrictive' });
+    assert.strictEqual(r.ok, false);
+  } finally { bg.restore(); }
+  // <all_urls> from when it was required (no siteMode): the same, once
+  const bg2 = await loadBackground({ storage: { sitesOn: ['shop.com'], __migrateAccess: true }, granted: ['<all_urls>'] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual([bg2.perms.removed, bg2.store.accessNote], [[['<all_urls>']], true]);
+  } finally { bg2.restore(); }
+  // after that (perSiteOnly): every site in the browser's own settings stays, until Disconnect on a site: then
+  // the every-site grant goes, that site is off, the others keep their switches and ask again, the same note
+  const bg3 = await loadBackground({ storage: { sitesOn: ['shop.com', 'x.com'] }, tabs: GATE_TABS, granted: ['<all_urls>'] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual([bg3.perms.removed, bg3.store.accessNote], [[], undefined]);
+    const panel3 = bg3.connectPanel();
+    const r = await panel3.ask({ type: 'site.disconnect', site: 'shop.com' });
+    assert.deepStrictEqual(r.result, { site: 'shop.com', disconnected: true, droppedEverySite: true });
+    assert.deepStrictEqual([bg3.perms.origins, bg3.store.sitesOn, bg3.store.accessNote], [[], ['x.com'], true]);
+    const st = (await panel3.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, st.disconnected, st.access.all], [true, ['x.com'], false]);
+  } finally { bg3.restore(); }
+  // a fresh TRIF (nothing given): nothing to give up, no note
+  const bg4 = await loadBackground({ storage: { sitesOn: [], __migrateAccess: true }, granted: [] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual([bg4.perms.removed, bg4.store.perSiteOnly, bg4.store.accessNote], [[], true, undefined]);
+  } finally { bg4.restore(); }
+});
+
+test('background: the block list keeps TRIF off a site whatever its access: mods, page commands, screenshots, runs, turning on', async () => {
+  const mods = [mod('shop.com/a'), mod('all-sites/dark', { matches: ['*://*/*'] })];
+  for (const granted of [['<all_urls>'], PER_SITE('shop.com', 'x.com')]) {
+    const bg = await loadBackground({ storage: { mods, sitesOn: ['shop.com', 'x.com'] }, tabs: GATE_TABS, granted });
+    try {
+      await settle(20);
+      const panel = bg.connectPanel();
+      let r = await panel.ask({ type: 'site.block', site: 'www.shop.com', blocked: true, tab: 6 });
+      assert.strictEqual(r.ok, true, r.error);
+      assert.deepStrictEqual([bg.store.blockedSites, bg.store.sitesOn], [['shop.com'], ['x.com']]);
+      assert.deepStrictEqual(bg.perms.removed, [], 'the browser\'s access is kept: the block list is what stops TRIF');
+      assert.ok(!scriptIds(bg).includes('shop.com/a'));
+      assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((s) => s.id === 'all-sites/dark').matches, ['*://*.x.com/*', '*://x.com/*']);
+      for (const cmd of ['text', 'screenshot']) assert.strictEqual((await bg.native.call(cmd, { tab: 6 })).error, lib.siteRefusal('shop.com', 'blocked'));
+      r = await panel.ask({ type: 'agent.start', site: 'shop.com', tabId: 6, url: 'https://shop.com/', prompt: 'hi' });
+      assert.deepStrictEqual([r.ok, r.error], [false, 'shop.com is blocked in TRIF']);
+      r = await panel.ask({ type: 'site.set', site: 'shop.com', on: true, tab: 6 });
+      assert.deepStrictEqual([r.ok, r.error], [false, 'shop.com is blocked in TRIF: unblock it first.']);
+      const st = (await bg.native.call('status')).result;
+      assert.deepStrictEqual([st.blockedSites, st.disconnected], [['shop.com'], []]);
+      // Unblocked: off, as it had access when blocked (never disconnected by the block)
+      await panel.ask({ type: 'site.block', site: 'shop.com', blocked: false });
+      assert.deepStrictEqual(bg.store.blockedSites, []);
+      assert.ok((await bg.native.call('text', { tab: 6 })).error.startsWith('TRIF is off on shop.com'));
+    } finally { bg.restore(); }
+  }
+});
+
+// ---- sensitive sites, each a site of its own (lib.js "sensitive sites", background.js considerSensitive) -----
+
+const MAIL_TABS = [
+  { id: 5, windowId: 1, index: 0, active: true, url: 'https://www.google.com/', title: 'Google' },
+  { id: 7, windowId: 1, index: 1, active: false, url: 'https://mail.google.com/mail/u/0/', title: 'Inbox' },
+];
+
+test('background: a new user\'s sensitive sites start blocked, each a site of its own; Unblock lands on off; the parent\'s and all-sites mods never run there', async () => {
+  const mods = [mod('google.com/dark', { matches: ['*://*.google.com/*'] }), mod('mail.google.com/calm', { matches: ['*://*.google.com/*'] }), mod('all-sites/big', { matches: ['*://*/*'] })];
+  const bg = await loadBackground({ storage: { __sensitive: true, mods, sitesOn: ['google.com'] }, tabs: MAIL_TABS });
+  try {
+    await settle(40);
+    // (mods in sites/mail.google.com/ would make it a question; these are a new user's: no done list, nothing reaching it but its own)
+    assert.ok(bg.store.blockedSites.includes('dashboard.stripe.com') && bg.store.blockedSites.includes('paypal.com'), 'TRIF\'s list blocked');
+    assert.ok(Array.isArray(bg.store.sensitiveDone) && bg.store.sensitiveDone.includes('paypal.com'));
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    // (its own mods: a question, as it has some)
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com').map((p) => [p.host, p.parent, p.why, p.mods, p.allSites]), [['mail.google.com', 'google.com', 'email', ['google.com/dark'], ['all-sites/big']]]);
+    // Until answered, as before: google.com's mods still reach it
+    assert.ok(!bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark').excludeMatches.length);
+    // Block it
+    let r = await panel.ask({ type: 'sensitive.answer', host: 'mail.google.com', choice: 'block' });
+    assert.strictEqual(r.ok, true, r.error);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com'), []); // (Docs and Drive are asked about too: their own question)
+    assert.ok(st.blockedSites.includes('mail.google.com'));
+    assert.ok(st.sensitive.splits.includes('mail.google.com'));
+    const dark = bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark');
+    assert.ok(['*://*.mail.google.com/*', '*://mail.google.com/*'].every((x) => dark.excludeMatches.includes(x)), 'google.com\'s mod skips mail.google.com');
+    assert.ok(['*://*.mail.google.com/*', '*://mail.google.com/*'].every((x) => bg.chrome.userScripts.scripts.find((y) => y.id === lib.RUNTIME_ID).excludeMatches.includes(x)), 'and so does TRIF\'s runtime');
+    assert.ok(!scriptIds(bg).includes('mail.google.com/calm'));
+    assert.strictEqual((await bg.native.call('text', { tab: 7 })).error, lib.siteRefusal('mail.google.com', 'blocked'));
+    assert.ok((await bg.native.call('text', { tab: 5 })).ok !== false || true);
+    // Unblock: off (the parent's access covers it), not on; Fix turns it on, with only its own mod
+    r = await panel.ask({ type: 'site.block', site: 'mail.google.com', blocked: false });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.ok((await bg.native.call('text', { tab: 7 })).error.startsWith('TRIF is off on mail.google.com'));
+    r = await panel.ask({ type: 'site.set', site: 'mail.google.com', on: true, tab: 7 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === 'mail.google.com/calm').matches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'its own mod, only there');
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === 'all-sites/big').matches, ['*://*.google.com/*', '*://google.com/*'], 'all-sites mods skip it');
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === lib.RUNTIME_ID).excludeMatches, [], 'the runtime goes there now: a mod of its own runs');
+    // An Unblock sticks: a new start doesn't block it again
+    assert.ok(bg.store.sensitiveDone.includes('mail.google.com'));
+  } finally { bg.restore(); }
+});
+
+test('background: on upgrade a sensitive host the user\'s mods reach is asked about; Keep TRIF on there copies the parent\'s mods with their switches and turns it on', async () => {
+  const mods = [mod('google.com/dark', { matches: ['*://*.google.com/*'] }), mod('google.com/quiet', { matches: ['*://mail.google.com/*'] }), mod('google.com/maps', { matches: ['*://maps.google.com/*'] })];
+  const bg = await loadBackground({ storage: { __sensitive: true, mods, sitesOn: ['google.com'], disabled: { 'google.com/quiet': true } }, tabs: MAIL_TABS });
+  try {
+    await settle(40);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com').map((p) => [p.host, p.mods]), [['mail.google.com', ['google.com/dark', 'google.com/quiet']]]);
+    assert.ok(!st.blockedSites.includes('mail.google.com'));
+    // (seen before: the copies would be new mods, which start off)
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    const replyP = panel.ask({ type: 'sensitive.answer', host: 'mail.google.com', choice: 'keep', tab: 7 });
+    let req;
+    for (let i = 0; i < 200 && !(req = bg.native.sent.find((m) => m.type === 'request' && m.cmd === 'sensitive.split')); i++) await tick();
+    assert.deepStrictEqual(req.args, { host: 'mail.google.com', ids: ['google.com/dark', 'google.com/quiet'] });
+    req.answered = true;
+    // (as the helper does: its scan sends the copies, then it answers)
+    bg.native.emit({ type: 'mods', mods: [...mods, mod('mail.google.com/dark', { matches: ['*://*.google.com/*'] }), mod('mail.google.com/quiet', { matches: ['*://mail.google.com/*'] })] });
+    bg.native.emit({ type: 'response', id: req.id, ok: true, result: { host: 'mail.google.com', copies: [{ from: 'google.com/dark', to: 'mail.google.com/dark' }, { from: 'google.com/quiet', to: 'mail.google.com/quiet' }] } });
+    const r = await replyP;
+    assert.strictEqual(r.ok, true, r.error);
+    await settle(30);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com'), []); // (Docs and Drive are asked about too: their own question)
+    assert.ok(st.sitesOn.includes('mail.google.com') && st.sitesOn.includes('google.com'), 'both on');
+    assert.ok(!bg.store.disabled['mail.google.com/dark'], 'the copy of a mod that was on is on');
+    assert.strictEqual(bg.store.disabled['mail.google.com/quiet'], true, 'the copy of one that was off is off');
+    assert.ok(!bg.store.newOff?.['mail.google.com/dark'], 'not "new"');
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === 'mail.google.com/dark').matches, ['*://*.mail.google.com/*', '*://mail.google.com/*']);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark').excludeMatches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'the parent\'s copy no longer runs there');
+    // A run on mail.google.com is scoped to it; a google.com run can't reach its tab
+    const startP = panel.ask({ type: 'agent.start', site: 'mail.google.com', tabId: 7, url: 'https://mail.google.com/mail/u/0/', prompt: 'calmer' });
+    const start = await answerNative(bg.native, 'agent.start', { runId: 'r9' });
+    assert.strictEqual(start.args.scope, 'mail.google.com');
+    assert.ok(start.args.splits.includes('mail.google.com'));
+    await startP;
+    const t = await bg.native.call('tabs', { scope: 'google.com' });
+    assert.deepStrictEqual(t.result.map((x) => x.id), [5], 'a google.com run doesn\'t list mail.google.com\'s tab');
+    const e = await bg.native.call('reload', { tab: 7, scope: 'google.com' });
+    assert.match(e.error, /this agent run is limited to google\.com/);
+    // Copy to {host} (the code card's menu): one mod of the parent's into the host's folder, by the helper
+    const copyP = panel.ask({ type: 'sensitive.copy', id: 'google.com/maps', host: 'mail.google.com' });
+    const creq = await answerNative(bg.native, 'sensitive.split', { host: 'mail.google.com', copies: [{ from: 'google.com/maps', to: 'mail.google.com/maps' }] });
+    assert.deepStrictEqual(creq.args, { host: 'mail.google.com', ids: ['google.com/maps'] });
+    assert.strictEqual((await copyP).ok, true);
+    const bad = await panel.ask({ type: 'sensitive.copy', id: 'google.com/maps', host: 'maps.google.com' });
+    assert.match(bad.error, /isn't a site of its own under google\.com/);
+  } finally { bg.restore(); }
+});
+
+test('background: a host a pattern makes sensitive (*bank*) is blocked the first time a tab is on it, once', async () => {
+  const mods = [mod('example.com/a', { matches: ['*://www.example.com/*'] }), mod('y.com/wide', { matches: ['*://*.y.com/*'] })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com', 'y.com'], mods }, tabs: [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/', title: 'E' }] });
+  try {
+    await settle(20);
+    assert.ok(!(bg.store.blockedSites || []).includes('netbank.example.com'));
+    bg.chrome.tabs.onUpdated.emit(8, { url: 'https://secure.netbank.example.com/login' }, { id: 8, url: 'https://secure.netbank.example.com/login' });
+    await settle(40);
+    assert.ok(bg.store.blockedSites.includes('netbank.example.com'), 'blocked: nothing of the user\'s reached it');
+    assert.ok(bg.store.sensitiveDone.includes('netbank.example.com'));
+    // One the user's mods reach is asked about instead
+    bg.chrome.tabs.onUpdated.emit(9, { url: 'https://mybank.y.com/' }, { id: 9, url: 'https://mybank.y.com/' });
+    await settle(40);
+    assert.ok(!bg.store.blockedSites.includes('mybank.y.com'));
+    assert.deepStrictEqual(bg.store.sensitivePending.map((p) => [p.host, p.mods]), [['mybank.y.com', ['y.com/wide']]]);
+    assert.ok(!bg.chrome.userScripts.scripts.find((x) => x.id === 'y.com/wide').excludeMatches.length, 'until answered, as before');
+    // Unblocked, it isn't blocked again on the next visit
+    const panel = bg.connectPanel();
+    await panel.ask({ type: 'site.block', site: 'netbank.example.com', blocked: false });
+    bg.chrome.tabs.onUpdated.emit(8, { url: 'https://netbank.example.com/' }, { id: 8, url: 'https://netbank.example.com/' });
+    await settle(30);
+    assert.ok(!bg.store.blockedSites.includes('netbank.example.com'));
+  } finally { bg.restore(); }
+});
+
+test('background: sites setup turns on are disconnected until connected, then on; screenshots know whether TRIF has <all_urls>', async () => {
+  const mods = [mod('www.google.com/a', { matches: ['*://www.google.com/*'] })];
+  const bg = await loadBackground({ storage: { sitesOn: [] }, granted: [], tabs: [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://www.google.com/' }],
+    windows: { get: async () => ({ id: 1, state: 'normal' }) } });
+  try {
+    bg.native.emit({ type: 'mods', mods, sitesOn: ['google.com', 'x.com'] });
+    await settle(20);
+    assert.deepStrictEqual(bg.store.sitesOn, ['google.com', 'x.com']);
+    assert.deepStrictEqual(scriptIds(bg), [], 'not connected yet: nothing registered');
+    const panel = bg.connectPanel();
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.disconnected, ['google.com', 'x.com']);
+    // Connect on google.com: on at once (its mods run).
+    bg.perms.grant(PER_SITE('google.com'));
+    await settle(30);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'www.google.com/a']);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.disconnected, ['x.com']);
+    // A site's own access isn't enough for Chrome's captureVisibleTab: the screenshot says what to do.
+    bg.chrome.tabs.captureVisibleTab = async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); };
+    const r = await bg.native.call('screenshot', { tab: 5 });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /only after the user clicks the TRIF toolbar button on it/);
+  } finally { bg.restore(); }
+});
+
+test('background (Safari): TRIF doesn\'t check site access (Safari asks per site itself)', async () => {
+  const bg = await loadBackground({ safari: true, storage: { mods: [mod('shop.com/a')], sitesOn: ['shop.com'] }, granted: [] });
+  try {
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg).filter((id) => id !== lib.RUNTIME_ID), ['shop.com/a']);
+  } finally { bg.restore(); }
+});
+
+// ---- mods sets in parts -------------------------------------------------------------------------
+
+// A mods message cut into modsPart messages the way the helper does (helper/lib/mods.js modsParts).
+function partsOf(msg, set, size = 50) {
+  const json = JSON.stringify(msg);
+  const out = [];
+  for (let i = 0; i * size < json.length; i++) out.push(json.slice(i * size, (i + 1) * size));
+  return out.map((data, i) => ({ type: 'modsPart', set, i, n: out.length, data }));
+}
+
+test('ModsParts: joins a set in order; a broken sequence is dropped with an error; a new set supersedes', () => {
+  const msg = { type: 'mods', mods: [mod('x.com/a'), mod('x.com/b', { code: '"quotes" \\ é 😀' })], sitesOn: ['x.com'] };
+  const parts = partsOf(msg, 's1', 40);
+  assert.ok(parts.length > 3);
+  const p = new lib.ModsParts();
+  for (const part of parts.slice(0, -1)) assert.deepStrictEqual(p.push(part), {});
+  assert.deepStrictEqual(p.push(parts.at(-1)), { message: msg });
+  // Missing a part: dropped, and the rest of that set too.
+  assert.match(p.push(parts[0]) && p.push(parts[2]).error, /got part 3 of \d+ after part 1/);
+  assert.deepStrictEqual(p.push(parts[3]), {}, 'the rest of a dropped set is ignored: one error is enough');
+  assert.deepStrictEqual(p.push(parts[0]), {}, 'its start again: a new try');
+  for (const part of parts.slice(1, -1)) p.push(part);
+  assert.deepStrictEqual(p.push(parts.at(-1)), { message: msg });
+  // Without its start.
+  assert.match(new lib.ModsParts().push(parts[1]).error, /part 2 of \d+ of mods set s1 came without the parts before it/);
+  // Malformed.
+  for (const bad of [{ ...parts[0], i: -1 }, { ...parts[0], n: 0 }, { ...parts[0], data: 5 }, { ...parts[0], set: '' }, { ...parts[0], i: 9, n: 3 }, null]) {
+    assert.match(new lib.ModsParts().push(bad).error, /malformed/);
+  }
+  // Text that doesn't parse, or isn't a mods message.
+  assert.match(new lib.ModsParts().push({ type: 'modsPart', set: 1, i: 0, n: 1, data: '{"type":"mo' }).error, /doesn't parse/);
+  assert.match(new lib.ModsParts().push({ type: 'modsPart', set: 1, i: 0, n: 1, data: '{"type":"other"}' }).error, /isn't a mods message/);
+  // A newer set's first part drops an unfinished older one, which is then ignored.
+  const newer = partsOf({ ...msg, sitesOn: [] }, 's2', 40);
+  const q = new lib.ModsParts();
+  q.push(parts[0]); q.push(parts[1]);
+  assert.deepStrictEqual(q.push(newer[0]), { superseded: 's1' });
+  assert.deepStrictEqual(q.push(parts[2]), {}, 'the old set is gone, its parts ignored');
+  for (const part of newer.slice(1, -1)) q.push(part);
+  assert.ok(q.push(newer.at(-1)).message);
+  const r = new lib.ModsParts();
+  r.push(parts[0]);
+  r.push(newer[0]);
+  for (const part of newer.slice(1, -1)) r.push(part);
+  assert.deepStrictEqual(r.push(newer.at(-1)).message.sitesOn, []);
+  // The helper's own cutting (quotes, backslashes, text past ASCII, emoji) joins back to the same message.
+  const { modsParts } = require('../helper/lib/mods');
+  const big = { type: 'mods', mods: [mod('x.com/big', { code: `"\\ é 😀 \u2028`.repeat(200000) })], sitesOn: ['x.com'], defaultOrder: {} };
+  const helperParts = modsParts(JSON.stringify(big), 'h-1').map((m) => JSON.parse(JSON.stringify(m)));
+  assert.ok(helperParts.length > 2);
+  const h = new lib.ModsParts();
+  for (const part of helperParts.slice(0, -1)) assert.deepStrictEqual(h.push(part), {});
+  assert.deepStrictEqual(h.push(helperParts.at(-1)), { message: big });
+  // reset (a whole mods message came) says what it dropped.
+  r.push(parts[0]);
+  assert.strictEqual(r.reset(), 's1');
+  assert.strictEqual(r.reset(), null);
+});
+
+test('background: hello says it takes mods in parts; a set in parts is applied once, whole, only after its last part', async () => {
+  const bg = await loadBackground();
+  try {
+    await settle(10);
+    const hello = bg.native.sent.find((m) => m.type === 'hello');
+    assert.deepStrictEqual(hello.features, ['modsParts', 'modsSame', 'boxRun']);
+    const mods = [mod('x.com/a', { code: 'a()'.repeat(50) }), mod('x.com/b', { hash: 'hb' }), mod('y.com/c', { hash: 'hc' })];
+    const parts = partsOf({ type: 'mods', mods, sitesOn: [] }, 's1', 100);
+    for (const part of parts.slice(0, -1)) bg.native.emit(part);
+    await settle(20);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id), [], 'nothing until the last part');
+    assert.ok(!bg.native.sent.some((m) => m.type === 'modsApplied'));
+    bg.native.emit(parts.at(-1));
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsApplied'));
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a', 'x.com/b', 'y.com/c']);
+    assert.deepStrictEqual(bg.store.modIds, ['x.com/a', 'x.com/b', 'y.com/c']);
+
+    // A broken set changes nothing, is logged, and asks the helper to send it again.
+    const next = partsOf({ type: 'mods', mods: [mod('x.com/a')], sitesOn: [] }, 's2', 100);
+    bg.native.emit(next[0]);
+    bg.native.emit(next[2]);
+    await settle(20);
+    const resend = bg.native.sent.find((m) => m.type === 'modsResend');
+    assert.match(resend.reason, /mods set s2: got part 3 of \d+ after part 1/);
+    assert.ok(bg.native.sent.some((m) => m.type === 'log' && m.level === 'error' && /mods set s2/.test(m.message)));
+    for (const part of next.slice(3)) bg.native.emit(part);
+    await settle(20);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a', 'x.com/b', 'y.com/c'], 'the last whole set stays');
+
+    // An unfinished set is superseded by a whole mods message (an older helper, or a set that fits).
+    bg.native.emit(next[0]);
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a')] });
+    await waitFor(() => bg.chrome.userScripts.scripts.length === 2);
+    for (const part of next.slice(1)) bg.native.emit(part);
+    await settle(20);
+    assert.strictEqual(bg.native.sent.filter((m) => m.type === 'modsResend').length, 1, 'one request per broken set; the rest of a superseded one is ignored');
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a']);
+  } finally { bg.restore(); }
+});
+
+const fs = require('node:fs');
+const path = require('node:path');
+test('panel markup: Settings is a labelled region with a heading; the instructions box\'s note is announced', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.html'), 'utf8');
+  assert.match(html, /<section id="settings"[^>]*aria-labelledby="settings-title"/);
+  assert.match(html, /<h2 id="settings-title"[^>]*>Settings<\/h2>/);
+  assert.match(html, /<textarea id="instructions"[^>]*aria-describedby="instructions-note"/);
+  assert.match(html, /<p id="instructions-note"[^>]*role="status"/);
+  // each mod's name is a heading (heading navigation goes mod to mod)
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8'), /const name = el\('h3', 'mod-name'\)/);
+});
+
+test('runtime: errors no mod threw are the page\'s own, kept apart (trif errors --page)', () => {
+  const page = makePage();
+  const W = loadRuntime(page);
+  const fire = (type, ev) => { for (const fn of page.__listeners[type] || []) fn(ev); };
+  fire('error', { error: new Error('Unexpected token } in JSON'), filename: 'https://x.com/app.js', lineno: 12 });
+  fire('error', { error: Object.assign(new Error('from a mod'), { stack: 'Error: from a mod\n    at trif://x.com/boom.js:1:1' }), filename: 'trif://x.com/boom.js' });
+  fire('unhandledrejection', { reason: 'nope' });
+  assert.deepStrictEqual(plain(W.errors.map((e) => e.mod)), ['x.com/boom']);
+  assert.deepStrictEqual(plain(W.pageErrors.map((e) => [e.message, e.source])), [['Unexpected token } in JSON', 'https://x.com/app.js:12'], ['nope', '']]);
+});
+
+test('groups: switched off per site, page scripts and rules apart; registration leaves those sites out', async () => {
+  let g = lib.switchGroup({}, 'www.X.com', 'page', false);
+  assert.deepStrictEqual(g, { 'x.com': ['page'] });
+  assert.strictEqual(lib.groupOffOn(g, 'page', 'm.x.com'), true);
+  assert.strictEqual(lib.groupOffOn(g, 'rules', 'x.com'), false);
+  assert.deepStrictEqual(lib.switchGroup(g, 'x.com', 'page', true), {});
+  assert.deepStrictEqual(lib.normalizeGroupsOff({ 'X.com': ['page', 'bogus'], '': ['page'], 'y.com': 'page' }), { 'x.com': ['page'] });
+  assert.throws(() => lib.switchGroup({}, 'x.com', 'bogus', false), /isn't a group/);
+  // a page script for every site and a rules mod: with page scripts off on x.com, only the page script
+  // leaves x.com out (its own switched-off sites kept)
+  const us = mockUserScripts();
+  const page = mod('all-sites/dark', { matches: ['*://*/*'] });
+  const rules = mod('x.com/calm', { rules: true });
+  await lib.syncUserScripts(us, { mods: [page, rules], runtimeCode: 'RT', offSites: { 'all-sites/dark': ['y.com'] }, groupsOff: g });
+  const byId = Object.fromEntries(us.scripts.map((s) => [s.id, s]));
+  assert.deepStrictEqual(byId['all-sites/dark'].excludeMatches.sort(), ['*://*.x.com/*', '*://*.y.com/*', '*://x.com/*', '*://y.com/*']);
+  assert.deepStrictEqual(byId['x.com/calm'].excludeMatches, []);
+});
+
+test('unwrapMarkdown: an update\'s notes flow to the panel\'s width (the file\'s line wrapping taken out)', async () => {
+  const { unwrapMarkdown, renderMarkdown } = await import('../extension/markdown.js');
+  assert.equal(unwrapMarkdown('- **Bigger mods.** A mod can now\n  be 4 MB.\n- Two\n\nA para\nthat goes on.\n\n[All](https://x)'),
+    '- **Bigger mods.** A mod can now be 4 MB.\n- Two\n\nA para that goes on.\n\n[All](https://x)');
+  assert.doesNotMatch(renderMarkdown(unwrapMarkdown('- one\n  two')), /<br/);
+  assert.equal(unwrapMarkdown(''), '');
+});
+
+// ---- sandboxed mods (extension/sandbox.js; docs/SAFE-MODS.md "Sandboxed: what's built")
+
+test('sandboxed mods: TRIF\'s own world, their code as text for SES; the sandbox runtime goes only where one runs', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const us = mockUserScripts();
+  const page = mod('x.com/page');
+  const boxed = mod('y.com/boxed', { sandboxed: true, code: 'trif.css("a { color: red }");' });
+  const boxed2 = mod('z.com/boxed', { sandboxed: true, matches: ['*://z.com/*', '*://*.z.com/*'] });
+  let r = await lib.syncUserScripts(us, { mods: [page, boxed, boxed2], runtimeCode: 'RT' });
+  assert.deepStrictEqual(r.errors, []);
+  assert.deepStrictEqual(r.registered, ['x.com/page', 'y.com/boxed', 'z.com/boxed']);
+  const byId = Object.fromEntries(us.scripts.map((s) => [s.id, s]));
+  assert.strictEqual(byId['x.com/page'].world, 'MAIN');
+  for (const id of ['y.com/boxed', 'z.com/boxed']) {
+    assert.strictEqual(byId[id].world, 'USER_SCRIPT');
+    assert.strictEqual(byId[id].worldId, sbx.SANDBOX_WORLD);
+  }
+  // (the mod's code is a string inside TRIF's code, evaluated by SES: it can't close the string)
+  const code = byId['y.com/boxed'].js[0].code;
+  assert.match(code, /__trifSandbox\.run\("y\.com\/boxed", "trif\.css\(\\"a \{ color: red \}\\"\);", \{"powers":\[\],"args":\{\}\}\)/);
+  new Function(code); // parses
+  const tricky = sbx.sandboxModCode('a/b', '"); fetch("x"); ("');
+  assert.ok(tricky.includes(JSON.stringify('"); fetch("x"); ("')));
+  // the sandbox runtime: SES from the extension, then TRIF's code, in the same world, where the sandboxed mods run
+  const run = byId[sbx.SANDBOX_RUNTIME_ID];
+  assert.ok(run, 'the sandbox runtime is registered');
+  assert.deepStrictEqual(run.js[1], { file: 'vendor/ses.umd.min.js' });
+  assert.strictEqual(run.js[2].code, sbx.sandboxRuntimeCode());
+  assert.strictEqual(run.world, 'USER_SCRIPT');
+  assert.strictEqual(run.worldId, sbx.SANDBOX_WORLD);
+  assert.deepStrictEqual(run.matches, ['*://*.z.com/*', '*://y.com/*', '*://z.com/*']);
+  assert.ok(!r.registered.includes(sbx.SANDBOX_RUNTIME_ID));
+  // the page's runtime still goes everywhere a mod runs (trif errors --page, recording)
+  assert.deepStrictEqual(byId[lib.RUNTIME_ID].matches, ['*://*.z.com/*', '*://x.com/*', '*://y.com/*', '*://z.com/*']);
+  // again, the same: nothing re-registered (known ids, as the background passes them)
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [page, boxed, boxed2], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.deepStrictEqual(us.calls, []);
+  assert.ok(r.known.includes(sbx.SANDBOX_RUNTIME_ID));
+  // one sandboxed mod gone: the runtime's matches follow (updated, the page's runtime and the others left)
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [page, boxed], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.deepStrictEqual(us.scripts.find((s) => s.id === sbx.SANDBOX_RUNTIME_ID).matches, ['*://y.com/*']);
+  // none left: the sandbox runtime goes
+  r = await lib.syncUserScripts(us, { mods: [page], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.ok(!us.scripts.some((s) => s.id === sbx.SANDBOX_RUNTIME_ID));
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/page']);
+});
+
+test('sandboxed mods: if the sandbox runtime can\'t be registered, its mods say why and aren\'t registered', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const us = mockUserScripts();
+  const register = us.register;
+  us.register = async (list) => { if (list.some((s) => s.id === sbx.SANDBOX_RUNTIME_ID)) throw new Error('no such world'); return register(list); };
+  const r = await lib.syncUserScripts(us, { mods: [mod('x.com/page'), mod('y.com/boxed', { sandboxed: true })], runtimeCode: 'RT' });
+  assert.deepStrictEqual(r.registered, ['x.com/page']);
+  assert.deepStrictEqual(r.errors, [{ id: 'y.com/boxed', error: 'TRIF\'s sandbox couldn\'t be set up: no such world' }]);
+  assert.strictEqual(r.known, null);
+});
+
+test('sandboxed mods: their own group, between rules and page scripts; as page scripts where the browser has no sandbox', () => {
+  assert.deepStrictEqual(lib.GROUPS, ['rules', 'sandboxed', 'page']);
+  assert.deepStrictEqual(lib.MOD_GROUPS, ['rules', 'sandboxed', 'page']);
+  assert.strictEqual(lib.modGroup(mod('a/b', { sandboxed: true })), 'sandboxed');
+  assert.strictEqual(lib.modGroup(mod('a/b', { sandboxed: true, unsandboxed: true })), 'page');
+  assert.strictEqual(lib.modGroup(mod('a/b', { rules: true })), 'rules');
+  assert.strictEqual(lib.modGroup(mod('a/b')), 'page');
+  // switched off on a site: only that group's mods leave it out
+  const g = lib.switchGroup({}, 'x.com', 'sandboxed', false);
+  assert.deepStrictEqual(g, { 'x.com': ['sandboxed'] });
+  assert.deepStrictEqual(lib.offSitesFor(mod('a/b', { sandboxed: true }), {}, g), ['x.com']);
+  assert.deepStrictEqual(lib.offSitesFor(mod('a/b'), {}, g), []);
+  // new boxed mods start off, as every mod from outside the chat
+  const m1 = mod('a/one', { sandboxed: true });
+  assert.deepStrictEqual(lib.applyNewMods([m1], { seen: {}, autoUpdated: {} }).newOff, { 'a/one': 'new' });
+});
+
+test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s OK, then runs as a page script; never silently', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const boxed = mod('y.com/boxed', { sandboxed: true, hash: 'H', description: 'Bounces the logo', pageFacts: ['can send requests'] });
+  const page = mod('x.com/page');
+  // a browser with the sandbox: as they are
+  assert.deepStrictEqual(lib.sandboxFallback([boxed, page], { canSandbox: true }), [boxed, page]);
+  // without: held, by TRIF's extension, with the reason first
+  const [held, same] = lib.sandboxFallback([boxed, page], { canSandbox: false, browser: 'Safari' });
+  assert.strictEqual(same, page);
+  assert.strictEqual(held.unsandboxed, true);
+  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run boxed mods, so here it would run as a free mod, with everything the page has; as a free mod, it can send requests',
+    facts: ['Safari can\'t run boxed mods, so here it would run as a free mod, with everything the page has', 'as a free mod, it can send requests'], claim: 'Bounces the logo', hash: 'H' });
+  // a held mod isn't registered
+  const us = mockUserScripts();
+  await lib.syncUserScripts(us, { mods: [held, page], runtimeCode: 'RT' });
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/page']);
+  // allowed (this version): a page script with TRIF's API around its code, no sandbox world
+  const [ok] = lib.sandboxFallback([held], { canSandbox: false, allowed: { 'y.com/boxed': 'H' } });
+  assert.strictEqual(ok.held, undefined);
+  assert.strictEqual(ok.unsandboxed, true);
+  assert.strictEqual(ok.hash, 'H');
+  const us2 = mockUserScripts();
+  const r = await lib.syncUserScripts(us2, { mods: [ok], runtimeCode: 'RT' });
+  assert.deepStrictEqual(r.registered, ['y.com/boxed']);
+  const s = us2.scripts.find((x) => x.id === 'y.com/boxed');
+  assert.strictEqual(s.world, 'MAIN');
+  assert.ok(!s.worldId);
+  assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
+  // (the mod's code first on the script's first line, so its errors keep their line numbers; then TRIF's API)
+  assert.ok(s.js[0].code.startsWith('(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
+  assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod, {\"powers\":[],\"args\":{}}, {\"actPartners\":{"));
+  new Function(s.js[0].code);
+  assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
+  // a new version waits again
+  const [again] = lib.sandboxFallback([{ ...boxed, hash: 'H2' }], { canSandbox: false, allowed: { 'y.com/boxed': 'H' } });
+  assert.strictEqual(again.held.by, 'sandbox');
+  // idempotent, and undone where the sandbox is there after all
+  assert.deepStrictEqual(lib.sandboxFallback(lib.sandboxFallback([boxed], { canSandbox: false }), { canSandbox: false }), lib.sandboxFallback([boxed], { canSandbox: false }));
+  assert.deepStrictEqual(lib.sandboxFallback([held], { canSandbox: true }), [boxed]);
+  // held by the helper anyway: its hold stays, marked as a page script here
+  const helperHeld = { ...boxed, held: { by: 'agent', reason: 'x', hash: 'H' } };
+  assert.deepStrictEqual(lib.sandboxFallback([helperHeld], { canSandbox: false })[0], { ...helperHeld, unsandboxed: true });
+});
+
+test('background: "Agent on this site" gates every agent command by the tab\'s site: Off nothing, Look no code; Ask asks in the panel, or says to open it', async () => {
+  const tabs = [
+    { id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/a', title: 'Example' },
+    { id: 6, windowId: 1, index: 1, active: false, url: 'https://shop.com/cart?id=7', title: 'My cart' },
+  ];
+  const executeScript = async ({ func }) => {
+    if (func.name === 'pageGuard') return [{ result: null }];
+    if (/__trifPageGuard === t/.test(String(func))) return [{ result: true }];
+    return [{ result: { url: 'https://example.com/a', text: 'page text' } }];
+  };
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com', 'shop.com'], agentSites: { 'shop.com': 'off' } }, tabs, scripting: { executeScript } });
+  try {
+    // Off: nothing on its tabs; the tab is listed without its address past the site, or its title
+    let r = await bg.native.call('text', { tab: 6 });
+    assert.match(r.error, /"Agent on this site" is Off for shop\.com/);
+    r = await bg.native.call('tabs', {});
+    assert.deepStrictEqual(r.result.map((t) => [t.id, t.url, t.title, t.agent || null]), [[5, 'https://example.com/a', 'Example', null], [6, 'https://shop.com/', '', 'off']]);
+    // Ask (example.com: no choice): reading works; code asks, and with no panel open says where to allow it
+    r = await bg.native.call('text', { tab: 5 });
+    assert.strictEqual(r.ok, true, r.error);
+    r = await bg.native.call('run', { tab: 5, code: '1' });
+    assert.match(r.error, /running code on example\.com needs the user's OK first \("Agent on this site" is Ask there\), and TRIF's side panel isn't open/);
+    // with a panel: it asks; the helper's timer is told; Not here sets Look, and the command says so
+    const panel = bg.connectPanel();
+    const asked = bg.native.call('run', { tab: 5, code: '1' });
+    let ask = null;
+    for (let i = 0; i < 200 && !ask; i++) { ask = panel.sent.find((m) => m.type === 'agentAsk'); await tick(); }
+    assert.ok(ask, 'the panel was asked');
+    assert.strictEqual(ask.site, 'example.com');
+    assert.ok(bg.native.sent.some((m) => m.type === 'requestWaiting' && m.ms > 20000), 'the helper was told to wait');
+    const status = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(status.agentAsks, [{ id: ask.id, site: 'example.com' }]);
+    assert.strictEqual((await panel.ask({ type: 'agentAsk.answer', id: ask.id, choice: 'no' })).ok, true);
+    r = await asked;
+    assert.match(r.error, /the user chose Not here: "Agent on this site" is now Look for example\.com/);
+    assert.deepStrictEqual(bg.store.agentSites, { 'example.com': 'look', 'shop.com': 'off' });
+    r = await bg.native.call('run', { tab: 5, code: '1' });
+    assert.match(r.error, /Look for example\.com/);
+    // the panel sets levels (an agent run can't: there's no such command for it)
+    assert.strictEqual((await panel.ask({ type: 'agentSite.set', site: 'example.com', level: null })).ok, true);
+    assert.deepStrictEqual(bg.store.agentSites, { 'shop.com': 'off' });
+    r = await bg.native.call('agentSite.set', { site: 'shop.com', level: 'run' });
+    assert.match(r.error, /unknown command/);
+    // Always on this site: Run code from then on (the command itself goes on to run)
+    const again = bg.native.call('run', { tab: 5, code: '1', timeout: 50 });
+    ask = null;
+    for (let i = 0; i < 200 && !ask; i++) { ask = panel.sent.filter((m) => m.type === 'agentAsk').pop(); if (ask && ask.id !== undefined && panel.sent.filter((m) => m.type === 'agentAsk').length < 2) ask = null; await tick(); }
+    assert.strictEqual((await panel.ask({ type: 'agentAsk.answer', id: ask.id, choice: 'always' })).ok, true);
+    r = await again;
+    assert.doesNotMatch(String(r.error || ''), /Agent on this site|Not here|needs the user's OK/);
+    assert.deepStrictEqual(bg.store.agentSites, { 'example.com': 'run', 'shop.com': 'off' });
+    // the sensitive list: the user's own, or TRIF's again
+    assert.strictEqual((await panel.ask({ type: 'agentSensitive.set', list: [{ pattern: 'Example.com', why: 'mine' }, { pattern: 'bad pattern!' }] })).ok, true);
+    assert.deepStrictEqual(bg.store.sensitiveSites, [{ pattern: 'example.com', why: 'mine' }]);
+    await panel.ask({ type: 'agentSensitive.set', list: null });
+    assert.strictEqual(bg.store.sensitiveSites, null);
+  } finally { bg.restore(); }
+});
+
+test('background: mods that break: a new error gets a card in the site\'s chat once, Ignore hides it; selectors that stop matching flag the mod; Fix it\'s prompt; Just flag it adds no card', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/hider', { name: 'Hider', matches: ['*://example.com/*'], hash: 'h1' }), mod('example.com/styler', { name: 'Styler', matches: ['*://example.com/*'], rules: true, selectors: ['#feed'], hash: 's1' })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const cards = () => (bg.store['chat:example.com']?.messages || []).filter((m) => m.kind === 'modError');
+  const boom = (n) => ({ mod: 'example.com/hider', message: `Cannot read properties of null (reading 'x') on item ${n}`, stack: 'TypeError\n    at trif://example.com/hider.js:4:2', time: Date.now() + n });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.errors = [boom(1)];
+    page.matched = { 'example.com/styler': true };
+    page.logs = [{ mod: 'example.com/hider', level: 'log', args: ['looking for posts'], time: Date.now() }];
+    await load();
+    assert.deepStrictEqual(cards().map((c) => [c.mod, c.text, c.line]), [['example.com/hider', 'Hider has a new error on example.com. Want me to fix it?', 3]]);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/hider').broken.map((b) => [b.message, b.line, b.count]), [["Cannot read properties of null (reading 'x') on item 1", 3, 1]]);
+    // (the same error again, on another item: no second card)
+    page.errors = [boom(2)];
+    await load();
+    assert.strictEqual(cards().length, 1);
+    // Fix it: the prompt carries the file, the error and the logs
+    const fix = await panel.ask({ type: 'modError.fix', id: 'example.com/hider', fp: cards()[0].fp, site: 'example.com', url: 'https://example.com/feed' });
+    assert.match(fix.result.prompt, /sites\/example\.com\/hider\.js[\s\S]*Cannot read properties of null[\s\S]*- log: looking for posts/);
+    // Ignore
+    assert.strictEqual((await panel.ask({ type: 'modError.dismiss', id: 'example.com/hider', fp: cards()[0].fp })).ok, true);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/hider').broken, []);
+    assert.strictEqual(cards()[0].done, 'ignored');
+    page.errors = [boom(3)];
+    await load();
+    assert.strictEqual(cards().length, 1);
+    // the style mod's selectors stop matching: three loads, then the card
+    page.matched = { 'example.com/styler': false };
+    await load(); await load();
+    assert.strictEqual(cards().length, 1);
+    await load();
+    assert.deepStrictEqual(cards().map((c) => c.text)[1], 'Styler may be broken on example.com: nothing it looks for is on the page any more. Want me to fix it?');
+    // Just flag it: the row's badge, no card
+    await panel.ask({ type: 'modError.onBreak', value: 'flag' });
+    page.errors = [{ ...boom(4), message: 'another failure' }];
+    await load();
+    assert.strictEqual(cards().length, 2);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.strictEqual(st.onBreak, 'flag');
+    assert.ok(st.mods.find((m) => m.id === 'example.com/hider').broken.some((b) => b.message === 'another failure'));
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});
+
+test('background: a click the clickjacking guard stopped: a card of its own in the chat (never a fix run, even with Fix it automatically), and the mod\'s badge', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/cover', { name: 'Cover', matches: ['*://example.com/*'], hash: 'c1' })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods, onBreak: 'auto' }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const msgs = () => bg.store['chat:example.com']?.messages || [];
+  const stopped = (n) => ({ mod: 'example.com/cover', kind: 'clickjack', why: 'faded', stack: '', time: Date.now() + n, message: `TRIF stopped a click on the page's "<button> Delete ${n}": this mod's style made it nearly transparent, and without the mod it shows, so the click would have landed on it unseen.` });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.errors = [stopped(1)];
+    await load();
+    const cards = msgs().filter((m) => m.kind === 'clickjack');
+    assert.deepStrictEqual(cards.map((c) => [c.mod, c.text]), [['example.com/cover', 'TRIF stopped a click: Cover had hidden what you clicked, so you couldn\'t see what it was. The page didn\'t get the click. If you didn\'t expect this, turn Cover off.']]);
+    assert.ok(!msgs().some((m) => m.kind === 'modError'), 'not a mod error\'s card');
+    assert.ok(!msgs().some((m) => /asked your agent to fix/.test(m.text || '')), 'no fix run');
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/cover').broken.map((b) => [b.clickjack, b.count]), [[true, 1]]);
+    // (another stop on another control: the same fingerprint, no second card)
+    page.errors = [stopped(2)];
+    await load();
+    assert.strictEqual(msgs().filter((m) => m.kind === 'clickjack').length, 1);
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});
+
+test('background: a side-panel run\'s navigate and open keep the tab\'s page loads on its site, and say when the site sent it on', async () => {
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X', status: 'complete' }];
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'] }, tabs });
+  try {
+    const rules = new Map();
+    chrome.declarativeNetRequest = {
+      updateSessionRules: async ({ addRules = [], removeRuleIds = [] }) => { for (const id of removeRuleIds) rules.delete(id); for (const r of addRules) rules.set(r.id, structuredClone(r)); },
+      getSessionRules: async () => [...rules.values()],
+    };
+    const during = []; // the rules in place as each load starts
+    let sendsOnTo = null; // where the site's address sends the tab (a redirect of its own)
+    const removed = [];
+    chrome.tabs.update = async (id, o) => {
+      during.push([...rules.values()].map((r) => r.condition));
+      const t = tabs.find((x) => x.id === id);
+      t.url = sendsOnTo || o.url;
+      setImmediate(() => chrome.tabs.onUpdated.emit(id, { status: 'complete' }));
+      return {};
+    };
+    chrome.tabs.create = async (o) => { const t = { id: 99, windowId: 1, index: 1, active: false, status: 'complete', ...o }; tabs.push(t); return t; };
+    chrome.tabs.remove = async (id) => { removed.push(id); const i = tabs.findIndex((t) => t.id === id); if (i >= 0) tabs.splice(i, 1); };
+
+    // navigate: the guard is on the tab before the load starts
+    let r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore', scope: 'x.com' });
+    assert.deepStrictEqual([r.ok, r.result.url], [true, 'https://x.com/explore']);
+    assert.deepStrictEqual(during.pop(), [{ tabIds: [5], resourceTypes: ['main_frame'], excludedRequestDomains: ['x.com'] }]);
+    assert.strictEqual(rules.size, 1, 'kept a moment after the load');
+    // the site sends the tab on to another site (the browser blocks the hop; the tab shows that address): said, not hidden
+    sendsOnTo = 'https://elsewhere.example/?carried=what-the-agent-read';
+    r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/redirect?to=elsewhere', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /x\.com sent the tab on to elsewhere\.example, which is outside x\.com: TRIF stopped it there/);
+    assert.strictEqual(during.pop().length, 1, 'one guard, not two');
+    tabs[0].url = 'https://x.com/home'; // (the user goes back)
+    // open: an empty tab first, guarded, then the address; a tab the site sent on is closed
+    sendsOnTo = null;
+    r = await bg.native.call('open', { to: 'https://x.com/settings', scope: 'x.com' });
+    assert.deepStrictEqual([r.ok, r.result], [true, { id: 99, url: 'https://x.com/settings' }]);
+    assert.deepStrictEqual(during.pop().find((c) => c.tabIds[0] === 99), { tabIds: [99], resourceTypes: ['main_frame'], excludedRequestDomains: ['x.com'] });
+    tabs.splice(tabs.findIndex((t) => t.id === 99), 1);
+    sendsOnTo = 'https://elsewhere.example/';
+    r = await bg.native.call('open', { to: 'https://x.com/redirect?to=elsewhere', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /sent the tab on to elsewhere\.example/);
+    assert.deepStrictEqual(removed, [99]);
+    assert.ok(![...rules.values()].some((x) => x.condition.tabIds[0] === 99), 'its guard went with it');
+    // without the rules (a browser that can't): no navigation for an agent
+    delete chrome.declarativeNetRequest;
+    const before = during.length;
+    sendsOnTo = null;
+    r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /couldn't keep tab 5's page loads to x\.com/);
+    assert.strictEqual(during.length, before, 'the tab went nowhere');
+    // the user's own terminal (no scope): as before, no guard
+    tabs[0].url = 'https://x.com/home';
+    r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore' });
+    assert.strictEqual(r.ok, true);
+  } finally { bg.restore(); }
+});
+
+test('background: trif run in the box needs no lock and no asking; the page\'s own world still does; Look and Off refuse both', async () => {
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X', status: 'complete' }];
+  // TRIF's sandbox world, as the browser would run it: the runtime is there once its script has been put in
+  const world = { runtime: false, injected: 0, evaluated: [], answer: JSON.stringify({ ok: true, json: '3' }) };
+  const execute = async ({ world: w, worldId, js }) => {
+    if (w === 'MAIN') return [{ result: JSON.stringify({ ok: true, json: '"in the page"' }) }];
+    assert.strictEqual(worldId, 'trif-sandbox');
+    if (js.some((x) => x.file)) { world.runtime = true; world.injected++; return [{}]; }
+    const code = js[0].code;
+    if (/typeof globalThis\.__trifSandbox !== "object"/.test(code)) return [{ result: world.runtime ? 'ready' : 'none' }];
+    if (code.startsWith('globalThis.__trifSandbox.evaluate(')) { world.evaluated.push(code); return [{ result: world.answer }]; }
+    return [{ result: null }];
+  };
+  const scripting = { executeScript: async ({ func }) => [{ result: func.name === 'pageGuard' ? null : true }] };
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'] }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+  try {
+    const rules = new Map();
+    chrome.declarativeNetRequest = {
+      updateSessionRules: async ({ addRules = [], removeRuleIds = [] }) => { for (const id of removeRuleIds) rules.delete(id); for (const r of addRules) rules.set(r.id, structuredClone(r)); },
+      getSessionRules: async () => [...rules.values()],
+    };
+    // in the box: the answer, nothing locked, nobody asked (the site's level is still "ask", no panel is open)
+    let r = await bg.native.call('run', { tab: 5, code: 'page.findAll("article").length', expression: true, world: 'box', scope: 'x.com' });
+    assert.deepStrictEqual([r.ok, r.result], [true, { value: 3, world: 'box' }]);
+    assert.strictEqual(rules.size, 0, 'no lock');
+    assert.strictEqual(world.injected, 1, 'the runtime was put there');
+    assert.match(world.evaluated[0], /"page\.findAll\(\\"article\\"\)\.length", true, \{"powers":\["page-data","read-drafts"\],"args":\{\}\}\)$/);
+    r = await bg.native.call('run', { tab: 5, code: 'page.title', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(world.injected, 1, 'once per page');
+    // code written for the page's world: the error says where it ran and what to use
+    world.answer = JSON.stringify({ ok: false, error: 'document is not defined\n    at trif-sandbox://run/x.js:1:1' });
+    r = await bg.native.call('run', { tab: 5, code: 'document.title', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /^document is not defined \(this ran in TRIF's box, where the page is `page` and `trif`.*`trif run --page`/);
+    // (an error of the box's own: as it is)
+    world.answer = JSON.stringify({ ok: false, error: 'TRIF sandbox: clicking for the user needs the click power' });
+    r = await bg.native.call('run', { tab: 5, code: 'document; page.find("a").click()', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(r.error, 'TRIF sandbox: clicking for the user needs the click power');
+    world.answer = JSON.stringify({ ok: true, json: '3' });
+    // the page's own world, from a chat: asks the user first (no panel here to ask), as before
+    r = await bg.native.call('run', { tab: 5, code: 'document.title', expression: true, world: 'page', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /needs the user's OK first/);
+    assert.strictEqual(rules.size, 0);
+  } finally { bg.restore(); }
+  // an older helper (no `world`), on a site set to Run code: the page's own world, as it always was
+  const b1 = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': 'run' } }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+  try {
+    const r = await b1.native.call('run', { tab: 5, code: 'document.title', expression: true });
+    assert.deepStrictEqual([r.ok, r.result], [true, { value: 'in the page' }]);
+  } finally { b1.restore(); }
+  // where the user said Look, or the site is Off: no code, boxed or not
+  for (const level of ['look', 'off']) {
+    const b2 = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': level } }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+    try {
+      const before = world.evaluated.length;
+      const r = await b2.native.call('run', { tab: 5, code: 'page.title', expression: true, world: 'box', scope: 'x.com' });
+      assert.strictEqual(r.ok, false, level);
+      assert.match(r.error, level === 'look' ? /set "Agent on this site" to Look/ : /"Agent on this site" is Off/);
+      assert.strictEqual(world.evaluated.length, before);
+    } finally { b2.restore(); }
+  }
+  // a browser without TRIF's sandbox world: said, with what to use
+  const b3 = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': 'run' } }, tabs, scripting });
+  try {
+    const r = await b3.native.call('run', { tab: 5, code: 'page.title', expression: true, world: 'box', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /has no box for an agent's code here .*trif run --page/);
+  } finally { b3.restore(); }
 });

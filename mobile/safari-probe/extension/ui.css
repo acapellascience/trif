@@ -1,0 +1,15 @@
+:root { color-scheme: light dark; }
+body { font: 16px/1.4 -apple-system, system-ui, sans-serif; margin: 0; padding: 14px; }
+body.popup { min-width: 300px; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 18px 0 6px; }
+h3 { font-size: 15px; margin: 14px 0 4px; }
+.dim { opacity: .7; font-size: 14px; margin: 4px 0 10px; }
+button { display: block; width: 100%; font: inherit; text-align: left; margin: 6px 0; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; }
+button.primary { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+button.quiet { border-color: transparent; opacity: .7; }
+.check { border-top: 1px solid rgba(127,127,127,.25); padding: 8px 0; }
+.check b { display: inline-block; min-width: 46px; }
+.yes b { color: #2e9e52; } .no b { color: #e5484d; } .error b { color: #e5484d; } .some b { color: #c98a00; } .info b { opacity: .6; }
+.detail { font: 12px/1.35 ui-monospace, Menlo, monospace; opacity: .8; white-space: pre-wrap; word-break: break-word; margin-top: 3px; }
+textarea { width: 100%; box-sizing: border-box; font: 12px ui-monospace, Menlo, monospace; }

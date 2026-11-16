@@ -35,7 +35,7 @@ function registerNativeHost(t, file, opts = {}) {
   for (const [i, key] of keys.entries()) {
     if (i > 0) {
       const cur = registry.getDefault(key, opts).value;
-      if (cur && isTrifManifest(cur, t.nativeDir) && fs.existsSync(cur)) continue;
+      if (cur && isTrifManifest(cur, t.nativeDirs[0]) && fs.existsSync(cur)) continue;
     }
     const error = registry.setDefault(key, file, opts);
     if (error) return { keys: done, error: `couldn't write the registry key ${key}: ${error}` };
@@ -62,7 +62,7 @@ function checkNativeHost(t, file, opts = {}) {
     if (i === 0) {
       if (!value) return `the registry key ${key} is missing, so ${t.label} can't find the helper`;
       if (value.toLowerCase() !== String(file).toLowerCase()) return `the registry key ${key} points at ${value}, not ${file}`;
-    } else if (!value || !isTrifManifest(value, t.nativeDir)) {
+    } else if (!value || !isTrifManifest(value, t.nativeDirs[0])) {
       return `the registry key ${key} ${value ? `points at ${value}` : 'is missing'} (${t.label} may read that one too)`;
     }
   }

@@ -1,7 +1,20 @@
 'use strict';
-// Mods a new workspace starts with, copied from the examples by `trif setup`, each switched on or off
-// as listed, and the sites TRIF starts on for; and keeping those mods up to date. $TRIF_HOME/
-// preinstalled.json = {offered: [ids], startOff: [ids], sitesOn: [sites], shipped: {id: record}}:
+// Tim's mods: the mods TRIF ships, copied from the examples into a workspace site by site, only for the
+// sites the user chose (the setup page's checklist, Settings in the panel, the "Add Tim's mods for <site>"
+// link on a site's panel, or `trif setup --examples [sites]`: nothing of Tim's is on disk before that),
+// each switched on or off as listed, and turning TRIF on for the sites in SITES_ON among them; and keeping
+// those mods up to date. $TRIF_HOME/preinstalled.json = {starter: {site: choice}, skipped: [ids],
+// offered: [ids], startOff: [ids], sitesOn: [sites], shipped: {id: record}}:
+//  - starter: the user's choice for each site Tim has mods for (its scope: google.com for the folder
+//    www.google.com), 'added' or 'none' (absent: not chosen, like a site a later TRIF version brings mods
+//    for, which Settings offers). An added site gets its mods, and every new one and every update a later
+//    version brings for it; any other site gets nothing. A site with ids in `offered` counts as added: a
+//    workspace set up before the choice existed (setup copied them all) keeps getting them as before;
+//  - skipped: mods of an added site the user chose not to add (shipped.install with `ids`; the setup page
+//    adds whole sites): never copied (no setup or update brings them), offered in Settings until added;
+//  - readded: {id: stamp}, mods the user deleted and then got back from Settings ("Add the rest") or the
+//    site's link: a fresh copy, which each browser switches on or off as listed once per stamp (a deleted
+//    mod stays gone otherwise: no setup or update brings it back);
 //  - offered: ids already offered, so one the user deleted doesn't come back with the next setup (and an
 //    existing file, the user's own version, is never overwritten);
 //  - startOff: ids setup copied that start off. The helper sends those mods with `startOff: true`, and
@@ -29,6 +42,9 @@
 // A copy that is still exactly what was shipped is replaced with the new version silently. Workspaces set
 // up before the record existed have none: there, a copy matching any version TRIF ever shipped
 // (examples/shipped-history.json, from git) counts as unchanged.
+// The new version is this TRIF's (examples/sites) or, between releases, the mods feed's when newer
+// (modsfeed.js, signed like TRIF's updates): the same rules, except that the feed's replaces an unchanged
+// copy only with automatic updates on (else it's offered), and never with an older version than it brought.
 //
 // Retired mods. A shipped mod can be folded into another one (RETIRED: AI Banisher took in Hide AI Mode
 // and Gemini Promo, Just Results took in Hide Sponsored Results). It's no longer offered to anyone, and
@@ -44,35 +60,72 @@ const path = require('path');
 const { parseHeader, sha1, isShippedSource } = require('./mods');
 const trash = require('./trash');
 const { envVar } = require('./env');
+const { scopeFor } = require('./scope');
 
-// on: switched on from the start; the rest wait for the user to switch them on.
+// on: switched on from the start; since 0.3 none is: every one waits for the user to switch it on (a copy already
+// on someone's computer keeps its switch).
 const PREINSTALLED = [
-  { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
-  { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
-  { id: 'x.com/plain-x', on: true },
-  { id: 'x.com/punk-fonts', on: false },
+  { id: 'www.google.com/hide-ai-in-results', on: false }, // AI Banisher
+  { id: 'www.google.com/hide-extra-sections', on: false }, // Just Results
+  { id: 'x.com/detox-timeline', on: false }, // (x.com/plain-x until 0.2.3: RETIRED, below)
   { id: 'x.com/rainbow-rave', on: false },
-  { id: 'amazon.com/simple-home', on: true },
-  { id: 'amazon.com/simple-shopping', on: true },
+  { id: 'amazon.com/simple-home', on: false },
+  { id: 'amazon.com/simple-shopping', on: false },
   { id: 'www.instagram.com/desaturate', on: false },
-  { id: 'www.instagram.com/following-only-feed', on: true },
-  { id: 'www.instagram.com/hide-ai-content', on: true },
-  { id: 'www.instagram.com/hide-reposts', on: true },
+  { id: 'www.instagram.com/following-only-feed', on: false },
+  { id: 'www.instagram.com/hide-ai-content', on: false },
+  { id: 'www.instagram.com/hide-reposts', on: false },
   // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
   // isn't in their `offered` list yet.
   { id: 'www.google.com/dvd-logo', on: false },
+  // Added in 0.2.3 (off, like any shipped mod an update brings).
+  { id: 'x.com/follow-status', on: false },
+  { id: 'x.com/space-shooter', on: false }, // X-Flyer
+  { id: 'www.instagram.com/three-column-feed', on: false },
+  // Added after 0.2.4: two for TRIF's own home page, timsrobot.com, whose demo's mods are the site's own
+  // (site/demo/mods/): these two drive that demo (skip its game to sandbox mode with every mod listed; R
+  // switches a random set on). Off, and TRIF starts off on timsrobot.com (not in SITES_ON).
+  { id: 'timsrobot.com/skip-to-sandbox', on: false },
+  { id: 'timsrobot.com/random-mods', on: false }, // R for Random
+  // Added in 0.2.5 (off): people's own colours, read from codes in their profile pictures (Profile Styler on
+  // profiles, Post Styler on posts and people cards), and Style Encoder to stamp yours into your picture.
+  { id: 'x.com/profile-styler', on: false },
+  { id: 'x.com/tune-composer', on: false },
+  { id: 'x.com/post-styler', on: false },
+  { id: 'x.com/style-encoder', on: false },
+  // Added in 0.3.0 (off): Oppish, a boxed mod for Google. (0.3.0 also ships twelve of the mods above as style or
+  // boxed mods: an unchanged copy becomes the new one with the update, an edited one is offered it.)
+  { id: 'www.google.com/oppish', on: false },
+  // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)
 ];
+
+// The order the side panel lists a site's shipped mods in until the user drags them into their own (display
+// only: mods run in their usual order). By site, as the extension's scopeFor gives it; the helper sends it
+// with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
+// (0.2.3: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
+const DEFAULT_ORDER = {
+  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder', 'x.com/space-shooter', 'x.com/rainbow-rave'],
+};
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
 // (0.2.0: AI Banisher and Just Results). retireShippedMods, below, handles the copies users have.
 const RETIRED = [
   { id: 'www.google.com/hide-ai-mode', into: 'www.google.com/hide-ai-in-results', since: '2' },
   { id: 'www.google.com/hide-sponsored', into: 'www.google.com/hide-extra-sections', since: '2' },
+  // 0.2.3: a rename (no "X" in a shipped mod's file name). Detox Timeline arrives like any new shipped mod,
+  // then the unchanged plain-x goes to the trash and each browser switches Detox Timeline on if plain-x
+  // was (absorbs); an edited plain-x stays, as the user's own.
+  { id: 'x.com/plain-x', into: 'x.com/detox-timeline', since: '1', renamed: true },
 ];
 
 // TRIF is off on every site until the user turns it on there; it starts on for these, the sites the
 // mods above are for.
 const SITES_ON = ['google.com', 'x.com', 'amazon.com', 'instagram.com'];
+
+// What the setup page and Settings call each site Tim has mods for (any other: the site itself).
+const SITE_NAMES = { 'google.com': 'Google', 'x.com': 'X', 'amazon.com': 'Amazon', 'instagram.com': 'Instagram' };
+// A few words after a site's name there, when the name alone doesn't say what its mods are for.
+const SITE_NOTES = { 'timsrobot.com': 'for TRIF’s own demo' };
 
 const SHIPPED_DIR = '.shipped';
 
@@ -87,12 +140,28 @@ function load(home) {
   if (s && typeof s === 'object' && !Array.isArray(s)) {
     for (const [id, r] of Object.entries(s)) if (r && typeof r === 'object' && !Array.isArray(r)) shipped[id] = r;
   }
-  return { offered: list(v && v.offered), startOff: list(v && v.startOff), sitesOn: list(v && v.sitesOn), shipped };
+  const offered = list(v && v.offered);
+  // The user's choice by site; a site with mods offered was added (by a setup before there was a choice, too).
+  const starter = {};
+  const c = v && v.starter;
+  if (c && typeof c === 'object' && !Array.isArray(c)) {
+    for (const [site, choice] of Object.entries(c)) if (choice === 'added' || choice === 'none') starter[site] = choice;
+  } else if (c === 'added' || c === 'none') {
+    // (one choice for every site: what development builds between 0.2.4 and 0.2.5 recorded)
+    for (const site of starterSites()) starter[site] = c;
+  }
+  for (const id of offered) { const site = siteOf(id); if (site) starter[site] = 'added'; }
+  const skipped = list(v && v.skipped).filter((id) => !offered.includes(id));
+  const readded = {};
+  if (v && v.readded && typeof v.readded === 'object' && !Array.isArray(v.readded)) {
+    for (const [id, stamp] of Object.entries(v.readded)) if (typeof stamp === 'string') readded[id] = stamp;
+  }
+  return { starter, skipped, readded, offered, startOff: list(v && v.startOff), sitesOn: list(v && v.sitesOn), shipped };
 }
 
 // Written whole and renamed into place: setup and the helpers (another browser's too) all write it.
 function save(home, state) {
-  const out = { offered: state.offered, startOff: state.startOff, sitesOn: state.sitesOn };
+  const out = { ...(Object.keys(state.starter || {}).length ? { starter: state.starter } : {}), ...(state.skipped && state.skipped.length ? { skipped: state.skipped } : {}), ...(Object.keys(state.readded || {}).length ? { readded: state.readded } : {}), offered: state.offered, startOff: state.startOff, sitesOn: state.sitesOn };
   if (Object.keys(state.shipped || {}).length) out.shipped = state.shipped;
   const tmp = `${file(home)}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(out, null, 2) + '\n');
@@ -103,6 +172,8 @@ function save(home, state) {
 
 const split = (id) => { const i = id.indexOf('/'); return [id.slice(0, i), id.slice(i + 1)]; };
 const modFile = (modsDir, id) => { const [site, mod] = split(id); return path.join(modsDir, site, `${mod}.js`); };
+/** The site a shipped mod is for, as the user chooses it: its folder's scope (www.google.com/x -> google.com). */
+const siteOf = (id) => scopeFor(split(String(id))[0]);
 /** What was shipped before: the version the user's copy is based on (the merge base). */
 const baseFile = (home, id) => { const [site, mod] = split(id); return path.join(home, SHIPPED_DIR, site, `${mod}.js`); };
 /** The new version waiting for the user's choice. */
@@ -147,25 +218,68 @@ function loadHistory(examplesDir) {
 
 const shippedBefore = (history, id, hash) => Array.isArray(history[id]) && history[id].includes(hash);
 
+/**
+ * The ids of mods that say they're TRIF's (`@source webmods`) but aren't a version TRIF shipped: someone's
+ * edit of one, or a mod that only says so. A header is the author's to write (an agent's, on a page's say-so),
+ * so the panel's "Tim's mod" goes by the file: {id: true}. `text`: a style mod's file. With `home`, a version
+ * the mods feed brought there counts as shipped.
+ */
+function changedShipped(examplesDir, mods, home = null) {
+  const history = loadHistory(examplesDir);
+  // (and the versions the mods feed brought, each checked against its signature: modsfeed.js)
+  const fed = home ? (() => { try { return require('./modsfeed').delivered(home); } catch { return {}; } })() : {};
+  const out = {};
+  for (const m of mods || []) {
+    if (!m || !isShippedSource(m.source)) continue;
+    const now = sha1(Buffer.from(String(m.text ?? m.code ?? ''), 'utf8'));
+    const current = readShipped(examplesDir, m.id);
+    if (!(current && current.hash === now) && !shippedBefore(history, m.id, now) && !shippedBefore(fed, m.id, now)) out[m.id] = true;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- setup
 
 /**
- * Copy the PREINSTALLED mods not offered before into modsDir, and offer SITES_ON. Returns
- * {added: [ids copied], on: [those switched on], sites: [sites newly offered]}.
+ * Copy the PREINSTALLED mods not offered before into modsDir, for the sites the user added (`add`: sites
+ * to add now, or 'all'; see starterSites), and offer the SITES_ON among those sites. `restore`: sites whose
+ * offered mods the user deleted come back too, fresh (readded). Returns {added: [ids copied], on: [those
+ * switched on], sites: [sites newly offered]}.
  */
-function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn = SITES_ON) {
+function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn = SITES_ON, { add = null, restore = [] } = {}) {
   const state = load(home);
   const history = loadHistory(examplesDir);
   const added = [];
   const on = [];
   let changed = false;
+  for (const site of add === 'all' ? starterSites(list, sitesOn) : add || []) {
+    if (state.starter[site] !== 'added') { state.starter[site] = 'added'; changed = true; }
+  }
   for (const { id, on: startOn } of list) {
-    if (state.offered.includes(id)) continue;
+    if (state.starter[siteOf(id)] !== 'added' || state.skipped.includes(id)) continue;
+    if (state.offered.includes(id)) {
+      // Deleted, and the user asked for it back: a fresh copy, switched as listed (each browser, once).
+      const dest = modFile(modsDir, id);
+      if (!restore.includes(siteOf(id)) || fs.existsSync(dest) || !fs.existsSync(modFile(examplesDir, id))) continue;
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      // (its base first: the helper judges a new shipped mod against it, held.js)
+      writeAtomic(baseFile(home, id), fs.readFileSync(modFile(examplesDir, id)));
+      fs.copyFileSync(modFile(examplesDir, id), dest);
+      added.push(id);
+      if (startOn) on.push(id); else if (!state.startOff.includes(id)) state.startOff.push(id);
+      const rec = state.shipped[id];
+      if (rec && !rec.retired) delete state.shipped[id]; // (updateShippedMods records it afresh; never `own` now)
+      state.readded[id] = new Date().toISOString();
+      changed = true;
+      continue;
+    }
     const src = modFile(examplesDir, id);
     if (!fs.existsSync(src)) continue;
     const dest = modFile(modsDir, id);
     if (!fs.existsSync(dest)) {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
+      // (its base first: the helper judges a new shipped mod against it, held.js)
+      writeAtomic(baseFile(home, id), fs.readFileSync(src));
       fs.copyFileSync(src, dest);
       added.push(id);
       if (startOn) on.push(id); else state.startOff.push(id);
@@ -177,7 +291,7 @@ function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn
     state.offered.push(id);
     changed = true;
   }
-  const sites = sitesOn.filter((s) => !state.sitesOn.includes(s));
+  const sites = sitesOn.filter((s) => state.starter[s] === 'added' && !state.sitesOn.includes(s));
   if (sites.length) { state.sitesOn.push(...sites); changed = true; }
   if (changed) save(home, state);
   return { added, on, sites };
@@ -185,20 +299,39 @@ function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn
 
 /**
  * Bring the shipped mods the user has up to date (see the top of this file). Run by every setup, after
- * preinstallMods. Returns {updated: [{id, version, from}], waiting: [{id, version}]}: copies replaced with
- * the new version, and edited copies with a new version waiting for the user (this time or before).
+ * preinstallMods, and by the helper after it checked the mods feed (modsfeed.js apply). Returns {updated:
+ * [{id, version, from}], waiting: [{id, version}]}: copies replaced with the new version, and edited copies
+ * with a new version waiting for the user (this time or before).
+ * The new version is the examples' or, when newer, the mods feed's (`feed`: {id: {code, hash, version}},
+ * by default what modsfeed.js kept, checked again). A version from the feed replaces an unchanged copy
+ * only with automatic updates on (`autoFeed`, by default config.json "autoUpdate", as for TRIF's own
+ * updates); without, it's offered like one for a changed copy.
  */
-function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
+function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED, { feed, autoFeed } = {}) {
   const state = load(home);
   const history = loadHistory(examplesDir);
   const updated = [];
   const waiting = [];
   let changed = false;
+  const fromFeed = feed !== undefined ? feed || {} : (() => { try { return require('./modsfeed').cached(home, { examplesDir, list }); } catch { return {}; } })();
+  let auto = autoFeed;
+  const autoOn = () => {
+    if (auto === undefined) { try { auto = require('./paths').readConfig(home).config.autoUpdate === true; } catch { auto = false; } }
+    return auto;
+  };
+  // (versions only the feed brought: one the user has isn't replaced by an older one, below)
+  const fed = Object.keys(fromFeed).length || fs.existsSync(path.join(home, '.mods-feed')) ? (() => { try { return require('./modsfeed').delivered(home); } catch { return {}; } })() : {};
   for (const { id } of list) {
     if (!state.offered.includes(id)) continue;
-    const shipped = readShipped(examplesDir, id);
+    const bundled = readShipped(examplesDir, id);
+    const f = fromFeed[id];
+    const shipped = f && (!bundled || require('./modsfeed').newer(f.version, bundled.version)) ? { code: f.code, hash: f.hash, version: f.version, feed: true } : bundled;
     const rec = state.shipped[id] || null;
     if (!shipped || (rec && rec.own)) continue;
+    // Never back to an older version than the feed brought the user (an older feed served again, or the
+    // feed's copy gone): a version newer than this one that the user has, or is offered, stays.
+    if (rec && !rec.retired && [rec, rec.pending].some((r) => r && r.version && require('./modsfeed').newer(r.version, shipped.version)
+      && (shipped.feed || (Array.isArray(fed[id]) && fed[id].includes(r.hash))))) continue;
     const mine = readOrNull(modFile(modsDir, id));
     if (!mine) continue; // deleted: it stays gone
     const mineHash = sha1(mine);
@@ -208,21 +341,26 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       // Already the shipped version (just copied, or the user got there). An undo of "Use the new
       // version" stays possible while nothing else changed.
       next = rec && rec.replaced && rec.hash === shipped.hash ? { ...current, replaced: rec.replaced } : current;
+      // (still the version TRIF put in place by itself: keep its stamp, for browsers that haven't seen it)
+      if (rec && rec.auto && rec.hash === shipped.hash) next = { ...next, auto: rec.auto };
       if (!(readOrNull(baseFile(home, id)) || Buffer.alloc(0)).equals(shipped.code)) writeAtomic(baseFile(home, id), shipped.code);
       removeFile(newFile(home, id));
     } else if (rec && rec.hash === shipped.hash) {
       next = current; // the user's changes are on top of this version already (merged, or edited since)
     } else if (rec && rec.declined === shipped.hash) {
       continue; // the user kept theirs over this version
-    } else if (rec && rec.hash ? mineHash === rec.hash : shippedBefore(history, id, mineHash)) {
+    } else if ((rec && rec.hash ? mineHash === rec.hash : shippedBefore(history, id, mineHash)) && !(shipped.feed && !autoOn())) {
       // Unchanged since it was shipped: the new version replaces it (its switch, kept by id, carries over).
-      writeAtomic(modFile(modsDir, id), shipped.code);
+      // (the base first: the helper judges a changed shipped mod against it, held.js)
       writeAtomic(baseFile(home, id), shipped.code);
+      writeAtomic(modFile(modsDir, id), shipped.code);
       removeFile(newFile(home, id));
-      next = current;
+      // (stamped: each browser switches it off, once; autoUpdatedIds)
+      next = { ...current, auto: new Date().toISOString() };
       updated.push({ id, version: shipped.version, from: rec ? rec.version || null : null });
     } else {
-      // Edited: left alone, with the new version kept for the user to use or merge.
+      // Edited (or, from the feed without automatic updates, unchanged): left alone, with the new version
+      // kept for the user to use or merge.
       next = { hash: rec ? rec.hash || null : null, version: rec ? rec.version || null : null, pending: current };
       if (!(readOrNull(newFile(home, id)) || Buffer.alloc(0)).equals(shipped.code)) writeAtomic(newFile(home, id), shipped.code);
       waiting.push({ id, version: shipped.version });
@@ -270,7 +408,8 @@ function retireShippedMods(ws, exDir = examplesDir(), retired = RETIRED) {
   const removed = [];
   const kept = [];
   let changed = false;
-  for (const { id, into, since } of retired) {
+  for (const { id, into, since, renamed } of retired) {
+    const how = renamed ? { renamed: true } : {}; // (setup says "now called", not "now part of")
     const rec = state.shipped[id] || null;
     if (!state.offered.includes(id) || (rec && (rec.own || rec.retired))) continue;
     const target = readShipped(exDir, into);
@@ -285,14 +424,14 @@ function retireShippedMods(ws, exDir = examplesDir(), retired = RETIRED) {
       const unchanged = shippedBefore(history, id, h) || (rec && (h === rec.hash || (rec.pending && h === rec.pending.hash)));
       if (!unchanged) {
         next = { retired: { into, kept: true } };
-        kept.push({ id, into, was, name });
+        kept.push({ id, into, was, name, ...how });
       } else {
         const t = state.shipped[into];
         if (!t || t.own || t.retired || !t.hash || !versionAtLeast(t.version, since) || !fs.existsSync(modFile(ws.modsDir, into))) continue;
         let trashed;
         try { trashed = trash.deleteMod(ws, id).trashed; } catch { continue; } // (not a plain file: left alone)
         next = { retired: { into, trashed: path.basename(trashed) } };
-        removed.push({ id, into, was, name, trashed });
+        removed.push({ id, into, was, name, trashed, ...how });
         // While "Use the new version" of `into` can be undone, the undo brings this back too.
         if (t.replaced) t.replaced = { ...t.replaced, retired: [...(t.replaced.retired || []), { id, rec }] };
       }
@@ -337,7 +476,7 @@ function pendingUpdates(home, mods) {
   for (const m of mods) {
     const rec = shipped[m.id];
     if (!rec || rec.own || rec.retired || !rec.pending) continue;
-    const mine = sha1(m.code);
+    const mine = sha1(m.text ?? m.code); // (the file, not the code TRIF makes of it: a style mod's, or one with a style section)
     if (mine === rec.pending.hash) continue;
     out[m.id] = { version: rec.pending.version || null, from: rec.version || null, modified: mine !== rec.hash };
   }
@@ -499,13 +638,160 @@ function restoreMod(ws, id, opts = {}) {
   return r;
 }
 
+// ---------------------------------------------------------------- Tim's mods, site by site
+
+/** The sites Tim has mods for: the ones TRIF starts on for first (SITES_ON's order), then the rest as listed. */
+function starterSites(list = PREINSTALLED, sitesOn = SITES_ON) {
+  const all = [...new Set(list.map((m) => siteOf(m.id)).filter(Boolean))];
+  return [...sitesOn.filter((s) => all.includes(s)), ...all.filter((s) => !sitesOn.includes(s))];
+}
+
+const siteName = (site) => SITE_NAMES[site] || site;
+
+/**
+ * The sites named on the command line (`trif setup --examples x.com,google.com`): each as its scope, its
+ * folder or its name ("x.com", "www.google.com", "Instagram"). Throws for one Tim has no mods for.
+ */
+function resolveSites(names, list = PREINSTALLED, sitesOn = SITES_ON) {
+  const known = starterSites(list, sitesOn);
+  const out = [];
+  for (const raw of (Array.isArray(names) ? names : String(names || '').split(',')).map((x) => String(x).trim().toLowerCase()).filter(Boolean)) {
+    const site = known.find((s) => s === scopeFor(raw) || siteName(s).toLowerCase() === raw);
+    if (!site) throw new Error(`Tim has no mods for ${raw}: the sites are ${known.join(', ')}`);
+    if (!out.includes(site)) out.push(site);
+  }
+  return out;
+}
+
+/** The user's choice by site, {site: 'added'|'none'}: only sites they chose (or have mods for). */
+function starterChoices(home) { return load(home).starter; }
+
+/**
+ * "Start with none" (the setup page), the sites left unticked there (`only`), or `setup --no-examples`:
+ * recorded as 'none' for each site not chosen yet, so nothing adds them later (the user still can).
+ * Never undoes 'added'. Returns the choices.
+ */
+function chooseNoStarter(home, { only = null, list = PREINSTALLED, sitesOn = SITES_ON } = {}) {
+  const state = load(home);
+  let changed = false;
+  for (const site of only || starterSites(list, sitesOn)) {
+    if (!state.starter[site]) { state.starter[site] = 'none'; changed = true; }
+  }
+  if (changed) save(home, state);
+  return state.starter;
+}
+
+/** The shipped mods named (ids, as PREINSTALLED lists them). Throws for one that isn't. */
+function resolveIds(ids, list = PREINSTALLED) {
+  const known = list.map((m) => m.id);
+  const out = [];
+  for (const id of (Array.isArray(ids) ? ids : []).map((x) => String(x).trim())) {
+    if (!known.includes(id)) throw new Error(`${id || '""'} isn't one of Tim's mods`);
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Add Tim's mods: what setup did for every site before there was a choice (the mods, their update records,
+ * TRIF on for the site if it's in SITES_ON). `sites` (or 'all'): every mod of those sites not on disk, the
+ * ones left out or deleted before too (the setup page, Settings' "Add the rest", a site's link). `ids`: just these mods (the setup page's ticked
+ * ones); for a site not chosen before, its other mods are left out (`skipped`: never copied, offered in
+ * Settings). `othersNone`: every site not chosen yet and not added now is recorded as 'none' (the setup
+ * page's "Add these"). Returns preinstallMods' result.
+ */
+function installStarter(home, modsDir, examplesDir, sites = 'all', { ids = null, othersNone = false, list = PREINSTALLED, sitesOn = SITES_ON } = {}) {
+  const mods = ids ? resolveIds(ids, list) : [];
+  const whole = ids ? [] : sites === 'all' ? starterSites(list, sitesOn) : resolveSites(sites, list, sitesOn);
+  const add = [...new Set([...whole, ...mods.map(siteOf)])];
+  const state = load(home);
+  const before = { ...state.starter };
+  const skipped = new Set(state.skipped);
+  for (const site of whole) for (const { id } of list) if (siteOf(id) === site) skipped.delete(id);
+  for (const id of mods) skipped.delete(id);
+  // A site chosen now for the first time, by its mods: the ones not ticked are left out.
+  for (const site of add) {
+    if (before[site] === 'added' || whole.includes(site)) continue;
+    for (const { id } of list) if (siteOf(id) === site && !mods.includes(id) && !state.offered.includes(id)) skipped.add(id);
+  }
+  if ([...skipped].join() !== state.skipped.join()) { state.skipped = [...skipped]; save(home, state); }
+  const r = preinstallMods(home, modsDir, examplesDir, list, sitesOn, { add, restore: whole });
+  if (othersNone) chooseNoStarter(home, { only: starterSites(list, sitesOn).filter((s) => !add.includes(s)) });
+  updateShippedMods(home, modsDir, examplesDir, list);
+  return r;
+}
+
+// A shipped mod's @name and @description, from the start of its file (X-Flyer is megabytes), by the file's
+// size and time: the helper asks for them with every mods message.
+const headerCache = new Map();
+function exampleHeader(file) {
+  let st;
+  try { st = fs.statSync(file); } catch { return null; }
+  const key = `${st.size}:${st.mtimeMs}`;
+  const hit = headerCache.get(file);
+  if (hit && hit.key === key) return hit.header;
+  let text = '';
+  try {
+    const fd = fs.openSync(file, 'r');
+    try { const buf = Buffer.alloc(Math.min(st.size, 16384)); text = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0)).toString('utf8'); } finally { fs.closeSync(fd); }
+  } catch { return null; }
+  const h = parseHeader(text);
+  const header = { name: h.name || null, description: h.description || '' };
+  headerCache.set(file, { key, header });
+  return header;
+}
+
+/**
+ * What the setup page and Settings show: {chosen (the user chose for some site, or has Tim's mods: the
+ * setup page's step is done), sites: [{site, name, note, choice ('added'|'none'|null), suggested (in SITES_ON:
+ * ticked on the setup page, and TRIF turns on for it), mods: [{id, name, description, on, choice ('added':
+ * on disk, 'deleted': added once and deleted since, 'skipped': left out, null)}]}]}, sites in
+ * starterSites' order, each one's mods in DEFAULT_ORDER's (else as listed). Only mods whose example is there.
+ */
+function starterOffer(home, examplesDir, list = PREINSTALLED, sitesOn = SITES_ON, { modsDir = path.join(home, 'sites') } = {}) {
+  const state = load(home);
+  const choices = state.starter;
+  const sites = [];
+  for (const site of starterSites(list, sitesOn)) {
+    const order = DEFAULT_ORDER[site] || [];
+    const ids = list.map((m) => m.id).filter((id) => siteOf(id) === site)
+      .sort((a, b) => (order.includes(a) ? order.indexOf(a) : order.length) - (order.includes(b) ? order.indexOf(b) : order.length));
+    const mods = [];
+    for (const id of ids) {
+      const h = exampleHeader(modFile(examplesDir, id));
+      // added: on disk; deleted: offered once, gone since (Settings offers it back); skipped: left out.
+      const choice = state.offered.includes(id) ? (fs.existsSync(modFile(modsDir, id)) ? 'added' : 'deleted') : state.skipped.includes(id) ? 'skipped' : null;
+      if (h) mods.push({ id, name: h.name || id.split('/')[1], description: h.description, on: !!list.find((m) => m.id === id).on, choice });
+    }
+    if (mods.length) sites.push({ site, name: siteName(site), note: SITE_NOTES[site] || '', choice: choices[site] || null, suggested: sitesOn.includes(site), mods });
+  }
+  return { chosen: sites.some((s) => s.choice), sites };
+}
+
 /** The ids the extension should switch off when it first sees them. */
 function startOffIds(home) { return new Set(load(home).startOff); }
+
+/** The mods added again after being deleted: {id: stamp}; each browser switches each as listed once per stamp. */
+function readdedIds(home) { return load(home).readded; }
+
+/**
+ * Shipped mods TRIF replaced with a new version by itself (the user hadn't changed theirs): id -> stamp,
+ * while the copy is still that version. Sent with the mods as `autoUpdated`: each browser switches it off
+ * once, as it came from outside the chat (extension/lib.js applyNewMods). Not one the user chose ("Use the
+ * new version"): they asked for that one.
+ */
+function autoUpdatedIds(home) {
+  const out = {};
+  for (const [id, r] of Object.entries(load(home).shipped)) if (typeof r.auto === 'string') out[id] = r.auto;
+  return out;
+}
 
 /** The sites each browser should turn TRIF on for when it first sees them. */
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
-  PREINSTALLED, RETIRED, SITES_ON, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
+  changedShipped,
+  PREINSTALLED, RETIRED, SITES_ON, SITE_NAMES, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
+  starterSites, siteOf, siteName, resolveSites, resolveIds, readdedIds, autoUpdatedIds, starterChoices, chooseNoStarter, installStarter, starterOffer, examplesDir,
   startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

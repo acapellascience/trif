@@ -9,8 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 const { buildMod, isIgnoredName, readModFile } = require('./mods');
-const { outOfScope } = require('./scope');
-const { badName } = require('./pathcheck');
+const { outOfScope, scopeOf } = require('./scope');
+const { badName, samePath } = require('./pathcheck');
 
 const TRASH = 'trash';
 const TRASH_DAYS = 30;
@@ -36,8 +36,13 @@ const timeOf = (stamp) => {
   return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6], +m[7]) : NaN;
 };
 
-function checkScope(site, file, scope, verb) {
+function checkScope(site, file, scope, verb, splits = []) {
   if (!scope) return;
+  // (a mod in another site's folder isn't this chat's, even when its @match is: sites/mail.google.com/ to a
+  // google.com chat, where mail.google.com is a site of its own, scope.js scopeOf)
+  if (scopeOf(site, [...splits, scope]) !== scope) {
+    throw new TrashError(`this chat can only ${verb} mods of ${scope}; ${site}/${path.basename(file, '.js')} is another site's. Ask the user to do it from the side panel there or their terminal.`);
+  }
   // (A link out of the mods folder, or the trash, isn't read: readModFile.)
   let code;
   try { code = readModFile(path.dirname(path.dirname(file)), file); } catch (e) { throw new TrashError(`${site}/${path.basename(file, '.js')}: ${e.message}`); }
@@ -76,14 +81,30 @@ function emptyTrash(ws, { days = TRASH_DAYS, now = Date.now() } = {}) {
   return removed;
 }
 
+// A chat's delete and restore go through the helper, which no sandbox limits: so the site folder they name
+// must be that site's own, a plain folder in the mods folder. A link there (a run can make one in the mods
+// folder) would take the helper to another site's folder under a name the run's scope covers.
+function ownFolder(ws, site, scope) {
+  if (!scope) return; // (the user's own terminal: their links are theirs)
+  const dir = path.join(ws.modsDir, site);
+  let st = null;
+  try { st = fs.lstatSync(dir); } catch { return; } // (not there: restore makes it)
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+  const root = real(ws.modsDir), at = real(dir);
+  if (st.isSymbolicLink() || !st.isDirectory() || !root || !at || !samePath(at, path.join(root, site))) {
+    throw new TrashError(`sites/${site} is a link, not ${site}'s own folder: ask the user to do it from their terminal`);
+  }
+}
+
 /** Moves <modsDir>/<site>/<mod>.js to the trash. Returns {id, file, trashed}. */
-function deleteMod(ws, id, { scope, now = Date.now() } = {}) {
+function deleteMod(ws, id, { scope, splits = [], now = Date.now() } = {}) {
   const { site, mod } = parseId(id);
   const file = path.join(ws.modsDir, site, `${mod}.js`);
   let st = null;
   try { st = fs.lstatSync(file); } catch { /* missing */ }
   if (!st || !st.isFile()) throw new TrashError(`there's no mod ${site}/${mod} (no file ${file})`);
-  checkScope(site, file, scope, 'delete');
+  ownFolder(ws, site, scope);
+  checkScope(site, file, scope, 'delete', splits);
   const dir = path.join(trashDir(ws), site);
   fs.mkdirSync(dir, { recursive: true });
   let trashed = path.join(dir, `${mod}@${stampOf(now)}.js`);
@@ -94,15 +115,18 @@ function deleteMod(ws, id, { scope, now = Date.now() } = {}) {
 }
 
 /** Puts the most recently deleted copy of a mod back. Returns {id, file}. */
-function restoreMod(ws, id, { scope } = {}) {
+function restoreMod(ws, id, { scope, splits = [] } = {}) {
   const { site, mod } = parseId(id);
   const entry = listTrash(ws).find((t) => t.id === `${site}/${mod}`);
   if (!entry) throw new TrashError(`${site}/${mod} isn't in the trash (trif restore lists what is)`);
   const file = path.join(ws.modsDir, site, `${mod}.js`);
   if (fs.existsSync(file)) throw new TrashError(`${site}/${mod} exists again (${file}): rename or delete it first`);
-  checkScope(site, entry.file, scope, 'restore');
+  ownFolder(ws, site, scope);
+  checkScope(site, entry.file, scope, 'restore', splits);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.renameSync(entry.file, file);
+  // (the folder swapped for a link between the check and the move: back it goes)
+  try { ownFolder(ws, site, scope); } catch (e) { try { fs.renameSync(file, entry.file); } catch { /* left where it is */ } throw e; }
   return { id: `${site}/${mod}`, file };
 }
 

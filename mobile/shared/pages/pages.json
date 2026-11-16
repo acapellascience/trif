@@ -1,0 +1,12 @@
+{
+  "plain.html": {},
+  "strict.html": {
+    "Content-Security-Policy": "default-src 'none'; script-src 'nonce-probe'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'"
+  },
+  "trusted.html": {
+    "Content-Security-Policy": "default-src 'none'; script-src 'nonce-probe'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
+  },
+  "hostile.html": {},
+  "spa.html": {},
+  "install.html": {}
+}

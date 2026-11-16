@@ -10,21 +10,24 @@ const { envVar } = require('./env');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
-const { scopeFor } = require('./scope');
+const { scopeFor, scopeOf, runScope, cleanSplits } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
-const { listModFiles } = require('./mods');
+const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
+const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
 const { panelRunsOff, killTree } = require('./platform');
+const { Stage, INSTRUCTION_NAME } = require('./stage');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
 const KEEP_RUN_LOGS = 50;
 const STDERR_KEEP = 16 * 1024;
 const MAX_SNAPSHOT_FILES = 5000;
-// Finished runs still count for held mods this long (a last write can reach the folder watcher late).
+// Finished runs still count for held mods this long (the helper's last copy from the run's working folder
+// reaches the folder watcher a moment later; the copy itself names the run, stage.js written).
 const RECENT_MS = 10000;
 
 const MAX_BOX_REQUEST = 8 * 1024 * 1024;
@@ -196,6 +199,36 @@ function screenshotsFolder(ws, scope) {
  * Throws unless the mods folder is a plain folder (made if missing) whose real path is the one `trif setup`
  * recorded for it, if it recorded one (config.json modsDirReal: {path, real}). Returns its real path.
  */
+// Files an agent reads as instructions for the folder they're in (Claude Code: CLAUDE.md, .claude/; Codex:
+// AGENTS.md, .codex/), anywhere under the mods folder. TRIF's own are in the workspace's root, which runs
+// can't write; the mods folder they can, so a run that read a hostile page could leave one there for every
+// later run, on any site: "can't change the agents' instructions" has to hold there too. Before a run
+// starts, any that are there are moved to the trash (<home>/trash/_instructions/, kept, never read as
+// instructions). Returns [{rel, to}].
+// (INSTRUCTION_NAME: stage.js, which never copies such a file into or out of a run's working folder)
+function instructionFiles(ws) {
+  const moved = [];
+  const root = ws.modsDir;
+  let budget = 20000;
+  const walk = (dir, depth) => {
+    let names = [];
+    try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of names) {
+      if (budget-- <= 0) return;
+      const p = path.join(dir, d.name);
+      if (INSTRUCTION_NAME.test(d.name)) {
+        const to = path.join(ws.home, 'trash', '_instructions', `${Date.now()}-${moved.length}-${path.relative(root, p).replace(/[^\w.-]+/g, '_').slice(-120)}`);
+        try { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.renameSync(p, to); moved.push({ rel: path.relative(ws.home, p), to: path.relative(ws.home, to) }); }
+        catch { try { fs.rmSync(p, { recursive: true, force: true }); moved.push({ rel: path.relative(ws.home, p), to: 'nowhere (removed)' }); } catch { /* left: the agent's own rules still apply */ } }
+        continue;
+      }
+      if (d.isDirectory() && !d.isSymbolicLink() && depth < 6) walk(p, depth + 1);
+    }
+  };
+  walk(root, 0);
+  return moved;
+}
+
 function checkModsFolder(ws) {
   const dir = ws.modsDir;
   let st = lstatOrNull(dir);
@@ -241,10 +274,13 @@ function workspaceLinks(ws, realMods, deniedTarget) {
   return out;
 }
 
-// The TRIF code a run's `trif` needs (helper/, and package.json for the version) and the examples
-// (`trif install-example`): not the whole package folder, which in a git checkout holds .git, keys
-// and build output.
-const CODE_ITEMS = ['helper', 'package.json', 'examples'];
+// The TRIF code a run's `trif` needs (helper/, package.json for the version, and the two extension files the
+// helper reads: the terms' table that `trif explain` reads, extension/explain.json, and the page-wide rules
+// sitecombos.js loads at start, extension/pagewide.js) and the examples (`trif install-example`): not the
+// whole package folder, which in a git checkout holds .git, keys and build output. tests/runcode.test.js
+// fails when the helper reads another extension file that isn't here; tests/run-sandbox.test.js when a
+// real `trif` command in a real run's sandbox can't read a file it needs.
+const CODE_ITEMS = ['helper', 'package.json', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'examples'];
 function trifCode(root = path.join(__dirname, '..', '..')) {
   return CODE_ITEMS.map((n) => path.join(root, n)).filter((p) => fs.existsSync(p)).map(realOrResolved);
 }
@@ -363,6 +399,46 @@ function deniedInHome(home, readable) {
   return out;
 }
 
+// Folders outside the home folder that hold other people's files or other disks: other users' home
+// folders, other volumes (external drives, disk images, network shares).
+const SHARED_ROOTS = process.platform === 'darwin' ? ['/Volumes', '/Users'] : ['/home', '/media', '/mnt', '/run/media'];
+
+/**
+ * macOS: the user's own folder beside the temporary one (/var/folders/xx/…/: C, the user's caches, X, 0),
+ * whose temporary folder T the agents deny by their own means. Each item but T, as real paths.
+ */
+function userTempSiblings(tmpdir = os.tmpdir()) {
+  const t = realOrResolved(tmpdir);
+  if (process.platform !== 'darwin' || !/^\/private\/var\/folders\//.test(t)) return [];
+  const parent = path.dirname(t);
+  try { return fs.readdirSync(parent).map((n) => path.join(parent, n)).filter((p) => p !== t); } catch { return []; }
+}
+
+/**
+ * What to deny outside the home folder: each item in SHARED_ROOTS (real paths, as sandboxes compare),
+ * except the home folder itself and what leads to it (deniedInHome handles it), what leads to
+ * something the run may read, and the link to the startup disk (/Volumes/Macintosh HD -> /). The
+ * system's temporary folders are denied by the agents' own means (codex.js :tmpdir, :slash_tmp);
+ * the user's own folder beside $TMPDIR (userTempSiblings) is added here.
+ */
+function deniedOutsideHome(home, readable, roots = SHARED_ROOTS) {
+  const ci = ignoresCase(home);
+  const holds = (outer, p) => within(p, outer, { ci, orEqual: true });
+  const out = [];
+  for (const root of roots) {
+    let names;
+    try { names = fs.readdirSync(root); } catch { continue; } // not on this system
+    for (const n of names) {
+      const p = path.join(root, n);
+      const rp = realOrResolved(p);
+      if (rp === path.parse(rp).root) continue; // the startup disk
+      if ([p, rp].some((x) => holds(x, home) || readable.some((r) => holds(x, r)))) continue;
+      out.push(rp);
+    }
+  }
+  return [...new Set([...out, ...userTempSiblings()])];
+}
+
 /**
  * What a run may touch, for the agents' sandboxes, which macOS enforces (docs/PROTOCOL.md "Run scope"):
  *   readable  the workspace, all of it (nothing private is kept there), the TRIF code `trif` runs
@@ -377,8 +453,12 @@ function deniedInHome(home, readable) {
  *             node, and `mkdir -p`, look at every folder on a path, the home folder included.
  * The only denies inside readable folders are the skill folders' secrets. No network at all: `trif`
  * reaches the helper through the mailbox. Real paths, as sandboxes compare.
+ * With `stage` (stage.js: the run's own working folder, a copy of the workspace), the run writes its copy's
+ * sites/ instead of the mods folder, and other sites' folders there are the read-only ones; `workspace` is
+ * the copy (the agent's working folder), readable on top of the rest (`readable` keeps the workspace
+ * itself), and `liveWorkspace`/`liveMods` the real workspace and mods folder, which only the helper writes.
  */
-function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
+function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, stage = null }) {
   ws = withPrivatePaths(ws);
   const real = realOrResolved;
   const node = real(process.execPath);
@@ -391,18 +471,29 @@ function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
   // the fresh mailbox): never a realpath of something a run could have replaced since.
   const mods = modsReal || checkModsFolder(ws);
   const shots = screenshotsReal || screenshotsFolder(ws, scope).real;
-  const writable = [mods, shots, real(box)];
+  // (the folder the run writes its mods in: its copy's sites/, or, without one, the mods folder itself)
+  const runMods = stage ? stage.sites : mods;
+  const writable = [runMods, shots, real(box)];
   let names = [];
-  try { names = fs.readdirSync(mods, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
-  const otherSites = names.filter((n) => scopeFor(n) !== scope);
+  try { names = fs.readdirSync(runMods, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
+  // Every other site's folder is read-only to the run. Not all-sites/: a mod for every site may be
+  // edited from any site's chat, and every such change waits for the user's OK (its @match is outside
+  // the run's scope: held.js), with the version before running meanwhile.
+  // (a sensitive host's own site, mail.google.com, is another site to a google.com run, and the other way
+  // round: scope.js scopeOf with the sites of their own the extension sent)
+  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && n !== ALL_SITES_DIR);
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
-  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(mods, n), real: real(path.join(mods, n)) }));
+  // (`link`: the folder is a link. Still denied to the run by both its paths, but never counted as a folder
+  // the run couldn't write (`locked`, below): what a link names is wherever it leads, which can be a folder
+  // of the run's own site, or become one, and a mod reached through it would pass as someone else's.)
+  const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return true; } };
+  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(runMods, n), real: real(path.join(runMods, n)), link: isLink(path.join(runMods, n)) }));
   // Read-only for the sandboxes: only those inside the mods folder. A site folder that is a link out of it
   // isn't a mod folder (mods.js ignores it), and making where it leads "read" would open it to the run
   // (in Codex's profile, a more specific path wins over the home folder's denies).
-  const readOnly = lockedDirs.map((d) => d.real).filter((r) => within(r, mods, { ci: ignoresCase(mods) }));
+  const readOnly = lockedDirs.map((d) => d.real).filter((r) => within(r, runMods, { ci: ignoresCase(runMods) }));
   // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
   // denying it would deny the workspace itself to a sandbox that follows links.)
   const inHome = deniedInHome(home, readable);
@@ -411,14 +502,37 @@ function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
   const deniedTarget = (t) => under(t, [privateDir]) || (within(t, home, { ci }) && (!under(t, readable) || under(t, inHome)));
   const { secrets, links } = skillSecrets(skills, deniedTarget);
   const skillDenied = secrets.map((x) => x.path);
-  const denied = [...inHome, privateDir, ...skillDenied];
+  const denied = [...inHome, ...deniedOutsideHome(home, readable), privateDir, ...skillDenied];
   // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
   // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
   // command() returns `locked`, the ones it did (runs.js uses that, not this).
-  const locked = lockedDirs.map((d) => d.rel);
+  const locked = lockedDirs.filter((d) => !d.link).map((d) => d.rel);
   // Links in the mods folder and the trash that lead out of it (or where the run may not read).
   const wsLinks = workspaceLinks(ws, mods, (t) => !within(t, shots, { ci, orEqual: true }) && deniedTarget(t));
-  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), screenshots: shots, modsDir: mods };
+  // The run's temporary folder (its commands'; Codex's own stays where it is), in its box: runs.js makes it.
+  const tmp = path.join(real(box), 'tmp');
+  // Claude Code's own (CLAUDE_CODE_TMPDIR), which its commands' sandbox may always write: one of the run's
+  // own, short (Claude Code 2.1.316 falls back to the /tmp/claude-<uid> every session shares when
+  // <it>/claude-<uid> is longer than 44 bytes), as the literal /tmp path it measures. runs.js makes it.
+  const agentTmp = shortTmp(box);
+  // The system's temporary folders the run may neither read nor write: every Claude Code session's
+  // scratch files and task output (/tmp/claude-<uid>), and $TMPDIR. (codex.js denies /tmp and $TMPDIR
+  // whole, by its own names; Claude Code's commands need /tmp for agentTmp.)
+  const systemTemp = [...new Set([path.join(real('/tmp'), `claude-${typeof process.getuid === 'function' ? process.getuid() : 0}`), real(os.tmpdir())])]
+    .filter((p) => !within(tmp, p, { ci, orEqual: true }) && !within(real(agentTmp), p, { ci, orEqual: true }));
+  const base = { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), tmp, agentTmp, systemTemp, screenshots: shots, modsDir: mods };
+  if (!stage) return base;
+  // (the copy is in ~/Library/Caches, beside the mailbox, which deniedInHome must still deny: so it's added
+  // here, after the home folder's denies were worked out, not to what they were worked out from)
+  return { ...base, readable: [...readable, stage.dir], workspace: stage.dir, modsDir: stage.sites, staged: true, liveWorkspace: real(ws.home), liveMods: mods };
+}
+
+/**
+ * A run's short temporary folder for Claude Code itself (runLimits agentTmp): /tmp/trif-<the last 8 of the
+ * run id>, its random end (newRunId: the start of it is the time, the same for runs started together).
+ */
+function shortTmp(box) {
+  return path.join('/tmp', `trif-${path.basename(box).replace(/[^\w-]/g, '').slice(-8)}`);
 }
 
 /** ws with its private folder's paths (paths.js workspace has them; a hand-made ws may not). */
@@ -440,8 +554,9 @@ function normalizeSite(site, url) {
  *   stop(runId) -> {stopped: true}
  *   list() -> [{runId, site, scope, agent, startedAt}]
  *   byToken(token) -> the live run whose agent was given this TRIF_RUN_TOKEN, or null
- *   scopes() -> [{runId, site, scope, before, locked, startedAt}] for live and just-finished runs (held
- *     mods; `locked`: the mods folders the run couldn't write, relative to the workspace)
+ *   scopes() -> [{runId, site, scope, written, locked, startedAt}] for live and just-finished runs (held
+ *     mods; `written`: what the helper copied into the mods folder for the run, path relative to the
+ *     workspace -> sha1, stage.js; `locked`: the mods folders the run couldn't write)
  *   stopAll() -> Promise (resolves once every agent process has exited, SIGKILLing stragglers)
  */
 class Runs {
@@ -449,12 +564,20 @@ class Runs {
    * onRequest(run, line, respond): a request from the run's mailbox (one JSON line, as on the socket);
    * respond(text) answers it. The host handles it as the run's, whatever the line says.
    */
-  constructor({ getWorkspace, logger, onEvent, onRequest, platform = process.platform }) {
+  /**
+   * withoutSandbox: the user's consent to run an agent without TRIF's sandbox (withoutsandbox.js):
+   * {allowed(agentId), consents(), guard(before)}. Without it, no agent may.
+   */
+  constructor({ getWorkspace, logger, onEvent, onRequest, withoutSandbox, onStaged, platform = process.platform }) {
     this.getWorkspace = getWorkspace;
     this.platform = platform;
+    this.withoutSandbox = withoutSandbox || { allowed: () => false, consents: () => ({}), guard: () => [] };
     this.logger = logger || { info() {}, warn() {}, error() {}, debug() {} };
     this.onEvent = onEvent || (() => {});
     this.onRequest = onRequest || ((run, line, respond) => respond(JSON.stringify({ id: null, ok: false, error: 'no helper commands here' })));
+    // onStaged(run, {pushed, pulled}): the helper copied a run's changes into the mods folder (or the other
+    // way): the browser should have them now.
+    this.onStaged = onStaged || (() => {});
     this.runs = new Map(); // runId -> run
     this.bySite = new Map(); // site -> runId
     this.recent = []; // [{runId, site, scope, before, locked, startedAt, until}]
@@ -473,7 +596,7 @@ class Runs {
   scopes() {
     const now = Date.now();
     this.recent = this.recent.filter((r) => r.until > now);
-    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, locked: r.locked || [], startedAt: r.startedAt }));
+    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, agentLevel: r.agentLevel, before: null, written: r.stage ? r.stage.written : null, locked: r.locked || [], startedAt: r.startedAt }));
     return [...live, ...this.recent];
   }
 
@@ -502,7 +625,9 @@ class Runs {
     const run = {
       id: newRunId(),
       site,
-      scope: scopeFor(site),
+      // (a sensitive host under a registrable domain is its own site: the extension says so, scope.js runScope)
+      scope: runScope(site, args.scope),
+      splits: cleanSplits(args.splits),
       // Given to the agent as TRIF_RUN_TOKEN; `trif` sends it, and the helper scopes its requests.
       token: crypto.randomBytes(16).toString('hex'),
       agent: adapter.id,
@@ -510,8 +635,11 @@ class Runs {
       ws,
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
+      agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
+      fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
+      effort: typeof args.effort === 'string' && /^[a-z]{2,12}$/.test(args.effort) ? args.effort : null, // (the panel's Effort setting)
       // codex-oss: this run's provider choice over config.json's (agents/codex-oss.js resolve).
       openModel: args.openModel && typeof args.openModel === 'object' && !Array.isArray(args.openModel) ? { ...args.openModel } : null,
       secrets: [], // values (API keys) kept out of the run's log and events
@@ -564,6 +692,7 @@ class Runs {
     if (run.doneSent) return;
     if (run.secrets.length) { const t = JSON.stringify(event); const r = redactSecrets(t, run.secrets); if (r !== t) event = JSON.parse(r); }
     if (event.kind === 'done') run.doneSent = true;
+    if (event.kind === 'error' && event.reason === 'login') { run.loginFailed = event.message; event = { ...event, agent: run.agent }; }
     try { this.onEvent(run.id, event); } catch (e) { this.logger.error(`agent event handler: ${e.message}`); }
   }
 
@@ -582,6 +711,18 @@ class Runs {
         try { if (Date.now() - fs.statSync(p).mtimeMs > 2 * RUN_TIMEOUT_MS) fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     } catch { /* ignore */ }
+    // And their Claude Code temporary folders (runLimits agentTmp), only the user's own.
+    try {
+      const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+      for (const f of fs.readdirSync('/tmp')) {
+        if (!/^trif-[\w-]{1,8}$/.test(f)) continue;
+        const p = path.join('/tmp', f);
+        try {
+          const st = fs.lstatSync(p);
+          if (st.isDirectory() && (uid === null || st.uid === uid) && Date.now() - st.mtimeMs > 2 * RUN_TIMEOUT_MS) fs.rmSync(p, { recursive: true, force: true });
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
     // Screenshots older than SCREENSHOT_KEEP_MS (store/PRIVACY.md says so), in every site's folder.
     pruneScreenshots(run.ws.screenshots);
     // Keep the last KEEP_RUN_LOGS - 1 (this run makes KEEP_RUN_LOGS).
@@ -596,15 +737,19 @@ class Runs {
   _launch(run) {
     const { ws, adapter } = run;
     this._prepareLogDir(run);
-    this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
+    this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, ...(run.effort ? { effort: run.effort } : {}), prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
+    // The consents to run without TRIF's sandbox as the run starts (a run without it may be able to write
+    // them: _finish takes out any it added).
+    try { run.consentsBefore = this.withoutSandbox.consents(); } catch { run.consentsBefore = {}; }
     // The run's mailbox, its only way to the helper (its sandbox has no network), and its screenshots
     // folder (it may not see other sites' screenshots).
     run.box = path.join(boxRoot(), run.id);
     try {
       // The mods folder first: a link there is a refusal the user should read as is.
       run.modsReal = checkModsFolder(ws);
+      for (const moved of instructionFiles(ws)) this.logger.warn(`agent run ${run.id}: ${moved.rel} in the mods folder is a file agents read as instructions, and nothing of TRIF's: moved to ${moved.to}`);
     } catch (e) {
       this._emit(run, { kind: 'error', message: e.message });
       return this._finish(run, { code: null, signal: null });
@@ -612,19 +757,52 @@ class Runs {
     try {
       fs.mkdirSync(boxRoot(), { recursive: true, mode: 0o700 });
       fs.mkdirSync(run.box, { mode: 0o700 }); // (fresh: not recursive, so it can't already be a link)
+      fs.mkdirSync(path.join(run.box, 'tmp'), { mode: 0o700 }); // its temporary folder (runLimits tmp)
+      // Claude Code's own (runLimits agentTmp; fresh, not recursive: never one someone left there, a link
+      // included, nor another run's).
+      fs.mkdirSync(shortTmp(run.box), { mode: 0o700 });
+      run.agentTmp = shortTmp(run.box);
       const shots = screenshotsFolder(ws, run.scope);
       run.screenshots = shots.dir;
       run.screenshotsReal = shots.real;
+      // The run's own working folder, a copy of the workspace (stage.js): the only mods folder it writes.
+      // The helper copies its changes into the real one as they're saved (_syncStage).
+      run.stage = new Stage({ ws, dir: path.join(boxRoot(), `${run.id}.ws`), scope: run.scope, splits: run.splits, liveReal: run.modsReal, logger: this.logger,
+        settings: run.adapter.workspaceSettings ? JSON.stringify({ permissions: { allow: run.adapter.allowedTools, deny: run.adapter.deniedTools } }, null, 2) + '\n' : null });
+      run.stage.create();
+      run.state.workspace = run.stage.dir; // (the chat names files by their place in it: sites/x.com/a.js)
     } catch (e) {
+      if (run.stage) run.stage.close(); // (half made: nothing in it is the run's)
       this._emit(run, { kind: 'error', message: `couldn't prepare the run's folders: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
     }
     this._serveBox(run);
-    const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots, TRIF_RUN_MODS_DIR: ws.modsDir };
-    const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
+    // (TRIF_RUN_MODS_DIR: where the run's `trif` reads and writes mods, its copy's sites/; TRIF_RUN_LIVE_MODS_DIR:
+    // the mods folder, a path into which `trif` takes as the same path in the copy)
+    const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots, TRIF_RUN_MODS_DIR: run.stage.sites, TRIF_RUN_LIVE_MODS_DIR: ws.modsDir };
+    // (with its version: an agent older than the one whose sandbox settings TRIF writes isn't started, as it
+    // may not understand them; asked once per binary, util.js versionOf)
+    const found = adapter.detect({ dirs: agents.searchDirs(ws), env: agents.agentEnv(ws), version: true });
     if (!found.available) {
-      this._emit(run, { kind: 'error', message: adapter.missing });
+      this._emit(run, { kind: 'error', message: found.path && found.note ? found.note : adapter.missing });
       return this._finish(run, { code: null, signal: null });
+    }
+    // An organization's settings that replace TRIF's limits, known before the agent starts (claude.js
+    // preflight: Claude Code's managed settings): stopped here, or with the user's consent, gone on.
+    if (adapter.preflight) {
+      let pre = null;
+      try { pre = adapter.preflight({}); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't check ${adapter.name}'s managed settings: ${e.message}`); }
+      for (const err of (pre && pre.errors) || []) this.logger.warn(`agent run ${run.id}: ${err}`);
+      if (pre && pre.breaks.length) {
+        const message = adapter.brokenMessage(pre);
+        this.logger.warn(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) ${pre.breaks.join('; ')}: stopped`);
+        this._emit(run, { kind: 'error', message });
+        run.agentDone = { ok: false, result: message };
+        return this._finish(run, { code: null, signal: null });
+      }
+      if (pre && pre.loosens.length && !this._withoutSandbox(run, { why: pre.loosens, message: adapter.withoutSandboxMessage(pre), from: pre.sources.join(', ') })) {
+        return this._finish(run, { code: null, signal: null });
+      }
     }
     // Adapters with something to settle first (codex-oss: the provider, its key, a local server; claude
     // and codex: a saved API key's proxy, agentkeys.js).
@@ -654,7 +832,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '' };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -672,19 +850,21 @@ class Runs {
     let cmd;
     try {
       fs.mkdirSync(run.agentDir, { mode: 0o700 });
-      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
+      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
       for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't prepare ${adapter.name}'s run: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
     }
     const { file, args, locked } = cmd;
+    if (cmd.env) env = { ...env, ...cmd.env }; // (claude: its temporary folder)
 
-    run.before = modSnapshot(ws.modsDir, ws.home);
-    // Changes in these folders aren't held on this run's account (held.js): only the ones the adapter
-    // says it kept the run out of; an adapter that doesn't say exempts none.
+    // (which of the mods folder's changes are this run's is what the helper copied from its working folder:
+    // run.stage.written, held.js. `locked`, the folders it couldn't write, is for a run without one.)
     run.locked = Array.isArray(locked) ? locked.filter((d) => limits.locked.includes(d)) : [];
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
+    // The mods' text as it was, so what this run changes can be undone (lib/history.js)
+    try { run.beforeContents = history.contentsSnapshot(ws); } catch (e) { this.logger.warn(`couldn't keep the mods' text for undo: ${e.message}`); }
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
       try { markRunActive(ws.home, { runId: run.id, by: ws.installId, browser: ws.browser || '', site: run.site }); run.marked = true; } catch (e) { this.logger.warn(`couldn't mark run ${run.id} active: ${e.message}`); }
@@ -693,13 +873,14 @@ class Runs {
     let child;
     try {
       // The message on stdin (cmd.stdin), never in argv: other processes can read those.
-      child = spawn(file, args, { cwd: ws.home, env, stdio: [typeof cmd.stdin === 'string' ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true });
+      child = spawn(file, args, { cwd: run.stage ? run.stage.dir : ws.home, env, stdio: [typeof cmd.stdin === 'string' ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true });
       if (typeof cmd.stdin === 'string') { child.stdin.on('error', () => { /* it may exit first */ }); child.stdin.end(cmd.stdin); }
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't start ${adapter.name}: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
     }
     run.child = child;
+    this._watchStage(run);
     child.on('error', (e) => {
       this._emit(run, { kind: 'error', message: `couldn't start ${adapter.name} (${found.path}): ${e.message}` });
       this._finish(run, { code: null, signal: null });
@@ -718,6 +899,7 @@ class Runs {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
       run.stderr = redactSecrets(run.stderr + chunk, run.secrets).slice(-STDERR_KEEP);
+      this._checkSandbox(run, chunk);
     });
 
     let exitInfo = null;
@@ -757,7 +939,14 @@ class Runs {
           } finally { fs.closeSync(fd); }
         } catch { line = null; }
         try { fs.unlinkSync(file); } catch { continue; } // another pass took it
+        // (its working folder first, both ways: a mod saved just before `trif reload` is in the mods folder
+        // when the reload goes out; what the helper did for it, a `trif delete`, is in its copy when it reads
+        // the answer)
+        let cmd = null;
+        try { cmd = line === null ? null : JSON.parse(line).cmd; } catch { /* the handler says so */ }
+        this._syncStage(run);
         const respond = (text) => {
+          this._syncStage(run, { touch: cmd === 'mod.delete' || cmd === 'mod.restore' });
           const tmp = path.join(run.box, `${id}.${crypto.randomBytes(4).toString('hex')}.part`);
           try {
             fs.writeFileSync(tmp, text, { flag: 'wx', mode: 0o600 });
@@ -772,9 +961,87 @@ class Runs {
     run.timers.push(setInterval(take, 200));
   }
 
+  // The run's working folder (stage.js) synced with the mods folder: on every change there (a moment after,
+  // so a burst of saves is one sync), every second, and around each of its requests.
+  _watchStage(run) {
+    if (!run.stage) return;
+    let timer = null;
+    const soon = () => { if (!timer && !run.finished) timer = setTimeout(() => { timer = null; this._syncStage(run); }, 100); };
+    try { run.stageWatcher = fs.watch(run.stage.sites, { recursive: true }, soon); run.stageWatcher.on('error', () => {}); } catch { /* polling alone */ }
+    run.timers.push(setInterval(() => this._syncStage(run), 1000));
+  }
+
+  _syncStage(run, opts = {}) {
+    if (!run.stage || run.stage.closed) return null;
+    let r;
+    try { r = run.stage.sync(opts); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't sync its working folder: ${e.message}`); return null; }
+    if (r.pushed.length) this.logger.info(`agent run ${run.id}: copied ${r.pushed.join(', ')} to the mods folder`);
+    if (r.pushed.length || r.pulled.length) { try { this.onStaged(run, r); } catch (e) { this.logger.warn(`agent run ${run.id}: ${e.message}`); } }
+    return r;
+  }
+
+  /**
+   * An organization's settings replace TRIF's sandbox for this run (`why`: what they do, as phrases;
+   * `message`: why it stopped, for the chat and `trif agent run`). With the user's consent for this agent
+   * (withoutsandbox.js, from the side panel only): go on, logged, with a `sandbox` event (the panel marks
+   * the chat "no TRIF sandbox"), and return true. Without: stop the run (an `error` with reason
+   * "sandbox": the panel's choice card) and return false.
+   */
+  _withoutSandbox(run, { why = [], message, from = '' }) {
+    let ok = false;
+    try { ok = !!this.withoutSandbox.allowed(run.agent); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't read the consent to run without TRIF's sandbox: ${e.message}`); }
+    const settingsName = run.adapter.settingsName || run.adapter.name;
+    if (ok) {
+      run.withoutSandbox = true;
+      this.logger.warn(`agent run ${run.id}: ${run.adapter.name} runs under the organization's settings${from ? ` (${from})` : ''}, not TRIF's sandbox: the user allowed it in the side panel`);
+      this._log(run, { webmods: 'withoutSandbox', why, from, time: Date.now() });
+      this._emit(run, { kind: 'sandbox', trif: false, agent: run.agent, name: run.adapter.name, settingsName });
+      return true;
+    }
+    run.sandboxRefused = true;
+    this.logger.warn(`agent run ${run.id}: ${run.adapter.name}'s organization settings replace TRIF's sandbox${from ? ` (${from})` : ''}: stopped`);
+    this._emit(run, { kind: 'error', reason: 'sandbox', agent: run.agent, name: run.adapter.name, settingsName, why, message });
+    run.agentDone = { ok: false, result: message };
+    this._kill(run, 500);
+    return false;
+  }
+
+  // The agent says it isn't using TRIF's sandbox (an organization's settings overrode it, codex.js
+  // sandboxOverridden): stop the run at once, with why, unless the user allowed this agent without it
+  // (_withoutSandbox). True for every line that says so (it's said in the run's log, not the chat), but
+  // not after the run was stopped for it.
+  _checkSandbox(run, text) {
+    if (!run.adapter.sandboxOverridden || !run.adapter.sandboxOverridden(text)) return false;
+    if (run.withoutSandbox) return true;
+    if (run.sandboxRefused) return false;
+    const message = run.adapter.sandboxOverriddenMessage ? run.adapter.sandboxOverriddenMessage(text) : `${run.adapter.name} isn't using TRIF's sandbox, so TRIF stopped the run`;
+    this._withoutSandbox(run, { message });
+    return true;
+  }
+
+  // A run without TRIF's sandbox whose organization's settings turn out to stop its work (`trif` can't
+  // reach the helper, writes to sites/ refused: the adapter's orgBlocked): ended, with why, once.
+  _checkBlocked(run, line) {
+    if (!run.withoutSandbox || run.orgBlocked || !run.adapter.orgBlocked) return false;
+    let why = null;
+    try { why = run.adapter.orgBlocked(line); } catch { why = null; }
+    if (!why) return false;
+    run.orgBlocked = why;
+    const message = run.adapter.orgBlockedMessage();
+    this.logger.warn(`agent run ${run.id}: under the organization's settings ${why === 'helper' ? "`trif` can't reach the helper" : 'writes to the mods folder are refused'}: stopped`);
+    this._emit(run, { kind: 'error', reason: 'orgBlocked', agent: run.agent, message });
+    run.agentDone = { ok: false, result: message };
+    this._kill(run, 500);
+    return true;
+  }
+
   _onLine(run, line) {
     if (!line.trim() || run.doneSent) return;
+    if (this._checkSandbox(run, line)) { this._log(run, line); return; }
     this._log(run, line);
+    // (Stopped for its settings: nothing more of it in the chat, nor a `done` of its own.)
+    if (run.orgBlocked || run.sandboxRefused) return;
+    if (this._checkBlocked(run, line)) return;
     try {
       run.adapter.parse(line, (ev) => {
         if (!ev || typeof ev !== 'object') return;
@@ -813,10 +1080,20 @@ class Runs {
     if (run.cleanup) { const c = run.cleanup; run.cleanup = null; Promise.resolve().then(c).catch((e) => this.logger.warn(`agent run ${run.id}: cleanup: ${e.message}`)); }
     if (run.stdoutBuf.trim()) { const l = run.stdoutBuf; run.stdoutBuf = ''; this._onLine(run, l); }
     try { run.boxWatcher?.close(); } catch { /* ignore */ }
+    // The run's working folder, one last time, then never again: what a process it left behind writes
+    // there from now on goes nowhere (its sandbox lets it write nothing else of the workspace).
+    try { run.stageWatcher?.close(); } catch { /* ignore */ }
+    if (run.stage && !run.stage.closed) {
+      this._syncStage(run);
+      run.stage.close();
+      try { if (run.adapter.afterRun && run.child) run.adapter.afterRun({ workingDir: run.stage.dir }); } catch { /* left */ }
+    }
     if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();
     if (run.agentDir) { try { fs.rmSync(run.agentDir, { recursive: true, force: true }); } catch { /* ignore */ } }
-    // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment: a
-    // write landing after the held-mod window (RECENT_MS) would never be held.
+    if (run.agentTmp) { try { fs.rmSync(run.agentTmp, { recursive: true, force: true }); } catch { /* ignore */ } }
+    // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment. (Not
+    // every one: Claude Code starts each command in a session of its own, and any can leave the group. What
+    // they write lands in the run's working folder, which nothing reads any more.)
     if (run.child && run.child.pid && !run.stopped) {
       const group = { pid: run.child.pid, kill() { /* the leader is gone: only its group is left */ } };
       killTree(group, 'SIGTERM', { platform: this.platform });
@@ -825,22 +1102,50 @@ class Runs {
 
     let changedFiles = [];
     if (run.beforeFiles) {
-      try { changedFiles = diffSnapshots(run.beforeFiles, snapshot(run.ws.modsDir, run.ws.home)); } catch { /* ignore */ }
+      // (what the run changed: the files the helper copied from its working folder for it, and its own trif
+      // delete and restore, that aren't as they were when it started)
+      try { changedFiles = diffSnapshots(run.beforeFiles, snapshot(run.ws.modsDir, run.ws.home)).filter((f) => !run.stage || run.stage.touched.has(f)); } catch { /* ignore */ }
+    }
+    // What it changed, kept for undo (history/), named in `done` for the chat's Undo line
+    let undoable = [];
+    if (run.beforeContents && changedFiles.length) {
+      try { undoable = history.recordChanges(run.ws, run.beforeContents, changedFiles, run.fix ? 'fix' : 'chat'); } catch (e) { this.logger.warn(`couldn't keep run ${run.id}'s changes for undo: ${e.message}`); }
     }
     const d = run.agentDone;
     let done;
     if (d) {
-      done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
+      done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, ...(Number.isFinite(d.contextTokens) ? { contextTokens: d.contextTokens } : {}), sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
-        const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
+        // (without the agent's own notices that say nothing about why it stopped: adapter.stderrNoise)
+        const noise = run.adapter.stderrNoise;
+        const tail = run.stderr.trim().split('\n').filter((l) => !(noise && noise.test(l))).slice(-12).join('\n').trim().slice(-2000);
+        // (A message, or a whole error event: util.js loginError.)
         const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
-        this._emit(run, { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
+        this._emit(run, friendly && typeof friendly === 'object' ? friendly
+          : { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
       }
       done = { kind: 'done', ok: false, result: null, costUsd: null, changedFiles, sessionId: run.lastSessionId || null };
     }
+    if (undoable.length) done.undoable = undoable;
     if (run.stopped && !run.shuttingDown) done.stopped = true;
+    // Stopped because an organization's settings replace TRIF's sandbox: the panel's choice card is the
+    // error event's; `done` says so too.
+    if (run.sandboxRefused && !done.ok) done.error = { kind: 'sandbox', agent: run.agent };
+    if (run.withoutSandbox) {
+      done.withoutSandbox = true;
+      try { this.withoutSandbox.guard(run.consentsBefore || {}); } catch (e) { this.logger.warn(`after agent run ${run.id}: couldn't check the consents to run without TRIF's sandbox: ${e.message}`); }
+    }
+    // Failed for want of a login: say so in `done` (the panel shows its login notice instead of an error),
+    // and agent.list says logged out from now on, whatever the agent's own status check says (Claude
+    // Code's still says logged in with an expired login it can't refresh), until a login or a run works.
+    if (run.loginFailed && !done.ok) {
+      done.error = { kind: 'login', agent: run.agent, message: run.loginFailed };
+      agents.noteLoginFailed(run.agent);
+    } else if (done.ok) {
+      agents.noteLoginWorked(run.agent);
+    }
     if (run.shuttingDown) this._emit(run, { kind: 'error', message: 'the helper shut down (Chrome closed?) before the agent finished' });
     this._emit(run, done);
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
@@ -854,12 +1159,12 @@ class Runs {
         for (const n of [...m.notes, ...m.errors]) this.logger.warn(`after agent run ${run.id}: ${n}`);
       }
     } catch (e) { this.logger.warn(`after agent run ${run.id}: couldn't check for private files in the workspace: ${e.message}`); }
-    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
+    if (run.stage && run.stage.dir) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, agentLevel: run.agentLevel, before: null, written: run.stage.written, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);
   }
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, trifCode, withPrivatePaths,
-  pruneScreenshots, screenshotsFolder, checkModsFolder, SCREENSHOT_KEEP_MS };
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, deniedOutsideHome, trifCode, withPrivatePaths,
+  pruneScreenshots, screenshotsFolder, checkModsFolder, instructionFiles, SCREENSHOT_KEEP_MS };

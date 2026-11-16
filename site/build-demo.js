@@ -1,0 +1,106 @@
+// The homepage demo's files (site/demo/) as one module the Worker imports: site/src/demo-files.js.
+// Run after changing anything in site/demo/: node site/build-demo.js (site/dev.js runs it on start, and
+// tests/site.test.js checks the module is up to date).
+//
+// site/demo/ holds the demo's own scripts (tab.js on the home page, which docks the side panel to it;
+// shim.js, which stands in for the extension's background under the real side panel; and panel.css), the
+// recorded chats (chats/*.json, from the promo video's sessions) and the mods it can switch on (mods/*.js,
+// the home page's own: TRIF doesn't ship them, so the real TRIF has none for this site), listed in
+// DEMO_ORDER. The side panel itself isn't here: the Worker serves the extension's own files (ext/ in its ASSETS
+// binding: wrangler.toml [assets], stage-assets.js).
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DEMO = path.join(HERE, 'demo');
+export const MODS_DIR = path.join(DEMO, 'mods');
+export const OUT = path.join(HERE, 'src', 'demo-files.js');
+
+// The order the recorded chats are offered in, one at a time, each one bigger than the last (the title
+// chat makes two mods, the makeover four). Follow-ups (a chat's `after`) are offered once the chats they
+// follow have been replayed. A chat marked `desk` (Tilt Card's: the phone has the rest to run) is left out
+// of the phone's sheet (shim.js).
+const CHAT_ORDER = ['tagline', 'robot', 'title', 'fireworks', 'makeover', 'gravity', 'tilt', 'shooter', 'rave', 'wrapup']; // (wrapup: "what should i do now?", no mods: the demo's last word)
+
+// The order the demo panel lists its mods in (every one in mods/, by file name): the order they're made in.
+export const DEMO_ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led',
+  'gravity', 'tilt', 'shooter', 'rave'];
+
+const read = (...p) => fs.readFileSync(path.join(DEMO, ...p), 'utf8');
+
+/** A mod's header fields (`// @name value`), repeated ones (@match) as lists. */
+function header(code) {
+  const block = /\/\/ ==(?:WebMod|UserScript)==([\s\S]*?)\/\/ ==\/(?:WebMod|UserScript)==/.exec(code);
+  if (!block) throw new Error('no mod header');
+  const h = { match: [] };
+  for (const line of block[1].split('\n')) {
+    const m = /^\/\/\s*@(\S+)\s+(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    if (m[1] === 'match') h.match.push(m[2]); else h[m[1]] = m[2];
+  }
+  return h;
+}
+
+export function demoModule() {
+  const mods = fs.readdirSync(MODS_DIR).filter((f) => f.endsWith('.js')).sort().map((f) => {
+    const slug = f.replace(/\.js$/, '');
+    if (!/^[a-z0-9-]+$/.test(slug)) throw new Error(`mod file name ${f}: use a-z, 0-9 and -`);
+    const code = fs.readFileSync(path.join(MODS_DIR, f), 'utf8');
+    const h = header(code);
+    const risk = /^(\d)\s*(.*)$/.exec(h.risk || '');
+    return {
+      slug, id: `timsrobot.com/${slug}`, name: h.name || slug, description: h.description || '', matches: h.match,
+      ...(h['touch-name'] ? { touchName: h['touch-name'] } : {}), // (the demo's name for it on a touchscreen)
+      runAt: h['run-at'] === 'document-start' ? 'document-start' : 'document-idle',
+      risk: risk ? { tier: Number(risk[1]), why: risk[2] } : null, code,
+    };
+  });
+  const slugs = new Set(mods.map((m) => m.slug));
+  for (const slug of DEMO_ORDER) if (!slugs.has(slug)) throw new Error(`DEMO_ORDER has ${slug}, which isn't in mods/`);
+  for (const slug of slugs) if (!DEMO_ORDER.includes(slug)) throw new Error(`mods/${slug}.js isn't in DEMO_ORDER`);
+  const order = DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`);
+  const chats = fs.readdirSync(path.join(DEMO, 'chats')).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(read('chats', f)));
+  for (const c of chats) {
+    if (!CHAT_ORDER.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER`);
+    for (const s of c.mods) if (!slugs.has(s)) throw new Error(`chat ${c.id}: no mod ${s}`);
+    if (c.focus !== undefined && !c.mods.includes(c.focus)) throw new Error(`chat ${c.id}: focus ${c.focus} isn't one of its mods`);
+    if (c.tour !== undefined && !(Array.isArray(c.tour) && c.tour.every((s) => c.mods.includes(s)))) throw new Error(`chat ${c.id}: tour is a list of its mods`);
+    if (c.desk !== undefined && typeof c.desk !== 'boolean') throw new Error(`chat ${c.id}: desk is true or false`);
+    if (c.touch !== undefined) { // its touchscreen version (shim.js): a prompt (or the same one), and texts by message index
+      if (c.touch.prompt !== undefined && (typeof c.touch.prompt !== 'string' || !c.touch.prompt.trim())) throw new Error(`chat ${c.id}: touch.prompt`);
+      for (const [i, text] of Object.entries(c.touch.texts || {})) {
+        if (!/^[1-9]\d*$/.test(i) || Number(i) >= c.messages.length || typeof text !== 'string') throw new Error(`chat ${c.id}: touch.texts[${i}]`);
+      }
+    }
+  }
+  for (const id of CHAT_ORDER) if (!chats.some((c) => c.id === id)) throw new Error(`no chats/${id}.json`);
+  const prompts = chats.flatMap((c) => [c.prompt, ...(c.touch?.prompt ? [c.touch.prompt] : [])]);
+  if (new Set(prompts).size !== prompts.length) throw new Error('two chats (or touch versions) have the same prompt');
+  chats.sort((a, b) => CHAT_ORDER.indexOf(a.id) - CHAT_ORDER.indexOf(b.id));
+  const files = Object.fromEntries(['tab.js', 'shim.js', 'panel.css', 'space.js'].map((f) => [f, read(f)]));
+  return `// Generated by site/build-demo.js from site/demo/: don't edit. Run node site/build-demo.js instead.
+export const FILES = ${JSON.stringify(files, null, 1)};
+export const MODS = ${JSON.stringify(mods, null, 1)};
+export const CHATS = ${JSON.stringify(chats, null, 1)};
+export const ORDER = ${JSON.stringify(order)};
+`;
+}
+
+export function writeDemoModule() {
+  const text = demoModule();
+  const old = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : null;
+  if (old !== text) fs.writeFileSync(OUT, text);
+  return old !== text;
+}
+
+// node site/build-demo.js [--stage]: --stage (what wrangler.toml [build] runs before a deploy) also stages the
+// Worker's files (stage-assets.js: the side panel's files and the notes' pictures and videos) into site/.assets/.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  console.log(writeDemoModule() ? `wrote ${path.relative(process.cwd(), OUT)}` : 'up to date');
+  if (process.argv.includes('--stage')) {
+    const { stageAssets, STAGE } = await import('./stage-assets.js');
+    console.log(`staged ${stageAssets()} files into ${path.relative(process.cwd(), STAGE)}`);
+  }
+}

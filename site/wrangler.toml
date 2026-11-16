@@ -7,6 +7,7 @@ compatibility_date = "2026-10-01"
 # redirects it to timsrobot.com (src/index.js redirectFor).
 routes = [
   { pattern = "timsrobot.com", custom_domain = true },
+  { pattern = "www.timsrobot.com", custom_domain = true }, # redirects to timsrobot.com (index.js redirectFor)
   { pattern = "webmods.dev", custom_domain = true },
   { pattern = "www.webmods.dev", custom_domain = true },
 ]
@@ -19,10 +20,26 @@ name = "EMAIL"
 [vars]
 REPORT_FROM = "reports@timsrobot.com"
 
-# At most 5 reports a minute from one address (approximate, per Cloudflare location).
+# At most 5 reports a minute from one address (approximate, per Cloudflare location), and, counted
+# separately, 5 Windows waitlist signups.
 [[ratelimits]]
 name = "REPORT_LIMIT"
 namespace_id = "1001"
   [ratelimits.simple]
   limit = 5
   period = 60
+
+# What the Worker serves from files (the ASSETS binding): the extension's side panel files the home page's
+# demo shows (src/demo.js EXTENSION_FILES, nothing else, under ext/) and the notes' pictures and videos
+# (site/public/notes/). build-demo.js stages them into .assets/ (stage-assets.js; not in git), and [build] runs
+# it before every deploy (and wrangler dev). run_worker_first: every request goes to the Worker, so no file
+# there is served unless index.js asks for it; html_handling none: sidepanel.html is fetched by that name (no
+# redirect to /sidepanel).
+[build]
+command = "node build-demo.js --stage"
+
+[assets]
+directory = ".assets"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"

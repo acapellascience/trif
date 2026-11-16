@@ -26,6 +26,7 @@ user_pref("extensions.webextOptionalPermissionPrompts", false);
 user_pref("extensions.update.enabled", false);
 user_pref("extensions.update.autoUpdateDefault", false);
 user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("media.volume_scale", "0.0");
 user_pref("browser.aboutwelcome.enabled", false);
 user_pref("browser.startup.page", 0);
 user_pref("browser.startup.homepage_override.mstone", "ignore");
@@ -119,6 +120,38 @@ class FirefoxDriver {
     return 'granted through ExtensionPermissions (permissions.request said no)';
   }
 
+  /**
+   * Gives TRIF <all_urls> (on) or takes it away (off), from its own page `ctx`, as for someone who installed
+   * it when <all_urls> was required (Firefox keeps that grant on the update): Firefox's tab capture wants it.
+   * Asked for with permissions.request from a real click on a button put in the page for it (prompts are
+   * off in this profile, so Firefox says yes): granting it from the browser's side (ExtensionPermissions.add)
+   * doesn't reach the running extension.
+   */
+  async setAllSites(ctx, on) {
+    if (!on) return this.bidi.call(ctx, `async () => chrome.permissions.remove({ origins: ['<all_urls>'] })`);
+    await this.bidi.call(ctx, `async () => {
+      const b = document.createElement('button');
+      b.id = 'e2e-all-sites';
+      b.textContent = 'e2e: all sites';
+      b.style.cssText = 'position:fixed;top:0;left:0;z-index:99999';
+      b.onclick = () => { window.__e2eAllSites = chrome.permissions.request({ origins: ['<all_urls>'] }); b.remove(); };
+      document.body.append(b);
+    }`);
+    await this.click(ctx, '#e2e-all-sites');
+    return this.bidi.call(ctx, `async () => window.__e2eAllSites`);
+  }
+
+  /** Restarts the add-on (as Firefox starting again does), and waits for its background to be back. */
+  async restartAddon() {
+    // Its pages first (the setup page polls the background: a restart under it logs a rejected promise).
+    for (const c of await this.contexts()) if (c.url.startsWith(this.origin)) await this.bidi.send('browsingContext.close', { context: c.id }).catch(() => {});
+    await this.chrome(`async (id) => {
+      const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
+      await (await AddonManager.getAddonByID(id)).reload();
+    }`, [ADDON_ID]);
+    await sleep(1500);
+  }
+
   /** Takes the userScripts permission away again, from an extension page `ctx` (the add-on giving it up). */
   async revokeUserScripts(ctx) {
     const removed = await this.bidi.call(ctx, `async () => chrome.permissions.remove({ permissions: ['userScripts'] })`);
@@ -127,6 +160,16 @@ class FirefoxDriver {
   }
 
   // ---- pages
+
+  /** The icon (its 16 px URL) TRIF's toolbar button has for a tab, from Firefox's own record of it. */
+  async actionIcon(tabId) {
+    return this.chrome(`async (id, tabId) => {
+      const { ExtensionParent } = ChromeUtils.importESModule('resource://gre/modules/ExtensionParent.sys.mjs');
+      const action = ExtensionParent.apiManager.global.browserActionFor(WebExtensionPolicy.getByID(id).extension).action;
+      const icon = action.getIcon({ tabId });
+      return (icon && (icon[16] || icon[Object.keys(icon)[0]])) || null;
+    }`, [ADDON_ID, tabId]);
+  }
 
   async contexts() {
     const { contexts } = await this.bidi.send('browsingContext.getTree', { maxDepth: 0 });
@@ -181,6 +224,55 @@ class FirefoxDriver {
       ] }],
     });
     await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
+  }
+
+  /** A trusted right-button press and release at (x, y): what a press does, without a click's action. */
+  async rightPress(ctx, x, y) {
+    await this.bidi.send('input.performActions', {
+      context: ctx,
+      actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: [
+        { type: 'pointerMove', x: Math.round(x), y: Math.round(y) }, { type: 'pointerDown', button: 2 }, { type: 'pointerUp', button: 2 },
+      ] }],
+    });
+    await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
+  }
+
+  /** A trusted press of `key` ('Escape') in the page `ctx`. */
+  /** The page's prefers-color-scheme: not offered over BiDi here (the screenshots in both themes are Chrome's). */
+  async colorScheme() { return false; }
+
+  /** The page's viewport (CSS px), as a shorter side panel would be; null puts it back. False if it can't. */
+  async viewport(ctx, size) {
+    try { await this.bidi.send('browsingContext.setViewport', { context: ctx, viewport: size ? { width: size.width, height: size.height } : null }); return true; } catch (e) { this.viewportError = String(e?.message ?? e).slice(0, 200); return false; }
+  }
+
+  async key(ctx, key) {
+    const value = { Escape: '\uE00C', Enter: '\uE007', Tab: '\uE004', ArrowDown: '\uE015', ArrowUp: '\uE013' }[key] || key;
+    await this.bidi.send('input.performActions', {
+      context: ctx, actions: [{ type: 'key', id: 'keyboard', actions: [{ type: 'keyDown', value }, { type: 'keyUp', value }] }],
+    });
+    await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
+  }
+
+  /** Firefox's prompt for optional permissions on (on) or off (as this profile starts: requests are granted). */
+  async setPermissionPrompts(on) {
+    await this.chrome(`async (on) => { Services.prefs.setBoolPref('extensions.webextOptionalPermissionPrompts', on); }`, [on]);
+  }
+
+  /** Answers the permission prompt an add-on's permissions.request opened: yes or no, as its buttons do. */
+  async answerPermissionPrompt(accept, { timeoutMs = 8000 } = {}) {
+    return waitFor('the permission prompt', () => this.chrome(`async (accept) => {
+      for (const win of Services.wm.getEnumerator('navigator:browser')) {
+        for (const b of win.gBrowser.browsers) {
+          const n = win.PopupNotifications.getNotification('addon-webext-permissions', b);
+          if (!n) continue;
+          (accept ? n.mainAction : n.secondaryActions?.[0])?.callback?.();
+          win.PopupNotifications.remove(n);
+          return accept ? 'accepted' : 'declined';
+        }
+      }
+      return null;
+    }`, [accept]), { timeoutMs });
   }
 
   /** Moves the mouse off whatever it last clicked (to the bottom left corner), so nothing shows hovered. */

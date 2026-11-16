@@ -1,0 +1,426 @@
+# Sandbox tier: working notes (branch sandbox-tier)
+
+Names (Nov 10, branch tier-names): what these notes call rules, sandboxed and page mods are, for people,
+**style mods**, **boxed mods** and **free mods** (headers `@style`, `@boxed`; the old ones still work).
+Identifiers, storage and protocol keep rules / sandboxed / page. UI strings: docs/TIER-NAMES-STRINGS.md.
+
+A running log of the overnight build of the sandboxed tier (docs/SAFE-MODS.md): decisions, measurements,
+browser findings, open questions for Tim. Newest findings are folded into the sections, not appended.
+
+## What was built
+
+- `// @sandboxed` header (helper/lib/mods.js). A mod is `@rules` or `@sandboxed`, not both (an error).
+  The hash of every other mod is unchanged (`sandboxed` only joins the hashed header fields when it's set),
+  so seen.json and allowed.json keep matching.
+- Never held for its code (held.js powersFor returns nothing for it, like a style mod). A side-panel run's
+  boxed mod is still held for an `@match` outside the run's site, or for `@risk 2`, exactly like a rules
+  mod: those are about the run's scope, not about what the code can do.
+- `trif check` on a boxed mod: parses it (inside an async function, as it runs), says it never waits,
+  and lists, as a lint, what the sandbox wouldn't give it (helper/lib/sandboxlint.js): page-only globals
+  (`window`, `document`, `fetch`, `localStorage`, ...), real-element members (`.innerHTML`,
+  `.addEventListener`, `.click`, `.style.x`, ...), string timers, and the two source patterns SES refuses
+  outright (`import(` and `<!--`/`-->`, even in strings and comments). Exit 0: a lint, not a hold.
+- `trif new --sandboxed` (helper/templates/sandboxed.js), `trif mods` ("kind: sandboxed"), `trif status`
+  ("registered (sandboxed)", "WAITING: ..." and `NO SANDBOX` in a browser without it, group names in
+  `GROUPS OFF` / `NEW MODS`).
+- extension/sandbox.js: the world's runtime and the API. lib.js: registration (`modToUserScript`,
+  `sandboxRuntimeScript`, `syncUserScripts`), groups (`modGroup` → 'sandboxed'), the fallback
+  (`sandboxFallback`). background.js: the world's configuration (`sandboxWorld`), settings storage
+  (`onUserScriptMessage`), errors and logs from the world (`sandboxList`), Allow for the fallback.
+- Panel: a **Boxed mods** group between Rules and Free mods with its own per-site switch; Settings →
+  New mods start → **Boxed mods** (default On).
+- Examples: examples/boxed (ports of Simple Shopping and DVD Logo; not shipped mods, nothing scans
+  that folder).
+
+## Design decisions (for Tim to review)
+
+1. **Built on the stand-in design** (SES Compartment in TRIF's userScripts world), not the removal design.
+   No concrete reason found against it; the hostile e2e is the evidence.
+2. **One shared world (`trif-sandbox`), one Compartment per mod**, not a `worldId` per mod. Chrome has
+   per-mod worlds, but each world would load SES (237 KB) and run lockdown again, per mod, per page
+   (measured below); compartments already separate the mods' globals, and the language is frozen for all of
+   them. What mods share: the DOM (shared with the page anyway), TRIF's one MutationObserver, and the frozen
+   intrinsics.
+3. **Messaging is on for TRIF's world**, against the brief's "no messaging", for `trif.settings`. Without
+   it, the only persistent storage the world can reach is the page's own (localStorage), which the brief
+   asked to avoid: the site could read, change and detect the settings. With it, TRIF's runtime captures
+   `chrome.runtime.sendMessage` before any mod runs and deletes `chrome`/`browser` from the world; mods'
+   compartments never have them. The background accepts only `settings.get` / `settings.save` for a
+   boxed mod it knows, for the site the *browser* says the sender is on (not the message), capped at
+   64 KB per mod per site, 200 sites per mod. Network is still off (the world's CSP and no API).
+   Alternative, one line each in sandbox.js and background.js: messaging off and settings in the page's
+   localStorage under a TRIF prefix (what the page-script fallback does).
+4. **Settings are per mod *and per site*.** Otherwise a mod matching two sites could carry what it read on
+   one into the other's page (the shared DOM is a channel to the page it runs on).
+5. **Addresses**: an image's `src` only `data:`/`blob:` or an address an image on the page already shows (so
+   cloning the site's logo works) — never a new request, not even to the site itself (a GET there can do
+   things: log out, unsubscribe, "like"). A link's `href` only this site's own pages *without a query*
+   (`/url?q=https://elsewhere` is an open redirect on many sites), or `#...`. A link goes nowhere until the
+   user clicks it.
+6. **Text the browser would run or submit isn't written**: `setText`, `append('text')`, `before/after`, and
+   `trif.text` refuse (or skip) `<script>`, `<style>`, `<textarea>`, `<option>`, `<select>`. An empty
+   `<script>` the page made would otherwise run text written into it later, in the page's world; a page
+   `<style>` would load `url()`s TRIF's CSS check never saw. `value` is only offered on `<progress>`/`<li>`.
+7. **The mod's code runs in an async function**: top-level `return` and `await` work (the settings API is a
+   promise); rejections after an await are reported as the mod's errors.
+8. **Code from strings**: the compartment has no `eval`, `Function` or `Compartment` (set undefined), and
+   SES's tamed `Function.prototype.constructor` throws, so not even code confined to the compartment can be
+   built from strings. The world itself allows 'unsafe-eval' because SES needs it to evaluate the mod.
+9. **Errors**: anything a browser API throws (a DOMException, say) reaches the mod as a fresh TypeError with
+   the message, so no object from outside the compartment's intrinsics leaks through an error.
+10. **Group of a boxed mod in a browser without the sandbox: "Free mods"**, since that's how it runs
+    (or would) there. So switching Free mods off on a site also covers them.
+11. **Fallback hold lives in the extension**, not the helper: held.json is shared by every browser, and the
+    hold is about where a mod can run in *this* browser. Allow (panel only) stores the allowed hash in
+    `unsandboxedOk`; a new version waits again. No `trif approve` for it (like the group switches).
+
+## Browsers
+
+- **Chrome** (138+, the extension's minimum; tested: Chrome for Testing 156, headless): everything above.
+  `configureWorld` with `worldId`, a CSP and messaging (133+), `userScripts.execute` with a `worldId` for
+  reading the world's errors and logs (135+), `runtime.onUserScriptMessage` (120+).
+- **Firefox** (153+, the add-on's minimum; tested: Firefox 159, headless): **hosts the sandbox too**, and the
+  hostile e2e passes there exactly as in Chrome. MDN's compat data: `userScripts.configureWorld` and
+  `worldId` since 136, `execute` since 153; Firefox's own test (test_ext_userScripts_mv3_csp.js) checks that
+  a world's CSP governs `eval`, which is all SES needs from it here (TRIF doesn't rely on the CSP for the
+  network: the compartment has no network API, and stand-ins refuse addresses; the e2e's server log shows
+  nothing reached it in either browser). SES's `lockdown()` works in Firefox's user script sandbox (Xray
+  wrappers and all). Two Firefox quirks, both handled in background.js `listenToSandbox`:
+  - `runtime.onUserScriptMessage` exists only once the optional userScripts permission is granted, and a
+    listener on `chrome.runtime`'s event (the namespace TRIF had touched before the grant) never heard a
+    user script's message, while one on `browser.runtime`'s did (seen with a probe in the e2e);
+  - taking the permission away and giving it back drops the listener: it's added again on each grant.
+  In Firefox, `TextEncoder`/`TextDecoder` aren't on the compartment's global (68 names vs Chrome's
+  70); `performance.now()` is 1 ms coarse there, so its timings below are rounded.
+- **Safari**: no world of TRIF's own (its userScripts is TRIF's adapter, extension/safari.js, which runs
+  free mods). Every boxed mod waits for the user's OK there, held by the extension with the reason
+  "Safari can't run boxed mods, so here it would run as a free mod, with everything the page has",
+  under Free mods; Allow runs it as a free mod with the same API (sandbox.js `sandboxPageCode`).
+  Not run in Safari tonight (no Safari e2e); the page-script form is tested in Chrome and Firefox (e2e
+  `sandboxPageFormCheck`: the API works in the page's world) and the hold in unit tests
+  (tests/extension.test.js `sandboxFallback`). Any browser whose `configureWorld` fails gets the same.
+
+## Measurements
+
+From tests/e2e/scenario.js `sandboxedCheck` (sandbox-<browser>.json in the run's output), test page with
+1000 cells and five boxed mods (hostile, good, throws, the two samples) plus one page mod:
+
+| | Chrome 156 | Firefox 159 |
+|---|---|---|
+| SES loaded in the world (per page where a boxed mod runs) | 2.3-2.8 ms | 3 ms |
+| `lockdown()` (once per page) | 5.8-6.9 ms | 4-5 ms |
+| a mod's first run (compartment + its top level) | 0.2-3 ms | 0-6 ms |
+| restyle 1000 elements through stand-ins (`style()`) | 3 ms | 2 ms |
+| the same in a page mod (`el.style.setProperty`) | 0.4 ms | 0-1 ms |
+| DVD port, per frame (TRIF's callback + the mod's step) | 0.11-0.13 ms | 0.11-0.18 ms |
+| names on the compartment's global | 70 (page's world: ~1,240) | 68 |
+
+So: about 8-10 ms once per page for the sandbox to start (at document_start, before any mod), then mods
+cost about what they do; stand-ins are 5-8x a direct DOM call on a hot loop (still ~3 µs an element). A
+world per mod would pay the 8-10 ms per mod per page, hence one shared world. Not measured on a real site
+(no network tonight); X's timeline with the feed mods is the next thing to time.
+
+## Hostile e2e: results
+
+Final runs (Chrome 156: 56 of 56 checks passed; Firefox 159: 61 of 61): 156 escapes tried (123 before the
+red team, 20 from its first round and 13 from its second: see "Red-team fixes") by
+tests/e2e/fixtures/sandbox-hostile.js, every one refused (TRIF or the language said no) or absent (the thing
+isn't there), in both browsers; the test server saw none of the `e2e-sbx-leak` addresses; the page's own
+listeners saw no click, key, submit, focus or message and no inline code ran; its prototypes were untouched
+(and not frozen: lockdown stays in TRIF's world); its form, empty script, style element, link, image, button
+handler and frame were as they were; the tab stayed on the page and no tab opened. By category:
+- network: fetch, XMLHttpRequest, WebSocket, EventSource, WebTransport, RTCPeerConnection, Worker,
+  SharedWorker, navigator (so sendBeacon), Image, Request, importScripts: absent; images at another site,
+  at this site with a query, at a new address on this site, the page's own image pointed elsewhere: refused;
+  CSS `url()` (trif.css, style values), `image-set()`, `@import`, an escaped `u\72l(`, `@font-face`, a
+  selector closing trif.hide's rule: refused; `<link>`, `<script>`, `<iframe>`, `<frame>`, `<object>`,
+  `<embed>`, `<form>`, `<input>`, `<meta>`, `<base>`, `<style>`, `<svg>`, `<video>`, `<audio>`, `<source>`,
+  `<template>`, `<portal>`: refused; a link to another site or to this site with a query: refused.
+- code from strings: eval, Function, Compartment, lockdown, harden: absent; the Function, async function and
+  generator constructors reached through functions: refused (SES); a string timer: refused.
+- inline code: onclick on the page's button, onerror on a new image, a `javascript:` link, `srcdoc`:
+  refused; `innerHTML` (frozen stand-in), `insertAdjacentHTML` (not there): refused; text into an empty
+  script the page made (setText, append), CSS into the page's style element: refused; trif.text over it:
+  skipped (nothing written).
+- other windows, frames, the page: window, document, self, top, parent, frames, opener, location, history,
+  storage, caches, cookieStore, chrome, browser, postMessage, open, alert, the page's own globals, event
+  constructors, MutationObserver, getComputedStyle, DOMParser, customElements, trustedTypes: absent; no
+  browser names on the global; a frame's window/document, into a frame, a frame by index: absent; the
+  language's prototypes, a stand-in and its prototype: refused (frozen); a stand-in method on something TRIF
+  didn't make: refused; a DOMException through a selector, classes or a canvas: arrives as a plain TypeError.
+- synthetic input: click(): refused (not there); dispatchEvent, focus, submit, requestSubmit: absent; a form
+  field's value, a textarea's or option's text: refused; execCommand: refused (no document).
+- navigation: location, window.open, a `target` attribute, a target=_blank link's click: refused.
+- clipboard, cookies, localStorage, postMessage: refused (none of them there).
+
+## Open questions
+
+- **Script gadgets** (red-team RT-1, closed for names): a mod's data attributes, ids and classes are
+  `trif-` only (see "Red-team fixes"). What's left that the page's code might act on: `aria-*`, `role`,
+  `title`, `hidden`, `tabindex`, `open` (a `<details>` the page lazy-loads on its `toggle`), and moving or
+  removing the page's own elements (an observer could react to that). And links: a same-site `href`
+  without a query that a framework prefetches on hover (Turbo 8 does) is a GET to the site without a
+  click. Low; not closed.
+- **Forms** (red-team RT-2 and RT-10, closed for buttons, moves, removal and writing over): what's left is
+  a mod's `<label>` around a page checkbox, and hiding a field the user then can't see. Deception that needs
+  the user's click.
+- **Deceiving the user by what's shown** (any mod can, style mods too).
+- **Denial of service**: a mod looping forever hangs the page (one thread); SES doesn't contain it.
+- **Keystrokes** (red-team RT-4, closed for fields): which key is pressed in a field reaches no mod; a
+  field in a closed shadow root is covered by default-deny since round 2 (RT-8), and an editor's text is
+  hidden (RT-9).
+- **Page CSP**: a `<style>` element from the world on a page whose CSP forbids inline styles (style-src
+  without 'unsafe-inline'): not tested. In Chrome the world's own CSP may cover it.
+- **API gaps found while porting**: CSS masks with the site's images, `getBBox`, drawing images on a canvas
+  (`drawImage`), focus/scrollIntoView. Each is a deliberate addition.
+- **Where SES loads**: the sandbox runtime goes wherever any boxed mod *matches*, ignoring excludes and
+  per-site switches (those only stop the mods). A boxed mod for every site costs ~8-10 ms on every page
+  load. Could carry the excludes common to all boxed mods.
+- **Settings of a deleted mod** stay in `sandboxSettings` (capped per mod); not cleaned up yet.
+- **`trif approve`** doesn't reach the extension's sandbox hold (Safari): Allow is in the panel only, like
+  the group switches.
+- **Safari not run** tonight (no Safari e2e); its path is the page-script form (tested in Chrome and
+  Firefox) plus the hold (unit tests).
+
+## New UI text (for Tim's review)
+
+(As built on sandbox-tier, before the names changed; the strings now: docs/TIER-NAMES-STRINGS.md.)
+
+Side panel:
+- Group heading **Boxed mods**, with the line *Run in TRIF's sandbox: they can't send, click or load anything.*
+- Settings → New mods start: a **Boxed mods** row (On / Off, default On).
+- Tag tooltip on a new boxed mod that started off: *New boxed mods start off (Settings): switch it on
+  once you've looked at it.* (the existing sentence with the new group name).
+- A boxed mod on hold in a browser without the sandbox: head *Waiting for your OK.*; facts *Safari can't
+  run boxed mods, so here it would run as a free mod, with everything the page has* (then any of
+  *as a free mod, it <TRIF's usual fact>*); note *Allow runs this version as a free mod, in this browser
+  only.* Buttons: Allow (on the row), Show code.
+- Errors via the existing "Couldn't switch …" note: *Couldn't switch Sandboxed on/off: …*
+
+CLI and agents (trif status / mods / check / new, help): `registered (sandboxed)`, `registered (boxed mod,
+run as a free mod: the user allowed it, as this browser has no sandbox)`, `WAITING: <reason>; only the
+user can allow that, in the side panel`, `NO SANDBOX    <browser> can't run boxed mods: each waits for
+the user's OK (in the side panel) to run as a free mod instead`, `kind: rules (…)` / `kind: sandboxed
+(…)` in trif mods, `boxed mods` in GROUPS OFF / NEW MODS, trif check's sandboxed output and lint lines,
+`trif new --sandboxed`, the template's comments, and the mods' own error messages (`TRIF sandbox: …`).
+
+## Packaging
+
+- extension/vendor: SES 2.3.0's `dist/ses.umd.min.js` byte for byte from npm (sha256 in README.txt), its
+  Apache-2.0 LICENSE and the four licenses it ships for code it includes (aura, caja, core-js, v8). TRIF's
+  own LICENSE (MIT) doesn't mention them yet.
+- `web-ext lint` on the Firefox build: two new warnings, both `DANGEROUS_EVAL` in vendor/ses.umd.min.js (SES
+  makes its evaluator with the realm's Function); no new errors. AMO may ask where the minified file comes
+  from: the npm package, unchanged.
+- The Chrome build: the world needs no new permission (userScripts already), nor web_accessible_resources
+  (the browser injects vendor/ses.umd.min.js as a user script file).
+
+## Red-team fixes (report: branch sandbox-redteam, docs/RED-TEAM-REPORT.md)
+
+The red team found no compartment escape and no direct exfiltration; it found the shared DOM was enough to
+make the page (or the user) act. What changed, and what each costs mods:
+
+- **RT-1, script gadgets (high).** Names a mod gives are TRIF's: data attributes only `data-trif-*`; `id` and
+  `class` only `trif-*`, and only on elements the mod made or that have no page-given value (the page's own
+  ids and classes can't be replaced or removed); `classes.add/remove/toggle` only `trif-` classes (`has`
+  reads any); `clone()` keeps no page-given id, class or data attribute. `aria-*` stays. `name` was never
+  offered. `trif check` lints literal names that would be refused.
+  *Cost*: a mod marks elements with `data-trif-…` or `trif-` classes (the Simple Shopping port changed
+  `data-ahr-hide` to `data-trif-hide`); it can't take a page class off to un-collapse something (override it
+  with `trif.css` instead), can't give a page element an id, and copies lose the page's classes, so page CSS
+  that targets them doesn't style the copy.
+- **RT-2, forms (medium).** A button a mod makes is created `type="button"` (`type` isn't offered, so it
+  can't change), and a mod's button can't be put inside a form at all. The page's own form-associated
+  elements (button, input, select, textarea, fieldset, output, object) can't be moved into, out of or between
+  forms (unless they name their form with `form=`, which moving doesn't change). Moving them within their
+  form, and moving anything else, still works. *Cost*: rearranging a page's form into another form or out
+  of it is refused; a mod can't add its own buttons inside a form (put them next to it).
+- **RT-3, clickjacking (medium, tier-wide).** CSS alone can make a page's real control invisible (or move it)
+  and float it over a decoy, so the user's own click lands on it. The first proposal (`style()` refusing
+  `opacity`, `clip-path`, `transform`… on the page's controls) was dropped: it missed style mods and
+  `trif.css`, which can do the same with a selector. **Partly closed for 0.3.1 (branch clickjack-guard): a
+  guard at the press**, for every tier whose styles TRIF applies. Strings: docs/CLICKJACK-STRINGS.md.
+  - *What's built* (extension/runtime.js `clickGuard`, in the page's world, listening on the window in the
+    capture phase from document_start, so before the page's own listeners; extension/sandbox.js, the
+    `trif:cj-*` events). On a trusted press (pointerdown, mousedown, touchstart, a click with no press before
+    it, Enter or Space on a focused control) on one of the page's controls (the element hit or its nearest
+    `a[href]`, `button`, `input`, `select`, `textarea`, `label`, `summary`, frame, control role, `[onclick]`,
+    `[contenteditable]`, tab stop; else the outermost element with the pointer cursor): is it **unseen**?
+    Opacity under 0.25 multiplied up its ancestors (with `filter: opacity()`; a heavy blur or an SVG `url()`
+    filter counts as nothing), a mask that hides it (an image, or a gradient of transparent colours only),
+    under 4 px, or nothing of it showing (no text, border, background, shadow, outline, picture, field or
+    generated content, looking through up to 60 elements inside it and skipping what's faded or masked out
+    in there). Almost every press stops there (seen). If it's unseen, TRIF **looks again with the mods'
+    styles taken away**: every TRIF style element in the control's tree scopes (`data-trif-style="<mod id>"`:
+    style mods, style sections, boxed mods' `trif.css`/`hide`) and TRIF's adopted shadow sheets disabled;
+    boxed mods' `style()` values and `animate()` animations on the control and its ancestors undone by the
+    sandbox (it keeps each property's value from before the mod's first write); the transitions this starts
+    cancelled as they start, and again on the way back, so the look reads the real values and the page never
+    shows them. Unseen without the mods too: the site's own design (a file input it made invisible over its
+    own label), and the press goes on. Seen without them: the press is stopped (`preventDefault` and
+    `stopImmediatePropagation` on it and on the rest of its gesture: up, click, contextmenu, the key's
+    release) and the mod named: the owner of the one sheet with a rule that changes how something looks and
+    matches the control, an ancestor or something in it (when several, each one's styles alone are tried;
+    when none alone does it, they're named together). A boxed mod that moved the control or an ancestor is
+    named for it whatever the look without styles says (a move can't be undone for the look). Also stopped,
+    without that comparison: a press through one of a boxed mod's own elements that lets clicks through
+    (`pointer-events: none`), with an opaque background colour, not faded, over at least half the control
+    (`trif:cj-cover`: those elements take clicks for a moment and the browser says what's on top). A frame
+    (`iframe`, `embed`, `object`) the mods hid is made unclickable (`[data-trif-guard] { pointer-events: none }`)
+    when the pointer enters it, as its presses happen inside it, out of reach; the click goes to what the
+    user saw under it. Told once per mod and reason on a page: an entry in the mod's errors (`kind:
+    'clickjack'`: `trif errors`, the row's badge), and a card in the site's chat (never a fix run); a boxed
+    mod's world tells the background at once, else it's read at the next look.
+  - *Not covered*: **free mods' code** (it runs in the page, and can do anything the page can; their style
+    section is marked and judged like a style mod's, but their own code can hide a control however it likes).
+  - *What's left, plainly*:
+    - **Disguise, not hiding.** A control that's visible but made to look or read like something else: its
+      words replaced (a style mod's `replace`, a boxed mod's `setText`), its colours, generated content, a
+      mod's own words drawn over it with a see-through background (Oppish does exactly this, honestly), a
+      picture or canvas drawn over it (pictures and canvases are mostly see-through: DVD Logo's bouncing copy,
+      Space Shooter's game; TRIF can't tell which pixels are), or a mod's element with a see-through
+      background. The guard judges whether the control can be seen, not what it says.
+    - **Decoys that aren't a boxed mod's own element**: a style mod's or `trif.css`'s `::before`/`::after`,
+      or a page element moved over the control by mod CSS, with `pointer-events: none`. Only boxed mods' own
+      elements are checked as covers.
+    - **Unseen by other means**: the control coloured like what's behind it, `mix-blend-mode`, `clip`/
+      `clip-path` leaving a sliver (they also clip where it can be clicked, so only the sliver's pressable),
+      text pushed out of its box (`text-indent`), a mask sized or placed off the control, a mask gradient
+      with one opaque stop, filters other than `opacity()`, a heavy `blur()` and `url()`.
+    - **Presses it doesn't see**: keyboard focus moved into a hidden frame (Tab), touch entering a hidden
+      frame (pointerover is what shields one: tested with a mouse), Enter in a `textarea` or editor and typing
+      into a hidden field (typing isn't a press), and controls the page made of plain elements with no role,
+      tab stop, `onclick` or pointer cursor.
+    - **Closed shadow roots** are judged at their host (what's inside isn't visible from TRIF's code).
+    - **Inside other shadow trees**, inherited styles a document sheet changes during the look (a colour)
+      can start transitions there; they're cancelled with the rest (`document.getAnimations()`).
+  - *Costs* (`window.__webmods.guard.stats`): in headless Chrome on a page of 9000 elements
+    (tests/clickjack-browser.test.js), a press 0.4 to 0.7 ms on average; the second look, only for an unseen
+    control, 3 to 9 ms (the first press of a page is the slowest, its code not yet warm). In the e2e's small
+    page through the real extension: Chrome about 1.5 ms a press and 1.5 ms for the second look (max 3.8);
+    Firefox about 1.3 ms and 2.8 ms (max 9, the first; Firefox's timer counts whole milliseconds; one earlier
+    run under load measured 22 ms at most, before the guard stopped asking TRIF's sandbox world on every
+    press). No event crosses to TRIF's world on a press unless it's on the page, and the check for a mod's
+    own element over a control runs only once a mod has made one. Only presses are watched (and the pointer
+    entering a frame). The second look's side effects,
+    when a press is on an unseen control: the mods' CSS animations restart (their sheet was off for a moment),
+    the page gets `transitioncancel` for transitions the look started, and MutationObservers that watch
+    `style` attributes see a boxed mod's inline styles on the control and its ancestors undone and redone.
+    A page's own invisible control pressed twice within 2 s is looked at once.
+  - *False positives found and how they're handled*: Rainbow Rave hides X's icons (`opacity: 0`) and draws
+    its own with `::after` (the control is judged, not the element hit, and generated content counts as
+    something it shows); Oppish makes a button's text transparent and draws its own words over it (the
+    button still shows its background and border; words-only overlays aren't covers); DVD Logo and Space
+    Shooter draw pictures and a canvas over the page with `pointer-events: none` (not counted as covers);
+    Tune Composer's own controls at 0.3 to 0.4 (the threshold is 0.25; a mod's own control isn't checked
+    for covers, and a mod's own element pressed counts only when it acts the page's way: a link, a button…);
+    the site's own button fading in on hover, pressed at once (judged where its transition ends); the
+    page's own transitions, which the second look first read at their first frame (cancelled, see above; a
+    sheet making every transition `none` cost 34 ms on 9000 elements, so it's not that). The e2e presses
+    every control in view on the X and Google stand-ins with Tim's shipped mods on (Rainbow Rave, Profile
+    and Post Styler, Follow Status, Oppish, DVD Logo, the two Google style mods, Detox Timeline:
+    tests/e2e/scenario.js `clickjackShipped`, Chrome): nothing stopped. The stand-ins are small (13 controls
+    in all), so the real sites are the better test: Simple Shopping has no stand-in (its port runs on the
+    e2e's sandbox page, where nothing it does is pressed).
+- **RT-4, keystrokes (low).** `key` and `code` reach a mod only when the key wasn't pressed in something
+  editable: input, textarea, select, contenteditable, or an element that may hold a field in its shadow root
+  (a custom element, or one with an open shadow root). The mod still gets the type, modifiers and target.
+  (`input` events never carried the typed data.) *Cost*: none for hotkeys on the page; a mod can't react to
+  which key is pressed inside a field. Residual: a field inside a *closed* shadow root on a plain element
+  (`div`, `span`, …) isn't detectable from TRIF's world.
+- **RT-5, the settings channel's world check (low).** Now `sender.userScriptWorldId === "trif-sandbox"` or
+  no answer. Both supported browsers send it (Chrome 133+, Firefox 136+; Firefox's seen in the e2e probe,
+  Chrome's by the settings e2e passing with the strict check).
+- **RT-6, SES integrity (design).** The SES file's sha256 is a constant (`SES_SHA256` in sandbox.js) checked
+  by `scripts/build-extension.js` (the build fails) and by tests/sandbox.test.js. `lockdown` now uses
+  `errorTaming: 'safe'`: a mod can't read any error's `stack` (which named TRIF's and SES's files); TRIF's
+  runtime reads stacks with SES's `getStackString`, which only its start compartment has, so `trif errors`
+  keeps stacks, and line numbers are now the file's own (the mod's source starts on the wrapper's first line,
+  in the sandbox and as a free mod; before, they were one line off).
+- **Regression checks**: the red team's PoCs, adapted to run as real boxed mods through the extension, are
+  in the hostile e2e (tests/e2e/fixtures/sandbox-hostile.js "the page's own code as the messenger" and
+  "forms"; the test page runs an htmx-like observer that turns `data-auto-post`, `data-hx-post`,
+  `data-controller`, a `js-auto-post` class, an `sbxConfig` id, and a page class being taken off into
+  requests), plus real keys in the e2e (two typed into a password field: unseen; one on the page: seen) and
+  the mod's own button, class and data attribute working.
+
+### Round 2 (report: same branch, "Round 2"): RT-1, RT-2, RT-5, RT-6 held; three more closed
+
+- **RT-8, keys from a closed shadow root (low).** Keys are now default-deny: `key`/`code` reach a mod only
+  for the document, `<html>`, `<body>`, or an element that is no field or editor and can't be holding one in
+  a shadow root. An event from inside an open root (composedPath()[0] isn't the target) is denied. Where
+  TRIF's world can see closed roots (`chrome.dom.openOrClosedShadowRoot` or Firefox's
+  `Element.openOrClosedShadowRoot`; which one, if any, is in `__trifSandbox.stats.closedRoots`), an element
+  is checked directly. **Neither is reachable from TRIF's user-script world in Chrome 156 or Firefox 159**
+  (stats.closedRoots was "none" in both e2e runs), so today, in both, any element that can host a shadow root (custom elements, and `div`,
+  `span`, `p`, `section`, `article`, `header`, `footer`, `nav`, `main`, `aside`, `blockquote`, `h1`-`h6`)
+  counts as editable. *Cost*: a hotkey pressed while the focus is on one of those (sites that focus a post,
+  like X's j/k on `<article>`, or a `div tabindex`) reaches the mod with `key: null` there; with the focus on
+  the page, a link, a button, a list item, a table cell, it works as before. Residual: a closed root on
+  `<body>` itself, where TRIF can't see closed roots.
+- **RT-9, an editor's text (low).** What's in an editing host (contenteditable, or a page in design mode) is
+  hidden from mods: `.text` leaves it out (an editor's own `.text` is ''; an ancestor's skips it),
+  `trif.text` doesn't read or rewrite it, `clone()` copies none of it, `attr()` is null inside it (a link
+  typed into a draft), and its pieces can't be moved out of it. *Cost*: a mod can't read or rewrite text
+  people are typing (word counters, live previews of a draft); it can still restyle and hide editors.
+  Residual: selectors still match inside an editor (`find('#editor a[href^="…"]')` can test an attribute's
+  value bit by bit; nothing can send the answer).
+- **RT-10, a field taken out of its form (low).** `remove()` and `setText()` are refused when they would take
+  a page field out of its form (removing the field, or something holding it, unless its form goes with it;
+  writing over anything holding one), as moves already were. `removeAttr` now follows the same attribute
+  rules as `setAttr`, so a field's `value` can't be taken off either (found while doing this). *Cost*:
+  removing part of a form that holds fields is refused (`hide()` hides it instead); removing a whole form
+  still works.
+- New hostile probes for each (now 156 in all), in the real user-script world: an editor's text, a piece's,
+  the page's text with an editor in it, an attribute inside it, moving a piece out, copies, `trif.text`;
+  removing a field or what holds it, writing over the form or what holds a field, taking a field's value
+  off; and real keys typed into a password field in a closed shadow root on a plain `<div>`.
+
+### Wording awaiting Tim's OK (not changed in the UI)
+
+(On branch tier-names, draft A and the Rules draft below are in the panel as the Boxed and Style mods
+lines, still awaiting Tim's OK: docs/TIER-NAMES-STRINGS.md.)
+
+The red team is right that "can't … click" overstates it: a mod (sandboxed or rules) can't click, but it can
+arrange the page so the user's own click does something else. Drafts:
+- Sandboxed group line, now *"Run in TRIF's sandbox: they can't send, click or load anything."*:
+  - A: *"Run in TRIF's sandbox: they change what the page shows, and can't send, load or click anything themselves."*
+  - B (shorter): *"Run in TRIF's sandbox: they can rearrange the page, but can't send or click anything themselves."*
+- Rules group line (same issue, RT-3 is tier-wide), now *"Run by TRIF from data: they can't send, click or
+  load anything."*: *"Run by TRIF from data: they change how the page looks, and can't send, load or click
+  anything themselves."*
+- Proposed CHANGELOG summary bullet (replacing the earlier proposal): *"- **Boxed mods:** JavaScript that
+  changes what pages show but can't send or click anything itself, so it never waits for you. Style,
+  Boxed and Free mods each have a switch per site."*
+- The `### More` bullet already on the branch (*"…it can't send, click or load anything, so it never waits
+  for your OK"*): *"…it changes what the page shows but can't send, load or click anything itself, so it
+  never waits for your OK"*.
+
+## Audit fixes (docs/AUDIT-REPORT.md on sandbox-audit; branch sandbox-fixes-3)
+
+The rule behind them, now in SAFE-MODS.md: **a boxed mod may only name things that are its own, or copy
+addresses the page already has.**
+
+- **AU-1, writing into drafts.** `setText`, `append`/`prepend` into, `before`/`after` beside, `remove()`,
+  `setAttr`, `removeAttr` and `classes` are refused on an editor or anything in one; `style()`, `hide()` and
+  `show()` stay. *Cost*: a boxed mod can't add a badge or button inside an editor (next to it is fine).
+- **AU-2 and AU-9, reading fields through `value`.** `attr('value')` is null on input, textarea, select and
+  option; no selector anywhere (`find`, `findAll`, `closest`, `matches`, `observe`, `text`, `hide`, and the
+  rules in `trif.css`) may name the `value` attribute or `:autofill`, or contain a `\` escape. *Cost*: CSS
+  or selectors by a field's value (rare); escaped selectors (`.a\:b`) must be written another way.
+- **AU-3, names shared with free mods.** A boxed mod's names are `trif-box-` (ids, classes,
+  `data-trif-box-*`); plain `trif-` is a free mod's, and refused. AGENTS.md tells free mods never to act on
+  `trif-box-` names. *Cost*: the prefix is longer; the two examples changed (`data-trif-box-hide`,
+  `data-trif-box-dvd`).
+- **AU-4 and AU-5.** A select's `option`/`optgroup` can't move to another select, out of one, or be removed
+  from one in a form; a custom element (a name with `-`) in a form counts as a field (moving in, out,
+  between, removing). *Cost*: rearranging custom elements in or out of forms is refused.
+- **AU-6.** `canvas()` only on canvases the mod made. *Cost*: no drawing on the page's own canvases.
+- **AU-7, links.** A link's `href` is `#…` or an address a link on the page already has. *Cost*: no new
+  same-site links (a copy of one of the page's works). **Observed before the fix** (Chrome 156, headless,
+  tests/e2e/scenario.js specRulesCheck run on main 4eebd9b): on a page with document speculation rules
+  (`prefetch`, `eagerness: immediate`, `href_matches: /e2e-spec-*`), a link a boxed mod added to
+  `/e2e-spec-boxed/carried-data` **was fetched with no click**, as was a free mod's. After the fix the
+  boxed mod's link is refused and nothing is fetched; a copy of the page's own link works. Firefox has
+  no speculation rules (its run shows nothing fetched either way).
+- **AU-8.** `open` only on `<details>`. *Cost*: none known.

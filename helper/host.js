@@ -19,25 +19,33 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { envVar } = require('./lib/env');
-const { workspace, VERSION } = require('./lib/paths');
+const { workspace, VERSION, examplesDir } = require('./lib/paths');
 const pipes = require('./lib/win/pipes');
 const { panelRunsOff } = require('./lib/platform');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
-const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./lib/mods');
+const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
+const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
-const { updateHeld, approveHeld, heldFile } = require('./lib/held');
-const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
+const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
+const { siteOkFor, splitsOf, sitesOf, approvedUnion, reach: siteReachOf, clickWordsOf } = require('./lib/sitecombos');
+const { powerInfo } = require('./lib/boxpowers');
+const history = require('./lib/history');
+const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
+  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds, changedShipped } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
-const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
+const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = require('./lib/browsers');
+const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash } = require('./lib/trash');
-const { scopeFor } = require('./lib/scope');
+const { runScope } = require('./lib/scope');
 const update = require('./lib/update');
+const modsFeed = require('./lib/modsfeed');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 const { migratePrivate } = require('./lib/migrate');
+const withoutSandbox = require('./lib/withoutsandbox');
 
 // The helper's private files (settings, logs, run logs, screenshots) leave the workspace for the private
 // folder, once (lib/migrate.js migratePrivate): side-panel runs may read the workspace, never that.
@@ -81,9 +89,13 @@ const state = {
   modErrors: [],
   modWarnings: [],
   held: {}, // mod id -> held entry (see lib/held.js)
+  review: {}, // mod id -> {facts, needs, claim}: what a mod the user has can do that they haven't seen (lib/held.js)
   updates: {}, // mod id -> new shipped version waiting (see lib/preinstalled.js pendingUpdates)
   lastSignature: null,
   lastFingerprint: null,
+  modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
+  resentFor: null, // the signature of the last set re-sent because the extension asked (modsResend)
+  sentMods: null, // id -> hash of the last set sent to this extension, for 'modsSame' (null: send every mod whole)
   stdoutOpen: true,
   shuttingDown: false,
   installing: false, // an update is being installed
@@ -91,6 +103,8 @@ const state = {
 
 logger.info(`host ${VERSION} starting (node ${process.version}, home ${ws.home}, mods ${ws.modsDir}, args ${JSON.stringify(process.argv.slice(2))})`);
 for (const n of privateMigration.notes) logger.info(n);
+// (tests: Show in Finder runs this instead of open/xdg-open, lib/reveal.js; said, so a test can check before it clicks)
+if (envVar('REVEAL_CMD')) logger.info(`reveal: TRIF_REVEAL_CMD stands in for open (${envVar('REVEAL_CMD')})`);
 // API keys left in config.json (before 0.2.0) move to the keyring (lib/agentkeys.js), in the background.
 require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
   for (const n of k.notes) logger.info(n);
@@ -109,6 +123,40 @@ function sendToExtension(msg) {
     throw new Error(`message is ${Math.ceil((frame.length - 4) / 1024)} KB; Chrome's native messaging limit is 1 MB`);
   }
   process.stdout.write(frame);
+}
+
+/**
+ * Whether the extension takes a mods set in parts: true or false once it has said hello (its `features`;
+ * every extension that can sends the feature, so one without it is 0.2.4 or older), null before.
+ */
+function takesParts() {
+  if (!state.hello) return null;
+  return state.hello.features.includes('modsParts');
+}
+
+/**
+ * Sends a {type:"mods"} message: as it is when it fits in one native message (what every extension
+ * understands), else in modsPart messages the extension joins and applies all at once; to an extension
+ * that takes 'modsSame', the mods it has already go without their code. Returns how it went: 'whole',
+ * 'parts' (with the count), or 'waiting' (too big for one message, and no hello yet to say the extension
+ * can take parts: the hello sends it again), with `bytes` sent and how many went without code (`same`).
+ */
+function sendMods(msg) {
+  // Mods the extension already has go without their code, if it can take that (withSame).
+  const same = state.hello?.features.includes('modsSame') ? state.sentMods : null;
+  const out = same ? { ...msg, mods: withSame(msg.mods, same) } : msg;
+  const nSame = same ? out.mods.filter((m) => m.same).length : 0;
+  const json = JSON.stringify(out);
+  const bytes = Buffer.byteLength(json);
+  const sent = (r) => { state.sentMods = new Map(msg.mods.map((m) => [m.id, m.hash])); return { ...r, bytes, same: nSame }; };
+  if (bytes <= MAX_TO_EXTENSION) { sendToExtension(out); return sent({ how: 'whole' }); }
+  const parts = takesParts();
+  if (parts === null) return { how: 'waiting', bytes };
+  if (!parts) throw new Error(`the mods are ${Math.ceil(bytes / 1024)} KB, and this extension takes at most 1 MB in one message`);
+  const set = `${process.pid}-${++state.modsSet}`;
+  const list = modsParts(json, set);
+  for (const part of list) sendToExtension(part);
+  return sent({ how: 'parts', parts: list.length });
 }
 
 process.stdout.on('error', (e) => {
@@ -130,24 +178,70 @@ process.stdin.on('end', () => shutdown('stdin closed (Chrome disconnected)'));
 process.stdin.on('close', () => shutdown('stdin closed (Chrome disconnected)'));
 process.stdin.on('error', (e) => shutdown(`stdin error: ${e.message}`));
 
+// The browser that started this helper (its parent process), looked up once: it names the browser better than
+// its extension can in some (Arc, Vivaldi). Each hello's name is checked against it (nameBrowser).
+let launcher;
+launchingBrowser().then((b) => {
+  launcher = b;
+  if (b) logger.info(`started by ${b.name} (${b.exe})`);
+  if (state.hello) nameBrowser();
+}, () => { launcher = null; });
+
+/**
+ * The browser's name in state.hello, from its hello and from what started the helper. When the helper knows
+ * what started it, the extension is told the name (a `browser` message): it then names the browser so in
+ * its panel too, and keeps that name over its own guesses.
+ */
+function nameBrowser() {
+  const h = state.hello;
+  if (!h || launcher === undefined) return;
+  const name = reconcileBrowser(h, launcher);
+  if (name !== h.browser) logger.info(`the browser is ${name} (its extension said ${h.browser})`);
+  h.browser = name;
+  if (!launcher) return;
+  if (!state.stdoutOpen) return;
+  try { sendToExtension({ type: 'browser', name }); } catch (e) { logger.warn(`could not send the browser's name: ${e.message}`); }
+}
+
 function onExtensionMessage(msg) {
   if (!msg || typeof msg !== 'object') return logger.warn('ignoring non-object message from extension');
   switch (msg.type) {
     case 'hello':
       state.hello = {
         version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome',
+        // (since 0.3.1: the kind of browser, and its own version where that isn't Chromium's or Firefox's)
+        family: browserFamily(msg), browserVersion: typeof msg.browserVersion === 'string' && msg.browserVersion ? msg.browserVersion.slice(0, 40) : null,
         installId: typeof msg.installId === 'string' && msg.installId ? msg.installId : null,
+        // What this extension can do beyond 0.2.4's protocol ('modsParts': mods sets in parts).
+        features: Array.isArray(msg.features) ? msg.features.filter((f) => typeof f === 'string') : [],
       };
       state.helloAt = Date.now();
-      logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
+      // (Every mod whole after a hello: it may come from an extension that just started, with other mods.)
+      state.sentMods = null;
+      nameBrowser();
+      logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${state.hello.browserVersion || msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       sendUpdate();
+      break;
+    case 'requestWaiting':
+      onRequestWaiting(msg);
       break;
     case 'response':
       onExtensionResponse(msg);
       break;
     case 'request':
       onExtensionRequest(msg);
+      break;
+    case 'modsResend':
+      // A set in parts didn't arrive whole, or a mod sent without its code wasn't there (the extension
+      // logged why). Sent again once; if that fails too, the next change or reconnect sends it again.
+      logger.warn(`the extension asked for the mods again: ${String(msg.reason ?? 'no reason given').slice(0, 300)}`);
+      // (Whole: what it has may not be what we think, if a set didn't arrive or a mod sent as `same` was missing.)
+      state.sentMods = null;
+      if (state.lastSignature && state.resentFor !== state.lastSignature) {
+        state.resentFor = state.lastSignature;
+        syncMods('resend', true);
+      }
       break;
     case 'modsApplied':
       state.modsApplied = {
@@ -157,6 +251,17 @@ function onExtensionMessage(msg) {
       };
       logger.info(`extension registered ${state.modsApplied.registered.length} mod(s)`);
       for (const e of state.modsApplied.errors) logger.warn(`extension could not register ${e.id}: ${e.error}`);
+      // (which boxed mods this browser runs: one not registered, and not held, is off here (switched off, its
+      // group or its site off, paused); a site's union of powers counts only the ones on, and one switched on is worked out again: sitecombos.js)
+      try {
+        const boxed = (state.mods || []).filter((m) => m.sandboxed).map((m) => m.id);
+        const on = new Set(state.modsApplied.registered);
+        const off = boxed.filter((id) => !on.has(id) && !(state.held && state.held[id]));
+        const who = `${state.hello ? browserKey(state.hello) : 'browser'}:${state.hello?.installId || process.pid}`;
+        // (and the sensitive sites of their own it knows of: mail.google.com's mods are its own site's, not google.com's)
+        const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null);
+        if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
+      } catch (e) { logger.warn(`switches: ${e.message}`); }
       break;
     case 'log': {
       const level = ['error', 'warn', 'info', 'debug'].includes(msg.level) ? msg.level : 'info';
@@ -182,15 +287,57 @@ function scheduleSync(reason) {
   debounceTimer = setTimeout(() => syncMods(reason, false), DEBOUNCE_MS);
 }
 
+// What a sandboxed mod's code would be able to do as a page script (lib/powers.js), by hash.
+const pageFactsCache = new Map();
+function pageFactsOf(m) {
+  const key = `${m.hash}:${m.id}`;
+  if (!pageFactsCache.has(key)) {
+    if (pageFactsCache.size > 500) pageFactsCache.clear();
+    const { powersOf, modSites } = require('./lib/powers');
+    let facts = [];
+    try { facts = powersOf(m.code || '', { sites: modSites(m) }).map((p) => p.fact); } catch { facts = []; }
+    pageFactsCache.set(key, facts);
+  }
+  return pageFactsCache.get(key);
+}
+
 function syncMods(reason, force) {
   if (state.shuttingDown) return;
   clearTimeout(debounceTimer);
   ensureWatchers();
   state.lastFingerprint = fingerprint();
-  const { mods, problems, warnings } = scanMods(ws.modsDir);
-  const plan = planModsMessage(mods);
-  try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
+  const scanned = scanMods(ws.modsDir);
+  let { mods } = scanned;
+  const { problems, warnings } = scanned;
+  // (an error here mustn't let a new or changed mod through unchecked: those wait until a sync works)
+  try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); state.held = heldOnError(ws, mods, state.held, e); }
+  // A change waiting for the user's OK to a mod that was running: the version that last ran keeps
+  // running meanwhile (held.js lastRun), sent as the mod, marked `pending` (the panel shows the change).
+  const pendingIds = new Set();
+  mods = mods.map((m) => {
+    // (held for being switched on: the very version that ran, which waits, as a new one would)
+    if (!state.held[m.id] || state.held[m.id].by === 'switch') return m;
+    const before = lastRun(ws.home, m.id);
+    if (before === null) return m;
+    try {
+      const old = buildMod({ site: m.site, file: m.file, code: before }).mod;
+      pendingIds.add(m.id);
+      // (and the waiting change's style section, which needs no OK, on it: its CSS, and its settings' values
+      // where the running version's settings take them; lib/stylesection.js restyle. A boxed or free mod only.)
+      if (!m.style || old.rules) return old;
+      const style = restyle(old.style, m.style);
+      if (JSON.stringify(style) === JSON.stringify(old.style || null)) return old;
+      return { ...old, style, hash: sha1(`${old.hash}\nstyle ${JSON.stringify(style)}`) };
+    } catch { return m; }
+  });
+  // An extension from before sets could go in parts takes 1 MB of mods in all (planModsMessage).
+  const plan = takesParts() === false
+    ? planModsMessage(mods, { who: `TRIF ${state.hello.version || '(an old version)'} in ${state.hello.browser}` })
+    : planMods(mods);
+  // What mods the user has can do that they haven't seen yet (held.js reviewItems): the panel asks once.
+  try { state.review = reviewItems(ws.home, mods, state.held); } catch (e) { logger.error(`mods to review: ${e.message}`); state.review = {}; }
   const origins = trackOrigins(mods);
+  const importedIds = require('./lib/share').loadImported(ws.home);
   // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't
   // registered. Preinstalled mods are marked startOff: the extension switches them off when it first sees them.
   const startOff = startOffIds(ws.home);
@@ -202,21 +349,62 @@ function syncMods(reason, force) {
   // switches over, once (preinstalled.js retireShippedMods).
   let absorbed = {};
   try { absorbed = absorbedIds(ws.home); } catch (e) { logger.warn(`retired mods: ${e.message}`); }
+  // Tim's mods the user deleted and got back (Settings' "Add the rest"): each browser switches each one as
+  // listed once per stamp, as for a new one (preinstalled.js readded).
+  let readded = {};
+  try { readded = readdedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  // Shipped mods TRIF updated by itself: stamped, so a browser where that group's new mods start off
+  // switches them off once (preinstalled.js autoUpdatedIds).
+  let autoUpdated = {};
+  try { autoUpdated = autoUpdatedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  let notShipped = {};
+  try { notShipped = changedShipped(examplesDir(), mods, ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  const allowedNow = loadAllowed(ws.home);
+  const splitsNow = splitsOf(ws.home); // (the sensitive sites of their own: each its own site, sitecombos.js)
   const sent = plan.mods.map((m) => {
-    const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
+    // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
+    const h = state.held[m.id], r = state.review && state.review[m.id];
+    const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
+      ...(h.reach ? { reach: h.reach } : {}), ...(h.runId ? { runId: h.runId } : {}),
+      // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
+      ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^(power|site):/.test(k)) ? { asks: true } : {}) } : null;
+    const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
+      : h ? { ...m, held: info }
+      : r ? { ...m, review: { facts: r.facts, needs: r.needs || [], claim: r.claim, ...(r.reach ? { reach: r.reach } : {}) } } : m;
     const o = origins[m.id];
-    const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
+    const withOrigin0 = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
+    const withOrigin = importedIds[m.id] ? { ...withOrigin0, imported: true } : withOrigin0; // (lib/share.js importMod)
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
-    return startOff.has(m.id) ? { ...withAbsorbs, startOff: true } : withAbsorbs;
+    const withReadded0 = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
+    const withReadded1 = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
+    // (says it's Tim's, but isn't a version TRIF shipped: the panel says "changed" beside "Tim's mod")
+    const withReadded = notShipped[m.id] ? { ...withReadded1, sourceChanged: true } : withReadded1;
+    // A sandboxed mod: what its code could do as a page script, for a browser without TRIF's sandbox, which
+    // holds it until the user allows that (extension/lib.js sandboxFallback)
+    // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)
+    // (and what its sites' mods together are approved for: the sandbox lets their acts through beside those powers)
+    const siteOk = m.sandboxed ? siteOkFor(m, scanned.mods, allowedNow, splitsNow) : [];
+    // (and, for the code card's Details: what its sites' boxed mods are allowed to do together, as their holds showed it)
+    const siteReach = m.sandboxed ? sitesOf(m, scanned.mods, splitsNow).map((s) => [s, approvedUnion(allowedNow, s)]).filter(([, u]) => u.length)
+      .map(([s, u]) => siteReachOf(s, u, u, clickWordsOf([m]))) : [];
+    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(siteOk.length ? { siteOk } : {}), ...(siteReach.length ? { siteReach } : {}) }
+      : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
+    return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}`).join('|') +
-    `|sites:${sitesOn.join(',')}`;
+  // Tim's mods, site by site: which the user added (or chose none for), and what each site's are, for the
+  // setup page's checklist, Settings and a site's "Add Tim's mods" link.
+  let starter = null;
+  try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}` : ''}${m.siteOk ? `:site ${m.siteOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
+    `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
-  state.mods = mods;
+  state.pending = [...pendingIds];
+  state.mods = scanned.mods; // (the files as they are: a waiting change's own text, for Show code and the diff)
   state.modErrors = errors;
   state.modWarnings = warnings;
   if (errorsChanged) {
@@ -226,9 +414,18 @@ function syncMods(reason, force) {
   if (!force && signature === state.lastSignature) return;
   state.lastSignature = signature;
   try {
-    sendToExtension({ type: 'mods', mods: sent, sitesOn });
+    // (defaultOrder: the side panel's order for a site's shipped mods until the user drags them; preinstalled.js.)
+    const t0 = Date.now();
+    const r = sendMods({ type: 'mods', mods: sent, sitesOn, defaultOrder: DEFAULT_ORDER, ...(starter ? { starter } : {}) });
     const nHeld = sent.filter((m) => m.held).length;
-    logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''} (${reason})`);
+    const kb = `${Math.ceil(r.bytes / 1024)} KB`;
+    if (r.how === 'waiting') {
+      // Before the hello (which syncs again) we don't know whether the extension can take parts.
+      state.lastSignature = null;
+      logger.info(`${sent.length} mod(s), ${kb}: too big for one message, waiting for the extension's hello (${reason})`);
+    } else {
+      logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''}${r.same ? ` (${r.same} it has already, without their code)` : ''}, ${kb}${r.how === 'parts' ? ` in ${r.parts} parts` : ''}, in ${Date.now() - t0} ms (${reason})`);
+    }
   } catch (e) {
     logger.error(`could not send mods: ${e.message}`);
   }
@@ -241,15 +438,25 @@ function syncMods(reason, force) {
 function trackOrigins(mods) {
   const ids = new Set(mods.map((m) => m.id));
   if (state.knownIds) {
-    const fresh = [...ids].filter((id) => !state.knownIds.has(id));
+    // A renamed file (same code, same site folder; state.mods is the last scan) keeps its mod's origin.
+    const renames = findRenames(state.mods, mods);
+    if (renames.length) {
+      try { if (renameOrigins(ws.home, renames)) logger.info(`kept where ${renames.map((r) => r.to).join(', ')} came from (renamed)`); } catch (e) { logger.error(`origins: ${e.message}`); }
+    }
+    const renamed = new Set(renames.map((r) => r.to));
+    const fresh = [...ids].filter((id) => !state.knownIds.has(id) && !renamed.has(id));
     if (fresh.length) {
       // Every helper reads the same run markers (this one's runs included), so they all agree.
       const me = state.hello?.installId || null;
       let active = [];
       try { active = activeRuns(ws.home).map((r) => ({ ...r, own: !!me && r.by === me })); } catch (e) { logger.warn(`active runs: ${e.message}`); }
       active.sort((a, b) => Number(b.own) - Number(a.own));
+      // (when each file was written: only one written while its run was going counts as that run's own, lib/origins.js live)
+      const byId = new Map(mods.map((m) => [m.id, m]));
+      const writtenAt = {};
+      for (const id of fresh) { try { writtenAt[id] = fs.statSync(byId.get(id).file).mtimeMs; } catch { /* gone again */ } }
       try {
-        if (recordOrigins(ws.home, fresh, active)) logger.info(`recorded where ${fresh.join(', ')} came from`);
+        if (recordOrigins(ws.home, fresh, active, Date.now(), writtenAt)) logger.info(`recorded where ${fresh.join(', ')} came from`);
       } catch (e) { logger.error(`origins: ${e.message}`); }
     }
   }
@@ -337,6 +544,15 @@ function poll() {
 const runs = new Runs({
   getWorkspace: () => ({ ...workspace(ws.home), installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
   logger, onEvent: onAgentEvent, onRequest: onRunRequest,
+  // A run's change copied into the mods folder (runs.js _syncStage): to the browser now, not at the watcher's next event.
+  onStaged: () => syncMods('agent run', false),
+  // The user's consent to run an agent under an organization's settings instead of TRIF's sandbox, read
+  // fresh each time (another browser's helper may have changed it). Only agent.withoutSandbox sets it.
+  withoutSandbox: {
+    allowed: (agent) => withoutSandbox.allowed(ws.home, agent),
+    consents: () => withoutSandbox.consents(ws.home),
+    guard: (before) => withoutSandbox.guard(ws.home, before, { logger }),
+  },
 });
 
 /**
@@ -353,10 +569,18 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
-  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
+const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
+  'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
+  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
+  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit']);
+// Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
+// a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
+// whose background takes it from the panel page alone. Runs can't reach that connection: their
+// sandboxes have no network and can't write the private folder, where the consent is kept.
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
-const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
+// (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
+const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
 
 // Merges proposed in a side-panel chat (agent.start with `merge`): mod id -> {scope, hash, version,
 // before} (preinstalled.js mergeRequest). The proposing run only explains and asks; the user's go-ahead
@@ -386,18 +610,17 @@ function onAgentEvent(runId, event) {
   // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
   if (event && event.kind === 'done' && String(runId).startsWith('r')) {
     syncMods('agent done', false);
-    const held = Object.entries(state.held).filter(([, h]) => h.runId === runId).map(([id, h]) => ({ id, reason: h.reason }));
+    const held = Object.entries(state.held).filter(([, h]) => h.runId === runId).map(([id, h]) => ({ id, reason: h.reason, facts: h.facts || [h.reason] }));
     if (held.length) event.held = held;
   }
-  // A run that found the agent logged out: agent.list shouldn't keep saying it's logged in.
-  if (event && event.kind === 'error' && /isn't logged in/.test(String(event.message))) agents.forgetLoginStatus();
+  // (A run that found the agent logged out: runs.js tells lib/agents, so agent.list says so.)
   // Every run goes to the extension (panels ignore runs they didn't start).
   if (state.stdoutOpen) {
     try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }
   }
   const subs = runSubscribers.get(runId);
   if (subs) for (const s of subs) reply(s, { type: 'agentEvent', runId, event });
-  if (event.kind === 'done') { runSubscribers.delete(runId); stopRunRecording(runId); }
+  if (event.kind === 'done') { runSubscribers.delete(runId); stopRunRecording(runId); closeRunTabs(runId); }
 }
 
 // The network recorder keeps whole request and response bodies (logins, API calls) for as long as it's
@@ -414,6 +637,27 @@ function noteRecording(runId, result) {
   } else if (runId && result.changed) {
     if (!recordingByRun.has(runId)) recordingByRun.set(runId, new Set());
     recordingByRun.get(runId).add(site);
+  }
+}
+
+// Tabs a run opened (`trif open`) are its own: closed when it ends, unless the user is looking at one
+// (the extension's close refuses that tab) or closed it already. runId -> tab ids.
+const tabsByRun = new Map();
+function noteOpened(runId, result) {
+  if (!runId || !result || !Number.isInteger(result.id)) return;
+  if (!tabsByRun.has(runId)) tabsByRun.set(runId, new Set());
+  tabsByRun.get(runId).add(result.id);
+}
+function closeRunTabs(runId) {
+  const tabs = tabsByRun.get(runId);
+  tabsByRun.delete(runId);
+  if (!tabs || !state.stdoutOpen) return;
+  for (const tab of tabs) {
+    const extId = `h${++requestCounter}`;
+    try { sendToExtension({ type: 'request', id: extId, cmd: 'close', args: { tab } }); } catch (e) { logger.warn(`couldn't close tab ${tab}: ${e.message}`); continue; }
+    // (an answer that it's gone, or that the user is on it, is fine: nothing to do)
+    const sink = { destroyed: false, writable: true, write(text) { const r = JSON.parse(text); if (r.ok) logger.info(`closed tab ${tab}: run ${runId} opened it and has ended`); } };
+    pending.set(extId, { sock: sink, clientId: null, cmd: 'close', runId: null, timer: setTimeout(() => pending.delete(extId), DEFAULT_TIMEOUT_MS) });
   }
 }
 
@@ -441,12 +685,17 @@ function stopRunRecording(runId) {
 // agent.list returns a promise (it checks login status).
 function agentCommand(cmd, args) {
   switch (cmd) {
+    // (With the agents the user allowed to run without TRIF's sandbox: Settings shows them.)
     case 'agent.list': {
       // Windows: no chats from the panel yet (lib/platform.js panelRunsOff). The panel says so and why,
       // and the agents aren't asked whether they're logged in (that runs them).
       const off = panelRunsOff(process.platform, ws.home);
       if (off) return { ...agents.listAgents(workspace(ws.home), { version: false }), runsOff: { title: off.title, text: off.text } };
-      return agents.listAgentsWithLogin(workspace(ws.home));
+      return agents.listAgentsWithLogin(workspace(ws.home)).then((r) => {
+        const allowed = withoutSandbox.consents(ws.home);
+        for (const a of r.agents) if (allowed[a.id]) a.withoutSandbox = true;
+        return r;
+      });
     }
     case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh, openModel: args.openModel || null });
     // Open models (agents/codex-oss.js): the defaults in config.json, which runs can't read or change.
@@ -481,16 +730,191 @@ function agentCommand(cmd, args) {
     case 'mod.approve': {
       const id = typeof args.id === 'string' ? args.id.trim() : '';
       if (!id) throw new Error('missing mod id');
-      approveHeld(ws.home, id);
+      approveHeld(ws.home, id, typeof args.hash === 'string' ? args.hash : null);
       logger.info(`approved held mod ${id}`);
       syncMods('approve', false);
       return { id, approved: true };
     }
+    case 'mod.reject': {
+      // "Don't allow" on a waiting change: the version before back (the waiting one kept in history/)
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      if (!id) throw new Error('missing mod id');
+      const r = rejectHeld(workspace(ws.home), id, typeof args.hash === 'string' ? args.hash : null);
+      logger.info(`didn't allow the change to ${id} (${r.restored === 'removed' ? 'it was new: to the trash' : 'the version before is back'})`);
+      syncMods('reject', false);
+      return r;
+    }
+    case 'mod.diff': {
+      // "Show what changed" on a waiting change: the version that last ran against the waiting one
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      const before = lastRun(ws.home, id);
+      const { lineDiff } = require('./lib/diff');
+      return { id, isNew: before === null, hash: m.hash, lines: lineDiff(before ?? '', m.text ?? m.code) };
+    }
+    case 'mod.undo': {
+      // Put back what a side-panel run changed (lib/history.js): the newest kept version, or the trash
+      // for a mod it created. The user's: refused from a run (AGENT_COMMANDS).
+      const r = history.undoChange(workspace(ws.home), String(args.id ?? ''));
+      logger.info(`undid the last change to ${r.id} (${r.restored === 'removed' ? 'it was new: to the trash' : 'the previous version back'})`);
+      syncMods('undo', false);
+      return r;
+    }
+    case 'mod.history': {
+      return { id: String(args.id ?? ''), entries: history.listHistory(workspace(ws.home), String(args.id ?? '')).map((e) => ({ at: e.at, stamp: e.stamp, kind: e.kind, source: e.source })) };
+    }
+    // The code card's History (lib/history.js): a kept version's text, its diff with the current one, and
+    // putting it back (the current one kept too; the next sync judges it like any change from outside)
+    case 'mod.historyCode': {
+      const id = String(args.id ?? '').trim();
+      const code = history.entryText(workspace(ws.home), id, String(args.stamp ?? ''));
+      return { id, stamp: String(args.stamp ?? ''), code: code.slice(0, 200000), truncated: code.length > 200000 };
+    }
+    case 'mod.historyDiff': {
+      const id = String(args.id ?? '').trim();
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      const { lineDiff } = require('./lib/diff');
+      return { id, lines: lineDiff(history.entryText(workspace(ws.home), id, String(args.stamp ?? '')), m.text ?? m.code) };
+    }
+    case 'mod.historyRestore': {
+      const r = history.restoreEntry(workspace(ws.home), String(args.id ?? ''), String(args.stamp ?? ''));
+      logger.info(`restored ${r.id} to its version from ${r.restored}`);
+      syncMods('restore', false);
+      return r;
+    }
+    // Export (lib/share.js): the mod's file, or a site's, copied to the downloads folder and shown there
+    // (each asks where first, with the system's folder chooser opening in Downloads: Tim, 11-14; a cancel
+    // exports nothing and says so: {cancelled: true})
+    case 'mod.export': {
+      const share = require('./lib/share');
+      const id = String(args.id ?? '');
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      return require('./lib/choosefolder').chooseFolder(`Where should TRIF save “${m.name || id}”?`, { start: share.downloadsDir() }).then((to) => {
+        if (!to) return { id, cancelled: true };
+        const r = share.exportMod(ws, state.mods, id, { to });
+        require('./lib/reveal').revealPath(r.file, 'folder');
+        logger.info(`exported ${r.id} to ${r.file}`);
+        return { id: r.id, file: path.basename(r.file), dir: path.dirname(r.file), where: homeShort(path.dirname(r.file)) };
+      });
+    }
+    case 'mod.exportSite': {
+      const share = require('./lib/share');
+      const site = String(args.site ?? '');
+      return require('./lib/choosefolder').chooseFolder(`Where should TRIF save the mods for ${site}?`, { start: share.downloadsDir() }).then((to) => {
+        if (!to) return { site, cancelled: true };
+        const r = share.exportSite(ws, state.mods, site, { to, ids: Array.isArray(args.ids) ? args.ids.map(String) : null });
+        require('./lib/reveal').revealPath(r.dir, 'folder');
+        logger.info(`exported ${r.ids.length} mod(s) of ${r.site} to ${r.dir}`);
+        return { site: r.site, dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };
+      });
+    }
+    // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so
+    // the next sync holds it like any (held.js), and marked imported
+    case 'mod.import': {
+      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? '') });
+      if (r.id) { logger.info(`imported ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}`); syncMods('import', false); }
+      return r.file ? { ...r, file: path.relative(ws.home, r.file) } : r;
+    }
+    // A site's files (lib/share.js): bytes and a name, never a path; data for the site's mods and runs
+    case 'files.add': {
+      const r = require('./lib/share').addFile(ws, { site: String(args.site ?? ''), name: String(args.name ?? ''), bytes: Buffer.from(String(args.data ?? ''), 'base64') });
+      logger.info(`added ${r.rel} (${r.size} bytes)`);
+      return r;
+    }
+    // (a file of any size, in slices: lib/share.js fileBegin)
+    case 'files.begin': return require('./lib/share').fileBegin(ws, { site: String(args.site ?? ''), name: String(args.name ?? ''), size: args.size });
+    case 'files.slice': return require('./lib/share').fileSlice(ws, { id: args.id, offset: args.offset, bytes: Buffer.from(String(args.data ?? ''), 'base64') });
+    case 'files.end': { const r = require('./lib/share').fileEnd(ws, { id: args.id }); logger.info(`added ${r.rel} (${r.size} bytes)`); return r; }
+    case 'files.abort': return require('./lib/share').fileAbort(ws, { id: args.id });
+    case 'files.list': return { site: String(args.site ?? ''), files: require('./lib/share').listFiles(ws, String(args.site ?? '')) };
+    case 'files.remove': return require('./lib/share').removeFile(ws, String(args.site ?? ''), String(args.name ?? ''));
+    case 'files.reveal': return require('./lib/share').revealFiles(ws, String(args.site ?? '')) && { site: String(args.site ?? ''), shown: true };
+    case 'mod.code': {
+      // The panel's code viewer and "Show code": the mod's file as TRIF read it, capped for the panel. A style
+      // mod: its rules (the file), not the code TRIF makes of them. `version: 'ran'`: a mod with a change
+      // waiting, the version that's running meanwhile (held.js lastRun).
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      const CAP = 200000;
+      let text = m.text ?? m.code;
+      if (args.version === 'ran') {
+        const before = lastRun(ws.home, id);
+        if (before === null) throw new Error(`${id} has no earlier version that ran`);
+        text = before;
+      }
+      // (`base`: the file's version, which the code card's Save sends back: lib/edit.js)
+      return { id, code: text.slice(0, CAP), truncated: text.length > CAP, file: path.basename(String(m.file || `${id.split('/')[1]}.js`)),
+        ...(args.version === 'ran' ? {} : { base: require('./lib/edit').fileHash(text) }) };
+    }
+    // The code card's Edit (lib/edit.js): Save checks the text as `trif check` does and writes it only if nothing's
+    // wrong and the file is still the version the edit started from (`base`); the version before goes into the
+    // mod's history; the sync right after judges the change (held.js: the user's edit). Not from a run.
+    case 'mod.save': {
+      const r = require('./lib/edit').saveEdit(workspace(ws.home), { id: String(args.id ?? ''), text: args.text, base: args.base });
+      if (!r.saved) return r;
+      syncMods('edit', false);
+      const h = state.held[r.id];
+      logger.info(`saved an edit of ${r.id}${h ? `, waiting for the user's OK (${(h.needs || []).join(', ')})` : ''}`);
+      return { ...r, held: !!h, pending: (state.pending || []).includes(r.id) };
+    }
+    // Undo right after Save: the version before back, if the file is still the edit
+    case 'mod.undoEdit': {
+      const r = require('./lib/edit').undoEdit(workspace(ws.home), { id: String(args.id ?? ''), stamp: String(args.stamp ?? ''), hash: args.hash });
+      logger.info(`undid the edit of ${r.id} (its version from ${r.restored} is back)`);
+      syncMods('undo edit', false);
+      return r;
+    }
+    case 'mod.reveal': {
+      // The code viewer's "Show in Finder" / "Open in editor", `trif reveal`: the mod's own file, found by
+      // its id (never a path from the message), opened by the system (lib/reveal.js). Not from a run.
+      return require('./lib/reveal').reveal(ws.modsDir, state.mods, typeof args.id === 'string' ? args.id : '', args.how === 'editor' ? 'editor' : 'folder');
+    }
+    case 'mod.review': {
+      // "Looks right" on a mod's review: what TRIF found in it is allowed for that mod (held.js).
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      if (state.held[id]) throw new Error(`${id} is on hold: allow it instead`);
+      const allowed = reviewMod(ws.home, m, state.mods); // (and the combinations it adds to its site: sitecombos.js)
+      logger.info(`reviewed ${id}: ${allowed.join(', ') || 'nothing to allow'}`);
+      syncMods('review', false);
+      return { id, allowed };
+    }
+    // "Keep TRIF on there" (the panel's question about a sensitive host after the update): the parent's mods
+    // that reached it, copied into its own folder (lib/split.js). Not from a run.
+    case 'sensitive.split': {
+      const r = require('./lib/split').splitSensitive(ws, String(args.host ?? ''), Array.isArray(args.ids) ? args.ids : []);
+      logger.info(`${r.host} is a site of its own: copied ${r.copies.map((c) => `${c.from} -> ${c.to}`).join(', ') || 'nothing'}`);
+      syncMods('split', false);
+      return r;
+    }
     case 'mod.delete': {
-      const r = deleteMod(ws, args.id, { scope: args.scope });
+      const r = deleteMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`deleted mod ${r.id} (to ${r.trashed})`);
       syncMods('delete', false);
       return { id: r.id, deleted: true };
+    }
+    // Tim's mods, the user's choice (the setup page, Settings, a site's panel; never a run): `ids`, the mods
+    // ticked on the setup page (a site's others are left out), or `sites` to add every mod of not added yet
+    // (all of them without either); `others: 'none'` records none for every site not chosen yet.
+    case 'shipped.install': {
+      const ids = args.ids === undefined ? null : resolveIds(args.ids);
+      const sites = ids ? [] : args.sites === undefined ? 'all' : resolveSites(Array.isArray(args.sites) ? args.sites : []);
+      if (ids ? !ids.length : sites !== 'all' && !sites.length) throw new Error('nothing to add: no sites or mods of Tim\'s named');
+      const r = installStarter(ws.home, ws.modsDir, examplesDir(), sites, { ids, othersNone: args.others === 'none' });
+      logger.info(`Tim's mods added (${ids ? ids.join(', ') : sites === 'all' ? 'every site' : sites.join(', ')}): ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
+      syncMods('Tim\'s mods', false);
+      return { added: r.added, sitesOn: r.sites, starter: starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }) };
+    }
+    case 'shipped.none': {
+      chooseNoStarter(ws.home);
+      logger.info('Tim\'s mods: none for the sites not chosen yet');
+      syncMods('Tim\'s mods', false);
+      return { starter: starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }) };
     }
     case 'mod.update': {
       // The user's choice for a new version of a shipped mod they changed: 'new' (theirs goes to the
@@ -504,7 +928,7 @@ function agentCommand(cmd, args) {
       return args.choice === 'new' ? { id: r.id, choice: 'new', version: r.version, trashed: !!r.trashed } : { id: r.id, choice: 'mine', version: r.version };
     }
     case 'mod.restore': {
-      const r = restoreMod(ws, args.id, { scope: args.scope });
+      const r = restoreMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`restored mod ${r.id}`);
       syncMods('restore', false);
       return { id: r.id, restored: true, file: r.file };
@@ -537,7 +961,7 @@ function agentCommand(cmd, args) {
  */
 function startRun(args) {
   const site = typeof args.site === 'string' && args.site.trim() ? args.site.trim() : agents.hostOf(args.url);
-  const scope = scopeFor(site);
+  const scope = runScope(site, args.scope);
   if (args.merge === undefined || args.merge === null || args.merge === '') {
     const r = runs.start(args);
     const ids = [...pendingMerges].filter(([, m]) => m.scope === scope).map(([id]) => id);
@@ -545,7 +969,7 @@ function startRun(args) {
     return r;
   }
   const id = String(args.merge).trim();
-  if (scopeFor(id.split('/')[0]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
+  if (require('./lib/scope').scopeOf(id.split('/')[0], [...(Array.isArray(args.splits) ? args.splits : []), scope]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });
@@ -564,6 +988,8 @@ let updateTimers = [];
 
 function updateInfo(summary = update.summary(workspace(ws.home))) {
   const info = { ...summary, installing: state.installing };
+  // (and what went wrong with the mods feed's last check, if anything: Settings shows it under this)
+  try { info.modsFeed = modsFeed.status(workspace(ws.home)); } catch (e) { logger.warn(`mods feed: ${e.message}`); }
   // The Firefox add-on updates on Firefox's schedule, so after an update it can lag behind the helper.
   // Its panel (old or new) shows an available update with `why`, so that's how it's told.
   const behind = extensionBehind();
@@ -574,10 +1000,10 @@ function updateInfo(summary = update.summary(workspace(ws.home))) {
 /** Why the extension is behind the helper (a message for its panel), or null. Firefox only. */
 function extensionBehind() {
   const h = state.hello;
-  if (!h || h.browser !== 'Firefox' || !h.version) return null;
+  if (!h || browserFamily(h) !== 'firefox' || !h.version) return null;
   let older = false;
   try { older = update.compareVersions(String(h.version), VERSION) < 0; } catch { return null; }
-  return older ? `The Firefox add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
+  return older ? `The ${h.browser} add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
 }
 
 function sendUpdate(info = updateInfo()) {
@@ -591,7 +1017,32 @@ async function checkForUpdate(force) {
   else if (info.available) logger.info(`update available: ${info.current} -> ${info.latest}`);
   sendUpdate(info);
   maybeAutoInstall(info);
+  // (and the mods feed, with the same check: new versions of Tim's mods between releases)
+  checkModsFeed(force).catch((e) => logger.warn(`mods feed: ${e.message}`));
   return info;
+}
+
+// The mods feed (lib/modsfeed.js): keeps the new versions of Tim's mods it has for this TRIF, then brings
+// them to the user's copies the way a release's setup does (preinstalled.js updateShippedMods: an unchanged
+// copy replaced with automatic updates on, else offered; a changed one offered). Not while TRIF itself is
+// being installed: the new version's setup does it.
+let modsFeedBusy = false;
+async function checkModsFeed(force) {
+  if (modsFeedBusy || state.installing || state.shuttingDown) return;
+  modsFeedBusy = true;
+  try {
+    const w = workspace(ws.home);
+    const r = await modsFeed.check(w, { force });
+    if (r.error) logger.warn(`mods feed: ${r.error}`);
+    if (state.installing || state.shuttingDown) return;
+    const { updated, waiting } = modsFeed.apply(w);
+    if (updated.length) logger.info(`mods feed: updated ${updated.map((m) => `${m.id} to version ${m.version}`).join(', ')}`);
+    if (waiting.length) logger.info(`mods feed: new version waiting for the user: ${waiting.map((m) => `${m.id} (version ${m.version})`).join(', ')}`);
+    if (updated.length || waiting.length) scheduleSync('mods feed');
+  } finally {
+    modsFeedBusy = false;
+    sendUpdate(); // (the panel's Settings: what went wrong, or that nothing did now)
+  }
 }
 
 // With "autoUpdate" on, install when nothing is running (else on a later check).
@@ -627,7 +1078,7 @@ function reloadExtension(reason) {
   try { sendToExtension({ type: 'reload', reason }); } catch (e) { logger.warn(`could not ask the extension to reload: ${e.message}`); }
 }
 
-// Another helper (the other browser's) or `npx trif setup` replaced <home>/app under this one: this
+// Another helper (the other browser's) or `npx timsrobot setup` replaced <home>/app under this one: this
 // process is running old code, so reload onto the new version.
 function checkAppReplaced() {
   checkCodeChanged();
@@ -673,7 +1124,7 @@ async function report(args) {
   const text = buildReport({
     description: typeof args.description === 'string' ? args.description.slice(0, 4000) : '',
     site: typeof args.site === 'string' ? args.site : '', siteOn: !!args.siteOn,
-    browser: state.hello ? `${state.hello.browser} ${state.hello.chrome || ''}`.trim() : null,
+    browser: state.hello ? require('./lib/browsers').browserLabel(state.hello) : null,
     extensionVersion: state.hello?.version || null,
     helper: { role: state.role, connectedFor: state.helloAt ? duration(Date.now() - state.helloAt) : null },
     agents: agentList ? agentList.agents : null,
@@ -685,6 +1136,12 @@ async function report(args) {
 
 // Run an agent command and call done(error, result): synchronously when the command is synchronous,
 // so agent.start / agent.login are answered before their first event.
+/** A folder as people read it: ~/Desktop, not /Users/someone/Desktop. */
+function homeShort(dir) {
+  const home = require('os').homedir();
+  return dir === home ? '~' : dir.startsWith(home + path.sep) ? `~${dir.slice(home.length)}` : dir;
+}
+
 function runAgentCommand(cmd, args, done) {
   let result;
   try { result = agentCommand(cmd, args); } catch (e) { return done(e); }
@@ -699,6 +1156,12 @@ function onExtensionRequest(msg) {
   const respond = (body) => {
     try { sendToExtension({ type: 'response', id, ...body }); } catch (e) { logger.warn(`could not answer extension request ${id}: ${e.message}`); }
   };
+  if (PANEL_COMMANDS.has(msg.cmd)) {
+    return Promise.resolve().then(() => panelCommand(msg.cmd, args)).then((result) => respond({ ok: true, result }), (e) => {
+      logger.warn(`${msg.cmd} failed: ${e.message}`);
+      respond({ ok: false, error: e.message });
+    });
+  }
   if (!AGENT_COMMANDS.has(msg.cmd) && !MOD_FILE_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
   runAgentCommand(msg.cmd, args, (e, result) => {
     if (e) {
@@ -707,6 +1170,25 @@ function onExtensionRequest(msg) {
     }
     respond({ ok: true, result: result === undefined ? null : result });
   });
+}
+
+/**
+ * agent.withoutSandbox {agent, allow}: "Use <agent> anyway" (allow: true) or Settings' "Stop allowing"
+ * (false). Returns {agents: [ids allowed]}. agent.logout {agent}: Settings' Log out (agents/index.js
+ * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
+ */
+function panelCommand(cmd, args) {
+  if (cmd === 'agent.logout') {
+    const agent = typeof args.agent === 'string' ? args.agent : '';
+    return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
+  }
+  if (cmd !== 'agent.withoutSandbox') throw new Error(`unknown command "${cmd}"`);
+  const agent = typeof args.agent === 'string' ? args.agent : '';
+  if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');
+  const now = withoutSandbox.setAllowed(ws.home, agent, args.allow);
+  if (args.allow) logger.warn(`${agent} may now run under an organization's settings instead of TRIF's sandbox (chosen in the side panel)`);
+  else logger.info(`${agent} no longer runs without TRIF's sandbox (Settings in the side panel)`);
+  return { agents: Object.keys(now) };
 }
 
 // ---------------------------------------------------------------- unix socket for the CLI
@@ -866,6 +1348,8 @@ function helperInfo() {
     pending: pending.size,
     runs: runs.list(),
     held: state.held,
+    pending: state.pending || [],
+    review: state.review,
     updates: state.updates,
     login: logins.info(),
   };
@@ -881,21 +1365,31 @@ function onClientLine(sock, line) {
   const args = req && req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
+  // The side panel's alone, whoever asks here (PANEL_COMMANDS).
+  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {
     run = runs.byToken(req.token);
     if (!run) return reply(sock, { id, ok: false, error: 'this agent run has ended (or its token is wrong)' });
     if (AGENT_COMMANDS.has(cmd)) {
-      return reply(sock, { id, ok: false, error: cmd === 'mod.approve'
-        ? 'only the user can approve a held mod (in the side panel, or `trif approve` in their terminal)'
+      return reply(sock, { id, ok: false, error: cmd === 'mod.approve' || cmd === 'mod.review' || cmd === 'mod.reject'
+        ? 'only the user can allow what a mod can do (in the side panel, or `trif approve` in their terminal)'
         : cmd === 'mod.update'
           ? 'only the user can choose what happens with a new version of a TRIF mod (in the side panel, or `trif mod-update` in their terminal)'
-          : `"${cmd}" isn't available inside an agent run` });
+          : cmd.startsWith('shipped.')
+            ? 'only the user adds Tim\'s mods (on the setup page, or in Settings in the side panel)'
+            : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
+    args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
+    args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
 
+  // (an extension from before `run` could use the box would run box code in the page's own world: say so)
+  if (cmd === 'run' && args.world === 'box' && !(state.hello && Array.isArray(state.hello.features) && state.hello.features.includes('boxRun'))) {
+    return reply(sock, { id, ok: false, error: 'this browser\'s TRIF extension is from before `trif run` could use TRIF\'s box (it updates by itself; in Chrome, reload it on chrome://extensions). Until then: `trif run --page`, which runs in the page\'s own world (document, window) and pauses the site\'s posting until the tab reloads' });
+  }
   if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
   if (cmd === 'mods') {
     return reply(sock, {
@@ -937,12 +1431,23 @@ function onClientLine(sock, line) {
   } catch (e) {
     return reply(sock, { id, ok: false, error: `could not send "${cmd}" to the extension: ${e.message}` });
   }
-  const timer = setTimeout(() => {
+  const expire = (ms) => setTimeout(() => {
     pending.delete(extId);
-    logger.warn(`request ${extId} (${cmd}) timed out after ${timeoutMs}ms`);
-    reply(sock, { id, ok: false, error: `timed out after ${timeoutMs}ms waiting for the extension to answer "${cmd}"` });
-  }, timeoutMs);
-  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null });
+    logger.warn(`request ${extId} (${cmd}) timed out after ${ms}ms`);
+    reply(sock, { id, ok: false, error: `timed out after ${ms}ms waiting for the extension to answer "${cmd}"` });
+  }, ms);
+  const timer = expire(timeoutMs);
+  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null, expire, timeoutMs });
+}
+
+// The extension is waiting for the user (the panel asking whether an agent may run code on a site:
+// background.js askToRun): the request gets that much longer before it times out here.
+function onRequestWaiting(msg) {
+  const p = pending.get(msg.id);
+  if (!p || !p.expire) return;
+  const ms = Math.min(Math.max(Number(msg.ms) || 0, 0), 60000) + p.timeoutMs;
+  clearTimeout(p.timer);
+  p.timer = p.expire(ms);
 }
 
 function onExtensionResponse(msg) {
@@ -951,13 +1456,14 @@ function onExtensionResponse(msg) {
   pending.delete(msg.id);
   clearTimeout(p.timer);
   if (p.cmd === 'record' && msg.ok) noteRecording(p.runId, msg.result);
+  if (p.cmd === 'open' && msg.ok) noteOpened(p.runId, msg.result);
   if (msg.ok) reply(p.sock, { id: p.clientId, ok: true, result: msg.result === undefined ? null : msg.result });
   else {
     let error = String(msg.error ?? 'unknown error from extension');
     // A command an older extension doesn't know yet (sweep, say): say how to get the newer one.
     if (/^unknown command\b/i.test(error) && state.hello?.version && state.hello.version !== VERSION) {
       error = `the ${state.hello.browser || 'browser'} extension is version ${state.hello.version} and doesn't know \`${p.cmd}\` yet (the helper is ${VERSION})` +
-        (state.hello.browser === 'Firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : state.hello.browser === 'Safari' ? ': build and open TRIF.app from this version' : ': reload TRIF on chrome://extensions');
+        (browserFamily(state.hello) === 'firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : browserFamily(state.hello) === 'safari' ? ': build and open TRIF.app from this version' : ': reload TRIF on chrome://extensions');
     }
     reply(p.sock, { id: p.clientId, ok: false, error });
   }

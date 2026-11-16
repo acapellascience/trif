@@ -16,7 +16,17 @@
 //     files. A new folder for another site can still be created; mods in it are held until the user
 //     approves them, like any out-of-scope mod;
 //   - reach no network at all: `trif` talks to the helper through the run's mailbox (client.js), so
-//     a run can't send what it read anywhere, nor reach the helper's sockets without its site limit.
+//     a run can't send what it read anywhere, nor reach the helper's sockets without its site limit;
+//   - neither read nor write the system's temporary folders (/tmp, $TMPDIR: other programs' files,
+//     every Claude Code session's scratch files in /tmp/claude-<uid>), which Codex's :workspace profile
+//     makes writable: the commands get a temporary folder in the run's box instead (TMPDIR, and
+//     TMPPREFIX for zsh's here-documents; macOS's bash 3.2 only uses /tmp for them, so those fail);
+//   - nor read other users' folders and other volumes (runs.js deniedOutsideHome).
+// And no Codex tools beyond its shell, apply_patch and view_image (both sandboxed: checked in Codex
+// 0.166's source) and its sub-agents (which inherit the profile): web search off (on by default, even
+// with no network, "cached" mode), and the features that reach outside the sandbox off (FEATURES_OFF).
+// Codex has no tool allowlist like Claude Code's --tools: tests/agent-tools.test.js checks the tools a
+// run gets.
 // The user's own Codex config and rules files are ignored for these runs, since a sandbox_mode there would
 // replace the profile and an "allow" rule could run commands outside it.
 //
@@ -27,10 +37,8 @@
 // exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool},
 // web_search {query}, todo_list, error {message}.
 
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture } = require('./util');
-
-const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or save an OpenAI API key: trif agent key --agent codex --set-key)";
-const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
+const path = require('path');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, isLoginFailure, loginError } = require('./util');
 
 const PROFILE = 'trif-run';
 // Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex itself
@@ -40,8 +48,30 @@ const PROFILE = 'trif-run';
 // through.)
 const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
 const MIN_VERSION = [0, 138, 0]; // permission profiles
+// Features on by default in Codex 0.166 that act outside the sandbox: ChatGPT apps (connectors on the
+// user's account), plugins, browser and computer use, image generation, MCP installs for skills, hooks.
+// (Unknown feature names are ignored, so older versions take these too.)
+const FEATURES_OFF = ['apps', 'plugins', 'remote_plugin', 'plugin_sharing', 'browser_use', 'browser_use_external',
+  'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'in_app_local_automation', 'image_generation',
+  'skill_mcp_dependency_install', 'hooks', 'tool_suggest'];
 
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
+
+// A run whose model requests go through its key proxy (keyproxy.js, token mode: codex-oss with a key, or
+// a plain run with an OpenAI API key saved, agentkeys.js): the proxy wants a token, which isn't in Codex's
+// argv or environment (other same-user processes can read both: sysctl KERN_PROCARGS2). It's in a file in
+// the run's own folder (runs.js agentDir: 0700, beside the run's box, where the run's commands can't read;
+// the file 0600, written by runs.js from `files`, removed with the folder when the run ends), and the
+// provider's `auth` has Codex read it: Codex 0.166 runs that command itself, outside the sandbox, and sends
+// what it prints as `Authorization: Bearer …` (checked against a stand-in server). The `-c` value names
+// the file, never the token.
+const TOKEN_FILE = 'key-proxy-token';
+function tokenFile(agentDir) { return path.join(agentDir, TOKEN_FILE); }
+/** The provider field that has Codex send the run's key-proxy token (with the provider's other fields). */
+function proxyAuth(agentDir) {
+  if (!agentDir) throw new Error('no run folder for the key proxy\'s token');
+  return `auth = { command = "/bin/cat", args = [${tomlKey(tokenFile(agentDir))}] }`;
+}
 
 /**
  * The inline TOML table for -c permissions=…: `denied` unreadable, `readable` read-only, `writable`
@@ -50,7 +80,7 @@ const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TO
  * folder is writable). No network.
  */
 function permissionsToml({ readable = [], writable = [], readOnly = [], denied = [] } = {}) {
-  const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`,
+  const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`, `${tomlKey(':tmpdir')} = "deny"`, `${tomlKey(':slash_tmp')} = "deny"`,
     ...denied.map((p) => `${tomlKey(p)} = "deny"`), ...readable.map((p) => `${tomlKey(p)} = "read"`),
     ...writable.map((p) => `${tomlKey(p)} = "write"`), ...readOnly.map((p) => `${tomlKey(p)} = "read"`)];
   return `{ ${PROFILE} = { extends = ":workspace", filesystem = { ${fsRules.join(', ')} }, network = { enabled = false } } }`;
@@ -79,6 +109,7 @@ function tooOld(version) {
 }
 
 const adapter = {
+  efforts: ['low', 'medium', 'high', 'xhigh', 'max'], // (until its model list says each model's: listModels)
   id: 'codex',
   name: 'Codex',
   binary: 'codex',
@@ -106,18 +137,36 @@ const adapter = {
     if (!list) return { models: [], default: null, custom: true, error: `couldn't read Codex's model list${r.stderr ? `: ${oneLine(r.stderr).slice(0, 200)}` : ''}` };
     const models = list.filter((m) => m && typeof m.slug === 'string' && m.visibility === 'list')
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
-      .map((m) => ({ id: m.slug, name: typeof m.display_name === 'string' && m.display_name ? m.display_name : m.slug, description: typeof m.description === 'string' ? m.description : '' }));
+      .map((m) => ({
+        id: m.slug, name: typeof m.display_name === 'string' && m.display_name ? m.display_name : m.slug, description: typeof m.description === 'string' ? m.description : '',
+        // (its effort levels and default, for the panel's Effort setting; not "ultra", which hands work to
+        // sub-agents: a run is one agent in TRIF's sandbox)
+        efforts: (Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [])
+          .map((x) => (x && typeof x === 'object' ? x : { effort: x })).filter((x) => typeof x.effort === 'string' && /^[a-z]+$/.test(x.effort) && x.effort !== 'ultra')
+          .map((x) => ({ id: x.effort, description: typeof x.description === 'string' ? x.description : '' })),
+        defaultEffort: typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : null,
+      }));
     return { models, default: models[0]?.id || null, custom: false, error: null };
   },
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml. `config`: more -c pairs
-  // (codex-oss: its provider; a plain run with an API key: the key proxy's provider, see keyProvider).
-  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], config = [] }) {
+  // (codex-oss: its provider). `keyProxy` {url, token}: a plain run with an API key, whose requests go
+  // through the run's key proxy (agentkeys.js). `proxyToken`: the key proxy's token, for a provider in
+  // `config` that uses proxyAuth (codex-oss). Either way the token goes into a file in `agentDir` (the
+  // run's own folder, see proxyAuth), never into args.
+  command({ bin, prompt, sessionId, model, effort, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [], keyProxy = null, proxyToken = null, agentDir = '' }) {
+    const token = proxyToken || (keyProxy && keyProxy.token) || null;
+    const viaProxy = keyProxy ? require('../agentkeys').codexProviderArgs(keyProxy.url, proxyAuth(agentDir)) : [];
+    if (token && !agentDir) throw new Error('no run folder for the key proxy\'s token');
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config,
-      '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`];
+      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config, ...viaProxy,
+      '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`,
+      ...(tmp ? ['-c', `shell_environment_policy.set={ TMPDIR = ${tomlKey(tmp)}, TMPPREFIX = ${tomlKey(`${tmp}/zsh`)} }`] : []),
+      '-c', 'web_search="disabled"', ...FEATURES_OFF.flatMap((f) => ['-c', `features.${f}=false`])];
     if (model) args.push('-m', model);
+    // The user's effort setting (the panel's Settings, per agent); none: the model's default
+    if (effort && /^[a-z]+$/.test(effort) && effort !== 'ultra') args.push('-c', `model_reasoning_effort="${effort}"`);
     if (sessionId) args.push('resume', sessionId);
     // The message on stdin (`-`), not in argv, which any same-user process can read (`ps`, sysctl
     // KERN_PROCARGS2; the agent's sandboxed commands included).
@@ -127,14 +176,15 @@ const adapter = {
     // (A site folder that is a link out of the mods folder isn't made read-only, runs.js runLimits: it
     // isn't writable either, since the sandbox checks where it leads.)
     const writableHere = (p) => writable.some((w) => p === w || p.startsWith(w.endsWith('/') ? w : `${w}/`));
-    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => readOnly.includes(d.real) || !writableHere(d.real)).map((d) => d.rel) };
+    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => !d.link && (readOnly.includes(d.real) || !writableHere(d.real))).map((d) => d.rel),
+      ...(token ? { files: [{ path: tokenFile(agentDir), content: token }] } : {}) };
   },
 
   parse(line, emit, state = {}) {
     const msg = parseJsonLine(line);
     if (!msg) return;
     state.seen = state.seen || new Set();
-    const friendly = state.friendly || friendlyDefault; // codex-oss.js words errors for its providers
+    const errorEvent = (m) => errorFor(m, state);
     switch (msg.type) {
       case 'thread.started':
         if (msg.thread_id) { state.sessionId = msg.thread_id; emit({ kind: 'session', sessionId: msg.thread_id }); }
@@ -147,7 +197,7 @@ const adapter = {
         if (item.type === 'agent_message') {
           if (done && typeof item.text === 'string' && item.text.trim()) { state.lastText = item.text; emit({ kind: 'text', text: item.text }); }
         } else if (item.type === 'error') {
-          if (done && item.message && !transportNoise(item.message, emit, state)) emit({ kind: 'error', message: friendly(item.message) });
+          if (done && item.message && !transportNoise(item.message, emit, state)) emit(errorEvent(item.message));
         } else {
           const tool = toolEvent(item, state.workspace);
           // Show tools as soon as they start; don't repeat them on completion.
@@ -165,20 +215,20 @@ const adapter = {
         break;
       case 'turn.failed': {
         const m = (msg.error && msg.error.message) || 'Codex failed';
-        emit({ kind: 'error', message: friendly(m) });
+        emit(errorEvent(m));
         emit({ kind: 'done', ok: false, result: m, costUsd: null, sessionId: state.sessionId || null });
         break;
       }
       case 'error':
-        if (msg.message && !transportNoise(msg.message, emit, state)) emit({ kind: 'error', message: friendly(msg.message) });
+        if (msg.message && !transportNoise(msg.message, emit, state)) emit(errorEvent(msg.message));
         break;
       default:
         break;
     }
   },
 
-  explainExit({ stderr }) {
-    return AUTH_RE.test(String(stderr || '')) ? NOT_LOGGED_IN : null; // (codex-oss.js has its own)
+  explainExit({ stderr, state = {} }) {
+    return loginFailed(String(stderr || ''), state) ? loginError(adapter.name) : null; // (codex-oss.js has its own)
   },
 
   // `codex login status` exits 0 when logged in (no tokens spent).
@@ -197,10 +247,20 @@ const adapter = {
   // No side panel login: `codex login` finishes through a localhost callback server (port 1455) or a
   // device code, not a code pasted back on stdin, and it's untested here. The panel shows loginFix.
   login: null,
+  // Settings' Log out (agents/index.js logout): Codex's stored credentials, the terminal's too.
+  logout: { args: ['logout'] },
 };
 
-function friendlyDefault(message) {
-  return AUTH_RE.test(String(message)) ? NOT_LOGGED_IN : String(message);
+// A run that failed for want of a login (util.js isLoginFailure). Not with a saved API key (state.apiKey),
+// which the run used instead of the login, nor for codex-oss (state.friendly words errors for its
+// providers: their API keys, not an OpenAI login).
+function loginFailed(message, state) {
+  return !state.friendly && !state.apiKey && isLoginFailure(message);
+}
+
+function errorFor(message, state) {
+  if (loginFailed(message, state)) return loginError(adapter.name);
+  return { kind: 'error', message: state.friendly ? state.friendly(message) : String(message) };
 }
 
 function toolEvent(item, workspace) {
@@ -222,8 +282,53 @@ adapter.prepare = async function prepare({ ws, logger }) {
   return (await require('../agentkeys').prepareAgentKey('codex', { ws, logger })) || {};
 };
 
+// An organization's managed Codex settings ("requirements") can refuse TRIF's permission profile; Codex then
+// says so and carries on under the profile the organization requires (e.g. "Configured value for
+// permission_profile is disallowed by requirements; falling back from trif-run to required value
+// CodexStandard"). That profile isn't TRIF's: it may allow more than TRIF's limits (network, folders), or
+// less (one company's stopped `trif` reaching the helper and writes to sites/). runs.js _checkSandbox
+// stops the run at once, unless the user chose "Use Codex anyway" in the side panel (withoutsandbox.js);
+// then the run goes on, and if the organization's profile turns out to stop the run's work (orgBlocked),
+// it's ended with orgBlockedMessage.
+const OVERRIDDEN = /disallowed by requirements|falling back from\s+\S*trif-run\S*\s+to required value/i;
+adapter.settingsName = 'Codex'; // "Your organization's <settingsName> settings" (docs/CODEX-ORG-STRINGS.md)
+adapter.sandboxOverridden = (text) => OVERRIDDEN.test(String(text || ''));
+// The messages never name another agent (the list keeps growing): "another agent". `personal`: whether a
+// personal Codex login would get TRIF's sandbox back (not for the open-model agent, codex-oss.js).
+function orgMessages({ personal }) {
+  return {
+    sandboxOverriddenMessage: (text) =>
+      "Your organization's Codex settings replace TRIF's sandbox, so TRIF stopped the run before Codex did anything. " +
+      'To let Codex work under your company\'s settings instead, choose “Use Codex anyway” in TRIF\'s side panel. ' +
+      `${personal ? 'A personal Codex login, or another agent, works' : 'Another agent works'} with TRIF's sandbox. ` +
+      `(Codex said: ${oneLine(String(text || '')).slice(0, 300)})`,
+    orgBlockedMessage: () =>
+      "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with " +
+      (personal ? 'this login. Use a personal Codex login, try another agent, or work with Codex in a terminal in ~/.trif.'
+        : 'them. Try another agent, or work with Codex in a terminal in ~/.trif.'),
+  };
+}
+Object.assign(adapter, orgMessages({ personal: true }));
+
+// Under the organization's profile: what the run's commands, edits and errors say, for withoutsandbox.js
+// blockedText (`trif` can't reach the helper, a write to sites/ refused).
+adapter.orgBlocked = (line) => {
+  const { blockedText } = require('../withoutsandbox');
+  const msg = parseJsonLine(line);
+  if (!msg) return null;
+  const item = msg.item && typeof msg.item === 'object' ? msg.item : null;
+  if (msg.type === 'item.completed' && item) {
+    if (item.type === 'file_change' && item.status === 'failed') return 'write';
+    return blockedText([item.aggregated_output, item.message, item.text].filter((x) => typeof x === 'string').join('\n'));
+  }
+  if (msg.type === 'error' || msg.type === 'turn.failed') return blockedText(msg.message || (msg.error && msg.error.message) || '');
+  return null;
+};
+
 module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
 adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
-module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;
+adapter.proxyAuth = proxyAuth;
+adapter.tokenFile = tokenFile;
+adapter.orgMessages = orgMessages;

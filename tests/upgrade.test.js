@@ -26,7 +26,8 @@ const U = require(path.join(appDir, 'helper/lib/update.js'));
 const P = require(path.join(appDir, 'helper/lib/paths.js'));
 const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
 const tgz = fs.readFileSync(tgzFile);
-const feed = Buffer.from(JSON.stringify({ version, published: '2026-11-03', notes: 'n', package: { url: 'https://example.invalid/trif.tgz', sha256: crypto.createHash('sha256').update(tgz).digest('hex'), size: tgz.length } }));
+// (with \`signed\`, which feeds have carried since 0.3.0: an updater from before it ignores it)
+const feed = Buffer.from(JSON.stringify({ version, published: '2026-11-03', signed: new Date().toISOString(), notes: 'n', package: { url: 'https://example.invalid/trif.tgz', sha256: crypto.createHash('sha256').update(tgz).digest('hex'), size: tgz.length } }));
 const sig = crypto.sign(null, feed, privateKey).toString('base64');
 const fetch = async (url) => (url.endsWith('.sig') ? Buffer.from(sig) : url.endsWith('.tgz') ? tgz : feed);
 U.install(P.workspace(), { root: appDir, fetch, publicKey, browsers: ['chrome'] }).then(
@@ -122,13 +123,16 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   const mods = sh(path.join(trif, 'bin', 'trif'), ['mods'], { cwd: home });
   assert.match(mods, /example\.com\/mine/);
 
-  // The shipped mods. Unchanged copies are the new versions (renamed: Timeline Detox; merged: AI Banisher,
+  // The shipped mods. Unchanged copies are the new versions (renamed: Detox Timeline; merged: AI Banisher,
   // Just Results); the unchanged copy of a mod folded into another is in the trash; the edited one stays.
   const sites = path.join(trif, 'sites');
-  for (const id of ['x.com/plain-x', 'www.instagram.com/following-only-feed', 'www.google.com/hide-ai-in-results', 'www.google.com/hide-extra-sections']) {
+  for (const id of ['x.com/detox-timeline', 'www.instagram.com/following-only-feed', 'www.google.com/hide-ai-in-results', 'www.google.com/hide-extra-sections']) {
     assert.strictEqual(fs.readFileSync(path.join(sites, `${id}.js`), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'), `${id}\n${info}`);
   }
-  assert.match(fs.readFileSync(path.join(sites, 'x.com', 'plain-x.js'), 'utf8'), /@name +Timeline Detox\n/);
+  assert.match(fs.readFileSync(path.join(sites, 'x.com', 'detox-timeline.js'), 'utf8'), /@name +Detox Timeline\n/);
+  // (plain-x was renamed detox-timeline in 0.2.3: the unchanged copy is in the trash, its switch carried over)
+  assert.ok(!fs.existsSync(path.join(sites, 'x.com', 'plain-x.js')), `plain-x.js is still there\n${info}`);
+  assert.deepStrictEqual(fs.readdirSync(path.join(trif, 'trash', 'x.com')).map((f) => f.replace(/@.*/, '')), ['plain-x']);
   assert.match(fs.readFileSync(path.join(sites, 'www.google.com', 'hide-ai-in-results.js'), 'utf8'), /@name +AI Banisher\n/);
   assert.ok(!fs.existsSync(path.join(sites, 'www.google.com', 'hide-ai-mode.js')), `hide-ai-mode.js is still there\n${info}`);
   assert.deepStrictEqual(fs.readdirSync(path.join(trif, 'trash', 'www.google.com')).map((f) => f.replace(/@.*/, '')), ['hide-ai-mode']);
@@ -137,4 +141,10 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   assert.deepStrictEqual(pre.shipped['www.google.com/hide-sponsored'], { retired: { into: 'www.google.com/hide-extra-sections', kept: true } });
   assert.strictEqual(pre.shipped['www.google.com/hide-ai-mode'].retired.into, 'www.google.com/hide-ai-in-results');
   assert.ok(pre.offered.includes('www.google.com/hide-ai-mode'), 'still counted as offered: never offered again');
+  // Tim's mods, site by site (0.2.5): every site the workspace had counts as added, so keeps its mods and
+  // updates; TRIF's own home page, timsrobot.com, whose mods came after, isn't added (Settings offers it).
+  assert.deepStrictEqual(pre.starter, { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'added', 'instagram.com': 'added' }, info);
+  assert.ok(!fs.existsSync(path.join(sites, 'timsrobot.com')), info);
+  assert.ok(!pre.offered.some((id) => id.startsWith('timsrobot.com/')));
+  assert.ok(!pre.sitesOn.includes('timsrobot.com'));
 });

@@ -8,12 +8,29 @@
   --muted: light-dark(#6e6e73, #9a9aa0);
   --faint: light-dark(#9a9a9f, #6f6f75);
   --line: light-dark(#e4e4e1, #323236);
-  --accent: light-dark(#2f5bd3, #8aa6ff);
-  --on-accent: light-dark(#ffffff, #10131c);
-  --ok: light-dark(#1f8a4c, #4cc27f);
-  --warn: light-dark(#b7791f, #e8b04a);
-  --bad: light-dark(#c4372d, #ff7b70);
-  --bad-bg: light-dark(#fdf1f0, #3a2220);
+  --paused: light-dark(#3a3a3e, #ffffff); /* a paused tab's state colour (tablock.js): white, dark grey on light */
+  /* The panel's colours, locked (Tim, 11-13): three, like an old LED panel, green, yellow and coral, and red
+     for a blocked site only (it never shows beside another). No blue. The tiers use the three (style, boxed,
+     free), and so do the panel's states: yellow when the agent isn't logged in, coral when TRIF is missing a
+     part (the helper, user scripts). Every link and main button is green, or the state's colour while
+     one applies (monochrome, --accent and --fill); a warning's title takes the robot's colour (--switch-on). --ok, --warn and --bad are the three again.
+     (Fills use the robot's own green, --trif-green, with dark text; text uses --led-green, darker on light.) */
+  --led-green: light-dark(#1f8a5b, #34d399);
+  --led-yellow: light-dark(#9a7300, #e8c547);
+  --led-coral: light-dark(#c2512d, #f0866a);
+  --blocked: light-dark(#d42a2a, #ff4f4f);
+  --accent: var(--led-green);
+  --ok: var(--led-green);
+  --warn: var(--led-yellow);
+  --bad: var(--led-coral);
+  --bad-bg: light-dark(#fdf1ec, #3a2420);
+  --on-switch: #04291c; /* text on a fill in the robot's colour (--switch-on): dark on green */
+  /* Monochrome (Tim, 11-13): the robot-off screens (the gate, blocked included, and the landing page) are one
+     colour in a state: their links, buttons and focus rings take it (body.needs-login, .blocked, .site-blocked
+     below). The rest of the panel keeps green links and buttons; its warnings' titles and main buttons take
+     the robot's colour. --accent is for text and lines, --fill (with --on-fill) for buttons. */
+  --fill: var(--trif-green);
+  --on-fill: #04291c;
   --code: light-dark(#f0f0ed, #2a2a2e);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius: 10px;
@@ -87,8 +104,9 @@ code {
   background: var(--faint);
 }
 .dot.ok { background: var(--ok); }
-.dot.warn { background: var(--warn); }
-.dot.bad { background: var(--bad); }
+.dot.warn { background: var(--led-yellow); }
+.dot.bad { background: var(--led-coral); }
+body.site-blocked .dot { background: var(--blocked); } /* (blocked: one colour, whatever else is in the way) */
 
 .icon-btn {
   flex: none;
@@ -119,22 +137,52 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 
 .settings { display: grid; gap: 8px; }
+/* Every part of the panel scrolls when its content outgrows its space: Settings gives way (the bar above it
+   stays) and scrolls inside; the cards scroll inside their max-height with their top line (and ×) fixed. */
+.settings { flex: 0 0 auto; max-height: max(55vh, 220px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; align-content: start; }
+/* (the notices give way too in a short panel, each keeping a line, and scroll inside; the mods box scrolls
+   its list inside its own max-height, and keeps its ⋯ menu unclipped) */
+.notice:not(.tab-lock) { flex-shrink: 1; min-height: 44px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .open-model { display: grid; gap: 8px; } /* openmodel.js */
 
 /* A site TRIF is off for: only "The robot is off." and the button. */
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }
-.gate-title { margin: 0; font-size: 15px; font-weight: 600; }
-.gate-icon { stroke: none; }
-.gate-icon .rim { fill: var(--switch-on); }
-.gate-icon .face { fill: #18181a; }
-.btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
+/* The robot, its line and the button are centred; the lines under the button (Block / Disconnect, an error,
+   Tim's mods, the problem line) hang below them without moving them, so the robot sits at one height. */
+.gate-main { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.gate-foot { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.gate-foot:not(:has(> :not([hidden]))) { display: none; }
+.gate-title { margin: 0; font-size: 15px; font-weight: 600; text-align: center; text-wrap: balance; } /* (a long site name wraps, centred) */
+.gate-why { margin: 0; max-width: 300px; color: var(--muted); font-size: 12px; text-align: center; text-wrap: balance; }
+/* Quiet links under Fix: block the site in TRIF, or disconnect it (the browser's permission). */
+.gate-links { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }
+.gate-links a { white-space: nowrap; } /* (one above the other, each on one line) */
+/* Disconnected (no access yet, or given back): the whole panel grey. Blocked in TRIF: red. */
+body.site-disconnected :is(.bar, .gate) { filter: grayscale(1); }
+body.site-blocked, body.site-blocked.needs-login, body.site-blocked.blocked { --switch-on: var(--blocked); --on-switch: #ffffff; } /* (red over anything else) */
+:is(body.site-blocked, body.site-blocked.needs-login, body.site-blocked.blocked) :is(.gate, .landing) { --accent: var(--blocked); --fill: var(--blocked); --on-fill: #ffffff; }
+body.site-blocked .gate-title { color: var(--blocked); }
+/* Settings: new mods start, the blocked sites, agents on sites. */
+.sites-block { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sites-title { margin: 0; font-size: 12px; font-weight: 600; }
+.starts-row { grid-template-columns: 1fr auto; }
+.blocked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.blocked-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.blocked-list:empty { display: none; }
+/* The gate's robot: the shaded one, with the state's face (renderGate). */
+.gate-icon { width: 64px; height: 64px; }
+.btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: var(--on-switch); font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
 /* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
    settings, and the dot when something red is wrong. Settings are for every site, so they open from both.
    (A notice moved into the gate, the login in progress, shows: only the body's own notices hide.) */
-body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer),
+/* (the power button stays on "The robot is off.", to turn it on from there; not when blocked or disconnected) */
+body:is(.no-site, .site-disconnected, .site-blocked) #site-switch { display: none; }
+/* (New chat keeps its place, hidden, so the power button beside it doesn't move) */
+body:is(.site-off, .no-site) #new-chat { visibility: hidden; }
+body:is(.site-off, .no-site) :is(.site, .mods, .chat, .composer, .using-line),
 body:is(.site-off, .no-site) > .notice { display: none; }
 body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
@@ -147,16 +195,25 @@ body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 .landing-version { margin: 0; font-size: 15px; font-weight: 600; }
 .landing-lead { margin: 0; color: var(--muted); }
 /* What's in the way, under the gate's or the landing page's own words: one line in the colour it's in. */
-.problem-line { max-width: 300px; margin: 0; text-align: center; color: var(--bad); }
-body.needs-login .problem-line { color: var(--warn); }
+.problem-line { max-width: 300px; margin: 0; text-align: center; color: var(--led-coral); }
+body.needs-login .problem-line { color: var(--led-yellow); }
+body.site-blocked .problem-line { color: var(--blocked); } /* (one colour: blocked's red, whatever else is in the way) */
 .problem-line p { margin: 0; }
-.problem-line a { color: inherit; }
+.problem-line a { color: var(--accent); } /* (links in the state's colour, like the line) */
 .problem-line code { white-space: nowrap; }
 .landing .problem-line { margin-top: 18px; }
+/* With something in the way (user scripts off, the helper away), the landing page's robot is the gate's:
+   the same size and place as the disconnected and blocked robots (Tim, 11-13). */
+body.blocked .landing { padding: 24px 16px 64px; }
+/* (the robot at the same height on all of them: its top 38% down the screen, the text below it, so a longer
+   line doesn't push it up; a short panel keeps 24px and scrolls) */
+:is(.gate, body.blocked .landing) { justify-content: flex-start; padding-top: max(24px, calc(38vh - 56px)); }
+body.blocked .landing-icon { width: 64px; height: 64px; }
+body.blocked .landing-words { margin-top: 14px; }
 /* The login started from the gate's line: its notice, in the gate in place of the line. */
 .gate .notice { width: min(100%, 320px); margin: 0; }
 /* Settings open above either one: in a short panel it scrolls instead of running off the bottom. */
-.gate, .landing { min-height: 0; overflow-y: auto; justify-content: safe center; }
+.gate, .landing { min-height: 0; overflow-y: auto; overflow-x: hidden; justify-content: safe center; }
 /* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
 .bar-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
 /* The robot in the middle of the bar (the toolbar icon), a button like the power button beside settings:
@@ -166,14 +223,28 @@ body.needs-login .problem-line { color: var(--warn); }
 .bar-robot .rim { fill: var(--switch-on); }
 .bar-robot .face { fill: #18181a; }
 .bar-robot .eye { fill: #59dbab; }
+/* His faces (data-face, sidepanel.js renderFaces; the toolbar icon's, faces.js), one colour each, the
+   frame's (--switch-on): paused, a pause sign (tablock.js); blocked, a cross; disconnected, a broken link
+   (grey, by the bar's filter); off, no eyes (robotless too, in the usual green); logged out, hollow eyes. */
+.bar-robot .pause { display: none; fill: var(--switch-on); }
+.bar-robot .cross { display: none; stroke: var(--switch-on); stroke-width: 14; stroke-linecap: round; }
+.bar-robot .link { display: none; fill: none; stroke: var(--switch-on); stroke-width: 7; stroke-linecap: round; }
+.bar-robot .xeyes { display: none; stroke: var(--switch-on); stroke-width: 9; stroke-linecap: round; }
+.bar-robot:is([data-face="paused"], [data-face="blocked"], [data-face="disconnected"], [data-face="off"], [data-face="robotless"]) .eye { display: none; }
+.bar-robot[data-face="disconnected"] .link { display: inline; }
+.bar-robot[data-face="paused"] .pause { display: inline; }
+/* (his marks are one colour; the face can differ for contrast: dark-grey marks need a light face) */
+.bar-robot[data-face="paused"] .face { fill: light-dark(#f4f4f5, #18181a); }
+.bar-robot[data-face="blocked"] .cross { display: inline; }
 .bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
-/* Asleep: still him, eyes and all, but grey and dim; pointing at him brightens him a little toward awake. */
-body.site-off .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
-body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
+/* Disconnected: grey and dim (his face's colour); pointing at him brightens him a little. Off keeps his
+   green, blank, like the robot in the panel below. */
+body.site-off .bar-robot[data-face="disconnected"] svg { filter: grayscale(1); opacity: 0.45; }
+body.site-off .bar-robot[data-face="disconnected"]:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
 /* On the light background the same opacity washes him out to a pale chip: less faded there. */
 @media (prefers-color-scheme: light) {
-  body.site-off .bar-robot svg { opacity: 0.6; }
-  body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.85; }
+  body.site-off .bar-robot[data-face="disconnected"] svg { opacity: 0.6; }
+  body.site-off .bar-robot[data-face="disconnected"]:hover:not([aria-busy="true"]) svg { opacity: 0.85; }
 }
 /* The power button that turns TRIF off (and on) for the site. */
 .power { color: var(--muted); }
@@ -181,18 +252,32 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0
 .power[aria-checked="true"], .power[aria-checked="true"]:hover:not(:disabled) { color: var(--switch-on); }
 .power[aria-busy="true"] { cursor: progress; opacity: 0.6; }
 
-/* Something in the way, the same conditions as the dot (sidepanel.js render): every green turns red when
+/* Something in the way, the same conditions as the dot (sidepanel.js render): every green turns coral when
    TRIF is missing a part (the helper isn't connected, or user scripts are off), or yellow when the agent
-   needs a login (or the open model a key) first. Nearly all of it is --switch-on (switch.css): the robots,
-   the power button, the Fix button, and (when user scripts are off) the mod switches and their lights. */
-body.blocked { --switch-on: var(--bad); }
-body.needs-login { --switch-on: var(--warn); }
-body.blocked .bar-robot .eye { fill: #ffc2bc; }
-body.needs-login .bar-robot .eye { fill: #fbe3a6; }
-body.needs-login .btn.go { color: #2e1f02; }
-/* Except the mods while only the helper is away, or only a login is missing: they still run (the extension
-   keeps its copy), so their switches and lights stay green. */
-body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on: var(--trif-green); }
+   needs a login (or the open model a key) first, or white (dark grey on the light theme) on a tab TRIF has
+   paused (body.tab-locked: the agent ran code there); coral and yellow win. Nearly all of it is --switch-on
+   (switch.css): the robots, the power button, the Fix button, and (when user scripts are off) the mod
+   switches and their lights. */
+body.blocked { --switch-on: var(--led-coral); --on-switch: light-dark(#ffffff, #3a1206); }
+body.needs-login { --switch-on: var(--led-yellow); --on-switch: light-dark(#ffffff, #2e1f02); }
+/* (the robot-off screens in one colour: Tim, 11-13) */
+body.needs-login :is(.gate, .landing) { --accent: var(--led-yellow); --fill: var(--led-yellow); --on-fill: light-dark(#ffffff, #2e1f02); }
+body.blocked :is(.gate, .landing) { --accent: var(--led-coral); --fill: var(--led-coral); --on-fill: light-dark(#ffffff, #3a1206); }
+body.tab-locked:not(.blocked, .needs-login) { --switch-on: var(--paused); }
+body.tab-locked:not(.blocked, .needs-login) .dot { background: var(--paused); }
+body.tab-locked:not(.blocked, .needs-login) .btn.go { color: light-dark(#ffffff, #1d1d1f); }
+/* (one colour: what's on his face is his frame's colour, coral or yellow too) */
+body:is(.blocked, .needs-login) .bar-robot :is(.eye, .pause) { fill: var(--switch-on); }
+/* (logged out: X eyes, in the yellow; the helper away: X eyes, in coral; user scripts off: the cross, in
+   coral: Tim, 11-13) */
+.bar-robot:is([data-face="login"], [data-face="helper"], [data-face="scripts"]) .eye { display: none; }
+.bar-robot:is([data-face="login"], [data-face="helper"]) .xeyes { display: inline; }
+.bar-robot[data-face="scripts"] .cross { display: inline; }
+/* The mods keep their tiers' colours whatever the panel's state. With user scripts off they can't run, so the
+   whole list dims (Tim, 11-13); with only the helper away, or the tab paused, they still run (the extension
+   keeps its copy), so it stays as it is. */
+body[data-problem="helper"] .mod-list, body.tab-locked:not(.needs-login) .mod-list { --switch-on: var(--trif-green); }
+body[data-problem="scripts"] .mod-list { opacity: 0.4; }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }
@@ -227,10 +312,33 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .note { margin: 0; color: var(--muted); font-size: 12px; }
 .note.error { color: var(--bad); }
 
+/* Settings, Tim's mods: a row per site, added or with its Add button. */
+.starter { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.starter[hidden] { display: none; }
+.starter-title { margin: 0; font-weight: 600; }
+.starter-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.starter-list li { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; align-items: center; }
+.starter-site { font-weight: 500; }
+.starter-mods { grid-column: 1; color: var(--muted); font-size: 12px; }
+.starter-state { grid-column: 2; grid-row: 1 / span 2; color: var(--muted); font-size: 12px; }
+.starter-list .btn { grid-column: 2; grid-row: 1 / span 2; }
+/* A site's panel: "Add Tim's mods for <site>", small. */
+.site-starter { flex: none; margin: 8px 12px 0; font-size: 12px; text-align: center; }
+.site-starter[hidden] { display: none; }
+.gate .site-starter { margin: 0; }
+.site-starter .mod-err { display: block; margin-top: 4px; }
+.site-starter .mod-err[hidden] { display: none; }
+body.no-site .site-starter { display: none; }
+
 .notice p { margin: 0; }
+/* The warnings under the robot (what's in the way, "Mods are paused"): their titles and main buttons in his
+   colour, their edge a touch of it (Tim, 11-13). */
+:is(#notice, #paused) .title { color: var(--switch-on); }
+:is(#notice, #paused) .btn.primary { background: var(--switch-on); color: var(--on-switch); }
 .notice p + p, .notice p + .actions { margin-top: 6px; }
 .notice .title { font-weight: 600; }
 .notice.bad { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+:is(#notice, #paused).bad { border-color: color-mix(in srgb, var(--switch-on) 35%, var(--line)); }
 .notice .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .notice > * + * { margin-top: 6px; }
 .notice.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
@@ -256,7 +364,7 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
   font-size: 12px;
 }
 .btn:hover { border-color: var(--faint); }
-.btn.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.btn.primary { background: var(--fill); border-color: transparent; color: var(--on-fill); }
 
 .mods summary {
   cursor: pointer;
@@ -270,29 +378,74 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 /* A section of its own above the chat: at most about 40% of the panel, scrolling inside, so the chat
    below shrinks instead of being pushed out of sight. */
 .mod-list {
-  list-style: none; margin: 4px -3px 0; padding: 2px 3px; /* room for focus rings inside the scroller */
+  list-style: none; margin: 4px -4px 0 -3px; padding: 2px 4px 2px 3px; /* room for focus rings inside the scroller, and the bin's pull toward the edge (-4px) */
   max-height: calc(40vh - 40px);
-  overflow-y: auto;
+  overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable; /* (a classic scrollbar's room kept, so it never covers the rows' right edge: the bins, OFF) */
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
-.mod-list li { padding: 5px 0; border-top: 1px solid var(--line); }
+.mod-list li { padding: 9px 0; border-top: 1px solid var(--line); }
 .mod-list li:first-child { border-top: 0; }
-.mod-row { display: flex; align-items: center; gap: 10px; }
+.mod-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; align-items: center; }
+/* Two lines: the grip down the left; the name (light, name, icons, a tag) to the switch, at the right of the
+   first line; the description under it, with </> and the bin at the right of the second, the bin pulled
+   toward the box's edge. Icon-sized hit areas (24px). */
+.mod-row > .mod-grip { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
+.mod-row > .mod-main { grid-column: 2; grid-row: 1; }
+.mod-row > .mod-right { grid-column: 3; grid-row: 1; justify-self: end; display: flex; align-items: center; gap: 8px; }
+.mod-row > .mod-desc { grid-column: 2; grid-row: 2; padding-left: 14px; }
+/* </> and the bin: together exactly the switch's width (30px, switch.css), under it, </>'s drawing from its left edge
+   and the bin's to its right edge (Tim, 11-13). Each button is its drawing's width (and 24px tall), so their click areas meet
+   nowhere; -4px top and bottom: they don't make the 12px line taller. */
+.mod-row > .mod-tools { grid-column: 3; grid-row: 2; justify-self: end; width: 30px; display: flex; align-items: center; justify-content: space-between; margin: -4px 0; }
+.mod-row > .mod-tools .icon-btn { width: auto; height: 24px; padding: 0; margin: 0; } /* (each exactly its drawing's width: no overlap) */
+.mod-row > .mod-tools .mod-code svg { width: 13px; height: 13px; }
+.mod-row > .mod-tools .mod-delete svg { width: 14px; height: 14px; margin-right: -1.5px; } /* (its drawing is 1.5px inside its box) */
+/* Reordering (sidepanel.js): the grip at the start of each row, the row being dragged, the rows making way. */
+.mod-list { position: relative; } /* (the rows' offsetTop is within the list) */
+.mod-grip { flex: none; width: 16px; height: 24px; margin-right: -6px; color: var(--faint); cursor: grab; touch-action: none; opacity: 0.6; }
+.mod-grip svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.mod-list li:hover .mod-grip, .mod-grip:focus-visible { opacity: 1; }
+.mod-grip:hover:not(:disabled) { background: transparent; color: var(--text); }
+.mod-list.dragging, .mod-list.dragging * { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.mod-list.dragging > li:not(.drag) { transition: transform 0.15s ease; }
+.mod-list li.drag {
+  position: relative; z-index: 1;
+  background: var(--surface);
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px var(--surface), 0 0 0 5px var(--line), 0 8px 20px 4px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+}
+.mod-list li.drag, .mod-list li.drag + li { border-top-color: transparent; }
+@media (prefers-reduced-motion: reduce) { .mod-list.dragging > li:not(.drag) { transition: none; } }
 .mod-main { flex: 1; min-width: 0; }
 .mod-name { font-weight: 500; }
+h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 /* The light hangs left of the name and file, so wrapped lines line up with the name. */
 .mod-main { position: relative; padding-left: 14px; }
 .light { position: absolute; left: 0; top: 6px; width: 7px; height: 7px; border-radius: 50%;
   background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .light.on { background: var(--switch-on); }
 .mod-list li.off .mod-name { color: var(--muted); }
-.mod-file { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+.mod-desc { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mod-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
+/* The one chip after the name (modlevel.js): muted for noticeable only, green for powers, amber for a
+   combination warning or changed requests */
+.mod-icons { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 3px; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
+.mod-icons:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.mod-icons:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
+.mod-ic { display: inline-flex; gap: 4px; font-size: 10px; line-height: 1; }
+.mod-ic svg { width: 14px; height: 14px; display: block; }
+.mod-ic.amber { color: var(--warn); }
+.mod-ic-sep { width: 1px; height: 11px; margin: 0 1px; background: var(--line); }
+/* Next to the name; when both don't fit on a line, the file name goes to the next one whole (it breaks only
+   when it's longer than a line). */
+.mod-file { display: inline-block; max-width: 100%; color: var(--muted); font: 11px/1.4 var(--mono); font-weight: 400; overflow-wrap: anywhere; }
 .mod-err { color: var(--bad); font-size: 12px; }
-.mod-source { font: 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
+.mod-source { font: 400 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
 .mod-source::before { content: "· "; }
 /* A new version of a shipped mod the user changed, with what they can do about it. */
-.mod-update { margin: 6px 0 2px 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-update { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
 .mod-update p { margin: 0; }
 .mod-update .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 /* A waiting button looks it (its tooltip says why), instead of silently ignoring clicks. */
@@ -320,7 +473,7 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .chat {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: auto; overflow-x: hidden;
   overscroll-behavior: contain;
   padding: 12px 12px 4px;
   scrollbar-width: thin;
@@ -382,8 +535,26 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
   text-overflow: ellipsis;
 }
 .msg.tool + .msg.tool { margin-top: -6px; }
+/* A run of tool lines, folded (sidepanel.js groupTools): "Ran 2 commands ›"; open, the lines under it */
 .msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
 .msg.mod .btn { padding: 2px 10px; }
+
+/* An organization's settings replace TRIF's sandbox: the choice (Stop, or Use <agent> anyway). */
+.msg.sandbox { padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 8px;
+  background: var(--surface); font-size: 12.5px; }
+.msg.sandbox p { margin: 0 0 6px; }
+.msg.sandbox .sandbox-title { font-weight: 600; font-size: 13px; }
+.msg.sandbox .sandbox-text, .msg.sandbox .sandbox-why { color: var(--muted); }
+.sandbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.sandbox-actions .btn { padding: 4px 12px; }
+.sandbox-answer { margin: 6px 0 0; color: var(--faint); font-size: 12px; }
+.without-sandbox { display: grid; gap: 4px; }
+.without-sandbox[hidden] { display: none; }
+.without-sandbox .note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.without-sandbox .btn { padding: 2px 10px; font-size: 12px; }
+
+/* The agent needs logging in (the notice above says how): a plain line, not an error. */
+.msg.login { padding: 0 2px 0 8px; border-left: 2px solid var(--led-yellow); color: var(--muted); font-size: 12px; }
 
 .msg.error {
   padding: 7px 10px;
@@ -405,7 +576,7 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--fill);
   animation: pulse 1.2s ease-in-out infinite;
 }
 @keyframes pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
@@ -414,6 +585,16 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 
 /* ---- composer -------------------------------------------------------------------------------- */
 
+/* Over the message box, small: which agent and model this chat uses, then what the agent can do here */
+.using-line { flex: none; display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; margin: 0 12px 2px; font-size: 11px; line-height: 1.4; color: var(--faint); }
+.using { min-width: 0; padding: 0 2px; border: 0; background: none; color: var(--faint); font: inherit;
+  text-align: right; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "no TRIF sandbox": this chat's agent ran under an organization's settings instead (before the agent's name) */
+.no-sandbox { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+  font-size: 10.5px; line-height: 1.5; white-space: nowrap; cursor: default; }
+.no-sandbox[hidden] { display: none; }
+.using:hover { color: var(--muted); text-decoration: underline; }
+.using[hidden] { display: none; }
 .composer {
   flex: none;
   position: relative;
@@ -440,6 +621,13 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 }
 .composer textarea::placeholder { color: var(--faint); }
 .composer textarea:disabled { cursor: not-allowed; }
+/* Robotless (body.robotless: no chat agent in this browser): one quiet line in the message box's place, and
+   nothing that asks the agent (the agent's line, the empty chat's starters, Explain, Merge with my agent,
+   a broken mod's Fix it). */
+.robotless-line { display: none; flex: none; margin: 6px 14px 12px; color: var(--faint); font-size: 12px; line-height: 1.4; }
+body.robotless .robotless-line { display: block; }
+body.robotless :is(.composer, .using-line, .empty, .agent-site-note, .explain-btn, .mod-update .merge, .break-actions .break-fix) { display: none; }
+body:is(.site-off, .no-site) .robotless-line { display: none; }
 
 .send {
   position: absolute;
@@ -452,8 +640,8 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
   padding: 0;
   border: 0;
   border-radius: 8px;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--fill);
+  color: var(--on-fill);
 }
 .send:disabled { background: var(--raised); color: var(--faint); }
 .send svg { width: 14px; height: 14px; stroke-width: 2; }
@@ -464,4 +652,423 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .check input { margin: 0; }
 
-#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); }
+#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); max-height: min(50vh, 320px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+#update .md :is(ul, ol) { margin: 0; padding-left: 16px; }
+#update .md li + li { margin-top: 4px; }
+
+/* What a mod can do (held, or to review): TRIF's facts, read from its code, apart from what the mod says */
+.mods-review-note { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.mod-facts { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-facts.held { border-color: var(--bad); }
+.mod-facts p { margin: 0; }
+.mod-facts .facts-head { font-weight: 600; }
+.mod-facts ul.facts { margin: 4px 0; padding-left: 18px; font-weight: 600; }
+.mod-facts .facts-note { color: var(--muted); }
+.mod-facts .facts-claim { margin-top: 4px; color: var(--muted); font-style: italic; }
+.mod-facts .facts-who { font-style: normal; }
+.mod-facts .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mod-facts .facts-code { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+
+/* A tab the agent ran code in (tablock.js): one line and a small Reload button, so the rest of the panel
+   stays in view; the details are in the line's tooltip. */
+.notice.tab-lock { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; }
+.notice.tab-lock[hidden] { display: none; }
+.notice.tab-lock > * + * { margin-top: 0; }
+.notice.tab-lock .title { flex: 1; min-width: 0; font-size: 12px; cursor: help; }
+.notice.tab-lock .btn { flex: none; padding: 2px 10px; }
+
+/* A waiting change, against the version that ran */
+.mod-facts .facts-diff { max-height: 260px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+.mod-facts .facts-diff .add { color: var(--ok, #2f9e6e); }
+.mod-facts .facts-diff .del { color: var(--bad); }
+.mod-facts .facts-diff .gap, .mod-facts .facts-diff .ctx { color: var(--muted); }
+
+/* Groups: how TRIF runs the mods below each heading ("Rules", "Page scripts"), with a switch for this site */
+.mod-list li.mod-group { padding: 14px 0 3px; border-top: 0; }
+.mod-list li.mod-group + li { border-top: 0; }
+/* Two columns: the name and its note on the left, the switch on the right, so the note wraps before it */
+.mod-list li.mod-group { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+.mod-group-row { display: contents; }
+.mod-group-name { grid-column: 1; }
+.mod-list li.mod-group .group-switch { grid-column: 2; grid-row: 1; }
+.mod-group-note { grid-column: 1; }
+/* A tier's name collapses it (sidepanel.js applyCollapsed): "STYLE MODS >" and its On and Off, nothing else */
+.group-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.group-toggle:hover { color: var(--text); }
+.group-count { display: inline-block; margin-left: 2px; padding: 0 6px; border-radius: 999px; background: var(--raised); font-size: 10.5px; font-weight: 600; line-height: 16px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+/* One colour: green while the tier is on here, grey when it's off */
+.group-count { color: var(--switch-on); }
+.mod-list li.mod-group.off .group-count { color: var(--muted); }
+.group-count:empty { display: none; }
+.group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.group-toggle .chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(90deg); transition: transform .15s ease; }
+.mod-list li.mod-group.collapsed .chev { transform: none; }
+.mod-list li.mod-group.collapsed .mod-group-note { display: none; }
+.mod-list[data-collapsed~="rules"] > li[data-group="rules"]:not(.mod-group),
+.mod-list[data-collapsed~="sandboxed"] > li[data-group="sandboxed"]:not(.mod-group),
+.mod-list[data-collapsed~="page"] > li[data-group="page"]:not(.mod-group) { display: none; }
+@media (prefers-reduced-motion: reduce) { .group-toggle .chev { transition: none; } }
+/* A tier's On and Off buttons: the pressed one filled (green for On), the other plain */
+.group-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.group-switch[aria-busy="true"] { cursor: progress; opacity: 0.6; }
+.gs-btn { padding: 2px 8px; border: 0; background: transparent; color: var(--muted); font-family: inherit; font-size: 10.5px; font-weight: 600; line-height: 1.5; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+.gs-btn + .gs-btn { border-left: 1px solid var(--line); }
+.gs-btn[aria-pressed="true"] { cursor: default; }
+.gs-btn[data-on="true"][aria-pressed="true"] { background: var(--switch-on); color: #10131c; }
+.gs-btn[data-on="false"][aria-pressed="true"] { background: var(--raised); color: var(--text); }
+.gs-btn[aria-pressed="false"]:hover { color: var(--text); }
+.gs-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mod-group-name { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.mod-group-note { margin: 3px 0 2px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+/* "more" after a line (sidepanel.js addMore: the approval card, the code card, the tiers' notes): its
+   explanation, under the line, in the card (which scrolls up and down when it's long) */
+.more-btn { display: inline-flex; vertical-align: -1px; margin: 0; padding: 1px; border: 0; border-radius: 50%; background: none; color: var(--faint); line-height: 1; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.more-btn svg { width: 11px; height: 11px; display: block; }
+.more-btn:hover, .more-btn.open { color: var(--text); }
+.more-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.more-text { white-space: pre-line; display: block; margin-top: 3px; padding-left: 7px; border-left: 2px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+.more-text[hidden] { display: none; }
+.mod-group-note .more-text { font-size: 11px; }
+.approval .ap-together .more-text { color: var(--text); opacity: 0.8; }
+.mod-list li.group-off { opacity: .45; }
+.mod-list li.mod-group.off .mod-group-name { text-decoration: line-through; }
+.mod-powers { font-size: 11px; color: var(--muted); }
+
+/* ---- the approval dialog (sidepanel.js "The approval dialog"): one card over the dimmed panel ---------- */
+.approval {
+  /* (TRIF's green, whatever the panel's state colours its switches (red blocked), except yellow for a login) */
+  --switch-on: var(--trif-green);
+  --on-switch: #04291c;
+  --accent: var(--led-green); --fill: var(--trif-green); --on-fill: #04291c;
+  /* (pinned to the top, so a card that grows, History opening, grows downward instead of jumping) */
+  width: auto; max-width: none; max-height: calc(100% - 32px); margin: 16px 16px auto; padding: 16px 16px 14px;
+  overflow-y: auto; overflow-x: hidden; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.55);
+}
+.approval::backdrop { background: rgb(0 0 0 / 0.55); backdrop-filter: blur(2px); }
+.approval > .ap-top { position: sticky; top: -16px; z-index: 2; margin: -16px -16px 0; padding: 16px 16px 6px; background: var(--surface); }
+.code-view[open] > .ap-top { position: static; margin: 0; padding: 0 0 6px; } /* (a column: its top never scrolls away) */
+@media (prefers-color-scheme: light) {
+  .approval { box-shadow: 0 18px 50px rgb(0 0 0 / 0.22); }
+  .approval::backdrop { background: rgb(20 20 24 / 0.38); }
+}
+.approval .ap-top { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.approval .ap-count { margin-right: auto; }
+.approval .ap-x { background: none; border: 0; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+.approval .ap-x:hover { color: var(--text); }
+.approval .ap-who { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.approval .ap-robot svg { display: block; width: 34px; height: 34px; }
+/* (the cards' robot: always the usual green one, eyes or the code card's </>; sidepanel.js cardRobot) */
+.approval .ap-robot svg { stroke: none; }
+.approval .ap-robot .rim { fill: var(--switch-on); }
+body.needs-login .approval { --switch-on: var(--led-yellow); --on-switch: light-dark(#ffffff, #2e1f02); --accent: var(--led-yellow); --fill: var(--led-yellow); --on-fill: light-dark(#ffffff, #2e1f02); }
+body.needs-login .approval .ap-robot .eye { fill: var(--led-yellow); }
+body.needs-login .approval .ap-robot .code { stroke: var(--led-yellow); }
+.approval .ap-robot .face { fill: #18181a; }
+.approval .ap-robot .eye { fill: #59dbab; }
+.approval .ap-robot .code { fill: none; stroke: #59dbab; stroke-width: 5.5; stroke-linecap: butt; stroke-linejoin: miter; }
+.approval .ap-name { margin: 0; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; }
+.approval .ap-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.approval .ap-chip { display: inline-block; margin-right: 6px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); font-size: 11px; }
+/* (the tiers' colours, as in the mod list) */
+.approval .ap-chip.style { border-color: color-mix(in srgb, var(--led-green) 45%, var(--line)); color: var(--led-green); }
+.approval .ap-chip.boxed { border-color: color-mix(in srgb, var(--led-yellow) 45%, var(--line)); color: var(--led-yellow); }
+.approval .ap-chip.free { border-color: color-mix(in srgb, var(--led-coral) 45%, var(--line)); color: var(--led-coral); }
+.approval .ap-lead { margin: 12px 0 6px; font-weight: 600; }
+.approval .ap-facts { margin: 0; padding: 0; list-style: none; }
+.approval .ap-facts li { display: flex; gap: 8px; margin-top: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); }
+.approval .ap-ic { flex: none; width: 16px; text-align: center; opacity: 0.85; }
+.approval .ap-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.approval .ap-together { margin-top: 10px; padding: 9px 11px; border-radius: 9px; background: var(--bad-bg); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.approval .ap-together p { margin: 0; }
+.approval .ap-together p + p { margin-top: 4px; }
+.approval .ap-together b { color: var(--bad); }
+.approval .ap-group .ap-mod { margin-top: 10px; }
+.approval .ap-group .ap-mod-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
+.approval .ap-group .ap-mod-name { font-size: 14px; }
+.approval .ap-group .ap-mod-change { font-size: 12px; color: var(--muted); }
+.approval .ap-group .ap-mod-code { margin-left: auto; }
+.ap-site { margin-top: 10px; padding: 9px 11px; border-radius: 9px; background: var(--bad-bg); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.ap-site p { margin: 0; }
+.ap-site .ap-site-head { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.ap-site .ap-site-head.ap-site-first { margin-top: 0; font-size: inherit; font-weight: 600; color: var(--bad); }
+.ap-site .ap-site-items { margin-top: 1px; }
+.ap-site .ap-site-flag { margin-top: 6px; font-weight: 600; }
+.ap-site .ap-new { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 16px; background: var(--bad); color: var(--bg, #fff); }
+.approval .ap-note { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.approval .ap-claim { margin: 4px 0 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.approval .ap-claim-who { font-style: normal; }
+.approval .ap-err { margin: 8px 0 0; color: var(--bad); font-size: 12px; }
+.approval .ap-code { max-height: 240px; overflow: auto; margin: 10px 0 0; padding: 8px; background: var(--code); border-radius: 8px; font: 11px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.approval .ap-code .add { color: var(--ok); }
+.approval .ap-code .del { color: var(--bad); }
+.approval .ap-code .gap, .approval .ap-code .ctx { color: var(--muted); }
+.approval .ap-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+.approval .ap-actions .btn { padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 500; }
+.approval .ap-actions .btn.go { font-weight: 650; color: var(--on-switch); }
+.approval .ap-actions .btn.text { margin-left: auto; background: none; border-color: transparent; color: var(--muted); }
+.approval .ap-actions .btn.text:hover { color: var(--text); }
+/* "N waiting": after Not now, at the top of the panel, beside the robot; reopens the dialog */
+.waiting-badge {
+  position: absolute; left: 50%; top: 100%; transform: translate(-50%, -50%); z-index: 2; /* (under the robot, on the bar's edge: clear of the site's name and the controls) */
+  padding: 2px 8px; border: 0; border-radius: 999px; background: var(--warn); color: #1a1300;
+  font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);
+}
+/* a held row's tag, in place of its switch (a change waiting: beside the name), which reopens the dialog */
+.tag.on-hold { background: none; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); cursor: pointer; }
+.tag.on-hold:hover { border-color: var(--warn); }
+.mod-row > .tag.on-hold { flex: none; align-self: center; }
+
+/* ---- "Agent on this site": on the line over the message box (a button and its menu), the chat's first
+   line on a sensitive site, Settings' lists ------------------------------------------------------------ */
+.agent-level-wrap { position: relative; flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.agent-level-wrap[hidden] { display: none; }
+.using[hidden] + .agent-level-wrap .using-sep { display: none; }
+.agent-level { display: inline-flex; align-items: center; gap: 4px; padding: 0 2px; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+.agent-level:hover, .agent-level[aria-expanded="true"] { color: var(--text); }
+.agent-level-icon { display: inline-flex; flex: none; color: var(--muted); }
+.agent-level-icon svg { width: 13px; height: 13px; stroke-width: 1.4; }
+.agent-level-icon svg.code-glyph { stroke-width: 1.05; }
+.agent-level .agent-level-caret { width: 10px; height: 10px; stroke-width: 1.8; }
+/* (narrow: only the icon; the words are its tooltip and label) */
+@media (max-width: 420px) { .agent-level .agent-level-text { display: none; } }
+.agent-level-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(300px, calc(100vw - 24px)); max-height: calc(100vh - 110px); overflow-y: auto; overflow-x: hidden; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); color: var(--text); font-size: 12px; text-align: left; }
+.agent-level-menu[hidden] { display: none; }
+.agent-level-head { margin: 2px 6px 6px; font-weight: 600; }
+.agent-level-menu [role="menuitemradio"] { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px; border: 0; border-radius: 7px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.agent-level-menu [role="menuitemradio"]:is(:hover, :focus-visible) { background: var(--raised); outline: none; }
+.agent-level-menu [role="menuitemradio"][aria-checked="true"] { background: var(--raised); box-shadow: inset 2px 0 0 var(--muted); }
+.agent-level-menu .agent-level-icon { margin-top: 1px; }
+.agent-level-item { display: flex; flex-direction: column; gap: 1px; }
+.agent-level-item span { color: var(--muted); }
+.agent-level-foot { margin: 6px 6px 2px; color: var(--muted); font-size: 11px; }
+/* the first line of a sensitive site's chat, as TRIF's own note */
+.agent-site-note { margin: 0 0 10px; padding: 0 2px; color: var(--muted); font-size: 12px; }
+.agent-site-note[hidden] { display: none; }
+.agent-sites-list select { margin-left: auto; font-size: 12px; }
+.agent-sites-list .agent-site { overflow-wrap: anywhere; }
+.sensitive-sites { width: 100%; font: 11px/1.45 var(--mono); padding: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); resize: vertical; }
+.sensitive-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.agent-ask .ap-who { margin-top: 8px; }
+
+/* ---- the code viewer (sidepanel.js "The code viewer"): the approval card's look, with the code ---------- */
+.mod-code { width: 24px; height: 24px; color: var(--faint); }
+.mod-code svg { width: 15px; height: 15px; }
+/* </>, everywhere it's drawn small: thin and sharp, so it doesn't read as a squiggle */
+svg.code-glyph { stroke-width: 1.05; stroke-linecap: butt; stroke-linejoin: miter; }
+.mod-code:hover:not(:disabled) { color: var(--text); }
+.code-view { width: auto; }
+/* A column inside the card's max-height: the code area gives way and scrolls inside, so however long the mod
+   or short the panel, the card stays on screen with its buttons showing */
+.code-view[open] { display: flex; flex-direction: column; overflow: hidden; }
+.code-view[open] > * { flex: none; }
+.code-view[open] > :is(.cv-code, .cv-history-list, .cv-e-box) { flex: 0 1 auto; min-height: 72px; }
+.code-view .cv-details { max-height: min(52vh, 420px); overflow-y: auto; overflow-x: hidden; margin: 12px 0 0; font-size: 12.5px; }
+.code-view .cv-details[hidden] { display: none; }
+.code-view .cv-details > p { margin: 0 0 8px; color: var(--muted); }
+.code-view .cv-details > p.ap-lead { color: var(--text); margin-top: 4px; }
+.code-view .cv-details .ap-together, .code-view .cv-details .ap-sites { margin: 0 0 10px; }
+.code-view .cv-d-facts .ap-ic svg { width: 14px; height: 14px; display: block; }
+.code-view .cv-d-facts .ap-ic { color: var(--muted); }
+.code-view .cv-versions { display: flex; gap: 6px; margin-top: 10px; }
+.code-view .cv-versions .btn[aria-pressed="true"] { border-color: var(--switch-on); box-shadow: inset 0 0 0 1px var(--switch-on); }
+.code-view .cv-code { counter-reset: line; max-height: min(52vh, 420px); overflow: auto; margin: 12px 0 0; padding: 8px 0; background: var(--code); border: 1px solid var(--line); border-radius: 9px; font: 11px/1.5 var(--mono); white-space: pre; tab-size: 2; }
+.code-view .cv-code .l { display: flex; padding: 0 10px 0 0; min-height: 1.5em; }
+.code-view .cv-code .l::before { counter-increment: line; content: counter(line); flex: none; display: inline-block; width: 3.2em; margin-right: 10px; padding-right: 6px; text-align: right; color: var(--faint); border-right: 1px solid var(--line); user-select: none; }
+.code-view .cv-code .lc { flex: 1 0 auto; }
+/* Wrapped (the default): long lines break, one number per source line, and a line's continuations hang at
+   its own indentation (--ind, codeLine) plus a little, so they read as one line */
+.code-view .cv-code.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-view .cv-code.wrap .lc { flex: 1 1 0; min-width: 0; padding-left: calc(var(--ind, 0ch) + 2ch); text-indent: calc(-1 * (var(--ind, 0ch) + 2ch)); }
+.code-view .cv-menu .cv-wrap[aria-checked="true"]::before { content: '✓ '; }
+.code-view .cv-menu .cv-wrap[aria-checked="false"]::before { content: '\2003'; }
+.code-view .cv-code .tc { color: var(--muted); font-style: italic; }
+.code-view .cv-code .ts { color: light-dark(#a3431f, #e6a77a); }
+.code-view .cv-code .tk { color: light-dark(#7a3fb0, #c6a0f6); }
+.code-view .cv-code .tn { color: light-dark(#1f6f8b, #7fc8e0); }
+.code-view .cv-note { margin-top: 6px; }
+/* The editor (the code card's Edit): numbered lines beside a plain text area, in the tier's colour; it scrolls
+   inside the card like the code does, so Save stays in view however long the mod or short the panel */
+.code-view .cv-e-box { display: flex; height: min(52vh, 420px); margin: 12px 0 0; background: var(--code); border: 1px solid color-mix(in srgb, var(--tier, var(--accent)) 55%, var(--line)); border-radius: 9px; overflow: hidden; }
+.code-view .cv-e-box:focus-within { border-color: var(--tier, var(--accent)); box-shadow: 0 0 0 1px var(--tier, var(--accent)); }
+.code-view .cv-e-box[hidden] { display: none; }
+.code-view .cv-e-gutter { flex: none; min-width: 3.2em; box-sizing: border-box; padding: 8px 6px 8px 4px; overflow: hidden; white-space: pre; text-align: right; color: var(--faint); font: 11px/1.5 var(--mono); border-right: 1px solid var(--line); user-select: none; }
+.code-view .cv-e-text { flex: 1; min-width: 0; margin: 0; padding: 8px 10px; border: 0; border-radius: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 11px/1.5 var(--mono); white-space: pre; overflow: auto; tab-size: 2; caret-color: var(--tier, var(--accent)); }
+.code-view .cv-e-text::selection { background: color-mix(in srgb, var(--tier, var(--accent)) 30%, transparent); }
+.code-view .cv-e-problems { margin-top: 10px; max-height: 30vh; overflow-y: auto; font-size: 12px; }
+.code-view .cv-e-problems p { margin: 2px 0; overflow-wrap: anywhere; }
+.code-view .cv-e-problem .link-btn { font-family: var(--mono); font-size: 11.5px; }
+.code-view .cv-e-saved { margin-top: 6px; }
+.code-view .cv-e-saved .link-btn { margin-left: 2px; }
+.code-view .ap-actions .cv-e-save { margin-left: auto; }
+/* file names as quiet links: the row's, and the cards' source line */
+.file-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.file-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.file-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--muted); }
+
+/* ---- mods that break: the row's badge and Undo fix, the chat's card, the code card's error ---------------- */
+.tag.err-badge { background: var(--bad-bg); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); cursor: pointer; font-weight: 600; }
+.tag.fix-undo { background: none; cursor: pointer; }
+.tag.fix-undo:hover, .tag.err-badge:hover { border-color: currentColor; }
+.msg.trif { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); background: var(--bad-bg); border-radius: 10px; padding: 8px 10px; }
+.msg.trif .break-state { color: var(--muted); }
+.msg.trif .break-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.msg.trif .break-actions .btn.text { background: none; border-color: transparent; color: var(--muted); }
+.code-view .cv-error { margin-top: 10px; }
+.code-view .cv-code .l.hl { background: color-mix(in srgb, var(--bad) 18%, transparent); }
+.break-row { grid-template-columns: 1fr auto; }
+/* Explain, under the agent's last reply (sidepanel.js renderExplain) */
+.msg .explain-btn { display: block; margin-top: 6px; padding: 2px 9px; font-size: 11.5px; }
+.msg.trif .break-actions .btn.go { background: var(--switch-on); color: var(--on-switch); border-color: transparent; }
+
+/* ---- history, sharing, a site's files, dropping files ------------------------------------------------ */
+.code-view .cv-history-list { list-style: none; margin: 12px 0 0; padding: 0; max-height: min(52vh, 420px); overflow: auto; }
+.code-view .cv-history-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); margin-top: 6px; }
+.code-view .cv-h-when { font-weight: 600; }
+.code-view .cv-h-from { grid-column: 1; color: var(--muted); font-size: 12px; }
+.code-view .cv-h-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.code-view .cv-h-actions .btn { padding: 4px 9px; font-size: 12px; }
+.code-view .cv-history-empty { display: block !important; color: var(--muted); }
+.code-view .cv-code .l.add { color: var(--ok); }
+.code-view .cv-code .l.del { color: var(--bad); }
+.code-view .cv-code .l.add::before, .code-view .cv-code .l.del::before, .code-view .cv-code .l.ctx::before { content: ''; counter-increment: none; width: 0; margin: 0; padding: 0; border: 0; }
+.code-view .cv-code .l.add, .code-view .cv-code .l.del, .code-view .cv-code .l.ctx { padding-left: 10px; }
+.site-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 12px 6px; font-size: 12px; color: var(--muted); }
+.link-btn { padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+.site-files { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.site-file { display: inline-flex; align-items: center; gap: 2px; font: 11px/1.4 var(--mono); color: var(--text); }
+.file-x { border: 0; background: none; color: var(--faint); cursor: pointer; padding: 0 2px; font-size: 13px; line-height: 1; }
+.file-x:hover { color: var(--bad); }
+.drop-overlay { position: fixed; inset: 8px; z-index: 50; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(2px); pointer-events: none; }
+.drop-overlay p { margin: 0; padding: 10px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-size: 14px; }
+
+/* ---- the simpler code card and mods box: tabs, ⋯ menus, Files as one line --------------------------- */
+.code-view .cv-tabs { display: flex; gap: 2px; margin-top: 12px; border-bottom: 1px solid var(--line); }
+.code-view .cv-tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 5px 10px; color: var(--muted); font-size: 13px; }
+.code-view .cv-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.code-view .cv-tab:hover { color: var(--text); }
+.code-view .cv-h-tools { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+.code-view .cv-h-tools .btn { padding: 3px 10px; font-size: 12px; }
+.code-view .cv-h-tools .cv-h-diff[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.code-view .cv-history-list li { display: block; padding: 0; background: none; border: 0; }
+.code-view .cv-h-row { display: grid; width: 100%; text-align: left; gap: 1px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); cursor: pointer; }
+.code-view .cv-h-row:hover { border-color: var(--faint); }
+.cv-more-wrap, .mods-more-wrap { position: relative; display: inline-flex; }
+.code-view .ap-actions .cv-more { min-width: 36px; padding: 7px 10px; }
+.pop-menu { position: absolute; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
+.pop-menu[hidden] { display: none; }
+.cv-menu { bottom: calc(100% + 4px); left: 0; }
+.mods-menu { top: calc(100% + 4px); right: 0; }
+.pop-menu .menu-item { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }
+.pop-menu .menu-item:hover { background: var(--raised); }
+.mods > summary { position: relative; padding-right: 28px; }
+.mods > summary .mods-more-wrap { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 6; } /* (its transform makes it a layer of its own, which the menu can't rise above: without the z-index the list after it, rows and switches, painted over the open menu. Tim, 11-14) */
+.mods-more { border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 6px; border-radius: 6px; cursor: pointer; }
+.mods-more:hover { color: var(--text); background: var(--raised); }
+.site-files-box { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
+.site-files-box > summary { cursor: pointer; }
+.site-files-box .site-files { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0 2px 14px; }
+
+/* the one-time note after an update gave up every site's access */
+.access-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
+
+/* ---- sensitive sites and Off (Tim, 2026-11-11) ------------------------------------------------------------ */
+/* Off: no starter suggestions (the agent can't see the page), and the level in words, however narrow. */
+body.agent-off #empty .chips { display: none; }
+@media (max-width: 420px) { .agent-level[data-level="off"] .agent-level-text { display: inline; } }
+/* The mods box: all its rows while the chat is empty (up to about 70% of the panel), today's height once it
+   has messages; vertical scrolling only. */
+body.chat-empty .mod-list { max-height: calc(70vh - 40px); }
+/* "N more for other <site> pages": a quiet line at the bottom of the box */
+.mod-list li.mods-fold { padding: 6px 0 2px; border-top: 1px solid var(--line); }
+.mods-fold-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0 2px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.mods-fold-btn:hover { color: var(--text); background: none; }
+.mods-fold-btn .chev { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s ease; }
+.mods-fold.open .mods-fold-btn .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .mods-fold-btn .chev { transition: none; } }
+/* The update's question about sensitive hosts your mods reach (background.js "sensitive sites on upgrade") */
+.sensitive-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
+.sensitive-note[hidden] { display: none; }
+.sensitive-note ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sensitive-note li p { margin: 0 0 6px; }
+.sensitive-note .sensitive-actions { margin-top: 0; }
+.sensitive-note .mod-err { display: block; margin-top: 4px; }
+.sensitive-note .sensitive-also { color: var(--muted); }
+.cv-menu .cv-copy-to { display: contents; }
+/* The grip under the mods list (Tim, 11-14): drag it up or down for the list's height, kept for next time
+   (sidepanel.js "the mods list's height"); never more than leaves the chat its room. */
+.mod-list.sized, body.chat-empty .mod-list.sized { max-height: min(var(--mods-h), calc(100vh - 170px)); }
+.mods-grip { display: flex; justify-content: center; align-items: center; height: 12px; margin: 0 0 -6px; cursor: ns-resize; touch-action: none; outline: none; }
+.mods-grip span { width: 32px; height: 4px; border-radius: 2px; background: var(--line); transition: background-color 0.15s ease; }
+.mods-grip:hover span, body.resizing-mods .mods-grip span { background: var(--faint); }
+.mods-grip:focus-visible span { background: var(--faint); box-shadow: 0 0 0 2px var(--accent); }
+body.resizing-mods, body.resizing-mods * { cursor: ns-resize !important; user-select: none; -webkit-user-select: none; }
+@media (prefers-reduced-motion: reduce) { .mods-grip span { transition: none; } }
+.mod-list.scrolls { padding-right: 18px; } /* (and an overlay one's, which takes none: sidepanel.js markListScroll) */
+
+/* ---- the tiers' colours (Tim, 11-13): each group's heading, count, On, its mods' switches when on, their lights and a
+   stripe beside each row in its tier's colour: style green, boxed yellow, free coral. Off stays grey. Fixed colours,
+   not --switch-on (which follows the panel's state: a login's yellow, a blocked site's coral). */
+.mod-list [data-group="rules"] { --tier: var(--led-green); }
+.mod-list [data-group="sandboxed"] { --tier: var(--led-yellow); }
+.mod-list [data-group="page"] { --tier: var(--led-coral); }
+.mod-list li.mod-group .mod-group-name { color: var(--tier); }
+.mod-list li.mod-group .group-count { color: var(--tier); background: none; border: 1px solid color-mix(in srgb, var(--tier) 45%, var(--line)); }
+.mod-list li.mod-group.off .mod-group-name, .mod-list li.mod-group.off .group-count { color: var(--muted); border-color: var(--line); }
+.mod-list li.mod-group .gs-btn[data-on="true"][aria-pressed="true"] { background: var(--tier); }
+.mod-list li.mod-group .tier-info { color: color-mix(in srgb, var(--tier) 80%, var(--surface)); }
+.mod-list li.mod-group .tier-info:hover, .mod-list li.mod-group .tier-info.open { color: var(--tier); }
+.mod-list li[data-mod][data-group] button.switch[aria-checked="true"] { background: var(--tier); }
+.mod-list li[data-mod][data-group] button.switch[aria-checked="true"]:hover { background: color-mix(in srgb, var(--tier) 85%, #000); }
+.mod-list li[data-mod][data-group] .light.on { background: var(--tier); }
+.mod-list li[data-mod][data-group] { position: relative; }
+.mod-list li[data-mod][data-group]::before { content: ''; position: absolute; left: -3px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--tier); }
+.mod-list li[data-mod][data-group].off::before { background: color-mix(in srgb, var(--tier) 35%, var(--line)); }
+.mod-list li.drag[data-group]::before { display: none; }
+/* A tier's card (its heading's "i"): the tier's colour along its top and in its name */
+.tier-card { max-width: min(380px, calc(100vw - 32px)); border-top: 3px solid var(--tier); }
+.tier-card[data-group="rules"] { --tier: var(--led-green); }
+.tier-card[data-group="sandboxed"] { --tier: var(--led-yellow); }
+.tier-card[data-group="page"] { --tier: var(--led-coral); }
+.tier-card .tc-head { display: flex; align-items: baseline; gap: 8px; }
+.tier-card .tc-name { margin: 0; font-size: 13px; font-weight: 600; color: var(--tier); }
+.tier-card .tc-head .ap-x { margin-left: auto; }
+.tier-card .tc-body { margin-top: 2px; font-size: 12.5px; line-height: 1.55; }
+.tier-card .tc-body p { margin: 0 0 8px; color: var(--muted); }
+.tier-card .tc-body p.tc-line { color: var(--text); font-weight: 500; }
+.tier-card .tc-body p:last-child { margin-bottom: 0; }
+
+/* ---- the code card in its mod's colour (Tim, 11-13): no chip; its robot, file link, tab underline and the
+   tier's line in the tier's colour; a boxed mod's warnings yellow, a free mod's coral; each "i" in its line's
+   colour (the tier's a little muted, as in the mod list), the rest muted. (.approval.code-view: over a login's
+   yellow too) */
+/* (and the approval card, #approval, the same way: Tim, 11-13) */
+:is(.approval.code-view, #approval)[data-group="rules"] { --tier: var(--led-green); }
+:is(.approval.code-view, #approval)[data-group="sandboxed"] { --tier: var(--led-yellow); }
+:is(.approval.code-view, #approval)[data-group="page"] { --tier: var(--led-coral); }
+:is(.approval.code-view, #approval)[data-group] { --switch-on: var(--tier); --accent: var(--tier); --on-switch: light-dark(#ffffff, #1d1d1f); }
+:is(.approval.code-view, #approval)[data-group] .ap-robot .code { stroke: var(--tier); }
+#approval[data-group] .ap-robot .eye { fill: var(--tier); }
+#approval[data-group] :is(.ap-together, .ap-site) { background: color-mix(in srgb, var(--tier) 10%, var(--surface)); border-color: color-mix(in srgb, var(--tier) 35%, var(--line)); }
+#approval[data-group] :is(.ap-together b, .ap-site .ap-site-first) { color: var(--tier); }
+#approval[data-group] .ap-site .ap-new { background: var(--tier); color: var(--bg, #fff); }
+#approval[data-group] :is(.ap-together, .ap-site) .more-btn { color: color-mix(in srgb, var(--tier) 80%, var(--surface)); }
+#approval[data-group] :is(.ap-together, .ap-site) .more-btn:is(:hover, .open) { color: var(--tier); }
+#approval .ap-together.ap-free p { color: var(--text); }
+#approval .ap-together.ap-free p + p { margin-top: 6px; }
+.code-view .cv-details > p.cv-d-tier { color: var(--muted); }
+.code-view .cv-details > p.cv-d-tier b { color: var(--tier); } /* (the name in its colour, the rest grey; its "i" coloured too: Tim, 11-13) */
+.code-view .cv-details .cv-d-tier .more-btn { color: color-mix(in srgb, var(--tier) 80%, var(--surface)); }
+.code-view .cv-details .cv-d-tier .more-btn:is(:hover, .open) { color: var(--tier); }
+.code-view .cv-details > p.cv-d-level { display: flex; align-items: baseline; gap: 6px; }
+.code-view .cv-details .cv-d-level .ap-ic { flex: none; align-self: center; color: var(--muted); }
+.code-view .cv-details .cv-d-level .ap-ic svg { width: 14px; height: 14px; display: block; }
+.code-view[data-group] .cv-details :is(.ap-together, .ap-site) { background: color-mix(in srgb, var(--tier) 10%, var(--surface)); border-color: color-mix(in srgb, var(--tier) 35%, var(--line)); }
+.code-view[data-group] .cv-details :is(.ap-together b, .ap-site .ap-site-first) { color: var(--tier); }
+.code-view[data-group] .cv-details .ap-site .ap-new { background: var(--tier); color: var(--bg, #fff); }
+.code-view[data-group] .cv-details :is(.ap-together, .ap-site) .more-btn { color: color-mix(in srgb, var(--tier) 80%, var(--surface)); }
+.code-view[data-group] .cv-details :is(.ap-together, .ap-site) .more-btn:is(:hover, .open) { color: var(--tier); }
+.code-view .cv-details .cv-d-free p { margin: 0; color: var(--text); }
+.code-view .cv-details .cv-d-free p + p { margin-top: 6px; }

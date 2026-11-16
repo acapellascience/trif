@@ -125,6 +125,20 @@ export const MARKDOWN_ELEMENTS = ['p', 'br', 'ul', 'ol', 'li', 'h4', 'hr', 'bloc
   'table', 'thead', 'tbody', 'tr', 'th', 'td'];
 export const MARKDOWN_ATTRIBUTES = ['href', 'target', 'rel', 'start'];
 
+/**
+ * Markdown with its file's line wrapping taken out (a release's notes, wrapped in CHANGELOG.md): a line that
+ * goes on a paragraph or list item joins the one before it, since renderMarkdown keeps line breaks.
+ */
+export function unwrapMarkdown(md) {
+  const out = [];
+  for (const line of String(md || '').split('\n')) {
+    const starts = /^\s*$/.test(line) || /^\s*([-*+]|\d+\.)\s/.test(line) || /^#/.test(line) || /^\s*>/.test(line) || /^\s*```/.test(line);
+    if (!starts && out.length && !/^\s*$/.test(out[out.length - 1])) out[out.length - 1] += ' ' + line.trim();
+    else out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** Put renderMarkdown output (already safe by construction) into `node`, through the Sanitizer as a second fence. */
 export function setMarkdown(node, text) {
   const html = renderMarkdown(text);

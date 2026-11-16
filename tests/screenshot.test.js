@@ -291,3 +291,53 @@ test('trif screenshot: the path on stdout, the note on stderr, --full and --copy
   const j = JSON.parse(r.stdout);
   assert.deepStrictEqual(j, { file: out, how: 'copy', full: false, note: 'this is a fresh copy of the page' });
 });
+
+test('without access to every site: only the tab in front, after the toolbar click; a clear error otherwise', async () => {
+  // Firefox's captureTab and Chrome's copy both want <all_urls>.
+  for (const plan of [
+    S.screenshotPlan({ showing: false, copy: true, allUrls: false }),
+    S.screenshotPlan({ showing: true, full: true, copy: true, allUrls: false }),
+    S.screenshotPlan({ showing: false, captureTab: true, browser: 'Firefox', allUrls: false }),
+  ]) assert.match(plan.error, /wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for.*clicked the TRIF toolbar button on that tab.*`trif sweep`/);
+  assert.strictEqual(S.screenshotPlan({ showing: true, captureTab: true, browser: 'Firefox', allUrls: false }), 'visible');
+  assert.strictEqual(S.screenshotPlan({ showing: true, copy: true, allUrls: false }), 'visible');
+  // Firefox given <all_urls> after it started: no captureTab in the running background until a restart.
+  assert.match(S.screenshotPlan({ showing: false, browser: 'Firefox', copy: true }).error, /after Firefox started.*quit and reopen Firefox/);
+
+  // Chrome refuses captureVisibleTab without activeTab: the agent is told what the user can do.
+  const api = mockApi();
+  api.tabs.captureVisibleTab = async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); };
+  await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null }),
+    /lets TRIF capture this tab only after the user clicks the TRIF toolbar button on it.*Ask the user to click the TRIF button on this tab/);
+  // After the click it works as before; and with <all_urls> nothing changes.
+  const ok = mockApi();
+  const r = await S.captureScreenshot(ok, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null });
+  assert.strictEqual(r.how, 'visible');
+  const ff = mockApi({ active: false, captureTab: true });
+  await assert.rejects(S.captureScreenshot(ff, { id: 5, windowId: 1, active: false, url: 'https://example.com/' }, {}, { browser: 'Firefox', allUrls: false, pageCall: async () => null }), /access to every site/);
+  assert.ok(!ff.calls.some((c) => c[0] === 'captureTab' || c[0] === 'windows.create'), 'nothing tried, no window opened');
+});
+
+test('a tab that is showing: the picture is of that tab or there is none (the user switching tabs meanwhile; a site the agent may not see)', async () => {
+  // the window's active tab, asked right before and right after the capture
+  const withQuery = (answers) => { const api = mockApi(); let n = 0; api.tabs.query = async (q) => { api.calls.push(['tabs.query', q]); const a = answers[Math.min(n++, answers.length - 1)]; return a ? [a] : []; }; return api; };
+  const tab = { id: 5, windowId: 1, active: true, url: 'https://example.com/page' };
+  const same = { id: 5, url: 'https://example.com/page' };
+  // still showing: the picture
+  let api = withQuery([same]);
+  const r = await S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome' });
+  assert.equal(r.how, 'visible');
+  assert.deepStrictEqual(api.calls.filter((c) => c[0] === 'tabs.query').map((c) => c[1]), [{ active: true, windowId: 1 }, { active: true, windowId: 1 }]);
+  // another tab showing before the capture: nothing captured
+  api = withQuery([{ id: 6, url: 'https://bank.example/' }]);
+  await assert.rejects(S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome' }), /stopped being the one showing/);
+  assert.ok(!api.calls.some((c) => c[0] === 'captureVisibleTab'));
+  // the user switched while it was taken: the picture is thrown away
+  api = withQuery([same, { id: 6, url: 'https://bank.example/' }]);
+  await assert.rejects(S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome' }), /stopped being the one showing/);
+  // the same tab, gone to a page the run may not see: thrown away, with why
+  api = withQuery([same, { id: 5, url: 'https://mail.example.com/inbox' }]);
+  const seen = [];
+  await assert.rejects(S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome', checkShown: (u) => { seen.push(u); if (/mail\./.test(u)) throw new Error('that site is a site of its own'); } }), /a site of its own/);
+  assert.deepStrictEqual(seen, ['https://example.com/page', 'https://mail.example.com/inbox']);
+});

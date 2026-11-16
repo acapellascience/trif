@@ -8,7 +8,7 @@ const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
 const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, REPO, privDir } = require('./fake-extension');
-const { parseHeader, buildMod, scanMods, planModsMessage, defaultMatches } = require('../helper/lib/mods');
+const { parseHeader, buildMod, scanMods, planMods, planModsMessage, modsParts, withSame, MAX_MOD_BYTES, MAX_MODS_BYTES, defaultMatches } = require('../helper/lib/mods');
 const { encode, Decoder } = require('../helper/lib/framing');
 
 const cleanups = [];
@@ -42,7 +42,7 @@ function sockRequest(sock, msg, timeout = 10000) {
 
 test('parseHeader: full header', () => {
   const h = parseHeader(`// ==WebMod==
-// @name        Plain X
+// @name        Detox Timeline
 // @description Following-only, filtered X timeline
 // @match       https://x.com/*
 // @match       https://twitter.com/*
@@ -52,7 +52,7 @@ test('parseHeader: full header', () => {
 // ==/WebMod==
 console.log(1);`);
   assert.equal(h.hasHeader, true);
-  assert.equal(h.name, 'Plain X');
+  assert.equal(h.name, 'Detox Timeline');
   assert.equal(h.description, 'Following-only, filtered X timeline');
   assert.deepEqual(h.matches, ['https://x.com/*', 'https://twitter.com/*']);
   assert.deepEqual(h.excludes, ['https://x.com/settings/*']);
@@ -63,20 +63,20 @@ console.log(1);`);
 });
 
 test('parseHeader: @source and @version mark the mods TRIF ships', () => {
-  const h = parseHeader('// ==WebMod==\n// @name Plain X\n// @source      TRIF\n// @version     3\n// ==/WebMod==\n');
+  const h = parseHeader('// ==WebMod==\n// @name Detox Timeline\n// @source      TRIF\n// @version     3\n// ==/WebMod==\n');
   assert.equal(h.source, 'trif');
   // Shipped mods say webmods (TRIF's name before 0.2.0) or trif; both count.
   const { isShippedSource } = require('../helper/lib/mods');
   assert.ok(isShippedSource('webmods') && isShippedSource('trif') && isShippedSource('WebMods'));
   assert.ok(!isShippedSource('me') && !isShippedSource(null));
   assert.equal(h.version, '3');
-  const { mod } = buildMod({ site: 'x.com', file: '/s/x.com/plain-x.js', code: '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n' });
+  const { mod } = buildMod({ site: 'x.com', file: '/s/x.com/detox-timeline.js', code: '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n' });
   assert.deepEqual([mod.source, mod.version], ['webmods', '2']);
   // Every shipped example says so (the updater only manages those).
   const { PREINSTALLED } = require('../helper/lib/preinstalled');
   for (const { id } of PREINSTALLED) {
     const ex = parseHeader(fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'));
-    assert.equal(ex.source, 'webmods', id);
+    assert.ok(isShippedSource(ex.source), `${id}: @source ${ex.source}`);
     assert.match(String(ex.version), /^\d+$/, id);
   }
 });
@@ -123,6 +123,21 @@ test('buildMod: hash changes with code and with metadata', () => {
   assert.equal(buildMod({ site: 'a.com', file: '/s/a.com/m.js', code: 'x' }).mod.hash, a);
   assert.notEqual(buildMod({ site: 'a.com', file: '/s/a.com/m.js', code: 'y' }).mod.hash, a);
   assert.notEqual(buildMod({ site: 'b.com', file: '/s/b.com/m.js', code: 'x' }).mod.hash, a);
+});
+
+test('findRenames: same code in the same site folder under a new file name is the same mod', () => {
+  const { findRenames } = require('../helper/lib/mods');
+  const m = (site, base, code) => buildMod({ site, file: `/m/${site}/${base}.js`, code }).mod;
+  const prev = [m('x.com', 'a', 'A'), m('x.com', 'b', 'B'), m('x.com', 'c', 'C'), m('y.com', 'd', 'D')];
+  const next = [m('x.com', 'a2', 'A'), m('x.com', 'b', 'B'), m('x.com', 'c2', 'C changed'), m('z.com', 'd', 'D'), m('x.com', 'copy', 'B')];
+  // a -> a2 (same code); b stays (its copy isn't a rename); c changed too; d moved to another site folder.
+  assert.deepStrictEqual(findRenames(prev, next), [{ from: 'x.com/a', to: 'x.com/a2' }]);
+  assert.deepStrictEqual(findRenames(next, next), []);
+  // A case-only rename (on macOS, the same file).
+  assert.deepStrictEqual(findRenames([m('x.com', 'Wob', 'W')], [m('x.com', 'wob', 'W')]), [{ from: 'x.com/Wob', to: 'x.com/wob' }]);
+  // Two identical old mods: each new one pairs with a different one.
+  assert.deepStrictEqual(findRenames([m('x.com', 'p', 'S'), m('x.com', 'q', 'S')], [m('x.com', 'r', 'S'), m('x.com', 's', 'S')]),
+    [{ from: 'x.com/p', to: 'x.com/r' }, { from: 'x.com/q', to: 'x.com/s' }]);
 });
 
 test('defaultMatches: ports stripped, IPs get exact pattern only', () => {
@@ -176,19 +191,71 @@ test('scanMods: ignores links out of the mods folder (a run could plant one), ke
   assert.deepEqual(scanMods(alias).mods.map((m) => m.id), ['a.com/one', 'a.com/same', 'b.com/one', 'b.com/same']);
 });
 
-test('planModsMessage: rejects a mod over 1 MB and keeps the total under the limit', () => {
+test('planMods: a mod over the per-mod cap is rejected; over the total, the largest go first', () => {
+  const MB = 1024 * 1024;
+  assert.equal(MAX_MOD_BYTES, 4 * MB);
+  assert.equal(MAX_MODS_BYTES, 16 * MB);
+  const m = (name, bytes) => buildMod({ site: 'a.com', file: `/s/a.com/${name}.js`, code: 'x'.repeat(bytes) }).mod;
+  const p = planMods([m('small', 10), m('huge', 4 * MB + 1), m('max', 4 * MB)]);
+  assert.deepEqual(p.mods.map((x) => x.id), ['a.com/small', 'a.com/max']);
+  assert.deepEqual(p.errors.map((e) => [e.id, e.limit]), [['a.com/huge', 'mod']]);
+  assert.match(p.errors[0].error, /mod is 4\.1 MB; a mod can be up to 4 MB, so it was not sent/);
+  // Five at the cap are over the total: the last of the largest goes.
+  const t = planMods([1, 2, 3, 4, 5].map((i) => m(`m${i}`, 4 * MB - i)));
+  assert.deepEqual(t.mods.map((x) => x.id), ['a.com/m2', 'a.com/m3', 'a.com/m4', 'a.com/m5']);
+  assert.deepEqual(t.errors.map((e) => [e.id, e.limit]), [['a.com/m1', 'total']]);
+  assert.match(t.errors[0].error, /all mods together are over 16 MB, the most TRIF sends to the browser; this one \(the largest, 4 MB\) was not sent/);
+  const q = planMods([m('a', 3 * MB), m('b', 4 * MB), m('c', 2 * MB), m('d', 2 * MB)], { total: 7 * MB });
+  assert.deepEqual(q.mods.map((x) => x.id), ['a.com/a', 'a.com/c', 'a.com/d']);
+  assert.deepEqual(q.errors.map((e) => [e.id, e.limit]), [['a.com/b', 'total']]);
+  assert.match(q.errors[0].error, /all mods together are over 7 MB/);
+  // Multi-byte characters count as the bytes they are.
+  assert.equal(planMods([m('e', 0), { ...m('f', 0), code: 'é'.repeat(6) }], { perMod: 11 }).errors[0].id, 'a.com/f');
+});
+
+test('planModsMessage (an extension that takes one message): rejects a mod over 1 MB and keeps the total under the limit', () => {
   const small = buildMod({ site: 'a.com', file: '/s/a.com/s.js', code: 'x' }).mod;
   const huge = buildMod({ site: 'a.com', file: '/s/a.com/h.js', code: 'x'.repeat(1100 * 1024) }).mod;
-  const p = planModsMessage([small, huge]);
+  const p = planModsMessage([small, huge], { who: 'TRIF 0.2.4 in Chrome' });
   assert.deepEqual(p.mods.map((m) => m.id), ['a.com/s']);
   assert.equal(p.errors[0].id, 'a.com/h');
-  assert.match(p.errors[0].error, /1 MB/);
+  assert.equal(p.errors[0].limit, 'extension');
+  assert.match(p.errors[0].error, /TRIF 0\.2\.4 in Chrome takes at most 1 MB of mods; update it/);
   const mid = (n) => buildMod({ site: 'a.com', file: `/s/a.com/m${n}.js`, code: 'y'.repeat(400 * 1024 + n) }).mod;
   const p2 = planModsMessage([mid(1), mid(2), mid(3)]);
   assert.equal(p2.mods.length, 2);
   assert.equal(p2.errors.length, 1);
   assert.equal(p2.errors[0].id, 'a.com/m3'); // the largest is dropped
   assert.ok(Buffer.byteLength(JSON.stringify({ type: 'mods', mods: p2.mods })) < 1024 * 1024);
+});
+
+test('withSame: a mod the extension has (same id and hash as last sent) goes without its code', () => {
+  const mods = [{ id: 'a', hash: 'h1', code: 'A' }, { id: 'b', hash: 'h2', code: 'B' }, { id: 'c', hash: 'h1', code: 'C' }];
+  assert.equal(withSame(mods, null), mods);
+  assert.deepEqual(JSON.parse(JSON.stringify(withSame(mods, new Map([['a', 'h1'], ['b', 'h1']])))),
+    [{ id: 'a', hash: 'h1', same: true }, { id: 'b', hash: 'h2', code: 'B' }, { id: 'c', hash: 'h1', code: 'C' }]);
+});
+
+test('modsParts: every part fits in a native message, and the parts join back into the same JSON', () => {
+  const limit = 1024 * 1024;
+  const join = (parts) => parts.map((p) => JSON.parse(JSON.stringify(p)).data).join('');
+  // Plain code, code full of quotes and backslashes (escaped twice), text past ASCII and emoji (surrogate
+  // pairs, which a part never splits), lone surrogates.
+  const codes = ['x'.repeat(3 * limit), '"\\'.repeat(700000), 'é漢😀'.repeat(400000), '\ud800a\udc00'.repeat(200000) + '😀'.repeat(300000)];
+  for (const code of codes) {
+    const json = JSON.stringify({ type: 'mods', mods: [{ id: 'a.com/x', code }], sitesOn: [] });
+    const parts = modsParts(json, 'set-1');
+    assert.ok(parts.length > 1);
+    for (const [i, p] of parts.entries()) {
+      assert.deepEqual([p.type, p.set, p.i, p.n], ['modsPart', 'set-1', i, parts.length]);
+      assert.ok(Buffer.byteLength(JSON.stringify(p)) <= limit, `part ${i} is ${Buffer.byteLength(JSON.stringify(p))} bytes`);
+      if (i < parts.length - 1) assert.ok(!/[\ud800-\udbff]$/.test(p.data) || /[\ud800-\udbff]{2}$/.test(p.data) || !/[\udc00-\udfff]/.test(parts[i + 1].data[0]), 'no pair split');
+    }
+    assert.equal(join(parts), json);
+  }
+  // Mostly ASCII fills each part close to the limit (no more parts than needed).
+  assert.equal(modsParts(JSON.stringify({ code: 'x'.repeat(3 * limit) }), 1).length, 4);
+  assert.deepEqual(modsParts('{}', 2).map((p) => p.data), ['{}']);
 });
 
 test('framing: round trip across arbitrary chunk boundaries', () => {
@@ -345,6 +412,37 @@ test('host: syncs on file add, change, delete, ignored files, and site folders c
   assert.deepEqual(ext.badFrames, []);
 });
 
+test('host: a renamed mod file goes out under its new name (mv, case-only, an editor\'s temp file renamed into place)', async () => {
+  const home = tempDir();
+  const ext = startHost(home);
+  const dir = path.join(home, 'sites', 'a.com');
+  writeMod(home, 'a.com', 'wobble.js', '// ==WebMod==\n// @name Wobble\n// ==/WebMod==\nconsole.log(1)');
+  ext.hello();
+  await ext.nextMods((mods) => mods.some((m) => m.id === 'a.com/wobble'));
+  const renamedTo = async (base, act) => {
+    const since = ext.messages.length;
+    act();
+    const mods = await ext.nextMods((ms) => ms.some((m) => m.id === `a.com/${base}`), { since, timeout: 4000 });
+    assert.deepStrictEqual(mods.map((m) => [m.id, path.basename(m.file), m.name]), [[`a.com/${base}`, `${base}.js`, 'Wobble']]);
+  };
+  await renamedTo('jelly', () => fs.renameSync(path.join(dir, 'wobble.js'), path.join(dir, 'jelly.js')));
+  await renamedTo('Jelly', () => fs.renameSync(path.join(dir, 'jelly.js'), path.join(dir, 'Jelly.js')));
+  await renamedTo('wiggle', () => {
+    fs.writeFileSync(path.join(dir, '.wiggle.js.tmp'), fs.readFileSync(path.join(dir, 'Jelly.js')));
+    fs.unlinkSync(path.join(dir, 'Jelly.js'));
+    fs.renameSync(path.join(dir, '.wiggle.js.tmp'), path.join(dir, 'wiggle.js'));
+  });
+});
+
+test('host: every mods message carries the side panel\'s default order for the shipped mods', async () => {
+  const home = tempDir();
+  writeMod(home, 'timsrobot.com', 'fireworks.js', '// mine');
+  const ext = startHost(home);
+  ext.hello();
+  const msg = await ext.next((m) => m.type === 'mods' && m.mods.length === 1);
+  assert.deepStrictEqual(msg.defaultOrder, require('../helper/lib/preinstalled').DEFAULT_ORDER);
+});
+
 test('host: rapid edits are debounced into few pushes', async () => {
   const home = tempDir();
   fs.mkdirSync(path.join(home, 'sites'), { recursive: true });
@@ -358,17 +456,116 @@ test('host: rapid edits are debounced into few pushes', async () => {
   assert.ok(pushes <= 2, `expected at most 2 pushes, got ${pushes}`);
 });
 
-test('host: oversized mod is not sent and is reported', async () => {
+test('host: a mod over the cap is not sent and is reported', async () => {
   const home = tempDir();
   writeMod(home, 'a.com', 'ok.js', 'ok');
-  writeMod(home, 'a.com', 'huge.js', '/*' + 'x'.repeat(1100 * 1024) + '*/');
+  writeMod(home, 'a.com', 'huge.js', '/*' + 'x'.repeat(MAX_MOD_BYTES) + '*/');
   const ext = startHost(home);
   const mods = await ext.nextMods();
   assert.deepEqual(mods.map((m) => m.id), ['a.com/ok']);
   await ext.waitForSocket();
   const ping = await sockRequest(ext.sock, { id: 1, cmd: 'ping' });
   assert.equal(ping.result.modErrors[0].id, 'a.com/huge');
+  assert.equal(ping.result.modErrors[0].limit, 'mod');
   await waitFor(() => /a\.com\/huge/.test(ext.stderr), { message: 'stderr report' });
+  const cli = await runCli(['mods', '--json'], { home });
+  assert.deepEqual(JSON.parse(cli.stdout).errors.map((e) => [e.id, e.limit]), [['a.com/huge', 'mod']]);
+});
+
+// Mods of 1.4 MB in all as sent: more than one native message.
+function writeBigMods(home) {
+  writeMod(home, 'a.com', 'big.js', `/* ${'"\\'.repeat(200 * 1024)} */`); // 400 KB that JSON doubles
+  writeMod(home, 'a.com', 'data.js', `const d = "${'é'.repeat(300 * 1024)}";`); // 600 KB of UTF-8
+  writeMod(home, 'a.com', 'small.js', 'small');
+}
+
+test('host: a set over 1 MB waits for the hello, then goes in parts to an extension that can take them', async () => {
+  const home = tempDir();
+  writeBigMods(home);
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('waiting for the extension\'s hello'), { message: 'waiting' });
+  assert.equal(ext.messages.filter((m) => m.type === 'mods').length, 0, 'nothing before the hello says parts are fine');
+  ext.hello({ features: ['modsParts'], version: '0.2.5' });
+  const msg = await ext.next((m) => m.type === 'mods');
+  assert.deepEqual(msg.mods.map((m) => m.id), ['a.com/big', 'a.com/data', 'a.com/small']);
+  assert.ok(msg.parts >= 2, `came in ${msg.parts} parts`);
+  assert.equal(msg.mods[0].code, fs.readFileSync(path.join(home, 'sites', 'a.com', 'big.js'), 'utf8'));
+  assert.equal(msg.mods[1].code, fs.readFileSync(path.join(home, 'sites', 'a.com', 'data.js'), 'utf8'));
+  assert.ok(ext.parts.every((p) => Buffer.byteLength(JSON.stringify(p)) <= 1024 * 1024));
+  assert.deepEqual(ext.badFrames, []);
+  const ping = await sockRequest(ext.sock, { id: 1, cmd: 'ping' });
+  assert.deepEqual(ping.result.modErrors, []);
+  assert.deepEqual(ping.result.extension.features, ['modsParts']);
+
+  // A change: a new set, under a new id.
+  const since = ext.messages.length;
+  writeMod(home, 'a.com', 'small.js', 'small 2');
+  const next = await ext.next((m) => m.type === 'mods', { since });
+  assert.notEqual(next.set, msg.set);
+  assert.equal(next.mods[2].code, 'small 2');
+
+  // Asked again (a set that didn't arrive whole): sent again, once.
+  const before = ext.messages.length;
+  ext.send({ type: 'modsResend', reason: 'part 2 of 3 of mods set x came without the parts before it' });
+  const again = await ext.next((m) => m.type === 'mods', { since: before });
+  assert.equal(again.mods[2].code, 'small 2');
+  ext.send({ type: 'modsResend', reason: 'again' });
+  await sleep(500);
+  assert.equal(ext.messages.slice(before).filter((m) => m.type === 'mods').length, 1, 'only once for the same set');
+  await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('asked for the mods again: part 2 of 3'), { message: 'logged' });
+
+  // An extension that takes mods without their code (modsSame): after the hello, every mod whole; then a
+  // change sends only the changed one's code.
+  ext.hello({ features: ['modsParts', 'modsSame'], version: '0.2.5' });
+  const whole = await ext.next((m) => m.type === 'mods' && m.mods.length === 3, { since: ext.messages.length });
+  assert.equal(whole.sameIds, undefined);
+  const since1 = ext.messages.length;
+  writeMod(home, 'a.com', 'small.js', 'small 3');
+  const delta = await ext.next((m) => m.type === 'mods', { since: since1 });
+  assert.deepEqual(delta.sameIds, ['a.com/big', 'a.com/data']);
+  assert.equal(delta.parts, undefined, 'small enough for one message now');
+  assert.equal(delta.mods[1].code, fs.readFileSync(path.join(home, 'sites', 'a.com', 'data.js'), 'utf8'), 'the fake took it from the last set');
+  assert.equal(delta.mods[2].code, 'small 3');
+  await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('(2 it has already, without their code)'), { message: 'logged' });
+  // Asked again: every mod whole.
+  const since3 = ext.messages.length;
+  ext.send({ type: 'modsResend', reason: 'missing 2 mod(s) sent without their code' });
+  const full = await ext.next((m) => m.type === 'mods', { since: since3 });
+  assert.equal(full.sameIds, undefined);
+  assert.equal(full.mods[2].code, 'small 3');
+  assert.deepEqual(ext.badFrames, []);
+
+  // A set that fits in one message still goes as one.
+  const since2 = ext.messages.length;
+  fs.rmSync(path.join(home, 'sites', 'a.com', 'big.js'));
+  const small = await ext.next((m) => m.type === 'mods', { since: since2 });
+  assert.equal(small.parts, undefined);
+  assert.deepEqual(small.mods.map((m) => m.id), ['a.com/data', 'a.com/small']);
+});
+
+test('host: an extension that takes one message (0.2.4 and older) gets 1 MB of mods, and is told why not more', async () => {
+  const home = tempDir();
+  writeBigMods(home);
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  ext.hello({ version: '0.2.4', browser: 'Firefox' });
+  const mods = await ext.nextMods();
+  assert.deepEqual(mods.map((m) => m.id), ['a.com/data', 'a.com/small'], 'the largest as sent (big.js, doubled by JSON) is left out');
+  assert.equal(ext.parts.length, 0);
+  const ping = await sockRequest(ext.sock, { id: 1, cmd: 'ping' });
+  assert.deepEqual(ping.result.modErrors.map((e) => [e.id, e.limit]), [['a.com/big', 'extension']]);
+  assert.match(ping.result.modErrors[0].error, /TRIF 0\.2\.4 in Firefox takes at most 1 MB of mods; update it/);
+  const doctor = await runCli(['doctor', '--json'], { home });
+  const check = JSON.parse(doctor.stdout).checks.find((c) => /a\.com\/big/.test(c.title));
+  assert.ok(check, doctor.stdout);
+  assert.equal(check.status, 'fail');
+  assert.match(check.fix, /about:addons/);
+  // Under 1 MB in all: everything, in one message, as before.
+  const since = ext.messages.length;
+  fs.rmSync(path.join(home, 'sites', 'a.com', 'data.js'));
+  const now = await ext.nextMods(() => true, { since });
+  assert.deepEqual(now.map((m) => m.id), ['a.com/big', 'a.com/small']);
 });
 
 test('host: routes responses by id, handles concurrent requests answered out of order', async () => {
@@ -513,6 +710,66 @@ test('host: shuts down after a frame too big to be real, rather than misreading 
   const { code } = await ext.exited;
   assert.equal(code, 1);
   assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /unreadable input from the extension/);
+});
+
+test('Tim\'s mods: none until the user chooses; shipped.install adds the sites asked for (the rest none with `others`), and the mods message says so', async () => {
+  const home = tempDir();
+  const ext = new FakeExtension({ home, env: { TRIF_EXAMPLES_DIR: path.join(REPO, 'examples', 'sites') } });
+  cleanups.push(() => ext.close());
+  ext.hello({ features: ['modsParts', 'modsSame'], version: '0.2.5' }); // (X's mods take more than one message)
+  let msg = await ext.next((m) => m.type === 'mods');
+  const S = require('../helper/lib/preinstalled');
+  assert.deepStrictEqual([msg.mods, msg.sitesOn], [[], []]);
+  assert.strictEqual(msg.starter.chosen, false);
+  assert.deepStrictEqual(msg.starter.sites.map((x) => x.site), S.starterSites());
+  assert.ok(msg.starter.sites.every((x) => x.choice === null && x.mods.length));
+  let since = ext.messages.length;
+  ext.send({ type: 'request', id: 'a', cmd: 'shipped.install', args: { sites: ['x.com', 'google.com'], others: 'none' } });
+  let res = await ext.next((m) => m.type === 'response' && m.id === 'a', { since });
+  assert.strictEqual(res.ok, true, res.error);
+  assert.deepStrictEqual(res.result.sitesOn, ['google.com', 'x.com']);
+  assert.ok(res.result.added.includes('x.com/detox-timeline'));
+  // The mods went first (the extension turns the sites on from them), then the answer.
+  msg = ext.messages.slice(since).findLast((m) => m.type === 'mods');
+  assert.ok(msg && ext.messages.indexOf(msg) < ext.messages.indexOf(res), 'mods before the response');
+  assert.deepStrictEqual(msg.sitesOn, ['google.com', 'x.com']);
+  assert.ok(msg.mods.every((m) => /^(x\.com|www\.google\.com)\//.test(m.id)), msg.mods.map((m) => m.id).join());
+  assert.strictEqual(msg.starter.chosen, true);
+  assert.deepStrictEqual(msg.starter.sites.map((x) => [x.site, x.choice]), [['google.com', 'added'], ['x.com', 'added'], ['amazon.com', 'none'], ['instagram.com', 'none'], ['timsrobot.com', 'none']]);
+  // Settings' Add, later: one more site.
+  since = ext.messages.length;
+  ext.send({ type: 'request', id: 'b', cmd: 'shipped.install', args: { sites: ['amazon.com'] } });
+  res = await ext.next((m) => m.type === 'response' && m.id === 'b', { since });
+  assert.deepStrictEqual(res.result.sitesOn, ['amazon.com']);
+  msg = await ext.next((m) => m.type === 'mods' && m.starter.sites.find((x) => x.site === 'amazon.com').choice === 'added', { since });
+  assert.ok(msg.mods.some((m) => m.id === 'amazon.com/simple-home'));
+  // A site Tim has no mods for, or no sites: refused.
+  ext.send({ type: 'request', id: 'c', cmd: 'shipped.install', args: { sites: ['example.com'] } });
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'c')).error, /Tim has no mods for example\.com/);
+  ext.send({ type: 'request', id: 'd', cmd: 'shipped.install', args: { sites: [] } });
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'd')).error, /nothing to add/);
+  // By mod (the setup page's ticked ones): only shipped mods' ids; a site's unticked ones left out.
+  ext.send({ type: 'request', id: 'e', cmd: 'shipped.install', args: { ids: ['www.instagram.com/desaturate', '../../etc/x'] } });
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'e')).error, /\.\.\/\.\.\/etc\/x isn't one of Tim's mods/);
+  since = ext.messages.length;
+  ext.send({ type: 'request', id: 'f', cmd: 'shipped.install', args: { ids: ['www.instagram.com/desaturate'] } });
+  res = await ext.next((m) => m.type === 'response' && m.id === 'f', { since });
+  assert.deepStrictEqual([res.result.added, res.result.sitesOn], [['www.instagram.com/desaturate'], ['instagram.com']]);
+  const ig = res.result.starter.sites.find((x) => x.site === 'instagram.com');
+  assert.deepStrictEqual(ig.mods.filter((m) => m.choice === 'added').map((m) => m.id), ['www.instagram.com/desaturate']);
+  assert.ok(ig.mods.filter((m) => m.id !== 'www.instagram.com/desaturate').every((m) => m.choice === 'skipped'));
+
+  // "Start with none": remembered, nothing on disk.
+  const home2 = tempDir();
+  const ext2 = new FakeExtension({ home: home2 });
+  cleanups.push(() => ext2.close());
+  await ext2.next((m) => m.type === 'mods');
+  ext2.send({ type: 'request', id: 'n', cmd: 'shipped.none', args: {} });
+  res = await ext2.next((m) => m.type === 'response' && m.id === 'n');
+  assert.strictEqual(res.result.starter.chosen, true);
+  await ext2.next((m) => m.type === 'mods' && m.starter.chosen, { timeout: 8000 });
+  assert.strictEqual(fs.existsSync(path.join(home2, 'sites', 'x.com')), false);
+  assert.ok(Object.values(S.starterChoices(home2)).every((c) => c === 'none'));
 });
 
 test('mods messages carry the sites preinstalled.json says to start on', async () => {

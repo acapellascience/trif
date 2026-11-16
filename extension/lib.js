@@ -2,6 +2,8 @@
 // functions that need Chrome APIs take them as parameters.
 
 import { safeStringify, formatError } from './runtime.js';
+import { SANDBOX_WORLD, SANDBOX_RUNTIME_ID, SES_FILE, sandboxRuntimeCode, sandboxModCode, sandboxPageCode, scriptName } from './sandbox.js';
+import { sensitiveList, patternMatches } from './agentsites.js';
 
 // The running extension's own id: the Web Store build has a different one from the unpacked dev build
 // (whose manifest key fixes it to this fallback, also used under Node in the tests).
@@ -9,11 +11,28 @@ export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdo
 // The Firefox build (scripts/build-extension.js firefox) runs the same code; these cover the differences.
 export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
 export const SAFARI = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('safari-web-extension:');
-export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
+// (Before BROWSER, which uses them at once.) What a browser name may be: a short word or two (what a brand or a Firefox fork calls itself is data).
+export const BROWSER_NAME_RE = /^[A-Za-z][\w .+-]{0,39}$/;
+// navigator.userAgentData.brands: each Chromium browser lists Chromium, a made-up "Not A Brand" (GREASE,
+// in any spelling) and usually its own brand; these name the ones TRIF knows.
+const BRANDS = [['Microsoft Edge', 'Edge'], ['Opera GX', 'Opera GX'], ['Opera Air', 'Opera Air'], ['Opera', 'Opera'], ['Brave', 'Brave'], ['Vivaldi', 'Vivaldi'], ['Google Chrome', 'Chrome']];
+const isGrease = (b) => /not.?a.?brand/i.test(b) || /[^\w .-]/.test(b);
+// The kind of browser: what the code does differently. The browser's name (BROWSER) is what the user sees.
+export const FAMILY = FIREFOX ? 'firefox' : SAFARI ? 'safari' : 'chromium';
+// The browser's own name: Brave, Edge, Opera, Vivaldi, Arc, Chromium, Chrome; Firefox (or a fork's name);
+// Safari. Worked out at once from what's known without waiting (browserFromSignals), then better by
+// detectBrowser (its answers that take a moment) and by the helper, which knows what started it: whoever
+// learns a better name calls setBrowser, and every module importing BROWSER sees the new one.
+export let BROWSER = browserFromSignals({ brands: globalThis.navigator?.userAgentData?.brands, userAgent: globalThis.navigator?.userAgent });
+/** Use `name` as the browser's name from now on (a name from detectBrowser, the helper or the status). */
+export function setBrowser(name) {
+  if (typeof name === 'string' && BROWSER_NAME_RE.test(name)) BROWSER = name;
+  return BROWSER;
+}
 // What the browser calls TRIF's panel: Chrome's side panel, Firefox's sidebar, Safari's window.
 export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
-export const SETUP_COMMAND = SAFARI ? 'npx trif setup --browser safari' : 'npx trif setup';
+export const SETUP_COMMAND = SAFARI ? 'npx timsrobot setup --browser safari' : 'npx timsrobot setup';
 export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.
@@ -31,13 +50,20 @@ export const RUN_CAP = 1000000;
  */
 export function userScriptsAvailable(chromeApi) {
   try {
-    const p = chromeApi.userScripts.getScripts(); // throws when the switch is off
+    // Throws when the switch is off. Asked for an id that's never registered: a plain getScripts() hands back
+    // every script with all its code, a copy of every mod for each call. This runs for every message from the
+    // helper, so a 48 MB set in 49 parts made gigabytes of copies in Firefox's parent process faster than it
+    // collected them (7.4 GB, and the Mac ran out of memory).
+    const p = chromeApi.userScripts.getScripts({ ids: [PROBE_ID] });
     if (p && typeof p.catch === 'function') p.catch(() => {});
     return true;
   } catch {
     return false;
   }
 }
+
+// (Never registered: see userScriptsAvailable.)
+const PROBE_ID = 'trif-probe';
 
 const RUN_AT = {
   document_start: 'document_start', 'document-start': 'document_start',
@@ -48,30 +74,145 @@ export function normalizeRunAt(runAt) {
   return RUN_AT[String(runAt || '').trim().toLowerCase()] || 'document_start';
 }
 
-/** Wrap a mod's code exactly as PROTOCOL.md specifies. */
-export function wrapModCode(id, code) {
+/**
+ * Wrap a mod's code exactly as PROTOCOL.md specifies. With `values` (a style section's settings, styleOf), the
+ * mod's own `trif` has them as `trif.style` (the page's window.trif for the rest), on the first line, so the
+ * file's first line is still the script's second.
+ */
+export function wrapModCode(id, code, values = null) {
   const mod = JSON.stringify(id);
-  return `(() => { const __mod = ${mod}; window.__webmods && (window.__webmods.current = __mod);
+  const own = values ? ` const trif = (() => { const t = window.trif; return Object.freeze(Object.create(t && (typeof t === 'object' || typeof t === 'function') ? t : null, { style: { value: Object.freeze(${JSON.stringify(values)}), enumerable: true } })); })();` : '';
+  return `(() => { const __mod = ${mod}; window.__webmods && (window.__webmods.current = __mod);${own}
 try { ${code}
 } catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[TRIF]", __mod, e); }
 })();
-//# sourceURL=trif://${id}.js`;
+//# sourceURL=trif://${scriptName(id)}.js`;
+}
+
+// ---- a mod's style section (helper/lib/stylesection.js) ---------------------------------------------------
+// The helper takes it out of the mod's code and sends `style: {css, values, settings}`: CSS that TRIF puts on
+// the page itself (checked as a style mod's), and the settings' values, which the code gets as `trif.style`.
+// The code never gets the section's text: only those values, checked again here (a number, a colour, a word,
+// true or false).
+
+const STYLE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const STYLE_WORD = /^(?:[A-Za-z][A-Za-z0-9-]{0,39}|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8}))$/;
+/** A mod's style section as this file uses it: {css, values}, or null when it has none (or it isn't one). */
+export function styleOf(mod) {
+  const st = mod && mod.style;
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return null;
+  const values = {};
+  const raw = st.values && typeof st.values === 'object' && !Array.isArray(st.values) ? st.values : {};
+  for (const [k, v] of Object.entries(raw).slice(0, 40)) {
+    if (!STYLE_NAME.test(k)) continue;
+    if ((typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && STYLE_WORD.test(v))) values[k] = v;
+  }
+  return { css: typeof st.css === 'string' ? st.css : '', values };
+}
+
+// (in the page, by itself: the section's CSS in a style element of its own, as a style mod's is)
+// (marked with the mod's id, for TRIF's clickjacking guard: runtime.js clickGuard)
+function putStyle(css, id) {
+  const style = document.createElement('style');
+  if (id) style.setAttribute('data-trif-style', String(id));
+  style.textContent = css;
+  const put = () => (document.head || document.documentElement).append(style);
+  if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
+}
+/** The script that puts a free mod's style section CSS on the page (before the mod's code, in its registration). */
+export function styleSectionCode(id, css) {
+  return `(${putStyle.toString()})(${JSON.stringify(String(css))}, ${JSON.stringify(String(id))});\n//# sourceURL=trif-style://${scriptName(id)}.css`;
 }
 
 export function modToUserScript(mod) {
-  return {
+  const base = {
     id: mod.id,
     matches: Array.isArray(mod.matches) ? mod.matches : [],
     excludeMatches: Array.isArray(mod.excludes) ? mod.excludes : [],
-    js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }],
     runAt: normalizeRunAt(mod.runAt),
-    world: 'MAIN',
     allFrames: false,
   };
+  // A sandboxed mod (sandbox.js): in TRIF's own world, its code evaluated by SES in a compartment of its
+  // own; or, in a browser without that world and once the user allowed it (sandboxFallback), in the page's
+  // world with the same API around it.
+  // (a boxed mod's powers, as the helper read them from its header: docs/POWERS.md)
+  // (and `site`: what the user approved for each site it's on, its mods' powers together, "<site> <a>+<b>+…", as
+  // the helper sends it (helper/lib/sitecombos.js): the sandbox's page-wide rules let those act)
+  const args = mod.powerArgs && typeof mod.powerArgs === 'object' ? mod.powerArgs : {};
+  // (a style section: a boxed mod's goes to the sandbox with its powers, which puts its CSS on the page and hands
+  // the values to its `trif`; a free mod's CSS is a script of TRIF's before its code, its values in its wrapper)
+  const style = styleOf(mod);
+  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.siteOk) && mod.siteOk.length ? { ...args, site: mod.siteOk } : args, ...(style ? { style } : {}) };
+  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
+  const js = [{ code: wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null) }];
+  if (style && style.css) js.unshift({ code: styleSectionCode(mod.id, style.css) });
+  return { ...base, js, world: 'MAIN' };
 }
 
-export function runtimeUserScript(code, matches = ['<all_urls>']) {
-  return { id: RUNTIME_ID, matches, excludeMatches: [], js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+/** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
+export function inSandboxWorld(mod) { return !!(mod && mod.sandboxed && !mod.unsandboxed); }
+
+/** The sandbox world's runtime (sandbox.js): SES, then TRIF's code; where any sandboxed mod runs. */
+const SES_STAMP = 'globalThis.__trifT0 = performance.now();'; // (so the runtime can say what loading SES took)
+export function sandboxRuntimeScript(matches, excludes = []) {
+  return { id: SANDBOX_RUNTIME_ID, matches, excludeMatches: excludes, js: [{ code: SES_STAMP }, { file: SES_FILE }, { code: sandboxRuntimeCode() }], runAt: 'document_start', world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, allFrames: false };
+}
+
+// ---- browsers without TRIF's sandbox world ------------------------------------------------------------
+// A sandboxed mod in a browser that can't host the world (background.js sandboxWorld: Safari, or a browser
+// whose userScripts has no configureWorld with a CSP) isn't silently run unsandboxed: it waits for the
+// user's OK, held here in the extension (held.by 'sandbox'; the helper's holds are about what a mod can do,
+// and this is about where it can run). Allowed (state `unsandboxedOk`: id -> the hash allowed), it runs as
+// a page script with the same API (sandbox.js sandboxPageCode), in the "Page scripts" group (modGroup), as
+// that's how it runs. A new version waits again.
+
+/** The text a sandboxed mod's hold shows in a browser without the sandbox. */
+export function sandboxHoldReason(browser = BROWSER) {
+  return `${browser} can't run boxed mods, so here it would run as a free mod, with everything the page has`;
+}
+
+/**
+ * The mods as this browser runs them: unchanged where it can sandbox (`canSandbox`); otherwise each sandboxed
+ * mod marked `unsandboxed`, and held (by 'sandbox') unless `allowed[id]` is its hash. Idempotent: marks from
+ * a run before (with another canSandbox or `allowed`) are taken off first; `hash` is left as the helper sent
+ * it (syncUserScripts tells the two ways of registering apart). Pure.
+ */
+export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser = BROWSER } = {}) {
+  return (mods || []).map((m0) => {
+    let m = m0;
+    if (m && (m.unsandboxed || (m.held && m.held.by === 'sandbox'))) {
+      m = { ...m };
+      delete m.unsandboxed;
+      if (m.held && m.held.by === 'sandbox') delete m.held;
+    }
+    if (!m || !m.sandboxed || canSandbox) return m;
+    // (held by the helper anyway: its own Allow first)
+    if (m.held) return { ...m, unsandboxed: true };
+    // (allowed for its code: a change to its style section alone doesn't ask again, helper/lib/stylesection.js)
+    if (allowed[m.id] && (allowed[m.id] === m.hash || (typeof m.codeHash === 'string' && allowed[m.id] === `code:${m.codeHash}`))) return { ...m, unsandboxed: true };
+    const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts.map((f) => `as a free mod, it ${f}`) : [])];
+    return { ...m, unsandboxed: true, held: { by: 'sandbox', site: modSiteName(m), reason: facts.join('; '), facts, claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash, ...(typeof m.codeHash === 'string' ? { codeHash: m.codeHash } : {}) } };
+  });
+}
+
+// (the site folder a mod is in: its id's first part)
+function modSiteName(m) { return String(m.site || String(m.id || '').split('/')[0] || ''); }
+
+export function runtimeUserScript(code, matches = ['<all_urls>'], excludes = []) {
+  return { id: RUNTIME_ID, matches, excludeMatches: excludes, js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+}
+
+/**
+ * The sensitive sites of their own no registered mod runs on (lib.js "sensitive sites"): the runtimes skip
+ * them too (their matches come from mods whose `*.google.com` would otherwise reach mail.google.com).
+ * `desired`: the mods as limitToSites made them (`usedSites`), `recording` the sites being recorded.
+ */
+export function runtimeExcludes(desired, recording, model) {
+  if (!model) return [];
+  const used = new Set((desired || []).flatMap((m) => m.usedSites || []));
+  for (const r of recording || []) used.add(r);
+  return model.splits.filter((x) => !used.has(x) && [...used].some((u) => hostInScope(x, u))).flatMap(siteExcludes).sort();
 }
 
 /**
@@ -116,11 +257,16 @@ export function normalizeDisabled(value) {
  * order). It only runs where a registered mod does, or on a site in `recording` (runtimeMatches); with
  * neither, nothing is registered at all. With `sitesOn`, mods are limited to those sites (limitToSites)
  * and so is `recording`.
- * Returns {registered, errors, applied, reset}.
+ * `known`: the ids registered after the last sync, as it returned them (null: not sure, ask the browser).
+ * With them the scripts aren't fetched: getScripts() hands back every script with all its code, a copy of
+ * every mod on every sync, which Firefox's parent process can be slow to free (see userScriptsAvailable).
+ * Returns {registered, errors, applied, reset, known} (`known` null when a register or update failed, as
+ * then it's unclear what's registered).
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, groupsOff = {}, recording = [], sitesOn = null, known = null, sensitive = null }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
-  if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
+  // `sensitive`: the sensitive sites (sensitiveSites): each of its own, with only its own mods.
+  if (sitesOn) recording = (recording || []).filter((site) => (sensitive ? siteOnFor(`https://${site}/`, sitesOn, sensitive) : (sitesOn || []).some((s) => hostInScope(site, s))));
   const errors = [];
   const desired = [];
   const seen = new Set();
@@ -130,29 +276,60 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
-    const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
+    const limited = sitesOn ? limitToSites(mod, sitesOn, sensitive) : mod;
     if (!limited) continue; // only on sites TRIF is off for
-    desired.push(withOffSites(limited, offSites[mod.id]));
+    // (its own switched-off sites, and the sites where its group is off: groupsOff)
+    const reg = withOffSites(limited, offSitesFor(mod, offSites, groupsOff));
+    // (a sandboxed mod run as a page script registers differently: a hash of its own)
+    // (and one whose sites' approved powers changed: they're in its registration)
+    const withHash = Array.isArray(reg.siteOk) && reg.siteOk.length ? `:site:${quickHash(reg.siteOk.join('|'))}` : '';
+    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}` } : withHash ? { ...reg, hash: `${reg.hash ?? ''}${withHash}` } : reg);
   }
 
-  const existing = await us.getScripts();
+  // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
+  // (Known ids carry no code: the runtime is then checked by its hash in `applied`.)
+  const existing = Array.isArray(known) ? known.map((id) => ({ id })) : await us.getScripts();
   const existingIds = new Set(existing.map((s) => s.id));
   const matches = runtimeMatches(desired, recording);
+  const rtExcludes = runtimeExcludes(desired, recording, sensitive);
   if (!matches.length) {
     if (existing.length) await us.unregister();
-    return { registered: [], errors, applied: {}, reset: existing.length > 0 };
+    return { registered: [], errors, applied: {}, reset: existing.length > 0, known: [] };
   }
-  const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches));
+  // The sandbox world's runtime (sandbox.js) goes where a sandboxed mod runs in that world. Its mods queue
+  // themselves until it's there, so unlike the page's runtime it needn't be registered before them.
+  const sandboxMatches = runtimeMatches(desired.filter(inSandboxWorld), []);
+  const sandboxCode = sandboxMatches.length ? sandboxRuntimeCode() : null;
+  const sandboxHash = sandboxMatches.length ? quickHash(sandboxCode + '\n' + JSON.stringify(sandboxMatches) + (rtExcludes.length ? JSON.stringify(rtExcludes) : '')) : null;
+  const sandboxNow = existing.find((s) => s.id === SANDBOX_RUNTIME_ID);
+  let sandboxUp = false; // (the sandbox runtime registered after this sync)
+  const syncSandboxRuntime = async (fresh) => {
+    const there = !fresh && !!sandboxNow;
+    if (!sandboxMatches.length) { if (there) await us.unregister({ ids: [SANDBOX_RUNTIME_ID] }); return; }
+    const code = sandboxNow?.js?.[2]?.code;
+    const same = there && (code !== undefined ? code === sandboxCode && JSON.stringify([...(sandboxNow.matches || [])].sort()) === JSON.stringify(sandboxMatches) && JSON.stringify([...(sandboxNow.excludeMatches || [])].sort()) === JSON.stringify(rtExcludes) : applied[SANDBOX_RUNTIME_ID] === sandboxHash);
+    try {
+      if (!same) { if (there) await us.update([sandboxRuntimeScript(sandboxMatches, rtExcludes)]); else await us.register([sandboxRuntimeScript(sandboxMatches, rtExcludes)]); }
+      next[SANDBOX_RUNTIME_ID] = sandboxHash;
+      sandboxUp = true;
+    } catch (e) {
+      unsure = true;
+      // (its mods would wait for it forever: each says why instead, and isn't registered)
+      for (const m of desired.filter(inSandboxWorld)) errors.push({ id: m.id, error: `TRIF's sandbox couldn't be set up: ${errMsg(e)}` });
+    }
+  };
+  const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches) + (rtExcludes.length ? JSON.stringify(rtExcludes) : ''));
   const current = existing.find((s) => s.id === RUNTIME_ID);
   const currentCode = current?.js?.[0]?.code;
   const sameMatches = (a) => Array.isArray(a) && JSON.stringify([...a].sort()) === JSON.stringify(matches);
   // (applied's hash also covers the fallback below, where the registered matches are <all_urls>.)
   const runtimeOk = !!current && (currentCode !== undefined
-    ? currentCode === runtimeCode && (sameMatches(current.matches) || applied[RUNTIME_ID] === runtimeHash)
+    ? currentCode === runtimeCode && ((sameMatches(current.matches) && JSON.stringify([...(current.excludeMatches || [])].sort()) === JSON.stringify(rtExcludes)) || applied[RUNTIME_ID] === runtimeHash)
     : applied[RUNTIME_ID] === runtimeHash);
 
   const next = {};
   const registered = [];
+  let unsure = false; // a register or update failed: what's registered is then for the browser to say
   const registerMod = async (mod, update) => {
     try {
       if (update) await us.update([modToUserScript(mod)]);
@@ -160,29 +337,189 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
       next[mod.id] = mod.hash ?? null;
       registered.push(mod.id);
     } catch (e) {
+      unsure = true;
       errors.push({ id: mod.id, error: errMsg(e) });
     }
+  };
+  const knownNow = () => (unsure ? null : [RUNTIME_ID, ...(sandboxUp ? [SANDBOX_RUNTIME_ID] : []), ...registered]);
+
+  // Several mods in one call: Chrome shares every user script with its pages again after each call, so
+  // ten 5 MB mods took 2-4 s one by one and 0.2-0.9 s in one call (Chrome 156). One bad mod fails the whole
+  // call, so then they go one at a time and only that one is reported (any the call did register, updated).
+  const registerMods = async (mods, update) => {
+    if (!mods.length) return;
+    if (mods.length > 1) {
+      try {
+        if (update) await us.update(mods.map(modToUserScript));
+        else await us.register(mods.map(modToUserScript));
+        for (const mod of mods) { next[mod.id] = mod.hash ?? null; registered.push(mod.id); }
+        return;
+      } catch { unsure = true; /* one at a time, below (some of the call's may be registered) */ }
+    }
+    const there = update || mods.length === 1 ? null : new Set((await us.getScripts()).map((s) => s.id));
+    for (const mod of mods) await registerMod(mod, update || !!there?.has(mod.id));
   };
 
   if (!runtimeOk) {
     if (existing.length) await us.unregister();
     // A mod with an invalid pattern makes the union invalid too; then the runtime goes everywhere
     // (the mod itself fails to register and is reported).
-    try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }
+    try { await us.register([runtimeUserScript(runtimeCode, matches, rtExcludes)]); } catch { await us.register([runtimeUserScript(runtimeCode, ['<all_urls>'], rtExcludes)]); }
     next[RUNTIME_ID] = runtimeHash;
-    for (const mod of desired) await registerMod(mod, false);
-    return { registered, errors, applied: next, reset: true };
+    await syncSandboxRuntime(true);
+    await registerMods(sandboxUp ? desired : desired.filter((m) => !inSandboxWorld(m)), false);
+    return { registered, errors, applied: next, reset: true, known: knownNow() };
   }
 
   next[RUNTIME_ID] = runtimeHash;
-  const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && !seen.has(id));
+  const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && id !== SANDBOX_RUNTIME_ID && !seen.has(id));
   if (stale.length) await us.unregister({ ids: stale });
+  await syncSandboxRuntime(false);
+  const fresh = [];
+  const changed = [];
   for (const mod of desired) {
-    if (!existingIds.has(mod.id)) await registerMod(mod, false);
+    if (inSandboxWorld(mod) && !sandboxUp) continue; // (reported above)
+    if (!existingIds.has(mod.id)) fresh.push(mod);
     else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
-    else await registerMod(mod, true);
+    else changed.push(mod);
   }
-  return { registered, errors, applied: next, reset: false };
+  await registerMods(changed, true);
+  await registerMods(fresh, false);
+  const order = new Map(desired.map((m, i) => [m.id, i]));
+  registered.sort((a, b) => order.get(a) - order.get(b)); // (in the mods' order, as before they were batched)
+  return { registered, errors, applied: next, reset: false, known: knownNow() };
+}
+
+// ---- mods in storage -----------------------------------------------------------------------------
+
+/**
+ * The mods are kept in chrome.storage.local one per key (`mod:<id>`), in the order `modIds` gives, so a
+ * change to one mod writes only that one: each write is a copy for the browser to pass on (and to every
+ * open extension page, in storage.onChanged), and a whole set of big mods on every change was a lot of
+ * memory for Firefox to free. (0.2.4 and older kept them all under `mods`: read until the first write.)
+ */
+export const modStorageKey = (id) => `mod:${id}`;
+
+/** The mods in what chrome.storage.local.get(null) returned. */
+export function storedMods(items) {
+  const s = items || {};
+  if (Array.isArray(s.modIds)) return s.modIds.map((id) => s[modStorageKey(id)]).filter((m) => m && typeof m === 'object');
+  return Array.isArray(s.mods) ? s.mods : [];
+}
+
+// What tells a mod's stored copy is current: all of it but the code, which its hash covers (mods.js buildMod).
+const storedSignature = (m) => JSON.stringify(typeof m.hash === 'string' ? { ...m, code: undefined } : m);
+
+/** What's in storage, as storedMods read it, for modsStoragePlan. */
+export function modsStorageState(items) {
+  const s = items || {};
+  if (!Array.isArray(s.modIds)) return { ids: null, keys: new Map(), legacy: 'mods' in s };
+  return { ids: s.modIds, keys: new Map(storedMods(s).map((m) => [m.id, storedSignature(m)])), legacy: 'mods' in s };
+}
+
+/**
+ * How to bring storage (`stored`, from modsStorageState or a previous plan) to `mods`: `set` (the mods that
+ * changed, and `modIds` if the list did), then `remove` (gone mods' keys, and the old `mods`). `stored` is
+ * what storage holds once both are done.
+ */
+export function modsStoragePlan(mods, stored) {
+  const set = {};
+  const keys = new Map();
+  const list = (Array.isArray(mods) ? mods : []).filter((m) => m && typeof m.id === 'string' && m.id);
+  for (const m of list) {
+    const sig = storedSignature(m);
+    keys.set(m.id, sig);
+    if (stored.keys.get(m.id) !== sig) set[modStorageKey(m.id)] = m;
+  }
+  const ids = list.map((m) => m.id);
+  if (JSON.stringify(ids) !== JSON.stringify(stored.ids)) set.modIds = ids;
+  const remove = [...stored.keys.keys()].filter((id) => !keys.has(id)).map(modStorageKey);
+  if (stored.legacy) remove.push('mods');
+  return { set, remove, stored: { ids, keys, legacy: false } };
+}
+
+// ---- mods sets in parts ---------------------------------------------------------------------------
+
+/**
+ * What this extension can do beyond 0.2.4's native messaging protocol, sent in its hello so the helper
+ * never has to guess from the version: 'modsParts' takes a mods set bigger than one native message (1 MB)
+ * as {type:"modsPart"} messages (ModsParts); 'modsSame' takes a mod it already has without its code
+ * (fillSameMods).
+ */
+// (`boxRun`: `run` takes `world: 'box'`, the agent's code in TRIF's sandbox world: background.js boxedRun)
+export const FEATURES = ['modsParts', 'modsSame', 'boxRun'];
+
+/**
+ * A mods message's mods with the code put back in those sent without it (`same: true`: the helper sent
+ * them before, with this hash; helper/lib/mods.js withSame), from `had` (the mods as they were). Returns
+ * {mods}, or {missing: [ids]} when one isn't there with that hash (then the helper must send them all).
+ */
+export function fillSameMods(mods, had) {
+  const byId = new Map((Array.isArray(had) ? had : []).filter((m) => m && typeof m.id === 'string').map((m) => [m.id, m]));
+  const missing = [];
+  const out = (Array.isArray(mods) ? mods : []).map((m) => {
+    if (!m || m.same !== true) return m;
+    const was = byId.get(m.id);
+    if (!was || typeof was.code !== 'string' || typeof m.hash !== 'string' || was.hash !== m.hash) { missing.push(String(m.id)); return m; }
+    const { same, ...rest } = m;
+    return { ...rest, code: was.code };
+  });
+  return missing.length ? { missing } : { mods: out };
+}
+
+/**
+ * Joins {type:"modsPart", set, i, n, data} messages back into the {type:"mods"} message the helper cut up
+ * (helper/lib/mods.js modsParts): `data` is a slice of its JSON text, parts 0..n-1 of one `set` in order.
+ * push(part) returns {message} once the last part is in (the whole set, to apply at once), {error} when the
+ * sequence is broken (a part missing, out of order or malformed, or text that doesn't parse: the set so far
+ * is dropped, and the helper should send it again; the rest of its parts are then ignored), else {}. A new
+ * set's first part drops an unfinished older one (`superseded`: its id), as does a whole `mods` message
+ * (reset()).
+ */
+export class ModsParts {
+  constructor() {
+    this.current = null;
+    this.dropped = null; // the last set given up on: the rest of its parts are ignored, not more errors
+  }
+
+  reset() {
+    const had = this.current;
+    this.current = null;
+    if (had) this.dropped = had.set;
+    return had ? had.set : null;
+  }
+
+  push(part) {
+    const { set, i, n, data } = part || {};
+    const okSet = (typeof set === 'string' && set) || Number.isInteger(set);
+    if (!okSet || !Number.isInteger(n) || n < 1 || !Number.isInteger(i) || i < 0 || i >= n || typeof data !== 'string') {
+      const had = this.reset();
+      return { error: `a malformed part of a mods set${had !== null ? ` (dropped set ${had})` : ''}` };
+    }
+    let superseded = null;
+    if (i === 0) {
+      superseded = this.reset();
+      this.current = { set, n, parts: [] };
+    } else if (set === this.dropped && this.current?.set !== set) {
+      return {};
+    } else if (!this.current || this.current.set !== set) {
+      const had = this.reset();
+      this.dropped = set;
+      return { error: `part ${i + 1} of ${n} of mods set ${set} came without the parts before it${had !== null ? ` (dropped set ${had})` : ''}` };
+    } else if (i !== this.current.parts.length || n !== this.current.n) {
+      const had = this.current;
+      this.reset();
+      return { error: `mods set ${set}: got part ${i + 1} of ${n} after part ${had.parts.length} of ${had.n}; dropped it` };
+    }
+    this.current.parts.push(data);
+    if (this.current.parts.length < n) return superseded !== null ? { superseded } : {};
+    const text = this.current.parts.join('');
+    this.current = null;
+    let message;
+    try { message = JSON.parse(text); } catch (e) { this.dropped = set; return { error: `mods set ${set} doesn't parse (${errMsg(e)}); dropped it` }; }
+    if (!message || message.type !== 'mods' || !Array.isArray(message.mods)) { this.dropped = set; return { error: `mods set ${set} isn't a mods message; dropped it` }; }
+    return superseded !== null ? { message, superseded } : { message };
+  }
 }
 
 // ---- tabs ---------------------------------------------------------------------------------------
@@ -223,7 +560,7 @@ export function selectTab(tabs, focusedWindowId, args = {}) {
   }
   // A run works on its site's tab even when the user has moved to another one.
   const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active) || (scope ? tabs[0] : null);
-  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : 'no active tab (is a Chrome window open?)');
+  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : `no active tab (is a ${BROWSER} window open?)`);
   return t;
 }
 
@@ -293,6 +630,127 @@ export function applyStartOff(mods, disabled = {}, startedOff = {}, installId = 
 }
 
 /**
+ * Tim's mods the user deleted and got back (Settings' "Add the rest", a site's link): the helper sends each
+ * with `readded` (a stamp). The first time this browser sees a stamp, the mod is switched as Tim set it,
+ * like a new one (off when it comes with `startOff`, else on), not as it was before it was deleted;
+ * `readded` (id -> stamp) remembers that, so after it the switch is the user's. Pure: returns {disabled,
+ * readded, changed} with new objects when something changed.
+ */
+export function applyReadded(mods, disabled = {}, readded = {}) {
+  const fresh = (mods || []).filter((m) => typeof m?.id === 'string' && typeof m.readded === 'string' && readded[m.id] !== m.readded);
+  if (!fresh.length) return { disabled, readded, changed: false };
+  const d = { ...disabled };
+  const r = { ...readded };
+  for (const m of fresh) {
+    if (m.startOff) d[m.id] = true; else delete d[m.id];
+    r[m.id] = m.readded;
+  }
+  return { disabled: d, readded: r, changed: true };
+}
+
+// ---- new mods start on or off ----------------------------------------------------------------------
+// A mod from outside this browser's own chat arrives switched off, until the user has looked at it. What
+// counts as arriving: a mod id this
+// browser has never seen (`seenMods`: a terminal agent's, one dropped in by hand, Tim's mods added, one
+// made from another browser), and a new version of a shipped mod TRIF put in place by itself (the helper
+// sends its stamp as `autoUpdated`; `autoUpdated` here remembers the stamps seen). Not: one this browser's
+// own side-panel chat made while its run was going (its origin is this install, `live`: the user asked for it,
+// and the agent checks it running; a file that appeared just after the run ended doesn't count; unless Settings'
+// "Mods your chat makes" is Wait for me: `chatWait`), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
+// asked for by name (a new version they chose, one restored from the trash: ids already seen). Tim's mods
+// the user got back (`readded`) count as arriving. `newOff` (id -> 'new' | 'update' | 'chat') remembers why a
+// mod was switched off, for the panel and `trif status`, until the user switches it on.
+
+/** The groups a mod can be in. */
+export const MOD_GROUPS = ['rules', 'sandboxed', 'page'];
+
+/** chrome.storage.local `newOff`, cleaned up: mod id -> 'new' | 'update' | 'chat'. */
+export function normalizeNewOff(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update' || v === 'chat' || v === 'sensitive') out[id] = v;
+  return out;
+}
+
+/**
+ * The first time this browser sees each mod (and each stamp of a shipped mod TRIF updated by itself):
+ * remembered in `seen` (id -> true) and `autoUpdated` (id -> stamp); one from outside the chat is switched
+ * off, with why in `newOff`. `seen` null (never stored: a browser that had its mods before this
+ * existed) takes every mod there now as seen, switching nothing off; `autoUpdated` null likewise.
+ * `readded`: the stamps the browser had seen before this message (a mod with a new one arrives again).
+ * `waits(mod)`: the mod is a sensitive site's (lib.js "sensitive sites"): there every mod starts off, the
+ * chat's too, whatever "Mods your chat makes" says (newOff 'sensitive'); a mod already here is untouched, so
+ * what the user had on there stays on.
+ * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
+ */
+export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {}, waits = () => false } = {}) {
+  const list = (mods || []).filter((m) => typeof m?.id === 'string');
+  const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
+  const copy = () => {
+    if (out.changed) return;
+    out.disabled = { ...disabled }; out.seen = { ...(seen || {}) }; out.autoUpdated = { ...(autoUpdated || {}) }; out.newOff = { ...newOff };
+    out.changed = true;
+  };
+  if (!seen || !autoUpdated) {
+    copy();
+    if (!seen) for (const m of list) out.seen[m.id] = true;
+    if (!autoUpdated) for (const m of list) if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
+  }
+  // (this browser's own chat: written while its run here was going, origin.live; not a file that appeared in the
+  // moments after it ended, which helper/lib/origins.js also counts for it but could be anyone's)
+  const fromChat = (m) => !!installId && m.origin?.by === installId && m.origin.live === true;
+  const off = (m) => !m.held && (!fromChat(m) || chatWait || waits(m));
+  for (const m of list) {
+    const fresh = !out.seen[m.id] || (typeof m.readded === 'string' && readded[m.id] !== m.readded);
+    const updated = typeof m.autoUpdated === 'string' && out.autoUpdated[m.id] !== m.autoUpdated;
+    if (!fresh && !updated) continue;
+    copy();
+    out.seen[m.id] = true;
+    if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
+    if (off(m) && out.disabled[m.id] !== true) {
+      out.disabled[m.id] = true;
+      out.newOff[m.id] = fromChat(m) ? (chatWait ? 'chat' : 'sensitive') : fresh ? 'new' : 'update';
+    }
+  }
+  // (why a mod that's gone was off: nothing to show any more)
+  const present = new Set(list.map((m) => m.id));
+  for (const id of Object.keys(out.newOff)) if (!present.has(id)) { copy(); delete out.newOff[id]; }
+  return out;
+}
+
+/**
+ * "Mods your chat makes: Wait for me": a change the chat made to a mod that's running waits, and the version
+ * before keeps running until the user turns this one on. `waiting` (id -> {old: the mod as it was}); given the
+ * mods before and after a sync. `waits(mod)`: a sensitive site's mod, where the chat's changes wait whatever
+ * the setting (applyNewMods). Pure: returns {waiting, changed}.
+ */
+export function applyChatWaiting(before, after, { waiting = {}, chatWait = false, installId = null, isOn = () => true, waits = () => false } = {}) {
+  const was = new Map((before || []).map((m) => [m.id, m]));
+  const out = { ...waiting };
+  let changed = false;
+  for (const m of after || []) {
+    const held = out[m.id];
+    const old = was.get(m.id);
+    const fromChat = !!installId && m.origin?.by === installId && m.origin.live === true;
+    if (held) {
+      // (put back as it was, or changed from outside the chat: nothing to wait for)
+      if (held.old.hash === m.hash || (old && old.hash !== m.hash && !fromChat)) { delete out[m.id]; changed = true; }
+      continue;
+    }
+    if ((chatWait || waits(m)) && fromChat && old && old.hash !== m.hash && !m.held && isOn(m.id)) { out[m.id] = { old }; changed = true; }
+  }
+  const present = new Set((after || []).map((m) => m.id));
+  for (const id of Object.keys(out)) if (!present.has(id)) { delete out[id]; changed = true; }
+  return { waiting: out, changed };
+}
+
+/** chrome.storage.local `readded`, cleaned up: mod id -> stamp. */
+export function normalizeReadded(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (typeof v === 'string') out[id] = v;
+  return out;
+}
+
+/**
  * Shipped mods folded into another one (helper/lib/preinstalled.js retireShippedMods): the helper sends
  * the ids whose old copy went to the trash as that mod's `absorbs`. The first time this browser sees each
  * one, the mod it went into takes over its switch: on if either was on (and on a site, on there if either
@@ -323,6 +781,244 @@ export function applyAbsorbed(mods, disabled = {}, offSites = {}, absorbed = {})
     }
   }
   return { disabled: d, offSites: o, absorbed: a, changed };
+}
+
+/**
+ * Mods renamed on disk since the last `mods` message. A mod's id is its site folder and file name, so a
+ * renamed file arrives as a new id while the old one is gone; when the code is the same, in the same site
+ * folder, it's the same mod. Returns [{from, to}] (each old id paired once, in order).
+ */
+export function findRenames(prev, next) {
+  const before = new Set((prev || []).map((m) => m?.id));
+  const now = new Set((next || []).map((m) => m?.id));
+  const gone = (prev || []).filter((m) => typeof m?.id === 'string' && typeof m.code === 'string' && !now.has(m.id));
+  const out = [];
+  for (const m of next || []) {
+    if (!gone.length) break;
+    if (typeof m?.id !== 'string' || typeof m.code !== 'string' || before.has(m.id)) continue;
+    const i = gone.findIndex((g) => g.site === m.site && g.code === m.code);
+    if (i === -1) continue;
+    out.push({ from: gone[i].id, to: m.id });
+    gone.splice(i, 1);
+  }
+  return out;
+}
+
+/**
+ * A renamed mod keeps its switches: its `disabled` and `offSites` entries move to the new id, and the new
+ * id counts as already seen (`startedOff`), so it isn't switched off again as if it were new. Pure: returns
+ * {disabled, offSites, startedOff, changed} with new objects when something changed.
+ */
+export function carryRenames(renames, { disabled = {}, offSites = {}, startedOff = {} } = {}) {
+  if (!renames?.length) return { disabled, offSites, startedOff, changed: false };
+  const d = { ...disabled };
+  const o = { ...offSites };
+  const s = { ...startedOff };
+  const was = renames.map(({ from }) => ({ disabled: d[from] === true, offSites: o[from] }));
+  for (const { from } of renames) { delete d[from]; delete o[from]; }
+  renames.forEach(({ to }, i) => {
+    if (was[i].disabled) d[to] = true; else delete d[to];
+    if (was[i].offSites?.length) o[to] = was[i].offSites; else delete o[to];
+    s[to] = true;
+  });
+  return { disabled: d, offSites: o, startedOff: s, changed: true };
+}
+
+// ---- the panel in a window of its own ------------------------------------------------------------
+//
+// Some Chromium browsers have chrome.sidePanel but not Chrome's side panel itself: Arc replaced Chrome's
+// browser UI, which is where the side panel lives, so sidePanel.open() does nothing there (even in Chrome
+// it doesn't wait for the panel to show). So a side panel says which window it's in as it loads
+// ("panel.window"), and when none has said so within PANEL_OPEN_WAIT_MS of the toolbar click, the
+// background opens the same page in a popup window beside the browser window instead, following that
+// window's tabs (sidepanel.html?window=<id>&fallback=1). See docs/PROTOCOL.md, "The panel in a window".
+
+export const PANEL_WINDOW_WIDTH = 400;
+export const PANEL_OPEN_WAIT_MS = 1000;
+// A side panel that shows up later than that (a slow start in Chrome) still counts: the window opened
+// meanwhile is closed again, and the browser isn't remembered as needing one.
+export const PANEL_LATE_MS = 10000;
+// A toolbar click focuses the browser window it's in: a focus that recent is the click's own.
+export const CLICK_FOCUS_MS = 500;
+
+/** The panel page's address in a window of its own, following the tabs of browser window `windowId`. */
+export function panelWindowUrl(getURL, windowId) {
+  return getURL(`sidepanel.html?window=${windowId}&fallback=1`);
+}
+
+/**
+ * What the panel page's address (location.search) says: `openedFor`, the browser window whose tabs it
+ * follows when it's a window of its own (Safari's, or the fallback here), else null (a side panel, which
+ * follows its own window's); `fallback`, whether it's the fallback.
+ */
+export function panelQuery(search) {
+  const q = new URLSearchParams(search || '');
+  const id = Number(q.get('window'));
+  const openedFor = Number.isInteger(id) && id > 0 ? id : null;
+  return { openedFor, fallback: openedFor !== null && q.get('fallback') === '1' };
+}
+
+/**
+ * The browser window a panel window (from windows.getAll with tabs) follows, or null when `win` isn't one.
+ * `base` is the extension's own URL (runtime.getURL('')).
+ */
+export function panelWindowTarget(win, base) {
+  const tab = win?.tabs?.length === 1 ? win.tabs[0] : null;
+  const url = tab ? (tab.url || tab.pendingUrl || '') : '';
+  if (!base || !url.startsWith(`${base}sidepanel.html?`)) return null;
+  const { openedFor, fallback } = panelQuery(url.slice(url.indexOf('?')));
+  return fallback ? openedFor : null;
+}
+
+const finite = (n) => typeof n === 'number' && Number.isFinite(n);
+const isBox = (b) => !!b && finite(b.left) && finite(b.top) && finite(b.width) && finite(b.height) && b.width > 0 && b.height > 0;
+
+/** The screen (one of `screens`, {left, top, width, height}: its usable area) that window `win` is mostly on. */
+export function screenFor(screens, win) {
+  if (!isBox(win) || !Array.isArray(screens)) return null;
+  const area = (s) => Math.max(0, Math.min(s.left + s.width, win.left + win.width) - Math.max(s.left, win.left))
+    * Math.max(0, Math.min(s.top + s.height, win.top + win.height) - Math.max(s.top, win.top));
+  let best = null;
+  for (const s of screens.filter(isBox)) if (area(s) > 0 && (!best || area(s) > area(best))) best = s;
+  return best;
+}
+
+/** `screens` with `screen` added (the latest first, a few at most, none twice). */
+export function rememberScreen(screens, screen) {
+  const list = Array.isArray(screens) ? screens.filter(isBox) : [];
+  if (!isBox(screen)) return list;
+  const key = (s) => [s.left, s.top, s.width, s.height].join();
+  const s = { left: screen.left, top: screen.top, width: screen.width, height: screen.height };
+  return [s, ...list.filter((x) => key(x) !== key(s))].slice(0, 6);
+}
+
+/**
+ * Where the panel window goes for browser window `win`: beside its right edge, as tall as it, when the
+ * screen it's on (from `screens`) has room there; otherwise over the window's right edge, inside the
+ * screen. With no screen known, over the right edge (on screen whenever the window's right edge is).
+ */
+export function panelWindowBounds(win, screens, width = PANEL_WINDOW_WIDTH) {
+  if (!isBox(win)) return { width, height: 800 };
+  const w = Math.round(Math.min(width, win.width));
+  const right = Math.round(win.left + win.width);
+  const top = Math.round(win.top);
+  const height = Math.round(win.height);
+  const s = screenFor(screens, win);
+  if (s && right + w <= s.left + s.width) return { left: right, top, width: w, height };
+  let left = right - w;
+  if (s) left = Math.max(s.left, Math.min(left, s.left + s.width - w));
+  return { left: Math.round(left), top, width: w, height };
+}
+
+/**
+ * What a toolbar click in browser window `browser` does while its panel window `panel` is open
+ * (windows.get results; `focusedAt`: window id -> when it was last focused, as far as the background
+ * saw). 'focus' brings the panel back when it's minimized, or behind the browser window (it overlaps it,
+ * and the browser window was focused after it, not just now by the click itself); else 'close', like the
+ * side panel's second click.
+ */
+export function panelWindowClick({ panel, browser, focusedAt = {}, now = Date.now() }) {
+  if (panel?.state === 'minimized') return 'focus';
+  const overlap = isBox(panel) && isBox(browser)
+    && panel.left < browser.left + browser.width && browser.left < panel.left + panel.width
+    && panel.top < browser.top + browser.height && browser.top < panel.top + panel.height;
+  const p = focusedAt[panel?.id] || 0;
+  const b = focusedAt[browser?.id] || 0;
+  return overlap && b > p && now - b > CLICK_FOCUS_MS ? 'focus' : 'close';
+}
+
+// ---- mod order in the side panel --------------------------------------------------------------------
+// The user can drag the panel's mods into the order they like, per site: chrome.storage.local `modOrder` =
+// {"<site>": ["<mod id>", …]} (the site as scopeFor gives it). Display only: mods run in the order they
+// always do. Mods not in a site's list (new ones) come after the listed ones, in the order they came in;
+// ids in the list that aren't mods any more are skipped (one brought back from the trash takes its old
+// place), and dropped the next time the order is saved.
+
+/** `modOrder` from storage, cleaned up: lists of ids, no duplicates, no empty lists. */
+export function normalizeModOrder(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [site, list] of Object.entries(value)) {
+      if (!Array.isArray(list)) continue;
+      const ids = [...new Set(list.filter((x) => typeof x === 'string' && x))];
+      if (ids.length) out[site] = ids;
+    }
+  }
+  return out;
+}
+
+/**
+ * Tim's mods, site by site, as the helper sends them (helper/lib/preinstalled.js starterOffer), cleaned up:
+ * {chosen, sites: [{site, name, note, choice: 'added'|'none'|null, suggested, mods: [{id, name, description, on, choice: 'added'|'deleted'|'skipped'|null}]}]},
+ * or null (an older helper, or nothing usable).
+ */
+export function normalizeStarter(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.sites)) return null;
+  const str = (x, max = 200) => (typeof x === 'string' ? x.slice(0, max) : '');
+  const sites = [];
+  for (const s of value.sites.slice(0, 50)) {
+    const site = s && typeof s === 'object' ? scopeFor(str(s.site)) : '';
+    if (!site || sites.some((x) => x.site === site)) continue;
+    const mods = (Array.isArray(s.mods) ? s.mods : []).slice(0, 50).filter((m) => m && typeof m === 'object' && str(m.id))
+      .map((m) => ({ id: str(m.id), name: str(m.name) || str(m.id), description: str(m.description), on: !!m.on, choice: ['added', 'deleted', 'skipped'].includes(m.choice) ? m.choice : null }));
+    if (!mods.length) continue;
+    sites.push({ site, name: str(s.name, 60) || site, note: str(s.note, 80), choice: s.choice === 'added' || s.choice === 'none' ? s.choice : null, suggested: !!s.suggested, mods });
+  }
+  return { chosen: !!value.chosen || sites.some((s) => s.choice), sites };
+}
+
+/** The sites' names as words: "X", "X and Google", "X, Google and Amazon". */
+export function siteNames(names) {
+  const list = (names || []).filter(Boolean);
+  return list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
+}
+
+/** `mods` in the saved order `ids` (mod ids, or nothing): the listed ones first, then the rest as they came. */
+export function orderMods(mods, ids) {
+  const list = Array.isArray(mods) ? mods : [];
+  if (!Array.isArray(ids) || !ids.length) return list.slice();
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return list
+    .map((m, i) => ({ m, i, r: rank.has(m?.id) ? rank.get(m.id) : Infinity }))
+    .sort((a, b) => (a.r - b.r) || (a.i - b.i))
+    .map((x) => x.m);
+}
+
+/** `ids` with `id` moved to position `to` (clamped to the list); the same array when it isn't there or doesn't move. */
+export function moveId(ids, id, to) {
+  const from = ids.indexOf(id);
+  if (from === -1) return ids;
+  const at = Math.max(0, Math.min(ids.length - 1, Math.trunc(Number(to) || 0)));
+  if (at === from) return ids;
+  const out = ids.slice();
+  out.splice(from, 1);
+  out.splice(at, 0, id);
+  return out;
+}
+
+/**
+ * `modOrder` with `site`'s order set to `ids`. When that's the order the mods come in anyway (`natural`),
+ * the site's entry goes instead, so new mods keep coming in where they would. Returns a new object.
+ */
+export function setModOrder(modOrder, site, ids, natural = []) {
+  const out = normalizeModOrder(modOrder);
+  const same = ids.length === natural.length && ids.every((id, i) => id === natural[i]);
+  if (same || !ids.length) delete out[site];
+  else out[site] = [...new Set(ids)];
+  return out;
+}
+
+/** `modOrder` with renamed mods (findRenames) in their old places. Returns {modOrder, changed}. */
+export function renameInOrder(modOrder, renames) {
+  const order = normalizeModOrder(modOrder);
+  const to = new Map((renames || []).map((r) => [r.from, r.to]));
+  let changed = false;
+  for (const [site, ids] of Object.entries(order)) {
+    if (!ids.some((id) => to.has(id))) continue;
+    order[site] = [...new Set(ids.map((id) => to.get(id) || id))];
+    changed = true;
+  }
+  return { modOrder: order, changed };
 }
 
 // ---- run scope ----------------------------------------------------------------------------------
@@ -389,12 +1085,178 @@ export function normalizeSitesOn(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === 'string').map(scopeFor).filter(Boolean))].sort();
 }
 
-/** The site in `sitesOn` that covers `url`'s host (http/https only), or null: TRIF is off there. */
-export function siteOnFor(url, sitesOn) {
+/**
+ * The site in `sitesOn` that covers `url`'s host (http/https only), or null: TRIF is off there. With the
+ * sensitive sites (`sensitive`, sensitiveSites below), the host's own site only: google.com on doesn't
+ * cover mail.google.com, which is a site of its own.
+ */
+export function siteOnFor(url, sitesOn, sensitive = null) {
   let u;
   try { u = new URL(String(url ?? '')); } catch { return null; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (sensitive) { const s = sensitive.scopeOf(u.hostname); return (sitesOn || []).includes(s) ? s : null; }
   return (sitesOn || []).find((s) => hostInScope(u.hostname, s)) || null;
+}
+
+// ---- sensitive sites, each a site of its own ---------------------------------------------------------
+// A host on the sensitive list (agentsites.js: TRIF's, or the user's from Settings) that is a subdomain of
+// a registrable domain (mail.google.com under google.com) is a site of its own in TRIF (Tim, 2026-11-11):
+// its mods are in sites/<host>/, its panel lists only those, a side-panel run there is scoped to it (and
+// its folder: helper/lib/scope.js scopeOf), it has its own switch, block and access, and no other site's
+// mods run on it: not the parent's (their `*.google.com` gets mail.google.com excluded), not all-sites
+// mods. A sensitive host that is itself a registrable domain (paypal.com) is already a site of its own;
+// all-sites mods skip it too. Either way a sensitive site's own mods run only there.
+// Wildcard patterns (`*bank*`) split at the label that matched: netbank.example.com is its own site.
+// `pending`: hosts the user hasn't answered the upgrade's question about yet (background.js
+// "sensitive sites on upgrade"): until then they stay part of their parent, as before.
+
+const cleanHostName = (h) => String(h || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
+
+/**
+ * The sensitive site `host` is in: {scope, why, pattern}, or null when it isn't sensitive. `scope` is the
+ * part of the host the matching pattern names (mail.google.com for inbox.mail.google.com), or its
+ * registrable domain when that's longer (paypal.com for www.paypal.com; example.bank for `*.bank`). The
+ * shortest when several match.
+ */
+export function sensitiveHit(host, list = null, pending = []) {
+  const h = cleanHostName(host);
+  if (!h || !h.includes('.') || isIp(h) || h.includes(':')) return null;
+  const reg = scopeFor(h);
+  let best = null;
+  for (const x of sensitiveList(list)) {
+    if (!patternMatches(x.pattern, h)) continue;
+    const p = cleanHostName(x.pattern);
+    let cand = p;
+    if (p.includes('*')) {
+      const labels = h.split('.');
+      const pl = p.split('.');
+      if (pl.length === 1) {
+        // (the matching label furthest right: `*bank*` on bank.mybank.example.com is mybank.example.com)
+        const re = new RegExp(`^${pl[0].split('*').map((t) => t.replace(/[.+?^${}()|[\]\\-]/g, '\\$&')).join('[a-z0-9-]*')}$`);
+        let i = labels.length - 1;
+        while (i >= 0 && !re.test(labels[i])) i--;
+        cand = labels.slice(Math.max(i, 0)).join('.');
+      } else cand = labels.slice(labels.length - pl.length).join('.');
+    }
+    if (!hostInScope(cand, reg)) cand = reg;
+    if (cand !== reg && pending.includes(cand)) continue; // (not answered yet: still part of its parent)
+    if (!best || cand.length < best.scope.length) best = { scope: cand, why: x.why, pattern: x.pattern };
+  }
+  return best;
+}
+
+/**
+ * The sensitive sites, for the functions that need them (siteOnFor, limitToSites, syncUserScripts):
+ *   scopeOf(host)     the site a host is in: its sensitive site, else its registrable domain
+ *   isSensitive(site) whether a site is a sensitive one
+ *   whyOf(site)       its `why` ("email")
+ *   splits            the sensitive sites of their own under a registrable domain that TRIF knows of: the
+ *                     list's hosts, and those among `hosts` (sites on, blocked, mod folders, tabs seen)
+ * `list`: the user's sensitive list or null for TRIF's; `pending` as above.
+ */
+export function sensitiveSites({ list = null, pending = [], hosts = [] } = {}) {
+  const memo = new Map();
+  const hit = (h) => { const k = cleanHostName(h); if (!memo.has(k)) memo.set(k, sensitiveHit(k, list, pending)); return memo.get(k); };
+  const scopeOf = (h) => hit(h)?.scope || scopeFor(h);
+  const splits = new Set();
+  const consider = (h) => { const x = hit(h); if (x && x.scope !== scopeFor(x.scope)) splits.add(x.scope); };
+  for (const x of sensitiveList(list)) if (!x.pattern.includes('*')) consider(x.pattern);
+  for (const h of hosts || []) consider(h);
+  return {
+    list, pending: [...pending],
+    scopeOf,
+    isSensitive: (site) => hit(site)?.scope === cleanHostName(site),
+    whyOf: (site) => hit(site)?.why || '',
+    splits: [...splits].sort(),
+  };
+}
+
+/** The sensitive sites named in the list itself (not wildcard patterns): what TRIF can block from the start. */
+export function sensitiveListSites(list = null) {
+  const out = new Set();
+  for (const x of sensitiveList(list)) {
+    if (x.pattern.includes('*')) continue;
+    const s = sensitiveHit(x.pattern, list)?.scope;
+    if (s) out.add(s);
+  }
+  return [...out].sort();
+}
+
+/** A stored list of sites (sitesOn, blockedSites): clean host names as they are (mail.google.com stays), sorted. */
+export function normalizeSiteList(value) {
+  return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === 'string').map(cleanHostName).filter((x) => /^(\[[0-9a-f:.]+\]|[a-z0-9_-]+(\.[a-z0-9_-]+)*)$/.test(x)))].sort();
+}
+
+/** The hosts the upgrade asks about, from storage: [{host, parent, why, mods: [ids], allSites: [ids]}]. */
+export function normalizePending(value) {
+  const out = [];
+  for (const p of Array.isArray(value) ? value : []) {
+    const host = cleanHostName(p?.host);
+    if (!host || out.some((x) => x.host === host)) continue;
+    const ids = (l) => (Array.isArray(l) ? l.filter((x) => typeof x === 'string') : []);
+    out.push({ host, parent: cleanHostName(p.parent) || scopeFor(host), why: String(p.why || ''), mods: ids(p.mods), allSites: ids(p.allSites) });
+  }
+  return out;
+}
+
+/**
+ * What to do with sensitive sites TRIF hasn't dealt with yet (background.js "sensitive sites on upgrade").
+ * `hosts`: sensitive sites (sensitiveHit's scopes) to look at; those in `done`, `pending` or `blocked` are
+ * skipped. Returns {block: [sites], ask: [{host, parent, why, mods, allSites}], done: [sites]}:
+ *   - a site of its own under a registrable domain (mail.google.com) that the user's setup reaches (TRIF on
+ *     for its parent and a switched-on mod of the parent's, or an all-sites one, matching it; or mods in its
+ *     own folder): asked about, with the parent's mods that match it (`mods`, switched on or off: the copies
+ *     keep that) and the all-sites ones that did (`allSites`: they skip it from now on);
+ *   - a sensitive registrable domain (paypal.com) that's on, or has mods of its own: left as it is;
+ *   - any other: blocked.
+ * `force`: work out the ask for a host whatever else (the panel's Keep, with the mods as they are now).
+ */
+export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [], list = null, mods = [], disabled = {}, sitesOn = [], force = false } = {}) {
+  const out = { block: [], ask: [], done: [] };
+  const seen = new Set();
+  for (const raw of hosts) {
+    const host = sensitiveHit(raw, list)?.scope;
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    if (!force && (done.includes(host) || pending.includes(host) || blocked.includes(host))) continue;
+    const parent = scopeFor(host);
+    const folder = (m) => String(m?.id || '').split('/')[0];
+    const own = mods.filter((m) => hostInScope(folder(m), host));
+    const reaches = (m) => (Array.isArray(m.matches) ? m.matches : []).some((p) => patternReachesHost(p, host));
+    const on = (m) => disabled[m.id] !== true && !m.held;
+    if (parent === host) {
+      if (!force) { if (!(sitesOn.includes(host) || own.length)) out.block.push(host); out.done.push(host); }
+      continue;
+    }
+    // (the parent's own: not another site apart's under it, mail.google.com's for docs.google.com, which run only there)
+    const parentMods = mods.filter((m) => folder(m) !== 'all-sites' && scopeFor(folder(m)) === parent && !hostInScope(folder(m), host) && !sensitiveHit(folder(m), list) && reaches(m));
+    const allSites = mods.filter((m) => folder(m) === 'all-sites' && reaches(m));
+    const reached = own.length > 0 || (sitesOn.includes(parent) && (parentMods.some(on) || allSites.some(on)));
+    if (reached || force) out.ask.push({ host, parent, why: sensitiveHit(host, list)?.why || '', mods: parentMods.map((m) => m.id), allSites: allSites.filter(on).map((m) => m.id) });
+    else out.block.push(host);
+    if (!force) out.done.push(host);
+  }
+  return out;
+}
+
+/** The site a mod's folder is: its id's first part, as a site (all-sites: null). */
+export function modHome(mod, sensitive = null) {
+  const folder = String(mod?.id || '').split('/')[0] || String(mod?.site || '');
+  if (!folder || folder === 'all-sites') return null;
+  return sensitive ? sensitive.scopeOf(folder) : scopeFor(folder);
+}
+
+/** Whether a match pattern's host part reaches `host` (any path): `*://*.google.com/x/*` reaches mail.google.com. */
+export function patternReachesHost(pattern, host) {
+  const p = String(pattern ?? '').trim();
+  if (p === '<all_urls>') return true;
+  const m = /^(\*|https?):\/\/([^/]*)\//i.exec(p);
+  if (!m) return false;
+  const ph = m[2].replace(/:(\*|\d+)$/, '').toLowerCase().replace(/\.$/, '');
+  const h = cleanHostName(host);
+  if (ph === '*') return true;
+  if (ph.startsWith('*.')) return hostInScope(h, ph.slice(2)) || hostInScope(`www.${h}`, ph.slice(2));
+  return ph === h || ph === `www.${h}`;
 }
 
 /**
@@ -434,10 +1296,18 @@ export function applyStartSites(sitesOn, offered, start) {
  * The mod limited to the sites in `sitesOn`: each @match narrowed to those sites (any-host patterns and
  * <all_urls> become one pair per site; patterns for other sites go), or null when nothing is left. The
  * sites used go into its hash, so it re-registers when they change. file:// patterns go too.
+ * With the sensitive sites (`sensitive`, sensitiveSites): a sensitive site only gets its own mods (those
+ * in its folder), and those run only there; other mods' patterns covering one get it excluded (`*.google.com`
+ * runs on google.com but not on mail.google.com). `usedSites`: the sites it ends up on.
  */
-export function limitToSites(mod, sitesOn) {
+export function limitToSites(mod, sitesOn, sensitive = null) {
   const out = new Set();
   const used = new Set();
+  const on = sitesOn || [];
+  const home = sensitive ? modHome(mod, sensitive) : null;
+  const homeSensitive = !!home && sensitive.isSensitive(home);
+  // (may the mod run on site s at all)
+  const allowed = (s) => !sensitive || (homeSensitive ? s === home : s === home || !sensitive.isSensitive(s));
   for (const raw of Array.isArray(mod?.matches) ? mod.matches : []) {
     const p = String(raw).trim();
     const m = p === '<all_urls>' ? ['', '*', '*', '/*'] : /^(\*|https?|wss?|ftp):\/\/([^/]*)(\/.*)$/i.exec(p);
@@ -446,17 +1316,143 @@ export function limitToSites(mod, sitesOn) {
     const port = /(:(\*|\d+))$/.exec(hostPart)?.[1] || '';
     const host = hostPart.slice(0, hostPart.length - port.length).toLowerCase();
     const add = (s) => { used.add(s); out.add(`${scheme}://${s}${port}${path}`); out.add(`${scheme}://*.${s}${port}${path}`); };
-    if (host === '*') { (sitesOn || []).forEach(add); continue; }
+    if (host === '*') { on.filter(allowed).forEach(add); continue; }
     const wild = host.startsWith('*.');
     const base = wild ? host.slice(2) : host;
-    const covering = (sitesOn || []).find((s) => hostInScope(base, s));
-    if (covering) { used.add(covering); out.add(p); continue; }
-    // "*.co.uk" with bbc.co.uk on: just bbc.co.uk. (An exact host never covers another site.)
-    if (wild) for (const s of sitesOn || []) if (hostInScope(s, base)) add(s);
+    const covering = sensitive ? (on.includes(sensitive.scopeOf(base)) ? sensitive.scopeOf(base) : null) : on.find((s) => hostInScope(base, s));
+    if (covering && allowed(covering)) { used.add(covering); out.add(p); continue; }
+    // "*.co.uk" with bbc.co.uk on: just bbc.co.uk. (An exact host never covers another site.) And a
+    // sensitive site's own mod with `*.google.com`: just mail.google.com.
+    if (wild) for (const s of on) if (s !== covering && hostInScope(s, base) && allowed(s)) add(s);
   }
   if (!out.size) return null;
+  // (the sensitive sites of their own under the sites it runs on, except its own: excluded)
+  const excl = new Set();
+  if (sensitive) {
+    for (const x of sensitive.splits) {
+      if (x === home) continue;
+      if ([...used].some((u) => u !== x && hostInScope(x, u))) siteExcludes(x).forEach((e) => excl.add(e));
+    }
+  }
   const tag = [...used].sort().join(',');
-  return { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}` : mod.hash };
+  const xs = [...excl].sort();
+  const limited = { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}${xs.length ? `|apart:${xs.join(',')}` : ''}` : mod.hash };
+  if (xs.length) limited.excludes = [...(Array.isArray(mod.excludes) ? mod.excludes : []), ...xs];
+  if (sensitive) limited.usedSites = [...used].sort();
+  return limited;
+}
+
+// ---- site access ----------------------------------------------------------------------------
+// TRIF asks for no sites at install (the manifest's host permissions are all optional), and asks for each
+// site's when it's turned on there: a site without the browser's access is disconnected (a first visit
+// too); "Connect" (or Fix) in the side panel asks for that site's origin (siteOrigins), from the click, and
+// turns it on. TRIF never asks for every site. (Until 0.3 a "permissive" mode had <all_urls>: an update
+// gives that up once, background.js dropEverySite, and the sites keep their switches and ask again.)
+// A site in `sitesOn` counts only with access (activeSites), and never when it's blocked in TRIF
+// (`blockedSites`, TRIF's own list, whatever access it has). Safari asks per site itself and its build
+// keeps <all_urls> (scripts/build-extension.js), so there TRIF doesn't ask or check.
+
+export const SITE_ACCESS = !SAFARI;
+
+/**
+ * The origins a site (a registrable domain) needs: the domain and its subdomains, http and https. One
+ * pattern does both: `*.amazon.com` matches amazon.com itself too (in Chrome's and Firefox's match
+ * patterns), and asking for amazon.com separately only made the browser's prompt list it twice. An IP
+ * address has no subdomains (and `*.` before one isn't a valid pattern): just the address.
+ */
+const isIp = (site) => /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site);
+export function siteOrigins(site) {
+  return isIp(site) ? [`*://${site}/*`] : [`*://*.${site}/*`];
+}
+
+export function originsFor(sites) {
+  return [...new Set((sites || []).flatMap(siteOrigins))];
+}
+
+/**
+ * What the browser gives TRIF, from permissions.getAll(): {origins, all, allUrls}. `all`: every http(s)
+ * site (<all_urls>, *://*\/*). `allUrls`: <all_urls> itself, which Chrome's and Firefox's tab capture
+ * want (a site's own origins aren't enough for it; see screenshot.js).
+ */
+export function normalizeAccess(granted) {
+  const origins = [...new Set((Array.isArray(granted?.origins) ? granted.origins : []).filter((o) => typeof o === 'string'))].sort();
+  const allUrls = origins.includes('<all_urls>');
+  const all = allUrls || ['http', 'https'].every((scheme) => origins.some((o) => originCovers(o, scheme, '*', false)));
+  return { origins, all, allUrls };
+}
+
+/** The access when TRIF doesn't check (Safari, or a browser without chrome.permissions): everything. */
+export const ALL_ACCESS = Object.freeze({ origins: ['<all_urls>'], all: true, allUrls: true });
+
+/** What the browser gives TRIF now (ALL_ACCESS where TRIF doesn't check). */
+export async function readAccess(chromeApi, check = SITE_ACCESS) {
+  if (!check || typeof chromeApi?.permissions?.getAll !== 'function') return ALL_ACCESS;
+  return normalizeAccess(await chromeApi.permissions.getAll());
+}
+
+// Whether a granted origin pattern covers pages of `host` (any port, any path) for `scheme`; with
+// `wild`, of all its subdomains too. `host` '*' asks for every host.
+function originCovers(pattern, scheme, host, wild) {
+  const p = String(pattern).trim();
+  if (p === '<all_urls>') return true;
+  const m = /^(\*|https?):\/\/([^/]*)(\/.*)$/i.exec(p);
+  if (!m || m[3] !== '/*') return false;
+  if (m[1] !== '*' && m[1].toLowerCase() !== scheme) return false;
+  const hp = /^(.*?)(?::(\*|\d+))?$/.exec(m[2]);
+  if (hp[2] !== undefined && hp[2] !== '*') return false;
+  const g = hp[1].toLowerCase().replace(/\.$/, '');
+  if (g === '*') return true;
+  if (host === '*') return false;
+  if (g.startsWith('*.')) return hostInScope(host, g.slice(2));
+  return !wild && g === host;
+}
+
+/** Whether the browser gives TRIF all of `site` (siteOrigins, both schemes; an IP has no subdomains). */
+export function hasSiteAccess(access, site) {
+  if (!access || access.all) return !!access;
+  return ['http', 'https'].every((scheme) => access.origins.some((o) => originCovers(o, scheme, site, false))
+    && (isIp(site) || access.origins.some((o) => originCovers(o, scheme, site, true))));
+}
+
+/** The sites TRIF works on: on in `sitesOn`, with access. */
+export function activeSites(sitesOn, access) {
+  return (sitesOn || []).filter((s) => hasSiteAccess(access, s));
+}
+
+/** The sites in `sitesOn` the browser doesn't give TRIF (yet, or any more). */
+export function sitesWithoutAccess(sitesOn, access) {
+  return (sitesOn || []).filter((s) => !hasSiteAccess(access, s));
+}
+
+/** The granted origins that give TRIF every site (what an update from a permissive TRIF gives up, once). */
+export function everySiteOrigins(access) {
+  const every = new Set(['<all_urls>', '*://*/*', 'http://*/*', 'https://*/*']);
+  return (access?.origins || []).filter((o) => every.has(o));
+}
+
+// ---- a site's state in the side panel, and in what agents are told ---------------------------------
+// - on: in `sitesOn`, with access: TRIF works there.
+// - off: with access, not in `sitesOn` (the power button's off): turning it on again doesn't ask.
+// - disconnected: without the browser's access: a first visit, or a site disconnected,
+//   or one setup turned on that isn't connected yet. "Connect" asks and turns it on, in one click.
+// - blocked: in TRIF's block list (`blockedSites`): nothing from TRIF touches it, whatever access TRIF
+//   has (with <all_urls> one site can't be taken away in Chrome's own settings), and it can't be turned on.
+
+/** The state of `site` (a registrable domain): 'on', 'off', 'disconnected' or 'blocked' (see above). */
+export function siteState(site, { sitesOn = [], access = null, blocked = [] } = {}) {
+  // (no access shows first: a blocked site the user disconnected is disconnected, and Connect brings it back
+  // to blocked, which TRIF's block list keeps whatever the access: Tim, 2026-11-11)
+  if (!hasSiteAccess(access, site)) return 'disconnected';
+  if ((blocked || []).includes(site)) return 'blocked';
+  return (sitesOn || []).includes(site) ? 'on' : 'off';
+}
+
+/** Why a page command or a run can't touch `site`, in the words the panel uses; null when it's on. */
+export function siteRefusal(site, state) {
+  if (state === 'blocked') return `${site} is blocked in TRIF: nothing from TRIF runs there or reads it, and only the user can unblock it (in the side panel)`;
+  if (state === 'disconnected') return `TRIF is disconnected on ${site}: nothing from TRIF runs there or reads it until the user connects it (the side panel on that site has the button)`;
+  if (state === 'off') return `TRIF is off on ${site}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`;
+  return null;
 }
 
 /** The side panel's "site" for a tab URL: hostname without a leading "www.", or null for pages mods can't run on. */
@@ -524,6 +1520,18 @@ export function globMatch(glob, s) {
   }
   const last = parts[parts.length - 1];
   return s.length - pos >= last.length && s.endsWith(last);
+}
+
+/**
+ * The side panel's mods box (Tim, 2026-11-11): `here`, the mods whose @match covers `url` (and held ones,
+ * which wait to be allowed here), and `other`, those for other pages of the site (their light is grey), which
+ * fold into "N more for other <site> pages" at the bottom. Each keeps the order it had.
+ */
+export function splitForPage(mods, url) {
+  const here = [];
+  const other = [];
+  for (const m of mods || []) (m.held || modAppliesTo(m, url) ? here : other).push(m);
+  return { here, other };
 }
 
 /** True when a mod ({matches, excludes}) would run on `url`. */
@@ -595,7 +1603,9 @@ export function isLoginUrl(url) {
  * injection), hence self-contained. With a `token` (isolated world), marks the document when it may, so the
  * extension can tell afterwards that the command ran in this same document (background.js pageCall).
  */
-export function pageGuard(scope, sitesOn, token) {
+// `apart`: sites of their own inside those (lib.js "sensitive sites") the code may not meet: mail.google.com
+// for a google.com run, or for any code while mail.google.com isn't on.
+export function pageGuard(scope, sitesOn, token, apart = []) {
   let u;
   try { u = new URL(String(location.href)); } catch (e) { return 'the tab is not on a web page any more'; }
   const host = u.hostname.toLowerCase().replace(/\.$/, '');
@@ -604,15 +1614,18 @@ export function pageGuard(scope, sitesOn, token) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') why = 'the tab went to a page that isn\'t http or https before TRIF reached it';
   else if (scope && !inside(scope)) why = `the tab went to ${host} before TRIF reached it, and this agent run is limited to ${scope}`;
   else if (!(sitesOn || []).some(inside)) why = `the tab went to ${host} before TRIF reached it, and TRIF is off there`;
+  else if ((apart || []).some(inside)) why = `the tab went to ${host} before TRIF reached it, which is a site of its own${scope ? `, and this agent run is limited to ${scope}` : ', and TRIF is off there'}`;
   if (!why && token) window.__trifPageGuard = token;
   return why;
 }
 
-export function buildRunCode(code, expression, runId, guard = null) {
+// tag: give the code a sourceURL of its own (trif-run-<runId>.js), so the page's save guard (tablock.js
+// leakGuard) can tell the agent's code on the call stack from the site's.
+export function buildRunCode(code, expression, runId, guard = null, { tag = false } = {}) {
   const body = expression ? `return (${code}\n);` : `${code}\n`;
-  // guard {scope, sitesOn}: checked against the document the code meets, before it runs.
+  // guard {scope, sitesOn, apart}: checked against the document the code meets, before it runs.
   const check = guard
-    ? `{ const __wmWhy = (${pageGuard.toString()})(${JSON.stringify(guard.scope || null)}, ${JSON.stringify(guard.sitesOn || [])}, null); if (__wmWhy) return JSON.stringify({ ok: false, error: __wmWhy }); }\n`
+    ? `{ const __wmWhy = (${pageGuard.toString()})(${JSON.stringify(guard.scope || null)}, ${JSON.stringify(guard.sitesOn || [])}, null, ${JSON.stringify(guard.apart || [])}); if (__wmWhy) return JSON.stringify({ ok: false, error: __wmWhy }); }\n`
     : '';
   return `(async () => {
 ${check}const __wmStringify = (${safeStringify.toString()});
@@ -633,7 +1646,7 @@ try {
   setTimeout(() => { try { delete runs[${JSON.stringify(runId)}]; } catch (x) {} }, 60000);
 } catch (x) {}
 return __wmOut;
-})()`;
+})()${tag ? `\n//# sourceURL=trif-run-${String(runId).replace(/[^\w-]/g, '')}.js` : ''}`;
 }
 
 /** Code that reads (and removes) a stored run envelope; evaluates to the string or null. */
@@ -692,6 +1705,83 @@ export function filterRequests(entries, { filter, limit } = {}) {
 /** Exponential reconnect delay: 1 s, 2 s, 4 s … capped at 30 s. */
 export function nextBackoff(prev) {
   return prev ? Math.min(prev * 2, 30000) : 1000;
+}
+
+// ---- which browser this is ------------------------------------------------------------------------
+
+
+/**
+ * The browser's name from what's known about it (each optional):
+ *   family: 'chromium' | 'firefox' | 'safari' (FAMILY);
+ *   brands: navigator.userAgentData.brands ([{brand, version}]);
+ *   userAgent: navigator.userAgent, only read when there are no brands (a Chromium too old for them);
+ *   brave: navigator.brave.isBrave() said yes; vivaldi: Vivaldi's own tab fields are there (vivaldiTabs);
+ *   panelInWindow: Chrome's side panel doesn't show here (background.js): a Chrome that has none is Arc;
+ *   firefoxName: runtime.getBrowserInfo().name (Firefox, LibreWolf, Waterfox, Floorp, Zen…).
+ */
+export function browserFromSignals({ family = FAMILY, brands, userAgent = '', brave = false, vivaldi = false, panelInWindow = false, firefoxName } = {}) {
+  if (family === 'safari') return 'Safari';
+  if (family === 'firefox') return typeof firefoxName === 'string' && BROWSER_NAME_RE.test(firefoxName.trim()) ? firefoxName.trim() : 'Firefox';
+  if (brave) return 'Brave';
+  if (vivaldi) return 'Vivaldi';
+  const names = Array.isArray(brands) ? brands.map((b) => (b && typeof b.brand === 'string' ? b.brand.trim() : '')).filter(Boolean) : [];
+  let name;
+  if (names.length) {
+    name = BRANDS.find(([brand]) => names.includes(brand))?.[1]
+      // (a brand TRIF doesn't know yet: its own name, as it gives it)
+      || names.find((b) => b !== 'Chromium' && !isGrease(b) && BROWSER_NAME_RE.test(b))
+      || (names.includes('Chromium') ? 'Chromium' : 'Chrome');
+  } else {
+    // No brands to go by: the user-agent string's own tokens, else Chrome as before.
+    const ua = String(userAgent || '');
+    name = /\bEdg\//.test(ua) ? 'Edge' : /\bOPR\//.test(ua) ? 'Opera' : /\bVivaldi\//.test(ua) ? 'Vivaldi' : /\bChromium\//.test(ua) ? 'Chromium' : 'Chrome';
+  }
+  return (name === 'Chrome' || name === 'Chromium') && panelInWindow ? 'Arc' : name;
+}
+
+/** The version of brand `name` in a fullVersionList (navigator.userAgentData's high-entropy values), or null. */
+export function brandVersion(fullVersionList, name) {
+  const brand = { Edge: 'Microsoft Edge', Chrome: 'Google Chrome', Arc: 'Google Chrome' }[name] || name;
+  const hit = Array.isArray(fullVersionList) ? fullVersionList.find((b) => b && b.brand === brand) : null;
+  return hit && typeof hit.version === 'string' && /^[\d.]{1,40}$/.test(hit.version) ? hit.version : null;
+}
+
+/** Whether Vivaldi's tab fields (`vivExtData`, or `extData` before) are on any tab: Vivaldi says it's Chrome otherwise. */
+export function vivaldiTabs(tabs) {
+  return Array.isArray(tabs) && tabs.some((t) => t && typeof t === 'object' && ('vivExtData' in t || 'extData' in t));
+}
+
+// A browser's answer that doesn't come within this long counts as none.
+const SIGNAL_MS = 1000;
+// `ask` is called here: one that throws at once counts as none too.
+const soon = (ask) => {
+  let timer;
+  const answer = new Promise((resolve) => resolve(ask())).catch(() => undefined);
+  return Promise.race([answer, new Promise((r) => { timer = setTimeout(r, SIGNAL_MS); })]).finally(() => clearTimeout(timer));
+};
+
+/**
+ * {name, version}: the browser's name (browserFromSignals) with the signals that take a moment, and its own
+ * version where it has one (Opera's or Edge's, not Chromium's; a Firefox fork's), else null. Each signal
+ * that fails or doesn't answer is left out. opts: { family, nav (navigator), api (chrome), ff (Firefox's
+ * `browser`), panelInWindow }.
+ */
+export async function detectBrowser({ family = FAMILY, nav = globalThis.navigator, api = globalThis.chrome, ff = globalThis.browser, panelInWindow = false } = {}) {
+  if (family === 'safari') return { name: 'Safari', version: null };
+  if (family === 'firefox') {
+    const runtime = ff?.runtime?.getBrowserInfo ? ff.runtime : api?.runtime;
+    const info = await soon(() => runtime?.getBrowserInfo?.());
+    const name = browserFromSignals({ family, firefoxName: info?.name });
+    return { name, version: name !== 'Firefox' && typeof info?.version === 'string' && /^[\w.-]{1,40}$/.test(info.version) ? info.version : null };
+  }
+  const uaData = nav?.userAgentData;
+  const [brave, tabs, high] = await Promise.all([
+    soon(() => (typeof nav?.brave?.isBrave === 'function' ? nav.brave.isBrave() : false)),
+    soon(() => api?.tabs?.query?.({})),
+    soon(() => uaData?.getHighEntropyValues?.(['fullVersionList'])),
+  ]);
+  const name = browserFromSignals({ family, brands: uaData?.brands, userAgent: nav?.userAgent, brave: brave === true, vivaldi: vivaldiTabs(tabs), panelInWindow });
+  return { name, version: brandVersion(high?.fullVersionList, name) };
 }
 
 export function chromeVersion(userAgent) {
@@ -763,6 +1853,61 @@ export function offOnSite(offSites, id, site) {
 /** Exclude patterns for a switched-off site and its subdomains (IPs: just the address). */
 export function siteExcludes(site) {
   return /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site) ? [`*://${site}/*`] : [`*://${site}/*`, `*://*.${site}/*`];
+}
+
+// ---- Groups: how TRIF runs a mod, switched on and off per site (docs/PROTOCOL.md "Groups").
+// "rules": a rules mod (its header says @rules: TRIF runs its data); "sandboxed": a sandboxed mod (its
+// header says @sandboxed: run in TRIF's own world, sandbox.js); "page": every other mod (a page script, run
+// in the page with everything it has), and a sandboxed mod in a browser without the sandbox (it runs, or
+// would run, as a page script there: sandboxFallback). `groupsOff` (chrome.storage.local) maps a site to
+// the groups switched off there: their mods don't run on it (or its subdomains), each mod's own
+// switch left as it is.
+export const GROUPS = ['rules', 'sandboxed', 'page'];
+// What people call each group (the values above are stored, in groupsOff and startsOff, so they stay): a
+// rules mod is a style mod, a sandboxed one a boxed mod, a page script a free mod.
+export const GROUP_NAMES = { rules: 'Style mods', sandboxed: 'Boxed mods', page: 'Free mods' };
+/** A group's name in a sentence: "style mods", "boxed mods", "free mods". */
+export function groupWord(group) { return (GROUP_NAMES[group] || GROUP_NAMES.page).toLowerCase(); }
+export function modGroup(mod) { return mod && mod.rules ? 'rules' : inSandboxWorld(mod) ? 'sandboxed' : 'page'; }
+
+/** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
+export function normalizeGroupsOff(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [site, list] of Object.entries(value)) {
+      const s = offSiteName(site);
+      if (!s || !Array.isArray(list)) continue;
+      const groups = [...new Set(list.filter((g) => GROUPS.includes(g)))];
+      if (groups.length) out[s] = [...new Set([...(out[s] || []), ...groups])];
+    }
+  }
+  return out;
+}
+
+/** Whether `group` is switched off on `site` (an entry for it or a parent domain). */
+export function groupOffOn(groupsOff, group, site) {
+  const s = offSiteName(site);
+  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && hostInScope(s, o));
+}
+
+/** `groupsOff` after switching `group` on or off on `site` (a new object). */
+export function switchGroup(groupsOff, site, group, enabled) {
+  const s = offSiteName(site);
+  if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
+  if (!GROUPS.includes(group)) throw new Error(`"${group}" isn't a group (${GROUPS.join(' or ')})`);
+  const out = normalizeGroupsOff(groupsOff);
+  const list = new Set(out[s] || []);
+  if (enabled) list.delete(group); else list.add(group);
+  if (list.size) out[s] = [...list]; else delete out[s];
+  return out;
+}
+
+/** The sites a mod is switched off on: its own (offSites) and its group's (groupsOff). */
+export function offSitesFor(mod, offSites, groupsOff) {
+  const own = (offSites && offSites[mod.id]) || [];
+  const g = modGroup(mod);
+  const group = Object.entries(groupsOff || {}).filter(([, list]) => list.includes(g)).map(([s]) => s);
+  return group.length ? [...new Set([...own, ...group])] : own;
 }
 
 /** The mod as registered: its switched-off sites added to its excludes (and to its hash, so it re-registers). */
@@ -848,7 +1993,34 @@ export function withoutModel({ settings, picks, snapshots }, agentId) {
  */
 export function siteSettings({ picks, snapshots, global, site }) {
   if (!site) return normalizeSettings(global);
-  if (picks[site]) return picks[site];
-  if (!snapshots.has(site)) snapshots.set(site, normalizeSettings(JSON.parse(JSON.stringify(global || {}))));
+  if (picks[site]) return notRobotless(picks[site]);
+  if (!snapshots.has(site)) snapshots.set(site, notRobotless(normalizeSettings(JSON.parse(JSON.stringify(global || {})))));
   return snapshots.get(site);
+}
+
+// ---- robotless ---------------------------------------------------------------------------------------
+// No chat agent in this browser: `settings.agent` (the default's) is ROBOTLESS. It's the browser's, not a
+// site's: it wins over every site's pick (which it leaves as they are), and no site's pick or snapshot
+// holds it (a site's agent is then its default's). Picking any agent (or Default) in Settings ends it.
+// Mods, approvals and the rest work as usual; the panel is green, as when logged in (docs/ROBOTLESS-STRINGS.md).
+export const ROBOTLESS = 'none';
+
+/** Whether the default agent settings (`settings` in storage) say robotless. */
+export function isRobotless(settings) {
+  return !!settings && typeof settings === 'object' && settings.agent === ROBOTLESS;
+}
+
+/** A site's settings without robotless in them (the default's own agent then). */
+function notRobotless(s) {
+  return s.agent === ROBOTLESS ? { ...s, agent: '' } : s;
+}
+
+/**
+ * The agents a chat whose agent isn't logged in can switch to: the other installed ones the helper knows are
+ * logged in (agent.list's `loggedIn === true`), in its order. Never one that isn't installed, or whose login
+ * is unknown.
+ */
+export function switchableAgents(list, currentId) {
+  return (Array.isArray(list) ? list : []).filter((a) => a && typeof a.id === 'string' && a.id && a.id !== currentId && a.id !== ROBOTLESS
+    && a.available === true && a.loggedIn === true);
 }

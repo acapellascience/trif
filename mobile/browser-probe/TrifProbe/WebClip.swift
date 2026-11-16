@@ -213,6 +213,31 @@ final class ProfileHandoff: NSObject, ObservableObject {
     static let shared = ProfileHandoff()
     enum State: Equatable { case idle, starting, handed, fetched, failed(String), timedOut, wrongBrowser(String), page, pageBack }
     @Published private(set) var state: State = .idle
+    /// The site this hand-off is for (the sheet shows where it got to when it's opened again for the same site).
+    @Published private(set) var site = ""
+    /// The profile was saved to Files (that route's first step done).
+    @Published var savedToFiles = false
+    /// The icon was used: TRIF was opened from it, for this site (so it's on the Home Screen).
+    @Published private(set) var installed = false
+    /// Whether the timsrobot.com page is there (asked when the sheet opens: which route's steps to show).
+    @Published private(set) var pageLive: Bool?
+    func checkPage() async { pageLive = await ProfileHandoff.pageIsThere(ProfileHandoff.clipBase) }
+    /// The sheet opened for a site: its progress kept if it's the same site, else a fresh start.
+    func begin(site s: String) {
+        guard s != site else { return }
+        stop(log: false)
+        site = s
+        state = .idle
+        savedToFiles = false
+        installed = false
+        openedAt = nil
+    }
+    /// TRIF was opened from a Home Screen icon for this site: the icon is there.
+    func opened(fromIconOf s: String) {
+        guard s == site, state != .idle || savedToFiles else { return }
+        installed = true
+        log("opened from the new icon for \(s): done")
+    }
     private var listener: NWListener?
     private var task: UIBackgroundTaskIdentifier = .invalid
     private var generation = 0
@@ -444,8 +469,6 @@ final class ProfileHandoff: NSObject, ObservableObject {
         stop(log: false)
     }
 
-    /// A new sheet: nothing handed yet.
-    func reset() { if state != .starting && state != .handed { state = .idle } }
 
     func stop(log: Bool) {
         listener?.cancel()
@@ -473,8 +496,10 @@ struct ProfileFile: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
-/// The ⋯ menu's Add to Home Screen: the icon, its name (editable), and the button; then what to do in Settings. If
-/// Safari can't be handed the profile (or never fetches it), saving it to Files instead.
+/// The ⋯ menu's Add to Home Screen (Tim, 11-16): before anything happens, what will happen and every step after it, for
+/// the route that will be used (Safari, or Files); the sheet stays on that list the whole time, so the person can go
+/// to Safari, Files or Settings and come back to read where they are, the step they're on marked as far as TRIF can
+/// tell. Never closed while they're away; reopened for the same site, it shows where they were.
 struct WebClipSheet: View {
     @EnvironmentObject var browser: Browser
     @Environment(\.dismiss) private var dismiss
@@ -483,92 +508,166 @@ struct WebClipSheet: View {
     @State private var name = ""
     @State private var failed = false
     @State private var saving: ProfileFile?
-    @State private var saved = false
+    @State private var filesRoute = false
 
     private var label: String { name.isEmpty ? (face?.name ?? "") : name }
     private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label) } }
+    private var started: Bool { handoff.state != .idle || handoff.savedToFiles }
     /// Safari didn't get it: the Files route is offered.
-    private var offerFiles: Bool {
-        switch handoff.state { case .failed, .timedOut, .wrongBrowser, .pageBack: return true; default: return failed }
+    private var safariFailed: Bool {
+        switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return false }
+    }
+
+    // MARK: the steps
+    private static let settingsSteps = [
+        "Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management).",
+        "Tap Install, enter your passcode, then Install again.",
+        "The icon appears on your Home Screen.",
+    ]
+    private var steps: [String] {
+        filesRoute
+            ? ["Choose where to save the file (On My iPhone is fine), then tap Save.",
+               "Open the Files app and tap “\(label) for TRIF”."] + WebClipSheet.settingsSteps
+            : ["Safari opens and asks to download a profile: tap Allow."] + WebClipSheet.settingsSteps
+    }
+    /// The step the person is on (0-based; steps.count when it's all done), as far as TRIF can tell.
+    private var current: Int {
+        if handoff.installed { return steps.count }
+        if filesRoute { return handoff.savedToFiles ? 1 : 0 }
+        switch handoff.state {
+        case .fetched, .pageBack: return 1
+        default: return 0
+        }
+    }
+    /// Where things are, in a line over the steps (nothing before the button).
+    private var status: String? {
+        if handoff.installed { return "Done: the icon is on your Home Screen." }
+        if filesRoute {
+            if handoff.savedToFiles { return "Saved to Files: next, open the Files app and tap it." }
+            if case .wrongBrowser(let b) = handoff.state { return "\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead." }
+            return safariFailed ? "Safari didn't get the icon. Save it to Files instead." : nil
+        }
+        switch handoff.state {
+        case .starting: return "Opening Safari…"
+        case .page, .handed: return "Safari is open: tap Allow there, then come back here."
+        case .fetched: return "Safari downloaded it: next, Settings."
+        case .pageBack: return "If Safari asked and you tapped Allow: next, Settings."
+        case .wrongBrowser(let b): return "\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead."
+        case .failed, .timedOut: return "Safari didn't get the icon. Save it to Files instead."
+        default: return nil
+        }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 16) {
                     Group {
                         if let icon = face?.icon {
-                            Image(uiImage: icon).resizable().frame(width: 96, height: 96)
-                                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                            Image(uiImage: icon).resizable().frame(width: 80, height: 80)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                 .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                         } else {
-                            ProgressView().frame(width: 96, height: 96)
+                            ProgressView().frame(width: 80, height: 80)
                         }
                     }
-                    .padding(.top, 24)
+                    .padding(.top, 12)
                     TextField("Name", text: $name)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 240)
-                        .disabled(face == nil)
-                    note.font(.footnote).multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal, 24)
-                    Button {
-                        guard let f = face, let p = profile else { failed = true; return }
-                        saved = false
-                        Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(f.source), \(p.count / 1000) kB profile)")
-                        ProfileHandoff.shared.hand(p, name: label)
-                    } label: {
-                        Text(handoff.state == .idle ? "Add to Home Screen" : "Try again").bold().frame(maxWidth: 240)
+                        .disabled(face == nil || started)
+                    if failed {
+                        Text("Couldn't make the icon for this page.").font(.footnote).foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(face == nil || handoff.state == .starting)
-                    if offerFiles {
-                        Button {
-                            guard let p = profile else { return }
-                            saving = ProfileFile(data: p)
-                        } label: {
-                            Text("Save to Files instead").frame(maxWidth: 240)
-                        }
-                        .buttonStyle(.bordered)
-                        .onAppear { Diagnostics.shared.log("icon", "fallback offered: save the profile to Files") }
+                    if let status {
+                        Text(status).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
+                            .foregroundStyle(handoff.installed ? Color.trifGreen : .primary).padding(.horizontal, 20)
+                    }
+                    stepList
+                    buttons
+                    Text("iOS only lets an icon that opens an app be added this way, with a small profile. It adds just this one icon, and you can remove it in Settings → General → VPN & Device Management.")
+                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading).padding(.horizontal, 20)
+                    if started && !handoff.installed {
+                        Text(filesRoute ? "A profile waits about 8 minutes in Settings. If it's gone, tap the file in Files again." : "A downloaded profile waits about 8 minutes. If it's gone from Settings, tap Download it again here.")
+                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading).padding(.horizontal, 20)
                     }
                 }
                 .padding(.bottom, 24)
             }
             .navigationTitle("Add to Home Screen")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: started ? .confirmationAction : .cancellationAction) {
+                    Button(started ? "Done" : "Cancel") { dismiss() }
+                }
+            }
         }
         .fileExporter(isPresented: Binding(get: { saving != nil }, set: { if !$0 { saving = nil } }), document: saving,
                       contentType: ProfileFile.type, defaultFilename: "\(label) for TRIF") { result in
             switch result {
-            case .success(let url): saved = true; Diagnostics.shared.log("icon", "profile saved to Files (\(url.lastPathComponent))")
+            case .success(let url): handoff.savedToFiles = true; Diagnostics.shared.log("icon", "profile saved to Files (\(url.lastPathComponent))")
             case .failure(let e): Diagnostics.shared.log("icon", "profile not saved to Files: \(e.localizedDescription)")
             }
             saving = nil
         }
+        // (Safari didn't get it: the Files route's steps, its button first)
+        .onChange(of: safariFailed) { _, now in if now { filesRoute = true } }
         .task {
-            ProfileHandoff.shared.reset()
-            if let f = await WebClipMaker.face(of: browser) { face = f; name = f.name } else { failed = true }
+            let site = Site.of(browser.webView.url?.host ?? "")
+            handoff.begin(site: site)
+            if handoff.savedToFiles || safariFailed { filesRoute = true }
+            async let page: Void = handoff.checkPage()
+            if let f = await WebClipMaker.face(of: browser) { face = f; if name.isEmpty { name = f.name } } else { failed = true }
+            await page
         }
     }
 
-    @ViewBuilder private var note: some View {
-        if saved {
-            Text("Saved. Open the Files app and tap the file, then open Settings, tap Profile Downloaded near the top, and Install.")
-        } else {
-            switch handoff.state {
-            case .handed, .fetched, .page:
-                Text("Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install.")
-            case .pageBack:
-                Text("In Settings, tap Profile Downloaded near the top, and Install. If Safari didn't offer the profile, save it to Files instead and tap it there.")
-            case .wrongBrowser(let b):
-                Text("\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead, then tap it there.")
-            case .failed, .timedOut:
-                Text("Safari didn't get the icon. Save it to Files instead, then tap it there.")
-            default:
-                if failed { Text("Couldn't make the icon for this page.") }
-                else { Text("The icon opens \(face?.site ?? "the site") in TRIF.") }
+    private var stepList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { n, text in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    ZStack {
+                        Circle().fill(n < current ? Color.trifGreen : n == current && started ? Color.trifGreen.opacity(0.18) : Color(.tertiarySystemFill))
+                        if n < current { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white) }
+                        else { Text("\(n + 1)").font(.system(size: 12, weight: .bold)).foregroundStyle(n == current && started ? Color.trifGreen : .secondary) }
+                    }
+                    .frame(width: 22, height: 22)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    Text(text).font(.subheadline.weight(n == current && started ? .semibold : .regular))
+                        .foregroundStyle(n < current ? .secondary : .primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder private var buttons: some View {
+        if !handoff.installed {
+            Button {
+                guard let f = face, let p = profile else { failed = true; return }
+                if filesRoute { saving = ProfileFile(data: p); return }
+                Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(f.source), \(p.count / 1000) kB profile)")
+                ProfileHandoff.shared.hand(p, name: label)
+            } label: {
+                Text(filesRoute ? (handoff.savedToFiles ? "Save it again" : "Save to Files") : (handoff.state == .idle ? "Add to Home Screen" : "Download it again"))
+                    .bold().frame(maxWidth: 240)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(face == nil || handoff.state == .starting)
+            if !filesRoute && (safariFailed || started) {
+                Button {
+                    filesRoute = true
+                    Diagnostics.shared.log("icon", "fallback offered: save the profile to Files")
+                } label: { Text("Save to Files instead").frame(maxWidth: 240) }
+                .buttonStyle(.bordered)
+            } else if filesRoute && !handoff.savedToFiles && !safariFailed {
+                Button { filesRoute = false } label: { Text("Use Safari instead").frame(maxWidth: 240) }
+                    .buttonStyle(.bordered)
             }
         }
     }

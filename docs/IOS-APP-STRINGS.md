@@ -204,21 +204,22 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The toolbar's back and forward while the chat shows | closed the chat | the chat's own back and forward (Back · Forward); the page button goes back to the tab |
 | When the page's data couldn't go in (diagnostics only) | — | (no words shown) |
 
-## Home Screen icons (added 11-16)
+## Home Screen icons (added 11-16; the sheet's steps changed 11-16, Tim)
 
 | Where | Old | New |
 |---|---|---|
 | The ⋯ menu | — | Add to Home Screen (greyed on a page that isn't a website) |
 | The sheet's title | — | Add to Home Screen |
+| Its top-left button | — | Cancel; once started: Done (top right) |
 | The sheet's name field (placeholder) | — | Name (filled in with the site's own short name, e.g. X) |
-| Under the name | — | The icon opens {site} in TRIF. |
-| The button | — | Add to Home Screen; after it's tapped: Try again |
-| After the button (what to do next) | — | Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install. |
-| If Safari didn't get it (added 11-16, Tim's phone) | — | Safari didn't get the icon. Save it to Files instead, then tap it there. |
-| If another browser (the default one) got it (added 11-16, Tim's Chrome) | — | {Chrome} opened instead of Safari, and only Safari can add the icon. Save it to Files instead, then tap it there. |
-| Back in TRIF after Safari was opened at timsrobot.com/clip (added 11-16; the page gives no word back) | — | In Settings, tap Profile Downloaded near the top, and Install. If Safari didn't offer the profile, save it to Files instead and tap it there. |
-| The second button, then | — | Save to Files instead (Files' own Save screen, the file named {Name} for TRIF) |
-| Once saved | — | Saved. Open the Files app and tap the file, then open Settings, tap Profile Downloaded near the top, and Install. |
+| Steps, the Safari route (shown before anything happens; the step they're on marked) | — | 1. Safari opens and asks to download a profile: tap Allow. · 2. Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management). · 3. Tap Install, enter your passcode, then Install again. · 4. The icon appears on your Home Screen. |
+| Steps, the Files route | — | 1. Choose where to save the file (On My iPhone is fine), then tap Save. · 2. Open the Files app and tap “{Name} for TRIF”. · then Settings' three steps as above |
+| Why (always shown) | — | iOS only lets an icon that opens an app be added this way, with a small profile. It adds just this one icon, and you can remove it in Settings → General → VPN & Device Management. |
+| Once started (Safari route) | — | A downloaded profile waits about 8 minutes. If it's gone from Settings, tap Download it again here. |
+| Once started (Files route) | — | A profile waits about 8 minutes in Settings. If it's gone, tap the file in Files again. |
+| Where they are (a line over the steps) | — | Opening Safari… · Safari is open: tap Allow there, then come back here. · Safari downloaded it: next, Settings. · If Safari asked and you tapped Allow: next, Settings. · Saved to Files: next, open the Files app and tap it. · Done: the icon is on your Home Screen. (TRIF was opened from the new icon) |
+| When Safari didn't get it | — | Safari didn't get the icon. Save it to Files instead. · {Chrome} opened instead of Safari, and only Safari can add the icon. Save it to Files instead. |
+| Buttons | — | Add to Home Screen; then Download it again · Save to Files instead (after a start, or when Safari didn't get it) · Files route: Save to Files, then Save it again · Use Safari instead |
 | If the page's icon and name couldn't be read | — | Couldn't make the icon for this page. |
 | The profile in Settings (name) | — | {Name} for TRIF (the publisher line shows TRIF) |
 | The profile in Settings (description) | — | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. |

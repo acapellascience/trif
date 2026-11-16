@@ -384,7 +384,12 @@ struct ContentView: View {
         .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
         .onOpenURL { url in
             if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
-            else if let site = TrifLink.target(url) { closeCovers(); addingIcon = false; browser.openFromIcon(site) }
+            else if let site = TrifLink.target(url) {
+                // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it)
+                ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
+                if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
+                closeCovers(); browser.openFromIcon(site)
+            }
             else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in

@@ -10,7 +10,7 @@ Computer side:
 - [x] 1. Design and wire protocol (docs/PHONE-LINK.md), the strings file
 - [x] 2. `helper/lib/phonelink/noise.js` (Noise IK, ciphers) and `frames.js` (packets, pieces), unit tests with
       the published vector
-- [ ] 3. `store.js`: the computer's key (keyring, service `TRIF phone link`), `<private>/phone-link.json`
+- [x] 3. `store.js`: the computer's key (keyring, service `TRIF phone link`), `<private>/phone-link.json`
       (on/off, port, paired phones), the pairing window (secret, 5 minutes, 5 tries, one phone), remove. Unit tests
       with `tests/fake-keychain.js`
 - [ ] 4. `server.js`: the listener (none while off; silent refusal of unpaired, removed, garbage, late), sessions,
@@ -35,38 +35,76 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 1, 2026-11-16)
+## Done this round (round 2, 2026-11-16)
 
-- Surveyed runs.js, scope.js, host.js, keyring.js, tophone.js and (read only) ios-poc's More chat. Wrote
-  docs/PHONE-LINK.md (design, security rules, wire protocol, states, proof) and docs/PHONE-LINK-STRINGS.md (drafts).
-- Built step 2: `helper/lib/phonelink/noise.js` and `frames.js`, Node's crypto only. `tests/phone-link-noise.test.js`:
-  18 tests pass locally, among them the published cacophony vector for `Noise_IK_25519_ChaChaPoly_SHA256`
-  (handshake bytes, handshake hash and four transport messages match), RFC 7748's X25519 example, every flipped
-  byte of message 1 refused, replay, wrong key, wrong prologue, frames up to a screenshot's size and the limits.
-- CI green for c8898a4 (the whole suite on macOS): https://github.com/acapellascience/trif/actions/runs/43959884729
+- Built step 3: `helper/lib/phonelink/store.js` (class `Store`): the computer's key pair made on first turn-on
+  (private key in the keyring only, base64url; public key in the file), `<private>/phone-link.json` written whole
+  with mode 600, the pairing window (16-byte secret in memory, 5 minutes, 5 wrong tries, one phone, a new QR
+  replaces it), `pairTry` with a constant-time compare, `isPaired`, `seen`, `remove`, `list`, `status`. No network.
+- `tests/phone-link-store.test.js`: 18 tests pass locally (both keyring stand-ins, the key in no file or argv,
+  a locked keyring is not a lost key,
+  expiry, tries, one phone per window, remove, a tampered file, two stores on one workspace, and a pairing through
+  the real Noise handshake with the store's keys). The noise tests still pass (18).
+- Two rules the store settles, now in PHONE-LINK.md section 3: the helper listens only while on AND (a phone is
+  paired OR a window is open); a key gone from the keyring means a new key on the next turn-on and the old phones
+  dropped.
+- CI: see below.
+
+## Earlier rounds
+
+- Round 1: the survey, docs/PHONE-LINK.md, docs/PHONE-LINK-STRINGS.md, step 2 (`noise.js`, `frames.js`, 18 tests
+  with the published cacophony vector). CI green for c8898a4:
+  https://github.com/acapellascience/trif/actions/runs/43959884729
 
 ## CI
 
-- Round 1, c8898a4: success, https://github.com/acapellascience/trif/actions/runs/43959884729 (the commit after it only edits this file)
+- Round 2: CI_LINE_ROUND_2
+- Round 1, c8898a4: success, https://github.com/acapellascience/trif/actions/runs/43959884729
 
 ## Next step
 
-Step 3: `helper/lib/phonelink/store.js` with its unit tests. The key pair made on first turn-on (private key
-through `keyring.js` setKey/getKey with `{service: 'TRIF phone link'}`, account `computer`, stored as base64url:
-check it against `KEY_RE`), `<private>/phone-link.json` written whole with mode 600 (write a temp file, rename),
-`pairStart()` → `{secret, qr, expires}`, `pairTry(phoneKey, secret, name)` (constant-time compare with
-`crypto.timingSafeEqual`, 5 minutes, 5 wrong tries close the window, the window closes on success), `isPaired(key)`,
-`remove(id)`, `list()`. No network in this step.
+Step 4: `helper/lib/phonelink/server.js` with its tests on 127.0.0.1 and a random port (`listen({host, port})`
+options so tests never bind all interfaces; stop it in `test.after`). `new Server(store, {version, log})`:
+on the store's `'change'`, start or stop the listener to match `store.status().listen` (keys from
+`await store.keys()`; null = don't listen). Per connection: `PacketReader`, a 5-second timer for the first
+message, at most 8 connections; a responder `Handshake` with the store's keys; `readMessage` throws → destroy the
+socket, nothing written. Then `hs.rs` is the phone's key: if the payload has `pair` → `store.pairTry(hs.rs,
+pair, name)`, else `store.isPaired(hs.rs)`; null → destroy, nothing written. Otherwise `writeMessage({v:1, name:
+store.name, paired:true})`, `split()`, `store.seen(id)`, a session `{phone, send(obj), close()}` with `seal` /
+`Assembler`; answer `hello` and `ping`; any other `t` → `error` `bad-request` for now (step 6 adds runs). When a
+phone is removed or the link goes off, close its sessions (compare sessions' phone ids with `store.list()` on
+`'change'`). Call `store.setPort(port)` once listening on a system-given port. Tests: link off = no listener at
+all; unpaired key, removed phone, garbage, a late first message and a wrong pairing secret each get zero bytes
+back and a closed socket; a paired phone gets `hello`/`pong`; removal closes the open session.
 
 ## Notes for next round
 
-- Tests: `node --test tests/phone-link-noise.test.js` (half a second). The whole suite is `npm test`; the browser
-  tests need `TRIF_BROWSER_TESTS=1` and are CI's job (don't run them locally without the lock and the watchdog).
+- Tests: `node --test tests/phone-link-store.test.js tests/phone-link-noise.test.js` (3 seconds). The whole suite
+  is `npm test`; the browser tests need `TRIF_BROWSER_TESTS=1` and are CI's job (don't run them locally without
+  the lock and the watchdog).
+- `store.js` API: `new Store(home, {env, now, name})` (an EventEmitter, `'change'`); `await setOn(true|false)` →
+  `{on, created}`; `await keys()` → `{publicKey, privateKey}` Buffers or null (off, or the keyring's key isn't the
+  file's); `status()` → `{on, id, name, port, phones, pairing, listen}` (no secret, no keys: safe for the panel);
+  `pairStart()` → `{secret, qr, expires}` (throws while off); `pairStop()`; `pairing()`; `pairTry(phoneKey Buffer,
+  secret string, name)` → the phone's row or null; `isPaired(phoneKey Buffer)` → row or null (null while off);
+  `seen(id)`; `remove(id)` → `{id, name}` or null; `list()`; `setPort(port)`. Everything but `setOn`/`keys` is
+  synchronous and reads the file again each time (two helpers agree); the window is the opening helper's alone.
+- Test setup to copy: `setup()` in the store test (temp workspace through `tempDir`, `makeFakeKeychain`, env
+  `{TRIF_KEYCHAIN_BIN}`, a clock the test moves; the private folder is `<home>-private`). The stand-in keychain
+  takes about 0.2 s per `setOn(true)`.
+- The store's expiry timer is unref'd and cleared by `pairStop()`; tests call `store.pairStop()` at the end.
+- Writing a file with the Write tool turned `\u2028` escapes into the real characters (a syntax error inside a
+  regex): check with `cat -v` after writing such escapes.
 - `noise.js` API: `new Handshake({initiator, s: {publicKey, privateKey}, rs, prologue, e})`, `writeMessage`,
   `readMessage`, `split() → {send, receive}`; the responder reads `hs.rs` (the phone's key) after message 1 and
   decides before `writeMessage`: that is where server.js refuses with nothing sent. `keyId(publicKey)` is the
   8-byte id. `frames.js`: `packet`, `PacketReader`, `seal(cipher, obj) → [packets]`, `Assembler(cipher).push(msg)`.
-- The published vector is in the test file: the Swift side (step 12) should run the same one.
+- The published vector is in the noise test file: the Swift side (step 12) should run the same one.
+- The computer's name is `os.hostname()` without `.local` for now (`computerName()` in store.js); the Mac's
+  friendlier name (`scutil --get ComputerName`) could replace it in step 5, where `dns-sd` needs a name anyway.
+- The sandbox keeps runs away from the Keychain already (agents/codex-oss.js's note: the home folder is denied),
+  so a run can't read the computer's key; step 6 should have a test line for the private folder's
+  `phone-link.json` and `phone-link/` being unreadable from a run.
 - The helper lives only while a browser with TRIF is open (native messaging host); several helpers can run, the
   one owning `helper.sock` should own the link (step 8: read host.js around `listen()` and how `helper.sock`
   changes hands).
@@ -89,3 +127,10 @@ check it against `KEY_RE`), `<private>/phone-link.json` written whole with mode 
 3. **Agent and model**: a phone run uses the computer's default agent and model in version 1; the phone shows
    which. Choosing from the phone could come later.
 4. **Strings**: docs/PHONE-LINK-STRINGS.md, all drafts.
+
+Items 1 to 3 stand as defaults (the main session's brief, round 2) until Tim says otherwise. New in round 2,
+small, also a default unless Tim objects:
+
+5. **A lost key drops the listed phones.** If the computer's key is gone from the Keychain (deleted by hand, a
+   new Mac restored without it), turning the link on makes a new key, and the phones listed before are removed
+   from the list, since they can't reach the new key and must scan a new code anyway.

@@ -3,7 +3,7 @@
 Every string people see that this branch adds, exact, for Tim's OK. **None is approved yet**: they are drafts,
 used meanwhile. `{computer}`, `{phone}` and the like are filled in. How it works: docs/PHONE-LINK.md.
 
-Nothing is built that shows these yet (round 1 wrote the design). Each round adds the strings its step shows.
+Nothing is built that shows these yet (round 1 wrote the design; round 2's store only makes three error texts). Each round adds the strings its step shows.
 
 ## Desktop: Settings in the side panel (not built)
 
@@ -18,6 +18,9 @@ Nothing is built that shows these yet (round 1 wrote the design). Each round add
 | Its button | Remove | |
 | After Remove | {phone} can't reach this computer any more. | |
 | The switch | Let connected phones reach this computer | off: no listener; the phones stay listed |
+| Turning on fails: no keyring (Linux without one; not the Mac) | the phone link needs a system keyring to keep this computer's key in (the macOS Keychain, or a Secret Service on Linux) | built in round 2 (`store.js`); the panel that shows it isn't |
+| Turning on fails: the keyring refused | couldn't keep this computer's phone link key: {what the keyring said} | the same; the second half is `keyring.js`'s existing text. Both as the helper's other errors are written (the panel puts them in its own sentence, step 9) |
+| Turning on fails: the keyring can't be read just now (locked) | couldn't read this computer's phone link key: {what the keyring said} | the same; nothing changes (no new key, the phones stay) |
 
 ## iPhone: More (not built; needs branch ios-poc)
 

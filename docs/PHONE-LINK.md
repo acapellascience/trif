@@ -88,6 +88,13 @@ Anything that would weaken one of these stops for Tim's decision (the loop's rul
 - **Removing a phone** (the panel's list): its key leaves the store, its open sessions are closed, its kept
   results are deleted. The phone finds out the next time it connects (section 8).
 - **A new QR** replaces an open window's secret. Closing Settings closes the window.
+- **When the helper listens** (`store.js` `status().listen`): the link is on, and a phone is paired or a pairing
+  window is open. On with nobody paired and no window, nothing listens. The switch stays where the user put it.
+- **A key that's gone** (the keyring's item deleted, or not the file's public key): nothing listens; turning the
+  link on again makes a new key pair and drops the listed phones, which were paired to the old key and can't reach
+  the new one (each shows "isn't connected any more" and pairs again).
+- **The file is read with nothing taken on trust**: a phone's `id` is made from its key again, rows without a
+  32-byte key are dropped, and a file that doesn't read is the same as none (off, nobody paired).
 
 ## 4. The wire
 

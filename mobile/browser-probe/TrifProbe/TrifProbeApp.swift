@@ -701,7 +701,10 @@ struct PageGlyph: View {
     var plus = false
     var body: some View {
         ZStack {
+            // (the soft circle only behind the +: over the chat, Mods, the tabs or the address screen the circle would
+            // read as "you're here", as it does behind the chat's robot, so the page glyph has none: Tim, 11-16)
             Circle().fill(Color.trifGreen.opacity(0.16)).frame(width: 40, height: 40)
+                .scaleEffect(plus ? 1 : 0.6).opacity(plus ? 1 : 0)
             if let letter, !letter.isEmpty, !plus {
                 Text(letter).font(.system(size: 19, weight: .bold, design: .rounded))
             } else {

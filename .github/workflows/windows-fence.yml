@@ -75,8 +75,9 @@ jobs:
           $node = (Get-Command node).Source
           $cred = New-Object System.Management.Automation.PSCredential($name, $pw)
           Write-Output "node: $node; as: $name (groups below, from inside the run)"
-          $p = Start-Process -FilePath $node -ArgumentList "`"$work\tests\windows-fence\run.js`" --yes-this-computer" -Credential $cred -WorkingDirectory $work -RedirectStandardOutput "$work\out.txt" -RedirectStandardError "$work\err.txt" -Wait -PassThru -NoNewWindow
-          Write-Output "exit code: $($p.ExitCode)"
+          $p = Start-Process -FilePath $node -ArgumentList "`"$work\tests\windows-fence\run.js`" --yes-this-computer" -Credential $cred -WorkingDirectory $work -RedirectStandardOutput "$work\out.txt" -RedirectStandardError "$work\err.txt" -PassThru -NoNewWindow
+          # (not -Wait, which also waits for everything the program started; six minutes, then what it wrote)
+          if (-not $p.WaitForExit(360000)) { Write-Output 'still going after six minutes: stopped'; taskkill /PID $p.Id /T /F | Out-Null } else { Write-Output "exit code: $($p.ExitCode)" }
           if (Test-Path "$work\out.txt") { Get-Content "$work\out.txt" }
           if (Test-Path "$work\err.txt") { Write-Output '--- stderr'; Get-Content "$work\err.txt" }
           exit 0

@@ -552,7 +552,9 @@ test('`trif agent open-model`: --set-key from stdin (never argv), --remove-key; 
 
 // ------------------------------------------------------------------ the key proxy (keyproxy.js)
 
-test('key proxy: a kept-alive connection the provider closed meanwhile is retried once on a new one, with the same body', async () => {
+// (Node 18 opens a new connection for every request unless told otherwise, so there's nothing to retry there:
+// seen once this file ran on windows-latest's Node 18 job; macOS's CI is Node 22)
+test('key proxy: a kept-alive connection the provider closed meanwhile is retried once on a new one, with the same body', { skip: Number(process.versions.node.split('.')[0]) < 19 && 'Node 18 keeps no connection alive by default' }, async () => {
   const net = require('net');
   const { startKeyProxy } = require('../helper/lib/keyproxy');
   // A provider that answers the first request on a connection and drops the connection at the second

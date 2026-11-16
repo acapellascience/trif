@@ -45,6 +45,10 @@ shared = project.main_group.new_group('Shared (from the repository)')
 pages = shared.new_file('../shared/pages')
 pages.last_known_file_type = 'folder'
 resources << pages
+# (and the side panel, as prepare.js copies it: a folder named "panel", for the robot view's More)
+panel = shared.new_file('../shared/gen/panel')
+panel.last_known_file_type = 'folder'
+resources << panel
 target.add_resources(resources)
 
 target.build_configurations.each do |config|

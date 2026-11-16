@@ -54,6 +54,27 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// TRIF in the chat (Web/chat.js; Tim, 11-13): its own world beside Claude's or ChatGPT's page.
     static let chatWorld = WKContentWorld.world(name: "trif-chat")
     @Published var service: ChatService = ChatService(rawValue: UserDefaults.standard.string(forKey: "chatService") ?? "") ?? .claude
+    /// The switch's third choice, More (Tim, 11-16): the desktop side panel's own chat on an API key, or on this iPhone
+    /// (PanelChat.swift), in place of Claude's or ChatGPT's page. Remembered.
+    @Published private(set) var more = UserDefaults.standard.bool(forKey: "chatMore")
+    private(set) lazy var panel: PanelChat = {
+        let p = PanelChat(browser: browser!, report: report)
+        p.onActivity = { [weak self] a in self?.activity = a }
+        p.isShown = { [weak self] in self?.shown ?? false }
+        return p
+    }()
+    /// Claude, ChatGPT or More.
+    func choose(more m: Bool, service s: ChatService? = nil) {
+        if m != more {
+            more = m
+            UserDefaults.standard.set(m, forKey: "chatMore")
+            report.log("claude", m ? "switched to More (the side panel's chat)" : "switched back to \(s?.rawValue ?? service.rawValue)")
+            if m { panel.start() } else if shown, !started { start() }
+        }
+        if let s, !m { use(s) }
+    }
+    /// The shown tab changed: the side panel follows it, as on desktop.
+    func tabChanged() { if more { panel.pushTab() } }
 
     @Published var popup: WKWebView?
     @Published var loading = false
@@ -304,6 +325,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// the message box after (Point TRIF at this).
     func open(then extra: (() async -> Void)? = nil) {
         Diagnostics.shared.mark("opening the chat")
+        // (More: the side panel's chat, which has its own context and fills nothing)
+        if more {
+            if activity == .replied { activity = .idle }
+            shown = true
+            panel.start()
+            report.log("claude", "More: opened")
+            return
+        }
         let was = activity
         let already = shown
         if was == .replied { activity = .idle }
@@ -870,19 +899,29 @@ struct ChatScreen: View {
             HStack(spacing: 8) {
                 // (back in the chat's own history: from a file, a link or a sign-in page to the conversation; the toolbar's
                 // page button goes back to the tab. 11-16)
+                if !pane.more {
                 Button { pane.back() } label: { Image(systemName: "chevron.left").font(.body.weight(.semibold)) }
                     .disabled(!pane.canGoBack)
                     .opacity(pane.canGoBack ? 1 : 0)
                     .accessibilityLabel("Back")
                     .accessibilityHidden(!pane.canGoBack)
+                }
                 Spacer(minLength: 4)
-                Picker("Chat", selection: Binding(get: { pane.service }, set: { pane.use($0) })) {
-                    ForEach(ChatService.allCases) { Text($0.rawValue).tag($0) }
+                // (Claude · ChatGPT · More: the third, the side panel's own chat, on an API key or this iPhone)
+                Picker("Chat", selection: Binding(get: { pane.more ? "more" : pane.service.rawValue }, set: { v in
+                    if v == "more" { pane.choose(more: true) } else { pane.choose(more: false, service: ChatService(rawValue: v)) }
+                })) {
+                    ForEach(ChatService.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                    Text("More").tag("more")
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
                 // (the chat's reload, beside new chat; stop while it loads. Not a pull: a conversation is long, its top far
                 // away. 11-16)
+                // (More: the panel's own bar has New chat and Settings; the switch alone up here, centred)
+                if pane.more {
+                    Spacer(minLength: 4)
+                } else {
                 if pane.loading {
                     Button { pane.webView.stopLoading(); pane.loading = false } label: { Image(systemName: "xmark") }
                         .accessibilityLabel("Stop loading")
@@ -892,6 +931,7 @@ struct ChatScreen: View {
                 }
                 Button { pane.home() } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel("Start over")
+                }
             }
             .overlay(alignment: .bottom) {
                 // (a project's page, not yet TRIF's: use it for TRIF's chats)
@@ -901,6 +941,9 @@ struct ChatScreen: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             Divider()
+            if pane.more {
+                WebViewHost(webView: pane.panel.webView)
+            } else {
             WebViewHost(webView: pane.webView)
                 .overlay(alignment: .top) {
                     if pane.adding {
@@ -915,6 +958,7 @@ struct ChatScreen: View {
                         .allowsHitTesting(false)
                     }
                 }
+            }
         }
         .background(Color(.systemBackground))
         .sheet(isPresented: Binding(get: { pane.popup != nil }, set: { if !$0 { pane.popup = nil } })) {

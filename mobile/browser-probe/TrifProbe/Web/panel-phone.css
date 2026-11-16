@@ -1,0 +1,19 @@
+/* The side panel on the iPhone (the robot view's More; Web/panel-adapter.js): only what the phone doesn't have goes.
+   - The robot's power switch: the app has no robot to turn off on a site.
+   - Settings that are desktop's: its instructions file, updates, Tim's mods, sites, sensitive sites, Setup and status
+     (the Mods tab has the mods, its switches and approvals). The agent level menu: the app's tools are fixed (read
+     the page, try a mod for a moment, a screenshot).
+   - The mods list over the chat: the Mods tab is where they are. */
+#bar-robot, #site-switch, #waiting-badge { display: none !important; }
+#settings .field-stacked, #instructions-note, #settings .check, #update-note, #starter, #settings .sites-block,
+#settings > p.note:last-child { display: none !important; }
+#agent-level-wrap, #mods, #drop-overlay { display: none !important; }
+
+/* The phone's widths (an SE is 375 points): the key rows wrap under their name. */
+.phone-keys { margin-top: 10px; }
+.phone-key { flex-wrap: wrap; row-gap: 6px; }
+.phone-key .om-key { flex: 1 1 100%; display: flex; gap: 6px; align-items: center; }
+.phone-key .om-key input { flex: 1 1 auto; min-width: 0; }
+/* No hover on a touch screen; a little more room for a thumb on the buttons. */
+.btn, .icon-btn { min-height: 32px; }
+textarea#input { font-size: 16px; } /* (under 16 px, iOS zooms the page when the box is tapped) */

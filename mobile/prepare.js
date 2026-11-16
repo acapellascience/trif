@@ -11,7 +11,7 @@
 //   returns JSON text.
 //
 //   node mobile/prepare.js           write them
-//   node mobile/prepare.js --check   exit 1 if either isn't what the current sources give
+//   node mobile/prepare.js --check   exit 1 if any isn't what the current sources give
 
 const fs = require('fs');
 const path = require('path');
@@ -137,6 +137,39 @@ function robotSwiftFile() {
     `    static let rimColour = ${rgb(green)}\n    static let faceColour = ${rgb(faceColour)}\n    static let eyeColour = ${rgb(eyeColour)}\n}\n`;
 }
 
+
+// panel/: the desktop side panel itself (extension/sidepanel.html, .js, .css and every module it imports, its
+// explanations and robot pictures), as the extension has them, for the robot view's More (the chat on an API key,
+// or on this iPhone): served to a web view of its own (TrifProbe/PanelChat.swift) at trifpanel://panel/. Only the
+// page changes: two lines before its own stylesheets end, the app's adapter (Web/panel-adapter.js: what the panel
+// gets from the background and the helper on desktop) and the phone's few styles (Web/panel-phone.css).
+const PANEL_DIR = path.join(__dirname, 'shared', 'gen', 'panel');
+const PANEL_FILES = ['sidepanel.js', 'sidepanel.css', 'switch.css', 'lib.js', 'runtime.js', 'sandbox.js', 'pagewide.js', 'markdown.js',
+  'login.js', 'agentsites.js', 'modlevel.js', 'icons.js', 'explain.js', 'explain.json', 'modswitch.js', 'openmodel.js'];
+const PANEL_ICONS = /^(robot-shaded.*\.svg|robot-32\.png)$/;
+const PANEL_HOOK = '<link rel="stylesheet" href="switch.css">';
+function panelFiles() {
+  const ext = path.join(ROOT, 'extension');
+  const out = new Map();
+  // (every module the panel imports, so a new import can't be left out: checked, not guessed)
+  const seen = new Set();
+  const walk = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const text = fs.readFileSync(path.join(ext, file), 'utf8');
+    for (const m of text.matchAll(/^import [^;]*? from '\.\/([\w.-]+)';/gms)) walk(m[1]);
+  };
+  walk('sidepanel.js');
+  const missing = [...seen].filter((f) => !PANEL_FILES.includes(f));
+  if (missing.length) throw new Error(`the side panel imports ${missing.join(', ')}: add to PANEL_FILES in mobile/prepare.js`);
+  for (const f of PANEL_FILES) out.set(f, fs.readFileSync(path.join(ext, f)));
+  for (const f of fs.readdirSync(path.join(ext, 'icons')).filter((n) => PANEL_ICONS.test(n)).sort()) out.set(`icons/${f}`, fs.readFileSync(path.join(ext, 'icons', f)));
+  const html = fs.readFileSync(path.join(ext, 'sidepanel.html'), 'utf8');
+  if (!html.includes(PANEL_HOOK)) throw new Error(`sidepanel.html: no ${PANEL_HOOK}`);
+  out.set('sidepanel.html', Buffer.from(html.replace(PANEL_HOOK, `${PANEL_HOOK}\n<!-- (the iPhone app: mobile/prepare.js) -->\n<link rel="stylesheet" href="panel-phone.css">\n<script src="panel-adapter.js"></script>`)));
+  return out;
+}
+
 async function main() {
   const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()], [ROBOT_OUT, robotSwiftFile()]];
   for (const [file, text] of files) {
@@ -148,7 +181,23 @@ async function main() {
     fs.writeFileSync(file, text);
     console.log(`wrote ${path.relative(ROOT, file)} (${(text.length / 1024).toFixed(0)} KB)`);
   }
+  // (the panel's folder: the same files, and nothing else in it)
+  const panel = panelFiles();
+  const there = fs.existsSync(PANEL_DIR) ? listFiles(PANEL_DIR) : [];
+  if (process.argv.includes('--check')) {
+    const extra = there.filter((f) => !panel.has(f));
+    const stale = [...panel].filter(([f, data]) => !fs.existsSync(path.join(PANEL_DIR, f)) || !fs.readFileSync(path.join(PANEL_DIR, f)).equals(data)).map(([f]) => f);
+    if (extra.length || stale.length) { console.error(`mobile/shared/gen/panel is out of date (${[...stale, ...extra].join(', ')}): run node mobile/prepare.js`); process.exit(1); }
+    return;
+  }
+  for (const f of there) if (!panel.has(f)) fs.rmSync(path.join(PANEL_DIR, f));
+  for (const [f, data] of panel) { fs.mkdirSync(path.dirname(path.join(PANEL_DIR, f)), { recursive: true }); fs.writeFileSync(path.join(PANEL_DIR, f), data); }
+  console.log(`wrote ${path.relative(ROOT, PANEL_DIR)} (${panel.size} files)`);
+}
+
+function listFiles(dir, base = '') {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? listFiles(path.join(dir, e.name), `${base}${e.name}/`) : [`${base}${e.name}`]));
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { runtimeFile, checksFile, modsFile, kitFile, bridgeFile, robotSwiftFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT, ROBOT_OUT };
+module.exports = { panelFiles, PANEL_DIR, runtimeFile, checksFile, modsFile, kitFile, bridgeFile, robotSwiftFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT, ROBOT_OUT };

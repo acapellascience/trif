@@ -31,6 +31,11 @@
 		ECF9AC8198F8D474EE8E0A97 /* History.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4AB4F92AE50452752EADEC /* History.swift */; };
 		A1C10B0E5EB1C11B00000001 /* WebClip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000002 /* WebClip.swift */; };
 		A1C10B0E5EB1C11B00000005 /* FolderWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000006 /* FolderWatch.swift */; };
+		A1C10B0E5EB1C11B00000007 /* PanelChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000008 /* PanelChat.swift */; };
+		A1C10B0E5EB1C11B00000009 /* PanelEngines.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000010 /* PanelEngines.swift */; };
+		A1C10B0E5EB1C11B00000011 /* panel-adapter.js in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000012 /* panel-adapter.js */; };
+		A1C10B0E5EB1C11B00000013 /* panel-phone.css in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000014 /* panel-phone.css */; };
+		A1C10B0E5EB1C11B00000015 /* panel in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000016 /* panel */; };
 		A1C10B0E5EB1C11B00000003 /* RobotShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000004 /* RobotShape.swift */; };
 		83C9CC277679A1522C7BFBA3 /* ModsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */; };
 		0EF94AA25682CDCF85352992 /* Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903BBCA66CB348FEA79D82F4 /* Import.swift */; };
@@ -71,6 +76,11 @@
 		7F4AB4F92AE50452752EADEC /* History.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "History.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000002 /* WebClip.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "WebClip.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000006 /* FolderWatch.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FolderWatch.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000008 /* PanelChat.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PanelChat.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000010 /* PanelEngines.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PanelEngines.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000012 /* panel-adapter.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = "panel-adapter.js"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000014 /* panel-phone.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; path = "panel-phone.css"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000016 /* panel */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; name = panel; path = ../shared/gen/panel; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000004 /* RobotShape.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "RobotShape.swift"; sourceTree = "<group>"; };
 		8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModsPanel.swift"; sourceTree = "<group>"; };
 		903BBCA66CB348FEA79D82F4 /* Import.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Import.swift"; sourceTree = "<group>"; };
@@ -119,6 +129,8 @@
 			children = (
 				70D950EDA7F1B22C717ECA41 /* style-mirror.js */,
 				D6514E135D112DD05D6B9F94 /* mods-page.css */,
+				A1C10B0E5EB1C11B00000012 /* panel-adapter.js */,
+				A1C10B0E5EB1C11B00000014 /* panel-phone.css */,
 				9526F4091350361C7E46F708 /* mods-page.js */,
 				22B988337DDCC367969E0FE6 /* mods.html */,
 				29CF97A92F672EEB375D02B9 /* start-own.js */,
@@ -143,6 +155,7 @@
 				32DE102B13442D7BC15C2099 /* browser-checks.json */,
 				D433E4378C40E0B5BEA34AF4 /* ses.umd.min.js */,
 				67A9547FACE37CC4642FD1F6 /* pages */,
+				A1C10B0E5EB1C11B00000016 /* panel */,
 			);
 			name = "Shared (from the repository)";
 			sourceTree = "<group>";
@@ -166,6 +179,8 @@
 				A1C10B0E5EB1C11B00000002 /* WebClip.swift */,
 				A1C10B0E5EB1C11B00000004 /* RobotShape.swift */,
 				A1C10B0E5EB1C11B00000006 /* FolderWatch.swift */,
+				A1C10B0E5EB1C11B00000008 /* PanelChat.swift */,
+				A1C10B0E5EB1C11B00000010 /* PanelEngines.swift */,
 				50952D10E0015A131982D938 /* Tabs.swift */,
 				C92814A95137C3CC4B0A8C2F /* Browser.swift */,
 				A67596316AFDF35B8CF90704 /* Checks.swift */,
@@ -242,6 +257,9 @@
 				1E813C508DF4C8DECF355AB3 /* sidepanel.css in Resources */,
 				4206EC0D673279D34CB31867 /* panel-kit.js in Resources */,
 				28EAA961AB24934B42B02715 /* mods-page.css in Resources */,
+				A1C10B0E5EB1C11B00000011 /* panel-adapter.js in Resources */,
+				A1C10B0E5EB1C11B00000013 /* panel-phone.css in Resources */,
+				A1C10B0E5EB1C11B00000015 /* panel in Resources */,
 				F35D29FE9EAE39CBCE16471E /* mods-page.js in Resources */,
 				B7F7A78E2063372A6C3DBEDA /* mods.html in Resources */,
 				1C17BC0B5A6D8672C0959C5C /* start-own.js in Resources */,
@@ -272,6 +290,8 @@
 				A1C10B0E5EB1C11B00000001 /* WebClip.swift in Sources */,
 				A1C10B0E5EB1C11B00000003 /* RobotShape.swift in Sources */,
 				A1C10B0E5EB1C11B00000005 /* FolderWatch.swift in Sources */,
+				A1C10B0E5EB1C11B00000007 /* PanelChat.swift in Sources */,
+				A1C10B0E5EB1C11B00000009 /* PanelEngines.swift in Sources */,
 				1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */,
 				066931474CC5139D68D2F470 /* Browser.swift in Sources */,
 				17237858CB0A046A273784DC /* Checks.swift in Sources */,

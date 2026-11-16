@@ -262,6 +262,27 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | Tapping it | — | **Use this project for TRIF chats?** New TRIF chats start in this project. If you pasted TRIF's instructions into it, each chat gets just the page. · Use it: TRIF's instructions are in it · Use it: they aren't in it · Cancel |
 | What's copied for the project's instructions | — | agent-facing (TRIF's how-to-reply note and the mod guide), not for review |
 
+## More: the side panel's chat on an API key, or on this iPhone (added 11-16)
+
+The desktop side panel itself runs here (mobile/prepare.js copies it): every word it already has carries over unchanged
+and isn't listed. Only what's new or reads differently on the phone:
+
+| Where | Old | New |
+|---|---|---|
+| The robot view's switch | Claude · ChatGPT | Claude · ChatGPT · **More** |
+| The panel's agent picker (Settings → Agent) | the coding agents | On this iPhone · Claude API · OpenAI API · OpenRouter (and the panel's own None (robotless)) |
+| On this iPhone's note under the agent | — | A stand-in for now: no model runs on this iPhone yet. |
+| Its one model | — | Stand-in · No model runs on this iPhone yet: a canned reply, to try the chat end to end. |
+| OpenRouter's default model | — | Auto (OpenRouter picks) |
+| Settings, under the effort: a block of its own | — | **API keys** · one row each: Anthropic / OpenAI / OpenRouter, a field (Paste your key) and Save; once saved: ✓ Saved · Replace · Remove key (Cancel while replacing). Under each: Sent only to {host}. At the end: Each key is kept in this iPhone’s Keychain, only on this iPhone, and only sent to its own service. |
+| Saving or removing a key | — | Saving… · Removing… · Couldn’t save the key: {why} · Couldn’t remove the key: {why} (the Keychain's own refusal: the Keychain said no ({code})) |
+| An engine without its key (the panel's login notice, its own words) | {agent} isn’t logged in. | {Claude API} isn’t logged in. To log in, add your {Anthropic} API key in Settings, under API keys. (Send's tooltip: Log in to {Claude API} first) |
+| The run's steps, one line each (the panel's tool lines) | — | Read the page's outline · Looked for `{selector}`: {n} match / matches · Looked for `{selector}`: not a valid selector · Couldn't look for `{selector}` · Tried {mod} (style mod): {x} of {y} selectors matched[, {n} errors] · Tried {mod} (boxed mod): no errors / {n} errors · Tried {mod} (style mod): it failed to start · Couldn't try it: {why} · Couldn't try {mod}: free mods can't be tried here · Couldn't try {mod}: its @match doesn't cover this page · Took a screenshot · Couldn't take a screenshot · Couldn't use the tab: it was closed · Couldn't read a tool call (its arguments weren't JSON) · Asked for a tool TRIF doesn't have ({name}) |
+| A run's errors (the panel's error lines) | — | {Claude API}: {the service's own message} ({status}) · Stopped after 15 steps. Say “go on” to let it continue. · The reply was cut off: it reached the model's length limit. · {Claude API}: the model declined this request · No {Anthropic} API key yet: add it in Settings, under API keys. |
+| Something of desktop's panel the phone doesn't have | — | This isn’t in the iPhone app yet. |
+| On this iPhone's reply (the stand-in, until a model runs on the phone) | — | This is a stand-in: no model runs on this iPhone yet. When one does, it answers here, with the page in hand. / Meanwhile, here's a small style mod for this site, to try Add this mod?: it underlines the links. (the mod: Underlined links · Underlines every link (from the stand-in on this iPhone)) |
+| Not shown on the phone (panel-phone.css) | the robot's power switch, the mods list, the agent level menu, Settings' instructions, updates, Tim's mods, sites, sensitive sites, Report a problem · Setup and status | — (the Mods tab has the mods; the app's tools are fixed) |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

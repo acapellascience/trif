@@ -214,6 +214,11 @@ extension Model {
         if let js = step["panejs"] as? String, let wv = Model.pane?.webView {
             do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
         }
+        // (the robot view's More: chosen, and JavaScript in the side panel's page)
+        if let m = step["more"] as? Bool { Model.pane?.choose(more: m, service: m ? nil : .claude) }
+        if let js = step["paneljs"] as? String, let wv = Model.pane?.panel.webView {
+            do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
+        }
         try? out.write(to: docs.appendingPathComponent("step-out.txt"), atomically: true, encoding: .utf8)
     }
 }
@@ -364,8 +369,8 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: browser.address) { _, _ in pane.follow(site: browser.site) }
-        .onChange(of: browser.pageChanged) { _, _ in pane.follow(site: browser.site); bars.attach(browser.webView) }
+        .onChange(of: browser.address) { _, _ in pane.follow(site: browser.site); pane.tabChanged() }
+        .onChange(of: browser.pageChanged) { _, _ in pane.follow(site: browser.site); pane.tabChanged(); bars.attach(browser.webView) }
         .onChange(of: browser.loading) { _, now in if now { bars.expand() } }
         // (the bars stay full while anything covers the page: its toolbar is how to get back)
         .onChange(of: covered) { _, now in bars.hold(now) }

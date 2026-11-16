@@ -160,6 +160,32 @@ Built on the probe, toward something to use every day:
   without the 16 KB guide. Project chats still show in Recents on both services (user reports, 11-16), so this
   groups them, it doesn't hide them. Unchecked on real logged-in pages: Claude's `/project/<id>` and ChatGPT's
   `/g/g-p-<id>-<name>/project` composers. The stand-in: serve.js answers `/project/<id>` with chat.html.
+- **More: the side panel's own chat, on an API key or this iPhone** (PanelChat.swift, PanelEngines.swift,
+  Web/panel-adapter.js, Web/panel-phone.css; 11-16). The robot view's switch is Claude · ChatGPT · More. More is the
+  desktop side panel itself: `node mobile/prepare.js` copies extension/sidepanel.html and every module it imports
+  (followed from its imports, so a new one can't be missed) into mobile/shared/gen/panel, unchanged but for two lines
+  in the page (the adapter and the phone's styles), and `--check` fails when they drift. The app serves it at
+  trifpanel://panel/. The adapter is what the panel gets from the background and the helper on desktop: storage (kept
+  in Application Support/panel-store.json), the shown tab as its window's active tab, and the requests (status,
+  agent.list, agent.models, agent.start/stop, chat.clear, chat.note); a run's events go into `chat:<site>` as
+  background.js onAgentEvent puts them there, so messages, tool lines, errors, Stop and New chat are the panel's own.
+  The engines are its agents (On this iPhone, Claude API, OpenAI API, OpenRouter), each with the panel's model and
+  effort pickers (the service's own model list once a key is saved; Other… takes any exact name). Missing a key, an
+  engine is "logged out" with the panel's own notice. Keys: Settings → API keys (added by the adapter), kept in the
+  Keychain on this device only (`WhenUnlockedThisDeviceOnly`, not synced), never sent back to the page, never logged,
+  sent only to that engine's host over HTTPS. The APIs: Anthropic's Messages API (streamed; thinking blocks passed
+  back as they came; prompt caching; server-side fallbacks on Opus 5.5, Sonnet 5.5, Fable 5.2), OpenAI's Responses
+  API (streamed, `store: false`, reasoning items passed back), OpenRouter's chat completions. Tools against the tab
+  the run started on: read_page, try_mod (style or boxed, TRIF's runtime, no powers, taken off by reloading the tab
+  when another is tried or the run ends), screenshot (models that take pictures); their results go to the model
+  marked as the website's data, not instructions; at most 15 steps. The mods in the replies go to Add this mod?.
+  On this iPhone is a stand-in (a canned reply with a small style mod) until the on-device engine is in.
+  Testing: `node mobile/mock-api.js 8379` and the app with `-apibase http://localhost:8379` (a loopback address only)
+  and the key `sk-test-not-a-real-key`; never a real key. The mock follows a script (read_page, try_mod, the mod;
+  "loop" for the step cap, "slow" to try Stop) and refuses a turn that lost its thinking block or reasoning item.
+  In the Simulator the Keychain needs the app signed to run locally with an entitlements file (application-identifier
+  and keychain-access-groups); unsigned it answers -34018. Unverified: real services, real keys, and the Keychain in
+  a sideloaded build (the signing tool gives it its entitlements).
 - **History** (History.swift). Every page any tab shows, newest first, by day; search, tap to open, long-press
   for a new tab, swipe to delete, Clear… (last hour, today, all). Kept in one file in Application Support, left
   out of backups; nothing sends it anywhere.

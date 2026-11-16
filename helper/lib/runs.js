@@ -969,10 +969,14 @@ class Runs {
         const file = path.join(run.box, name);
         let line;
         try {
-          const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+          // (Windows has no O_NOFOLLOW, and opened a link there: so a link is told by looking first, and by what
+          // was opened being the file that was looked at)
+          const seen = fs.lstatSync(file);
+          if (!seen.isFile()) throw new Error('not a request');
+          const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
           try {
             const st = fs.fstatSync(fd);
-            if (!st.isFile() || st.size > MAX_BOX_REQUEST) throw new Error('not a request');
+            if (!st.isFile() || st.size > MAX_BOX_REQUEST || st.ino !== seen.ino || st.dev !== seen.dev) throw new Error('not a request');
             line = fs.readFileSync(fd, 'utf8').trim();
           } finally { fs.closeSync(fd); }
         } catch { line = null; }

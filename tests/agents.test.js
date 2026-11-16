@@ -689,7 +689,7 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
     { kind: 'text', text: 'Done: the banner is hidden.' },
   ]);
   assert.equal(evs.filter((e) => e.kind === 'done').length, 1);
-  assert.deepEqual(done, { kind: 'done', ok: true, result: 'Done: the banner is hidden.', costUsd: 0.0123, changedFiles: ['sites/example.com/fake.js'], sessionId: 'sess-new-1', undoable: ['example.com/fake'] });
+  assert.deepEqual(done, { kind: 'done', ok: true, result: 'Done: the banner is hidden.', costUsd: 0.0123, changedFiles: [inWs('sites', 'example.com', 'fake.js')], sessionId: 'sess-new-1', undoable: ['example.com/fake'] });
 
   // The agent got the contract's flags, cwd and context. Its working folder is the run's own copy of the
   // workspace (stage.js), beside its mailbox, removed after the run; its edit is in the mods folder.
@@ -1194,7 +1194,7 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
     '',
     'done: ok ($0.0123)',
     'session: sess-new-1   (continue: trif agent run --session sess-new-1 --url https://example.com/page "...")',
-    'changed: sites/example.com/fake.js',
+    `changed: ${inWs('sites', 'example.com', 'fake.js')}`,
     '',
   ].join('\n'));
   const call = calls(bin).pop();
@@ -1949,7 +1949,7 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   r = await extRequest(ext, 'agent.models', { agent: 'nope' });
   assert.match(r.error, /unknown agent/);
   // Too old for permission profiles: not offered at all.
-  fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\necho "codex-cli 0.120.0"\n');
+  fs.writeFileSync(path.join(bin, 'codex'), `#!${process.execPath}\nconsole.log('codex-cli 0.120.0');\n`);
   r = await extRequest(ext, 'agent.list', {});
   const cx = r.result.agents.find((a) => a.id === 'codex');
   assert.equal(cx.available, false);

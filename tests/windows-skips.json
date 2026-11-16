@@ -2,6 +2,7 @@
   "reasons": {
     "runs": "a side-panel run's test still written for macOS and Linux: #!/bin/sh stand-ins, a PATH with colons, a folder locked with chmod (docs/WINDOWS-PROGRESS.md)",
     "mac-command": "about the command and the sandbox settings for macOS and Linux, which Windows never builds (Windows' own: tests/windows-runs.test.js, \"Claude Code on Windows: …\")",
+    "open-model": "chats with an open model are off there: no run of one has been fenced or attacked (docs/WINDOWS-PROGRESS.md)",
     "login": "logging an agent in from the panel is off there, with runs",
     "limits": "a run's limits are worked out for macOS's and Linux's sandboxes; Windows' aren't built",
     "keychain": "about the macOS Keychain and Linux's Secret Service, through stand-ins that are scripts (Credential Manager: tests/windows.test.js, tests/windows-smoke.js)",
@@ -72,9 +73,9 @@
     "open-models.test.js": {
       "`trif agent open-model`: --set-key from stdin (never argv), --remove-key; --key-env gone; doctor: key saved or missing (never shown), key variables in the environment": "keychain",
       "codex-oss prepare: a proxy only with a saved key, read afresh each run; the run closes it; settings say whether one is saved": "keychain",
-      "command: local Ollama, LM Studio, OpenRouter (through the key proxy), custom URL with resume": "runs",
-      "helper: codex-oss listed (experimental, never the default); settings and the API key through agent.openModel*; refused from a run": "runs",
-      "helper: no key, Ollama down or the model missing: the run fails fast with the fix, Codex never starts": "runs",
+      "command: local Ollama, LM Studio, OpenRouter (through the key proxy), custom URL with resume": "open-model",
+      "helper: codex-oss listed (experimental, never the default); settings and the API key through agent.openModel*; refused from a run": "open-model",
+      "helper: no key, Ollama down or the model missing: the run fails fast with the fix, Codex never starts": "open-model",
       "helper: the key never reaches Codex (no env, no argv): read from the keyring, the run's key proxy adds it, closes after; never in logs or events": "keychain",
       "keyring: macOS `security` (written through -i on stdin, as hex: never in argv), Linux secret-tool, none; keys checked": "keychain"
     },

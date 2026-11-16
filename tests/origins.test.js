@@ -267,6 +267,9 @@ test('a mod renamed while another browser\'s run is going keeps its own origin; 
   await sleep(300);
   // Firefox (B) has a run going on x.com (this test process stands in for its helper).
   markRunActive(home, { runId: 'rB1', by: 'B', browser: 'Firefox', site: 'x.com' });
+  // (Windows stamps a file up to 16 ms behind the clock a run's start is read from: seen on Node 18, where the
+  // new file looked older than the run)
+  await sleep(50);
   const since = ext.messages.length;
   fs.renameSync(path.join(home, 'sites', 'x.com', 'wobble.js'), path.join(home, 'sites', 'x.com', 'jelly.js'));
   writeMod(home, 'x.com', 'new.js', '// made during the run');

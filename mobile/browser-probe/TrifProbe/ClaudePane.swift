@@ -38,6 +38,27 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     @Published var popup: WKWebView?
     @Published var loading = false
+    /// The chat's own history (its page's back and forward): the chat's ‹ and the toolbar's arrows while it shows.
+    @Published private(set) var canGoBack = false
+    @Published private(set) var canGoForward = false
+    func back() { if canGoBack { webView.goBack() } }
+
+    /// Reload, the chat's own (Tim, 11-16: "if anything goes wrong there, you're stuck"): the same address, never a
+    /// new chat. A reply being written is watched again once it has loaded (didFinish: chat.js resume); the tab's data
+    /// being put in its box is put in again, once.
+    func reloadChat() {
+        report.log("claude", "\(service.rawValue): reloaded")
+        fillGeneration += 1
+        if adding, let p = lastPrepared { refill = p }
+        loading = true
+        navigating = true
+        webView.reload()
+    }
+    /// Which fill is current: a reload makes the one under way stop, and starts it again after.
+    private var fillGeneration = 0
+    private var lastPrepared: Prepared?
+    private var refill: Prepared?
+    func forward() { if webView.canGoForward { webView.goForward() } }
     /// The chat is showing, full screen over the tab.
     @Published private(set) var shown = false
     @Published private(set) var activity: ChatActivity = .idle
@@ -77,10 +98,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         sv.isScrollEnabled = false
         sv.bounces = false
         sv.contentInsetAdjustmentBehavior = .never
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, !ClaudePane.scrolls(self.webView.scrollView) else { return }
-                self.webView.scrollView.setContentOffset(.zero, animated: true)
+        // (the keyboard gone, however it went (Tim, 11-16: the chat's page stayed pushed up, its message box mid-screen
+        // over an empty half, after the keyboard closed): the chat's page back in its frame, now and once it has
+        // settled; doing it again changes nothing)
+        for name in [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.settleLayout() }
             }
         }
         scrollWatches = [
@@ -106,9 +129,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let url = wv.url
             Task { @MainActor in self?.remember(url) }
         }
+        historyWatches = [
+            webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in let v = wv.canGoBack; Task { @MainActor in self?.canGoBack = v } },
+            webView.observe(\.canGoForward, options: [.new]) { [weak self] wv, _ in let v = wv.canGoForward; Task { @MainActor in self?.canGoForward = v } },
+        ]
     }
 
     private var urlWatch: NSKeyValueObservation?
+    private var historyWatches: [NSKeyValueObservation] = []
     private var scrollWatches: [NSKeyValueObservation] = []
 
     /// Whether a page is bigger than the web view showing it (then it scrolls as a document does).
@@ -130,10 +158,35 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let sv = self.webView.scrollView
             let over = max(sv.contentSize.height - sv.bounds.height, sv.contentSize.width - sv.bounds.width)
             let on = sv.isScrollEnabled ? over > 1 : over > 24
-            guard sv.isScrollEnabled != on else { return }
-            sv.isScrollEnabled = on
-            sv.bounces = on
-            if !on, sv.contentOffset != .zero { sv.setContentOffset(.zero, animated: false) }
+            if sv.isScrollEnabled != on {
+                sv.isScrollEnabled = on
+                sv.bounces = on
+            }
+            self.clampOffset()
+        }
+    }
+
+    /// The page's offset inside its frame, kept within what it can be: none when it fits (the chats scroll inside
+    /// themselves), and never past its end (WebKit can leave the page pushed up once the keyboard has gone).
+    private func clampOffset() {
+        let sv = webView.scrollView
+        guard !sv.isTracking, !sv.isDecelerating else { return }
+        let maxY = max(0, sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+        let maxX = max(0, sv.contentSize.width - sv.bounds.width)
+        let fit = CGPoint(x: min(max(sv.contentOffset.x, 0), maxX), y: sv.isScrollEnabled ? min(max(sv.contentOffset.y, -sv.adjustedContentInset.top), maxY) : 0)
+        if fit != sv.contentOffset { sv.setContentOffset(fit, animated: false) }
+    }
+
+    /// After the keyboard goes (or the chat comes back): the page's layout as it should be, now and a moment later.
+    func settleLayout() {
+        webView.setNeedsLayout()
+        clampOffset()
+        fitScrolling()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            self?.clampOffset()
+            // (the page told its window's size again: a chat that measured itself with the keyboard up lays out again)
+            _ = try? await self?.webView.evaluateJavaScript("window.dispatchEvent(new Event('resize')); 1", in: nil, in: ClaudePane.chatWorld)
         }
     }
     /// The site the chat's conversation is for: the shown tab's (follow). Each site keeps its own conversation,
@@ -186,11 +239,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// Loads an address in the chat, marked as loading at once (a fill waits for it: waitForPage).
     private func go(_ url: URL) {
         loading = true
+        navigating = true
         requested = url
         webView.load(URLRequest(url: url))
     }
     /// The address last asked for: the conversation the chat is about to show, before it has loaded.
     private var requested: URL?
+    /// A load asked for hasn't put its page in yet (until it commits): the page there is the one before.
+    private var navigating = false
 
     /// Loads the chat the first time it's opened (not before: the browser is useful without it).
     func start() {
@@ -206,8 +262,17 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func follow(site new: String) { tabSite = new }
 
     /// To the shown tab's site's conversation, if the chat is on another's and nothing is going on in it.
+    /// The chat's page is one of its own: a conversation or a new chat (not a file, a link or a sign-in page it went to).
+    var onChatPage: Bool {
+        guard let u = webView.url, let home = URL(string: service.home), u.host == home.host else { return false }
+        let p = u.path
+        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p == home.path || p == "/" || p == "/new"
+    }
+
     private func catchUp() {
-        guard started, site != tabSite, activity == .idle else { return }
+        // (the chat follows the tab's site only from one of its own pages: one that went to a file, a link or a sign-in
+        // stays there, for its ‹ to bring back; 11-16)
+        guard started, site != tabSite, activity == .idle, onChatPage || webView.url == nil else { return }
         site = tabSite
         guard let url = resumeURL else { return }
         if webView.url?.absoluteString.hasPrefix(url.absoluteString) == true { return }
@@ -219,6 +284,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// message box (fillContext); at a reply waiting to be read, it opens there. `then`: one more thing to put in
     /// the message box after (Point TRIF at this).
     func open(then extra: (() async -> Void)? = nil) {
+        Diagnostics.shared.mark("opening the chat")
         let was = activity
         let already = shown
         if was == .replied { activity = .idle }
@@ -227,12 +293,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         shown = true
         report.log("claude", "\(service.rawValue): opened\(was == .idle ? "" : " (\(was.rawValue))")")
         // (the tab's data starts being gathered now, while the chat's page gets ready: 11-15)
+        Diagnostics.shared.mark("opening the chat: gathering the page")
         let ready = was == .idle && !already ? prepare() : nil
+        Diagnostics.shared.mark("opening the chat: the chat's page")
         queue { [weak self] in
             guard let self else { return }
             if was == .replied { _ = await self.chatJS("showReply()") }
             else if let ready { await self.fillContext(ready) }
-            if let extra { await self.waitForPage(); await extra() }
+            if let extra { await extra() } // (chat.js fill waits for the message box itself)
         }
     }
 
@@ -269,10 +337,6 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
     }
 
-    /// Waits for the chat's page to finish loading (15 s at most).
-    private func waitForPage() async {
-        for _ in 0..<60 where loading || webView.url == nil { try? await Task.sleep(nanoseconds: 250_000_000) }
-    }
 
     private func chatJS(_ call: String) async -> String? {
         try? await webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.\(call) : null;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) as? String
@@ -319,18 +383,31 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// person sends it themselves.
     private func fillContext(_ ready: Prepared) async {
         let sw = ready.watch
+        let generation = fillGeneration
+        lastPrepared = ready
         adding = true
-        defer { adding = false }
-        await waitForPage()
-        // (the message box a moment after the page has loaded: chat.js fill waits for it too)
+        defer { if generation == fillGeneration { adding = false } }
+        // (only into one of the chat's own pages with its message box there: not waiting for the page to finish
+        // loading (claude.ai takes seconds more after its box is usable: 11-16, a new chat took 5 s to fill), but
+        // looking for the box every 150 ms, 20 s at most (the person may go back to the conversation from a file
+        // meanwhile); the chat is never moved for it. 11-16: a fill started on a file the chat had opened)
         var st: [String: Any] = [:]
-        for _ in 0..<20 {
-            st = (Browser.parse(await chatJS("state()")) as? [String: Any]) ?? [:]
-            if st["editor"] as? Bool == true { break }
-            try? await Task.sleep(nanoseconds: 300_000_000)
+        for _ in 0..<133 {
+            if !navigating, onChatPage {
+                st = (Browser.parse(await chatJS("state()")) as? [String: Any]) ?? [:]
+                if st["editor"] as? Bool == true { break }
+            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if !shown && activity != .idle { break }
+            if generation != fillGeneration { break }
         }
         sw.lap("the chat ready")
-        guard st["editor"] as? Bool == true else { report.log("claude", "\(service.rawValue): no message box (signed out?), nothing filled"); return }
+        guard generation == fillGeneration else { return } // (the chat reloaded meanwhile: filled after it, instead)
+        guard onChatPage, st["editor"] as? Bool == true else {
+            report.log("claude", "\(service.rawValue): no message box (\(onChatPage ? "signed out?" : "not on a conversation")), nothing filled")
+            Diagnostics.shared.log("chat", "the page's data wasn't put in: the chat \(onChatPage ? "had no message box" : "wasn't on a conversation") for 20 s")
+            return
+        }
         if st["has"] as? Bool == true { report.log("claude", "\(service.rawValue): the message box already has something in it: left as it is"); return }
         if st["working"] as? Bool == true { return }
         guard let browser, shown || activity == .idle else { return }
@@ -611,20 +688,29 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         return .allow
     }
 
-    // (a .js file the person downloads in the chat: to Add this mod?: ModDownloads)
+    // (a .js file the person taps in the chat, shown or downloaded: never shown in the chat, which it would strand
+    // (11-16), but to Add this mod?: ModDownloads)
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
-        ModDownloads.wanted(navigationResponse) ? .download : .allow
+        if navigationResponse.isForMainFrame, (navigationResponse.response.suggestedFilename ?? "").lowercased().hasSuffix(".js")
+            || (navigationResponse.response.url?.path.lowercased().hasSuffix(".js") ?? false) { return .download }
+        return ModDownloads.wanted(navigationResponse) ? .download : .allow
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { if webView === self.webView { loading = true } }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { if webView === self.webView { navigating = false } }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if webView === self.webView { loading = false }
         note(webView === self.webView ? "loaded" : "loaded in a window it opened", webView.url)
         // (the chat's page loaded again while a reply was being written, its process ended say: watched again)
         if webView === self.webView, activity == .working { Task { _ = await chatJS("resume()") } }
+        // (reloaded while the tab's data was going in: in again)
+        if webView === self.webView, let p = refill {
+            refill = nil
+            queue { [weak self] in await self?.fillContext(p) }
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -669,26 +755,32 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 /// running and a reply goes on being written and watched.
 struct ChatScreen: View {
     @ObservedObject var pane: ClaudePane
-    /// What the way back says: the tab's site (or "Tab").
-    var tabName: String
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Button { pane.close() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
-                        Text(tabName).lineLimit(1).truncationMode(.middle)
-                    }
-                }
-                .accessibilityLabel("Back to \(tabName)")
+                // (back in the chat's own history: from a file, a link or a sign-in page to the conversation; the toolbar's
+                // page button goes back to the tab. 11-16)
+                Button { pane.back() } label: { Image(systemName: "chevron.left").font(.body.weight(.semibold)) }
+                    .disabled(!pane.canGoBack)
+                    .opacity(pane.canGoBack ? 1 : 0)
+                    .accessibilityLabel("Back")
+                    .accessibilityHidden(!pane.canGoBack)
                 Spacer(minLength: 4)
-                if pane.loading { ProgressView().scaleEffect(0.7) }
                 Picker("Chat", selection: Binding(get: { pane.service }, set: { pane.use($0) })) {
                     ForEach(ChatService.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
+                // (the chat's reload, beside new chat; stop while it loads. Not a pull: a conversation is long, its top far
+                // away. 11-16)
+                if pane.loading {
+                    Button { pane.webView.stopLoading(); pane.loading = false } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Stop loading")
+                } else {
+                    Button { pane.reloadChat() } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Reload the chat")
+                }
                 Button { pane.home() } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel("Start over")
             }

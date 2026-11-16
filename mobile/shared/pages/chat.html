@@ -58,6 +58,9 @@
   let send = row.querySelector('button');
   const files = [];
   const slow = location.search.includes('slow');
+  // (?slowload: a picture that takes five seconds (node's slow server on 8378), so the page keeps loading long after
+  // its message box is there, as claude.ai's does)
+  if (location.search.includes('slowload')) { const i = new Image(); i.src = `http://localhost:8378/slow?${Date.now()}`; document.body.append(i); }
   const nostop = location.search.includes('nostop');
 
   const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length); };

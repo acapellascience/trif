@@ -194,6 +194,15 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The address bar while a page loads | Stop (accessibility) | a small × after Share; accessibility: Stop loading |
 | Pulling the page down past its top: three choices, the chosen one's name under it | — | New Tab · Reload · Close Tab |
 
+## The chat's top bar (changed 11-16)
+
+| Where | Old | New |
+|---|---|---|
+| Top left | ‹ {site} (back to the tab; accessibility Back to {site}) | ‹ alone, back in the chat's own pages (from a file, a link, a sign-in page), hidden when there's nothing to go back to; accessibility: Back |
+| Beside new chat | (a spinner while loading) | a reload arrow; accessibility: Reload the chat. While loading: × ; accessibility: Stop loading |
+| The toolbar's back and forward while the chat shows | closed the chat | the chat's own back and forward (Back · Forward); the page button goes back to the tab |
+| When the page's data couldn't go in (diagnostics only) | — | (no words shown) |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

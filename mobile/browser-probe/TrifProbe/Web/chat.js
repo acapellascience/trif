@@ -46,13 +46,16 @@
       .map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`.includes(label)).length;
   }
 
+  let settled = false; // (that moment waited once for this page)
   async function fill(text, png, name, pdf, picture) {
-    // (a chat that has only just loaded isn't ready for a paste: its page finished, then a moment)
-    if (document.readyState !== 'complete') { await new Promise((r) => addEventListener('load', r, { once: true })); await wait(800); }
-    // (a chat that has only just loaded draws its message box a moment later: up to 10 s)
+    // (the message box, as soon as it's there (every 100 ms, 10 s at most), not the page's whole load: claude.ai
+    // goes on loading for seconds after its box works. Then, if the page is still loading, a moment for the box to
+    // take pastes (it was a paste taken late: 11-14), 600 ms at most)
     let ed = editor();
-    for (let i = 0; !ed && i < 50; i++) { await wait(200); ed = editor(); }
+    for (let i = 0; !ed && i < 100; i++) { await wait(100); ed = editor(); }
     if (!ed) return 'no message box';
+    if (document.readyState !== 'complete' && !settled) await Promise.race([new Promise((r) => addEventListener('load', r, { once: true })), wait(600)]);
+    settled = true;
     ed.focus();
     const said = [];
     if (png) {

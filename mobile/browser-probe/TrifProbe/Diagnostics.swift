@@ -143,6 +143,9 @@ final class Diagnostics {
     /// app was blocked (taps waited); over 500 ms, it's logged with what the app was doing. One check out at a time.
     nonisolated static func watchMainThread() {
         let q = DispatchQueue(label: "trif.hang-watch", qos: .utility)
+        // (development: -hang100 logs any wait over 100 ms, ten looks a second)
+        let fine = ProcessInfo.processInfo.arguments.contains("-hang100")
+        let limit = fine ? 0.1 : 0.5
         final class Out: @unchecked Sendable { var waiting = false }
         let out = Out()
         func tick() {
@@ -152,10 +155,10 @@ final class Diagnostics {
                 DispatchQueue.main.async {
                     let waited = CFAbsoluteTimeGetCurrent() - sent
                     q.async { out.waiting = false }
-                    if waited > 0.5 { MainActor.assumeIsolated { Diagnostics.shared.log("hang", "the app's main thread was blocked \(Int(waited * 1000)) ms (last: \(Diagnostics.shared.lastAction))") } }
+                    if waited > limit { MainActor.assumeIsolated { Diagnostics.shared.log("hang", "the app's main thread was blocked \(Int(waited * 1000)) ms (last: \(Diagnostics.shared.lastAction))") } }
                 }
             }
-            q.asyncAfter(deadline: .now() + 1, execute: tick)
+            q.asyncAfter(deadline: .now() + (fine ? 0.1 : 1), execute: tick)
         }
         q.async(execute: tick)
     }

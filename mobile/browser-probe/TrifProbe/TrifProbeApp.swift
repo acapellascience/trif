@@ -184,6 +184,8 @@ extension Model {
         if step["status"] != nil { out = browser.status }
         if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
         if step["closechat"] != nil { Model.pane?.close() }
+        if step["newchat"] != nil { Model.pane?.home() }
+        if step["chatback"] != nil { Model.pane?.back() }
         if let p = step["pause"] as? Bool { browser.pauseAll(p) }
         if step["acceptOffer"] != nil, let o = browser.safety.offer { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged() }
         // ({"panego": "…"}: the chat pane loads an address; {"pane": 1}: its scrolling and size; {"panejs": "…"}: in its page)
@@ -233,6 +235,7 @@ struct ContentView: View {
             browser.safety.active(p == .active)
             if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot(nil, "the app left the front") } }
         }
+
         .alert(item: $safety.offer) { o in
             let name = o.likely.flatMap { id in browser.mods.mods.first { $0.id == id }?.name }
             return Alert(title: Text("\(o.site) keeps this iPhone busy"),
@@ -252,7 +255,7 @@ struct ContentView: View {
             ZStack {
                 // (the chat leaves the toolbar showing under it, so the chat button is where it was, to go back: Tim,
                 // 11-15, "sometimes you hit it by accident and you just wanna go back")
-                ChatScreen(pane: pane, tabName: browser.site.isEmpty ? "Tab" : browser.site)
+                ChatScreen(pane: pane)
                     .modifier(ToolbarRoom(insets: bars.insets))
                     .zIndex(pane.shown ? 1 : 0)
                     .allowsHitTesting(pane.shown)
@@ -333,6 +336,7 @@ struct ContentView: View {
         .onChange(of: browser.loading) { _, now in if now { bars.expand() } }
         // (the bars stay full while anything covers the page: its toolbar is how to get back)
         .onChange(of: covered) { _, now in bars.hold(now) }
+        .onChange(of: pane.shown) { _, now in if now { pane.settleLayout() } }
         .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
         .onChange(of: browser.hideChat) { _, _ in pane.close() }
         // (the next of a reply's mods once the Mods tab, opened for one that waits for an OK, has closed)
@@ -497,13 +501,14 @@ struct ContentView: View {
         HStack(spacing: 0) {
             // (with the chat open, back and forward only close it, back to the page as it was: Tim, 11-15, "that's
             // the behaviour people will expect")
-            Button { if covered { closeCovers() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
-                .disabled(!covered && !browser.canGoBack)
-                .accessibilityLabel(covered ? backToTab : "Back")
+            // (the chat showing: its own history; the tabs, Mods or the address screen: closed; else the tab's history)
+            Button { if pane.shown { pane.back() } else if covered { closeCovers() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
+                .disabled(pane.shown ? !pane.canGoBack : !covered && !browser.canGoBack)
+                .accessibilityLabel(covered && !pane.shown ? backToTab : "Back")
                 .frame(maxWidth: .infinity)
-            Button { if covered { closeCovers() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
-                .disabled(!covered && !browser.canGoForward)
-                .accessibilityLabel(covered ? backToTab : "Forward")
+            Button { if pane.shown { pane.forward() } else if covered { closeCovers() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
+                .disabled(pane.shown ? !pane.canGoForward : !covered && !browser.canGoForward)
+                .accessibilityLabel(covered && !pane.shown ? backToTab : "Forward")
                 .frame(maxWidth: .infinity)
             // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
             Button { if pane.shown { pane.close() } else { closeCovers(); pane.open() } } label: {

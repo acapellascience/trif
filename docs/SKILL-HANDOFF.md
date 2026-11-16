@@ -4,10 +4,15 @@ The skill (`skill/`, made by `skill/build.js`) lets Claude write a mod anywhere:
 claude.ai, Cowork, Claude Code. This note is about the last step, getting the file into TRIF, and about a test
 hook inside TRIF. It ranks the options, says what a hostile page could do with each, and what's built.
 
-**Status (2026-11-16).** Nothing here lets a web page hand code to TRIF or run it: those changes are Tim's call,
-and none was made. Built: the skill, its generator, the packaging and tests; a "Paste a mod…" item in the panel
-(branch `skill-paste`, a prototype whose wording waits for Tim: docs/SKILL-STRINGS.md); the skill's own live-test
-scripts, which run in the page as Claude's own code and never reach TRIF.
+**Status (2026-11-16, second pass).** Tim chose: keep Paste a mod, build (a) in the helper, and build "Try it
+here" as a button only the user can press; (b) and (c) as page hooks stay out. All three are built on branch
+`skill`, their wording waiting for Tim in docs/SKILL-STRINGS.md:
+
+- **Paste a mod…** (sidepanel.js pasteCard): the ⋯ menu, a box, Add or Try it here.
+- **Mod files in Downloads** (helper/lib/downloads.js; Settings → "Offer to add mod files I download", off by
+  default; config.json `watchDownloads`): the card "Add this mod?" with Add, Try it here, Not now, Ignore files
+  from <site>. Details and threats below, as designed.
+- **Try it here** (background.js tryMod, helper/lib/preview.js): on both cards, by the card's tab.
 
 ## The one fact everything turns on
 
@@ -112,12 +117,31 @@ style-mod runtime (copied from `helper/lib/rules.js` by the generator, so it can
 `try-boxed.js` runs a boxed mod's code over the page with a copy of TRIF's API that refuses the main things the
 box refuses. Both are Claude's code in the page, as Claude's every other action is, and reach nothing of TRIF's.
 
+### What's built for (a), and what the user sees on macOS
+
+- The helper reads the folder with asynchronous calls only, so the system's question never holds it up. The
+  first read happens when the user switches the setting on (and at each start of the browser while it's on).
+- macOS protects ~/Downloads. The helper is the browser's child, so the system asks in the browser's name, once:
+  "“Google Chrome” would like to access files in your Downloads folder" (or Firefox's). Until it's answered the
+  note says "Looking at your Downloads folder… (your computer may ask whether your browser can.)". Refused (now
+  or before), reading fails with EPERM and the note says how to allow it (System Settings → Privacy & Security →
+  Files & Folders → the browser → Downloads Folder); nothing else breaks, and it starts working on the next look
+  once allowed. Many users won't see the question at all: a browser that has saved downloads there, or TRIF's
+  own Export (which writes there), usually has it already. Not tried on a fresh Mac account here (it would mean a
+  real TCC prompt on Tim's machine): to check, on a new macOS user, switch it on in each browser.
+- Where it came from: macOS's where-from record on the file (the page's site is shown, never the address) and the
+  quarantine record's app name; on Linux, Chrome's `user.xdg.*.url`. Found here: headless Chrome for Testing
+  writes the quarantine record (its own name) but no where-from record, for blob:, data: and served downloads
+  from 127.0.0.1 alike; the card then says "<file> is in your Downloads." without a site. Whether a real Chrome
+  and Firefox write it for a download from claude.ai is on Tim's try list. (The quarantine record's id also
+  points into macOS's download history database, which has the address; TRIF doesn't read that.)
+- Both browsers' helpers watch when it's on (one config); a file added or put off in one is dropped from the
+  other (downloads.json in the private folder, also where "Ignore files from" is kept).
+
 ## Waiting on Tim
 
-1. Paste a mod (branch `skill-paste`): keep, change the wording, or drop. Strings: docs/SKILL-STRINGS.md.
-2. (a), the downloads watch: build it as above (off by default, a setting to switch it on, the card, the badge)?
-   It needs wording for the setting and the card, and a line in the privacy policy.
-3. "Try it here" on the import card: build it?
-4. (b) and (c) as page hooks: recommended against.
-5. Publishing the skill (claude.ai upload, a plugin marketplace) is Tim's: `node skill/package.js` makes
+1. The wording of all three (docs/SKILL-STRINGS.md) before a release.
+2. A line in the privacy policy (store/PRIVACY.md, on branch `store`) for the Downloads setting: off by default;
+   when on, the helper reads the names in the downloads folder and new `.js` files' text, on the computer only.
+3. Publishing the skill (claude.ai upload, a plugin marketplace): `node skill/package.js` makes
    `skill/dist/trif-skill.zip` and `skill/dist/trif-plugin/`.

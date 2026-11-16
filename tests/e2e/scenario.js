@@ -1413,6 +1413,7 @@ class Scenario {
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty; the boxed mods of a site of its own are approved as that site ("Your inbox.x.com mods can:" on its card), apart from x.com\'s', () => this.sensitiveCheck(win));
       await r.check('sharing: a mod pasted in the panel is imported, switched off; a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
+      await r.check('downloads: off until switched on in Settings; then a new mod file in Downloads (not one there before) gets an "Add this mod?" card naming where it came from (the file\'s where-from record); Try it here runs it in this tab with TRIF\'s runtime (style from the card, boxed from the paste card; a free mod refused) and Undo reloads it away; Add imports it switched off, the file left in Downloads; Not now, and Ignore files from <site>', () => this.downloadsCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
@@ -4477,6 +4478,128 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
     } finally {
       for (const f of made) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.panel(`async () => { for (const id of ['code-view', 'import-ask']) { const d = document.getElementById(id); if (d && d.open) d.close(); } document.getElementById('drop-overlay').hidden = true; return true; }`).catch(() => {});
+    }
+  }
+
+  // Mod files in the user's downloads (helper/lib/downloads.js) and Try it here (background.js tryMod): the run's
+  // downloads folder (TRIF_DOWNLOADS), files written there as a browser would leave them, with a where-from record
+  // on macOS as browsers set it.
+  async downloadsCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dl = path.join(this.work, 'downloads');
+    const dir = path.join(this.trif, 'sites', site);
+    const problems = [];
+    const made = [];
+    const mod = (name, body, extra = '') => `// ==WebMod==\n// @name ${name}\n// @description An e2e mod from the downloads folder\n// @match *://127.0.0.1/*\n${extra}// ==/WebMod==\n${body}\n`;
+    const download = (file, text, from) => {
+      fs.mkdirSync(dl, { recursive: true });
+      const f = path.join(dl, file);
+      fs.writeFileSync(f, text);
+      made.push(f);
+      if (from && process.platform === 'darwin') {
+        const { execFileSync } = require('child_process');
+        const plist = execFileSync('/usr/bin/plutil', ['-convert', 'binary1', '-o', '-', '-'], { input: JSON.stringify([`blob:https://${from}/1234`, `https://${from}/chat/1`]) });
+        execFileSync('/usr/bin/xattr', ['-wx', 'com.apple.metadata:kMDItemWhereFroms', plist.toString('hex'), f]);
+      }
+      return f;
+    };
+    const offer = () => this.panel(`async () => { const n = document.getElementById('download-offer'); return n && !n.hidden ? { title: n.querySelector('.title')?.textContent || '', text: n.textContent, buttons: [...n.querySelectorAll('.actions button')].map((b) => b.textContent) } : null; }`);
+    const press = (label) => this.panel(`async (label) => { const b = [...document.querySelectorAll('#download-offer .actions button')].find((x) => x.textContent === label); if (!b) return false; b.click(); return true; }`, [label]);
+    const outline = () => this.page(`async () => getComputedStyle(document.body).outlineColor`).catch(() => null);
+    const toggle = async () => {
+      await this.panelClick('#settings-btn');
+      await waitFor('settings', () => this.panel(`async () => document.querySelector('#settings').getClientRects().length > 0 || null`), { timeoutMs: 8000 });
+      await this.d.click(this.panelCtx, '#watch-downloads');
+    };
+    const note = () => this.panel(`async () => ({ on: document.getElementById('watch-downloads').checked, note: document.getElementById('downloads-note').textContent })`);
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
+      await this.dismissApproval();
+      download('e2e-before.js', mod('E2E Before', '{ "hide": ["#nothing"] }', '// @style\n'), 'claude.ai');
+      await toggle();
+      const on = await waitFor('watching', async () => { const n = await note(); return n.on && /TRIF offers each new mod file/.test(n.note) ? n : null; }, { timeoutMs: 15000 }).catch(() => null);
+      if (!on) problems.push(`the switch: ${JSON.stringify(await note())}`);
+      await this.shot(this.panelCtx, 'downloads-setting');
+      await this.panelClick('#settings-btn');
+      // a style mod downloaded "from claude.ai"
+      const styleText = '// ==WebMod==\n// @name E2E Downloaded\n// @description Outlines the page in an odd colour\n// @match *://127.0.0.1/*\n// @style\n// ==/WebMod==\n{ "css": "body { outline: 7px solid rgb(1, 2, 3) }" }\n';
+      const f = download('e2e-downloaded.js', styleText, 'claude.ai');
+      const card = await waitFor('the offer', () => offer(), { timeoutMs: 20000 }).catch(() => null);
+      const fromLine = process.platform === 'darwin' ? 'e2e-downloaded.js was downloaded from claude.ai.' : 'e2e-downloaded.js is in your Downloads.';
+      if (!card || card.title !== 'Add this mod? E2E Downloaded' || !card.text.includes(fromLine) || !card.text.includes('From your Downloads')
+        || JSON.stringify(card.buttons) !== JSON.stringify(['Add', 'Try it here', 'Not now', ...(process.platform === 'darwin' ? ['Ignore files from claude.ai'] : [])])) problems.push(`the card: ${JSON.stringify(card)}`);
+      if (card && /E2E Before/.test(card.text)) problems.push('a file there before it was switched on was offered');
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `downloads-offer-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
+      // Try it here: in this tab, TRIF's runtime; Undo reloads it away
+      await press('Try it here');
+      const tried = await waitFor('the trial on the page', async () => ((await outline()) === 'rgb(1, 2, 3)' ? true : null), { timeoutMs: 10000 }).catch(() => null);
+      if (!tried) problems.push(`Try it here: the page's outline is ${await outline()} (${JSON.stringify(await offer())})`);
+      const tryingCard = await offer();
+      if (!tryingCard || !/Trying it on this tab/.test(tryingCard.text) || !tryingCard.buttons.includes('Undo')) problems.push(`the card while trying: ${JSON.stringify(tryingCard)}`);
+      await this.shot(this.panelCtx, 'downloads-trying');
+      await press('Undo');
+      const undone = await waitFor('undone', async () => { const o = await outline(); return o && o !== 'rgb(1, 2, 3)' ? o : null; }, { timeoutMs: 15000 }).catch(() => null);
+      if (!undone) problems.push('Undo left the trial on the page');
+      if (fs.existsSync(path.join(dir, 'e2e-downloaded.js'))) problems.push('trying it added it');
+      // Add: imported, switched off; the download left where it was
+      await waitFor('the card again', async () => { const o = await offer(); return o && o.buttons.includes('Try it here') ? o : null; }, { timeoutMs: 8000 }).catch(() => null);
+      await press('Add');
+      const added = path.join(dir, 'e2e-downloaded.js');
+      made.push(added);
+      await waitFor('the added mod', () => (fs.existsSync(added) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Add wrote nothing'));
+      if (fs.existsSync(added) && fs.readFileSync(added, 'utf8') !== styleText) problems.push('the added mod isn\'t the file');
+      if (!fs.existsSync(f) || fs.readFileSync(f, 'utf8') !== styleText) problems.push('the download was moved or changed');
+      const off = await waitFor('it\'s off', async () => { const l = (await this.cli(['status'], { timeoutMs: 20000 })).stdout.split('\n').find((x) => x.includes(`${site}/e2e-downloaded`)); return l && /off/.test(l) ? l.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
+      if (!off) problems.push('the added mod isn\'t off');
+      await waitFor('the card gone', async () => ((await offer()) ? null : true), { timeoutMs: 8000 }).catch(() => problems.push('the card stayed after Add'));
+      // the paste card's Try it here: a boxed mod (no powers, whatever it asks), and a free mod refused
+      const pasteTry = async (text) => {
+        await this.panelClick('#mods-more');
+        await this.panelClick('#paste-mod');
+        await waitFor('the paste card', () => this.panel(`async () => document.getElementById('paste-ask')?.open || null`), { timeoutMs: 5000 });
+        await this.panel(`async (t) => { const a = document.querySelector('#paste-ask textarea'); a.value = t; a.dispatchEvent(new Event('input')); return true; }`, [text]);
+        await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(2)');
+        return waitFor('its line', () => this.panel(`async () => { const p = document.querySelector('#paste-ask .paste-tried'); return p && !p.hidden ? p.textContent : null; }`), { timeoutMs: 10000 }).catch(() => null);
+      };
+      const boxedLine = await pasteTry(mod('E2E Boxed Try', "trif.css('body { outline: 5px solid rgb(4, 5, 6) }');\npage.on('input', (e) => trif.log(typeof e.data));", '// @boxed\n// @powers read-drafts\n'));
+      const boxedOn = await waitFor('the boxed trial', async () => ((await outline()) === 'rgb(4, 5, 6)' ? true : null), { timeoutMs: 10000 }).catch(() => null);
+      if (!boxedOn || !/Trying it on this tab/.test(boxedLine || '')) problems.push(`the paste card's Try it here: ${boxedLine}, outline ${await outline()}`);
+      await this.shot(this.panelCtx, 'paste-trying');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(2)'); // (Undo)
+      if (!(await waitFor('the boxed trial undone', async () => { const o = await outline(); return o && o !== 'rgb(4, 5, 6)' ? true : null; }, { timeoutMs: 15000 }).catch(() => null))) problems.push('the paste card\'s Undo left the trial');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(3)'); // (Cancel)
+      const freeLine = await pasteTry(mod('E2E Free Try', "(() => { document.body.style.outline = '3px solid rgb(7, 8, 9)'; })();"));
+      if (!/Only style and boxed mods can be tried here/.test(freeLine || '')) problems.push(`a free mod's trial: ${freeLine}`);
+      if ((await outline()) === 'rgb(7, 8, 9)') problems.push('a free mod ran on Try');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(3)');
+      // Not now; Ignore files from <site>
+      download('e2e-later.js', mod('E2E Later', '{ "hide": ["#nothing"] }', '// @style\n'), 'evil.example');
+      const later = await waitFor('the next offer', async () => { const o = await offer(); return o && /E2E Later/.test(o.title) ? o : null; }, { timeoutMs: 20000 }).catch(() => null);
+      if (!later) problems.push('a second file wasn\'t offered');
+      await press('Not now');
+      await waitFor('gone', async () => ((await offer()) ? null : true), { timeoutMs: 8000 }).catch(() => problems.push('Not now left the card'));
+      if (process.platform === 'darwin') {
+        download('e2e-evil.js', mod('E2E Evil', '{ "hide": ["#nothing"] }', '// @style\n'), 'evil.example');
+        const evil = await waitFor('the evil offer', async () => { const o = await offer(); return o && /E2E Evil/.test(o.title) ? o : null; }, { timeoutMs: 20000 }).catch(() => null);
+        if (!evil || !evil.buttons.includes('Ignore files from evil.example')) problems.push(`the third card: ${JSON.stringify(evil)}`);
+        await press('Ignore files from evil.example');
+        await waitFor('gone', async () => ((await offer()) ? null : true), { timeoutMs: 8000 }).catch(() => problems.push('Ignore left the card'));
+        download('e2e-evil-2.js', mod('E2E Evil Two', '{ "hide": ["#nothing"] }', '// @style\n'), 'evil.example');
+        await sleep(8000);
+        if (await offer()) problems.push('a file from an ignored site was offered');
+      }
+      // switched off: no card, the note says what it does
+      await toggle();
+      const offNow = await waitFor('off', async () => { const n = await note(); return !n.on && /When a mod file appears in your Downloads/.test(n.note) ? n : null; }, { timeoutMs: 10000 }).catch(async () => note());
+      if (!offNow || offNow.on || !/When a mod file appears in your Downloads/.test(offNow.note)) problems.push(`switched off: ${JSON.stringify(offNow)}`);
+      await this.panelClick('#settings-btn');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `switched on: a file there before isn't offered; "${card.title}", ${process.platform === 'darwin' ? 'from claude.ai (its where-from record)' : 'from Downloads'}; Try it here outlined the page and Undo reloaded it away; Add imported it, off, the download untouched; the paste card tried a boxed mod and refused a free one; Not now${process.platform === 'darwin' ? ', Ignore files from evil.example (its next file not offered)' : ''}; switched off`;
+    } finally {
+      for (const x of made) { try { fs.unlinkSync(x); } catch { /* gone */ } }
+      await this.panel(`async () => { const d = document.getElementById('paste-ask'); if (d && d.open) d.close(); return true; }`).catch(() => {});
     }
   }
 

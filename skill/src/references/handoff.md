@@ -31,6 +31,11 @@ Use the first of these you can:
    site* → *Paste a mod…*, pastes it and clicks Add (a TRIF without that menu item: they save it as a `.js` file in
    any text editor and import that). Keep it short enough to copy in one go.
 
+If the user switched on "Offer to add mod files I download" in TRIF's Settings, a mod file saved to their
+Downloads (2 or 3) brings up TRIF's own card, "Add this mod?", with Add, Try it here (it runs a style or boxed
+mod on their tab, with TRIF's own runtime, until the page reloads) and Not now. Tell them to look at TRIF's panel
+(its toolbar button shows a 1).
+
 ## What to tell the user
 
 In a few plain lines (adapt, don't paste):

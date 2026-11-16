@@ -15,6 +15,7 @@ const http = require('http');
 const { browserTestsSkip, launch } = require('./cdp-page');
 const { checkMod } = require('../skill/trif/scripts/check-mod');
 const share = require('../helper/lib/share');
+const { originOf } = require('../helper/lib/downloads');
 
 const PAGE_DIR = path.join(__dirname, '..', 'skill', 'trif', 'scripts', 'page');
 const script = (name) => fs.readFileSync(path.join(PAGE_DIR, name), 'utf8');
@@ -201,6 +202,10 @@ test('the skill\'s page scripts in a real page: try-style, try-boxed, record, sw
       assert.equal(imported.id, '127.0.0.1/calm-feed');
       assert.equal(checkMod(mod, { fileName: 'calm-feed.js' }).id, imported.id);
       assert.deepEqual(Object.keys(share.loadImported(home)), ['127.0.0.1/calm-feed'], 'marked imported: TRIF starts it off');
+      // (where it came from, as Chrome recorded it on the file: what TRIF's "Add this mod?" card names. Headless
+      // Chrome for Testing writes the quarantine record but, here, no where-from record: the card then says the file is in
+      // the Downloads folder, without a site)
+      if (process.platform === 'darwin') { const o = await originOf(file); t.diagnostic(`recorded on the download: ${JSON.stringify(o)}`); assert.match(String(o.app), /Chrome/, 'the quarantine record names the browser'); assert.ok(o.from === null || o.from === '127.0.0.1', 'a where-from record, if any, names the page\'s site, never more'); }
     });
 
     assert.deepEqual(errors, [], 'nothing thrown in the page');

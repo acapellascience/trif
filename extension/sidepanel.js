@@ -41,7 +41,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), agentLogin: $('#agent-login'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
-  autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), modsFeedNote: $('#mods-feed-note'), update: $('#update'),
+  autoUpdate: $('#auto-update'), watchDownloads: $('#watch-downloads'), downloadsNote: $('#downloads-note'), downloadOffer: $('#download-offer'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), modsFeedNote: $('#mods-feed-note'), update: $('#update'),
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
@@ -3288,11 +3288,28 @@ function pasteCard() {
     siteCards.add(cancel);
     const add = button('Add', 'go', () => done(area.value));
     add.disabled = true;
-    area.addEventListener('input', () => { add.disabled = !area.value.trim(); });
-    acts.append(add, button('Cancel', 'text', () => done(null)));
+    // (Try it here: this panel's tab, until it reloads: background.js tryMod)
+    const said = el('p', 'note paste-tried');
+    said.hidden = true;
+    let tried = null;
+    const tryIt = button('Try it here', '', async () => {
+      tryIt.disabled = true;
+      said.classList.remove('error');
+      try {
+        if (tried !== null) { await request({ type: 'mod.untry', tabId: tried }); tried = null; tryIt.textContent = 'Try it here'; said.hidden = true; return; }
+        const r = await request({ type: 'mod.try', text: area.value, tabId: view.tab?.id });
+        tried = r.tabId;
+        tryIt.textContent = 'Undo';
+        said.textContent = r.errors?.length ? `It ran into a problem here: ${r.errors[0]}` : 'Trying it on this tab. Undo, or reloading the page, takes it away.';
+        said.hidden = false;
+      } catch (e) { said.textContent = String(e?.message ?? e); said.classList.add('error'); said.hidden = false; } finally { tryIt.disabled = !area.value.trim(); }
+    });
+    tryIt.disabled = true;
+    area.addEventListener('input', () => { add.disabled = !area.value.trim(); tryIt.disabled = !area.value.trim(); });
+    acts.append(add, tryIt, button('Cancel', 'text', () => done(null)));
     x.addEventListener('click', () => done(null));
     d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
-    d.append(top, el('h2', 'ap-name', 'Paste a mod'), el('p', 'ap-lead', 'It\'s added switched off, like an imported file: look at it, then turn it on.'), area, acts);
+    d.append(top, el('h2', 'ap-name', 'Paste a mod'), el('p', 'ap-lead', 'It\'s added switched off, like an imported file: look at it, then turn it on.'), area, said, acts);
     document.body.append(d);
     d.showModal();
     area.focus();
@@ -3353,7 +3370,7 @@ async function importModFile(file) {
       if (!choice) return;
       continue;
     }
-    return;
+    return r?.id || null;
   }
 }
 
@@ -4106,6 +4123,7 @@ mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-
 const UPDATED_SHOWN_MS = 24 * 60 * 60 * 1000;
 
 function renderUpdate() {
+  renderDownloads();
   const n = ui.update;
   const u = view.status?.helper?.connected ? view.status.update : null;
   const done = view.updated && Date.now() - view.updated.at < UPDATED_SHOWN_MS && view.updated.to === (u?.current || view.status?.version) ? view.updated : null;
@@ -4208,6 +4226,91 @@ async function installUpdate() {
 ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
 ui.chatMods.addEventListener('change', () => setChatWait(ui.chatMods.value === 'wait'));
 ui.onBreak?.addEventListener('change', () => request({ type: 'modError.onBreak', value: ui.onBreak.value }).then(refreshStatus, () => {}));
+
+// ---- mod files the user downloads (helper/lib/downloads.js) ---------------------------------------------------
+// Settings' switch (off by default), and the card for each offer: what the file is and where it came from, what
+// TRIF finds it can do, and Add (the import a dropped file gets), Try it here, Not now, Ignore files from <site>.
+// The card is the panel's wherever it shows (side panel or a window of its own): Try it here takes this panel's tab.
+const DOWNLOADS_NOTES = {
+  off: 'When a mod file appears in your Downloads, TRIF offers to add it, switched off. It reads nothing else there.',
+  starting: 'Looking at your Downloads folder… (your computer may ask whether your browser can.)',
+  watching: 'TRIF offers each new mod file in your Downloads. It reads nothing else there.',
+  'no-access': 'TRIF can’t read your Downloads folder: your computer didn’t allow your browser to. To allow it, open System Settings → Privacy & Security → Files & Folders, and turn on Downloads Folder under your browser.',
+  missing: 'There’s no Downloads folder for TRIF to look in.',
+};
+function renderDownloads() {
+  const connected = !!view.status?.helper?.connected;
+  const d = connected ? view.status.downloads : null;
+  if (ui.watchDownloads) {
+    ui.watchDownloads.checked = !!d?.on;
+    ui.watchDownloads.disabled = !connected || !!view.downloadsBusy;
+    const note = !connected ? '' : DOWNLOADS_NOTES[d?.on ? d.state : 'off'] || `TRIF can’t look in your Downloads folder: ${d?.state}`;
+    if (ui.downloadsNote.textContent !== note) ui.downloadsNote.textContent = note;
+  }
+  renderDownloadOffer(d?.offer || null);
+}
+function renderDownloadOffer(o) {
+  const n = ui.downloadOffer;
+  if (!n) return;
+  const key = o ? `${o.id}|${view.tab?.id}|${view.tried?.id === o.id ? view.tried.tabId : ''}|${view.offerError || ''}` : '';
+  if (n.dataset.key === key) return;
+  n.dataset.key = key;
+  if (!o) { n.replaceChildren(); n.hidden = true; return; }
+  const parts = [el('p', 'head', 'From your Downloads'), el('p', 'title', `Add this mod? ${o.name}`)];
+  if (o.description) parts.push(el('p', 'note', o.description));
+  const where = o.from ? `${o.file} was downloaded from ${o.from}.` : `${o.file} is in your Downloads.`;
+  parts.push(el('p', 'note', `${where} It’s added switched off: look at it, then turn it on.`));
+  if (o.can?.length) {
+    parts.push(el('p', 'note', o.kind === 'boxed' ? 'It asks for powers, so it waits for your OK. It could:' : 'TRIF finds it could do more than change the page, so it waits for your OK. It could:'));
+    const ul = el('ul', 'offer-can');
+    for (const c of o.can.slice(0, 6)) ul.append(el('li', null, c));
+    parts.push(ul);
+  }
+  if (view.offerError) parts.push(el('p', 'note error', view.offerError));
+  const tried = view.tried?.id === o.id && view.tried.tabId === view.tab?.id;
+  if (tried) parts.push(el('p', 'note', 'Trying it on this tab. Undo, or reloading the page, takes it away.'));
+  const acts = el('p', 'actions');
+  const busy = (b) => { for (const x of acts.querySelectorAll('button')) x.disabled = b; };
+  const fail = (e) => { view.offerError = String(e?.message ?? e); busy(false); renderDownloadOffer(view.status?.downloads?.offer || null); };
+  acts.append(button('Add', 'primary', async () => {
+    busy(true); view.offerError = null;
+    try {
+      const f = await request({ type: 'downloads.take', id: o.id });
+      const id = await importModFile(new File([f.text], f.name, { type: 'text/javascript' }));
+      if (id) { await request({ type: 'downloads.done', id: o.id, how: 'added' }); view.tried = null; }
+      busy(false);
+    } catch (e) { fail(e); }
+  }));
+  if (o.kind !== 'free') {
+    if (tried) acts.append(button('Undo', null, async () => { busy(true); try { await request({ type: 'mod.untry', tabId: view.tab?.id }); view.tried = null; busy(false); renderDownloadOffer(o); } catch (e) { fail(e); } }));
+    else acts.append(button('Try it here', null, async () => {
+      busy(true); view.offerError = null;
+      try {
+        const f = await request({ type: 'downloads.take', id: o.id });
+        const r = await request({ type: 'mod.try', text: f.text, name: f.name, tabId: view.tab?.id });
+        view.tried = { id: o.id, tabId: r.tabId };
+        if (r.errors?.length) view.offerError = `It ran into a problem here: ${r.errors[0]}`;
+        busy(false); n.dataset.key = ''; renderDownloadOffer(o);
+      } catch (e) { fail(e); }
+    }));
+  }
+  acts.append(button('Not now', 'text', async () => { busy(true); try { await request({ type: 'downloads.done', id: o.id, how: 'dismissed' }); view.tried = null; view.offerError = null; } catch (e) { fail(e); } }));
+  if (o.from) acts.append(button(`Ignore files from ${o.from}`, 'text', async () => { busy(true); try { await request({ type: 'downloads.ignore', id: o.id }); view.tried = null; view.offerError = null; } catch (e) { fail(e); } }));
+  parts.push(acts);
+  n.replaceChildren(...parts);
+  n.hidden = false;
+}
+ui.watchDownloads?.addEventListener('change', async () => {
+  const on = ui.watchDownloads.checked;
+  view.downloadsBusy = true;
+  ui.downloadsNote.textContent = on ? DOWNLOADS_NOTES.starting : '';
+  try { await request({ type: 'downloads.setWatch', on }); } catch (e) {
+    ui.watchDownloads.checked = !on;
+    ui.downloadsNote.textContent = `Couldn’t change it: ${String(e?.message ?? e)}`;
+  }
+  view.downloadsBusy = false;
+  refreshStatus();
+});
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

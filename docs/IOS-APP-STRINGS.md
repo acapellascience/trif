@@ -226,14 +226,19 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The profile in Settings (description) | — | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. |
 | The icon's label on the Home Screen | — | {Name}, as typed in the sheet |
 
-## The app view (added 11-16, from a Home Screen icon)
+## Full screen (added 11-16 as "the app view"; renamed and changed 11-16, Tim)
 
 | Where | Old | New |
 |---|---|---|
-| A Home Screen icon made from now on (its address has app=1) | — | opens its site full screen: no address bar, toolbar or tabs; mods run as usual; each icon keeps its own tab |
-| Two fingers held still on the page for a moment (the way back) | — | a control at the top for 4 seconds: Switch to TRIF view (accessibility: the same, also as an action) |
-| A link tapped there to another site | — | opens in TRIF's own view, in a new tab |
-| A window the page opens | — | a tab in TRIF's own view |
+| A tab in full screen | — | its page with no address bar, toolbar or tabs; mods run as usual. Each tab's own, remembered |
+| Two fingers held still on the page for a moment (any tab, either way) | a "Switch to TRIF view" control at the top, in the app view only | switches at once; a note at the top, fading after 2 s: Switched to full screen · Switched to TRIF view |
+| The first time in full screen (once) | — | Hold two fingers on the page to switch views (fades after 4 s) |
+| The ⋯ menu | — | **Full screen**, with the line under it: Or hold two fingers on the page |
+| The ⋯ menu (a switch, off at first) | — | Hide the full screen button |
+| Full screen's button (a small round one at the top right, below a site's own top bar; bright for 3 s on entering, and for a moment when the page is scrolled back up or the app comes back; otherwise faint) | — | (a picture only: the exit full screen glyph) accessibility: Switch to TRIF view |
+| With the button hidden, for VoiceOver | Switch to TRIF view (an action) | Switch to TRIF view (a button of its own) |
+| A Home Screen icon made from 11-16 (its address has app=1) | opened the app view | its tab starts in full screen; each icon keeps its own tab |
+| A link tapped in full screen to another site | opens in TRIF's own view, in a new tab | opens in TRIF view, in a new tab |
 
 ## Mods that arrive by themselves (added 11-16, Tim approved)
 

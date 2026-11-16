@@ -198,6 +198,8 @@ extension Model {
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
+        if step["resethint"] != nil { UserDefaults.standard.removeObject(forKey: "fullScreenHinted") }
+        if step["fullscreen"] != nil { browser.toggleFullScreen(); out = "full screen: \(browser.fullScreen), note: \(browser.status)" }
         if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
         if step["closechat"] != nil { Model.pane?.close() }
         if step["newchat"] != nil { Model.pane?.home() }
@@ -237,6 +239,8 @@ struct ContentView: View {
     @State private var addingIcon = false
     @State private var pickingFolder = false
     @State private var askingProject = false
+    /// ⋯'s Hide the full screen button (off at first): the two-finger hold is then the only way out.
+    @AppStorage("fullScreenButtonHidden") private var hideExitButton = false
     @ObservedObject private var folder = FolderWatch.shared
     @State private var importing = false
     @State private var asking = false
@@ -316,11 +320,12 @@ struct ContentView: View {
                     NewTabView(history: browser.history).modifier(BarPadding(bars: bars, top: true, bottom: true))
                 }
             }
-            .modifier(BarPadding(bars: bars, top: !BarState.moves && !browser.appMode, bottom: !BarState.moves && !browser.appMode))
-            .padding(.top, browser.appMode ? 0 : BarState.compactHeight)
+            .modifier(BarPadding(bars: bars, top: !BarState.moves && !browser.fullScreen, bottom: !BarState.moves && !browser.fullScreen))
+            .padding(.top, browser.fullScreen ? 0 : BarState.compactHeight)
             .accessibilityHidden(pane.shown)
-            if browser.appMode {
-                AppViewSwitch(asked: browser.appSwitchAsked, leave: { browser.leaveApp() })
+            if browser.fullScreen {
+                FullScreenNote(text: browser.status, voiceOverExit: hideExitButton, leave: { browser.setFullScreen(false) }) { browser.status = "" }
+                if !hideExitButton { FullScreenExit(wake: browser.exitWake, long: browser.exitWakeLong) { browser.setFullScreen(false) } }
             } else {
             PullActionsView(pull: bars.pull, insets: bars.insets)
             TopBar(bars: bars, full: addressBar, compact: compactBar)
@@ -346,10 +351,11 @@ struct ContentView: View {
             .frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
-        .onChange(of: browser.appMode) { _, now in bars.setApp(now); if now { closeCovers() } }
+        .onChange(of: browser.fullScreen) { _, now in bars.setFull(now); if now { closeCovers() } }
         .onAppear {
-            pane.follow(site: browser.site); bars.attach(browser.webView); bars.setApp(browser.appMode)
+            pane.follow(site: browser.site); bars.attach(browser.webView); bars.setFull(browser.fullScreen)
             // (a pull's choice: as the toolbar's new tab, a reload, and closing the tab as the switcher does)
+            bars.wakeExit = { [browser] in browser.wakeExit() }
             bars.pull.act = { [browser] c in
                 switch c {
                 case .newTab: browser.newTab()
@@ -402,7 +408,7 @@ struct ContentView: View {
                 ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
                 if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
                 closeCovers()
-                if TrifLink.wantsApp(url) { browser.openApp(site) } else { browser.leaveApp(); browser.openFromIcon(site) }
+                if TrifLink.wantsFullScreen(url) { browser.openFullScreen(site) } else { browser.openFromIcon(site) }
             }
             else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
         }
@@ -616,6 +622,12 @@ struct ContentView: View {
                 Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
                 Button { onTab { addingIcon = true } } label: { Label("Add to Home Screen", systemImage: "plus.app") }
                     .disabled(!onWebPage)
+                // (full screen for this tab; the line under it names the shortcut, which also switches back)
+                Button { onTab { browser.setFullScreen(true) } } label: {
+                    Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                    Text("Or hold two fingers on the page")
+                }
+                Toggle(isOn: $hideExitButton) { Label("Hide the full screen button", systemImage: "eye.slash") }
                 Divider()
                 Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
                 Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
@@ -1099,11 +1111,14 @@ final class BarState: NSObject, ObservableObject {
         applyInsets(range: true)
     }
 
-    /// The app view: no bars at all (nothing covers the page, nothing moves, no pull-down).
-    private(set) var app = false
-    func setApp(_ a: Bool) {
-        guard a != app else { return }
-        app = a
+    /// Full screen: no bars at all (nothing covers the page, nothing moves, no pull-down).
+    private(set) var full = false
+    /// Full screen's page scrolled back up: its way-out button brightens (set by the app).
+    var wakeExit: () -> Void = {}
+    private var upRun: CGFloat = 0
+    func setFull(_ a: Bool) {
+        guard a != full else { return }
+        full = a
         stop()
         target = 0
         progress = 0
@@ -1137,7 +1152,12 @@ final class BarState: NSObject, ObservableObject {
         let y = sv.contentOffset.y
         defer { lastY = y }
         if shifting { return } // (the page moved with the bar: not the person's scrolling)
-        guard !app else { return }
+        guard !full else {
+            // (full screen: scrolled back up a little way, the way out shows again for a moment)
+            upRun = y < lastY ? upRun + (lastY - y) : 0
+            if upRun > 40 { upRun = 0; wakeExit() }
+            return
+        }
         pulled(sv)
         guard BarState.moves, !held else { return }
         let top = -sv.adjustedContentInset.top
@@ -1269,7 +1289,7 @@ final class BarState: NSObject, ObservableObject {
         if #available(iOS 26, *) {
             let p = progress
             let gone = keyboardUp ? 1 : p // (the toolbar, gone down with the keyboard)
-            let e = app ? .zero : UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * gone, 0) * 2).rounded() / 2, right: 0)
+            let e = full ? .zero : UIEdgeInsets(top: (extra * (1 - p) * 2).rounded() / 2, left: 0, bottom: (max(bottomHeight - toolbarHeight * gone, 0) * 2).rounded() / 2, right: 0)
             let was = wv.obscuredContentInsets
             let sv = wv.scrollView
             if was != e || (BarState.compensates && sv.contentInset != e) {
@@ -1289,7 +1309,7 @@ final class BarState: NSObject, ObservableObject {
                 // comes back on scrolling up, stayed hidden under the full bar: 11-16, Tim's phone)
                 shift(sv, by: e.top - was.top)
             }
-            if range && app {
+            if range && full {
                 wv.setMinimumViewportInset(.zero, maximumViewportInset: .zero)
             } else if range {
                 wv.setMinimumViewportInset(UIEdgeInsets(top: 0, left: 0, bottom: max(bottomHeight - toolbarHeight, 0), right: 0),
@@ -1321,37 +1341,84 @@ final class FingerWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
     override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 }
 
-/// The app view's one way back (Tim, 11-16): two fingers held still on the page for a moment (no page uses that,
-/// and the gesture never blocks the page) brings up "Switch to TRIF view" at the top for a few seconds; a tap on it
-/// goes back to TRIF's own view, on the same tab. Nothing else of the browser shows. (The status bar's strip, the
-/// first idea, gets no touches on iOS.)
-struct AppViewSwitch: View {
-    let asked: Int
+/// Full screen's own note (the bars, where notes usually are, are away): the app's note ("Switched to full screen",
+/// and any other while the tab is in full screen) at the top, fading as the others do, after 2 seconds. And for
+/// VoiceOver, which can't hold two fingers on the page, the way back as a button of its own.
+struct FullScreenNote: View {
+    let text: String
+    /// (VoiceOver's own way back, while the button is hidden)
+    let voiceOverExit: Bool
     let leave: () -> Void
-    @State private var shown = false
+    let dismiss: () -> Void
     var body: some View {
         ZStack(alignment: .top) {
-            if shown {
-                Button(action: leave) {
-                    Label("Switch to TRIF view", systemImage: "rectangle.on.rectangle")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(.regularMaterial, in: Capsule())
-                        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-                }
-                .tint(Color.trifGreen)
-                .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            if !text.isEmpty {
+                Text(text)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .onTapGesture { withAnimation(.easeOut(duration: 0.3)) { dismiss() } }
+                    .transition(.opacity)
+                    .task(id: text) {
+                        let wait = UIAccessibility.isVoiceOverRunning ? 10.0 : text == Browser.fullScreenHint ? 4.0 : 2.0
+                        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeOut(duration: 0.3)) { dismiss() }
+                    }
+            }
+            if voiceOverExit {
+            Color.clear.frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityLabel("Switch to TRIF view")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { leave() }
             }
         }
         .frame(maxWidth: .infinity)
-        .onChange(of: asked) { _, _ in
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { shown = true }
-            let mine = asked
-            Task { try? await Task.sleep(nanoseconds: 4_000_000_000); if mine == asked { withAnimation(.easeOut(duration: 0.25)) { shown = false } } }
+        .allowsHitTesting(!text.isEmpty)
+    }
+}
+
+/// Full screen's visible way out (Tim, 11-16: someone who comes in from a Home Screen icon mustn't be stuck): a small
+/// round button at the top right, over a dark see-through backing. Bright for 3 seconds on entering full screen, and for
+/// a moment when the page is scrolled back up or the app comes back to the front; otherwise faint (30%), never gone.
+/// A tap is TRIF view, as the two-finger hold. ⋯ → Hide the full screen button takes it away.
+/// (development) `-exitrobot`: the robot instead of the exit glyph, to compare.
+struct FullScreenExit: View {
+    let wake: Int
+    let long: Bool
+    let leave: () -> Void
+    @State private var bright = true
+    static let robot = ProcessInfo.processInfo.arguments.contains("-exitrobot")
+    static let below: CGFloat = 60
+    var body: some View {
+        Button(action: leave) {
+            Group {
+                if FullScreenExit.robot { RobotGlyph().frame(width: 17, height: 17) }
+                else { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 12, weight: .bold)) }
+            }
+            .foregroundStyle(.white)
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(Color.black.opacity(0.45)))
+            .contentShape(Circle().inset(by: -8))
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Switch to TRIF view") { leave() }
+        .buttonStyle(.plain)
+        .opacity(bright ? 1 : 0.3)
+        .accessibilityLabel("Switch to TRIF view")
+        // (below a site's own top bar, not on it: X's and Instagram's are about 44 to 53 points tall, with their
+        // buttons at the right; Simulator 11-16. Over the page's content, faint, rather than over its controls)
+        .padding(.top, FullScreenExit.below)
+        .padding(.trailing, 8)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .task(id: wake) {
+            withAnimation(.easeOut(duration: 0.2)) { bright = true }
+            try? await Task.sleep(nanoseconds: long ? 3_000_000_000 : 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.6)) { bright = false }
+        }
     }
 }
 

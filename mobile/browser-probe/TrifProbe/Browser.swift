@@ -56,11 +56,33 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
     @Published var wantsMods = false
     @Published var status = ""
-    /// The app view (Tim, 11-16): a site opened from its Home Screen icon, full screen, no browser chrome around it.
-    @Published var appMode = false
-    var appSite = ""
-    /// Two fingers held on the page in the app view: the "Switch to TRIF view" control shows (counted, so each shows it).
-    @Published var appSwitchAsked = 0
+    /// Full screen (Tim, 11-16): a tab's page with no browser around it (no address bar, toolbar or tabs), as an app.
+    /// Each tab's own: two fingers held on the page switch it, either way, any time; the ⋯ menu's Full screen too; a
+    /// Home Screen icon's tab starts in it. Remembered by tab (its id), across launches.
+    @Published private(set) var fullScreenTabs: Set<UUID> = Set((UserDefaults.standard.stringArray(forKey: "fullScreenTabs") ?? []).compactMap(UUID.init(uuidString:)))
+    var fullScreen: Bool { current.map { fullScreenTabs.contains($0.id) } ?? false }
+    /// Full screen on or off for a tab (the shown one by default); `note`: say so in a note that fades.
+    func setFullScreen(_ on: Bool, tab: Tab? = nil, note: Bool = true) {
+        guard let t = tab ?? current, fullScreenTabs.contains(t.id) != on else { return }
+        if on { fullScreenTabs.insert(t.id) } else { fullScreenTabs.remove(t.id) }
+        UserDefaults.standard.set(fullScreenTabs.map(\.uuidString), forKey: "fullScreenTabs")
+        report.log("fullscreen", "\(on ? "full screen" : "TRIF view") for the tab on \(Site.of(t.host).isEmpty ? "no site" : Site.of(t.host))")
+        guard t === current else { return }
+        if on { wakeExit(long: true) }
+        // (the first time in full screen, wherever it came from: how to get out, once; Tim, 11-16)
+        if on, !UserDefaults.standard.bool(forKey: "fullScreenHinted") {
+            UserDefaults.standard.set(true, forKey: "fullScreenHinted")
+            status = Browser.fullScreenHint
+        } else if note { status = on ? "Switched to full screen" : "Switched to TRIF view" }
+    }
+    static let fullScreenHint = "Hold two fingers on the page to switch views"
+    /// Full screen's way out, the small button at the top right, comes up bright for a moment (counted): on entering
+    /// full screen, the page scrolled back up, the app back in front.
+    @Published private(set) var exitWake = 0
+    /// The last wake-up is entering full screen (3 s bright), not a scroll or a return (a moment).
+    private(set) var exitWakeLong = false
+    func wakeExit(long: Bool = false) { exitWakeLong = long; exitWake += 1 }
+    func toggleFullScreen() { setFullScreen(!fullScreen) }
     @Published var picked: Picked?
     /// The last thing hidden, while it can be undone (the status strip's Undo: Tim, 11-14, hid a whole page).
     @Published var lastHide: HideRule?
@@ -143,7 +165,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         press.minimumPressDuration = 0.45
         press.delegate = self
         wv.addGestureRecognizer(press)
-        // (the app view's way back: two fingers held still on the page; pages don't use it, and it never blocks them)
+        // (full screen and back: two fingers held still on the page; pages don't use it, and it never blocks them. A
+        // pinch moves too far, a two-finger tap is too short)
         let two = UILongPressGestureRecognizer(target: self, action: #selector(twoFingerPress(_:)))
         two.numberOfTouchesRequired = 2
         two.minimumPressDuration = 0.6
@@ -210,6 +233,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     private var waitingForFront = true
     private let launchedAt = Date()
     private func cameToFront() {
+        if fullScreen { wakeExit() }
         guard waitingForFront else { return }
         waitingForFront = false
         let waited = Date().timeIntervalSince(launchedAt)
@@ -291,6 +315,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         tab.webView.stopLoading()
         tabs.remove(at: i)
         TabShots.shared.remove(tab.id)
+        setFullScreen(false, tab: tab, note: false)
         if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
         if tab === current { select(tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
     }
@@ -636,19 +661,50 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
+    /// Where each finger of a two-finger touch came down: a hold counts only if neither has moved since (a pinch keeps
+    /// its centre still, which is all the long press itself measures: Simulator 11-16, a pinch switched views).
+    private var twoStart: [(touch: UITouch, at: CGPoint)] = []
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if let p = g as? UILongPressGestureRecognizer, p.numberOfTouchesRequired == 2, let v = g.view {
+            twoStart.removeAll { $0.touch.phase == .ended || $0.touch.phase == .cancelled || $0.touch === touch }
+            twoStart.append((touch, touch.location(in: v)))
+        }
+        return true
+    }
+    /// The fingers of a two-finger hold are each still near where they came down.
+    private func stillHolding(_ press: UILongPressGestureRecognizer) -> Bool {
+        guard let v = press.view, twoStart.count >= 2, press.numberOfTouches >= 2 else { return false }
+        return (0..<press.numberOfTouches).allSatisfy { i in
+            let now = press.location(ofTouch: i, in: v)
+            return twoStart.contains { hypot($0.at.x - now.x, $0.at.y - now.y) < 24 }
+        }
+    }
+
     @objc private func twoFingerPress(_ press: UILongPressGestureRecognizer) {
-        guard appMode else { return }
         // (the fingers lifting can read to the page as a tap on whatever was under them: a link tapped from then until
         // a moment after is let go, Simulator 11-16, X's "Get the app")
-        if press.state == .began || press.state == .ended || press.state == .cancelled { ignoreLinksUntil = Date().addingTimeInterval(0.8) }
-        guard press.state == .began else { return }
+        if press.state == .began || press.state == .ended || press.state == .cancelled {
+            ignoreLinksUntil = Date().addingTimeInterval(0.8)
+            // (and a click the page handles itself, not a link: let go too, for the same moment, from TRIF's world)
+            Task { _ = await call(Browser.clickGuard, in: Browser.trifWorld) }
+        }
+        guard press.state == .began, stillHolding(press) else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        appSwitchAsked += 1
+        toggleFullScreen()
     }
     private var ignoreLinksUntil = Date.distantPast
+    static let clickGuard = """
+    if (!window.__trifClickGuard) {
+      window.__trifClickGuard = true;
+      window.addEventListener('click', (e) => { if (Date.now() < (window.__trifNoClickUntil || 0)) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+    }
+    window.__trifNoClickUntil = Date.now() + 800;
+    return 'ok';
+    """
 
     @objc private func longPressed(_ press: UILongPressGestureRecognizer) {
-        guard press.state == .began, !appMode else { return } // (no pointing at parts of the page in the app view)
+        // (no pointing at parts of the page in full screen; and not with two fingers down: that's full screen's hold)
+        guard press.state == .began, !fullScreen, press.numberOfTouches < 2 else { return }
         let point = press.location(in: webView)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task { await pick(at: point) }
@@ -1094,13 +1150,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         let scheme = url.scheme ?? ""
         if navigationAction.navigationType == .linkActivated, Date() < ignoreLinksUntil, webView === self.webView { return .cancel }
-        // (in the app view, a link the person taps to another site opens in TRIF's own view, in a tab of its own; the
-        // app view stays the icon's site's. Redirects and sign-in hops are left alone: only a tapped link)
-        if appMode, webView === self.webView, navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? false,
-           ["http", "https"].contains(scheme), !Site.host(url.host ?? "", isIn: appSite) {
-            appMode = false
+        // (in full screen, a link the person taps to another site opens in TRIF's own view, in a new tab; the full-screen
+        // tab stays on its site. Redirects and sign-in hops are left alone: only a tapped link)
+        let here = Site.of(webView.url?.host ?? "")
+        if fullScreen, webView === self.webView, navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? false,
+           ["http", "https"].contains(scheme), !here.isEmpty, !Site.host(url.host ?? "", isIn: here) {
             newTab(url.absoluteString)
-            report.log("icon", "a link from the app view of \(appSite) to \(url.host ?? "?"): TRIF's view, a new tab")
+            report.log("fullscreen", "a link from \(here) in full screen to \(url.host ?? "?"): TRIF view, a new tab")
             return .cancel
         }
         if ModDownloads.wanted(navigationAction) { return .download }
@@ -1178,7 +1234,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let url = navigationAction.request.url, let link = Browser.modLink(url, source: "the page") { offer(link); return nil }
         let t = makeTab(configuration: configuration)
         t.started = true
-        appMode = false // (a window the page opens: a tab of TRIF's, in its own view)
+        // (a window the page opens: a new tab, in TRIF view)
         let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.count - 1) + 1
         tabs.insert(t, at: at)
         select(t)

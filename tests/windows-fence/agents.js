@@ -325,7 +325,7 @@ async function codexTools(base) {
     for (const x of t.tools) {
       if (/trif/i.test(String(x.name)) && !trifTool) { trifTool = x.name; show(`the MCP tool as Codex offers it (${x.name})`, JSON.stringify(x).slice(0, 700)); }
       if (x.name === 'apply_patch' && label.startsWith('as TRIF')) show('apply_patch as offered', JSON.stringify(x).slice(0, 500));
-      if (x.name === 'exec' && label.startsWith('features.shell_tool')) show('exec as offered without the shell (the tools it can call)', [...String(x.description || '').matchAll(/^### `([\w]+)`/gm)].map((m) => m[1]).join(', ') || JSON.stringify(x).slice(0, 400));
+      if (x.name === 'exec') console.log(`    exec can call: ${[...String(x.description || '').matchAll(/^### `([\w]+)`/gm)].map((m) => m[1]).join(', ') || JSON.stringify(x).slice(0, 600)}`);
     }
   }
   // Real runs, the stand-in model asking for each thing in turn.
@@ -348,7 +348,7 @@ async function codexTools(base) {
   ]) {
     const api = await startFakeModelServer({ script: steps.map((x) => ({ ...x })), models: ['standin'] });
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', ...extra, ...mcp,
-      '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses" }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
+      '-c', `model_providers.standin={ name = "Stand-in", base_url = ${toml(`${api.url}/v1`)}, wire_api = "responses", supports_websockets = false, request_max_retries = 1, stream_max_retries = 1 }`, '-c', 'model_provider="standin"', '-m', 'standin', '-'];
     const r = runTool(bin, args, { env, cwd: work, input: 'do the steps', timeout: 180000 });
     console.log(`\n>>> ${label}: exit ${r.status}; requests to the stand-in: ${api.requests.length}`);
     const asked = steps.filter((x) => !x.say).map((x) => (x.call ? `${x.call.name} ${JSON.stringify(x.call.arguments)}` : x.custom ? `apply_patch ${x.custom.input.split('\n')[1]}` : `shell: ${x.run}`));

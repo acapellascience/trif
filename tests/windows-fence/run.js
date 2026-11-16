@@ -160,6 +160,7 @@ function fence(exe, spec, { timeout = 240000 } = {}) {
     { id: 'write its mailbox', g: 'works', expect: 'allow', op: 'write', path: path.join(box, 'req-1.json') },
     { id: 'write its temporary folder', g: 'works', expect: 'allow', op: 'write', path: path.join(box, 'tmp', 't.txt') },
     { id: 'write its screenshots folder', g: 'works', expect: 'allow', op: 'write', path: path.join(shots, 'a.png') },
+    { id: 'ask the system for a path\'s real name (its own working folder)', g: 'works', expect: 'info', op: 'realpath', path: stage },
     // reads: nothing else in the home folder
     { id: 'read a file elsewhere in the home folder', g: 'reads', expect: 'deny', op: 'read', path: path.join(home, 'secret.txt') },
     { id: 'read an ssh key', g: 'reads', expect: 'deny', op: 'read', path: path.join(home, '.ssh', 'id_ed25519') },

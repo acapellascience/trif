@@ -151,8 +151,13 @@ async function doctor(opts = {}) {
   if (major >= 18) add('ok', `Node ${process.version}`);
   else add('fail', `Node ${process.version} is too old (TRIF needs Node 18 or newer)`, 'install a current Node from https://nodejs.org or with your package manager, then run trif setup again');
 
+  // Inside a side-panel run on Windows the run's fence (lib/win/fence.js) shows it its own copy of the
+  // workspace and nothing of the real one, its wrappers included: said, not failed on.
+  const fenced = win && !!envVar('RUN_BOX');
+
   // Workspace
-  if (fs.existsSync(ws.home) && fs.existsSync(ws.modsDir)) add('ok', `workspace ${ws.home}`);
+  if (fenced) add('ok', `inside a side-panel agent run: the workspace ${ws.home} and its wrappers aren't checked (the run works in a copy and can't see them; run trif doctor in a terminal for those)`);
+  else if (fs.existsSync(ws.home) && fs.existsSync(ws.modsDir)) add('ok', `workspace ${ws.home}`);
   else add('fail', `workspace ${ws.home} is missing${fs.existsSync(ws.home) ? ` its mods folder ${ws.modsDir}` : ''}`, setupFix);
   if (ws.configError) add('fail', ws.configError, `fix or delete ${ws.configFile}`);
   // The private folder (settings, logs, screenshots): never readable by side-panel runs, so nothing of it
@@ -193,7 +198,9 @@ async function doctor(opts = {}) {
 
   // Host wrapper
   let wrapperOk = false;
-  if (!fs.existsSync(ws.hostWrapper)) {
+  if (fenced) {
+    wrapperOk = true;
+  } else if (!fs.existsSync(ws.hostWrapper)) {
     add('fail', `host wrapper ${ws.hostWrapper} is missing`, setupFix);
   } else if (!runnable(ws.hostWrapper)) {
     add('fail', `host wrapper ${ws.hostWrapper} is not executable`, `chmod +x ${ws.hostWrapper}   (or ${setupFix})`);
@@ -325,6 +332,7 @@ async function doctor(opts = {}) {
   const pathDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
   const onPath = pathDirs.some((d) => runnable(path.join(d, win ? 'trif.cmd' : 'trif')));
   if (onPath) add('ok', '`trif` is on PATH');
+  else if (fenced) { /* (a run has `trif` as a tool there, not on a PATH) */ }
   else if (win) add('warn', '`trif` is not on your PATH', `${setupFix} (it adds ${ws.bin} to your PATH), then open a new terminal`);
   else add('warn', '`trif` is not on your PATH', `add ${ws.bin} to PATH: echo 'export PATH="${ws.bin}:$PATH"' >> ~/.zshrc  (then open a new terminal)`);
 

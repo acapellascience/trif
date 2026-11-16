@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { MAX_TO_EXTENSION } = require('./framing');
-const { within, ignoresCase, unsafeName, shownName } = require('./pathcheck');
+const { within, ignoresCase, unsafeName, shownName, nativeReal } = require('./pathcheck');
 
 const RUN_AT = {
   'document-start': 'document_start',
@@ -219,9 +219,7 @@ function statSafe(p) {
 }
 
 // The system's real path (links resolved, and on macOS each component in its on-disk case), or null.
-function realOrNull(p) {
-  try { return fs.realpathSync.native(p); } catch { return null; }
-}
+function realOrNull(p) { return nativeReal(p); } // (pathcheck.js: with what stands in for it inside a run's fence on Windows)
 
 // A run may write its site's folder, so it can plant a link there (sites/x.com/a.js -> ~/.ssh/id_rsa, or
 // sites/evil -> ~/.ssh). The helper reads mods outside any sandbox, so an entry whose real path is outside

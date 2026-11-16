@@ -46,6 +46,7 @@ function run(file, args, opts = {}) {
 const OPS = {
   read: (o) => ({ ok: true, got: fs.readFileSync(o.path, 'utf8').slice(0, 60) }),
   list: (o) => ({ ok: true, got: fs.readdirSync(o.path).length }),
+  realpath: (o) => ({ ok: true, got: fs.realpathSync.native(o.path) }),
   stat: (o) => ({ ok: true, got: fs.statSync(o.path).isDirectory() ? 'dir' : 'file' }),
   write: (o) => { fs.writeFileSync(o.path, 'written from inside the fence\n'); return { ok: true }; },
   append: (o) => { fs.appendFileSync(o.path, 'appended from inside the fence\n'); return { ok: true }; },

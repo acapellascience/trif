@@ -22,9 +22,20 @@
 
 const fs = require('fs');
 const path = require('path');
+const { envVar } = require('./env');
+
+// Inside a run's fence on Windows (lib/win/fence.js) the system won't say any path's real name: asking
+// needs the mount manager, which is closed to an AppContainer (EPERM for every path; seen on
+// windows-latest). There the path as written stands in, if something is there: what the fenced program can
+// open is the fence's to decide, not these checks', and the helper, outside it, makes them for real on
+// everything a run leaves (stage.js, mods.js).
+function fencedReal(p) {
+  if (process.platform !== 'win32' || !envVar('RUN_BOX')) return null;
+  try { fs.lstatSync(p); return path.resolve(p); } catch { return null; }
+}
 
 function nativeReal(p) {
-  try { return fs.realpathSync.native(p); } catch { return null; }
+  try { return fs.realpathSync.native(p); } catch { return fencedReal(p); }
 }
 
 /**
@@ -161,4 +172,4 @@ function unsafeName(name) {
 /** `name` for a message: its unsafe characters shown as "?". */
 function shownName(name) { return String(name ?? '').replace(new RegExp(UNSAFE_IN_NAME.source, 'g'), '?').slice(0, 200); }
 
-module.exports = { realish, ignoresCase, within, isInside, samePath, badName, unsafeName, shownName, platformIgnoresCase, winOddPath, stripLongPrefix };
+module.exports = { nativeReal, realish, ignoresCase, within, isInside, samePath, badName, unsafeName, shownName, platformIgnoresCase, winOddPath, stripLongPrefix };

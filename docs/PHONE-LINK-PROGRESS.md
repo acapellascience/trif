@@ -53,7 +53,7 @@ iPhone side (needs ios-poc free):
   never goes on without the sandbox (`_withoutSandbox`), even with the panel's consent recorded ("For Tim" 6).
 - `tests/phone-link-run.test.js`: 10 tests, the real `Runs` in-process in a temp workspace with a stand-in agent
   (a fake `claude`, no model). All phone-link tests plus stage, phone, run-folders, codex-sandbox and agents:
-  167 pass locally (44 s). CI: see below.
+  167 pass locally (44 s). CI green for a6878b0 on the first attempt: see CI below.
 
 ## Earlier rounds
 
@@ -71,7 +71,8 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
-- Round 5: CI_ROUND5
+- Round 5, a6878b0: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43971467309
+  (903 tests, 896 passed, 7 skipped, 0 failed; all 10 remote-run tests ran there)
 - Round 4, 0bd5bdc: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43967487962
   (all 11 announcer tests ran there). Round 3's docs-only commit 0f79fa7 had failed on the clickjacking guard's
   timing check alone (873 passed, 1 failed, run 43966627115): the known flake, rerun once with

@@ -172,6 +172,7 @@ A tap opens the app on the tab the message was sent from, with Add this mod? (or
 |---|---|
 | The toolbar's middle button (a page in a soft green circle): back to the page from the chat, the tabs, Mods or the address screen; on the page already, only a light tap | accessibility: Back to {site} (Back to Tab with no site), the string the chat's ‹ {site} uses |
 | Back and forward while any of those cover the page | close it, as they did for the chat; accessibility: Back to {site} |
+| The same button on the page itself (changed 11-16): a + that opens a new tab, onto the address screen; the glyph turns between + and the page as the view changes | accessibility: New Tab |
 
 The tabs and the Mods tab now open over the page with the toolbar showing under them (they were sheets over it).
 

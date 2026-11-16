@@ -510,11 +510,11 @@ struct ContentView: View {
         showMods = false
         showAddress = false
     }
-    /// The toolbar's page button (Tim, 11-15): back to the page, from whatever covers it; on the page already, only
-    /// the tap's feel.
+    /// The toolbar's page button (Tim, 11-15): back to the page, from whatever covers it. On the page already (Tim,
+    /// 11-16): a + that opens a new tab, onto the address screen.
     private func showPage() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        closeCovers()
+        if covered { closeCovers() } else { browser.newTab() }
     }
 
     /// Back and forward's accessibility label while the chat is open (as the chat's own ‹ {site}).
@@ -551,9 +551,9 @@ struct ContentView: View {
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
                 .frame(maxWidth: .infinity)
-            // (the page: back to it from whatever covers it; in the middle, a little bigger)
-            Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil) }
-                .accessibilityLabel(backToTab)
+            // (the page: back to it from whatever covers it; on the page, a + for a new tab; in the middle, a little bigger)
+            Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
+                .accessibilityLabel(covered ? backToTab : "New Tab")
                 .frame(width: 64)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { ContentView.pageButtonMidX = $0 }
             // (the mods' button is a switch, on or, with all paused, off: Tim, 11-15; the robot is the chat's now)
@@ -658,16 +658,20 @@ struct RobotGlyph: View {
 /// `-pageletter`: the site's letter).
 struct PageGlyph: View {
     var letter: String? = nil
+    /// On the page itself: a + (a new tab) instead of the page, the change between the two a quick, soft replace.
+    var plus = false
     var body: some View {
         ZStack {
             Circle().fill(Color.trifGreen.opacity(0.16)).frame(width: 40, height: 40)
-            if let letter, !letter.isEmpty {
+            if let letter, !letter.isEmpty, !plus {
                 Text(letter).font(.system(size: 19, weight: .bold, design: .rounded))
             } else {
-                Image(systemName: "doc.text").font(.system(size: 19, weight: .medium))
+                Image(systemName: plus ? "plus" : "doc.text").font(.system(size: 19, weight: plus ? .semibold : .medium))
+                    .contentTransition(.symbolEffect(.replace.downUp))
             }
         }
         .frame(width: 40, height: 40)
+        .animation(.easeInOut(duration: 0.22), value: plus)
     }
 }
 

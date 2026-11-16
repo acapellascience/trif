@@ -573,7 +573,11 @@ test('the site\'s files for deploys: the side panel\'s (only those the demo uses
 
 test('/clip: the iPhone app\'s Home Screen icon page: only a TRIF icon is accepted; nothing asked for', async () => {
   const [{ default: worker }] = await load();
-  const { checkClip, CLIP_JS } = await import('../site/src/clip.js');
+  const { CHECK_SRC, TOP_KEYS, CLIP_KEYS, CLIP_JS } = await import('../site/src/clip.js');
+  // (the page's own check, from the same source text the page runs)
+  const check = new Function(`${CHECK_SRC}\nreturn checkClip;`)();
+  const checkClip = (p) => check(p, TOP_KEYS, CLIP_KEYS);
+  assert.ok(CLIP_JS.includes(CHECK_SRC), 'the page runs the check as written, not a bundler\'s copy of it');
   const clip = (over = {}, top = {}) => ({
     PayloadType: 'Configuration', PayloadVersion: 1, PayloadIdentifier: 'com.timsrobot.trif.webclip.x.com', PayloadUUID: 'U',
     PayloadDisplayName: 'X for TRIF', PayloadDescription: 'Adds an X icon…', PayloadOrganization: 'TRIF', PayloadRemovalDisallowed: false,

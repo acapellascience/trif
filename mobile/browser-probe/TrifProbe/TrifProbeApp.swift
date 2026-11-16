@@ -183,6 +183,7 @@ extension Model {
         if let n = step["select"] as? Int, n < browser.tabs.count { browser.select(browser.tabs[n]) }
         if let n = step["close"] as? Int, n < browser.tabs.count { browser.close(browser.tabs[n]) }
         if step["back"] != nil { browser.back() }
+        if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
         if step["cancelOffer"] != nil { browser.modOffer = nil }
@@ -225,6 +226,7 @@ struct ContentView: View {
     @State private var showTabs = false
     @State private var showHistory = false
     @State private var showMods = false
+    @State private var addingIcon = false
     @State private var importing = false
     @State private var asking = false
     @State private var question = ""
@@ -294,7 +296,8 @@ struct ContentView: View {
     // growing and shrinking and the toolbar sliding away as the page scrolls (BarState), so the page is never
     // resized while that happens: what's under the bars is told to the page once they settle. iOS 26 and later;
     // before that the bars stay full and the page sits between them.)
-    private var column: some View {
+    private var column: some View { columnLinks(columnBase) }
+    private var columnBase: some View {
         ZStack(alignment: .top) {
             ZStack(alignment: .top) {
                 WebViewHost(webView: browser.webView).id(browser.current.id)
@@ -351,6 +354,10 @@ struct ContentView: View {
         .onChange(of: modsPanel.wantsClose) { _, want in if want { showMods = false; modsPanel.wantsClose = false } }
         .onChange(of: browser.wantsMods) { _, want in if want { showMods = true; browser.wantsMods = false } }
         .onChange(of: browser.wantsAddress) { _, want in if want { closeCovers(); showAddress = true; browser.wantsAddress = false } }
+    }
+    /// (the sheets and what comes from outside: in a part of their own, so the compiler can follow the chain)
+    private func columnLinks(_ base: some View) -> some View {
+        base
         .onChange(of: browser.wantsSheet) { _, which in
             switch which {
             case "mods": showMods = true
@@ -359,16 +366,22 @@ struct ContentView: View {
             case "chat": pane.open()
             case "import": importing = true
             case "address": showAddress = true
-            case "none": showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
+            case "icon": addingIcon = true
+            case "none": addingIcon = false; showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
             default: break
             }
             browser.wantsSheet = ""
         }
         .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
-        .onOpenURL { url in if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) } }
+        .onOpenURL { url in
+            if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
+            else if let site = TrifLink.target(url) { closeCovers(); addingIcon = false; browser.openFromIcon(site) }
+            else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { browser.importFiles(urls) }
         }
+        .sheet(isPresented: $addingIcon) { WebClipSheet().environmentObject(browser) }
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
@@ -477,6 +490,8 @@ struct ContentView: View {
         .padding(.vertical, 6)
     }
 
+    /// The shown tab is on a website (for Add to Home Screen).
+    private var onWebPage: Bool { let s = browser.webView.url?.scheme; return s == "https" || s == "http" }
     /// Something covers the page: the chat, the tabs, the Mods tab, the address screen.
     private var covered: Bool { pane.shown || showTabs || showMods || showAddress }
     /// Whatever covers the page closes (the chat as its own Back does: nothing in it lost).
@@ -556,6 +571,8 @@ struct ContentView: View {
                 Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
                 Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
                 Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                Button { onTab { addingIcon = true } } label: { Label("Add to Home Screen", systemImage: "plus.app") }
+                    .disabled(!onWebPage)
                 Divider()
                 Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
                 Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }

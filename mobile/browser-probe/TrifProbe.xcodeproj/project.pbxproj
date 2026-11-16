@@ -29,6 +29,7 @@
 		FA8B849F0EDF4996DCE7F94D /* Mods.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE824E1A29585E6DA63DE65 /* Mods.swift */; };
 		1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50952D10E0015A131982D938 /* Tabs.swift */; };
 		ECF9AC8198F8D474EE8E0A97 /* History.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4AB4F92AE50452752EADEC /* History.swift */; };
+		A1C10B0E5EB1C11B00000001 /* WebClip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000002 /* WebClip.swift */; };
 		83C9CC277679A1522C7BFBA3 /* ModsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */; };
 		0EF94AA25682CDCF85352992 /* Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903BBCA66CB348FEA79D82F4 /* Import.swift */; };
 		B7F7A78E2063372A6C3DBEDA /* mods.html in Resources */ = {isa = PBXBuildFile; fileRef = 22B988337DDCC367969E0FE6 /* mods.html */; };
@@ -66,6 +67,7 @@
 		FD05AECBA179D94C3E3B0BEF /* TrifProbe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TrifProbe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		50952D10E0015A131982D938 /* Tabs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Tabs.swift"; sourceTree = "<group>"; };
 		7F4AB4F92AE50452752EADEC /* History.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "History.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000002 /* WebClip.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "WebClip.swift"; sourceTree = "<group>"; };
 		8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModsPanel.swift"; sourceTree = "<group>"; };
 		903BBCA66CB348FEA79D82F4 /* Import.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Import.swift"; sourceTree = "<group>"; };
 		22B988337DDCC367969E0FE6 /* mods.html */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.html; path = "mods.html"; sourceTree = "<group>"; };
@@ -157,6 +159,7 @@
 				903BBCA66CB348FEA79D82F4 /* Import.swift */,
 				8D7457D479B7BD9BC097CAC0 /* ModsPanel.swift */,
 				7F4AB4F92AE50452752EADEC /* History.swift */,
+				A1C10B0E5EB1C11B00000002 /* WebClip.swift */,
 				50952D10E0015A131982D938 /* Tabs.swift */,
 				C92814A95137C3CC4B0A8C2F /* Browser.swift */,
 				A67596316AFDF35B8CF90704 /* Checks.swift */,
@@ -260,6 +263,7 @@
 				0EF94AA25682CDCF85352992 /* Import.swift in Sources */,
 				83C9CC277679A1522C7BFBA3 /* ModsPanel.swift in Sources */,
 				ECF9AC8198F8D474EE8E0A97 /* History.swift in Sources */,
+				A1C10B0E5EB1C11B00000001 /* WebClip.swift in Sources */,
 				1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */,
 				066931474CC5139D68D2F470 /* Browser.swift in Sources */,
 				17237858CB0A046A273784DC /* Checks.swift in Sources */,

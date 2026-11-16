@@ -203,6 +203,21 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The toolbar's back and forward while the chat shows | closed the chat | the chat's own back and forward (Back · Forward); the page button goes back to the tab |
 | When the page's data couldn't go in (diagnostics only) | — | (no words shown) |
 
+## Home Screen icons (added 11-16)
+
+| Where | Old | New |
+|---|---|---|
+| The ⋯ menu | — | Add to Home Screen (greyed on a page that isn't a website) |
+| The sheet's title | — | Add to Home Screen |
+| The sheet's name field (placeholder) | — | Name (filled in with the site's own short name, e.g. X) |
+| Under the name | — | The icon opens {site} in TRIF. |
+| The button | — | Add to Home Screen; after it's tapped: Make it again |
+| After the button (what to do next) | — | Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install. |
+| If it couldn't be handed over | — | Couldn't hand the icon to Safari. |
+| The profile in Settings (name) | — | {Name} for TRIF (the publisher line shows TRIF) |
+| The profile in Settings (description) | — | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. |
+| The icon's label on the Home Screen | — | {Name}, as typed in the sheet |
+
 ## The desktop panel's words, reused unchanged (not for review)
 
 Style mods / Boxed mods / Free mods and their lines; On / Off; the row tags (new, updated, on hold, change on hold,

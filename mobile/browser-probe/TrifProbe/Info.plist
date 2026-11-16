@@ -22,6 +22,18 @@
 			</array>
 		</dict>
 	</array>
+	<!-- (trif://open?url=<a site>: the address of a site's Home Screen icon, WebClip.swift) -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.timsrobot.trifprobe.open</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>trif</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationShortcutItems</key>
 	<array>
 		<dict>

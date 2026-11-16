@@ -58,7 +58,8 @@ target.build_configurations.each do |config|
   s['TARGETED_DEVICE_FAMILY'] = '1,2'
   s['CODE_SIGN_STYLE'] = 'Automatic'
   s['GENERATE_INFOPLIST_FILE'] = 'YES'
-  # (what Xcode's generated Info.plist can't say: the files the app opens, the icon's Pause all mods)
+  # (what Xcode's generated Info.plist can't say: the files the app opens, the trif:// scheme of Home Screen icons,
+  # the icon's Pause all mods)
   s['INFOPLIST_FILE'] = 'TrifProbe/Info.plist'
   s['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
   s.delete('ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME') # (no accent colour in the catalog: the app sets its tint itself)

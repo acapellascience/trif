@@ -221,7 +221,8 @@ time, for a headless Simulator: write the app's Documents/step.json, then
 `{"import": "path"}`, `{"offer": "a chat's reply"}`, `{"addOffer": 1}`, `{"cancelOffer": 1}`, `{"status": 1}`, and
 for the chat `{"panego": "…"}`, `{"pane": 1}` (its scrolling and size), `{"panejs": "…"}`, `{"chat": 1}` (shown, what
 it's doing, its address), `{"closechat": 1}`; `{"boxjs": "…"}` (in the boxed mods' world: `return JSON.stringify(globalThis.__trifSandbox.errors)`),
-`{"approve": "<mod id>|*"}` (Allow on waiting mods); `{"sheet": "address"}` opens the address screen; `-pageletter` at
+`{"approve": "<mod id>|*"}` (Allow on waiting mods); `{"sheet": "address"}` opens the address screen; `{"sheet": "icon"}`
+the Add to Home Screen sheet; `{"tabhosts": 1}` lists the tabs' hosts (* on the one shown); `-pageletter` at
 launch shows the site's letter in the toolbar's page button instead of the page glyph. shared/pages/fixedbars.html
 has a fixed header and an x.com-like fixed tab bar at the bottom, for the bars moving over a page. shared/pages/feed.html draws a feed from feed.json by fetch and by
 XMLHttpRequest, for a boxed mod's site-data power (trif.filterResponse).
@@ -230,6 +231,13 @@ The chat can't be signed in to in the Simulator: `-chathome http://localhost:837
 `node mobile/serve.js`) gives it a stand-in (shared/pages/chat.html) with claude.ai's message box, send and stop
 buttons and a reply written a few words at a time, with a mod in it ("two" in the message: two mods; "no mod": none).
 Screenshots from 11-15 are in browser-probe/shots/ (not committed).
+
+Home Screen icons (WebClip.swift): the ⋯ menu's Add to Home Screen makes a configuration profile with one Web Clip
+(`trif://open?url=<site>`, full screen, identifier `com.timsrobot.trif.webclip.<site>` so adding a site again replaces
+its icon) and hands it to Safari from a server on 127.0.0.1 that stops once Safari has it. Full screen on purpose: a
+clip that isn't opens Safari and asks "Open in TRIF Probe?" every time; a full-screen one shows a blank screen for a
+moment and opens the app with no question (Simulator, iOS 26.3). `TargetApplicationBundleIdentifier` is ignored in a
+profile installed by hand. A `trif://open?url=` link goes to a tab already on that site, else a new tab; only http(s).
 
 ## What isn't probed, because it's known
 

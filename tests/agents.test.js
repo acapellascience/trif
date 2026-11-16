@@ -19,6 +19,21 @@ const { redact } = require('../helper/lib/logins');
 const WIN = process.platform === 'win32';
 const exe = (dir, name) => path.join(dir, WIN ? `${name}.cmd` : name);
 const inWs = (...parts) => path.join(...parts);
+// A stand-in on a PATH that no config.json names yet (windowsShims reads the PATH from there): its .cmd.
+const cmdFor = (dir, name) => { if (WIN) fs.writeFileSync(path.join(dir, `${name}.cmd`), `@ECHO off\r\n"${process.execPath}" "%~dp0${name}" %*\r\n`); };
+// The system's own folders on a PATH (Windows starts a .cmd with cmd.exe).
+const SYSTEM_PATH = WIN ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : ['/usr/bin', '/bin'];
+// A folder nothing can be put in until the function this returns is called: by its mode, or on Windows,
+// where a mode does nothing, by a rule against the user for the folder itself (and nothing in it left from
+// an earlier move, which could still be put into).
+function lockFolder(dir) {
+  if (!WIN) { fs.chmodSync(dir, 0o500); return () => fs.chmodSync(dir, 0o700); }
+  const { execFileSync } = require('child_process');
+  const who = require('os').userInfo().username;
+  for (const n of fs.readdirSync(dir)) if (/^from-workspace-/.test(n)) fs.rmSync(path.join(dir, n), { recursive: true, force: true });
+  execFileSync('icacls', [dir, '/deny', `${who}:(WD,AD)`], { stdio: 'pipe' });
+  return () => execFileSync('icacls', [dir, '/remove:d', who], { stdio: 'pipe' });
+}
 const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const cleanups = [];
@@ -173,7 +188,8 @@ function calls(bin) {
   const dir = path.join(bin, 'calls');
   let names = [];
   try { names = fs.readdirSync(dir).sort(); } catch { return []; }
-  return names.map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')));
+  // (one the stand-in is still writing isn't a call yet: seen empty on a slow Windows runner)
+  return names.flatMap((n) => { try { return [JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8'))]; } catch { return []; } });
 }
 function callFor(bin, word) { return calls(bin).find((c) => c.prompt.includes(word)); }
 
@@ -895,15 +911,15 @@ test('a run never starts with private files in the workspace: they\'re moved fir
   assert.ok(callFor(bin, 'MOVEDFIRST'));
   // Can't be moved (the private folder isn't writable): refused, the agent never starts.
   // (the private folder locked before the file appears: nothing can move it in between)
-  fs.chmodSync(privDir(home), 0o500);
-  fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
+  const unlock = lockFolder(privDir(home));
   try {
+    fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
     r = await extRequest(ext, 'agent.start', { ...START, prompt: 'NEVERSTARTS' });
     assert.equal(r.ok, false, `started anyway: ${JSON.stringify(r)}; in the workspace: ${fs.readdirSync(home).join(', ')}; private: ${fs.readdirSync(privDir(home)).join(', ')}`);
     assert.match(r.error, /private files are in the workspace.*config\.json.*trif setup/);
     assert.ok(!callFor(bin, 'NEVERSTARTS'));
   } finally {
-    fs.chmodSync(privDir(home), 0o700);
+    unlock();
   }
 });
 
@@ -1288,7 +1304,8 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   fs.mkdirSync(fakeBin);
   fs.writeFileSync(path.join(fakeBin, 'claude'), FAKE_CLAUDE);
   fs.chmodSync(path.join(fakeBin, 'claude'), 0o755);
-  const termPath = `${fakeBin}:/usr/bin:/bin`;
+  cmdFor(fakeBin, 'claude');
+  const termPath = [fakeBin, ...SYSTEM_PATH].join(path.delimiter);
   let r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.equal(r.code, 0, r.stderr);
   // (Moved out of the workspace into the private folder, where runs can't read it.)
@@ -1304,7 +1321,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
       deny: ['WebFetch', 'WebSearch'],
     },
   });
-  assert.match(r.stdout, new RegExp(`agents +claude \\(${fakeBin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude\\), codex not found`));
+  assert.match(r.stdout, new RegExp(`agents +claude \\(${reEsc(exe(fakeBin, 'claude'))}\\), codex not found`));
 
   // Overwritten on every setup; a broken config.json is left alone.
   fs.writeFileSync(path.join(ws, '.claude', 'settings.json'), '{"permissions":{"allow":["Bash"]}}');
@@ -1316,15 +1333,15 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ env: { PATH: termPath } }));
 
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });
-  assert.match(r.stdout, /^ok {4}Claude Code 9\.9\.9 \(.*fakebin\/claude\)$/m);
+  assert.match(r.stdout, new RegExp(`^ok {4}Claude Code 9\\.9\\.9 \\(${reEsc(exe(fakeBin, 'claude'))}\\)$`, 'm'));
   assert.match(r.stdout, /^warn {2}Claude Code isn't logged in, so the side panel can't use it$/m);
   assert.match(r.stdout, /fix: run `claude` in a terminal and log in/);
   assert.match(r.stdout, /^- {5}Codex: not found \(optional\)$/m);
 
   // Agent on the terminal's PATH but not the recorded one.
-  fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ env: { PATH: '/usr/bin' } }));
+  fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ env: { PATH: SYSTEM_PATH[0] } }));
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws, env: { PATH: termPath } });
-  assert.match(r.stdout, /warn {2}Claude Code is at .*fakebin\/claude, but the helper won't find it there/);
+  assert.match(r.stdout, new RegExp(`warn {2}Claude Code is at ${reEsc(exe(fakeBin, 'claude'))}, but the helper won't find it there`));
   assert.match(r.stdout, /fix: run trif setup in this terminal/);
 });
 
@@ -1333,11 +1350,17 @@ test('doctor: an agent that isn\'t logged in is only a warning when the side pan
   const ws = path.join(root, 'ws');
   const fakeBin = path.join(root, 'fakebin');
   fs.mkdirSync(fakeBin);
-  const script = (name, body) => { fs.writeFileSync(path.join(fakeBin, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(fakeBin, name), 0o755); };
+  // (stand-ins as Node scripts, with a .cmd beside each on Windows)
+  const script = (name, body) => { fs.writeFileSync(path.join(fakeBin, name), `#!${process.execPath}\nconst a = process.argv[2];\n${body}\n`); fs.chmodSync(path.join(fakeBin, name), 0o755); cmdFor(fakeBin, name); };
   const flag = path.join(root, 'claude-logged-in');
-  script('claude', `case "$1" in --version) echo "9.9.9 (Claude Code)";; auth) if [ -e ${JSON.stringify(flag)} ]; then echo '{"loggedIn": true, "authMethod": "claude.ai"}'; else echo '{"loggedIn": false}'; exit 1; fi;; esac`);
-  script('codex', 'case "$1" in --version) echo "codex-cli 0.140.0";; login) echo "Not logged in"; exit 1;; esac');
-  const termPath = `${fakeBin}:/usr/bin:/bin`;
+  script('claude', `if (a === '--version') console.log('9.9.9 (Claude Code)');
+else if (a === 'auth') {
+  if (require('fs').existsSync(${JSON.stringify(flag)})) console.log('{"loggedIn": true, "authMethod": "claude.ai"}');
+  else { console.log('{"loggedIn": false}'); process.exitCode = 1; }
+}`);
+  script('codex', `if (a === '--version') console.log('codex-cli 0.140.0');
+else if (a === 'login') { console.log('Not logged in'); process.exitCode = 1; }`);
+  const termPath = [fakeBin, ...SYSTEM_PATH].join(path.delimiter);
   await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--no-examples'], { home: ws, env: { PATH: termPath } });
   fs.writeFileSync(flag, 'yes');
   let r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });

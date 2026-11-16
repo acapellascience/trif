@@ -258,7 +258,8 @@ test('a run: a process it leaves behind, out of its group, writes into its worki
   assert.deepEqual(d.changedFiles, [path.join('sites', 'example.com', 'early.js')]);
   assert.ok(fs.existsSync(path.join(h, 'sites', 'example.com', 'early.js')), 'what it wrote while it ran is in the mods folder');
   await sleep(2500);
-  assert.ok(fs.existsSync(path.join(cwd, 'sites', 'example.com', 'late.js')), 'the late write happened (into a folder nothing reads)');
+  // (a slow runner's left-behind process can take longer than that to write)
+  await waitFor(() => fs.existsSync(path.join(cwd, 'sites', 'example.com', 'late.js')), { timeout: 15000, message: 'the late write (into a folder nothing reads)' });
   assert.ok(!fs.existsSync(path.join(h, 'sites', 'example.com', 'late.js')), 'the late write never reached the mods folder');
   fs.rmSync(cwd, { recursive: true, force: true });
   assert.ok(!fs.readFileSync(path.join(privDir(h), 'helper.log'), 'utf8').includes('late.js'));

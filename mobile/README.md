@@ -131,7 +131,14 @@ message box, notices a send, watches whether a reply is still being written (Cla
 streaming mark; ChatGPT's stop button; else the reply unchanged for six seconds) and reads the code blocks
 written in the reply. It never presses Send and never reads the rest of the conversation. It reads only what the
 page shows: no internal routes of claude.ai or chatgpt.com, no session token, no cookie (Tim, 11-16: nothing against
-their terms). A .js file a reply attaches comes to TRIF only when the person taps it (a download the app catches).
+their terms). A .js file a reply attaches comes to TRIF only when the person taps it: a download the app catches
+(ChatGPT's file links, and a viewer's own Download button), or, when the tap opens the chat's own viewer over the
+conversation (Claude's file cards, 11-16), the code the viewer shows, read off the screen without its line numbers
+(chat.js VIEWER, viewerCode: the viewer's markup isn't known signed in, so whatever covers the message box counts too,
+as does an address with /files/, /artifacts/ or /canvas in it). A viewer that showed no mod's code is noted in the
+diagnostics. The page's data goes into the message box only while a person could use it: shown, on the screen, with
+nothing over it (no viewer, sheet or dialog); meanwhile the fill waits, as long as the viewer stays open and the chat is
+shown, and goes in when it closes. The stand-in has such a card and viewer ("viewer" in a message; `?viewerroute`).
 
 ## The browser probe as an app (branch ios-poc, 11-15)
 
@@ -251,11 +258,17 @@ to Add this mod?, one at a time; files iCloud hasn't brought down yet are asked 
 there is moved or changed. And `trif://add?v=1&name=<site>-<mod>.js&z=<raw deflate, base64url>[&h=<16 hex of
 sha256>]` (a QR code's link): unpacked (256 KB at most), checked, offered the same way.
 
-The app view (Browser.openApp, TrifProbeApp.swift AppViewSwitch): `trif://open?url=…&app=1`, what Home Screen icons made
-from 11-16 open, shows the site full screen with no browser chrome (no bars, no pull-down, no pointing at parts of the
-page); each icon's site keeps its own tab (`appTabs`). Two fingers held still on the page bring up Switch to TRIF view
-(the status bar's strip gets no touches on iOS; a tap the lifting fingers make is let go for 0.8 s). A tapped link to
-another site, or a window the page opens, goes to TRIF's own view in a new tab.
+Full screen (Browser.setFullScreen, TrifProbeApp.swift FullScreenNote and FullScreenExit): a tab's page with no browser
+chrome (no bars, no pull-down, no pointing at parts of the page), each tab's own (`fullScreenTabs`, by tab id). Two
+fingers held still on the page for 0.6 s switch it either way, on any tab (a two-finger tap is too short; a pinch is
+refused, as each finger must stay within 24 points of where it came down: the long press alone measures only their
+centre; a tap the lifting fingers make is let go for 0.8 s); the ⋯ menu's Full screen does too. A note says which, at the
+top in full screen; the first time, how to switch back. A small exit button at the top right, 60 points down so it's
+below a site's own top bar (X's and Instagram's buttons are up there), bright for 3 s on entering and for a moment when
+the page is scrolled back up or the app comes back, otherwise at 30%; ⋯ → Hide the full screen button takes it away.
+`trif://open?url=…&app=1`, what Home Screen icons made from 11-16 open, starts that site's tab in full screen; each
+icon's site keeps its own tab (`iconTabs`). A tapped link to another site, or a window the page opens, goes to a new tab
+in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen` and `resethint`.)
 
 Home Screen icons (WebClip.swift): the ⋯ menu's Add to Home Screen makes a configuration profile with one Web Clip
 (`trif://open?url=<site>`, full screen, identifier `com.timsrobot.trif.webclip.<site>` so adding a site again replaces

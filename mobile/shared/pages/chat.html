@@ -18,6 +18,10 @@
   attachments and text across a reload and puts them back 0.8 s after the page loads, as claude.ai keeps a draft;
   `?gptpaste` takes a pasted text file as its text, as chatgpt.com did on Tim's iPhone (11-16), while its hidden file
   input (the paper clip's) still makes tiles.
+  "viewer" in the message: the mod as a file card that isn't a link (Claude's, 11-16): a tap opens a viewer over the
+  whole chat (a dialog with the file's name, Download and Close, its code with line numbers a person can't select),
+  the message box still there underneath; `?viewerroute` gives the viewer an address of its own (/chat/<id>/files/<name>)
+  that Back or Close leaves.
 -->
 <style>
   :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
@@ -40,6 +44,13 @@
   .ProseMirror:empty::before { content: "Reply to the stand-in…"; opacity: 0.5; }
   .row button { width: 40px; height: 40px; border-radius: 10px; border: 0; background: #c96442; color: white; font-size: 18px; }
   .row button:disabled { opacity: 0.4; }
+  .file-card { display: inline-flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 6px 0; cursor: pointer; }
+  .file-card small { opacity: 0.6; }
+  .viewer { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 10; }
+  .viewer header { display: flex; gap: 8px; align-items: center; }
+  .viewer header span { flex: 1; }
+  .viewer pre { flex: 1; margin: 0; border-radius: 0; overflow: auto; }
+  .viewer .linenumber { display: inline-block; width: 2.2em; opacity: 0.45; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
 <body>
@@ -147,12 +158,13 @@ ${JSON.stringify(body, null, 2)}`;
     files.length = 0;
     tiles.textContent = '';
     if (draft) sessionStorage.removeItem('draft');
-    if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}`);
+    if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}${location.search}`);
     const origin = (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
     let parts;
     if (/no mod/i.test(text)) parts = [['p', 'Which part of the page do you mean? Point TRIF at it and send me that.']];
     // ("file": the mod as an attached file, a card with a download link, as Claude's file cards, for a tap; "file
     // and block": the same mod in a code block too)
+    else if (/viewer/i.test(text)) parts = [['p', 'Here it is as a file:'], ['card', modFor(origin, 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }', hide: ['#promo-banner'] }), 'calmer-feed.js']];
     else if (/file/i.test(text)) {
       parts = [['p', 'The mod is big, so here it is as a file:'], ['a', '/stand-in-file/calmer-feed.js', 'calmer-feed.js']];
       if (/block/i.test(text)) parts.push(['pre', modFor('http://localhost', 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }' })]);
@@ -164,6 +176,34 @@ ${JSON.stringify(body, null, 2)}`;
       parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
     }
     reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0));
+  }
+
+  // (Claude's file viewer, as far as it matters here: over the whole chat, the message box left underneath)
+  function openViewer(name, code) {
+    const v = document.createElement('div');
+    v.className = 'viewer';
+    v.setAttribute('role', 'dialog');
+    v.setAttribute('aria-modal', 'true');
+    v.innerHTML = '<header><span></span><button type="button" aria-label="Download">Download</button><button type="button" aria-label="Close">✕</button></header><pre><code></code></pre>';
+    v.querySelector('header span').textContent = name;
+    const c = v.querySelector('code');
+    code.split('\n').forEach((line, i) => { const n = document.createElement('span'); n.className = 'linenumber'; n.textContent = String(i + 1); c.append(n, `${line}\n`); });
+    const routed = location.search.includes('viewerroute');
+    const close = () => { v.remove(); if (routed && /\/files\//.test(location.pathname)) history.back(); };
+    v.querySelector('[aria-label="Close"]').addEventListener('click', close);
+    v.querySelector('[aria-label="Download"]').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      a.download = name;
+      document.body.append(a);
+      a.click();
+      a.remove();
+    });
+    if (routed) {
+      history.pushState({ viewer: name }, '', `${location.pathname.replace(/\/files\/.*$/, '')}/files/${name}${location.search}`);
+      addEventListener('popstate', () => v.remove(), { once: true });
+    }
+    document.body.append(v);
   }
 
   function reply(parts, seconds) {
@@ -180,6 +220,19 @@ ${JSON.stringify(body, null, 2)}`;
     log.append(box);
     const steps = [];
     for (const [tag, t, label] of parts) {
+      if (tag === 'card') {
+        steps.push(() => {
+          const card = document.createElement('div');
+          card.className = 'file-card';
+          card.setAttribute('role', 'button');
+          card.tabIndex = 0;
+          card.innerHTML = `<b></b><small>JS</small>`;
+          card.querySelector('b').textContent = label;
+          card.addEventListener('click', () => openViewer(label, t));
+          box.append(card);
+        });
+        continue;
+      }
       if (tag === 'a') {
         steps.push(() => { const card = document.createElement('div'); card.setAttribute('data-testid', 'file-card'); const a = document.createElement('a'); a.href = t; a.textContent = label; a.setAttribute('download', label); card.append('📄 ', a); box.append(card); });
         continue;

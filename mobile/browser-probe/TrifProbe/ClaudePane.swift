@@ -428,19 +428,35 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // loading (claude.ai takes seconds more after its box is usable: 11-16, a new chat took 5 s to fill), but
         // looking for the box every 150 ms, 20 s at most (the person may go back to the conversation from a file
         // meanwhile); the chat is never moved for it. 11-16: a fill started on a file the chat had opened)
+        // (and only with the conversation itself in front: the message box shown and usable, nothing over it. While a
+        // viewer is open (a file, an artifact: 11-16, Tim tapped a .js and Claude's viewer covered the box), the wait
+        // goes on, however long, for as long as the chat is shown: closing the viewer lets the fill go in)
         var st: [String: Any] = [:]
-        for _ in 0..<133 {
+        var waited = 0
+        var saidViewer = false
+        while waited < 133 {
             if !navigating, onChatPage {
                 st = (Browser.parse(await chatJS("state()")) as? [String: Any]) ?? [:]
-                if st["editor"] as? Bool == true { break }
+                if st["usable"] as? Bool == true { break }
+            }
+            let over = st["viewer"] as? String
+            if let over, !saidViewer {
+                saidViewer = true
+                report.log("claude", "\(service.rawValue): \(over) is over the message box: the fill waits for it to close")
             }
             try? await Task.sleep(nanoseconds: 150_000_000)
+            if over == nil || !shown { waited += 1 }
             if !shown && activity != .idle { break }
             if generation != fillGeneration { break }
         }
         sw.lap("the chat ready")
         guard generation == fillGeneration else { return } // (the chat reloaded meanwhile: filled after it, instead)
-        guard onChatPage, st["editor"] as? Bool == true else {
+        guard onChatPage, st["editor"] as? Bool == true, st["usable"] as? Bool == true else {
+            if let over = st["viewer"] as? String {
+                report.log("claude", "\(service.rawValue): \(over) stayed over the message box, nothing filled")
+                Diagnostics.shared.log("chat", "the page's data wasn't put in: \(over) was over the chat's message box")
+                return
+            }
             report.log("claude", "\(service.rawValue): no message box (\(onChatPage ? "signed out?" : "not on a conversation")), nothing filled")
             Diagnostics.shared.log("chat", "the page's data wasn't put in: the chat \(onChatPage ? "had no message box" : "wasn't on a conversation") for 20 s")
             return
@@ -521,6 +537,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "done":
             // (the mods: the reply's new code blocks with a whole mod file in each)
             handleDone(d, d["mods"] as? [String] ?? [])
+        case "viewer":
+            // (the chat's own viewer opened, on a file the person tapped: the mod it shows, to Add this mod?; or, when no
+            // code could be read off it, a line in the diagnostics, so the next report shows what was there)
+            let text = d["text"] as? String ?? ""
+            let name = d["name"] as? String ?? ""
+            let what = "\(d["why"] as? String ?? "a viewer")\(name.isEmpty ? "" : " on \(name)") at \(d["path"] as? String ?? "?")"
+            if text.isEmpty {
+                report.log("claude", "\(service.rawValue): \(what), no mod's code read off it")
+                if name.lowercased().hasSuffix(".js") { Diagnostics.shared.log("chat files", "\(service.rawValue)'s viewer opened \(what), and no mod's code could be read off it") }
+                return
+            }
+            report.log("claude", "\(service.rawValue): \(what): its code read (\(text.count) characters), to Add this mod?")
+            guard let browser else { return }
+            Task { @MainActor in
+                let offered = await browser.offerFromChat([text])
+                if let conv = self.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
+            }
         default: break
         }
     }
@@ -734,8 +767,9 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             || (navigationResponse.response.url?.path.lowercased().hasSuffix(".js") ?? false) { return .download }
         return ModDownloads.wanted(navigationResponse) ? .download : .allow
     }
-    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
-    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
+    // (a window the chat opened only to download a file, ChatGPT's signed address say: closed again once the file's on its way)
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download); if webView === popup { popup = nil } }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download); if webView === popup { popup = nil } }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { if webView === self.webView { loading = true } }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {

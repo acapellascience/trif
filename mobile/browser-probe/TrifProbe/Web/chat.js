@@ -8,6 +8,10 @@
 //     the tab; then the reply watched until it's done (for the chat button's dots and its replied mark), and the mod
 //     files in its code blocks (ones that weren't there before the send) handed to the app, which asks Add this mod?
 //     about each (Tim, 11-15; kept, 11-16) (the AUTO path).
+//   - a file the person opens in the chat's own viewer (Claude's, over the conversation, when a .js in a reply is
+//     tapped): the code it shows is read off the screen, as a code block's is, and handed to the app for Add this mod?;
+//     and while a viewer (or anything) is over the message box, nothing is filled in: the app waits (usableEditor,
+//     viewer; Tim, 11-16).
 // It reads only what the page shows: never the sites' own internal routes (their APIs), never a session token or
 // cookie (Tim, 11-16: nothing against Claude's or ChatGPT's terms). A .js file in a reply comes to TRIF only when
 // the person taps it (a download the app catches: ModDownloads). It never sends a message, never reads the
@@ -21,6 +25,92 @@
   function editor() {
     const list = [...document.querySelectorAll('div.ProseMirror[contenteditable="true"], #prompt-textarea, [contenteditable="true"], textarea')].filter(visible);
     return list[list.length - 1] || null;
+  }
+
+  // ---- the conversation in front, or something over it (Tim, 11-16: a tapped .js opened Claude's file viewer, and
+  // the page's data was being filled into the message box hidden under it) ------------------------------------------
+  // Claude's and ChatGPT's viewers (a file, an artifact, a canvas), as best known without signing in: unverified, so
+  // what's covering the message box is also found by looking, whatever its markup (covered(), below). All in one place.
+  const VIEWER = [
+    '[role="dialog"]', '[aria-modal="true"]',
+    '[data-testid*="artifact" i]', '[data-testid*="file-viewer" i]', '[data-testid*="file-preview" i]', '[data-testid*="code-viewer" i]',
+    '[class*="artifact-panel" i]', '[class*="file-viewer" i]', '[id*="artifact" i]', 'section[aria-label*="artifact" i]', '[data-testid="canvas"]',
+  ].join(', ');
+  /** A viewer's own address: Claude's /chat/<id>/files/…, /artifacts/…; ChatGPT's canvas. */
+  const VIEWER_ROUTE = /\/(files|artifacts?|canvas)\b/i;
+  const VIEWER_MIN = 0.35; // (how much of the window a viewer covers, at least: not a menu or a tooltip)
+
+  /** An element that's shown: in the layout, not hidden from people (aria-hidden, inert), with a size. */
+  function shown(el) {
+    if (!el || !el.isConnected) return false;
+    if (el.closest('[aria-hidden="true"], [inert]')) return false;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
+    }
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  /** What's over the message box: the thing on top at its middle, if that isn't the box (or inside it), else null. */
+  function covered(ed) {
+    const r = ed.getBoundingClientRect();
+    const x = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1);
+    const y = Math.min(Math.max(r.top + Math.min(r.height / 2, 20), 1), innerHeight - 1);
+    if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return document.body; // (off the screen)
+    const top = document.elementFromPoint(x, y);
+    const box = composerBox() || ed;
+    if (!top || top === ed || ed.contains(top) || box.contains(top) || top.contains(box)) return null;
+    return top;
+  }
+  /** The message box, only if a person could use it now: shown, on the screen, nothing over it. */
+  function usableEditor() {
+    const ed = editor();
+    return ed && shown(ed) && !covered(ed) ? ed : null;
+  }
+  /** An open viewer: one of VIEWER's, big enough, shown; or whatever covers the message box (its outermost layer);
+   *  or the viewer's own address. {root, why} or null. */
+  function viewer() {
+    const big = (el) => { const r = el.getBoundingClientRect(); return r.width * r.height >= innerWidth * innerHeight * VIEWER_MIN; };
+    for (const el of document.querySelectorAll(VIEWER)) if (!el.closest('[data-trif]') && shown(el) && big(el)) return { root: el, why: 'a viewer' };
+    const ed = editor();
+    const over = ed && covered(ed);
+    if (over && over !== document.body) {
+      // (the layer it belongs to: its highest ancestor that's positioned over the page)
+      let root = over;
+      for (let n = over; n && n !== document.body; n = n.parentElement) if (/fixed|absolute|sticky/.test(getComputedStyle(n).position) && big(n)) root = n;
+      if (big(root)) return { root, why: 'something over the message box' };
+    }
+    if (VIEWER_ROUTE.test(location.pathname)) return { root: document.querySelector('main') || document.body, why: 'a viewer\'s address' };
+    return null;
+  }
+  /** The code a viewer shows, as text: its code elements, without their line numbers (elements a person can't select,
+   *  aria-hidden, or named for line numbers, hidden for the moment of reading). */
+  function viewerCode(root) {
+    const blocks = [...root.querySelectorAll('pre, code, [class*="code" i], [data-testid*="code" i]')].filter((n) => !n.parentElement.closest('pre, code'));
+    const texts = [];
+    for (const b of blocks.length ? blocks : [root]) {
+      const nums = [...b.querySelectorAll('*')].filter((n) => /line-?num|linenumber|gutter/i.test(`${n.className && n.className.baseVal !== undefined ? n.className.baseVal : n.className} ${n.getAttribute('data-testid') || ''}`)
+        || getComputedStyle(n).userSelect === 'none' || n.getAttribute('aria-hidden') === 'true');
+      const was = nums.map((n) => n.style.display);
+      nums.forEach((n) => { n.style.display = 'none'; });
+      try { texts.push(b.innerText || b.textContent || ''); } finally { nums.forEach((n, i) => { n.style.display = was[i]; }); }
+    }
+    const all = texts.join('\n');
+    const a = all.search(/^.*==WebMod==/m), z = all.search(/==\/WebMod==/);
+    if (a === -1 || z === -1) return null;
+    return all.slice(all.lastIndexOf('\n', a) + 1);
+  }
+  /** (each viewer once: what it showed, by its text) */
+  let viewerSeen = '';
+  function lookAtViewer() {
+    const v = viewer();
+    if (!v) { viewerSeen = ''; return; }
+    const code = viewerCode(v.root);
+    const name = ((v.root.innerText || '').match(/[\w.() -]+\.js\b/) || [''])[0].trim();
+    const key = `${name}|${code ? code.length : 0}|${(code || '').slice(0, 200)}`;
+    if (key === viewerSeen) return;
+    viewerSeen = key;
+    post({ type: 'viewer', why: v.why, name, path: location.pathname.replace(/[^/]{24,}/g, '…'), text: code || '' });
   }
 
   /** One paste into the message box: true if the page took it (its paste handler cancelled the event). */
@@ -64,9 +154,9 @@
     // (the message box, as soon as it's there (every 100 ms, 10 s at most), not the page's whole load: claude.ai
     // goes on loading for seconds after its box works. Then, if the page is still loading, a moment for the box to
     // take pastes (it was a paste taken late: 11-14), 600 ms at most)
-    let ed = editor();
-    for (let i = 0; !ed && i < 100; i++) { await wait(100); ed = editor(); }
-    if (!ed) return 'no message box';
+    let ed = usableEditor();
+    for (let i = 0; !ed && i < 100; i++) { await wait(100); ed = usableEditor(); }
+    if (!ed) return viewer() ? 'something over the message box' : 'no message box';
     if (document.readyState !== 'complete' && !settled) await Promise.race([new Promise((r) => addEventListener('load', r, { once: true })), wait(600)]);
     settled = true;
     ed.focus();
@@ -278,8 +368,12 @@
   /** The mod files in code blocks: [{ key: its header, text }], in page order. */
   function modBlocks(onlyAfter) {
     const out = [];
+    // (not the code a viewer shows over the chat: that's read as the viewer's, without its line numbers, lookAtViewer)
+    const v = viewer();
+    const over = v && v.root !== document.body && v.root.localName !== 'main' ? v.root : null;
     for (const pre of document.querySelectorAll('pre')) {
       if (onlyAfter && !(onlyAfter.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      if (pre.closest(VIEWER) || (over && over.contains(pre))) continue;
       const raw = pre.textContent || '';
       const end = raw.search(/==\/WebMod==/);
       if (raw.indexOf('==WebMod==') === -1 || end === -1) continue;
@@ -404,7 +498,8 @@
   function state() {
     const c = composer();
     const ours = trifInBox(c);
-    return JSON.stringify({ editor: !!editor(), has: !!(c.text || c.names.length), trif: ours.count, others: ours.others, context: hasContext(), working: replying() || !!watch, replying: replying() });
+    const v = viewer();
+    return JSON.stringify({ editor: !!editor(), usable: !!usableEditor(), viewer: v ? v.why : null, has: !!(c.text || c.names.length), trif: ours.count, others: ours.others, context: hasContext(), working: replying() || !!watch, replying: replying() });
   }
 
   // ---- what TRIF put in the message box (11-16: the page went in twice after leaving the chat and coming back) ----
@@ -491,9 +586,10 @@
   let queued = false;
   // (one observer for the buttons, the pills, keeping the reply in view and a mod that turns up late: at most
   // every 400 ms, only when the page changes)
-  new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); reveal(); late(); }, 400); } })
+  new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); reveal(); late(); lookAtViewer(); }, 400); } })
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   mark();
+  addEventListener('popstate', () => setTimeout(lookAtViewer, 300));
 
   /** (development) The message box's surroundings, as HTML, to see how a chat builds its chips and buttons. */
   function dump() {
@@ -507,5 +603,5 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif };
+  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, viewer: () => { const v = viewer(); return v ? v.why : null; } };
 })();

@@ -37,7 +37,7 @@ test('the chat script: fill, the send, the reply watched until done, its mods ha
     await page.addScriptTag({ content: CHAT });
 
     // A new chat: no instructions in it, nothing in the box. The instructions go in as an attached file.
-    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, has: false, trif: 0, others: false, context: false, working: false, replying: false });
+    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, usable: true, viewer: null, has: false, trif: 0, others: false, context: false, working: false, replying: false });
     const said = await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null),
       "I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…");
     assert.match(said, /text attached/);
@@ -183,6 +183,60 @@ test('the chat script: TRIF\'s file attached through the page\'s file input when
     assert.equal(await page.evaluate(() => globalThis.__trifChat.clearTrif()), 0);
     assert.equal(await page.evaluate(() => document.querySelectorAll('[data-testid="file-thumbnail"]').length), 0);
     assert.equal(await page.evaluate(() => document.querySelector('.ProseMirror').textContent), 'make it green');
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+test('the chat script: a file opened in the chat\'s viewer (Claude\'s, 11-16): its code read off the screen for Add this mod?, and no fill while the viewer covers the message box', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    for (const query of ['', '?viewerroute']) {
+      const page = await browser.newPage();
+      await page.goto(`${base}/chat.html${query}`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+      await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'as a viewer file please'); });
+      await page.click('button[aria-label="Send message"]');
+      await waitPost(page, 'done');
+      // (the card is no link: a tap opens the viewer over the chat, its code with line numbers beside it)
+      await page.click('.file-card');
+      const [v] = await waitPost(page, 'viewer');
+      assert.match(v.text, /^\/\/ ==WebMod==/);
+      assert.match(v.text, /==\/WebMod==/);
+      assert.doesNotMatch(v.text, /^\d/m, 'no line numbers in the code read');
+      assert.equal(v.name, 'calmer-feed.js');
+      if (query) assert.match(v.path, /\/files\/calmer-feed\.js$/);
+      // (the message box is still there, under the viewer: not usable, so nothing goes in)
+      let st = JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
+      assert.equal(st.editor, true);
+      assert.equal(st.usable, false);
+      assert.ok(st.viewer);
+      const filling = page.evaluate(() => globalThis.__trifChat.fill('Here\'s http://127.0.0.1:9/ in TRIF now: …', null, null, null, null));
+      await page.waitForTimeout(1500);
+      assert.equal(await page.evaluate(() => document.querySelector('.ProseMirror').textContent), '', 'nothing typed under the viewer');
+      // (closed: the fill that was waiting goes in)
+      await page.click('.viewer [aria-label="Close"]');
+      assert.match(await filling, /text/);
+      assert.match(await page.evaluate(() => document.querySelector('.ProseMirror').textContent), /in TRIF now/);
+      st = JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
+      assert.equal(st.usable, true);
+      assert.equal(st.viewer, null);
+      if (query) assert.doesNotMatch(await page.evaluate(() => location.pathname), /\/files\//);
+      // (opened again after a moment: offered again, once; the viewer staying open isn't offered over and over)
+      await page.waitForTimeout(800);
+      await page.click('.file-card');
+      await page.waitForTimeout(1200);
+      assert.equal((await posts(page)).filter((m) => m.type === 'viewer').length, 2, 'once more after it was closed (seen again), not more');
+      // (the viewer's code isn't a reply's code block too: no late pickup of it, with its line numbers)
+      assert.equal((await posts(page)).filter((m) => m.type === 'done' && m.why === 'late').length, 0);
+      await page.close();
+    }
   } finally {
     if (browser) await browser.close();
     server.close();

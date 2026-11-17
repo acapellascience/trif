@@ -120,7 +120,11 @@ The brief: ios-poc isn't free; the look at Settings' Connect a phone in a real b
   failed, the phone view's "the site sees an iPhone in that tab only" alone; the new browser test and every
   other phone-link test passed. That flake failed in all three runs. One guess, not proven: this round's
   test built its reader (swiftc) while that test's browser ran; the build now waits for the browsers' lock.
-  The run of the commit that records this line: see the round's report, and the next round's first look.
+  46e4d37 (the build under the lock), run https://github.com/acapellascience/trif/actions/runs/44011896600:
+  the same, 927 passed, 1 failed, that flake alone, so the guess was wrong. How it fails: "the page area is
+  the phone's", `{w: 776, h: 813}` for `{w: 390, h: 750}` (the phone window's size, in tests/phone-browser.test.js;
+  not this branch's code). Four runs in a row now: for the main session. The commit that records this line
+  was pushed without waiting for its run (docs only).
 - Round 11, 8a7b8f3: failed twice on browser tests alone, run
   https://github.com/acapellascience/trif/actions/runs/44007593328: attempt 1 (935 tests, 926 passed, 8
   skipped, 1 failed) on the clickjacking guard alone; attempt 2 (`gh run rerun --failed`, once, as the brief

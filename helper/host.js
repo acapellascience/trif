@@ -37,7 +37,8 @@ const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = re
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = require('./lib/browsers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
-const { deleteMod, emptyTrash } = require('./lib/trash');
+const { deleteMod, emptyTrash, siteInScope } = require('./lib/trash');
+const { ownFolder } = require('./lib/stage');
 const { runScope } = require('./lib/scope');
 const update = require('./lib/update');
 const modsFeed = require('./lib/modsfeed');
@@ -582,9 +583,38 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
 const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore']);
-// Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
+// Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
+// The page commands a run's `trif` sends (cli.js; AGENTS.md "Commands"): the only ones that go on from a run
+// to the extension, which holds each to the run's site (args.scope: background.js scopedTab, checkScopeUrl).
+const RUN_PAGE_COMMANDS = new Set(['status', 'tabs', 'run', 'reload', 'navigate', 'open', 'close', 'text', 'sweep', 'screenshot',
+  'record', 'requests', 'request', 'errors', 'logs', 'mod.enable']);
+// Everything a run may ask, by its token or through its mailbox (onClientLine): the helper's own `ping` and
+// `mods` (answered for the run's site alone: helperInfo, runMod), the mod-file commands and those page
+// commands. Anything else from a run is refused there and never sent on to the extension, whatever the
+// extension would make of it: a command added later is a run's only once it's named here.
+const RUN_COMMANDS = new Set(['ping', 'mods', ...MOD_FILE_COMMANDS, ...RUN_PAGE_COMMANDS]);
+
+const siteOfId = (id) => String(id ?? '').trim().split('/')[0];
+/**
+ * Whether a mod is a run's site's, by its id: the rule its delete and restore go by (lib/trash.js siteInScope).
+ * A phone view's run: its phone twin's mods only; a sensitive site of its own and its parent: each other's
+ * aren't. `scope`, `splits`: the run's (onClientLine sets args.scope and args.scopeSplits from its token).
+ */
+function runMod(id, scope, splits) {
+  return !!scope && siteInScope(siteOfId(id), scope, Array.isArray(splits) ? splits : []);
+}
+/**
+ * A mod's text or diff asked for by id (mod.code, mod.diff): from a run, its own site's mods only, said before
+ * the mod is looked up (so the answer doesn't tell which other mods there are). The side panel and the user's
+ * terminal send no scope: every mod.
+ */
+function checkRunReads(id, args) {
+  if (args.scope === undefined && args.agentRun === undefined) return;
+  if (runMod(id, args.scope, args.scopeSplits)) return;
+  throw new Error(`this chat can only show mods of ${args.scope || 'its own site'}; ${String(id || '(no id)').slice(0, 200)} is another site's`);
+}
 
 // Merges proposed in a side-panel chat (agent.start with `merge`): mod id -> {scope, hash, version,
 // before} (preinstalled.js mergeRequest). The proposing run only explains and asks; the user's go-ahead
@@ -745,6 +775,7 @@ function agentCommand(cmd, args) {
     case 'mod.diff': {
       // "Show what changed" on a waiting change: the version that last ran against the waiting one
       const id = typeof args.id === 'string' ? args.id.trim() : '';
+      checkRunReads(id, args);
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const before = lastRun(ws.home, id);
@@ -845,6 +876,7 @@ function agentCommand(cmd, args) {
       // mod: its rules (the file), not the code TRIF makes of them. `version: 'ran'`: a mod with a change
       // waiting, the version that's running meanwhile (held.js lastRun).
       const id = typeof args.id === 'string' ? args.id.trim() : '';
+      checkRunReads(id, args);
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const CAP = 200000;
@@ -1362,7 +1394,48 @@ function onClient(sock) {
   });
 }
 
-function helperInfo() {
+/**
+ * `ping`. For a run (`run`: the one whose token or mailbox asked), what the helper knows of its own mods alone:
+ * its site's and the others it may change or made (runsOwn), itself of the runs, and no login. `trif status`
+ * and `trif verify` in a run read their mod's hold, waiting change and errors from this.
+ */
+function helperInfo(run = null) {
+  const info = allHelperInfo();
+  if (!run) return info;
+  const mine = (id) => runsOwn(run, id);
+  const only = (o) => Object.fromEntries(Object.entries(o || {}).filter(([id]) => mine(id)));
+  const byId = (list) => (Array.isArray(list) ? list : []).filter((e) => e && mine(e.id));
+  return {
+    ...info,
+    mods: info.mods.filter(mine),
+    modErrors: byId(info.modErrors),
+    modWarnings: byId(info.modWarnings),
+    modsApplied: info.modsApplied ? { ...info.modsApplied, registered: info.modsApplied.registered.filter(mine), errors: byId(info.modsApplied.errors) } : info.modsApplied,
+    runs: info.runs.filter((r) => r.runId === run.id),
+    held: only(info.held),
+    pending: info.pending.filter(mine),
+    review: only(info.review),
+    updates: only(info.updates),
+    login: null,
+  };
+}
+
+/**
+ * The mods a run is told about by `ping`: its site's (runMod), the other folders it may change (stage.js
+ * ownFolder: all-sites/ for a run that isn't a phone view's), a folder it made for another site, and a mod held
+ * as this chat's (held.js: its change to an every-site mod waits, what it wrote for another site is held; `trif
+ * verify` says so from the hold). Other sites' mods, holds and updates aren't its to ask the helper about.
+ */
+function runsOwn(run, id) {
+  const site = siteOfId(id);
+  if (!site || typeof id !== 'string') return false;
+  if (runMod(id, run.scope, run.splits) || ownFolder(site, run.scope, run.splits || [])) return true;
+  if (run.stage && run.stage.newFolders && run.stage.newFolders.has(site)) return true;
+  const h = state.held[id];
+  return !!h && (h.runId === run.id || (!!h.scope && h.scope === run.scope));
+}
+
+function allHelperInfo() {
   return {
     helper: VERSION,
     pid: process.pid,
@@ -1414,6 +1487,8 @@ function onClientLine(sock, line) {
             ? 'only the user adds Tim\'s mods (on the setup page, or in Settings in the side panel)'
             : `"${cmd}" isn't available inside an agent run` });
     }
+    // (and nothing but what a run may ask: RUN_COMMANDS. Not sent on for the extension to refuse.)
+    if (!RUN_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: `"${cmd.slice(0, 60)}" isn't a command an agent run can send (\`trif help\` lists the ones there are)` });
     args.scope = run.scope;
     args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
@@ -1423,13 +1498,15 @@ function onClientLine(sock, line) {
   if (cmd === 'run' && args.world === 'box' && !(state.hello && Array.isArray(state.hello.features) && state.hello.features.includes('boxRun'))) {
     return reply(sock, { id, ok: false, error: 'this browser\'s TRIF extension is from before `trif run` could use TRIF\'s box (it updates by itself; in Chrome, reload it on chrome://extensions). Until then: `trif run --page`, which runs in the page\'s own world (document, window) and pauses the site\'s posting until the tab reloads' });
   }
-  if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
+  if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo(run) });
   if (cmd === 'mods') {
+    // (from a run: its own site's mods, and what's wrong with those, alone: runMod)
+    const mine = run ? (e) => !!e && runMod(e.id, run.scope, run.splits) : () => true;
     return reply(sock, {
       id, ok: true,
       result: {
-        modsDir: ws.modsDir, errors: state.modErrors, warnings: state.modWarnings,
-        mods: state.mods.map((m) => ({
+        modsDir: ws.modsDir, errors: state.modErrors.filter(mine), warnings: state.modWarnings.filter(mine),
+        mods: state.mods.filter(mine).map((m) => ({
           ...summarize(m), ...(state.held[m.id] ? { held: state.held[m.id] } : {}), ...(state.updates[m.id] ? { update: state.updates[m.id] } : {}),
         })),
       },
@@ -1453,9 +1530,11 @@ function onClientLine(sock, line) {
     return;
   }
 
-  // Everything else is a page command for the extension. One that loads a page: a mod file changed since
+  // Everything else is a page command for the extension (from a run: one of RUN_PAGE_COMMANDS, checked again
+  // here, where it would go out). One that loads a page: a mod file changed since
   // the last sync (written just before `trif reload`, inside the 150 ms debounce, or before the watcher
   // fired) goes to the extension first, which registers it before loading the page (background.js).
+  if (run && !RUN_PAGE_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: `"${cmd.slice(0, 60)}" isn't a command an agent run can send` });
   if (LOADS_PAGE.has(cmd) && fingerprint() !== state.lastFingerprint) syncMods(`before ${cmd}`, false);
   const extId = `h${++requestCounter}`;
   const timeoutMs = typeof args.timeout === 'number' && args.timeout > 0 ? args.timeout + GRACE_MS : DEFAULT_TIMEOUT_MS;

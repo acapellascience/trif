@@ -205,7 +205,9 @@ Exact drafts: docs/PHONE-LINK-STRINGS.md, "Phone sync".
   before running, removed to Recently deleted, a refused file).
 - End to end: the stand-in phone (`tests/phone-link-client.js`) syncs with the real helper in a temp HOME on
   127.0.0.1: add, edit both ways, a conflict, deletes both ways, a held mod on the computer, a style change at
-  once, the refusals.
+  once, the refusals. Built (S4): `tests/phone-sync-e2e.test.js`, with `PhoneClient.sync` (the app's whole
+  sync: begin, get, put, end); also a race (`changed`, then the conflict), a twin with a phone run `later`, a
+  twin that's a link, a second phone's own base, the switch off, and the desktop mods untouched throughout.
 - The Mac test harness for the Swift side (mobile/test/phonelink.test.js) against the same helper.
 - Simulator: a mod made on the phone, edited by a desktop phone-view chat (the stand-in agent), back on the phone;
   a conflict; a delete.

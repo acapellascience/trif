@@ -9,7 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 const { buildMod, isIgnoredName, readModFile } = require('./mods');
-const { outOfScope, scopeOf } = require('./scope');
+const { outOfScope, scopeOf, isPhoneSite } = require('./scope');
+const { ownTwin } = require('./stage');
 const { badName, samePath } = require('./pathcheck');
 
 const TRASH = 'trash';
@@ -40,7 +41,8 @@ function checkScope(site, file, scope, verb, splits = []) {
   if (!scope) return;
   // (a mod in another site's folder isn't this chat's, even when its @match is: sites/mail.google.com/ to a
   // google.com chat, where mail.google.com is a site of its own, scope.js scopeOf)
-  if (scopeOf(site, [...splits, scope]) !== scope) {
+  // (a phone view's chat, scope phone~x.com: its phone twin's mods only, never x.com's: stage.js ownTwin)
+  if (isPhoneSite(scope) ? !ownTwin(site, scope, splits) : scopeOf(site, [...splits, scope]) !== scope) {
     throw new TrashError(`this chat can only ${verb} mods of ${scope}; ${site}/${path.basename(file, '.js')} is another site's. Ask the user to do it from the side panel there or their terminal.`);
   }
   // (A link out of the mods folder, or the trash, isn't read: readModFile.)

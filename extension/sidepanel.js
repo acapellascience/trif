@@ -3495,6 +3495,9 @@ async function loadModels(agentId, fresh = false) {
   renderModels();
 }
 
+// What "no model picked" runs, where the helper sets it rather than the agent (claude.js DEFAULT_MODEL)
+const DEFAULT_MODEL_NAMES = { claude: 'Opus (default)' };
+
 function renderModels() {
   const { id, info } = currentAgent();
   renderOpenModel(id, !!view.status?.helper?.connected); // open model: where it comes from (openmodel.js)
@@ -3504,7 +3507,7 @@ function renderModels() {
   const allowsOther = !list || list.custom !== false;
   const known = !chosen || models.some((m) => m.id === chosen);
   const def = list?.default ? models.find((m) => m.id === list.default) : null;
-  const opts = [new Option(def ? `Default (${def.name})` : 'Default', '')];
+  const opts = [new Option(def ? `Default (${def.name})` : DEFAULT_MODEL_NAMES[id] || 'Default', '')];
   for (const m of models) {
     const o = new Option(m.name, m.id);
     if (m.description) o.title = m.description;
@@ -3552,13 +3555,13 @@ function renderEffort(id, info, model) {
 
 /**
  * The line over the message box: this chat's agent and model ("Open model · Kimi K2.7 Code", "Claude Code ·
- * Default (Opus)"), so a model picked somewhere else is never a surprise. The model's name once its list has
+ * Opus (default)"), so a model picked somewhere else is never a surprise. The model's name once its list has
  * loaded (settings), its id until then.
  */
 function renderUsing(info, chosen, models, def) {
   if (!info) { ui.using.hidden = true; return; }
   const named = chosen && models.find((m) => m.id === chosen);
-  const model = chosen ? (named ? named.name : chosen) : def ? `Default (${def.name})` : 'Default model';
+  const model = chosen ? (named ? named.name : chosen) : def ? `Default (${def.name})` : DEFAULT_MODEL_NAMES[info.id] || 'Default model';
   const effort = chosenEffort(info.id);
   ui.using.textContent = `${info.name} · ${model}${effort ? ` · ${EFFORT_NAMES[effort] || effort} effort` : ''}`;
   ui.using.title = 'Change the agent or model';

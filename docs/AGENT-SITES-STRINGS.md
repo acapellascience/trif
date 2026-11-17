@@ -54,7 +54,7 @@ Every user- and agent-facing string the per-site agent setting adds, exact (all 
 ## Moved to the chat line (branch faces, 2026-11-11; **approved by Tim 2026-11-14**, AWAITING-STRINGS.md)
 
 The control left the header. It's now the third part of the line over the message box, after the agent and
-model ("Claude Code · Default model · Agent asks before running code ▾"), shown only where there's a chat
+model ("Claude Code · Opus (default) · Agent asks before running code ▾"), shown only where there's a chat
 to have (the site connected and the robot on: not on the off, blocked or disconnected gates, nor on pages
 with no site). A button opens a small menu (radio items; arrows, Home/End, Enter, Esc to close). Each level
 has a small monochrome icon in the muted text colour; on a panel narrower than 420px only the icon shows,

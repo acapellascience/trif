@@ -1948,3 +1948,26 @@ test('a run is told which browser it was started from', () => {
   assert.match(agents.contextText({ url: 'https://x.com/', browser: 'Firefox' }), /in the user's Firefox\./);
   assert.match(agents.contextText({ url: 'https://x.com/' }), /in the user's browser\./);
 });
+
+test('side panel: no model picked reads "Opus (default)" for Claude Code, "Default" for the others', async () => {
+  // (Claude Code's list names no default, so the panel's own name is the one shown, never "Default (Opus (newest))")
+  assert.equal((await claude.listModels()).default, null);
+  const js = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  const grab = (start) => { const i = js.indexOf(start); assert.ok(i >= 0, start); const end = js.indexOf('\n}\n', i); return js.slice(i, end + 2); };
+  const src = `${js.slice(js.indexOf('const DEFAULT_MODEL_NAMES'), js.indexOf(';', js.indexOf('const DEFAULT_MODEL_NAMES')) + 1)}
+    const EFFORT_NAMES = {}; const ui = { using: {} }; const chosenEffort = () => '';
+    ${grab('function renderUsing(')}
+    ({ renderUsing, ui })`;
+  const { renderUsing, ui } = require('vm').runInNewContext(src);
+  const claudeModels = [{ id: 'opus', name: 'Opus (newest)' }, { id: 'sonnet', name: 'Sonnet (newest)' }];
+  renderUsing({ id: 'claude', name: 'Claude Code' }, '', claudeModels, null);
+  assert.equal(ui.using.textContent, 'Claude Code · Opus (default)');
+  renderUsing({ id: 'claude', name: 'Claude Code' }, 'sonnet', claudeModels, null);
+  assert.equal(ui.using.textContent, 'Claude Code · Sonnet (newest)');
+  renderUsing({ id: 'codex', name: 'Codex' }, '', [], null);
+  assert.equal(ui.using.textContent, 'Codex · Default model');
+  renderUsing({ id: 'codex', name: 'Codex' }, '', [{ id: 'gpt-5', name: 'GPT-5' }], { id: 'gpt-5', name: 'GPT-5' });
+  assert.equal(ui.using.textContent, 'Codex · Default (GPT-5)');
+  // the model menu's first entry: the same name for Claude Code (its list has no default of its own)
+  assert.match(js, /new Option\(def \? `Default \(\$\{def\.name\}\)` : DEFAULT_MODEL_NAMES\[id\] \|\| 'Default', ''\)/);
+});

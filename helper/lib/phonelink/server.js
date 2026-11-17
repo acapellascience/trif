@@ -22,6 +22,7 @@
 const net = require('net');
 const { EventEmitter } = require('events');
 const { Handshake, keyId } = require('./noise');
+const { cleanName } = require('./store');
 const { packet, PacketReader, seal, Assembler } = require('./frames');
 
 const VERSION = 1;
@@ -101,7 +102,7 @@ class Server extends EventEmitter {
     this.handle('ping', () => ({ t: 'pong' }));
     this.handle('hello', (session, msg) => {
       const d = msg.device && typeof msg.device === 'object' ? msg.device : {};
-      session.hello = { app: text(msg.app, 40), device: { name: text(d.name, 60), width: size(d.width), height: size(d.height) } };
+      session.hello = { app: text(msg.app, 40), device: { name: cleanName(d.name, ''), width: size(d.width), height: size(d.height) } };
       return { agent: null, pending: [], ...this.helloMore(session), t: 'hello', v: VERSION, version: this.version, name: this.store.name };
     });
   }

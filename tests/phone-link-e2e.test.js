@@ -130,6 +130,7 @@ test('the phone link end to end: pair, a run with a try on the phone, its result
   put('x.com/keep.js', '// another desktop mod');
   put('all-sites/dark.js', '// for every site');
   put('phone~other.example/theirs.js', '// another site\'s phone mod');
+  put('phone~x.com/old.js', '// ==WebMod==\n// @name old\n// ==/WebMod==\n// the phone twin\'s own old mod');
 
   ext = new FakeExtension({ home, env });
   await ext.waitForSocket();
@@ -156,7 +157,8 @@ test('the phone link end to end: pair, a run with a try on the phone, its result
   assert.deepEqual((await panel('phone.status')).phones.map((p) => [p.id, p.name]), [[idA, 'Tim\'s iPhone']]);
 
   // ---- A run from the phone: the page copy, a screenshot, and words that make the stand-in agent write all
-  // over its working folder, try its draft on the phone, ask for this computer's tabs, and look once more.
+  // over its working folder, delete its twin's old mod, try its draft on the phone, ask for this computer's tabs,
+  // and look once more.
   A.onTool = (m) => (m.tool === 'try_mod' ? { text: 'The bar is at the bottom.\nErrors: none', shot: TRIED.toString('base64') }
     : m.tool === 'screenshot' ? { shot: NOW.toString('base64') } : { text: 'not asked in this test', error: true });
   const before = tree();
@@ -164,7 +166,7 @@ test('the phone link end to end: pair, a run with a try on the phone, its result
   const ran = phoneCalls().length;
   const started = await A.request({
     t: 'run.start', url: 'https://x.com/home', page: PAGE, shot: SHOT.toString('base64'), chat: 'chat-1',
-    prompt: 'WRITE a bottom bar PHONE[try bottom-bar] CLI[screenshot] CLI[text] CLI[tabs] PHONE[screenshot]',
+    prompt: 'WRITE DELETE a bottom bar PHONE[try bottom-bar] CLI[screenshot] CLI[text] CLI[tabs] PHONE[screenshot]',
   });
   assert.equal(started.t, 'run.started', JSON.stringify(started));
   const runId = started.runId;
@@ -177,10 +179,10 @@ test('the phone link end to end: pair, a run with a try on the phone, its result
   const result = await A.next((m) => m.t === 'run.result' && m.runId === runId);
   assert.deepEqual(result.mods.map((m) => [m.id, m.name]).sort(), [['phone~m.x.com/part', 'a part of the site'], ['phone~x.com/bottom-bar', 'bottom bar']]);
   assert.match(result.mods.find((m) => m.id === 'phone~x.com/bottom-bar').code, /^\/\/ ==WebMod==\n\/\/ @name bottom bar\n/);
-  assert.deepEqual(result.removed, []);
+  assert.deepEqual(result.removed, ['phone~x.com/old'], 'the twin\'s mod it deleted');
 
   // The agent was given the phone's page and screenshot as files of its run, and the page's address and width.
-  const call = await waitFor(() => calls().find((c) => c.prompt.includes('WRITE a bottom bar')), { message: 'the agent\'s call' });
+  const call = await waitFor(() => calls().find((c) => c.prompt.includes('WRITE DELETE a bottom bar')), { message: 'the agent\'s call' });
   assert.match(call.context, /"https:\/\/x\.com\/home" on the phone, 393 px wide/);
   assert.deepEqual(Object.keys(call.seen).sort(), [`phone-page-${runId}.txt`, `phone-screenshot-${runId}.jpg`]);
   assert.equal(call.seen[`phone-page-${runId}.txt`].head, PAGE.slice(0, 40));
@@ -213,10 +215,12 @@ test('the phone link end to end: pair, a run with a try on the phone, its result
   assert.deepEqual(since.filter((m) => m.type === 'agentEvent'), [], 'the phone\'s chat is not the panel\'s');
   for (const m of since) for (const s of SECRETS) assert.equal(JSON.stringify(m).includes(s), false, `${s} is in a ${m.type} message to the extension`);
 
-  // The folder limit: the mods folder has the twin's two new files, and nothing else changed.
+  // The folder limit: the mods folder has the twin's two new files, the twin's old mod is gone, and nothing
+  // else changed.
   const after = tree();
   assert.deepEqual(Object.keys(after).filter((k) => !(k in before)).sort(), [path.join('phone~m.x.com', 'part.js'), path.join('phone~x.com', 'bottom-bar.js')]);
-  for (const k of Object.keys(before)) assert.equal(after[k], before[k], `${k} is as it was`);
+  assert.deepEqual(Object.keys(before).filter((k) => !(k in after)), [path.join('phone~x.com', 'old.js')], 'only the twin\'s deleted mod gone');
+  for (const k of Object.keys(before)) if (k in after) assert.equal(after[k], before[k], `${k} is as it was`);
 
   // Kept for the phone until it says it has it; never the page copy or a screenshot, there or anywhere (the
   // stand-in agent's own notes of what it was given aside).

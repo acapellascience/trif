@@ -339,7 +339,7 @@ test('a file that isn\'t what the store wrote: off, or its bad rows dropped; ids
   assert.equal(got.port, 0);
   assert.deepEqual(got.phones.map((p) => p.id), [keyId(k1), keyId(k2)]);
   assert.deepEqual(got.phones[0], { id: keyId(k1), name: 'Lied about its id', key: b64(k1), pairedAt: null, lastSeen: '2026-11-16T12:00:00.000Z' });
-  assert.equal(got.phones[1].name, 'x'.repeat(60));
+  assert.equal(got.phones[1].name, 'x'.repeat(59) + '\u2026');
   // Phones without the computer's key are paired to nothing.
   assert.deepEqual(parse(JSON.stringify({ on: true, phones: [{ key: b64(k1), name: 'A' }] })), off);
 });
@@ -349,8 +349,13 @@ test('names are shown as text: one line, no control characters, 60 characters, a
   assert.equal(cleanName('', 'iPhone'), 'iPhone');
   assert.equal(cleanName(null, 'iPhone'), 'iPhone');
   assert.equal(cleanName({ toString: () => 'object' }, 'iPhone'), 'iPhone');
-  assert.equal(Array.from(cleanName('😀'.repeat(100), 'x')).length, 60);
-  assert.equal(cleanName('a'.repeat(59) + ' b', 'x'), 'a'.repeat(59), 'no space left at the cut');
+  assert.equal(cleanName('😀'.repeat(100), 'x'), '😀'.repeat(59) + '\u2026', 'no word to cut at: mid-word');
+  assert.equal(cleanName('👨‍👩‍👧'.repeat(70), 'x'), '👨‍👩‍👧'.repeat(59) + '\u2026', 'an emoji of several code points stays whole');
+  assert.equal(cleanName('a'.repeat(60), 'x'), 'a'.repeat(60), '60 is whole');
+  assert.equal(cleanName('a'.repeat(59) + ' b', 'x'), 'a'.repeat(59) + '\u2026', 'no space in the second half: mid-word');
+  const long = 'Tim’s iPhone from the studio upstairs, the one with the cracked screen';
+  assert.equal(cleanName(long, 'x'), 'Tim’s iPhone from the studio upstairs, the one with the\u2026', 'at a word');
+  assert.ok(Array.from(cleanName(long, 'x')).length <= 60);
 });
 
 test('a long computer name is cut in the code\'s text, never the code refused: whole characters, then "\u2026", in what the panel\'s code holds', async () => {

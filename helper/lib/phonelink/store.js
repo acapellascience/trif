@@ -42,10 +42,18 @@ function key32(text) {
   return buf.length === DHLEN && b64(buf) === text ? buf : null;
 }
 
-/** A name as it will be shown (as text): one line, no control characters, 60 characters at most. */
+/**
+ * A name as it will be shown (as text): one line, no control characters, 60 characters at most (as a reader counts
+ * them: an emoji stays whole). A longer one is cut at the last space in its second half, else mid-word, then "…".
+ */
 function cleanName(name, fallback) {
   const s = String(typeof name === 'string' ? name : '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim();
-  return Array.from(s).slice(0, NAME_MAX).join('').trim() || fallback;
+  const chars = characters(s);
+  if (chars.length <= NAME_MAX) return s || fallback;
+  let keep = chars.slice(0, NAME_MAX - 1);
+  const space = keep.lastIndexOf(' ');
+  if (space >= NAME_MAX / 2) keep = keep.slice(0, space);
+  return keep.join('').trim() + '\u2026';
 }
 
 /** The Mac's own name (System Settings, General, About), as its other Bonjour records give it. */

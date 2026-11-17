@@ -293,8 +293,21 @@
   // ([data-cds-part=paint]); ChatGPT on the button. And what TRIF attaches (the page, "TRIF instruction"; after a
   // mod is added, "TRIF follow-up", "TRIF screenshot" and "TRIF full page") as small pills saying so, not big tiles
   // (data-trif-chip, set by mark below); their remove buttons stay.
+  // (each pill's words: what TRIF attached, said as TRIF's (Tim, 11-16: "make it clear … those are attachments"); the
+  // key is the file's name, which the chat and the model see, unchanged)
+  const PILLS = {
+    'TRIF instruction': 'From TRIF: page & guide',
+    'TRIF follow-up': 'From TRIF: the page now',
+    'TRIF screenshot': 'From TRIF: screenshot',
+    'TRIF full page': 'From TRIF: full page',
+    'TRIF pointer': 'From TRIF: your pick',
+  };
+  const pillWords = Object.entries(PILLS).map(([k, w]) => `
+    span[data-trif-chip="${k}"][class*="composer-attachment"]::before,
+    [data-trif-chip="${k}"] [data-cds-card-body]::after,
+    [data-trif-chip="${k}"][class*="group/thumbnail"] > div:first-child::before { content: "${w}"; }`).join('');
   const style = document.createElement('style');
-  style.textContent = `
+  style.textContent = pillWords + `
     button[data-testid="chat-input-send"]:not(:disabled) [data-cds-part="paint"],
     button[data-testid="send-button"]:not(:disabled), #composer-submit-button:not(:disabled),
     button[aria-label="Send"]:not(:disabled), button[data-testid="composer-speech-button"], button[aria-label*="voice" i] {
@@ -311,11 +324,6 @@
       display: inline-block; padding: 7px 16px; border-radius: 999px; background: #e3f7ee; color: #0f6b4a;
       font: 600 13px/1.2 -apple-system, system-ui, sans-serif; white-space: nowrap;
     }
-    span[data-trif-chip="TRIF instruction"][class*="composer-attachment"]::before { content: "TRIF instruction"; }
-    span[data-trif-chip="TRIF follow-up"][class*="composer-attachment"]::before { content: "TRIF follow-up"; }
-    span[data-trif-chip="TRIF screenshot"][class*="composer-attachment"]::before { content: "TRIF screenshot"; }
-    span[data-trif-chip="TRIF full page"][class*="composer-attachment"]::before { content: "TRIF full page"; }
-    span[data-trif-chip="TRIF pointer"][class*="composer-attachment"]::before { content: "TRIF pointer"; }
     [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
     [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
     [data-trif-chip] [data-cds-card-body] > div, [data-trif-chip] img, [data-trif-chip] picture { display: none !important; }
@@ -323,11 +331,6 @@
       font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
     }
     [data-trif-chip] .cds-card-fill { background: #e3f7ee !important; }
-    [data-trif-chip="TRIF instruction"] [data-cds-card-body]::after { content: "TRIF instruction"; }
-    [data-trif-chip="TRIF follow-up"] [data-cds-card-body]::after { content: "TRIF follow-up"; }
-    [data-trif-chip="TRIF screenshot"] [data-cds-card-body]::after { content: "TRIF screenshot"; }
-    [data-trif-chip="TRIF full page"] [data-cds-card-body]::after { content: "TRIF full page"; }
-    [data-trif-chip="TRIF pointer"] [data-cds-card-body]::after { content: "TRIF pointer"; }
     /* (Claude's picture-preview tile, a PDF's: a fixed box with the preview and "pdf" in it; the box made a pill,
        its insides hidden, the remove button kept: Tim, 11-14) */
     [data-trif-chip][class*="group/thumbnail"] > div:first-child {
@@ -336,17 +339,12 @@
       padding: 7px 16px !important; font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
     }
     [data-trif-chip][class*="group/thumbnail"] > div:first-child > * { display: none !important; }
-    [data-trif-chip="TRIF instruction"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF instruction"; }
-    [data-trif-chip="TRIF follow-up"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF follow-up"; }
-    [data-trif-chip="TRIF screenshot"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF screenshot"; }
-    [data-trif-chip="TRIF full page"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF full page"; }
-    [data-trif-chip="TRIF pointer"][class*="group/thumbnail"] > div:first-child::before { content: "TRIF pointer"; }
-    @media (prefers-color-scheme: dark) {
-      [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
-      [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }
-      span[data-trif-chip][class*="composer-attachment"]::before { background: rgba(52, 211, 153, 0.16); color: #34d399; }
-      [data-trif-chip][class*="group/thumbnail"] > div:first-child { background: rgba(52, 211, 153, 0.16) !important; color: #34d399; }
-    }`;
+    /* (dark by the page's own colours where the message box is, not the phone's setting: a chat can be set to light
+       on a dark phone. data-trif-tone, set by lookUpdate) */
+    :root[data-trif-tone="dark"] [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
+    :root[data-trif-tone="dark"] [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }
+    :root[data-trif-tone="dark"] span[data-trif-chip][class*="composer-attachment"]::before { background-color: rgba(52, 211, 153, 0.16); color: #34d399; }
+    :root[data-trif-tone="dark"] [data-trif-chip][class*="group/thumbnail"] > div:first-child { background: rgba(52, 211, 153, 0.16) !important; color: #34d399; }`;
   (document.head || document.documentElement).append(style);
 
   // The send, and the reply after it (Tim, 11-15: "the moment you hit send, trif pops you back over to your
@@ -641,10 +639,240 @@
       messages: all.length, last: last && { el: desc(last), rect: rect(last), scroller: desc(scrollerOf(last)) }, scrollers }, null, 1);
   }
 
+
+  // ---- TRIF's look in the chat (Tim, 11-16: "make it clear that like, hello this is trif, those are attachments,
+  // what would you like to fix on your website? insert our robot"). Cosmetic only: nothing here changes what's sent.
+  //   - A new, empty conversation: TRIF's robot and a greeting in the service's own greeting's place (its heading kept
+  //     in the layout, made invisible), or just above the message box when no such heading is found. The greeting is
+  //     TRIF's own layer on the body, outside the page's own tree, and takes no touches.
+  //   - What TRIF attached: the pills (above) say "From TRIF: …", with the robot before the words.
+  //   - The services' upsells (Upgrade, Get Plus, Try Go…) hidden: only buttons and links with exactly such words. Never
+  //     their names, logos, terms, privacy or "can make mistakes" lines.
+  // Logged-in markup can't be seen here (no sign-ins): every selector is by role, text or what the page shows.
+  let lookSite = '';
+  let robot = null; // { rim, face, eyes: [..], colours } from the app (RobotShape), so it's TRIF's own shape
+  const GREETING = {
+    hello: 'Hello, this is TRIF',
+    ask: (site) => site ? `What would you like to fix on ${site}?` : 'What would you like to fix on this site?',
+    attached: 'TRIF has attached the page below. Say what bothers you, then send.',
+  };
+  const UPSELL = /^(upgrade( (plan|now|to (plus|pro|max|team|go)))?|upgrade your plan|get (plus|pro|max|go)|try (chatgpt )?(plus|pro|max|go)( (free|for free))?|try (plus|pro|max|go),? free|claim (free )?offer|see plans( (and|&) pricing)?|view plans)$/i;
+  const BRAND = /claude|chatgpt|openai|anthropic/i;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function robotSvg(size) {
+    if (!robot) return null;
+    const svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 128 128');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('aria-hidden', 'true');
+    for (const [points, fill] of [[robot.rim, robot.colours.rim], [robot.face, robot.colours.face], ...robot.eyes.map((e) => [e, robot.colours.eye])]) {
+      const p = document.createElementNS(SVGNS, 'polygon');
+      p.setAttribute('points', points);
+      p.setAttribute('fill', fill);
+      svg.append(p);
+    }
+    return svg;
+  }
+  /** The robot as a picture for CSS (the pills): an SVG data address made from the same shape. */
+  function robotURL() {
+    if (!robot) return '';
+    const polys = [[robot.rim, robot.colours.rim], [robot.face, robot.colours.face], ...robot.eyes.map((e) => [e, robot.colours.eye])]
+      .map(([pts, fill]) => `<polygon points='${pts}' fill='${fill}'/>`).join('');
+    return `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'>${polys}</svg>`)}")`;
+  }
+  const lookStyle = document.createElement('style');
+  lookStyle.textContent = `
+    [data-trif-hidden] { display: none !important; }
+    [data-trif-greeting-hidden] { visibility: hidden !important; }
+    #trif-greeting { all: initial; position: fixed; z-index: 20; pointer-events: none; display: flex; flex-direction: column;
+      align-items: center; gap: 6px; text-align: center; font: 15px/1.35 -apple-system, system-ui, sans-serif; box-sizing: border-box;
+      padding: 0 20px; transition: opacity .2s; }
+    #trif-greeting[hidden] { display: none; }
+    #trif-greeting .trif-hello { font: 600 21px/1.25 -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; margin-top: 4px; }
+    #trif-greeting .trif-ask { font: 400 16px/1.35 -apple-system, system-ui, sans-serif; }
+    #trif-greeting .trif-small { font: 400 13px/1.35 -apple-system, system-ui, sans-serif; margin-top: 2px; }
+    #trif-greeting[data-tone="light"] .trif-hello, #trif-greeting[data-tone="light"] .trif-ask { color: #18181b; }
+    #trif-greeting[data-tone="light"] .trif-small { color: #52525b; }
+    #trif-greeting[data-tone="light"] .trif-site { color: #1f8a5b; font-weight: 600; }
+    #trif-greeting[data-tone="dark"] .trif-hello, #trif-greeting[data-tone="dark"] .trif-ask { color: #f4f4f5; }
+    #trif-greeting[data-tone="dark"] .trif-small { color: #a1a1aa; }
+    #trif-greeting[data-tone="dark"] .trif-site { color: #34d399; font-weight: 600; }
+    /* (little room, the keyboard up on a small phone: the robot beside two lines, the explanation left out) */
+    #trif-greeting.trif-tight { flex-direction: row; align-items: center; justify-content: center; gap: 10px; text-align: left; }
+    #trif-greeting.trif-tight svg { width: 34px; height: 34px; flex: none; }
+    #trif-greeting.trif-tight .trif-words { align-items: flex-start; }
+    #trif-greeting.trif-tight .trif-hello { font-size: 16px; margin-top: 0; }
+    #trif-greeting.trif-tight .trif-ask { font-size: 14px; }
+    #trif-greeting.trif-tight .trif-small { display: none; }
+    #trif-greeting .trif-words { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    /* (an attachment of TRIF's in markup this doesn't know: the robot before it, on a green tint, its name kept) */
+    [data-trif-chip]:not([class*="composer-attachment"]):not([class*="group/thumbnail"]):not(:has([data-cds-card-body])) {
+      background: #e3f7ee !important; color: #0f6b4a !important; }
+    [data-trif-chip]:not([class*="composer-attachment"]):not([class*="group/thumbnail"]):not(:has([data-cds-card-body]))::before {
+      content: ""; display: inline-block; width: 16px; height: 16px; flex: none; vertical-align: -3px; margin-right: 2px;
+      background: var(--trif-robot) no-repeat center / 16px 16px; }
+    :root[data-trif-tone="dark"] [data-trif-chip]:not([class*="composer-attachment"]):not([class*="group/thumbnail"]):not(:has([data-cds-card-body])) {
+      background: rgba(52, 211, 153, 0.16) !important; color: #34d399 !important; }`;
+  (document.head || document.documentElement).append(lookStyle);
+  const pillRobot = document.createElement('style');
+  (document.head || document.documentElement).append(pillRobot);
+
+  /** The page is dark where the message box is: the first background behind it that isn't see-through. */
+  function pageDark() {
+    const lum = (c) => { const m = String(c).match(/[\d.]+/g); if (!m || m.length < 3 || (m.length > 3 && Number(m[3]) < 0.5)) return null; return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255; };
+    for (let n = composerBox(); n; n = n.parentElement) { const l = lum(getComputedStyle(n).backgroundColor); if (l !== null) return l < 0.45; }
+    for (const n of [document.body, document.documentElement]) { const l = n && lum(getComputedStyle(n).backgroundColor); if (l !== null && l !== undefined) return l < 0.45; }
+    return matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  /** The service's own greeting in an empty conversation: a heading above the message box, with words only (no
+   *  logo or picture in it), not naming the service, not in a menu, the side bar or a dialog. */
+  let hiddenHeading = null;
+  function serviceGreeting(boxTop, minTop) {
+    if (hiddenHeading && hiddenHeading.isConnected) return hiddenHeading;
+    for (const h of document.querySelectorAll('h1, h2, [data-testid*="greeting" i]')) {
+      // (a header, form or footer around it is allowed: chatgpt.com's mobile page puts its greeting in a footer, with
+      // the message box (logged out, 11-16); the page's top bar isn't, as the heading must be below it and above the
+      // box; a heading with a link in it (terms, privacy) never)
+      if (h.closest('nav, aside, [role="dialog"], [role="menu"], [data-trif]') || h.querySelector('svg, img, picture, video, canvas, a')) continue;
+      const t = (h.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 80 || BRAND.test(t) || !shown(h)) continue;
+      const r = h.getBoundingClientRect();
+      if (r.height < 14 || r.width < 60 || r.bottom > boxTop || r.top < minTop - 4) continue;
+      return h;
+    }
+    return null;
+  }
+  /** The message box's surroundings as they show: the outermost of its ancestors (up to eight) that has a size and
+   *  holds none of the messages nor a heading (chatgpt.com's mobile page wraps it in boxes of no size, and its form
+   *  holds the greeting too). */
+  function composerRect(ed) {
+    let best = ed.getBoundingClientRect();
+    for (let n = ed, i = 0; i < 8; i++) {
+      const p = n.parentElement;
+      if (!p || p === document.body || p.querySelector(USER) || p.querySelector(REPLY) || p.querySelector('h1, h2')) break;
+      const r = p.getBoundingClientRect();
+      if (r.height > 0 && r.width > 0 && r.height < innerHeight * 0.9) best = r;
+      n = p;
+    }
+    return best;
+  }
+  function unhideHeading() {
+    if (hiddenHeading) hiddenHeading.removeAttribute('data-trif-greeting-hidden');
+    hiddenHeading = null;
+  }
+  let card = null;
+  function greetingCard() {
+    if (card && card.isConnected) return card;
+    card = document.createElement('div');
+    card.id = 'trif-greeting';
+    card.setAttribute('data-trif', 'greeting');
+    card.setAttribute('aria-live', 'polite');
+    const pic = robotSvg(52);
+    if (pic) card.append(pic);
+    const words = document.createElement('div');
+    words.className = 'trif-words';
+    for (const cls of ['trif-hello', 'trif-ask', 'trif-small']) { const d = document.createElement('div'); d.className = cls; words.append(d); }
+    card.append(words);
+    document.body.append(card);
+    return card;
+  }
+  /** Where the greeting goes, and whether at all: an empty conversation, the message box usable, nothing over it. */
+  function placeGreeting() {
+    const ed = usableEditor();
+    const box = ed;
+    const empty = !document.querySelector(USER) && !document.querySelector(REPLY);
+    if (!robot || !box || !empty || viewer() || !document.body) { unhideHeading(); if (card) card.hidden = true; return; }
+    const b = composerRect(ed);
+    const c = greetingCard();
+    c.querySelector('.trif-hello').textContent = GREETING.hello;
+    const ask = c.querySelector('.trif-ask');
+    const words = GREETING.ask(lookSite);
+    if (ask.getAttribute('data-words') !== words) {
+      ask.setAttribute('data-words', words);
+      ask.textContent = '';
+      // (the site in TRIF's green: the words around it as text)
+      const at = lookSite ? words.indexOf(lookSite) : -1;
+      if (at < 0) ask.textContent = words;
+      else { const s = document.createElement('span'); s.className = 'trif-site'; s.textContent = lookSite; ask.append(words.slice(0, at), s, words.slice(at + lookSite.length)); }
+    }
+    const attached = !!document.querySelector('[data-trif-chip]');
+    c.querySelector('.trif-small').textContent = attached ? GREETING.attached : '';
+    c.setAttribute('data-tone', document.documentElement.getAttribute('data-trif-tone') || (pageDark() ? 'dark' : 'light'));
+    c.hidden = false;
+    const width = Math.min(innerWidth, 420);
+    c.style.width = `${width}px`;
+    c.style.left = `${Math.round((innerWidth - width) / 2)}px`;
+    // (the room: under the page's own top bar (a header at the top of the window), above the message box)
+    let minTop = 12;
+    for (const hd of document.querySelectorAll('header, [role="banner"]')) {
+      const r = hd.getBoundingClientRect();
+      if (r.top <= 8 && r.height > 0 && r.height < 160 && r.bottom > minTop && shown(hd)) minTop = r.bottom + 8;
+    }
+    const h = serviceGreeting(b.top, minTop);
+    const fit = (tight) => {
+      c.classList.toggle('trif-tight', tight);
+      const height = c.getBoundingClientRect().height;
+      let top = h ? (() => { const r = h.getBoundingClientRect(); return r.top + r.height / 2 - height / 2; })() : b.top - height - 20;
+      top = Math.max(minTop, Math.min(top, b.top - height - 8));
+      return top + height <= b.top - 4 ? top : null;
+    };
+    if (h && h !== hiddenHeading) { unhideHeading(); hiddenHeading = h; h.setAttribute('data-trif-greeting-hidden', ''); }
+    if (!h) unhideHeading();
+    let top = fit(false);
+    if (top === null) top = fit(true);
+    // (no room even for that: nothing, and the service's own greeting shown again)
+    if (top === null) { c.hidden = true; unhideHeading(); return; }
+    c.style.top = `${Math.round(top)}px`;
+    // (something opened over that place, a side bar or a menu: the greeting isn't drawn over it)
+    const mid = document.elementFromPoint(innerWidth / 2, Math.min(innerHeight - 1, Math.max(1, top + 26)));
+    if (mid && mid.closest('nav, aside, [role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]')) c.hidden = true;
+  }
+  /** The upsells hidden (only a button or link whose own words are one, and nothing that holds the message box). */
+  function hideUpsells() {
+    for (const el of document.querySelectorAll('a, button, [role="button"], [role="menuitem"]')) {
+      if (el.hasAttribute('data-trif-hidden') || el.closest('[data-trif]')) continue;
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t.length > 40 || !UPSELL.test(t)) continue;
+      const ed = editor();
+      if (ed && el.contains(ed)) continue;
+      el.setAttribute('data-trif-hidden', 'upsell');
+    }
+  }
+  let lookQueued = false;
+  function setTone() {
+    const tone = pageDark() ? 'dark' : 'light';
+    if (document.documentElement.getAttribute('data-trif-tone') !== tone) document.documentElement.setAttribute('data-trif-tone', tone);
+  }
+  function lookSoon() { if (!lookQueued) { lookQueued = true; requestAnimationFrame(() => { lookQueued = false; try { setTone(); placeGreeting(); } catch (e) {} }); } }
+  function lookUpdate() { try { hideUpsells(); } catch (e) {} lookSoon(); }
+  try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(lookSoon, 300)); } catch (e) {}
+  addEventListener('resize', lookSoon);
+  addEventListener('scroll', lookSoon, { capture: true, passive: true });
+  if (window.visualViewport) visualViewport.addEventListener('resize', lookSoon);
+  /** From the app: the site this chat is for, and TRIF's robot (RobotShape's polygons and colours). */
+  function look(site, shape) {
+    lookSite = String(site || '');
+    if (shape && shape.rim && !robot) {
+      robot = shape;
+      if (card) { card.remove(); card = null; }
+      const u = robotURL();
+      pillRobot.textContent = `
+        :root { --trif-robot: ${u}; }
+        span[data-trif-chip][class*="composer-attachment"]::before, [data-trif-chip] [data-cds-card-body]::after,
+        [data-trif-chip][class*="group/thumbnail"] > div:first-child::before {
+          display: inline-block; background-image: ${u}; background-repeat: no-repeat; background-size: 16px 16px;
+          background-position: 0 center; padding-left: 22px !important; }
+        span[data-trif-chip][class*="composer-attachment"]::before { background-position: 12px center; padding-left: 34px !important; }`;
+    }
+    lookUpdate();
+    return 'ok';
+  }
+
   let queued = false;
   // (one observer for the buttons, the pills, keeping the reply in view and a mod that turns up late: at most
   // every 400 ms, only when the page changes)
-  new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); reveal(); late(); lookAtViewer(); }, 400); } })
+  new MutationObserver(() => { if (!queued) { queued = true; setTimeout(() => { queued = false; mark(); reveal(); late(); lookAtViewer(); lookUpdate(); }, 400); } })
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   mark();
   addEventListener('popstate', () => setTimeout(lookAtViewer, 300));
@@ -661,5 +889,5 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, viewer: () => { const v = viewer(); return v ? v.why : null; } };
+  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, look, viewer: () => { const v = viewer(); return v ? v.why : null; } };
 })();

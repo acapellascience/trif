@@ -26,6 +26,8 @@
   whole chat (a dialog with the file's name, Download and Close, its code with line numbers a person can't select),
   the message box still there underneath; `?viewerroute` gives the viewer an address of its own (/chat/<id>/files/<name>)
   that Back or Close leaves.
+  `?greet`: an empty conversation's greeting heading ("How can I help you today?", as both chats have one) and an
+  Upgrade plan button in the header, for TRIF's greeting and upsell hiding (chat.js look).
 -->
 <style>
   :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
@@ -82,6 +84,19 @@
   // its message box is there, as claude.ai's does)
   if (location.search.includes('slowload')) { const i = new Image(); i.src = `http://localhost:8378/slow?${Date.now()}`; document.body.append(i); }
   const nostop = location.search.includes('nostop');
+  if (location.search.includes('greet')) {
+    const h = document.createElement('h1');
+    h.className = 'greet';
+    h.textContent = 'How can I help you today?';
+    h.style.cssText = 'font: 600 26px/1.3 Georgia, serif; text-align: center; margin: 22vh 0 0;';
+    log.append(h);
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.textContent = 'Upgrade plan';
+    up.style.cssText = 'float: right; font: 13px system-ui; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit;';
+    document.querySelector('header').append(up);
+    new MutationObserver(() => { if (log.querySelector('[data-testid="user-message"]')) h.remove(); }).observe(log, { childList: true });
+  }
 
   const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length); };
   ed.addEventListener('input', refresh);

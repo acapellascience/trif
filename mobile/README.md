@@ -174,6 +174,14 @@ Built on the probe, toward something to use every day:
   and where none takes text the instructions are typed in. Code blocks are read line by line (a code editor's lines
   too, .cm-editor/.cm-line); Add to TRIF hands over on the press itself. A reply with code but no mod read from it is
   noted in the diagnostics ("chat"). The stand-in has it: `?octane` (and `?cm` for editor lines).
+- **The chat reads as TRIF** (Web/chat.js look, ChatView.tellLook; Tim, 11-16). In an empty conversation, TRIF's robot
+  (RobotShape's polygons, passed by the app on each load) and "Hello, this is TRIF / What would you like to fix on
+  {site}?" go in the service's own greeting's place (that heading kept in the layout, invisible; only an h1/h2 with words,
+  no link, logo or the service's name), or above the message box; a layer of TRIF's on the body, outside the page's
+  tree, taking no touches, placed again on scroll, resize and changes; with little room, the robot beside two lines;
+  none, nothing. Its colours, and the pills', follow the page's own background where the message box is
+  (data-trif-tone), not the phone's setting. TRIF's attachments read "From TRIF: …" with the robot; upsell buttons and
+  links (Upgrade, Get Plus, Try Go, See plans…) are hidden by their exact words. Nothing sent changes. Stand-in: `?greet`.
 - **More than one chat** (ClaudePane: ChatView, viewFor, release; 11-16, Tim approved). Up to three chat pages, each
   its own web view (sharing the sign-ins) with its own conversation, reply watcher and pending fill; all stay in the
   view tree (the shown one on top), so a reply goes on being written while another chat shows. The robot opens the

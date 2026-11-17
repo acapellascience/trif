@@ -112,7 +112,19 @@ readers read them on the phone. Worth a phone wording, or leave.
 | Status strip after a mod from the chat is added | Added {name}. What it did is attached in the chat's message box: send it, with what to fix, if it needs fixing. | (gone: what it did goes into the message box the next time the chat opens) · Added {name}. It runs on {sites}. (unchanged) |
 
 What's attached in the message box keeps its names: TRIF instruction (a chat without TRIF's instructions yet),
-TRIF follow-up (one that has them), TRIF screenshot, TRIF pointer.
+TRIF follow-up (one that has them), TRIF screenshot, TRIF pointer. (Their pills read "From TRIF: …" since 11-16: see TRIF's look in
+the Claude and ChatGPT pages.)
+
+## TRIF's look in the Claude and ChatGPT pages (added 11-16, Tim: "make it clear … hello this is trif, those are attachments")
+
+Drawn by TRIF over the chat's page (Web/chat.js look); nothing it adds is sent. Drafts for Tim.
+
+| Where | Old | New |
+|---|---|---|
+| A new, empty conversation: TRIF's greeting, in the chat's own greeting's place (theirs hidden), or above the message box | (the chat's own: How can I help you today? · What are you working on?) | TRIF's robot, then **Hello, this is TRIF** · **What would you like to fix on {site}?** ({site} in TRIF's green; without a site: What would you like to fix on this site?) · once TRIF's attachments are in the box: TRIF has attached the page below. Say what bothers you, then send. With little room (the keyboard up on the SE): the robot beside the first two lines only |
+| What TRIF attached, as pills in the message box (the robot before the words) | TRIF instruction · TRIF follow-up · TRIF screenshot · TRIF full page · TRIF pointer | From TRIF: page & guide · From TRIF: the page now · From TRIF: screenshot · From TRIF: full page · From TRIF: your pick (the files keep their names, which the chat and the model see) |
+| An attachment of TRIF's in markup TRIF doesn't know | its tile as the chat draws it | the same, on TRIF's green tint with the robot before its name |
+| The chats' upsells | Upgrade · Upgrade plan · Get Plus · Try Go… · See plans and pricing | (hidden: only buttons and links with exactly such words; their names, logos, Log in, terms, privacy and "can make mistakes" lines stay) |
 
 ## Notes that go by themselves (added 11-15)
 

@@ -58,7 +58,19 @@ final class ChatView: Identifiable {
     /// Claude or ChatGPT: the one it was opened on.
     var service: ChatService
     /// The site its conversation is for (each site keeps its own conversation).
-    var site = ""
+    var site = "" { didSet { if site != oldValue { tellLook() } } }
+    /// TRIF's look in the page (Web/chat.js look): the site for its greeting, and TRIF's robot (RobotShape), so the
+    /// greeting and the pills draw TRIF's own shape. On each load and whenever the site changes.
+    func tellLook() {
+        webView.callAsyncJavaScript("return globalThis.__trifChat && globalThis.__trifChat.look ? globalThis.__trifChat.look(site, shape) : null;",
+                                    arguments: ["site": site, "shape": ChatView.robotShape], in: nil, in: ClaudePane.chatWorld) { _ in }
+    }
+    static let robotShape: [String: Any] = {
+        func points(_ p: [(Double, Double)]) -> String { p.map { "\($0.0),\($0.1)" }.joined(separator: " ") }
+        func rgb(_ c: (Int, Int, Int)) -> String { "rgb(\(c.0),\(c.1),\(c.2))" }
+        return ["rim": points(RobotShape.rim), "face": points(RobotShape.face), "eyes": RobotShape.eyes.map(points),
+                "colours": ["rim": rgb(RobotShape.rimColour), "face": rgb(RobotShape.faceColour), "eye": rgb(RobotShape.eyeColour)]]
+    }()
     var started = false
     var loading = false { willSet { changed() } }
     var canGoBack = false { willSet { changed() } }
@@ -1030,6 +1042,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         v?.loading = false
         note(v != nil ? "loaded" : "loaded in a window it opened", webView.url, v)
         guard let v else { return }
+        v.tellLook()
         // (the chat's page loaded again while a reply was being written, its process ended say: watched again)
         if v.activity == .working { Task { _ = await chatJS(v, "resume()") } }
         // (reloaded while the tab's data was going in: in again)

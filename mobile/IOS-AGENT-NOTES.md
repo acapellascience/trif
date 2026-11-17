@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (229 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (242 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -34,13 +34,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 11 in-app states, PASS/FAIL lines;
   regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`),
   playcheck ("http://…": a page with a <video>/<audio>; ~75 s of PASS/FAIL: a playing background tab is kept past
-  20 s and a memory warning, let go once paused; a same-page quiet tab is let go), playing (each tab: WebKit's state,
+  20 s and a memory warning, let go once paused; a same-page quiet tab is let go), iconprofile ({"outline", "swatch" 0-5, "badge", "name", "noise"}: the shown
+  page's Home Screen icon and profile to Documents/icon-test.png and .mobileconfig; "noise" = a worst-case photo),
+  playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
 - Stand-in chat (where Claude/ChatGPT can't be signed in): `node mobile/serve.js` (8377), launch with
-  `-chathome http://localhost:8377/chat.html`. Message words steer it: "two", "no mod", "file", "file and block",
+  `-chathome http://localhost:8377/chat.html` (`?greet`: an empty-state heading and an Upgrade plan button, for TRIF's
+  greeting and upsell hiding). A saved project (`chatProject.Claude` in the app's prefs plist) sends the chat to
+  /project/… instead and drops the query: delete it with PlistBuddy (`Delete :chatProject.Claude`) while the app is stopped. Message words steer it: "two", "no mod", "file", "file and block",
   "viewer", "wait N". Query flags: `?gpt` (/c/ addresses), `?slow`, `?nostop`, `?draft`, `?gptpaste`, `?viewerroute`,
   `?octane` (ChatGPT's newer mobile page: li[data-message-role], data-message-complete, a 3 s pause, picture-only
   inputs), `?cm` (code as .cm-editor/.cm-line), `?slowload`. `/project/<id>` serves it as a project page.
@@ -75,16 +79,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Map
 
-- TrifProbeApp.swift: the app's views (toolbar, bars, sheets, ⋯ menu, full screen note and exit button), `Model`, dev steps, BarState.
+- TrifProbeApp.swift: the app's views (toolbar, bars, sheets, the ⋯ menu at the address bar's left (moreMenu), full
+  screen note and exit button), `Model`, dev steps, BarState.
 - Browser.swift: tabs' web views, navigation, mod offers (Add this mod?), hide/point, outline and chat context
   (pageForChat, feedbackForChat), screenshots, full screen state, ModDownloads (.js downloads to Add this mod?).
 - Tabs.swift: Tab, tab pictures. History.swift: history. Import.swift: importing mod files. FolderWatch.swift: the watched
-  iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (profile hand-off), `trif://open`.
+  iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
+  WebClipMaker.compose; profile hand-off), `trif://open`.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). ModsPanel.swift + Web/mods.html,
   mods-page.js/css: the Mods tab.
 - ClaudePane.swift: the robot view: ChatService, up to 3 ChatViews (Claude/ChatGPT pages), fills, reply watching,
   conversations' sites, projects, notifications, the switch Claude · ChatGPT · More. Web/chat.js: TRIF inside those pages
-  (fill, send, done-detection, pickup, Add to TRIF, viewers).
+  (fill, send, done-detection, pickup, Add to TRIF, viewers, and `look`: the greeting, the pills' words, upsells hidden;
+  ChatView.tellLook passes the site and RobotShape's polygons on each load).
 - PanelChat.swift: More, the desktop side panel in a web view (trifpanel://), runs and tools. Web/panel-adapter.js: the
   panel's chrome.* and background stand-in, API keys and model blocks. Web/panel-phone.css: what the phone hides.
   PanelEngines.swift: Keychain keys, Anthropic / OpenAI Responses / OpenRouter streaming, the Simulator stand-in.
@@ -129,6 +136,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   .playback/.moviePlayback at launch (category only, not activated), and BackgroundPlay.resume replays a video
   WebKit paused as the app left. That last is beyond Safari (which pauses it, 11-16 Simulator); a page that pauses
   itself as it goes hidden is respected. Awaiting Tim's view.
+- Home Screen icons (Tim's design, 11-16): a small TRIF app (the app icon's rim and face A round a black screen, the
+  picture on it at 74% of the face), outline colour (TRIF green gradient + 5 swatches + any), own picture (Photos),
+  no outline, green checkmark "fixed" badge; names {Site} on TRIF · {user}'s {Site} (GitHub user-login meta and
+  MediaWiki #pt-userpage only) · fixed {Site} · Custom…; Tim's labels approved as written. The toolbar's last button
+  is a plain + for it; the ⋯ menu is at the address bar's left (without Add to Home Screen). The profile is named
+  {Site} for TRIF whatever the label (Settings, Files). http sites and profiles over 400,000 bytes skip the clip page.
+- The chat pages read as TRIF (Tim, 11-16): greeting with the robot in the service's greeting's place, pills "From
+  TRIF: …" with the robot, upsell buttons hidden; never their branding, Log in, terms or safety lines. Cosmetic only.
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
@@ -146,6 +161,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Background play never tried on a real phone (YouTube, Tim's mod, AirPods, calls). Lock screen in the Simulator:
   WebKit's Now Playing shows the page's mediaSession title, artist and progress (shot 229) but no play/pause
   buttons were visible; Control Center not checked. Media inside iframes isn't replayed (main frame only).
+- Home Screen icons: the new look never installed on a Home Screen (the profile passes the clip page's check, run
+  locally in headless Chrome with the page's own script; the Simulator install flow wasn't rerun). The two + buttons in
+  the toolbar (the middle new-tab + and the last Home Screen +) are as Tim drew it: watch for confusion. "{user}'s"
+  works only where the page shows the name plainly (GitHub, Wikipedia); X, Reddit, YouTube etc. aren't read.
+- The chat look, logged in (can't be checked here): Claude's greeting heading (an h1/h2 with words only? its spark
+  logo must stay), Claude's and ChatGPT's pill markup (data-cds card, group/thumbnail, composer-attachment span),
+  upsell button words, dark mode by the page's own colours (data-trif-tone). Logged-out chatgpt.com checked (shot 241:
+  its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 - Add this mod? shows sites, powers and the free warning but not the mod's facts ("names another site: …") that the
   approval card shows.
 
@@ -182,4 +205,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   ms before didEnterBackground, then visibilitychange), and resumes it on return; Safari the same. A play() then
   (from the page or the app) is allowed and keeps going; <audio> isn't paused at all. Without our session category
   sound still went on (WebKit sets its own); UIBackgroundModes audio is the part that matters.
-- zsh doesn't split `$FILES`: use an array for commit-by-path lists.
+- zsh doesn't split `$FILES`: use an array for commit-by-path lists. Never `git add -N .` (it picks up shots/).
+- Simulator toggles (SwiftUI Toggle) often ignore a quick tool tap: tap with duration 0.15. After `simctl ui
+  appearance dark` a running app sometimes stays light (11-16): relaunch, or darken the stand-in page itself (panejs
+  setting --bg/--fg) to check TRIF's tone logic.
+- chat.js look: chatgpt.com's mobile page wraps its message box in display:contents boxes (zero size): composerRect
+  takes the outermost ancestor with a size that holds no messages and no heading. Headings in a footer or form are
+  allowed (ChatGPT's is), not ones with a link, logo or the service's name in them.

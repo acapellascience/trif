@@ -74,15 +74,15 @@ function nodeArchive() {
   return { pin, file };
 }
 
-// `npm pack` of this checkout's package files at `version`, with `releaseKey` (a PEM) in place of the real
-// one when given. Returns the .tgz path.
-function pack(S, version, releaseKey) {
+// `npm pack` of this checkout's package files (or `root`'s) at `version`, with `releaseKey` (a PEM) in place
+// of the real one when given. Returns the .tgz path.
+function pack(S, version, releaseKey, root = REPO) {
   const stage = path.join(S, `stage-${version}`);
-  const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   for (const f of pkg.files) {
-    fs.cpSync(path.join(REPO, f.replace(/\/$/, '')), path.join(stage, f.replace(/\/$/, '')), { recursive: true, filter: (p) => !p.split(path.sep).includes('node_modules') });
+    fs.cpSync(path.join(root, f.replace(/\/$/, '')), path.join(stage, f.replace(/\/$/, '')), { recursive: true, filter: (p) => !p.split(path.sep).includes('node_modules') });
   }
-  for (const f of ['README.md', 'LICENSE']) if (fs.existsSync(path.join(REPO, f))) fs.copyFileSync(path.join(REPO, f), path.join(stage, f));
+  for (const f of ['README.md', 'LICENSE']) if (fs.existsSync(path.join(root, f))) fs.copyFileSync(path.join(root, f), path.join(stage, f));
   fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify({ ...pkg, version, scripts: {} }, null, 2));
   if (releaseKey) fs.writeFileSync(path.join(stage, 'helper', 'lib', 'release-key.js'), `'use strict';\nmodule.exports = ${JSON.stringify(releaseKey)};\n`);
   const out = path.join(S, 'files');
@@ -326,5 +326,123 @@ test('a computer with no Node: install.sh, the helper, `trif` in sandboxed runs,
     assert.deepStrictEqual(fs.existsSync(native) ? fs.readdirSync(native) : [], [], 'the browser connection removed');
     if (process.platform === 'darwin') assert.deepStrictEqual(fs.readdirSync(path.join(home, 'Library', 'LaunchAgents')), [], "the Safari bridge's agent removed");
     assert.deepStrictEqual(Object.keys(kc.items()).filter((x) => /trif|claude|codex/i.test(x)), [], 'the saved keys removed');
+  });
+});
+
+// The upgrade (step 9): TRIF as people have it today, installed by `npx timsrobot setup` on the computer's
+// own Node, updates to this build the way the panel's Update button does (the old updater runs the new
+// setup on that Node); the new setup fetches TRIF's own Node and moves everything onto it. The old build is
+// the last release (TRIF_UPGRADE_FROM: another git ref), packed with a test release key; this build is
+// packed one patch version up. Skipped when the ref isn't in this clone.
+const FROM = process.env.TRIF_UPGRADE_FROM || 'v0.3.0';
+const hasFrom = spawnSync('git', ['rev-parse', '-q', '--verify', `${FROM}^{commit}`], { cwd: REPO }).status === 0;
+test(`upgrade: a Node-based install (${FROM}) updates to this build and ends on TRIF's own Node, keeping everything`, { skip: skip || (!hasFrom && `no git ref ${FROM} here`), timeout: 600000 }, async (t) => {
+  const S = scratch();
+  cleanups.push(() => fs.rmSync(S, { recursive: true, force: true }));
+  const home = path.join(S, 'h');
+  const ws = path.join(home, '.trif');
+  const priv = P.defaultPrivateDir({ env: {}, homedir: home });
+  fs.mkdirSync(path.join(S, 'files'), { recursive: true });
+  fs.mkdirSync(home);
+  const src = path.join(S, 'from');
+  fs.mkdirSync(src);
+  execFileSync('/bin/sh', ['-c', `git -C "$1" archive "$2" | tar -x -C "$3"`, 'sh', REPO, FROM, src]);
+  const OLD = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8')).version;
+  const NEW = OLD.replace(/\d+$/, (n) => String(Number(n) + 1));
+  assert.ok(require('../helper/lib/update').compareVersions(NEW, OLD) > 0);
+  const k = crypto.generateKeyPairSync('ed25519');
+  const oldTgz = pack(S, OLD, k.publicKey.export({ type: 'spki', format: 'pem' }), src);
+  const newTgz = pack(S, NEW, null);
+  const node = nodeArchive();
+  fs.copyFileSync(node.file, path.join(S, 'files', node.pin.file));
+  const srv = await serve(path.join(S, 'files'));
+  cleanups.push(() => srv.stop());
+  // (the real pins, served from here)
+  const pinsFile = path.join(S, 'pins.json');
+  fs.writeFileSync(pinsFile, JSON.stringify({ ...R.PINS, base: srv.base, archives: { [KEY]: [node.pin] } }));
+
+  // The computer as it is today: Node on PATH (only node: a folder of its own).
+  const sysBin = path.join(S, 'sysnode');
+  fs.mkdirSync(sysBin);
+  fs.symlinkSync(process.execPath, path.join(sysBin, 'node'));
+  const kc = makeFakeKeychain(path.join(home, 'Library', 'Keychains', 'trif-test'));
+  const base = { HOME: home, TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1', TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), ...kc.env };
+  const withNode = { ...base, PATH: `${sysBin}:${NO_NODE_PATH}`, TRIF_RUNTIME: pinsFile };
+  const noNode = { ...base, PATH: NO_NODE_PATH };
+  const browsers = process.platform === 'darwin' ? 'chrome,safari' : 'chrome';
+  const native = process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts') : path.join(home, '.config', 'google-chrome', 'NativeMessagingHosts');
+  const plistDir = path.join(home, 'Library', 'LaunchAgents');
+  const plistText = () => fs.readdirSync(plistDir).map((f) => fs.readFileSync(path.join(plistDir, f), 'utf8')).join('\n');
+  const cfgFile = path.join(priv, 'config.json');
+  const phoneFile = path.join(priv, 'phone-link.json');
+  const phone = { v: 1, phones: [{ id: 'p1', name: "Tim's phone", key: 'AAAA', paired: '2026-11-15T10:00:00Z' }] };
+
+  await t.test(`${FROM}, installed the way it is today: on the computer's Node`, () => {
+    const pkgDir = path.join(S, 'npx');
+    fs.mkdirSync(pkgDir);
+    execFileSync('tar', ['-xzf', oldTgz, '-C', pkgDir]);
+    const r = run(path.join(sysBin, 'node'), [path.join(pkgDir, 'package', 'helper', 'cli.js'), 'setup', '--copy', '--browser', browsers, '--no-link', '--no-examples'], withNode);
+    assert.strictEqual(r.code, 0, r.out);
+    assert.strictEqual(R.installedNode(ws), null, 'no runtime yet');
+    assert.doesNotMatch(fs.readFileSync(path.join(ws, 'bin', P.CLI_NAME), 'utf8'), /\/runtime\//);
+    if (process.platform === 'darwin') assert.doesNotMatch(plistText(), /\/runtime\//);
+    // The user's things: a mod, settings, a paired phone (phone-link's file and its key in the keyring), an API key.
+    fs.mkdirSync(path.join(ws, 'sites', 'mine.test'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'sites', 'mine.test', 'keep.js'), '// ==WebMod==\n// @name Keep\n// @match https://mine.test/*\n// ==/WebMod==\n');
+    const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+    fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, updateFeed: `${srv.base}latest.json`, keepMe: 'yes' }));
+    fs.writeFileSync(phoneFile, JSON.stringify(phone));
+  });
+  await require('../helper/lib/keyring').setKey('computer', 'phone-private-key', { service: 'TRIF phone link', env: kc.env });
+  await require('../helper/lib/agentkeys').setAgentKey('claude', 'sk-ant-fake-upgrade', { env: kc.env });
+  const keysBefore = kc.items();
+
+  await t.test(`the ${FROM} updater installs this build: TRIF's own Node fetched, wrappers and the Safari bridge on it`, () => {
+    const feed = rel.latestFeed({ version: NEW, published: '2026-11-17', signed: new Date().toISOString(), notes: 'Test build.', url: `${srv.base}${path.basename(newTgz)}`, sha256: sha(newTgz), size: fs.statSync(newTgz).size });
+    fs.writeFileSync(path.join(S, 'files', 'latest.json'), feed);
+    fs.writeFileSync(path.join(S, 'files', 'latest.json.sig'), rel.signBytes(feed, k.privateKey.export({ type: 'pkcs8', format: 'pem' })));
+    const u = run(path.join(ws, 'bin', P.CLI_NAME), ['update', '--install'], withNode, { timeout: 300000 });
+    assert.strictEqual(u.code, 0, u.out);
+    console.log(`# upgrade from ${FROM} (old updater, runtime fetched from a local server): ${u.ms} ms`);
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(ws, 'app', 'package.json'), 'utf8')).version, NEW);
+    const rt = R.installedNode(ws);
+    assert.ok(rt && rt.startsWith(path.join(ws, 'runtime', `node-v${R.PINS.version}-${KEY}`)), `${rt}\n${u.out}`);
+    for (const w of [P.CLI_NAME, `${P.CLI_NAME}-host`]) {
+      const text = fs.readFileSync(path.join(ws, 'bin', w), 'utf8');
+      assert.ok(text.includes(rt) && !text.includes(sysBin), `${w}:\n${text}`);
+    }
+    const manifest = JSON.parse(fs.readFileSync(path.join(native, `${P.HOST_NAME}.json`), 'utf8'));
+    assert.strictEqual(manifest.path, path.join(ws, 'bin', `${P.CLI_NAME}-host`));
+    if (process.platform === 'darwin') {
+      assert.strictEqual(fs.readdirSync(plistDir).length, 1);
+      assert.ok(plistText().includes(`<string>${rt}</string>`), plistText());
+    }
+  });
+
+  await t.test('nothing lost: mods, settings, the paired phone, saved keys', () => {
+    assert.ok(fs.existsSync(path.join(ws, 'sites', 'mine.test', 'keep.js')));
+    const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+    assert.strictEqual(cfg.keepMe, 'yes');
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(phoneFile, 'utf8')), phone);
+    assert.deepStrictEqual(kc.items(), keysBefore);
+  });
+
+  await t.test('then the computer\'s Node goes away: trif, doctor and the helper still work', async () => {
+    fs.rmSync(sysBin, { recursive: true });
+    const trif = (args) => run(path.join(ws, 'bin', P.CLI_NAME), args, noNode);
+    assert.strictEqual(trif(['help']).code, 0);
+    const d = trif(['doctor']);
+    assert.ok(d.out.includes(`TRIF's own Node v${R.PINS.version} (`), d.out);
+    assert.doesNotMatch(d.out, /not its own|damaged|system Node/i, d.out);
+    const ext = new FakeExtension({ home: ws, command: path.join(ws, 'bin', `${P.CLI_NAME}-host`), env: noNode });
+    cleanups.push(() => ext.close());
+    ext.handlers = { tabs: () => [{ id: 12, windowId: 1, active: true, url: 'https://example.com/page', title: 'Example' }] };
+    ext.hello({ version: NEW });
+    await ext.waitForSocket(15000);
+    const cmd = execFileSync('ps', ['-o', 'command=', '-p', String(ext.child.pid)], { encoding: 'utf8' }).trim();
+    assert.ok(cmd.startsWith(R.installedNode(ws)), cmd);
+    const tabsR = await runAsync(path.join(ws, 'bin', P.CLI_NAME), ['tabs'], noNode);
+    assert.match(tabsR.out, /example\.com\/page/, tabsR.out);
+    await ext.close();
   });
 });

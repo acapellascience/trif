@@ -23,7 +23,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 - [x] 8. Clean-machine test (macOS, local): temp HOME, PATH without node, install.sh against a local server
       with a built package, helper with a stand-in agent, `trif` in a real sandboxed run
       (`tests/run-sandbox.test.js` style), update from a previous build, uninstall.
-- [ ] 9. Upgrade test: a Node-based install of origin/main updates to this build, keeps ~/.trif, settings,
+- [x] 9. Upgrade test: a Node-based install of origin/main updates to this build, keeps ~/.trif, settings,
       paired phones (phone-link state if merged), and ends on the runtime.
 - [ ] 10. CI: job on macos-latest and ubuntu-latest that builds, removes node from PATH, runs 8 and 9; CI
       tests on the pinned Node version.
@@ -42,6 +42,9 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   server and the cached real archive 7.8 s; on disk runtime 139 MB (du), app 7.5 MB; package (npm pack)
   2.7 MB; `trif help` on the runtime 57-60 ms warm, ~230 ms the first time; `trif update --install` (local
   server, runtime kept) 0.26 s; the whole test 18.6 s incl. a Claude Code and a Codex run.
+- Upgrade test (round 7, this Mac, tests/clean-machine.test.js second test): the v0.3.0 updater installs
+  this build and setup fetches + unpacks the runtime (local server, cached archive) in 4.3-4.5 s; whole
+  test 6.8 s.
 - Today (system Node 22): `node -e 0` 20-50 ms, `node helper/cli.js --version` 70-130 ms.
 
 ## Done this round
@@ -87,12 +90,34 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   with real Claude Code and Codex runs (18.6 s); helper/install-script/run-sandbox 43/43 still pass.
   CI: https://github.com/acapellascience/trif/actions/runs/44190037064 green (clean-machine test skipped there: opt-in until step 10). Previous run 44188683245: only the clickjack-browser flake.
 
+- Round 7, step 9 (7 still waits on For Tim 2 and 4): second test in tests/clean-machine.test.js, the
+  upgrade from a Node-based install. Passes locally from v0.3.0 (default) and from origin/main
+  (`TRIF_UPGRADE_FROM=origin/main`); the whole file 13/13 incl. step 8's real Claude Code and Codex runs.
+  CI: CI_LINK_9
+
 ## Next step
 
-Step 7 (front door text) if Tim has answered For Tim 2 and 4; else step 9 (upgrade test from a Node-based
-install of origin/main), which needs no wording: extend tests/clean-machine.test.js with a second test.
+Step 7 (front door text) if Tim has answered For Tim 2 and 4; else step 10 (CI job on macos-latest and
+ubuntu-latest: TRIF_CLEAN_MACHINE=1, node off PATH for the TRIF parts, tests on the pinned Node; fetch the
+upgrade tag, e.g. `fetch-depth: 0` or `git fetch --tags`, else the upgrade test skips).
 
 ## Notes for next round
+
+- Step 9 as built: `git archive <FROM>` (default v0.3.0, the release people have; `TRIF_UPGRADE_FROM`
+  overrides; skipped if the ref is missing) packed at its own version with a test release key; this build
+  packed one patch up. Old install = the old package's `helper/cli.js setup --copy --browser chrome,safari`
+  on the system node (a folder holding only a `node` link, so PATH=<that>:/usr/bin:/bin), as npx does.
+  Seeded: a mod, config keys, `<private>/phone-link.json` (phone-link's store file, branch not merged), the
+  phone link's keyring item (service "TRIF phone link", account "computer") and an agent key. Then the old
+  wrapper's `trif update --install` with TRIF_RUNTIME=<pins pointing at the local server> (the old updater
+  passes its env to the new setup); checks: app at the new version, runtime installed, both wrappers and
+  the Safari plist name it (not the system node), manifest path unchanged, nothing lost (keyring items
+  identical). Then the node folder is deleted: help, doctor (own-Node line, no warnings), the helper via
+  bin/trif-host (ps shows the runtime) and `trif tabs` all work.
+- Risk not tested: the old updater kills setup at 120 s, so setup's download budget under it is 75 s; a
+  slow connection (~<3 Mbit/s for 28 MB) falls back to the system node with a note, and that install moves
+  to the runtime only at the next update or `trif setup --runtime`. doctor's warn line covers it.
+- `pack(S, version, key, root)` now takes the source root.
 
 - Step 8 as built: tests/clean-machine.test.js, opt-in `TRIF_CLEAN_MACHINE=1` (skipped otherwise, so CI
   skips it until step 10 sets it). npm-packs this checkout twice (0.1.0 with a test release key, and the

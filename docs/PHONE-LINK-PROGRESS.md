@@ -52,7 +52,8 @@ iPhone side (needs ios-poc free):
   phone isn't connected", and everyone else's is refused by the helper; nothing of it reaches the extension.
 - AGENTS.md "Phone runs" (named in the run's context), `trif help phone`, PHONE-LINK.md sections 4 and 6.
 - `tests/phone-link-tool.test.js`: 9 tests (the stand-in agent runs the real cli.js; one against the real
-  host.js with a fake extension). `npm test` locally: see CI below.
+  host.js with a fake extension). Locally: the phone-link tests with cli, stage, phone, run-folders,
+  codex-sandbox, agents, explain and hardening all pass; CI green for 69375a1 on the first attempt.
 
 ## Earlier rounds
 
@@ -76,6 +77,11 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 7, 69375a1: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43998715361
+  (920 tests, 913 passed, 7 skipped, 0 failed; all 9 tool tests ran there, the browser tests passed too).
+  Locally `npm test` (no browser tests) had one failure, not this branch's: tests/update.test.js "release
+  script: secrets go to security and web-ext…", which needs `web-ext` and this worktree's node_modules has
+  none (alone, it hangs until killed: don't run it locally here; CI runs it and it passes).
 - Round 6, 71fe8e8: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43994465011
   (911 tests, 904 passed, 7 skipped, 0 failed; all 8 remote tests ran there). The commit before it, 766ae0d,
   failed (run 43993766535: 901 passed, 3 failed): the clickjacking guard's timing check and the phone view's

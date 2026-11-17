@@ -82,7 +82,10 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
-- Round 8: CI_PLACEHOLDER
+- Round 8, a48e0d0: failed, run 44001116015 (921 tests, 911 passed, 3 failed): the two known browser flakes
+  (the clickjacking guard; the phone view's "the site sees an iPhone in that tab only") and this round's own
+  host test, on a race in the test (it took an older `phoneLink` message for the one after Remove, then found
+  the listener still closing). Fixed in the next commit: its result is in the line above this one once known.
 - Round 7, 69375a1: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43998715361
   (920 tests, 913 passed, 7 skipped, 0 failed; all 9 tool tests ran there, the browser tests passed too).
   Locally `npm test` (no browser tests) had one failure, not this branch's: tests/update.test.js "release

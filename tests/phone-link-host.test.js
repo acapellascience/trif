@@ -171,18 +171,21 @@ test('the phone link in the real helper: off until the panel turns it on, the ow
   await assert.rejects(panel(second, 'phone.pair.start'), /another browser/);
   assert.equal(standIn.calls().length, 1, 'the second helper announces nothing');
   // It can remove a phone: the owner closes that phone, and with no phone left nothing listens.
+  const mark = first.messages.length;
   const removed = await panel(second, 'phone.remove', { id: idA });
   assert.deepEqual(removed.removed, { id: idA, name: 'Phone A' });
   await a.closed;
-  await first.next((m) => m.type === 'phoneLink' && m.status.phones.length === 0 && !m.status.listening, { since: before, timeout: 10000 });
-  assert.equal(await listening(port), false);
+  // (the owner's panel is told too; the listener is closed a moment after the phone is)
+  await first.next((m) => m.type === 'phoneLink' && m.status.phones.length === 0 && !m.status.listening, { since: mark, timeout: 10000 });
+  await waitFor(async () => !(await listening(port)), { message: 'the listener to close' });
   await waitFor(() => gone(call.pid), { message: 'the announcement to end' });
   await assert.rejects(PhoneClient.connect({ port, computerKey, keys: keysA }), (e) => e.code === 'ECONNREFUSED');
 
   // A second phone, paired in the owner; then the owner goes (its browser closed).
-  const again = qrOf((await panel(first, 'phone.pair.start')).qr);
+  const window2 = await panel(first, 'phone.pair.start');
+  const again = qrOf(window2.qr);
   const keysB = generateKeyPair();
-  const b = await connect(port, computerKey, keysB, { name: 'Phone B', pair: again.secret });
+  const b = await connect(window2.port, computerKey, keysB, { name: 'Phone B', pair: again.secret });
   const call2 = await waitFor(() => standIn.calls()[1], { message: 'the second announcement' });
   await first.close();
   await b.closed;

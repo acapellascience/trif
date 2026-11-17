@@ -68,7 +68,9 @@ function dropLock() {
 
 /**
  * Starts headless Chrome for Testing in a new temporary profile. opts: { extension (a folder to load as an
- * unpacked extension), args (more switches) }. Returns a Browser; close() it in a finally.
+ * unpacked extension), args (more switches), prepare(profile, extensionId) (called before Chrome starts, to put
+ * something in its new profile: a native messaging manifest in <profile>/NativeMessagingHosts, say) }. Returns a
+ * Browser; close() it in a finally.
  */
 async function launch(opts = {}) {
   const bin = findChrome();
@@ -85,10 +87,11 @@ async function launch(opts = {}) {
 }
 
 class Browser {
-  async _start(bin, { extension, args = [] }) {
+  async _start(bin, { extension, args = [], prepare }) {
     this.extensionId = extension ? extensionId(extension) : null;
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-cdp-page-'));
     const profile = path.join(this.dir, 'profile');
+    if (prepare) { fs.mkdirSync(profile); prepare(profile, this.extensionId); }
     const argv = [
       '--headless=new', '--mute-audio', '--no-first-run', '--no-default-browser-check',
       `--user-data-dir=${profile}`, '--remote-debugging-port=0',

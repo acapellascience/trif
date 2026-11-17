@@ -242,6 +242,8 @@ test('connect a phone: its elements: the switch, the phones with Remove, the cod
   const svg = root.querySelector('.pl-qr');
   assert.deepStrictEqual([svg.tagName, svg.getAttribute('role'), svg.getAttribute('aria-label'), svg.getAttribute('viewBox')], ['SVG', 'img', 'The code to scan', '0 0 49 49']);
   assert.deepStrictEqual(svg.children.map((c) => [c.tagName, c.getAttribute('fill')]), [['RECT', '#fff'], ['PATH', '#000']]);
+  // (filled squares, never outlined as the panel's icons are: seen in a real browser, tests/phone-link-browser.test.js)
+  assert.strictEqual(svg.children[1].getAttribute('stroke'), 'none');
   assert.strictEqual(root.querySelector('.pl-connect'), null);
   // The text of the code (the secret) is in no element's text or attribute but the picture's path
   const seen = JSON.stringify(root.all().map((e) => [e.textContent, e.getAttribute('aria-label'), e.id, e.className]));

@@ -194,6 +194,9 @@ function qrSvg(doc, text, label) {
   bg.setAttribute('width', String(size)); bg.setAttribute('height', String(size)); bg.setAttribute('fill', '#fff');
   const path = doc.createElementNS(SVG, 'path');
   path.setAttribute('d', d); path.setAttribute('fill', '#000');
+  // (the panel's icons are drawn as lines, sidepanel.css `svg`: this is filled squares, never outlined, or
+  // the outlines run the modules together and no camera reads it)
+  path.setAttribute('stroke', 'none');
   svg.append(bg, path);
   return svg;
 }

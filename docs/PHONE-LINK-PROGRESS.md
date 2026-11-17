@@ -37,35 +37,41 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 11, 2026-11-16)
+## Done this round (round 12, 2026-11-16)
 
-The brief: ios-poc isn't free, so the computer-side extras 2 and 3 of round 10's list, as one chunk.
+The brief: ios-poc isn't free; the look at Settings' Connect a phone in a real browser (Tim's OK).
 
-- **A phone run in the real sandbox** (`tests/run-sandbox.test.js`, a third test; macOS, local only, skipped on
-  CI as its two others are): the stand-in phone pairs with the real host.js in a scratch home folder and
-  starts a run of the real Claude Code with the stand-in model, no paid call, the listener on 127.0.0.1.
-  Inside the run's sandbox `trif phone page`, `trif phone try`, `trif phone screenshot`, `trif new|check` for
-  the twin, `trif mods` and `trif explain` work, and the phone's copy of the page is readable (the Read
-  tool); refused, each by whom it should be: `ls phone-link/` and Read of `phone-link.json` and of the
-  keychain's file (Claude Code's rules), `trif check phone-link.json` (trif), `trif tabs|screenshot` (the
-  helper, in words), `trif new` in the site's desktop folder and in another site's (the sandbox). The
-  result is the twin's one mod, the desktop folder has nothing new, the extension got no step, the phone's
-  key reached neither a command's output nor the model, the page copy is gone after the run.
-- **Not with Codex** (three tries, then left): see the notes. The test's fixture now takes a name
-  (`setup('claude')`: a scratch home of its own, since each stand-in model counts its steps from its start).
-- **A long computer name is cut in the QR's text** (`store.js` `qrName`, `QR_TEXT_MAX` 271): whole characters
-  (grapheme clusters), then "…"; the name itself (`hello`, the panel, Bonjour) is as before. One new test
-  in `tests/phone-link-store.test.js` (emoji, CJK, a five-code-point emoji, half a surrogate pair; each
-  code drawn by `extension/qr.js`). PHONE-LINK.md section on pairing and its "Proof" list say both.
-- Locally the whole suite but update.test.js: 916 tests, 906 passed, 10 skipped, 0 failed (72 s).
-- CI for 8a7b8f3: every phone-link test passed in both attempts; a known browser flake failed in each (the
-  CI section has the names):
-  https://github.com/acapellascience/trif/actions/runs/44007593328
-- At the round's end the main session passed on Tim's OK for the headless look at Connect a phone: no room
-  left in this round (the chunk and its CI were done at about 50 tool calls), so it is the next step.
+- **`tests/phone-link-browser.test.js`** (macOS, local only: `TRIF_BROWSER_TESTS=1`, skipped on CI): TRIF's
+  own extension in headless Chrome for Testing (`tests/cdp-page.js`: muted, the lock, the memory guard), the
+  side panel's page in a tab 380 px wide, and the real `helper/host.js` started by the browser itself over
+  native messaging in a temp workspace (fake keychain, stand-in dns-sd, the listener on 127.0.0.1). Each
+  state, light and dark: off, the "i" open, the code, on with no phones, a phone listed, two (one with a
+  long name), one removed, off with the phone kept; Settings closed while a code shows. The code is read
+  back from each screenshot's pixels by macOS's own reader (Vision) and a stand-in phone pairs with what it
+  read; a cancelled code pairs nothing. 27 s.
+- **Found and fixed: no camera could read the code.** The panel's icon rule (`sidepanel.css` `svg {
+  fill: none; stroke: currentColor; stroke-width: 1.6 }`) outlined every module of the QR, so they ran
+  together into a blot (grey on white in the dark theme). The unit tests could not see it (the matrix was
+  right; the drawing was not). Now `stroke="none"` on the path (phonelink.js) and `stroke: none` on `.pl-qr`;
+  one line more in `tests/phone-link-panel.test.js`.
+- **Found and fixed: a short window cut the code.** Settings shows `max(55vh, 220px)` at once and the code
+  was 220 px, so in a window under about 420 px high it was never whole in view. `.pl-qr` is now at most
+  `max(55vh - 40px, 150px)` wide (220 px as before in a window of 480 px or more); Vision reads it at 420
+  and 320 px high and at 300 px wide.
+- Nothing in the section is wider than the panel at 380 or 300 px; a long phone name wraps and Remove stays
+  whole; the section scrolls with Settings; no error in the panel's page.
+- `tests/cdp-page.js` `launch` takes `prepare(profile, extensionId)` (called before Chrome starts: the
+  native messaging manifest goes into `<profile>/NativeMessagingHosts`).
+- Screenshots (22, not committed: 1.9 MB, and each code in them is a scratch helper's) are in
+  `docs/phone-link-shots/`. CI: see the CI section.
 
 ## Earlier rounds
 
+- Round 11: a phone's run in the real sandbox (`tests/run-sandbox.test.js`, its third test: the real Claude
+  Code, the stand-in model, the stand-in phone; `trif phone` works inside, the link's files and key, this
+  computer's tabs and the site's desktop mods are refused); not with Codex (three tries, see the notes); a
+  long computer name cut in the QR's text (`store.js` `qrName`). CI for 8a7b8f3: every phone-link test
+  passed in both attempts, a known browser flake failed in each.
 - Round 10: step 10, `tests/phone-link-e2e.test.js` (one story with the stand-in phone against the real
   host.js in a temp HOME: pair from the code's text, a run with a try on the phone, page commands refused in
   words, the twin's mods alone, nothing for the extension, the page copy in no file afterwards, a drop and a
@@ -170,28 +176,30 @@ The brief: ios-poc isn't free, so the computer-side extras 2 and 3 of round 10's
 
 ## Next step
 
-**The look at Settings' Connect a phone in a real browser. Tim OK'd it** (the main session's message at the
-end of round 11; there was no room left in that round). Local, headless Chrome, `--mute-audio`, the shared
-test lock, a memory watchdog of about 1.5 GB, one browser suite at a time, a temp HOME, the stand-in dns-sd
-(nothing announced on the network), the listener on 127.0.0.1. What to do:
-- open the side panel's Settings, turn the link on, show the code;
-- read the QR back from the page and check it decodes to the text the helper gave (`trif://pair?…`);
-- the phone list and Remove (pair a stand-in phone from the code, `tests/phone-link-client.js`);
-- each state: off, on with no phones, pairing, a phone listed; light and dark;
-- the section scrolls with Settings (Tim's rule: a panel that can outgrow its space scrolls);
-- save screenshots under the worktree (`docs/phone-link-shots/`) and list their paths in the round's report.
-Start from how tests/extension.test.js opens the side panel in Chromium (`TRIF_BROWSER_TESTS=1`) and from
-`tests/phone-link-e2e.test.js` for the helper's side (the fake keychain, `makeStandIn`, `qrOf`).
-
-After that: step 12 (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a
-self-test, frames, NWBrowser), **only when the round's brief says ios-poc is free**. Other computer-side work
+**Step 12** (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a self-test,
+frames, NWBrowser), **only when the round's brief says ios-poc is free**. If it isn't, the computer-side work
 that is left (each small; none is a checklist item):
 1. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
    test, `run.result`'s `removed` with real entries.
-2. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
+2. A phone's name is cut at 60 characters in the middle of a word, with no "…" (`server.js` `text(d.name,
+   60)`; seen in the browser look). The computer's name in the code is cut at whole characters with "…"
+   (`store.js` `qrName`): the same for a phone's name, and a test.
+3. Optional: `tests/phone-link-browser.test.js` on CI (Linux has no Vision: the code would be read from the
+   page's path instead, or by a small decoder in the test).
+4. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
 
 ## Notes for next round
 
+- The browser look: `TRIF_E2E_CHROME="$(ls -d ~/WebMods/tests/e2e/.browsers/chrome/*/chrome-mac-*/Google\ Chrome\ for\ Testing.app/Contents/MacOS/Google\ Chrome\ for\ Testing | tail -1)"
+  TRIF_BROWSER_TESTS=1 PHONE_LINK_SHOTS=docs/phone-link-shots node --test tests/phone-link-browser.test.js`
+  (27 s; this worktree has no Chrome for Testing of its own, the main checkout's is used). It needs Tim's OK
+  each time, as any local browser run. The helper there is started by Chrome through a small `host.sh` that
+  sets `testEnv`'s variables and becomes host.js (cdp-page strips `TRIF_*` from Chrome's own environment).
+  The panel's page opened in a tab (`chrome-extension://<id>/sidepanel.html`) works as the side panel does
+  for Settings. After the switch goes on again the listener is up a moment after the panel says "on": the
+  test waits for it (not looked into; the end-to-end test has the listener's own proof).
+- **Anything drawn as an SVG in the side panel is outlined by `sidepanel.css`'s `svg` rule** unless it says
+  `stroke: none` itself: that is what broke the code. Unit tests with a fake document can't see CSS.
 - The real-sandbox phone test: `node --test --test-name-pattern "a run from a paired phone"
   tests/run-sandbox.test.js` (5 s; the whole file 19 s). It needs the real Claude Code on this Mac and runs
   it with fake keys against `tests/fake-anthropic-server.js`. Steps that need the run's id (the page copy's

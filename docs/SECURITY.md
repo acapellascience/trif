@@ -517,10 +517,21 @@ decision. In short:
   and data, deleted when it ends, never kept with its result.
 - **Approval stays on the phone.** No message approves a mod, changes a setting, pairs a phone or reads a
   desktop mod. The copy in the computer's phone twin is held or not by the computer's own rules.
+- **Phone sync** (docs/PHONE-SYNC.md, rules 3 and 5 as Tim confirmed them on 2026-11-17): a paired phone may
+  read and write the mod files of the phone twins, `sites/phone~*/`, and nothing else. It names a mod by its
+  id, which the helper turns into a path itself after its checks; no message names a folder or a path. What
+  arrives is checked like an import (UTF-8, no NUL, a header the reader takes, 1 MB a mod, 500 mods, 16 MB in
+  all), written through a temporary file into a real folder (never a link), and held by held.js as any
+  change from outside: one that can send, act or load from elsewhere waits for the user's OK on the computer,
+  its hold naming the phone; a style mod runs at once. A replaced file goes to history first, a deleted one
+  to the trash; nothing is hard-deleted. Each phone's base is in the private folder, deleted with the phone.
+  Desktop mods and the on/off switches don't sync. Settings has a switch that turns it off (`off` to every
+  `sync.*`, nothing read or written).
 
 Tests: tests/phone-link-*.test.js (the published Noise vector, pairing, refusals with nothing sent, the
 folder limit, the commands for the phone's page), and tests/phone-link-e2e.test.js, the whole story with a
-stand-in phone against the real helper on 127.0.0.1.
+stand-in phone against the real helper on 127.0.0.1; the sync's: tests/phone-sync*.test.js, its end-to-end
+test tests/phone-sync-e2e.test.js.
 
 ## The prompt
 

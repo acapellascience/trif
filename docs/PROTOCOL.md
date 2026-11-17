@@ -942,8 +942,8 @@ Its design, its wire protocol (Noise IK over TCP, found over Bonjour as `_trif._
   `phone.remove` are requests of the side panel's alone, like `agent.withoutSandbox`: over the extension's own
   connection, refused on the socket and from a run. The helper sends `{type: "phoneLink", status}` when the
   link changes, once the panel has asked for the status (PHONE-LINK.md section 7). The extension's messages
-  are `phoneLink.status|on|off|pair.start|pair.stop|remove`, from the panel page only (extension/phonelink.js;
-  the QR code is drawn by extension/qr.js).
+  are `phoneLink.status|on|off|pair.start|pair.stop|remove|sync`, from the panel page only (extension/phonelink.js;
+  the QR code is drawn by extension/qr.js). `phone.sync {on}` is the phone sync's switch (on for a paired phone).
 - **Runs.** A phone's run is an ordinary run of the default agent whose site is the page's phone twin
   (`phone~<host>`, made by the helper from the page's address). Its events go to the phone, never to the
   extension as `agentEvent`s, and of this file's commands it may use only the helper's own (`ping`, `mods`,
@@ -952,9 +952,16 @@ Its design, its wire protocol (Noise IK over TCP, found over Bonjour as `_trif._
 - **CLI.** `trif phone page [selector] [--limit N]`, `trif phone try <mod>`, `trif phone screenshot`: inside a
   phone's run only, answered by the phone through the helper (`remote.page`, `remote.try`,
   `remote.screenshot` on the run's mailbox), within a minute or with the reason in words.
-- **Files.** `<private>/phone-link.json` (on or off, the port, the paired phones' public keys) and
-  `<private>/phone-link/kept/` (runs a phone hasn't fetched yet); the computer's private key is in the
-  keyring (service `TRIF phone link`). Code: helper/lib/phonelink/.
+- **Phone sync.** The phone's mods and the computer's phone twins (`sites/phone~<site>/`) kept the same, both
+  ways, over the same session: `sync.begin`, `sync.get`, `sync.put`, `sync.end` from the phone, `sync.changed`
+  (a nudge naming nothing) from the computer. A mod is named by its id, `<site>/<name>`, never a path; the helper
+  writes only in the phone twins (and history, trash, its private folder). What arrives is checked like an
+  import and held by held.js as a change from outside, its hold saying which phone. The design, the messages and
+  the limits: **docs/PHONE-SYNC.md** (sections 7 and 9). Code: helper/lib/phonelink/sync.js, syncsession.js.
+- **Files.** `<private>/phone-link.json` (on or off, the port, the paired phones' public keys),
+  `<private>/phone-link/kept/` (runs a phone hasn't fetched yet), `<private>/phone-link/sync/<phone id>.json`
+  (each phone's sync base, mode 600) and `$TRIF_HOME/synced.json` (what the sync wrote, for held.js); the
+  computer's private key is in the keyring (service `TRIF phone link`). Code: helper/lib/phonelink/.
 
 ## Repository layout
 

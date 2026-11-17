@@ -2125,6 +2125,7 @@ class Scenario {
           await clearSite(`solve-${task.key}-${name}`);
           await openPage(task.file);
           fs.writeFileSync(path.join(sitesDir, `solve-${name}.js`), `// ==WebMod==\n// @name        solve ${name}\n// @description The study's scripted ${name} fix\n// @run-at      document-start\n// ==/WebMod==\n\n${body}\n`);
+          await sleep(2500); // (the helper sees the new file and holds it first, as an agent's would be by the time a run ends)
           await letRun();
           const m = await task.measure(`solve-${task.key}-${name}`);
           solved.push({ task: task.key, solve: name, ...m });

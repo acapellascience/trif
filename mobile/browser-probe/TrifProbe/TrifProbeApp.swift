@@ -210,6 +210,9 @@ extension Model {
             if let text = v as? String, text == "forget" { m.forget() } else if let text = v as? String { m.open(text) }
             out = "phone link: " + m.describe
         }
+        // ({"phonedrop": 1}: More's link to the computer lost as a suspended app loses it; it reconnects after its waits,
+        // or at once when the app comes back to the front)
+        if step["phonedrop"] != nil, let l = Model.pane?.panel.link { l.drop(); out = "phone link: \(l.state), following \(l.following.count)" }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
@@ -621,8 +624,6 @@ struct ContentView: View {
             Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
             Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
             Button("Ask the phone's own model…") { onTab { question = ""; asking = true } }
-            // (the phone link's pairing; step 14 of the phone link opens it from More's My computer engine too)
-            Button { onTab { phoneLink.shown = true } } label: { Label("My computer…", systemImage: "desktopcomputer") }
             Button("Show everything hidden on this site again", role: .destructive) { onTab { Task { await browser.forgetRulesHere() } } }
             Divider()
             Menu("The probe") {

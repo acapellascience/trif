@@ -61,6 +61,94 @@ if args.count > 3, args[1] == "pair" {
     nextJob()
     dispatchMain()
 }
+// check remote <port> <code text>: pairs (PhoneLinkPairer, a vault in memory), then PhoneLinkRemote with the same keys at
+// 127.0.0.1:<port>, driven by lines on stdin:
+//   run <site> <prompt>   run.start for https://<site>/home with a page copy and a small JPEG
+//   drop                  the connection lost as a suspended app loses it (no reconnection until `wake`)
+//   wake                  reconnect now (run.resume for the followed runs)
+//   quit
+// and prints: "paired <name>", "hello <name> agent <agent> pending <n>", "started" or "error <code>", "event <n> <kind>
+// <what>", "tool <tool> <input JSON, code cut to its first line>" (answered at once: canned words, a JPEG), "result
+// <mod ids> removed <n>", "state <state>", "lost <code>".
+if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let code = PairCode.parse(args[3]) {
+    let keys = PhoneLinkKeys(vault: MemoryVault())
+    let at: [NWEndpoint] = [.hostPort(host: "127.0.0.1", port: port)]
+    let jpeg = Data([0xff, 0xd8, 0xff, 0xe0]) + Data("the phone's page".utf8)
+    let p = PhoneLinkPairer(code: code, keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], endpoints: at)
+    var remote: PhoneLinkRemote?
+    func json(_ o: Any) -> String { String(data: try! JSONSerialization.data(withJSONObject: o, options: .sortedKeys), encoding: .utf8)! }
+    func begin() {
+        let r = PhoneLinkRemote(keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], app: "check", endpoints: at)
+        r.retry = []
+        r.onState = { s in say("state \(s)") }
+        r.onEvent = { _, n, ev in
+            let kind = ev["kind"] as? String ?? "?"
+            let what: String
+            switch kind {
+            case "text": what = ev["text"] as? String ?? ""
+            case "tool": what = "\(ev["name"] as? String ?? "") \(ev["summary"] as? String ?? "")"
+            case "error": what = ev["message"] as? String ?? ""
+            case "done": what = "ok \(ev["ok"] as? Bool ?? false)"
+            case "session": what = ev["sessionId"] as? String ?? ""
+            default: what = ""
+            }
+            say("event \(n) \(kind) \(what.replacingOccurrences(of: "\n", with: " "))")
+        }
+        r.onResult = { _, m in
+            let ids = (m["mods"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }.sorted()
+            say("result \(ids.joined(separator: ",")) removed \((m["removed"] as? [Any])?.count ?? 0)")
+        }
+        r.onTool = { _, tool, input, answer in
+            var shown = input
+            if let c = shown["code"] as? String { shown["code"] = String(c.split(separator: "\n").first ?? "") }
+            say("tool \(tool) \(json(shown))")
+            switch tool {
+            case "try_mod": answer(.init(text: "Tried it.\nErrors: none", shot: jpeg, error: false))
+            case "read_page": answer(.init(text: "<nav>Home</nav>", shot: nil, error: false))
+            default: answer(.init(text: "The screenshot is attached.", shot: jpeg, error: false))
+            }
+        }
+        r.onLost = { _, e in say("lost \(e.code)") }
+        remote = r
+        r.connect { res in
+            switch res {
+            case .success(let h): say("hello \(h.name) agent \(h.agent ?? "none") pending \(h.pending.count)")
+            case .failure(let f): say("connect failed \(f)")
+            }
+        }
+        FileHandle.standardInput.readabilityHandler = { h in
+            let d = h.availableData
+            if d.isEmpty { exit(0) }
+            for line in String(decoding: d, as: UTF8.self).split(separator: "\n").map(String.init) {
+                DispatchQueue.main.async {
+                    let w = line.split(separator: " ", maxSplits: 2).map(String.init)
+                    switch w.first {
+                    case "run" where w.count == 3:
+                        remote?.start(url: "https://\(w[1])/home", prompt: w[2], page: "<main>the page</main>", shot: jpeg, chat: w[1], session: nil, width: 375) { res in
+                            switch res {
+                            case .success: say("started")
+                            case .failure(let e): say("error \(e.code)")
+                            }
+                        }
+                    case "drop": remote?.drop()
+                    case "wake": remote?.wake()
+                    case "quit": exit(0)
+                    default: say("? \(line)")
+                    }
+                }
+            }
+        }
+    }
+    p.onStep = { s in
+        switch s {
+        case .paired(let n): say("paired \(n)"); DispatchQueue.main.async { withExtendedLifetime(p) {}; begin() }
+        case .failed(let f): say("pair failed \(f)"); exit(1)
+        default: break
+        }
+    }
+    p.start()
+    dispatchMain()
+}
 guard args.count >= 5, args[1] == "connect", let port = NWEndpoint.Port(args[2]) else {
     say("usage: check selftest | connect <port> <computerKeyHex> <phonePrivateHex> [secret]")
     exit(2)

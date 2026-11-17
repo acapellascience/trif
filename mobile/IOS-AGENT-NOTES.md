@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (270 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (275 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -38,7 +38,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   20 s and a memory warning, let go once paused; a same-page quiet tab is let go), iconprofile ({"outline", "swatch" 0-5, "badge", "name", "noise"}: the shown
   page's Home Screen icon and profile to Documents/icon-test.png and .mobileconfig; "noise" = a worst-case photo),
   iconqueue (the same options: the shown page's icon onto the list waiting), phonelink (PhoneLink.swift's self-test in iOS's CryptoKit: "phone link self-test: ok"),
-  phonepair (1: the pairing's state; "trif://pair?…": pair with that code; "forget"), iconbatch (the list's profile to
+  phonepair (1: the pairing's state; "trif://pair?…": pair with that code; "forget"), phonedrop (More's link to the
+  computer lost as a suspended app loses it: it reconnects after 2 s, or at once when the app is back in front), iconbatch (the list's profile to
   Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds),
   exitbutton (where full screen's exit button and its taps are),
   playing (each tab: WebKit's state,
@@ -116,11 +117,24 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (Keychain service "TRIF phone link", accounts `phone` (private key) and `computer` (JSON: key, name, pairedAt),
   after first unlock, this device only; `MemoryVault` in the Mac test), `PhoneLinkPairer` (Bonjour candidates or fixed
   endpoints → session with `pair` → kept on the answer → app `hello` for the name → closed; `Step`, `Failure`).
-  PhoneLinkView.swift: `PhoneLinkModel.shared` (`open(text)`, `forget()`), the My computer sheet (⋯ menu, `trif://pair`
-  links), `QRScanner` (AVCaptureMetadataOutput). Info.plist: NSLocalNetworkUsageDescription, NSBonjourServices
-  `_trif._tcp`, the camera's words. The More engine is the loop's step 14. Test on the Mac:
-  `node --test mobile/test/phonelink.test.js` (swiftc builds it with mobile/test/phonelink-check/main.swift; a stand-in
-  computer from the phone-link worktree's helper/lib/phonelink, or TRIF_PHONE_LINK_LIB; 5 s).
+  PhoneLinkView.swift: `PhoneLinkModel.shared` (`open(text)`, `forget()`, `phoneName`/`sentName`: what the computer
+  lists this iPhone as, named by the person before pairing, "iPhone" to start with), the My computer sheet (opened
+  from More: Settings' My computer block and the engine's "Pair with my computer" link, https://pair.trif.invalid/
+  caught in PanelChat; and `trif://pair` links; no ⋯ menu item since 11-17), `QRScanner` (AVCaptureMetadataOutput).
+  Info.plist: NSLocalNetworkUsageDescription, NSBonjourServices `_trif._tcp`, the camera's words.
+  PhoneLinkRemote.swift (no UI; built for the Mac too): More's "My computer" engine's link: `connect` (Bonjour or
+  fixed endpoints, no secret, app `hello` at once, `ping` every 30 s), `start` (`run.start` with the outline as the
+  page copy and a JPEG), events numbered and each handed on once, `tool.request` → `onTool`, `run.result` → `onResult`
+  then `run.ack`, `away` on a drop → reconnect after `retry` waits or `wake()` → `run.resume` from the last event;
+  `onLost` (no-run, away after the waits, removed). PanelChat.swift's engine `computer` (PanelEngines' list):
+  `goComputer`, the computer's `done` held until its result, whose mods go to `offerFromChat` (Add this mod?); its
+  tool requests run `runTool` on the run's tab (try_mod answers with a screenshot too); `linkWords` (the states).
+  Test on the Mac: `node --test mobile/test/phonelink.test.js` (swiftc builds the three files with
+  mobile/test/phonelink-check/main.swift; a stand-in computer from the phone-link worktree's helper/lib/phonelink
+  and tests/, or TRIF_PHONE_LINK_LIB; 6 tests, under a minute). The last one runs the real Store, Server, Runs and Remote with
+  the stand-in agent (phone-link's `tests/phone-link-computer.js`, which is also the Simulator's computer: `node
+  tests/phone-link-computer.js --seconds 600`, its first line `{port, qr}`, then stdin `go <word>`, `kept`, `remove`,
+  `pair`, `quit`; launch the app with `-linkhost 127.0.0.1:<port>`).
 - make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).

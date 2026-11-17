@@ -3,10 +3,10 @@ import Network
 import SwiftUI
 import UIKit
 
-// The phone link's screen for now (step 13 of the phone link): My computer, from the ⋯ menu, and from a
+// The phone link's screen: My computer, from More (Settings and the My computer engine), and from a
 // `trif://pair` link (iOS's Camera app scanning desktop TRIF's code opens it here). Scans the code with the camera
-// (QRScanner), pairs (PhoneLinkPairer, PhoneLinkPair.swift) and shows the paired computer. Step 14 opens it from
-// More's "My computer" engine. Every word is a draft in docs/IOS-APP-STRINGS.md and docs/PHONE-LINK-STRINGS.md.
+// (QRScanner), pairs (PhoneLinkPairer, PhoneLinkPair.swift) under the name the person gives this iPhone, and shows
+// the paired computer. More opens it (Settings' My computer block, and the My computer engine's notices). Every word is a draft in docs/IOS-APP-STRINGS.md and docs/PHONE-LINK-STRINGS.md.
 //
 // Development: `-linkhost 127.0.0.1:<port>` pairs with that address instead of looking on the Wi-Fi (a loopback
 // address only), for the Simulator against a helper in a temp HOME.
@@ -21,6 +21,16 @@ final class PhoneLinkModel: ObservableObject {
     @Published var scanning = false
     @Published var note: String?
     private var pairer: PhoneLinkPairer?
+    /// What the computer lists this iPhone as (Tim's default 17, 11-17): the person names it at pairing; "iPhone" to
+    /// start with (iOS gives apps only "iPhone" for the device's name, without an entitlement TRIF doesn't ask for).
+    @Published var phoneName: String = UserDefaults.standard.string(forKey: "phoneLinkName") ?? "iPhone" {
+        didSet { UserDefaults.standard.set(phoneName, forKey: "phoneLinkName") }
+    }
+    /// The name as sent: trimmed, 60 characters at most, "iPhone" if empty.
+    var sentName: String {
+        let t = phoneName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "iPhone" : String(t.prefix(60))
+    }
 
     /// A `trif://pair` link (the Camera app, or a scan): pairs at once. False when it isn't a code.
     @discardableResult
@@ -37,7 +47,7 @@ final class PhoneLinkModel: ObservableObject {
         note = nil
         codeName = code.name
         let screen = UIScreen.main.bounds.size
-        let p = PhoneLinkPairer(code: code, phoneName: UIDevice.current.name,
+        let p = PhoneLinkPairer(code: code, phoneName: sentName,
                                 device: ["name": UIDevice.current.model, "width": Int(screen.width), "height": Int(screen.height)],
                                 endpoints: Self.devEndpoints)
         p.onStep = { [weak self] s in
@@ -110,6 +120,15 @@ struct PhoneLinkView: View {
                         Section {
                             Text("Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code.")
                         }
+                    }
+                    if model.computer == nil {
+                        // (what the computer lists this iPhone as: Tim's default 17)
+                        Section {
+                            TextField("iPhone", text: $model.phoneName)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled()
+                                .submitLabel(.done)
+                        } header: { Text("This iPhone's name") } footer: { Text("What TRIF on your computer calls this iPhone.") }
                     }
                     Section {
                         Button(model.computer == nil ? "Scan the code" : "Scan a new code") { model.reset(); model.scanning = true }

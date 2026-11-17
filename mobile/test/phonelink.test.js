@@ -16,6 +16,7 @@ const { execFileSync, spawn } = require('child_process');
 
 const HERE = __dirname;
 const SWIFT = [path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLink.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkPair.swift'),
+  path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkRemote.swift'),
   path.join(HERE, 'phonelink-check', 'main.swift')];
 const mac = process.platform === 'darwin';
 const lib = [process.env.TRIF_PHONE_LINK_LIB, path.join(os.homedir(), 'WebMods-worktrees', 'phone-link', 'helper', 'lib', 'phonelink'),
@@ -196,5 +197,109 @@ test('PhoneLinkPair.swift against the real helper (server.js, store.js, a temp H
     store.pairStop();
     await server.stop();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const computerFixture = lib && path.join(lib, '..', '..', '..', 'tests', 'phone-link-computer.js');
+const noComputer = noLib || (!(computerFixture && fs.existsSync(computerFixture)) && 'the stand-in computer (branch phone-link\'s tests/phone-link-computer.js) isn\'t here');
+
+/** A child's stdout as lines: `next(pred, ms)` → the first line from now on (or already waiting) that matches. */
+function lineReader(child, label) {
+  const lines = [];
+  let buf = '';
+  let wake = null;
+  child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { lines.push(buf.slice(0, i)); buf = buf.slice(i + 1); } if (wake) wake(); });
+  let seen = 0;
+  const all = [];
+  async function next(pred, ms = 20000) {
+    const end = Date.now() + ms;
+    for (;;) {
+      while (seen < lines.length) { const l = lines[seen++]; all.push(l); if (pred(l)) return l; }
+      const left = end - Date.now();
+      if (left <= 0) throw new Error(`${label}: no line matching ${pred} in ${ms} ms; had:\n${all.join('\n')}`);
+      await new Promise((r) => { wake = r; setTimeout(r, Math.min(left, 200)); });
+    }
+  }
+  return { next, all };
+}
+
+test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server, Runs, Remote, the stand-in agent, a temp HOME): a run with its steps, try on the phone, page and screenshot, the result; dropped and resumed; removed', { skip: noComputer, timeout: 180000 }, async () => {
+  build();
+  const comp = spawn(process.execPath, [computerFixture, '--seconds', '150'], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const C = lineReader(comp, 'computer');
+  let phone = null;
+  try {
+    const { port, qr } = JSON.parse(await C.next((l) => l.startsWith('{"port"')));
+    phone = spawn(bin, ['remote', String(port), qr], { stdio: ['pipe', 'pipe', 'inherit'] });
+    const P = lineReader(phone, 'phone');
+    const say = (l) => phone.stdin.write(l + '\n');
+    assert.equal(await P.next((l) => l.startsWith('paired') || l.includes('failed')), 'paired Stand-in Mac');
+    assert.equal(await P.next((l) => l.startsWith('hello') || l.includes('failed')), 'hello Stand-in Mac agent Stand-in agent pending 0');
+
+    // 1. A run: its steps numbered and in order, the three tools asked of the phone and answered, the twin's mod.
+    say('run x.com WRITE PHONE[try bottom-bar] PHONE[page nav --limit 3] PHONE[screenshot]');
+    const first = P.all.length;
+    assert.equal(await P.next((l) => l.startsWith('started') || l.startsWith('error')), 'started');
+    const result = await P.next((l) => l.startsWith('result'));
+    const got = P.all.slice(first);
+    const tools = got.filter((l) => l.startsWith('tool '));
+    assert.deepEqual(tools, [
+      'tool try_mod {"code":"\\/\\/ ==WebMod==","id":"phone~x.com\\/bottom-bar"}',
+      'tool read_page {"limit":3,"selector":"nav"}',
+      'tool screenshot {}',
+    ]);
+    const events = got.filter((l) => l.startsWith('event '));
+    assert.deepEqual(events.map((l) => Number(l.split(' ')[1])), events.map((_, i) => i + 1), 'numbered from 1, none twice');
+    assert.ok(events.some((l) => / text Done\.$/.test(l)), events.join('\n'));
+    assert.match(events[events.length - 1], /^event \d+ done ok true$/);
+    assert.equal(result, 'result phone~m.x.com/part,phone~x.com/bottom-bar removed 0', 'the twin\'s mods only');
+
+    // 2. The link drops while a run waits; the computer finishes; the phone comes back and gets the rest, once.
+    say('run y.com PAUSE:a WRITE PHONE[screenshot]');
+    await P.next((l) => l.startsWith('started'));
+    const one = await P.next((l) => / text Working$/.test(l));
+    say('drop');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state away');
+    const mark = P.all.length;
+    comp.stdin.write('go a\n');
+    // (until the computer has the run's end: then nothing of it can reach the phone live)
+    for (let i = 0; i < 100; i++) {
+      comp.stdin.write('kept\n');
+      const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"')));
+      const mine = Object.values(k.kept).flat();
+      if (mine.length && mine.every((r) => r.done)) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.deepEqual(P.all.slice(mark).filter((l) => !l.startsWith('state')), [], 'nothing while away');
+    say('wake');
+    const back = await P.next((l) => l.startsWith('result'));
+    const after = P.all.slice(mark);
+    assert.ok(!after.some((l) => l.startsWith('tool ')), 'the screenshot asked while away was never asked of the phone');
+    const evs = after.filter((l) => l.startsWith('event '));
+    const n1 = Number(one.split(' ')[1]);
+    assert.deepEqual(evs.map((l) => Number(l.split(' ')[1])), evs.map((_, i) => n1 + 1 + i), 'resumed after the last event it had');
+    assert.match(evs[evs.length - 1], /^event \d+ done ok true$/);
+    assert.equal(back, 'result phone~m.y.com/part,phone~y.com/bottom-bar removed 0');
+    // (acked: the computer keeps nothing)
+    for (let i = 0; i < 50; i++) { comp.stdin.write('kept\n'); const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"'))); if (!Object.values(k.kept).flat().length) break; assert.ok(i < 49, 'acked runs deleted'); await new Promise((r) => setTimeout(r, 100)); }
+
+    // 3. Removed on the computer: the link closes; reconnecting is refused, and a new run says why. (A pairing
+    // window is open there, so the listener stays up: with no phone paired and no window, nothing listens, and
+    // the phone finds nothing: `lost away`, "not found".)
+    say('run z.com SLEEP');
+    await P.next((l) => / text Thinking$/.test(l));
+    comp.stdin.write('pair\n');
+    await C.next((l) => l.startsWith('{"qr"'));
+    comp.stdin.write('remove\n');
+    await C.next((l) => l.startsWith('{"removed"'));
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state away');
+    say('wake');
+    assert.equal(await P.next((l) => l.startsWith('lost')), 'lost removed');
+    say('run z.com hello');
+    assert.equal(await P.next((l) => l.startsWith('error')), 'error removed');
+  } finally {
+    if (phone) phone.kill('SIGKILL');
+    comp.stdin.write('quit\n');
+    await new Promise((r) => { const t = setTimeout(() => { comp.kill('SIGKILL'); r(); }, 5000); comp.on('exit', () => { clearTimeout(t); r(); }); });
   }
 });

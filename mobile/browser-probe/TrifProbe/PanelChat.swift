@@ -4,7 +4,7 @@
 // and the helper; this is the app's half of that: its storage, the shown tab, and the runs.
 //
 // A run (the panel's agent.start): the chosen engine (PanelEngines.swift: Claude API, OpenAI API, OpenRouter, On this
-// iPhone) with the page's context, and tools against the tab the run started on, as the desktop agent's trif commands:
+// iPhone; My computer, below) with the page's context, and tools against the tab the run started on, as the desktop agent's trif commands:
 //   - read_page: the outline, or what a selector matches (counts, text, sizes). Reading only.
 //   - try_mod: a style or boxed mod run for a moment in TRIF's own runtime, this tab only, with no powers; what its
 //     selectors matched and its errors. Taken off (the tab reloaded) when another is tried or the run ends.
@@ -13,6 +13,12 @@
 // back is the page's, so it's handed to the model as data, never as instructions. At most 15 steps a run. Each step is
 // one line in the chat (the panel's tool lines). The mods in the replies go to Add this mod?, with its checks and holds,
 // as the other chats' do.
+//
+// My computer (the phone link, PhoneLinkRemote.swift): the run goes to the person's own coding agent on their computer,
+// with the page's outline and a screenshot; its steps come back as the panel's events, the computer's `trif phone`
+// commands are answered with the same three tools on the run's tab, and the mods it wrote in the computer's phone twin
+// go to Add this mod?. The link dropping (the app suspended) doesn't end the run: the computer finishes, and the app
+// picks up where it was when it reconnects.
 
 import Combine
 import SwiftUI
@@ -100,6 +106,17 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             }
     }
 
+    /// Pairing changes (PhoneLinkModel) told to the page; the app in front again wakes a dropped link.
+    private var linkWatch: AnyCancellable?
+    private func watchLink() {
+        guard linkWatch == nil else { return }
+        linkWatch = PhoneLinkModel.shared.$computer.dropFirst().removeDuplicates { $0?.id == $1?.id && $0?.name == $1?.name }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.linkChanged() } }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.wakeLink() }
+        }
+    }
+
     /// The model on this iPhone loaded ahead (the More chat shown, a model there), so a request doesn't wait for it.
     func preloadLocal() {
         let ready = LocalModels.shared.readyModels
@@ -110,6 +127,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     /// Loads the panel the first time More is shown, with what it kept and the shown tab.
     func start() {
         watchModels()
+        watchLink()
         preloadLocal()
         guard !loaded else { pushTab(); return }
         loaded = true
@@ -208,8 +226,18 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             if let id = d["runId"] as? String, let run = runs[id] { go(run) }
             return (["going": true], nil)
         case "run.stop":
-            if let id = d["runId"] as? String, let run = runs[id] { run.stopping = true; run.task?.cancel() }
+            if let id = d["runId"] as? String, let run = runs[id] {
+                run.stopping = true
+                run.task?.cancel()
+                if let rid = run.remoteId { link.stop(rid) }
+            }
             return (["stopped": true], nil)
+        case "link.status":
+            let c = PhoneLinkKeys.shared.computer
+            return (["paired": c != nil, "name": c?.name ?? ""], nil)
+        case "link.open":
+            PhoneLinkModel.shared.shown = true
+            return (["shown": true], nil)
         default:
             return (nil, "the app has no \(type)")
         }
@@ -219,7 +247,13 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     private func agentList() -> [String: Any] {
         let agents: [[String: Any]] = PanelEngine.all.map { e in
             var a: [String: Any] = ["id": e.id, "name": e.name, "available": true, "canLogin": false, "path": "", "version": ""]
-            if e.keyName != nil {
+            if e.id == "computer" {
+                // (not paired: the panel's "isn't logged in" notice, its link opening the pairing screen)
+                let c = PhoneLinkKeys.shared.computer
+                a["loggedIn"] = c != nil
+                a["loginFix"] = "pair this iPhone with TRIF on your computer: [Pair with my computer](\(PanelChat.pairLink))"
+                a["note"] = c.map { "Your coding agent on \($0.name) makes the mod, inside TRIF's safeguards there. Same Wi-Fi only." } ?? "Your coding agent on your computer makes the mod. Same Wi-Fi only."
+            } else if e.keyName != nil {
                 a["loggedIn"] = APIKeys.has(e.id)
                 a["loginFix"] = e.keyFix
             } else {
@@ -239,6 +273,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     /// service only; OpenRouter's is public), else the ones TRIF knows. "Other…" takes any exact name.
     private func models(_ id: String?, fresh: Bool) async -> [String: Any] {
         guard let e = PanelEngine.named(id) else { return ["models": [], "default": NSNull(), "custom": true] }
+        if e.id == "computer" { return ["models": [], "default": NSNull(), "custom": false] } // (the computer's own choice)
         if (fresh || liveModels[e.id] == nil), e.keyName != nil, let list = await fetchModels(e) { liveModels[e.id] = list }
         let list = liveModels[e.id] ?? e.models
         let known = Dictionary(uniqueKeysWithValues: e.models.map { ($0.id, $0) })
@@ -312,6 +347,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         var task: Task<Void, Never>?
         var stopping = false
         var tried = false
+        /// My computer's run id (the computer's), once started; the done event held until its result came.
+        var remoteId: String?
+        var heldDone: [String: Any]?
+        var sessionIdSeen: String?
         init(site: String, url: String, prompt: String, engine: PanelEngine, model: String, effort: String?, sessionId: String, isNew: Bool, said: [[String: String]], tab: WKWebView?) {
             self.site = site; self.url = url; self.prompt = prompt; self.engine = engine; self.model = model; self.effort = effort
             self.sessionId = sessionId; self.isNew = isNew; self.said = said; self.tab = tab
@@ -325,6 +364,14 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         guard let browser else { return (nil, "no browser") }
         guard let e = PanelEngine.named(d["agent"] as? String ?? "iphone") ?? PanelEngine.named("iphone") else { return (nil, "no such engine") }
         if e.keyName != nil, !APIKeys.has(e.id) { return (nil, "No \(e.keyName!) API key yet: add it in Settings, under API keys.") }
+        if e.id == "computer" {
+            guard PhoneLinkKeys.shared.computer != nil else { return (nil, "This iPhone isn't paired with a computer yet: in Settings, choose Pair with my computer.") }
+            // (the conversation is the computer's: its session id comes back in the run's events, and goes with the next run)
+            let run = Run(site: d["site"] as? String ?? "", url: d["url"] as? String ?? "", prompt: d["prompt"] as? String ?? "", engine: e, model: "",
+                          effort: nil, sessionId: d["sessionId"] as? String ?? "", isNew: false, said: [], tab: browser.webView)
+            runs[run.id] = run
+            return (["runId": run.id], nil)
+        }
         let model = (d["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? e.defaultModel ?? ""
         if e.id == "iphone", model != "stand-in", let m = LocalModels.named(model) ?? Optional(LocalModels.suggested), !LocalModels.shared.isReady(m) {
             return (nil, "\(m.name) isn't on this iPhone yet: download it in Settings, under Model on this iPhone.")
@@ -361,6 +408,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     }
 
     private func go(_ run: Run) {
+        if run.engine.id == "computer" { return goComputer(run) }
         guard run.task == nil, let conv = sessions[run.sessionId]?.conv else { return }
         onActivity(.working)
         report.log("panel", "\(run.engine.name) (\(run.model)): a run on \(run.site)\(run.isNew ? ", a new chat" : "")")
@@ -426,6 +474,147 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     static let maxSteps = 15
 
+    // MARK: My computer (the phone link)
+
+    static let pairLink = "https://pair.trif.invalid/"
+
+    /// The link to the paired computer, made once (PhoneLinkRemote.swift).
+    private(set) lazy var link: PhoneLinkRemote = {
+        let screen = UIScreen.main.bounds.size
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        let l = PhoneLinkRemote(phoneName: PhoneLinkModel.shared.sentName, device: ["name": UIDevice.current.model, "width": Int(screen.width), "height": Int(screen.height)],
+                                app: version, endpoints: PhoneLinkModel.devEndpoints)
+        l.onEvent = { [weak self] rid, _, ev in MainActor.assumeIsolated { self?.computerEvent(rid, ev) } }
+        l.onResult = { [weak self] rid, m in MainActor.assumeIsolated { self?.computerResult(rid, m) } }
+        l.onTool = { [weak self] rid, tool, input, answer in MainActor.assumeIsolated { self?.computerTool(rid, tool, input, answer) } }
+        l.onLost = { [weak self] rid, e in MainActor.assumeIsolated { self?.computerLost(rid, e) } }
+        l.onState = { [weak self] s in MainActor.assumeIsolated { self?.computerState(s) } }
+        return l
+    }()
+    private func computerRun(_ rid: String) -> Run? { runs.values.first { $0.remoteId == rid } }
+
+    /// The app in front again: a dropped link reconnects at once (its runs resumed).
+    func wakeLink() { if !runs.values.filter({ $0.remoteId != nil }).isEmpty { link.wake() } }
+    /// Paired, forgotten or paired with another: the panel's agent line and Settings told.
+    func linkChanged() {
+        guard loaded else { return }
+        if PhoneLinkKeys.shared.computer == nil { link.close() }
+        Task { _ = try? await webView.callAsyncJavaScript("window.__trifPanelLinkChanged && window.__trifPanelLinkChanged(); return 1;", arguments: [:], in: nil, contentWorld: .page) }
+    }
+
+    private func goComputer(_ run: Run) {
+        guard run.task == nil, run.remoteId == nil else { return }
+        onActivity(.working)
+        report.log("panel", "My computer: a run on \(run.site)")
+        run.task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.step(run, "Asking \(PhoneLinkKeys.shared.computer?.name ?? "your computer")…")
+            // (what the agent there gets of the page: its outline, as text, and what's on the screen)
+            let page = await self.outline(run, max: 30000) ?? "(no outline: the page isn't ready)"
+            var shot: Data?
+            if let wv = run.tab { shot = await PanelChat.snapshot(wv) }
+            let width = run.tab.map { Int($0.bounds.width) }
+            guard !run.stopping else { return self.endComputer(run, ["kind": "done", "ok": false, "sessionId": run.sessionId]) }
+            self.link.start(url: run.url, prompt: run.prompt, page: page, shot: shot, chat: run.site, session: run.sessionId, width: width) { [weak self] r in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    switch r {
+                    case .success(let rid):
+                        run.remoteId = rid
+                        if run.stopping { self.link.stop(rid) }
+                    case .failure(let e):
+                        self.emit(run, ["kind": "error", "message": PanelChat.linkWords(e.code, e.message)])
+                        self.report.log("panel", "My computer: not started (\(e.code))")
+                        self.endComputer(run, ["kind": "done", "ok": false, "sessionId": run.sessionId])
+                    }
+                }
+            }
+        }
+    }
+
+    private func computerEvent(_ rid: String, _ ev: [String: Any]) {
+        guard let run = computerRun(rid) else { return }
+        // (the computer's done waits for its result: the mods go to Add this mod? first, as the other engines' do)
+        if ev["kind"] as? String == "done" { run.heldDone = ev; return }
+        if ev["kind"] as? String == "session", let s = ev["sessionId"] as? String { run.sessionIdSeen = s }
+        emit(run, ev)
+    }
+
+    private func computerResult(_ rid: String, _ m: [String: Any]) {
+        guard let run = computerRun(rid) else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.undoTry(run)
+            let mods = (m["mods"] as? [[String: Any]] ?? [])
+            let codes = mods.compactMap { $0["code"] as? String }
+            let big = mods.filter { $0["tooBig"] as? Bool == true }.compactMap { $0["name"] as? String ?? $0["id"] as? String }
+            if !big.isEmpty { self.emit(run, ["kind": "error", "message": "Too big to bring over: \(big.joined(separator: ", ")). It stays in TRIF on your computer."]) }
+            var offered = 0
+            if let browser = self.browser, !codes.isEmpty { offered = await browser.offerFromChat(codes, from: run.site).count }
+            var done = run.heldDone ?? ["kind": "done", "ok": true]
+            if done["sessionId"] == nil, let s = run.sessionIdSeen { done["sessionId"] = s }
+            self.report.log("panel", "My computer: the run ended, \(mods.count) mod(s) from the computer, \(offered) offered")
+            self.endComputer(run, done, offered: offered)
+        }
+    }
+
+    private func endComputer(_ run: Run, _ done: [String: Any], offered: Int = 0) {
+        guard runs[run.id] != nil else { return }
+        emit(run, done)
+        runs[run.id] = nil
+        if let rid = run.remoteId { link.unfollow(rid) }
+        onActivity(offered > 0 || isShown() ? .idle : .replied)
+    }
+
+    private func computerLost(_ rid: String, _ e: PhoneLinkRemote.RunError) {
+        guard let run = computerRun(rid) else { return }
+        emit(run, ["kind": "error", "message": PanelChat.linkWords(e.code, e.message)])
+        Task { @MainActor [weak self] in await self?.undoTry(run); self?.endComputer(run, ["kind": "done", "ok": false, "sessionId": run.sessionIdSeen ?? run.sessionId]) }
+    }
+
+    private func computerState(_ s: PhoneLinkRemote.State) {
+        guard s == .away else { return }
+        for run in runs.values where run.remoteId != nil { step(run, "Still working on \(PhoneLinkKeys.shared.computer?.name ?? "your computer"). Reconnecting…") }
+    }
+
+    /// A computer's tool request: the same three tools, on the run's tab, as the API engines'.
+    private func computerTool(_ rid: String, _ tool: String, _ input: [String: Any], _ answer: @escaping (PhoneLinkRemote.ToolAnswer) -> Void) {
+        guard let run = computerRun(rid) else { return answer(.init(text: "That run isn't open on the iPhone any more.", shot: nil, error: true)) }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var args = input
+            if tool == "try_mod" { args = ["code": input["code"] as? String ?? ""] }
+            let r = await self.runTool(PanelToolCall(id: "computer", name: tool, input: args), run)
+            var shot = r.image
+            // (try: what the page looks like with it on, too)
+            if tool == "try_mod", shot == nil, let wv = run.tab { shot = await PanelChat.snapshot(wv) }
+            answer(.init(text: r.text, shot: shot, error: r.error))
+        }
+    }
+
+    /// What the chat says for the link's states (docs/PHONE-LINK.md section 8; the drafts in docs/PHONE-LINK-STRINGS.md)
+    /// and the computer's errors.
+    static func linkWords(_ code: String, _ message: String) -> String {
+        let name = PhoneLinkKeys.shared.computer?.name ?? "your computer"
+        let pair = "[Pair with my computer](\(pairLink))"
+        switch code {
+        case "notPaired": return "This iPhone isn't paired with a computer yet: \(pair)."
+        case "notFound": return "Can't find \(name). It may be asleep, on another Wi-Fi, or have no browser with TRIF open."
+        case "away", "timeout": return "Lost touch with \(name). It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there."
+        case "removed": return "This iPhone isn't connected to \(name) any more. Connect it again from TRIF's Settings there: \(pair)."
+        case "denied": return "TRIF needs Local Network access to find \(name). Turn it on in Settings, then TRIF Probe, then Local Network."
+        case "broken": return "Something on your Wi-Fi answered as \(name) but isn't it. TRIF didn't connect."
+        case "keychain": return "This iPhone couldn't keep the connection's key. Try again."
+        case "selfTest": return "TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect."
+        case "busy": return "\(name) is already working on this site. Try again when it's done."
+        case "no-agent": return "\(name) has no coding agent set up for TRIF yet."
+        case "bad-url": return "TRIF can't make a mod for this page's address."
+        case "too-big": return "This page is too big to send to \(name)."
+        case "no-run": return "\(name) doesn't have that request any more."
+        default: return "\(name) couldn't start it: \(message)"
+        }
+    }
+
     // MARK: Not right? Ask Claude (the model on this iPhone's replies end with it)
 
     /// The link in a reply (the panel's markdown takes http(s) links only; this one is never loaded: it's caught here).
@@ -435,6 +624,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     /// Set by the pane: the same request to Claude, in its chat, with the page.
     var onAskClaude: (String) -> Void = { _ in }
     private func caught(_ url: URL) -> Bool {
+        if url.host == "pair.trif.invalid" { PhoneLinkModel.shared.shown = true; return true }
         guard url.host == "ask-claude.trif.invalid" else { return false }
         report.log("panel", "Ask Claude, after the model on this iPhone")
         onAskClaude(lastLocalRequest)

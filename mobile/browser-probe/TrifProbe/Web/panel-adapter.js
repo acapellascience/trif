@@ -279,6 +279,19 @@
     if (b) { b.click(); b.click(); }
     post({ type: 'statusChanged' });
   }
+  // ---- Settings: My computer (the phone link's engine): paired or not, and the way to its screen (pairing, Forget) --
+  const linkBox = () => document.getElementById('phone-link');
+  async function paintLink() {
+    const box = linkBox();
+    if (!box) return;
+    let st;
+    try { st = await app({ type: 'link.status' }); } catch (e) { return; }
+    box.replaceChildren(el('p', 'sites-title', 'My computer'));
+    const line = el('p', 'note', st.paired ? `Paired with ${st.name}. Its coding agent makes the mod.` : 'Your coding agent on your computer can make mods here. Pair this iPhone with TRIF on your computer first.');
+    box.append(line, btn(st.paired ? 'My computer…' : 'Pair with my computer…', () => app({ type: 'link.open' }).catch(() => {})));
+  }
+  window.__trifPanelLinkChanged = () => { paintLink().then(afterKeys); return true; };
+
   // ---- The models that run on this iPhone (On this iPhone's): Settings' block, and a bar over the chat ------------
   // (11-16, Tim: a download he started showed him nothing he could see. Now: in Settings, each model with a real bar,
   // "{MB} of {MB}", its speed and time left, Pause and Cancel; over the chat, while On this iPhone is the chat's
@@ -425,18 +438,23 @@
     const settings = document.getElementById('settings');
     const anchor = document.getElementById('model-note');
     if (!settings || !anchor) return;
+    const link = document.createElement('div');
+    link.id = 'phone-link';
+    link.className = 'phone-keys';
+    (document.getElementById('effort-row') || anchor).after(link);
     const box = document.createElement('div');
     box.id = 'phone-keys';
     box.className = 'phone-keys';
-    (document.getElementById('effort-row') || anchor).after(box);
+    link.after(box);
     const models = document.createElement('div');
     models.id = 'phone-models';
     models.className = 'phone-keys';
     box.after(models);
+    paintLink();
     paintKeys();
     refreshModels();
     // (Settings opened, the chat's agent changed: the models' state looked at again)
-    document.getElementById('settings-btn')?.addEventListener('click', () => setTimeout(refreshModels, 50));
+    document.getElementById('settings-btn')?.addEventListener('click', () => setTimeout(() => { refreshModels(); paintLink(); }, 50));
     new MutationObserver(() => { if (lastModels) paintChatBar(lastModels); }).observe(document.getElementById('using') || document.body, { childList: true, characterData: true, subtree: true });
   });
 })();

@@ -400,13 +400,14 @@ and warning's "i" (explain.json); Import mod…; Export all mods for {site}; Cou
 
 ## My computer: pairing with TRIF on the computer (added 11-17, drafts; the phone link, step 13)
 
-The phone link's pairing screen (PhoneLinkView.swift). For now it opens from the ⋯ menu and from a `trif://pair`
-link (iOS's Camera app scanning the code in desktop TRIF's Settings); the phone link's step 14 opens it from More's
-"My computer" engine. The same lines are in docs/PHONE-LINK-STRINGS.md on branch phone-link.
+The phone link's pairing screen (PhoneLinkView.swift). It opens from More (Settings' My computer block, and the My
+computer engine's notices; since 11-17, step 14, in place of the ⋯ menu's "My computer…", now gone) and from a
+`trif://pair` link (iOS's Camera app scanning the code in desktop TRIF's Settings). The same lines are in
+docs/PHONE-LINK-STRINGS.md on branch phone-link.
 
 | Where | New |
 |---|---|
-| The ⋯ menu (for now) | My computer… |
+| ~~The ⋯ menu~~ (removed 11-17: More opens it) | ~~My computer…~~ |
 | The screen's title | My computer |
 | Before pairing | Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code. |
 | The button | Scan the code (once paired: Scan a new code) |
@@ -429,5 +430,38 @@ link (iOS's Camera app scanning the code in desktop TRIF's Settings); the phone 
 | Under it | Your computer still lists this iPhone until you remove it there. |
 | The button at the top | Done |
 
+| This iPhone's name, the field's heading (before pairing; added 11-17, step 14, default 17) | This iPhone's name |
+| The field (prefilled, editable) | iPhone |
+| Under it | What TRIF on your computer calls this iPhone. |
+
 {computer} is the name in the code until the computer's own `hello` names it ("your computer" if the code has none).
+
+## My computer in More (added 11-17, drafts; the phone link, step 14)
+
+More's engine that hands the request to the person's own coding agent on their computer (PanelChat.swift,
+Web/panel-adapter.js). The same lines are in docs/PHONE-LINK-STRINGS.md on branch phone-link.
+
+| Where | New |
+|---|---|
+| The agent menu | My computer |
+| The agent's note, paired | Your coding agent on {computer} makes the mod, inside TRIF's safeguards there. Same Wi-Fi only. |
+| The agent's note, not paired | Your coding agent on your computer makes the mod. Same Wi-Fi only. |
+| Not paired (the panel's own notice: "My computer isn't logged in. To log in, …") | pair this iPhone with TRIF on your computer: Pair with my computer (a link: opens the pairing screen) |
+| Settings, the block's heading | My computer |
+| Settings, paired | Paired with {computer}. Its coding agent makes the mod. · My computer… |
+| Settings, not paired | Your coding agent on your computer can make mods here. Pair this iPhone with TRIF on your computer first. · Pair with my computer… |
+| A request sent before pairing | This iPhone isn't paired with a computer yet: in Settings, choose Pair with my computer. |
+| The first step line of a request | Asking {computer}… |
+| The link drops in a request (a step line) | Still working on {computer}. Reconnecting… |
+| Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. |
+| Lost touch, given up (or no answer in 20 s) | Lost touch with {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there. |
+| Removed there, or its link turned off | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there: Pair with my computer. |
+| Local Network off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF Probe, then Local Network. |
+| Already working on the site | {computer} is already working on this site. Try again when it's done. |
+| No agent there | {computer} has no coding agent set up for TRIF yet. |
+| Not a page TRIF makes mods for | TRIF can't make a mod for this page's address. |
+| Page too big | This page is too big to send to {computer}. |
+| A request the computer no longer has | {computer} doesn't have that request any more. |
+| A mod over the size limit | Too big to bring over: {names}. It stays in TRIF on your computer. |
+| Anything else | {computer} couldn't start it: {the computer's words} |
 

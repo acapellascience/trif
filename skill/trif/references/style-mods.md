@@ -50,20 +50,21 @@ style mod's old name, `@rules`, still works):
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
-**Scrolling feeds: filter the data, not the drawn rows.** `hide` and `filter` (and a boxed mod's
-`post.hide()`) act on what the site has already drawn: it builds each item, then TRIF hides it. That's
-right for a few things: a box, a sidebar, an ad every tenth post. To drop many of a feed's items (X,
+**Scrolling feeds: start simple; filter the data only when hiding breaks the feed.** `hide` and `filter`
+(and a boxed mod's `post.hide()`) act on what the site has already drawn: it builds each item, then TRIF
+hides it. Start there, hiding the row's contents rather than the row so the list closes up, and check it
+by scrolling (`trif sweep --scroll`). That's enough for most requests: a box, a sidebar, an ad every
+tenth post, a shelf that turns up now and then. Go deeper only when you see the cost in this feed (X,
 Instagram, Threads, Facebook, Reddit, YouTube, TikTok: lists that load as you scroll and keep only the
-visible rows on the page), it costs: the site still builds every row, scrolling stutters (worst on
-phones), hidden rows leave gaps or blank stretches, and when most rows are hidden the list can stop
-loading more, because it only asks for more when its end comes on screen. There, remove the items from
-the response the feed is built from, so the site never draws them: a boxed mod with the `site-data`
-power (`trif.filterResponse`; BOXED.md, "Powers"), or a free mod that patches `fetch` and XHR
-(TECHNIQUES.md, "Filtering data before the app sees it"). The trade-off: more code, it depends on the
-response's shape (that changes less often than class names, but it changes), and it must keep the
-pagination cursors; if a whole page filters down to nothing, the list may stall. If you do hide drawn
-rows in such a list, hide the row's contents, not the row, so the list closes up. Tell the user which way
-you went and why, in a sentence.
+visible rows on the page): scrolling stutters, hidden rows leave blank stretches, or the list stops
+loading more because most of what it drew is hidden. Then remove the items from the response the feed
+is built from, so the site never draws them: a boxed mod with the `site-data` power
+(`trif.filterResponse`; BOXED.md, "Powers"), or a free mod that patches `fetch` and XHR (TECHNIQUES.md,
+"Filtering data before the app sees it"). That costs more code, depends on the response's shape, and must
+keep the pagination cursors. Don't fight the feed's scrolling itself (faking scroll positions,
+overriding `scrollY` or the list's measurements): it's slow to get right and breaks with each site
+change; if hiding and data filtering both fail, say so and ask. Tell the user which way you went and
+why, in a sentence.
 
 ### A style section in boxed and free mods
 

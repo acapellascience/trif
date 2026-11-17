@@ -40,7 +40,7 @@ test('SKILL.md: the name, a description within claude.ai\'s 200 characters, and 
 
 test('the references cut from the guides have the sections they should, and a moved heading fails the build', () => {
   const ref = (f) => fs.readFileSync(path.join(SKILL, 'references', f), 'utf8');
-  assert.match(ref('style-mods.md'), /### Style mods: start here[\s\S]*Scrolling feeds: filter the data[\s\S]*### A style section in boxed and free mods/);
+  assert.match(ref('style-mods.md'), /### Style mods: start here[\s\S]*Scrolling feeds: start simple[\s\S]*### A style section in boxed and free mods/);
   assert.match(ref('boxed-mods.md'), /## Boxed mods: when a style mod isn[\s\S]*### Powers: what a boxed mod can ask for[\s\S]*`site-data`/);
   assert.match(ref('checks.md'), /## Mods that wait for the user's OK[\s\S]*## Writing mods TRIF can read[\s\S]*## Account safety[\s\S]*## Safety rules/);
   assert.match(ref('free-mods.md'), /## Where mods run[\s\S]*### 2\. Filtering data before the app sees it[\s\S]*## Keep mods fast/);

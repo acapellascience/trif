@@ -11,7 +11,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
       keep only bin/node + LICENSE, `runtimeNode(home)`, prune old ones. Unit tests with a fake archive.
 - [x] 3. setup.js: use the runtime's node for both wrappers and the Safari LaunchAgent (fetch it if missing;
       fallback `pickNodePath()` with a note); `--no-runtime` for git checkouts/dev. Tests.
-- [ ] 4. update.js: run the new package's setup with the runtime's node when present; doctor.js: check the
+- [x] 4. update.js: run the new package's setup with the runtime's node when present; doctor.js: check the
       runtime (present, hash of bin/node, runs) and say when TRIF is still on a system node. Tests.
 - [ ] 5. `trif uninstall` (manifests, LaunchAgent, bin, app, runtime; mods and private folder kept unless
       `--all`). Tests. Strings to NO-NODE-STRINGS.md.
@@ -58,13 +58,30 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   change). CI: https://github.com/acapellascience/trif/actions/runs/44174209142 green after one rerun
   (codex-sandbox.test.js mailbox-wait timing flake, passes locally).
 
+- Round 3, step 4: update.js runs the new setup on TRIF's own Node with 10 min (tells setup via
+  TRIF_SETUP_TIMEOUT_MS); doctor checks the runtime (whole, pin, damaged, still on system Node). New tests
+  in setup-runtime (3) and update (1 + asserts); locally update/cli/runtime/upgrade + 9 related files pass
+  (only the known web-ext ENOENT release test fails, no npm install here). CI: https://github.com/acapellascience/trif/actions/runs/44177557546 green (attempt 1 cancelled: no macOS runner within 15 min; rerun passed)
+
 ## Next step
 
-Step 4: update.js (raise its setup `run` timeout above 120 s for runtime downloads; old updaters keep 120 s,
-which chooseNode already respects) and doctor.js (runtime present, `.trif-runtime.json` nodeSha256 matches
-bin/node, `--version` runs; say when the wrappers name a system node). Tests.
+Step 5: `trif uninstall` (manifests, Safari LaunchAgent, bin, app, runtime; mods and the private folder
+kept unless `--all`). Tests in a temp HOME only. Strings to NO-NODE-STRINGS.md. (Still unconfirmed by Tim,
+For Tim 3; build it as designed, easy to change.)
 
 ## Notes for next round
+
+- Step 4 as built: update.js `updateNode(home)` (the running node if it's already a runtime, else
+  `R.installedNode(home)`, else `process.execPath`); setup run with `timeout: SETUP_TIMEOUT_MS` (10 min,
+  under lock.js's 15 min stale age) and `TRIF_SETUP_TIMEOUT_MS` in its env; setup.js `downloadBudget(env)`
+  = that less 60 s (min 30 s, max 10 min), 75 s when the lock is held without it. runtime.js
+  `runtimeOf(node, home)` / `checkRuntime(node, home)` (MARK, sha of bin/node, --version); doctor.js
+  `runtimeCheck` after the host-wrapper line: ok / warn (older pin) / fail (damaged: rm -rf + setup) /
+  warn (copy on system node: `trif setup --runtime`) / info (git checkout, runtime off, no platform).
+- installedNode doesn't hash, so setup won't replace a damaged runtime by itself: doctor says remove it.
+  Maybe setup should re-verify the hash and re-fetch (0.3 s for 110 MB); decide in step 8.
+- doctor's top "Node vX" line still says "install a current Node from nodejs.org" when the running node is
+  <18; step 7 (front door text) should change that fix too.
 
 - Step 3 as built (lib/setup.js `chooseNode`): runtime by default for mode copy (npx, updates, install.sh),
   the running node for mode link (git checkouts) unless `--runtime`; `--no-runtime` / `TRIF_RUNTIME=off`

@@ -3247,7 +3247,7 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
   const guard = `if (!(${m})(location.href, ${JSON.stringify(mod.matches)}) || (${m})(location.href, ${JSON.stringify(mod.excludes || [])})) return;`;
   // (each world keeps the ids of the mods that started in it on this page: the Mods tab's "Running on this page")
   const ran = `(globalThis.__trifRan = globalThis.__trifRan || []).push(${JSON.stringify(id)});`;
-  let script, world, at;
+  let script, world, at, styleScript = '';
   if (tier === 'style') {
     script = `(function () { ${guard}\n${ran}\n${mod.code}\n})();`;
     world = 'trif'; at = 'start';
@@ -3260,17 +3260,135 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
     // page's first requests; the others when the page has been read)
     world = 'box'; at = (mod.powers || []).includes('site-data') ? 'start' : 'end';
   } else {
-    // (its errors kept on the page, for the chat and the Mods tab: Browser.modErrors)
-    script = `(async function () { ${guard}\n${ran}\n${String(mod.code)}\n})().catch((e) => { (window.__trifModErrors = window.__trifModErrors || []).push(${JSON.stringify(id)} + ": " + ((e && e.message) || e)); console.error("TRIF mod ${id}:", e); });`;
+    // (its errors kept on the page, for the chat and the Mods tab: Browser.modErrors, and told to the app's
+    // Diagnostics, as its start is: freePageRuntime. A style section's values are its own `trif.style`, as on
+    // desktop (extension/lib.js wrapModCode), on the line with `ran`: no line added before the code.)
+    const values = styleValues(mod);
+    const own = values ? ` const trif = (() => { const t = window.trif; return Object.freeze(Object.create(t && (typeof t === 'object' || typeof t === 'function') ? t : null, { style: { value: Object.freeze(${JSON.stringify(values)}), enumerable: true } })); })();` : '';
+    const started = ` window.__trifFree && window.__trifFree.start(${JSON.stringify(id)});`;
+    script = `(async function () { ${guard}\n${ran}${started}${own}\n${String(mod.code)}\n})().catch((e) => { (window.__trifModErrors = window.__trifModErrors || []).push(${JSON.stringify(id)} + ": " + ((e && e.message) || e)); window.__trifFree && window.__trifFree.error(${JSON.stringify(id)}, (e && e.message) || e); console.error("TRIF mod ${id}:", e); });\n//# sourceURL=trif://${id}.js`;
     world = 'page'; at = mod.runAt === 'document_start' ? 'start' : 'end';
+    // (a style section's CSS: put on the page by TRIF itself, in TRIF's world at the page's start, where
+    // style-mirror.js keeps it working on a page whose policy refuses inline styles; desktop puts it in a style
+    // element of its own before the mod's code: extension/lib.js styleSectionCode)
+    const css = mod.style && typeof mod.style.css === 'string' ? mod.style.css : '';
+    if (css) styleScript = `(function () { ${guard}\n(${putStyle.toString()})(${JSON.stringify(id)}, ${JSON.stringify(css)});\n})();`;
   }
   return {
     id, site: s, name: mod.name, description: mod.description || '', tier, matches: mod.matches, excludes: mod.excludes || [],
     sites: s === 'all-sites' ? ['all-sites'] : codePowers.modSites(mod), runAt: mod.runAt, powers: mod.powers || [], powerArgs: mod.powerArgs || {},
     powerInfo: mod.sandboxed ? boxPowers.powerInfo(mod) : null, risk: mod.risk || null, hash: mod.hash,
-    needs: needsOf(mod), code: code, script, world, at,
+    needs: needsOf(mod), code: code, script, world, at, styleScript,
   };
 }
+
+// ---- a free mod's style section, and its trif.log ------------------------------------------------------------
+
+// (a style section's values as the code gets them, checked again as extension/lib.js styleOf does: a number, a
+// colour, a word, true or false; null when the mod has no section)
+const STYLE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const STYLE_WORD = /^(?:[A-Za-z][A-Za-z0-9-]{0,39}|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8}))$/;
+function styleValues(mod) {
+  const st = mod && mod.style;
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return null;
+  const values = {};
+  const raw = st.values && typeof st.values === 'object' && !Array.isArray(st.values) ? st.values : {};
+  for (const [k, v] of Object.entries(raw).slice(0, 40)) {
+    if (!STYLE_NAME.test(k)) continue;
+    if ((typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && STYLE_WORD.test(v))) values[k] = v;
+  }
+  return values;
+}
+
+// (in TRIF's world, by itself: the section's CSS in a style element of its own, marked with the mod's id)
+function putStyle(id, css) {
+  const style = document.createElement('style');
+  style.setAttribute('data-trif-style', id);
+  style.textContent = css;
+  const put = () => (document.head || document.documentElement).append(style);
+  if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
+}
+
+/**
+ * In the page's world, before any free mod (ModStore.userScripts, only where one may run): desktop's
+ * window.trif.log/warn/error (extension/runtime.js; `expect` is a no-op here), each line told to TRIF's world
+ * with the mod it's from (the script's trif://<id>.js in the call stack where an engine keeps sourceURL; WebKit's
+ * stacks say only "user-script:N", so there: the free mod that started last on the page, desktop's fallback), and
+ * `__trifFree`, which a free mod's wrapper tells when it starts and what it threw (WebKit gives a user script's
+ * later errors, from an event or a timer, as "Script error." with no stack, so those can't be named and aren't
+ * told). TRIF's world (freeRelay) caps them and hands them to the app's Diagnostics. Page code can call these as well (it's the page's world): what gets
+ * through is capped there.
+ */
+function freePageRuntime() {
+  if (window.top !== window || window.__trifFree) return;
+  const nativeConsole = { log: console.log, warn: console.warn, error: console.error };
+  const Ev = CustomEvent, dispatch = EventTarget.prototype.dispatchEvent, root = document, stringify = JSON.stringify;
+  let current = null;
+  const started = new Set();
+  const modOf = (stack) => { const m = /trif:\/\/([^\s:)]+?)\.js/.exec(String(stack || '')); return m ? m[1] : null; };
+  // (WebKit doesn't always start TRIF's world's scripts before the page's: lines wait, up to 60, until freeRelay says
+  // it's there, answering this world's hello or as it starts)
+  let ready = false;
+  const waiting = [];
+  const send = (detail) => { try { dispatch.call(root, new Ev('trif-free-mod', { detail })); } catch (e) { /* never throw into a mod */ } };
+  const tell = (kind, mod, text) => {
+    try {
+      const detail = stringify({ kind, mod: mod || '', text: String(text).slice(0, 400), path: location.pathname });
+      if (ready) send(detail); else if (waiting.length < 60) waiting.push(detail);
+    } catch (e) { /* never throw into a mod */ }
+  };
+  root.addEventListener('trif-free-relay', () => { if (ready) return; ready = true; waiting.splice(0).forEach(send); });
+  try { dispatch.call(root, new Ev('trif-free-hello')); } catch (e) { /* no relay yet */ }
+  const show = (a) => { if (typeof a === 'string') return a; try { const s = stringify(a); return s === undefined ? String(a) : s; } catch (e) { return String(a); } };
+  const logger = (level) => function (...args) {
+    try {
+      const mod = modOf(new Error().stack) || current;
+      tell(level, mod, args.map(show).join(' '));
+      nativeConsole[level].call(console, '[TRIF]', mod || '', ...args);
+    } catch (e) { /* never throw into a mod */ }
+  };
+  if (!window.trif) window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error'), expect: function () {} };
+  if (!window.webmods) window.webmods = window.trif;
+  Object.defineProperty(window, '__trifFree', {
+    value: Object.freeze({
+      start(id) { current = String(id); if (!started.has(current)) { started.add(current); tell('start', current, ''); } },
+      error(id, message) { tell('error', String(id), message); },
+    }),
+  });
+}
+
+/**
+ * In TRIF's world (to the app: Browser's "trif" handler, "modlog"): what freePageRuntime tells, at most 40 lines a
+ * page load, each up to 200 characters, a mod's start once. The page's world is untrusted: only the kind, the mod's
+ * id, the address's path and the line passed go on, cut to size.
+ */
+function freeRelay() {
+  if (window.top !== window || globalThis.__trifFreeRelay) return;
+  globalThis.__trifFreeRelay = true;
+  let n = 0;
+  const seen = new Set();
+  const cut = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, max);
+  document.addEventListener('trif-free-mod', (e) => {
+    try {
+      if (n >= 40 || typeof e.detail !== 'string' || e.detail.length > 2000) return;
+      const d = JSON.parse(e.detail);
+      if (!d || !['start', 'log', 'warn', 'error'].includes(d.kind)) return;
+      const mod = cut(d.mod, 100);
+      if (d.kind === 'start') { if (seen.has(mod)) return; seen.add(mod); }
+      n++;
+      const more = n === 40 ? ' (no more lines from this page load)' : '';
+      window.webkit.messageHandlers.trif.postMessage({ type: 'modlog', kind: d.kind, mod, path: cut(d.path, 100), text: cut(d.text, 200) + more });
+    } catch (err) { /* not one of ours */ }
+  }, true);
+  // (here: to the page's world's runtime, if it started first, and whenever it says hello)
+  const here = () => { try { document.dispatchEvent(new CustomEvent('trif-free-relay')); } catch (err) { /* no page yet */ } };
+  document.addEventListener('trif-free-hello', here, true);
+  here();
+}
+
+/** The two scripts above, as the app puts them in pages. */
+const freePageScript = `(${freePageRuntime.toString()})();`;
+const freeRelayScript = `(${freeRelay.toString()})();`;
 
 // ---- checking an edit before it's saved (the code card's Edit: what `trif check` would say) -------------------
 
@@ -3395,7 +3513,7 @@ function findMod(text) {
 // (the probe's earlier name for readMod)
 const parseMod = (text, opts) => readMod(text, opts);
 
-const api = { readMod, parseMod, findMod, checkMod, jsonErrorLine, matchesUrl, appliesTo, needsOf, waiting, allow, lineDiff, nameOf, siteFor };
+const api = { readMod, parseMod, findMod, checkMod, freePageScript, freeRelayScript, jsonErrorLine, matchesUrl, appliesTo, needsOf, waiting, allow, lineDiff, nameOf, siteFor };
 
 return api;
 })();

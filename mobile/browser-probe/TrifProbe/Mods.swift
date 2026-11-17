@@ -53,6 +53,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     var script: String          // what runs: the mod behind a check of the page's address
     var world: String           // trif, box or page
     var at: String              // start or end
+    /// A free mod's style section: the script that puts its CSS on the page, in TRIF's world (modfile.js readMod
+    /// styleScript); "" without one. Not kept: made again with `script`.
+    var styleScript: String = ""
     var on: Bool = true
     /// Sites it's switched off on (a mod for several sites: its switch is the site's, as desktop's offSites).
     var offSites: [String] = []
@@ -73,7 +76,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// runs on another). nil: from a file or a code, which has no site of its own.
     var cameFrom: String? = nil
 
-    struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String }
+    struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String; var style: String? = nil }
 
     var tierName: String { tier == "style" ? "Style mod" : tier == "boxed" ? "Boxed mod" : "Free mod" }
     /// The tier's colour, as the panel's (sidepanel.css --led-green, --led-yellow, --led-coral).
@@ -186,6 +189,13 @@ final class ModStore: ObservableObject {
         return c
     }()
 
+    /// modfile.js freePageScript and freeRelayScript (the reader's own text: the same until the app brings a new one).
+    private lazy var freeScripts: (page: String, relay: String)? = {
+        guard let c = js, let page = c.evaluateScript("__trifMods.freePageScript")?.toString(), let relay = c.evaluateScript("__trifMods.freeRelayScript")?.toString(),
+              page.hasPrefix("("), relay.hasPrefix("(") else { return nil }
+        return (page, relay)
+    }()
+
     /// Pause all mods (the Mods tab's ⋯, the app icon's menu): no mod runs anywhere until Resume.
     @Published private(set) var paused = UserDefaults.standard.bool(forKey: ModStore.pausedKey)
     func setPaused(_ p: Bool) {
@@ -260,6 +270,7 @@ final class ModStore: ObservableObject {
         var m = InstalledMod(id: s("id"), site: s("site"), name: s("name"), description: s("description"), tier: s("tier"), sites: a("sites"), matches: a("matches"),
                              powers: a("powers"), code: s("code"), script: s("script"), world: s("world"), at: s("at"))
         m.excludes = a("excludes")
+        m.styleScript = s("styleScript")
         m.hash = s("hash")
         m.powerArgs = d["powerArgs"] as? [String: [String]] ?? [:]
         if let info = d["powerInfo"] as? [String: Any] {
@@ -343,15 +354,22 @@ final class ModStore: ObservableObject {
     /// the sites it's switched off on, and the sites whose tier is off.
     func userScripts() -> [WKUserScript] {
         if paused { return [] }
-        var list: [(InstalledMod, String, String, String)] = []
+        var list: [(InstalledMod, String, String, String, String)] = []
         for m in mods where m.on {
-            if m.held { if let r = m.ran { list.append((m, r.script, r.world, r.at)) }; continue }
-            list.append((m, m.script, m.world, m.at))
+            if m.held { if let r = m.ran { list.append((m, r.script, r.world, r.at, r.style ?? "")) }; continue }
+            list.append((m, m.script, m.world, m.at, m.styleScript))
         }
         var out: [WKUserScript] = []
-        // (first in each world with a mod: a style element the page's policy refuses still applies: Web/style-mirror.js)
+        // (first in each world with a mod: a style element the page's policy refuses still applies: Web/style-mirror.js;
+        // TRIF's world has a free mod's style section too)
         let mirror = Browser.resource("style-mirror", "js")
-        if list.contains(where: { $0.2 == "trif" }) { out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld)) }
+        if list.contains(where: { $0.2 == "trif" || !$0.4.isEmpty }) { out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld)) }
+        // (where a free mod may run: desktop's window.trif.log/warn/error in the page's world, and their way to the
+        // app's Diagnostics in TRIF's ("mod log" lines: a mod's start, its log lines, its errors), before any mod)
+        if list.contains(where: { $0.2 == "page" }), let free = freeScripts {
+            out.append(WKUserScript(source: free.relay, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
+            out.append(WKUserScript(source: free.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        }
         if list.contains(where: { $0.2 == "box" }) {
             out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
             out.append(WKUserScript(source: Browser.resource("ses.umd.min", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
@@ -362,16 +380,18 @@ final class ModStore: ObservableObject {
         // change's version before: the power in the grant its script carries). It wraps fetch and XMLHttpRequest only
         // once such a mod asks for a filter; what a filter gives back is checked in the box world (remove or reorder
         // only), and anything else leaves the site's response as it was.)
-        let bridged = list.filter { m, script, world, _ in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
+        let bridged = list.filter { m, script, world, _, _ in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
         if !bridged.isEmpty {
             let pairs = bridged.map { [$0.0.matches, $0.0.excludes] }
             out.append(WKUserScript(source: Browser.resource("page-bridge", "js") + "(\(Browser.jsonText(pairs)));", injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         }
-        for (m, script, world, at) in list {
+        for (m, script, world, at, style) in list {
             let off = (m.multiSite ? m.offSites : []) + groupsOff.filter { $0.value.contains(m.tier) }.map(\.key)
-            let source = off.isEmpty ? script : "(function () { const h = location.hostname.replace(/^www\\./, ''); if (\(Browser.jsonText(Array(Set(off)).sorted())).some((s) => h === s || h.endsWith('.' + s))) return;\n\(script)\n})();"
+            let behind = { (s: String) in off.isEmpty ? s : "(function () { const h = location.hostname.replace(/^www\\./, ''); if (\(Browser.jsonText(Array(Set(off)).sorted())).some((s) => h === s || h.endsWith('.' + s))) return;\n\(s)\n})();" }
             let w: WKContentWorld = world == "box" ? Browser.boxWorld : world == "page" ? .page : Browser.trifWorld
-            out.append(WKUserScript(source: source, injectionTime: at == "start" ? .atDocumentStart : .atDocumentEnd, forMainFrameOnly: true, in: w))
+            // (a free mod's style section first, at the page's start whenever its code runs, as desktop's is)
+            if !style.isEmpty { out.append(WKUserScript(source: behind(style), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld)) }
+            out.append(WKUserScript(source: behind(script), injectionTime: at == "start" ? .atDocumentStart : .atDocumentEnd, forMainFrameOnly: true, in: w))
         }
         return out
     }
@@ -399,7 +419,7 @@ final class ModStore: ObservableObject {
             // (from the computer, phone sync: judged as an edit, its switch kept)
             if source == "import" { m.on = false; m.newOff = "update" } else if source == "edit" || source == "computer" { m.on = old.on; m.newOff = old.newOff } else { m.on = true; m.newOff = nil }
             // (the version before ran, and this one waits: it keeps running meanwhile)
-            if m.held, !old.held || old.ran != nil { m.ran = old.ran ?? .init(code: old.code, script: old.script, world: old.world, at: old.at) }
+            if m.held, !old.held || old.ran != nil { m.ran = old.ran ?? .init(code: old.code, script: old.script, world: old.world, at: old.at, style: old.styleScript) }
             mods[i] = m
         } else {
             // (new from the computer, phone sync D8: as an import, off and marked new)
@@ -547,7 +567,7 @@ final class ModStore: ObservableObject {
         back.allowed = ModStore.seeded(now)
         back.extraNeeds = ModStore.changeNeeds(back, was: now)
         back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: source)] + now.history
-        if back.held, !now.held { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at) }
+        if back.held, !now.held { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at, style: now.styleScript) }
         mods[i] = back
         save()
         return true

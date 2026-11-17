@@ -1056,6 +1056,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             Diagnostics.shared.log("busy", "\(Diagnostics.place(url)): its main thread was busy \(busy)% of the last 10 s (longest stall \(longest) ms), \((body["elements"] as? NSNumber)?.intValue ?? 0) elements, \(running.map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
             safety.busy(site: Site.of(url?.host ?? ""), percent: busy, mods: running)
             return (["ok": true], nil)
+        case "modlog":
+            // (a free mod's start, its window.trif.log/warn/error lines and its errors: modfile.js freeRelay, which caps
+            // them; told by the page's world, so cut again here and kept to what the mod passed)
+            let cut = { (k: String, n: Int) in String((body[k] as? String ?? "").prefix(n)) }
+            let kind = cut("kind", 8), mod = cut("mod", 100), path = cut("path", 100), text = cut("text", 240)
+            let host = message.webView?.url?.host ?? "?"
+            Diagnostics.shared.log("mod log", kind == "start" ? "\(mod) started on \(host)\(path)" : "\(mod) on \(host)\(path): \(kind == "log" ? "" : "\(kind): ")\(text)")
+            return (["ok": true], nil)
         default:
             return (nil, "unknown message")
         }

@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (290 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (292 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -70,6 +70,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - The .ipa: `xcodebuild … -configuration Release -sdk iphoneos -derivedDataPath <ddev> CODE_SIGNING_ALLOWED=NO DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build`,
   zip `Payload/TrifProbe.app` to `~/Downloads/TrifProbe.ipa`, copy `TrifProbe.app.dSYM` to ~/Downloads, copy the .ipa to
   `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/TrifProbe.ipa`, report `dwarfdump --uuid`. Tim sideloads it with iloader.
+- The mod reader on the Mac: `node --test mobile/test/modfile.test.js` (gen/mods.js in node's vm: a free mod's style
+  section, its trif.log lines and start to the app, capped; boxed and style mods). Real WebKit without the Simulator:
+  mobile/test/webkit-check (swiftc; an offscreen WKWebView with the scripts as ModStore.userScripts puts them, on
+  serve.js's strict.html and plain.html: what applied in each world, what reached the handler, a snapshot).
 - Generated files: `node mobile/prepare.js` (and `--check`, run by mobile/test/smoke.js): sandbox-runtime.js,
   browser-checks.json, mods.js, panel-kit.js, mod-guide.txt, page-bridge.js, RobotShape.swift, and the side panel folder
   `shared/gen/panel`. Never edit those by hand.
@@ -106,7 +110,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
   WebClipMaker.compose; profile hand-off; IconHandoffSteps, the steps shared with the list), `trif://open`.
   IconQueue.swift: the list of icons waiting (QueuedIcon, IconQueue, the batch profile, IconQueueView).
-- Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). ModsPanel.swift + Web/mods.html,
+- Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
+  (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
+  a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is
+  `styleScript`, a style element put by TRIF's world at the page's start (style-mirror.js there for strict pages;
+  desktop: lib.js styleSectionCode). Not kept: made again with `script` at launch; a held change's `ran` keeps its
+  own `style`. Where a free mod may run: `freePageScript` (page world: desktop's window.trif.log/warn/error, expect a
+  no-op) tells TRIF's world's `freeRelayScript` by a CustomEvent with a JSON string, which caps (40 a load, 200
+  characters) and posts "modlog" → Browser → Diagnostics "mod log" (start, log, warn, error: the wrapper's catch). ModsPanel.swift + Web/mods.html,
   mods-page.js/css: the Mods tab.
 - ClaudePane.swift: the robot view: ChatService, up to 3 ChatViews (Claude/ChatGPT pages), fills, reply watching,
   conversations' sites, projects, notifications, the switch Claude · ChatGPT · More. Web/chat.js: TRIF inside those pages
@@ -259,6 +270,22 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- 11-17 (free mods' style section, mod log lines): the Mac lost its iOS Simulator runtime AND the iOS platform
+  around 16:09 (`simctl list runtimes` empty, xcodebuild "iOS 26.2 is not installed"; disk went 97% → 25% used:
+  a cleanup?). Getting them back is a ~8 GB download (`xcodebuild -downloadPlatform iOS`): ask Tim first. Until
+  then: no Simulator checks (this batch used mobile/test/webkit-check on the Mac's WebKit instead), and the .ipa
+  builds only with actool swapped out (it needs a simulator runtime even for a device build): `xcodebuild -project
+  TrifProbe.xcodeproj -target TrifProbe -configuration Release -sdk iphoneos SYMROOT=<ddev>/Build/Products
+  OBJROOT=<ddev>/Build/Intermediates.noindex … ASSETCATALOG_EXEC=<dir>/actool`, where `<dir>/actool` (it must be
+  named actool) execs the real one except for `--compile`, which copies the 11-17 15:22 build's Assets.car and icon
+  PNGs, partial Info.plist and dependency file (kept in the session scratchpad's actool-cache). Only valid while
+  Assets.xcassets is unchanged (last changed 11-16). `-scheme` builds fail at destination resolution: use `-target`.
+- Free mods' style section on a phone: never seen on a real one. FeedBook's start and log lines should now be in
+  Tim's diagnostics ("mod log"). A held free mod's version that keeps running keeps its own style (desktop's
+  restyle puts the waiting change's style on it); a setting changed in the code card reloads the page (as every
+  mod change does), nothing is restyled live. Log lines from a later callback name the free mod that started
+  last on the page (WebKit's stacks have no sourceURL); a free mod's errors from events or timers aren't told.
+
 - Chat offers on the real claude.ai (signed in, can't be checked here): whether its older messages render before
   the person's latest in the DOM (the page side assumes document order; the app's memory is the guarantee either
   way), whether the USER selector still matches (without it the page side falls back to all blocks), and a viewer
@@ -296,6 +323,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- WebKit (Mac, 11-17): a user script's stack says `user-script:N` (`//# sourceURL` ignored); its errors from later
+  callbacks reach window's error event as "Script error." with no stack. At document start, user scripts in
+  different content worlds don't start in a fixed order (TRIF's world was after the page's about 1 run in 4): the
+  free runtime holds its lines until freeRelay answers its hello. A CustomEvent's string `detail` crosses worlds.
 
 - Simulator screenshots lag ~2 s, so a 2 s note ("Copied.") is usually gone from them: poll `{"status": 1}` instead.
 

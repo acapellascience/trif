@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const { tempDir, sleep, waitFor } = require('./fake-extension');
 const { makeFakeKeychain } = require('./fake-keychain');
 const { PhoneClient } = require('./phone-link-client');
+const { makeStandIn } = require('./fake-dns-sd');
 const { Store } = require('../helper/lib/phonelink/store');
 const { Server } = require('../helper/lib/phonelink/server');
 const { generateKeyPair } = require('../helper/lib/phonelink/noise');
@@ -19,29 +20,6 @@ const { Announcer, BIN, LABEL_MAX, instanceName, recordArgs, pause } = require('
 
 const cleanups = [];
 test.after(async () => { for (const fn of cleanups.reverse()) { try { await fn(); } catch { /* ignore */ } } });
-
-// The stand-in: logs, then waits to be killed (or leaves at once while a file named `die` sits beside it).
-const STANDIN = `#!${process.execPath}
-'use strict';
-const fs = require('fs');
-const path = require('path');
-fs.appendFileSync(path.join(__dirname, 'calls.log'), JSON.stringify({ pid: process.pid, argv: process.argv.slice(2) }) + '\\n');
-if (fs.existsSync(path.join(__dirname, 'die'))) process.exit(1);
-setInterval(() => {}, 1000);
-`;
-
-function makeStandIn(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  const bin = path.join(dir, 'dns-sd');
-  fs.writeFileSync(bin, STANDIN);
-  fs.chmodSync(bin, 0o755);
-  const calls = () => {
-    let text = '';
-    try { text = fs.readFileSync(path.join(dir, 'calls.log'), 'utf8'); } catch { /* none yet */ }
-    return text.split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  };
-  return { dir, bin, calls, die: (on) => (on ? fs.writeFileSync(path.join(dir, 'die'), '') : fs.rmSync(path.join(dir, 'die'), { force: true })) };
-}
 
 const gone = (pid) => { try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; } };
 const untilGone = (pid) => waitFor(() => gone(pid), { message: `process ${pid} to end` });

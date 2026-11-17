@@ -22,7 +22,7 @@ Computer side:
 - [x] 6b. `remote.js`: `run.start` over a session, events numbered, kept results, `run.resume`/`run.ack`,
       `run.result`, kept results deleted when the phone is removed
 - [x] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
-- [ ] 8. `host.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
+- [x] 8. `host.js` and `link.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
 - [ ] 9. Desktop panel: Connect a phone (QR encoder in the extension, the list, Remove, the switch), strings
 - [ ] 10. End to end: `tests/phone-link-client.js` (a stand-in phone) against the real helper in a temp HOME, the
       stand-in model: pair, run, try on the phone, result, drop and resume, remove
@@ -37,26 +37,31 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 7, 2026-11-16)
+## Done this round (round 8, 2026-11-16)
 
-- Built step 7, the try-on-the-phone round trip. `trif phone page [selector] [--limit N] | try <mod> |
-  screenshot` (cli.js, help.js) → `remote.page|try|screenshot` through the run's mailbox → host.js
-  `onClientLine` → `remoterun.js` `remoteCommand` → `remote.js` `Remote.tool(run, cmd, args)` → `tool.request`
-  on the session that follows the run → the phone's `tool.result` → what the command prints.
-- The draft for `try` is read by the helper from the run's working copy by mod id (`readDraft`: own twin only,
-  no link followed, 1 MB). A screenshot that comes back is a file of the run's (`phone-now-<run>-<n>.jpg|png`,
-  600, 30 at most), deleted with the run. Only the session that was asked can answer, once, within 60 s.
-  No session, the phone going away, the run ending, the phone removed: each fails the command at once, in
-  words for the agent.
-- host.js has `let remoteTool = null` (step 8 sets it): until then a phone run's `trif phone` answers "the
-  phone isn't connected", and everyone else's is refused by the helper; nothing of it reaches the extension.
-- AGENTS.md "Phone runs" (named in the run's context), `trif help phone`, PHONE-LINK.md sections 4 and 6.
-- `tests/phone-link-tool.test.js`: 9 tests (the stand-in agent runs the real cli.js; one against the real
-  host.js with a fake extension). Locally: the phone-link tests with cli, stage, phone, run-folders,
-  codex-sandbox, agents, explain and hardening all pass; CI green for 69375a1 on the first attempt.
+- Built step 8. New `helper/lib/phonelink/link.js` (class `Link`: makes the Store, and in the owner the Server,
+  the Announcer and the Remote); host.js has one `link` and about 30 lines for it: started where the helper
+  becomes primary (`becomePrimary`), `link.closing()` at the start of `shutdown()` (the announcement ends, no new
+  phone run), `link.stop()` after `runs.stopAll()`; a phone run's events no longer go to the extension
+  (`onAgentEvent`, the `done` handling kept); `trif phone` now reaches `link.tool`.
+- The panel's commands (`PANEL_COMMANDS`, refused on the socket and from a run): `phone.status`, `phone.on`,
+  `phone.off`, `phone.pair.start`, `phone.pair.stop`, `phone.remove {id}`; a `phoneLink` message to the
+  extension on every change once the panel has asked `phone.status` (PHONE-LINK.md section 7 has the table).
+- Two helpers: the one without `helper.sock` has the store alone (`here: false`): status, on, off and remove
+  work there (the owner follows the file from its 2-second poll: `link.refresh()`), a pairing window is refused.
+  A helper whose `helper.sock` isn't its own any more gives the link up (the same poll).
+- Tests can't reach the network or the Keychain by default now: `testEnv` (tests/fake-extension.js) gives every
+  helper a `TRIF_DNS_SD` that isn't there and `TRIF_PHONE_LINK_HOST=127.0.0.1`; the stand-in dns-sd moved to
+  `tests/fake-dns-sd.js`.
+- `tests/phone-link-host.test.js`: one long test against the real host.js (two fake extensions, the fake
+  keychain, the stand-in dns-sd and phone; 3 s). Locally the whole suite but update.test.js: 902 tests, 892
+  passed, 10 skipped, 0 failed. CI: see below.
 
 ## Earlier rounds
 
+- Round 7: step 7, `trif phone page|try|screenshot` (cli.js → the run's mailbox → host.js → `remoterun.js`
+  `remoteCommand` → `Remote.tool` → `tool.request` on the session that follows the run), AGENTS.md "Phone
+  runs", 9 tests. CI green for 69375a1 on the first attempt.
 - Round 6: step 6b, `remote.js` (class `Remote`: `run.start`, numbered `run.event`s, `run.result` from the
   run's own twin, `run.resume`/`run.ack`/`run.stop`, kept runs in `<private>/phone-link/kept/`, a phone's own
   runs only, deleted with the phone), 8 tests. CI green for 71fe8e8 on the first attempt.
@@ -77,6 +82,7 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 8: CI_PLACEHOLDER
 - Round 7, 69375a1: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43998715361
   (920 tests, 913 passed, 7 skipped, 0 failed; all 9 tool tests ran there, the browser tests passed too).
   Locally `npm test` (no browser tests) had one failure, not this branch's: tests/update.test.js "release
@@ -114,26 +120,47 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 8: host.js owns the link. In this order: (1) read host.js around `listen()` (line ~1220) and how
-`helper.sock` changes hands between helpers: the helper that owns `helper.sock` makes the `Store`, the
-`Server`, the `Announcer` and the `Remote` (`agent:` the default agent as the panel would choose it), starts
-them (`server.start()` binds nothing while the link is off), sets `remoteTool = (run, cmd, args) =>
-remote.tool(run, cmd, args)`, and stops them in `shutdown()` (`remote.stop()` after `runs.stopAll()`,
-`announcer.stop()`, `server.stop()`); a helper that loses or never had `helper.sock` has none of it. (2)
-`onAgentEvent`: `if (remote && remote.onEvent(runId, event))` → not sent to the extension, but the `done`
-handling there (`syncMods`, `held`) stays. (3) The panel's commands, in `PANEL_COMMANDS` (the side panel's
-connection only, never the socket, never a run): `phone.status` (the store's `status()`, the announcer's
-`error`), `phone.on`, `phone.off`, `phone.pair.start` (→ `{qr, expires}`; the secret only inside `qr`),
-`phone.pair.stop`, `phone.remove {id}`; and a `phoneLink` message to the extension when the store changes.
-(4) `testEnv` in tests/fake-extension.js gets `TRIF_DNS_SD` pointing at a stand-in (move `makeStandIn` from
-the bonjour test to a shared file), so no host test can announce on the Wi-Fi; the listener in host tests must
-bind 127.0.0.1 (an env for tests only, e.g. `TRIF_PHONE_LINK_HOST`, or the store's port 0 plus a host
-option). Tests: a host test with the fake extension: off by default (nothing listens: check the port file /
-`phone.status`), `phone.on` from the socket refused, from the extension it listens, pair with the stand-in
-phone, `phone.remove`, a second helper doesn't bind. Don't start step 9 (the panel's UI) in the same round.
+Step 9: the desktop panel's Connect a phone, in Settings (extension/sidepanel.js, sidepanel.html,
+sidepanel.css; background.js passes `phone.*` requests from the panel page alone, as it does
+`agent.withoutSandbox`: grep that name in extension/ to find the path, and passes the helper's `phoneLink`
+message on to the panel). In this order: (1) a QR encoder in the extension, no dependency (byte mode, level M,
+versions up to about 10: the QR's text is about 110 characters), with a unit test against a known matrix; (2)
+the section: the switch (`phone.on`/`phone.off`), the button (`phone.pair.start` → the QR and "Good for 5
+minutes", `phone.pair.stop` when Settings closes or the window's time is up), the list with Remove
+(`phone.remove`), the `here: false` line instead of the button, the `announce` line; strings from
+docs/PHONE-LINK-STRINGS.md as drafts; the section scrolls with Settings (Tim's rule: panels scroll). (3) Tests:
+unit tests for the encoder and whatever the panel's code can be tested without a browser; a browser test only
+with the shared lock, headless, `--mute-audio` and the memory watchdog, and the main session asks Tim "done
+editing?" before any browser run, so prefer leaving the browser test to CI. Don't start step 10 in the same
+round.
 
 ## Notes for next round
 
+- Step 8's API. `new Link({home, runs, version, log, agent, getWorkspace, env})` (an EventEmitter, `'change'`):
+  `start()` (the owner's; async), `closing()`, `stop()` (async), `refresh()`, `onEvent(runId, event)` → true
+  for a phone's run, `tool` (a getter: the function for `remoteCommand`, or null without the link),
+  `status()`, `command(cmd, args)` (async; throws with `e.code` `elsewhere`, `no-listener`), `owner`, `store`,
+  `server`, `announcer`, `remote`. `COMMANDS` is the list host.js puts in `PANEL_COMMANDS`.
+- For step 9: `phone.pair.start` answers `{qr, expires, ...status}`; its `port` is the listener's. The panel
+  must not keep or log `qr` beyond drawing it. `phone.status` first, then `phoneLink` messages follow by
+  themselves. In a helper without the link `phone.pair.start` fails with "another browser's TRIF has the
+  phone link just now…": show the strings file's line for `here: false` instead of calling it.
+- For step 10: the host test's helpers to copy: `panel(ext, cmd, args)` (a request as the side panel's),
+  `qrOf(qr)` → `{key, secret}`, `connect(port, computerKey, keys, {name, pair})`, `listening(port)`,
+  `everyFile()`. A host test brings `env: {...chain.env, TRIF_DNS_SD: standIn.bin}` (`makeFakeKeychain`,
+  `makeStandIn` from tests/fake-dns-sd.js); without them `phone.on` fails (no keychain) and the announcer
+  says `missing`. The stand-in agent for a run through the real host.js: `standInAgent` sets `process.env`
+  for this process; a spawned helper needs the same variables in the FakeExtension's `env` (look at what
+  `standInAgent` sets). Test: `node --test tests/phone-link-host.test.js` (3 s).
+- `TRIF_PHONE_LINK_HOST` takes only `127.0.0.1` or `::1` (anything else is ignored: every interface, as the
+  phone needs). It can only narrow where the listener is.
+- A second owner can't happen through `becomePrimary` (a live `helper.sock` is probed first), but if someone
+  deletes `helper.sock` under a live helper, another helper takes it and the first gives the link up at its
+  next poll (2 s): for those 2 seconds both may listen (the second on another port when the kept one is
+  taken) and both may announce. The phone matches on the id and tries each record (step 12's note), and both
+  helpers trust the same file, so nothing is weakened; noted, not fixed.
+- The whole suite locally, without the update test that hangs here: `node --test $(ls tests/*.test.js | grep
+  -v update.test.js)` (64 s, no browser tests without `TRIF_BROWSER_TESTS=1`).
 - Step 7's API. `remote.tool(run, cmd, args)` → a promise of `{text, file | null, error}` (`run`: the helper's
   live run, from `runs.byToken`; rejects with `e.code` `not-remote`, `away`, `timeout`, `busy`, `bad-request`,
   `no-mod`, `too-big`; the message is for the agent). `remote.tools` (id → waiting request), `remote.toolMs`
@@ -325,6 +352,17 @@ New in round 6, small, defaults unless Tim objects:
    copy or the screenshot. A phone is given at most 3 runs at once and 20 kept ones.
 9. **Removing a phone stops its run** if one is going (what it already wrote to the phone twin stays, as the
    user's own files).
+
+New in round 8, small, defaults unless Tim objects:
+
+10. **With two browsers open, one of them has the link** (the one whose helper owns `helper.sock`: usually the
+    browser opened first). In the other browser's Settings the switch and Remove work, but Connect a phone
+    shows a line sending the user to the first browser (strings file, a draft). Making the button work from
+    any browser needs the helpers to talk to each other about a pairing secret: not built.
+11. **A phone's run ends when the browser that has the link closes**, like a panel's run (the helper lives
+    only while its browser is open). What the agent already wrote to the phone twin stays; the phone gets the run
+    as ended, with what was written, when it next connects. Another open browser takes the link over
+    within a few seconds, for new runs.
 
 New in round 5 (6 is built as the strict default; 7 is for the main session and Tim, about main's code):
 

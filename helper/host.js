@@ -26,6 +26,7 @@ const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, fold
 const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
 const { remoteRefusal, remoteCommand } = require('./lib/phonelink/remoterun');
+const { Link, COMMANDS: PHONE_COMMANDS } = require('./lib/phonelink/link');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
@@ -535,6 +536,11 @@ function fingerprint() {
 function poll() {
   if (state.shuttingDown) return;
   ensureWatchers();
+  // The phone link: what another browser's helper changed in its file, and whether helper.sock is still ours.
+  try {
+    link.refresh();
+    if (link.owner && !ownsSock()) { logger.info('phone link: helper.sock is another helper\'s now, so is the link'); link.stop(); }
+  } catch (e) { logger.warn(`phone link: ${e.message}`); }
   const fp = fingerprint();
   if (fp !== state.lastFingerprint) scheduleSync('poll');
 }
@@ -579,7 +585,32 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout']);
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', ...PHONE_COMMANDS]);
+
+// The phone link (lib/phonelink/link.js; docs/PHONE-LINK.md). Every helper has the store; the listener, the
+// announcer and the phones' runs are in the helper that owns helper.sock alone (becomePrimary), and nothing
+// listens there either until the user turns the link on in the side panel and connects a phone.
+const link = new Link({
+  home: ws.home, runs, version: VERSION, log: (line) => logger.info(line),
+  getWorkspace: () => workspace(ws.home),
+  // (a phone's run uses this computer's default agent: the first one that is installed, as agent.list says)
+  agent: () => {
+    const r = agents.listAgents(workspace(ws.home), { version: false });
+    const a = r.agents.find((x) => x.id === r.default);
+    return a && a.available ? { id: a.id, name: a.name, model: null } : null;
+  },
+});
+// The side panel is told when the link changes, once it has asked about it (an older extension never does).
+let linkWatched = false;
+link.on('change', () => {
+  if (!linkWatched || !state.stdoutOpen || state.shuttingDown) return;
+  try { sendToExtension({ type: 'phoneLink', status: link.status() }); } catch (e) { logger.warn(`could not send the phone link's status: ${e.message}`); }
+});
+/** helper.sock is still the one this helper made (a helper that lost it gives up the phone link). */
+function ownsSock() {
+  if (!server || serverIno === null) return !!server;
+  try { return fs.statSync(ws.sock).ino === serverIno; } catch { return false; }
+}
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
@@ -616,8 +647,10 @@ function onAgentEvent(runId, event) {
     if (held.length) event.held = held;
   }
   // (A run that found the agent logged out: runs.js tells lib/agents, so agent.list says so.)
-  // Every run goes to the extension (panels ignore runs they didn't start).
-  if (state.stdoutOpen) {
+  // A phone's run goes to its phone (phonelink/remote.js), never to the extension: the phone's chat isn't a
+  // panel's. Every other run goes to the extension (panels ignore runs they didn't start).
+  const phones = link.onEvent(runId, event);
+  if (!phones && state.stdoutOpen) {
     try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }
   }
   const subs = runSubscribers.get(runId);
@@ -1184,6 +1217,7 @@ function onExtensionRequest(msg) {
  * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
  */
 function panelCommand(cmd, args) {
+  if (PHONE_COMMANDS.includes(cmd)) { linkWatched = true; return link.command(cmd, args); }
   if (cmd === 'agent.logout') {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
@@ -1244,6 +1278,7 @@ async function becomePrimary() {
       try { serverIno = fs.statSync(ws.sock).ino; } catch { serverIno = null; }
       state.role = 'primary';
       stopSecondaryChecks();
+      link.start().catch((e) => logger.warn(`phone link: ${e.message}`)); // (the owner of helper.sock owns the link)
       logger.info(`serving CLI on ${ws.sock}`);
       return 'primary';
     } catch (e) {
@@ -1346,8 +1381,6 @@ function helperInfo() {
   };
 }
 
-// The phone link's Remote.tool, in the helper that owns the link (set where the link is started); null without it.
-let remoteTool = null;
 
 function onClientLine(sock, line) {
   let req;
@@ -1360,7 +1393,7 @@ function onClientLine(sock, line) {
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
-  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
+  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {
@@ -1383,8 +1416,8 @@ function onClientLine(sock, line) {
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
   // `trif phone …`: a phone run's way to the page on its phone, answered by the phone link (phonelink/remote.js
-  // Remote.tool, when this helper owns the link: `remoteTool`), never by the extension. Refused for anyone else.
-  const viaPhone = remoteCommand(run, cmd, args, remoteTool);
+  // Remote.tool, when this helper owns the link: `link.tool`), never by the extension. Refused for anyone else.
+  const viaPhone = remoteCommand(run, cmd, args, link.tool);
   if (viaPhone) {
     viaPhone.then((result) => reply(sock, { id, ok: true, result }), (e) => reply(sock, { id, ok: false, error: e.message }));
     return;
@@ -1490,7 +1523,10 @@ function shutdown(reason, code = 0) {
   }
   pending.clear();
   // Agents die with the helper (SIGTERM, SIGKILL after a moment); their final events still go out.
-  const agentsGone = Promise.all([runs.stopAll(), logins.stopAll()]);
+  link.closing(); // (no announcement and no new phone run from here on)
+  const agentsGone = Promise.all([runs.stopAll(), logins.stopAll()])
+    // (after the runs: their last events are kept for their phones; a second at most, the exit doesn't wait on a phone)
+    .then(() => Promise.race([link.stop(), new Promise((r) => setTimeout(r, 1000))])).catch(() => {});
   if (server) {
     try { server.close(); } catch { /* ignore */ }
     // Only remove the socket if it's still ours (a newer helper may have replaced it).

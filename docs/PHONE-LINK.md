@@ -279,9 +279,30 @@ The record tells the Wi-Fi that this computer runs TRIF with the link on, and it
 ## 7. On the computer's screen
 
 Settings in the side panel gets **Connect a phone**: a switch, the QR code while a pairing window is open, and
-the list of paired phones with Remove. Commands, all `PANEL_COMMANDS` (a click in the panel, never the socket or
-a run): `phone.status`, `phone.setOn`, `phone.pair` (opens the window, returns the QR's text), `phone.pairStop`,
-`phone.remove`. The QR is drawn by a small encoder in the extension (no dependency, no network).
+the list of paired phones with Remove. Commands, all `PANEL_COMMANDS` (the side panel's, over the extension's own
+connection to its helper; never the socket, never a run), built in `helper/lib/phonelink/link.js`:
+
+| Command | Answer |
+|---|---|
+| `phone.status` | `{on, id, name, port, phones: [{id, name, pairedAt, lastSeen}], pairing: {expires} or null, listen, here, listening, announce}` |
+| `phone.on`, `phone.off` | the status |
+| `phone.pair.start` | `{qr, expires}` and the status. `qr` is the QR's text: the only place the secret ever goes |
+| `phone.pair.stop` | the status |
+| `phone.remove {id}` | `{removed: {id, name} or null}` and the status |
+
+`here`: this helper owns the link. `listening`: a listener is up. `announce`: null, or why the phone can't find
+the computer (`unsupported`, `missing`, `failing`: bonjour.js). After its first `phone.status` the panel also gets
+`{type: 'phoneLink', status}` whenever the status changes (never the QR's text).
+
+**Which helper.** Each browser with TRIF has a helper of its own. The one that owns `helper.sock` owns the link:
+the listener, the announcer and the phones' runs. The other helpers have the file alone
+(`here: false`): they can show the link, turn it on or off and remove a phone, and the owner follows the file
+(within 2 seconds: its poll), but they can't open a pairing window, which lives in the owner's memory. When the
+owner goes (its browser closed), the helper that takes `helper.sock` takes the link; a helper that finds
+`helper.sock` isn't its own any more gives the link up. A run that was going for a phone ends with its helper,
+as a panel's does.
+
+The QR is drawn by a small encoder in the extension (no dependency, no network).
 While a phone's run works, the desktop shows nothing new in version 1 (the run is in the helper's log and
 `agent.running`); a line in the panel is a later option.
 

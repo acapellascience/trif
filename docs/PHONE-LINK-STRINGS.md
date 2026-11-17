@@ -21,6 +21,9 @@ Nothing is built that shows these yet (round 1 wrote the design; round 2's store
 | Turning on fails: no keyring (Linux without one; not the Mac) | the phone link needs a system keyring to keep this computer's key in (the macOS Keychain, or a Secret Service on Linux) | built in round 2 (`store.js`); the panel that shows it isn't |
 | Turning on fails: the keyring refused | couldn't keep this computer's phone link key: {what the keyring said} | the same; the second half is `keyring.js`'s existing text. Both as the helper's other errors are written (the panel puts them in its own sentence, step 9) |
 | Turning on fails: the keyring can't be read just now (locked) | couldn't read this computer's phone link key: {what the keyring said} | the same; nothing changes (no new key, the phones stay) |
+| Instead of the button, in a browser whose TRIF doesn't have the link (`here: false`: another browser's does) | Another browser's TRIF is handling phones just now. Connect a phone from there. | new in round 8 (draft). The helper's own error for a `phone.pair.start` there is agent-style text, not shown as it is |
+| Under the switch, when the phone can't find the computer (`announce`: `missing` or `failing`) | Your phone may not find this computer just now. | new in round 8 (draft); `unsupported` (not a Mac) shouldn't be reachable in version 1 |
+| Connect a phone fails: no port could be opened | This computer couldn't open a port for the phone to reach. | new in round 8 (draft; the helper says the same in lower case) |
 
 ## iPhone: More (not built; needs branch ios-poc)
 

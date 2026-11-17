@@ -5,7 +5,7 @@
 // refusal of the folder reported, and where a file came from as the system recorded it. The panel's card and
 // Try it here in a real browser: tests/e2e/scenario.js downloadsCheck.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');

@@ -279,7 +279,8 @@ test('a run from the phone view writes only its phone twin\'s folder; the deskto
     const desk = runLimits(ws, { scope: 'x.com', box, screenshots: box });
     assert.deepEqual([...desk.locked].sort(), ['other.example', 'phone~x.com'].map((d) => path.join('sites', d)), 'a desktop run: the phone twin read-only');
     // (read-only, not hidden: the run's readable folders include the workspace, the desktop mods in it)
-    assert.ok(phone.readable.some((r) => modsDir.startsWith(r) || fs.realpathSync(modsDir).startsWith(r)));
+    // (realpathSync.native too: on Windows it gives the long names of a temp folder's short ones, RUNNER~1, as runLimits does)
+    assert.ok(phone.readable.some((r) => [modsDir, fs.realpathSync(modsDir), fs.realpathSync.native(modsDir)].some((p) => p.startsWith(r))));
   } finally { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(priv, { recursive: true, force: true }); }
 });
 

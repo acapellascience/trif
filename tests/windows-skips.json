@@ -9,7 +9,8 @@
     "sockets": "about Unix sockets as files (named pipes: tests/windows.test.js)",
     "legacy": "about the move from ~/.webmods (before 0.2.0), which Windows never had",
     "safari": "Safari and launchd are macOS only",
-    "release": "the build and release scripts are for the Mac (zip, the Keychain)"
+    "release": "the build and release scripts are for the Mac (zip, the Keychain)",
+    "permissions": "about a folder made unreadable with chmod, which takes no reading away from its owner on Windows (no POSIX permission bits)"
   },
   "files": {
     "agent-keys.test.js": {
@@ -87,6 +88,9 @@
     },
     "helper.test.js": {
       "host: removes a stale socket left by a crashed helper": "sockets"
+    },
+    "downloads.test.js": {
+      "downloads: a folder macOS won't let it read is reported, not fatal; off stops it": "permissions"
     }
   }
 }

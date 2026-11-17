@@ -37,6 +37,15 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
       `readPlain`, beside round 5's `runs.js` `_serveBox`. Each looks at the name first and takes only the
       plain file it looked at; tests in `tests/cli.test.js`, `tests/stage.test.js` and
       `tests/agents.test.js` run on windows-latest (they make links there) and pass.
+- [x] **Security: the stage's plain-file functions keep a path under their folder themselves** (added
+      after round 7 from an independent red team's run on the branch `windows-redteam`,
+      [44006035513](https://github.com/acapellascience/trif/actions/runs/44006035513), which found no way
+      out; Tim approved this one hardening). `helper/lib/stage.js` `readPlain`, `writePlain`, `removePlain`,
+      `plainUnder`, `_readLive`, `_deleteLive`: a path that's absolute, has `..`, or isn't under the folder
+      (case as the volume has it) is refused there, through `pathcheck.js` `relRefused` and `joinInside`.
+      Tests on every system (`tests/windows.test.js`, `tests/stage.test.js`) and Windows' odd forms for real
+      on windows-latest (`..\`, `C:..`, `\\?\`, drive-relative, trailing dots and spaces). Done in round 8,
+      green on CI (the links under "Done this round").
 - [x] **The reserves recorded** in `docs/WINDOWS.md` ("The options, against the guarantees", "Codex: where
       it stands", "WSL").
 
@@ -182,7 +191,7 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   on the known one alone (`tests/clickjack-browser.test.js`, "a press: 5.93 ms on average"; 832 pass, 1
   fail).
 
-## Done this round (round 7)
+### Round 7
 
 - **Nothing on Windows relies on `O_NOFOLLOW` any more.** `cli.js` `writeOptionFile` (a run's
   `trif screenshot -o`, `trif request -o`): the name is looked at first, a link, a folder or a file with
@@ -237,14 +246,54 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   tests [43993241030](https://github.com/acapellascience/trif/actions/runs/43993241030): red on the known
   one alone again.
 
+## Done this round (round 8)
+
+- **The one item added after round 7** (the main session's brief; Tim approved it): an independent red
+  team on `windows-redteam` found no way out, and one thing to harden. `stage.js` `plainUnder` asked only
+  that the real path of `root` + `rel` be what the two joined say, and `path.join` takes `..` out before
+  either is looked at: `readPlain(root, '..\outside\secret.txt')` gave the file outside. No caller could
+  give it such a path (each takes `rel` from the names found in a folder, and `nameRefused` passes over
+  the odd ones), so nothing was reachable from a run; it's closed in the functions themselves all the same.
+- **What changed**: `pathcheck.js` has `relRefused(rel)` (why a path isn't names alone under a folder:
+  a root or drive, `.`/`..`, an empty name, a NUL; by Windows' rules also `/` as a separator and the names
+  it reads as another, `winOddPath`) and `joinInside(root, rel, {ci})` (the path, or it throws: refused by
+  its names, or the path made isn't inside `root`, case as the volume has it). `stage.js` goes through it
+  in `readPlain`, `writePlain` (before a folder is made), `plainFolders`, `removePlain`, `plainUnder`
+  (false; `''` is still the folder itself), `_readLive` and `_deleteLive` (before anything is moved to the
+  trash). `_writeLive`'s read of the mods folder's version for history is `_readLive` now (never through
+  a link).
+- **Checked beside it, nothing to change**: `cli.js` `-o` in a run (`optionPath`: real paths and
+  `winOddPath`, so `..\x`, `C:..`, a trailing dot or space are refused already); a run's `mod.delete` and
+  `mod.restore` (`trash.js` `parseId`: `badName` on both names); `mod.code` and `mod.diff` (the id must be
+  a mod the helper has); the mailbox's file names (`runs.js` `_serveBox`: `^[\w.-]+\.req$` from the
+  folder's own list; the second red team is on that protocol, on `windows-redteam`, untouched here);
+  `win/fenced-files.js` (inside the fence, which decides what it opens, by design).
+- **Tests**: `tests/windows.test.js` "path checks: a relative path that must stay under a folder…" (both
+  systems' rules, on every system); `tests/stage.test.js` "stage: the plain-file functions themselves keep
+  a path under their folder…" (for real, every system: nothing outside read, written, removed or moved)
+  and "stage on Windows: the ways Windows has of saying a path elsewhere are refused…" (windows-latest
+  only: 40 forms against a real file outside).
+- CI at `3a9610b`: windows-fence
+  [44009104897](https://github.com/acapellascience/trif/actions/runs/44009104897) green (`fence`,
+  `fence-standard-user`, `run`, `agents`, `run-codex`: real runs behind the changed functions), the macOS
+  tests [44009104766](https://github.com/acapellascience/trif/actions/runs/44009104766) green, windows
+  [44009104809](https://github.com/acapellascience/trif/actions/runs/44009104809): Node 22 and
+  `still-skipped` green; Node 18 red at first on one test this round didn't touch ("mod.delete /
+  mod.restore: from the panel any mod; from a run only mods inside its scope": the run's `trif delete`
+  got no answer from the helper within 10 s), green when the job was run again, nothing changed (745 pass,
+  103 skipped; Node 22: 746 pass, 102 skipped): a flake, beside the two noted before. The three new tests
+  passed on both Nodes, in the red attempt too.
+
 ## Next step
 
-**Nothing is left on the checklist: the goal is complete as of round 7**, each item proven on
-windows-latest (the links under "Done this round" and the rounds before). What's left isn't the loop's:
+**Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is
+done in round 8**, each proven on windows-latest (the links under "Done this round" and the rounds
+before). What's left isn't the loop's:
 - **Tim's**: the texts in `docs/WINDOWS-STRINGS.md` (README's Windows section among them), and the merge
   to main and a release, which no round does.
 - **If another round runs anyway**, in this order, none of it required by the goal: the Node 18 flakes on
-  the Windows runner (5 s waits: "agent.running lists the runs still going…" this round, the six
+  the Windows runner ("mod.delete / mod.restore…" in round 8: a run's request unanswered for 10 s; the 5 s waits:
+  "agent.running lists the runs still going…" in round 7, the six
   `tests/cli.test.js` ones in round 6: longer waits there, or the helper's log printed when one fails);
   an attempt at a junction and a hard link from inside the fence (`tests/windows-fence/run.js`); other
   sites' folder names out of Claude Code's argv on Windows (round 6's note); the open model, which is out
@@ -326,6 +375,10 @@ windows-latest (the links under "Done this round" and the rounds before). What's
 - `O_NOFOLLOW` is nothing on Windows (`fs.constants.O_NOFOLLOW` is undefined): since round 7 nothing
   relies on it (the checklist's security item). A new open of a file a run can name wants the same: `lstat`
   first, then what's opened must be it.
+- **A path a caller gives under a folder** (round 8): `pathcheck.js` `joinInside(root, rel, {ci})`, never
+  `path.join(root, rel)` (which takes `..` out, so a real-path check after it sees nothing wrong). The
+  tests' list of Windows' forms is in `tests/stage.test.js` ("stage on Windows: …"): add to it there.
+- The branch `windows-redteam` is the red teams': never pushed to or changed from this loop.
 - The open model on Windows: out of scope for now, settled in round 6 ("Outside the goal" above). Leave
   its three tests skipped as `open-model`.
 - **Round 6, the rule in the settings file**: Claude Code takes `permissions.allow` from the run's

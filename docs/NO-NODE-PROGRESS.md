@@ -85,7 +85,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 
 - Round 6, step 8 (before 7: Tim hasn't answered For Tim): tests/clean-machine.test.js, 8/8 pass locally
   with real Claude Code and Codex runs (18.6 s); helper/install-script/run-sandbox 43/43 still pass.
-  CI: CI_LINK
+  CI: https://github.com/acapellascience/trif/actions/runs/44190037064 green (clean-machine test skipped there: opt-in until step 10). Previous run 44188683245: only the clickjack-browser flake.
 
 ## Next step
 

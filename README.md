@@ -128,7 +128,7 @@ Settings → Extensions and delete the old WebMods app.
 - Standing instructions for your agent ("talk like a caveman", "don't bring up detectability") go in
   the box in the side panel's settings (the gear). Every chat reads them, and so does Claude Code when
   you run it in `~/.trif`. They're saved in `~/.trif/instructions.md`.
-- Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
+- Commands: `/model sonnet` (or `opus`, `haiku`, `default`: Opus for Claude Code, Codex's own for Codex) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
 ### Tim's starter mods

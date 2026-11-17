@@ -36,15 +36,24 @@ approved, then can move into extension/explain.json so that `trif explain` knows
 | Connect a phone fails: no port could be opened | This computer couldn't open a port for the phone to reach. | round 8 (draft; the helper's words, as a sentence) |
 | Connect a phone fails: the computer's name makes the code's text longer than the code holds (about 270 bytes; a name of some 30 emoji) | This computer's name is too long for the code. Shorten it in System Settings, then try again. | new in round 9 (draft); the pairing window is closed again. Since round 11 the helper cuts a long name in the code (whole characters, then "…"), so this line is a backstop the user shouldn't meet: Tim may drop it |
 
-## iPhone: More and My computer (pairing built in round 15 on ios-poc, 85166ad; the engine in More is step 14)
+## iPhone: More and My computer (pairing built in round 15 on ios-poc, 85166ad; the engine in More in round 16, step 14)
 
-The pairing screen, PhoneLinkView.swift on ios-poc: for now from the app's ⋯ menu and from a `trif://pair` link
-(iOS's Camera app scanning the code); step 14 opens it from More. The same lines are in ios-poc's
+The pairing screen, PhoneLinkView.swift on ios-poc: from More (Settings' My computer block, and the engine's
+notices; the ⋯ menu's "My computer…" is gone since round 16) and from a `trif://pair` link (iOS's Camera app
+scanning the code). The same lines are in ios-poc's
 docs/IOS-APP-STRINGS.md ("My computer").
 
 | Where | String | Notes |
 |---|---|---|
-| The engine's name | My computer | beside the API engines and On this iPhone; also the pairing screen's title and, for now, the ⋯ menu's "My computer…" |
+| The engine's name | My computer | beside the API engines and On this iPhone; also the pairing screen's title (the ⋯ menu's "My computer…" removed, round 16) |
+| This iPhone's name, before pairing | This iPhone's name · (the field, prefilled) iPhone · What TRIF on your computer calls this iPhone. | new round 16 (draft): "For Tim" 17. What the computer lists the phone as |
+| The agent's note | paired: Your coding agent on {computer} makes the mod, inside TRIF's safeguards there. Same Wi-Fi only. · not paired: Your coding agent on your computer makes the mod. Same Wi-Fi only. | new round 16 (draft) |
+| Not paired (the panel's own "My computer isn't logged in. To log in, …") | pair this iPhone with TRIF on your computer: Pair with my computer | new round 16 (draft); the words after the colon are a link to the pairing screen |
+| More's Settings block | My computer · paired: Paired with {computer}. Its coding agent makes the mod. · My computer… · not paired: Your coding agent on your computer can make mods here. Pair this iPhone with TRIF on your computer first. · Pair with my computer… | new round 16 (draft) |
+| A request sent before pairing | This iPhone isn't paired with a computer yet: in Settings, choose Pair with my computer. | new round 16 (draft) |
+| The first step line of a request | Asking {computer}… | new round 16 (draft) |
+| Lost touch, given up | Lost touch with {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there. | new round 16 (draft): after the reconnection's waits (about 90 s of the app in front) |
+| The computer's errors in the chat | {computer} is already working on this site. Try again when it's done. · {computer} has no coding agent set up for TRIF yet. · TRIF can't make a mod for this page's address. · This page is too big to send to {computer}. · {computer} doesn't have that request any more. · Too big to bring over: {names}. It stays in TRIF on your computer. · {computer} couldn't start it: {the computer's words} | new round 16 (drafts): `busy`, `no-agent`, `bad-url`, `too-big`, `no-run`, a mod over 1 MB, anything else |
 | Before pairing | Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code. | built round 15 |
 | The button | Scan the code | built round 15; once paired: "Scan a new code" |
 | Local Network permission (Info.plist) | TRIF looks for your computer on your Wi-Fi when you choose My computer. | built round 15 |
@@ -65,9 +74,9 @@ docs/IOS-APP-STRINGS.md ("My computer").
 | The encryption's self-test failed | TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect. | new round 15 (draft) |
 | Forgetting on the phone | Forget {computer} | new round 15 (draft) |
 | Under it | Your computer still lists this iPhone until you remove it there. | new round 15 (draft) |
-| Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. | one state for both causes: see "For Tim" in the progress file |
-| Removed | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there. | |
-| The link drops in a run | Still working on {computer}. | |
+| Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. | one state for both causes: see "For Tim" in the progress file. Built round 16 in More too |
+| Removed | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there. | built round 16, followed by ": Pair with my computer" (a link) |
+| The link drops in a run | Still working on {computer}. | built round 16 as a step line, with " Reconnecting…" after it |
 | A run kept from before | {computer} finished this while TRIF was closed. | |
 | The computer's agent can't run inside TRIF's sandbox (an organization's settings replace it) | {computer}'s coding agent can't work inside TRIF's sandbox there, so it can't make mods for this iPhone. Chats in TRIF on the computer still can. | round 5: a phone run never goes on without the sandbox, even if that was allowed on the computer (the progress file, "For Tim" 6) |
 | A run was going when the browser on the computer closed (a line in the chat, as the run's other errors are) | TRIF on the computer stopped before the agent finished | round 6 (`remote.js`): said when the next helper reads the kept run. The desktop's own text for the same moment is "the helper shut down (Chrome closed?) before the agent finished" |

@@ -42,7 +42,7 @@ iPhone side (ios-poc):
 - Bug found and fixed (ios-poc a2bb8b7): a synced change sat in the store and ran only after a relaunch; now the pages'
   scripts are remade after a sync (Browser.syncApplied) and the shown page reloads if it's affected. Mac test 8/8.
 - Stand-in (phone-link): the computer's `run <site> <words>` (a desktop phone-view run, nudge when done) and the
-  agent's EDIT[:rrggbb]; phone-sync-e2e + phone-link-run 11/11. CI: see below. .ipa built, dSYM F386A367-DD85-31DC-BE66-1680659BAE56.
+  agent's EDIT[:rrggbb]; phone-sync-e2e + phone-link-run 11/11. CI: ios-poc https://github.com/acapellascience/trif/actions/runs/44064337204 green; phone-link https://github.com/acapellascience/trif/actions/runs/44064371815 the clickjack flake alone (twice). .ipa built, dSYM F386A367-DD85-31DC-BE66-1680659BAE56.
 
 ## Next step
 
@@ -82,3 +82,4 @@ None: every checklist item is done. Left for Tim: the decisions below, and a pas
 - Round 4: 5f48cc5, run 44056254255: green.
 - Round 5: phone-link 02de94e, run 44056937058: the clickjack flake, green on rerun; ios-poc 4bcd67d, run 44058240792: green.
 - Round 6: phone-link 010554a, run 44061245200: green; ios-poc 8373e19, run 44061257135: green.
+- Round 7: phone-link 2e1781f, run 44064371815: the clickjack flake alone (test 144), on the run and its one rerun; ios-poc a2bb8b7, run 44064337204: green.

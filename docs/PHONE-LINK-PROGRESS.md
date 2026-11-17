@@ -58,6 +58,11 @@ The brief: ios-poc isn't free, so the computer-side extras 2 and 3 of round 10's
   in `tests/phone-link-store.test.js` (emoji, CJK, a five-code-point emoji, half a surrogate pair; each
   code drawn by `extension/qr.js`). PHONE-LINK.md section on pairing and its "Proof" list say both.
 - Locally the whole suite but update.test.js: 916 tests, 906 passed, 10 skipped, 0 failed (72 s).
+- CI for 8a7b8f3: every phone-link test passed in both attempts; a known browser flake failed in each (the
+  CI section has the names):
+  https://github.com/acapellascience/trif/actions/runs/44007593328
+- At the round's end the main session passed on Tim's OK for the headless look at Connect a phone: no room
+  left in this round (the chunk and its CI were done at about 50 tool calls), so it is the next step.
 
 ## Earlier rounds
 
@@ -99,6 +104,16 @@ The brief: ios-poc isn't free, so the computer-side extras 2 and 3 of round 10's
 
 ## CI
 
+- Round 11, 8a7b8f3: failed twice on browser tests alone, run
+  https://github.com/acapellascience/trif/actions/runs/44007593328: attempt 1 (935 tests, 926 passed, 8
+  skipped, 1 failed) on the clickjacking guard alone; attempt 2 (`gh run rerun --failed`, once, as the brief
+  says: 924 passed, 3 failed) on the phone view's three ("the site sees an iPhone in that tab only", "a site
+  whose service worker serves its pages", "TRIF as installed, on a site without access"). Each passed in the
+  other attempt; every phone-link test passed in both, the new store test too (the real-sandbox test is
+  skipped there, as its file's other two are: no Claude Code on CI). Known flakes, not looked into. The
+  commit that records this line was pushed without waiting for its run (docs only).
+- Round 10's docs-only commit af8e169 (the same code as 2714c89): failed on the clickjacking guard alone, run
+  44006336367: the known flake, not rerun.
 - Round 10, 2714c89: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/44005995592
   (933 tests, 926 passed, 7 skipped, 0 failed; the end-to-end test ran there, the browser tests passed too).
   The commit that records this line was pushed without waiting for its run (docs only).
@@ -155,14 +170,25 @@ The brief: ios-poc isn't free, so the computer-side extras 2 and 3 of round 10's
 
 ## Next step
 
-Step 12 (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a self-test, frames,
-NWBrowser), **only when the round's brief says ios-poc is free**. Until then, computer-side work that is left
-(each small; none is a checklist item):
-1. A look at Settings' Connect a phone in a real browser (headless, the lock, `--mute-audio`, the watchdog):
-   needs the main session to ask Tim first (not OK'd as of round 11).
-2. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
+**The look at Settings' Connect a phone in a real browser. Tim OK'd it** (the main session's message at the
+end of round 11; there was no room left in that round). Local, headless Chrome, `--mute-audio`, the shared
+test lock, a memory watchdog of about 1.5 GB, one browser suite at a time, a temp HOME, the stand-in dns-sd
+(nothing announced on the network), the listener on 127.0.0.1. What to do:
+- open the side panel's Settings, turn the link on, show the code;
+- read the QR back from the page and check it decodes to the text the helper gave (`trif://pair?…`);
+- the phone list and Remove (pair a stand-in phone from the code, `tests/phone-link-client.js`);
+- each state: off, on with no phones, pairing, a phone listed; light and dark;
+- the section scrolls with Settings (Tim's rule: a panel that can outgrow its space scrolls);
+- save screenshots under the worktree (`docs/phone-link-shots/`) and list their paths in the round's report.
+Start from how tests/extension.test.js opens the side panel in Chromium (`TRIF_BROWSER_TESTS=1`) and from
+`tests/phone-link-e2e.test.js` for the helper's side (the fake keychain, `makeStandIn`, `qrOf`).
+
+After that: step 12 (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a
+self-test, frames, NWBrowser), **only when the round's brief says ios-poc is free**. Other computer-side work
+that is left (each small; none is a checklist item):
+1. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
    test, `run.result`'s `removed` with real entries.
-3. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
+2. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
 
 ## Notes for next round
 

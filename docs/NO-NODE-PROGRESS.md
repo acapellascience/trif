@@ -93,7 +93,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 - Round 7, step 9 (7 still waits on For Tim 2 and 4): second test in tests/clean-machine.test.js, the
   upgrade from a Node-based install. Passes locally from v0.3.0 (default) and from origin/main
   (`TRIF_UPGRADE_FROM=origin/main`); the whole file 13/13 incl. step 8's real Claude Code and Codex runs.
-  CI: CI_LINK_9
+  CI: https://github.com/acapellascience/trif/actions/runs/44191011295 green (the new tests skip there: opt-in until step 10).
 
 ## Next step
 

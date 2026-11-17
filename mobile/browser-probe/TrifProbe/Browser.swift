@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import WebKit
 import PDFKit
+import AVFoundation
 
 /// What the kit says about the element under a finger (mobile/shared/kit.js describe).
 struct Picked: Equatable {
@@ -138,6 +139,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.memoryWarning() }
         }
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if let self { BackgroundPlay.resume(self) } }
+        }
         installScripts()
         ModDownloads.shared.browser = self
         FolderWatch.shared.browser = self
@@ -190,21 +194,57 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         ]
     }
 
-    /// A tab in the background lets its page go after a while (and at once when iOS warns of low memory): its address,
+    /// A tab in the background lets its page go after a while (and when iOS warns of low memory): its address,
     /// back/forward list and picture are kept, and the page loads again when the tab is shown. A page left running
     /// behind kept using the phone (Tim, 11-15: an x.com tab with a busy mod, while he read Wikipedia).
+    /// A tab playing sound or a video is kept, as Safari keeps one (Tim, 11-16: a YouTube video with his Background
+    /// Play mod stopped about 20 s after he switched tabs): it's let go once it has been paused or stopped that long.
     private var letGo: [UUID: Task<Void, Never>] = [:]
-    private static let backgroundSeconds: UInt64 = 20
+    static let backgroundSeconds: Double = 20
+    /// How often a kept, playing tab is looked at again.
+    static let playingCheckSeconds: Double = 5
     private func letGoLater(_ tab: Tab) {
         letGo[tab.id]?.cancel()
         letGo[tab.id] = Task { @MainActor [weak self, weak tab] in
-            try? await Task.sleep(nanoseconds: Browser.backgroundSeconds * 1_000_000_000)
-            guard !Task.isCancelled, let self, let tab else { return }
-            self.discard(tab)
+            var wait = Browser.backgroundSeconds, kept = false, quietSince = Date()
+            while true {
+                // (nothing held while waiting: a closed tab's web view goes, and its sound with it)
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                wait = Browser.playingCheckSeconds
+                guard !Task.isCancelled, let self, let tab, tab !== self.current, self.tabs.contains(where: { $0 === tab }) else { return }
+                if await Browser.playing(tab) {
+                    if !kept { Diagnostics.shared.log("tab", "kept a background tab's page: it's playing (\(Diagnostics.place(tab.webView.url))); let go once it has stopped \(Int(Browser.backgroundSeconds)) s") }
+                    kept = true; quietSince = Date()
+                } else if !kept || Date().timeIntervalSince(quietSince) >= Browser.backgroundSeconds {
+                    guard !Task.isCancelled, tab !== self.current else { return }
+                    self.discard(tab, kept ? "it stopped playing \(Int(Date().timeIntervalSince(quietSince))) s ago" : nil)
+                    return
+                }
+            }
         }
     }
 
-    func discard(_ tab: Tab) {
+    /// A tab's page is playing sound (or a video with sound): WebKit says so, and the page agrees. WebKit's answer
+    /// alone isn't the page's (11-16, the Simulator): it's the whole web process's, so a same-site tab that never
+    /// played says "playing" while another plays, and media WebKit paused itself (the app in the background) stays
+    /// "playing". So the page is asked too, in TRIF's world: a video or audio playing, not muted (a muted feed video
+    /// doesn't keep a tab), or a frame it could be in. A page that doesn't answer within a second (busy, or its
+    /// process gone) counts as not playing.
+    static func playing(_ tab: Tab) async -> Bool {
+        guard tab.started, tab.webView.url != nil else { return false }
+        let wv = tab.webView
+        return await Browser.within(1, false) {
+            guard await wv.requestMediaPlaybackState() == .playing else { return false }
+            let page = try? await wv.callAsyncJavaScript(Browser.pagePlaying, arguments: [:], in: nil, contentWorld: Browser.trifWorld)
+            return (page as? String).map { $0 != "no" } ?? false
+        }
+    }
+    static let pagePlaying = """
+        if ([...document.querySelectorAll('video, audio')].some((m) => !m.paused && !m.ended && !m.muted)) return 'playing';
+        return document.querySelector('iframe') ? 'in a frame, maybe' : 'no';
+        """
+
+    func discard(_ tab: Tab, _ why: String? = nil) {
         guard tab !== current, tab.started, tab.webView.url != nil else { return }
         tab.savedState = tab.webView.interactionState as? Data
         tab.savedURL = tab.webView.url
@@ -217,13 +257,26 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         tab.replaceWebView(WKWebView(frame: .zero, configuration: config))
         attach(tab)
         tab.started = false
-        Diagnostics.shared.log("tab", "let go of a background tab's page (\(Diagnostics.place(tab.savedURL))); it loads again when shown")
+        Diagnostics.shared.log("tab", "let go of a background tab's page (\(Diagnostics.place(tab.savedURL)))\(why.map { ": \($0)" } ?? ""); it loads again when shown")
         noteRunning()
     }
 
-    /// iOS warns the app of low memory: every background tab lets its page go now.
+    /// iOS warns the app of low memory: every background tab lets its page go now, except one that's playing (it
+    /// goes on being looked at, and is let go once it has stopped).
     func memoryWarning() {
-        for t in tabs where t !== current { letGo[t.id]?.cancel(); discard(t) }
+        let others = tabs.filter { $0 !== current && $0.started && $0.webView.url != nil }
+        guard !others.isEmpty else { return }
+        Task { @MainActor in
+            // (all asked at once: a second at most)
+            let asks = others.map { t in Task { @MainActor in await Browser.playing(t) } }
+            var playing: [Tab] = []
+            for (t, ask) in zip(others, asks) where await ask.value { playing.append(t) }
+            for t in others where !playing.contains(where: { $0 === t }) && t !== current { letGo[t.id]?.cancel(); discard(t, "low memory") }
+            // (its let-go wait, from when it was left, goes on looking at it)
+            for t in playing where t !== current {
+                Diagnostics.shared.log("tab", "low memory: kept a background tab's page, it's playing (\(Diagnostics.place(t.webView.url))); \(others.count == playing.count ? "no other to let go" : "\(others.count - playing.count) other\(others.count - playing.count == 1 ? "" : "s") let go")")
+            }
+        }
     }
 
     /// A launch that isn't in front yet (iOS prewarming the app, a launch in the background) loads no page: the tabs
@@ -312,6 +365,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func close(_ tab: Tab) {
         guard let i = tabs.firstIndex(where: { $0 === tab }) else { return }
+        letGo[tab.id]?.cancel(); letGo[tab.id] = nil
         tab.webView.stopLoading()
         tabs.remove(at: i)
         TabShots.shared.remove(tab.id)
@@ -368,6 +422,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // (development) `-bare`: nothing of the app's in any page, to measure a page without it
         if ProcessInfo.processInfo.arguments.contains("-bare") { return }
         ucc.addUserScript(WKUserScript(source: Diagnostics.stallWatch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
+        ucc.addUserScript(WKUserScript(source: BackgroundPlay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
         let kit = Browser.resource("kit", "js")
         let startOwn = Browser.resource("start-own", "js") + "(\(report.rulesJSON()));"
         let startPage = Browser.resource("start-page", "js")
@@ -1273,6 +1328,198 @@ struct WebViewHost: UIViewRepresentable {
     let webView: WKWebView
     func makeUIView(context: Context) -> WKWebView { webView }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
+/// Sound and video go on with the app in the background or the phone locked (Tim, 11-16: YouTube with his
+/// Background Play mod): Info.plist's UIBackgroundModes `audio`, and the app's audio session set to playback at
+/// launch. Only the category is set, the session isn't started: nothing plays and no other app's sound is
+/// interrupted until a page plays. (The local model, the chats and the Mods tab make no sound of their own.)
+/// That alone keeps sound (an <audio>) going, as in Safari. A video with sound WebKit pauses as the app goes to
+/// the background or the phone locks (Safari does the same, 11-16, the Simulator), and plays it again when the app
+/// comes back: TRIF plays it on at once instead (`resume`), unless the page paused it itself as it went hidden
+/// (YouTube without a background-play mod). Interruptions (a call, another app's sound) and the session's other
+/// changes go to the diagnostics, for a "stopped by itself" report. Development: `-noaudiosession` leaves the
+/// session as iOS starts it, `-nobgresume` leaves WebKit's pause, to compare.
+enum BackgroundPlay {
+    /// (in TRIF's world, every page from its start) When each video or audio was last paused, and whether the page
+    /// was showing then. As the app leaves (or the phone locks), WebKit pauses a video with sound while the page
+    /// still shows, then tells the page it's hidden. At that moment, before the page's own listeners (this one is
+    /// the first on the window), what WebKit paused within the last second plays on; a page that pauses as it goes
+    /// hidden (YouTube without a background-play mod) then pauses it itself, while hidden, and that's kept.
+    /// (TRIF's world sees the real visibilityState, whatever a mod tells the page.)
+    static let watch = """
+        document.addEventListener('pause', (e) => {
+          if (e.target instanceof HTMLMediaElement) e.target.__trifPause = { at: Date.now(), visible: document.visibilityState === 'visible' };
+        }, true);
+        window.addEventListener('visibilitychange', () => {
+          if (document.visibilityState !== 'hidden') return;
+          const now = Date.now();
+          for (const m of document.querySelectorAll('video, audio')) {
+            const p = m.__trifPause;
+            if (m.paused && !m.ended && p && p.visible && now - p.at < 1000) { m.__trifPlayedOn = now; m.play().catch(() => {}); }
+          }
+        }, true);
+        """
+    /// After the app has gone (`left`, ms): plays on what WebKit paused since then that's still paused (the page wasn't
+    /// told, or a mod stopped the telling): in the shown tab only what was paused while it showed; in a tab already
+    /// hidden (its page isn't told anything as the app leaves) whatever was paused since. Says what it did.
+    private static let playOn = """
+        const out = [], since = left - 300;
+        for (const m of document.querySelectorAll('video, audio')) {
+          const p = m.__trifPause;
+          if (!p || p.at < since - 2000) continue;
+          const d = Math.round(p.at - left), gap = Math.abs(d) + ' ms ' + (d < 0 ? 'before' : 'after') + ' the app was told it left';
+          if (m.__trifPlayedOn && m.__trifPlayedOn >= p.at - 1000) out.push((m.paused ? 'played on as it was hidden, then the page paused it' : 'played on as it was hidden') + ' (' + m.localName + ', paused ' + gap + ')');
+          else if (!m.paused || m.ended) continue;
+          else if (p.at < since || (shown && !p.visible)) out.push('left paused (' + m.localName + ', paused ' + gap + (p.visible ? '' : ', while hidden') + ')');
+          else { try { await m.play(); out.push('played on (' + m.localName + ', paused ' + gap + ')'); } catch (e) { out.push('refused ' + e.name); } }
+        }
+        return out.join('; ');
+        """
+
+    /// The app went to the background (or the phone locked): what WebKit paused plays on. Looked at twice, as
+    /// WebKit's pause can come a moment after the app is told.
+    @MainActor static func resume(_ browser: Browser) {
+        guard !ProcessInfo.processInfo.arguments.contains("-nobgresume") else { return }
+        // (WebKit pauses as it's told the app left: the same moment as this, give or take: 300 ms before counts)
+        let left = Date().timeIntervalSince1970 * 1000
+        Task { @MainActor in
+            var told = Set<String>()
+            for wait in [0.6, 1.4] {
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                guard UIApplication.shared.applicationState == .background else { return }
+                for t in browser.tabs where t.started && t.webView.url != nil {
+                    let wv = t.webView, shown = t === browser.current
+                    let r = await Browser.within(1, "no answer") { () -> String in
+                        let v = try? await wv.callAsyncJavaScript(playOn, arguments: ["left": left, "shown": shown], in: nil, contentWorld: Browser.trifWorld)
+                        return v.map { "\($0)" } ?? "no answer"
+                    }
+                    if !r.isEmpty, told.insert(r).inserted { Diagnostics.shared.log("audio", "the app went to the background, \(Diagnostics.place(wv.url))\(shown ? "" : " (a background tab)"): \(r)") }
+                }
+            }
+        }
+    }
+
+    @MainActor static func setUp() {
+        let session = AVAudioSession.sharedInstance()
+        if !ProcessInfo.processInfo.arguments.contains("-noaudiosession") {
+            do { try session.setCategory(.playback, mode: .moviePlayback) }
+            catch { Diagnostics.shared.log("audio", "couldn't set the audio session to playback: \(error.localizedDescription)") }
+        }
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { n in
+            let info = n.userInfo ?? [:]
+            let type = (info[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init(rawValue:))
+            let line: String
+            if type == .began {
+                let reason = (info[AVAudioSessionInterruptionReasonKey] as? UInt).flatMap(AVAudioSession.InterruptionReason.init(rawValue:))
+                line = "sound interrupted (\(reason == .appWasSuspended ? "the app was suspended" : reason == .routeDisconnected ? "the headphones or speaker went" : "another app or a call"))"
+            } else {
+                let resume = ((info[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0) & AVAudioSession.InterruptionOptions.shouldResume.rawValue != 0
+                line = "sound interruption ended\(resume ? ", iOS says it may resume" : "")"
+            }
+            MainActor.assumeIsolated { Diagnostics.shared.log("audio", line) }
+        }
+        nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                Diagnostics.shared.log("audio", "iOS reset its media services: the audio session set again")
+                if !ProcessInfo.processInfo.arguments.contains("-noaudiosession") { try? session.setCategory(.playback, mode: .moviePlayback) }
+            }
+        }
+    }
+
+    /// (development) The session as it is now, for the `playing` step.
+    @MainActor static func describe() -> String {
+        let s = AVAudioSession.sharedInstance()
+        return "category \(s.category.rawValue), mode \(s.mode.rawValue), other audio playing \(s.isOtherAudioPlaying), outputs \(s.currentRoute.outputs.map(\.portType.rawValue))"
+    }
+}
+
+extension Model {
+    /// (development, the dev step {"playcheck": "<a page with a video or audio>"}) The regression check for a playing
+    /// tab (Tim, 11-16: YouTube stopped about 20 s after he switched tabs): the page opens in a new tab and plays,
+    /// the tab before is shown again, and the playing tab must still be there and playing past the let-go time and
+    /// after a memory warning, then be let go once paused that long; the same page in a tab that doesn't play is
+    /// let go. PASS/FAIL lines; about 75 s. The app in the background and the phone locked are checked from outside
+    /// (simctl, the Home button) with {"playing": 1} and {"tabjs": …, "tab": n}.
+    static func playCheck(browser: Browser, page: URL) async -> String {
+        var lines: [String] = []
+        func check(_ ok: Bool, _ what: String) { lines.append("\(ok ? "PASS" : "FAIL") \(what)") }
+        func sleep(_ s: Double) async { try? await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000)) }
+        func time(_ t: Tab) async -> Double {
+            let r = try? await t.webView.callAsyncJavaScript("const m = document.querySelector('video, audio'); return m ? m.currentTime : -1", arguments: [:], in: nil, contentWorld: .page)
+            return (r as? Double) ?? (r as? NSNumber)?.doubleValue ?? -1
+        }
+        guard let before = browser.current else { return "FAIL no tab shown" }
+        browser.newTab(page.absoluteString)
+        guard let t = browser.current, t !== before else { return "FAIL no new tab" }
+        await sleep(0.5); await browser.waitForLoad(); await sleep(1)
+        let started = try? await t.webView.callAsyncJavaScript("""
+            const all = [...document.querySelectorAll('video, audio')];
+            if (!all.length) return 'no video or audio on the page';
+            const m = all[0];
+            m.loop = true;
+            try { await m.play(); return 'playing'; } catch (e) { return 'play refused: ' + e.name; }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        await sleep(1.5)
+        let front = await Browser.playing(t)
+        check(front, "plays in front (\(started.map { "\($0)" } ?? "no answer"))")
+        guard front else { browser.close(t); return lines.joined(separator: "\n") }
+
+        // (a second tab on the same page that never plays: WebKit says "playing" for it too, as it shares the web
+        // process; it must still be let go)
+        browser.newTab(page.absoluteString)
+        let quiet = browser.current!
+        await sleep(0.5); await browser.waitForLoad(); await sleep(1)
+        browser.select(before)
+        let t0 = await time(t)
+        await sleep(Browser.backgroundSeconds + 8)
+        let t1 = await time(t)
+        check(!quiet.started, "the same page in another tab, not playing, let go")
+        browser.close(quiet)
+        check(t.started && t.webView.url != nil, "kept past \(Int(Browser.backgroundSeconds)) s in a background tab")
+        check(await Browser.playing(t) && t1 > t0 + Browser.backgroundSeconds / 2, "still playing there (\(String(format: "%.1f", t0)) s → \(String(format: "%.1f", t1)) s)")
+
+        browser.memoryWarning()
+        await sleep(2)
+        let t2 = await time(t)
+        check(t.started && t.webView.url != nil, "kept after a memory warning")
+        check(await Browser.playing(t) && t2 > t1, "still playing after it (\(String(format: "%.1f", t2)) s)")
+
+        _ = try? await t.webView.callAsyncJavaScript("document.querySelector('video, audio')?.pause()", arguments: [:], in: nil, contentWorld: .page)
+        await sleep(2)
+        check(!(await Browser.playing(t)), "paused")
+        // (looked at every few seconds: let go between the let-go time and one look later)
+        await sleep(Browser.backgroundSeconds + Browser.playingCheckSeconds + 2)
+        check(!t.started, "let go once paused \(Int(Browser.backgroundSeconds)) s")
+        browser.close(t)
+        browser.select(before)
+        return lines.joined(separator: "\n")
+    }
+
+    /// (development, {"playing": 1}) Each tab: shown (*), let go or not, and WebKit's playback state.
+    static func playingStates(browser: Browser) async -> String {
+        var out: [String] = []
+        for t in browser.tabs {
+            var state = "let go"
+            if t.started && t.webView.url != nil {
+                let wv = t.webView
+                let s = await Browser.within(1, "no answer") { () -> String in
+                    switch await wv.requestMediaPlaybackState() {
+                    case .playing: return "playing"
+                    case .paused: return "paused"
+                    case .suspended: return "suspended"
+                    case .none: return "none"
+                    @unknown default: return "?"
+                    }
+                }
+                let page = (try? await wv.callAsyncJavaScript(Browser.pagePlaying, arguments: [:], in: nil, contentWorld: Browser.trifWorld)) as? String
+                state = "WebKit: \(s), page: \(page ?? "no answer") → \(await Browser.playing(t) ? "kept" : "not playing")"
+            }
+            out.append("\(t === browser.current ? "*" : " ") \(t.host.isEmpty ? "-" : t.host) \(state)")
+        }
+        return out.joined(separator: "\n") + "\naudio session: " + BackgroundPlay.describe()
+    }
 }
 
 /// (Browser.within: whichever of an answer and its time limit comes first)

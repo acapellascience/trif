@@ -53,6 +53,12 @@
 	<string>Websites you visit can ask to use the microphone, for a voice or video call.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>To save pictures from websites to your photos.</string>
+	<!-- (sound and video go on with the app in the background or the phone locked: Browser.swift
+	     BackgroundPlay. Tim, 11-16: YouTube with his Background Play mod) -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 </dict>

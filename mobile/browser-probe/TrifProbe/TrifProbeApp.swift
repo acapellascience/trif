@@ -194,6 +194,12 @@ extension Model {
         if let u = step["openurl"] as? String, let url = URL(string: u) { out = await UIApplication.shared.open(url) ? "opened" : "not opened" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
+        if let u = step["playcheck"] as? String, let page = URL(string: u) { out = await Model.playCheck(browser: browser, page: page) }
+        if step["playing"] != nil { out = await Model.playingStates(browser: browser) }
+        // ({"tabjs": "…", "tab": n}: JavaScript in tab n's page, shown or not)
+        if let js = step["tabjs"] as? String, let n = step["tab"] as? Int, n < browser.tabs.count {
+            do { out = "\(try await browser.tabs[n].webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
+        }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }

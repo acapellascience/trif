@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (228 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (229 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -32,7 +32,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   service ("Claude"/"ChatGPT"), more (true/false), panejs (JS in the shown chat page), paneljs (JS in More's panel),
   panego, offer/cancelOffer/addOffer, status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve,
   view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 11 in-app states, PASS/FAIL lines;
-  regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`)…
+  regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`),
+  playcheck ("http://…": a page with a <video>/<audio>; ~75 s of PASS/FAIL: a playing background tab is kept past
+  20 s and a memory warning, let go once paused; a same-page quiet tab is let go), playing (each tab: WebKit's state,
+  the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -59,9 +62,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `shared/gen/panel`. Never edit those by hand.
 - Browser tests (headless Chrome, muted): `TRIF_BROWSER_TESTS=1 TRIF_E2E_CHROME="/Users/tim/WebMods/tests/e2e/.browsers/chrome/mac_arm-156.0.8078.80/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" node --test mobile/test/chat.test.js`
   (6 tests: fill, send, watch, pickup, viewers, ChatGPT's new page). One browser suite at a time; small payloads.
+- Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
+  won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
+  Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
+  JS counts as a gesture). App to the background: `simctl launch <dev> com.apple.Preferences`; back: `simctl launch`
+  the app; lock: the iOS Simulator tool's LOCK button (HOME wakes / unlocks). Steps still answer in the background
+  while something plays.
 - Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-pageletter`, `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
+  `-nobarshift`, `-pageletter`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`.
 
 ## Map
@@ -114,6 +123,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   214.04)`, not the mask moved in (its inner corners were too sharp). Rim = square minus face (even-odd, rim gradient),
   face on top (#18181a light, #000 tinted, none in dark); rim 100.4 at the sides, 120.5 on the diagonal. iOS's mask
   makes the outer edge. The approved mockups' tinted greys (brightened) are NOT used: tinted stays the grayscale.
+- Background tabs are let go after 20 s (and on a memory warning) unless playing sound: a playing tab is kept,
+  looked at every 5 s, and let go once paused/stopped 20 s (Tim, 11-16: YouTube with his Background Play mod).
+- Sound and video play on with the app in the background or the phone locked: UIBackgroundModes audio, the session
+  .playback/.moviePlayback at launch (category only, not activated), and BackgroundPlay.resume replays a video
+  WebKit paused as the app left. That last is beyond Safari (which pauses it, 11-16 Simulator); a page that pauses
+  itself as it goes hidden is respected. Awaiting Tim's view.
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
@@ -128,6 +143,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Permission strings still await Tim.
 - Safe mode's banner (mods switched off) lives in the bars, so a tab in full screen (an icon launch) doesn't show it;
   only the Mods tab lists them. Icons made before `app=1` (early 11-16) open in TRIF view: re-add them.
+- Background play never tried on a real phone (YouTube, Tim's mod, AirPods, calls). Lock screen in the Simulator:
+  WebKit's Now Playing shows the page's mediaSession title, artist and progress (shot 229) but no play/pause
+  buttons were visible; Control Center not checked. Media inside iframes isn't replayed (main frame only).
 - Add this mod? shows sites, powers and the free warning but not the mod's facts ("names another site: …") that the
   approval card shows.
 
@@ -157,4 +175,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   The SE is left in Tinted · Light (as found). A reinstall refreshes the icon (no cache problem seen).
 - The icon's light PNG drops alpha: ~3k seam pixels between rim and face render partly transparent in Chrome; their
   colour is the blend, so dropping alpha is right (don't composite onto black).
+- `requestMediaPlaybackState` is the web process's, not the page's: a same-site tab that never played says
+  "playing", and so does media WebKit paused itself (app in the background) or a page paused during that.
+  Browser.playing confirms with the page (an unmuted <video>/<audio> playing, or an iframe). `.playing` alone lies.
+- WebKit pauses an inline video with sound as the app goes to the background or the phone locks (pause event a few
+  ms before didEnterBackground, then visibilitychange), and resumes it on return; Safari the same. A play() then
+  (from the page or the app) is allowed and keeps going; <audio> isn't paused at all. Without our session category
+  sound still went on (WebKit sets its own); UIBackgroundModes audio is the part that matters.
 - zsh doesn't split `$FILES`: use an array for commit-by-path lists.

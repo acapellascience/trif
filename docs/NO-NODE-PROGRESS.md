@@ -117,7 +117,8 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   run-scope-reads/runtime/setup-runtime/uninstall/install-script 308 pass, 2 skipped (opt-in), 0 fail; the
   merged tree's clean-machine file 13/13 (real Claude Code and Codex runs). New: the upgrade test seeds real
   phone-link state once the branch is merged and the paired phone reconnects to the helper on the runtime.
-  CI: see below.
+  CI: https://github.com/acapellascience/trif/actions/runs/44195812789 green on attempt 1 (unit, clean-machine
+  macOS + Linux). Previous run 44194903097: only the clickjack-browser flake.
 
 ## Next step
 

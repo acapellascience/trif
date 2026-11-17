@@ -17,6 +17,8 @@ const https = require('https');
 const path = require('path');
 const { run } = require('./util');
 
+const { deep2Route } = require('./deep2');
+
 const PAGE = (title, body) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${title}</title>
 <style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:40px;max-width:720px}#target{padding:12px;border:1px dashed #999}</style>
@@ -891,6 +893,8 @@ async function startServers(dir) {
     if (u.pathname === '/pebble.html') return send(200, 'text/html; charset=utf-8', PEBBLE_PAGE());
     if (u.pathname === '/pebble/app.js') return send(200, 'text/javascript', `(${pebbleApp})();`);
     if (u.pathname === '/api/pebble/new') { const after = Number(u.searchParams.get('after')) || 1030; return send(200, 'application/json', JSON.stringify({ items: [pebblePost(after + 1)] })); }
+    // (the second depth study's pages, lib/deep2.js)
+    if (deep2Route(u, req, send)) return;
     // (the scrolling-feed task's next posts: two friends', a Sponsored one, and a friend's that says "sponsored" every other page)
     if (u.pathname === '/api/hearth-more' && u.search === '?ads=1' && req.method === 'POST') {
       const n = requests.filter((x) => x.url === '/api/hearth-more?ads=1').length;

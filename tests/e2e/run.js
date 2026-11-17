@@ -9,8 +9,8 @@
 // (--guidance-repeats N); results in guidance.json. See docs/TESTING.md.
 // --study: harder requests with four guides (0.2's, before the 2026-11-12 trim, this checkout's, next to none),
 // a real Claude Code run each (opus unless --claude-model; --guidance-repeats N rounds; --study-tasks
-// promos,pink,hearth,feed,autoplay,follow,jump and --study-guides v02,pre,trim,now,current,lean,box,dig,none to narrow; --study-effort high
-// sets Claude Code's effort); results in study.json.
+// promos,pink,hearth,feed,autoplay,follow,jump,suggest,newest,live and --study-guides v02,pre,trim,now,current,lean,lean2,box,dig,none to narrow;
+// --study-effort high sets Claude Code's effort; --study-solve measures scripted fixes instead, no agent runs); results in study.json.
 // --oss: open-model (codex-oss) runs through OpenRouter, with the key already saved in your Keychain (the
 // panel's API key field, or `trif agent open-model --provider openrouter --set-key`); skipped without one.
 // The key is never read from the environment, shown or logged.
@@ -43,6 +43,7 @@ function parseArgs(argv) {
     else if (a === '--study-tasks') o.studyTasks = val().split(',');
     else if (a === '--study-guides') o.studyGuides = val().split(',');
     else if (a === '--study-effort') o.studyEffort = val();
+    else if (a === '--study-solve') o.studySolve = true;
     else if (a === '--guidance-repeats') o.guidanceRepeats = Number(val());
     else if (a === '--oss-model') o.ossModel = val();
     else if (a === '--upgrade-from') o.upgradeFrom.push(path.resolve(val()));
@@ -109,7 +110,7 @@ async function main() {
           work: path.join(work, `${browser === 'firefox' ? 'ff' : 'cr'}-${name}`.slice(0, 24)),
           agent: o.agent && !agentDone, codex: o.codex && !agentDone, oss: o.oss && !agentDone, claudeModel: o.claudeModel, codexModel: o.codexModel,
           ossModel: o.ossModel, guidance: o.guidance && !agentDone, guidanceRepeats: o.guidanceRepeats,
-          study: o.study && !agentDone, studyTasks: o.studyTasks, studyGuides: o.studyGuides, studyEffort: o.studyEffort,
+          study: o.study && !agentDone, studyTasks: o.studyTasks, studyGuides: o.studyGuides, studyEffort: o.studyEffort, studySolve: o.studySolve,
           headless: o.headless, extensionDirFirefox: fxDir,
         });
         agentDone = true; // agent runs once per browser, in its first scenario

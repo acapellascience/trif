@@ -13,6 +13,7 @@ const { ChromeDriver } = require('./lib/chrome');
 // The sites setup turns TRIF on for (helper/lib/preinstalled.js SITES_ON).
 const SITES_START = ['amazon.com', 'google.com', 'instagram.com', 'x.com'];
 const { SWEEP_EXPECT, murmurPage } = require('./lib/server');
+const D2 = require('./lib/deep2');
 const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
@@ -1757,6 +1758,8 @@ class Scenario {
       // the 2026-11-17 head-to-head: main's guides (67c16d5) against the condensed ones on lean-guides (8334aa2)
       current: Object.fromEntries(DOCS.map((f) => [f, show('67c16d5', f)])),
       lean: Object.fromEntries(DOCS.map((f) => [f, show('8334aa2', f)])),
+      // the second depth study (docs/STUDY-DEEP-2.md): lean-guides as it stood then (ce5b1bc)
+      lean2: Object.fromEntries(DOCS.map((f) => [f, show('ce5b1bc', f)])),
       // the 2026-11-17 depth study: this checkout's guides (main's, eb92635 or later) as they are ("box"), and with
       // the `trif run` passage of AGENTS.md's "The CLI" (from "It runs in one of two places:" to the end of that
       // list) replaced by one that says what the page's own world is for ("dig"); both texts are in study.json
@@ -1953,14 +1956,51 @@ class Scenario {
       return { ...m, stayed: m.shift !== null && Math.abs(m.shift) < 80, neverJumped: m.minY > 500, topWorks: m.yAfterLogo < 5, shot: shot && path.basename(shot) };
     };
 
+
+    // ---- the second depth study's tasks (lib/deep2.js: Tidepool, Quillby, Glint). Each measure empties the
+    // site's storage first (so only a mod's own doing counts, not a setting left by hand), reloads, and scores
+    // 'deep' (goal met, nothing left), 'surface' (passes a look, fails a measure) or 'fail'.
+    const fresh = async (file) => {
+      await this.d.eval(await pageCtx(file), `async () => { try { localStorage.clear(); sessionStorage.clear(); } catch {} }`).catch(() => null);
+      const t0 = Date.now();
+      await this.cli(['reload', '--url', file]);
+      return t0;
+    };
+    const measureSuggest = async (label) => {
+      const t0 = await fresh('tidepool.html');
+      await sleep(2000);
+      const ctx = await pageCtx('tidepool.html');
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      const m = await this.d.eval(ctx, D2.PAGE_SUGGEST, [], { timeoutMs: 60000 });
+      const pages = this.o.servers.requests.filter((q) => q.url.startsWith('/tidepool/api/v2/feed') && q.time >= t0).length;
+      return { ...D2.scoreSuggest(m, pages), shot: shot && path.basename(shot) };
+    };
+    const measureNewest = async (label) => {
+      await fresh('quillby.html');
+      await sleep(2000);
+      const ctx = await pageCtx('quillby.html');
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      return { ...D2.scoreNewest(await this.d.eval(ctx, D2.PAGE_NEWEST, [], { timeoutMs: 30000 })), shot: shot && path.basename(shot) };
+    };
+    const measureLive = async (label) => {
+      const t0 = await fresh('glint.html');
+      await sleep(7000);
+      const ctx = await pageCtx('glint.html');
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      const t1 = Date.now();
+      const m = await this.d.eval(ctx, D2.PAGE_LIVE, [], { timeoutMs: 30000 });
+      const n = (c, t) => this.o.servers.requests.filter((q) => q.url.startsWith(`/glint/api/f?ch=${c}&`) && q.time >= t).length;
+      return { ...D2.scoreLive(m, n(D2.GL_FEAT, t0), n(3, t1)), shot: shot && path.basename(shot) };
+    };
+
     // ---- how a run worked, from its log in the scratch home (the newest one)
     const runLog = (since) => {
       const files = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl')).map((f) => path.join(runsDir, f)).filter((f) => fs.statSync(f).mtimeMs >= since) : [];
       files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
       return files[0] || null;
     };
-    const workStats = (file) => {
-      const st = { tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, verifies: 0, pageRuns: 0, boxMisses: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0, firstWords: null, firstLine: '' };
+    const workStats = (file, task) => {
+      const st = { bundleCmds: 0, bundleSeen: 0, netLooks: 0, tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, verifies: 0, pageRuns: 0, boxMisses: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0, firstWords: null, firstLine: '' };
       let started = null;
       if (!file) return st;
       const texts = [];
@@ -1980,7 +2020,10 @@ class Scenario {
             st.tools++;
             const cmd = String((c.input && (c.input.command || c.input.file_path || c.input.pattern)) || '');
             for (const f of DOCS) if (cmd.includes(f) && !st.guideReads.includes(f)) st.guideReads.push(f);
+            // (looking at the app's code: its script by path, the page's script list, or a fetch/curl of a .js file)
+            if (task && task.bundle && (cmd.includes(task.bundle.split('/').pop()) || /document\.scripts|querySelectorAll\(\s*\\?['"]script|getElementsByTagName\(\s*\\?['"]script|script\[src|curl\b[^|;]*\.js\b|fetch\([^)]*\.js/.test(cmd))) st.bundleCmds++;
             if (c.name !== 'Bash') continue;
+            st.netLooks += (cmd.match(/\btrif (record|requests?)\b/g) || []).length;
             st.reloads += (cmd.match(/\btrif reload\b/g) || []).length;
             st.verifies += (cmd.match(/\btrif verify\b/g) || []).length;
             st.pageRuns += (cmd.match(/\btrif run\b[^|&;]*--page/g) || []).length;
@@ -1996,6 +2039,7 @@ class Scenario {
           for (const c of o.message.content) {
             if (c && c.type === 'tool_result' && c.is_error) st.blocked++;
             if (c && c.type === 'tool_result' && /ran in TRIF's box/.test(JSON.stringify(c.content || ''))) st.boxMisses++;
+            if (c && c.type === 'tool_result' && task && task.mark && JSON.stringify(c.content || '').includes(JSON.stringify(task.mark).slice(1, -1))) st.bundleSeen++;
           }
         }
         if (o.type === 'result') {
@@ -2058,10 +2102,13 @@ class Scenario {
       { key: 'autoplay', file: 'streamly.html', turns: ['stop it from playing the next episode by itself'], measure: measureAutoplay },
       { key: 'follow', file: 'murmur.html', turns: ["hide posts from accounts I don't follow"], measure: measureFollow },
       { key: 'jump', file: 'pebble.html', turns: ['stop the feed jumping back to the top when new posts come in'], measure: measureJump },
+      { key: 'suggest', file: 'tidepool.html', turns: ['get rid of the suggested posts in my feed'], measure: measureSuggest, bundle: D2.TIDEPOOL_JS, mark: D2.BUNDLE_MARKS.suggest },
+      { key: 'newest', file: 'quillby.html', turns: ['show me the newest comments first'], measure: measureNewest, bundle: D2.QUILLBY_JS, mark: D2.BUNDLE_MARKS.newest },
+      { key: 'live', file: 'glint.html', turns: ['get rid of the live preview that pops up in the corner'], measure: measureLive, bundle: D2.GLINT_JS, mark: D2.BUNDLE_MARKS.live },
     ].filter((t) => !this.o.studyTasks || this.o.studyTasks.includes(t.key));
 
     const baselines = {};
-    for (const file of ['promos.html', 'hearth.html', 'hearth-feed.html', 'streamly.html', 'murmur.html', 'pebble.html']) {
+    for (const file of ['promos.html', 'hearth.html', 'hearth-feed.html', 'streamly.html', 'murmur.html', 'pebble.html', 'tidepool.html', 'quillby.html', 'glint.html']) {
       const task = tasks.find((t) => t.file === file);
       if (!task) continue;
       await openPage(file);
@@ -2069,6 +2116,27 @@ class Scenario {
         : file === 'promos.html' ? await measurePromos() : await task.measure(`${task.key}-baseline`);
     }
     r.log(`--study baselines: ${JSON.stringify(baselines)}`);
+
+    // --study-solve: each task's scripted fixes (lib/deep2.js SOLVES) as free mods, measured as a run's would be
+    if (this.o.studySolve) {
+      const solved = [];
+      for (const task of tasks) {
+        for (const [name, body] of Object.entries(D2.SOLVES[task.key] || {})) {
+          await clearSite(`solve-${task.key}-${name}`);
+          await openPage(task.file);
+          fs.writeFileSync(path.join(sitesDir, `solve-${name}.js`), `// ==WebMod==\n// @name        solve ${name}\n// @description The study's scripted ${name} fix\n// @run-at      document-start\n// ==/WebMod==\n\n${body}\n`);
+          await letRun();
+          const m = await task.measure(`solve-${task.key}-${name}`);
+          solved.push({ task: task.key, solve: name, ...m });
+          r.record(`--study-solve ${task.key} ${name}`, m.outcome === (name.startsWith('deep') ? 'deep' : name === 'click' ? 'deep' : 'surface') ? 'pass' : 'fail', JSON.stringify(m));
+        }
+      }
+      fs.writeFileSync(this.r.file('study-solve.json'), JSON.stringify({ baselines, solved }, null, 2));
+      await clearSite('solve-end');
+      for (const f of DOCS) { const p = path.join(this.trif, f); if (saved[f] !== null) fs.writeFileSync(p, saved[f]); else fs.rmSync(p, { force: true }); }
+      await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
+      return;
+    }
     const rows = [];
     const writeOut = () => fs.writeFileSync(this.r.file('study.json'), JSON.stringify({ model, sizes, arms, baselines, rows }, null, 2));
     let seed = 7;
@@ -2080,11 +2148,12 @@ class Scenario {
           useGuide(g);
           await clearSite(tag);
           await openPage(task.file);
+          if (task.bundle) { await fresh(task.file); await sleep(1500); } // (no setting left in the site's storage by the last run)
           let session = null;
           for (let turn = 0; turn < task.turns.length; turn++) {
             const res = await agentRun(task.file, task.turns[turn], session);
             session = res.session || session;
-            const work = workStats(res.log);
+            const work = workStats(res.log, task);
             const allowed = await letRun();
             const m = await task.measure(`${tag}-${turn}`);
             const mods = theMods().map((f) => ({ file: f, tier: tierOf(fs.readFileSync(path.join(sitesDir, f), 'utf8')), lines: fs.readFileSync(path.join(sitesDir, f), 'utf8').split('\n').length }));

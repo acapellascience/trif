@@ -186,7 +186,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Home Screen icons: a 4-icon batch (outline colours, badge, no outline, custom name, a Photos-like picture) installed
   in the Simulator 11-17 by the server route, opened from an icon (list cleared, sheet said done), removed in Settings
   (all four went). "{user}'s" works only where the page shows the name plainly (GitHub, Wikipedia).
-- The clip page takes several icons only on branch clip-page (commit "several icons in one profile", 11-17), NOT
+- The clip page takes several icons only on branch clip-page (49a41c1, 11-17, pushed), NOT
   deployed: until Tim deploys it, the live page lacks "trif-clip-batch" and the app hands batches over by the server on
   the phone (which failed once on Tim's iPhone, 11-16: then Files). Single icons are unchanged.
 - The exit button's new spot: its taps only proven in the Simulator through the window recognizer; never on a phone.

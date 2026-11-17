@@ -284,6 +284,20 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   103 skipped; Node 22: 746 pass, 102 skipped): a flake, beside the two noted before. The three new tests
   passed on both Nodes, in the red attempt too.
 
+## Merge of main (11-17)
+
+- **main merged into `windows`** (`bef1379`): the run-scope allowlist (run-scope-reads: host.js
+  `RUN_COMMANDS`, `checkRunReads`, `helperInfo(run)`; trash.js `checkSite`), the phone view, the skill, the
+  clip page. Conflicts only where both sides added: `contextText` takes `phone` and `noShell`, runs.js passes
+  both, stage.js imports and exports both sides' helpers. A fenced run's `trif` reaches the helper through
+  the same `onClientLine`, so the allowlist and scope checks hold there as on macOS; the phone twin's lock
+  reaches the fence through `lockedDirs`. skill/build.js copies env.js too (Windows' pathcheck.js needs it).
+  Two of main's new tests failed on windows-latest and are fixed in `91e070a` (downloads' chmod 0o000 folder:
+  skip list, reason `permissions`; phone.test.js compares `realpathSync.native`'s long names, RUNNER~1).
+  [44037442444](https://github.com/acapellascience/trif/actions/runs/44037442444) green (Node 22 after one
+  rerun: a codex-sandbox.test.js flake, untouched by the merge); tests/run-scope-reads.test.js passes there
+  (7 of 7); windows-fence and the macOS tests green.
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is

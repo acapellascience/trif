@@ -19,6 +19,9 @@
 //   write <rel> <JSON string>   writes a twin file as a desktop edit would (inside sites/phone~*/ only), then
 //                 nudges the phone: {wrote: rel, nudged: n}
 //   delete <rel>  deletes a twin file (into <home>/trash/, as the side panel's delete), then nudges: {deleted, nudged}
+//   run <site> <words>  a desktop phone-view chat ("Edit for mobile", scope phone~<site>) with the stand-in agent
+//                and those words (EDIT, say): {run: runId}; when it's done, the twin's change nudges the phone (as
+//                host.js's syncMods does): {runDone: runId, ok, changedFiles, nudged}
 //   nudge         sync.changed to every connected phone: {nudged: n}
 //   synced        the last sync per phone (the Settings line's facts): {synced: {<phone id>: {...} | null}}
 //   held          the held map's twin entries: {held: {<id>: {by, ...}}}
@@ -48,10 +51,18 @@ const chain = makeFakeKeychain(path.join(home, 'keychain'));
 const store = new Store(home, { env: { ...chain.env }, name: 'Stand-in Mac' });
 const server = new Server(store, { version: '9.9.9', host: '127.0.0.1', port: 0, log: () => {} });
 let remote = null;
+const desktopRuns = new Set();
 const runs = new Runs({
   getWorkspace: () => P.workspace(home),
   logger: { info() {}, debug() {}, error() {}, warn() {} },
-  onEvent: (runId, ev) => { remote.onEvent(runId, ev); },
+  onEvent: (runId, ev) => {
+    remote.onEvent(runId, ev);
+    if (desktopRuns.has(runId) && ev.kind === 'done') {
+      desktopRuns.delete(runId);
+      // (the stage's last copy into the live twin is a moment after; then the nudge, as syncMods's)
+      setTimeout(() => say({ runDone: runId, ok: ev.ok, changedFiles: ev.changedFiles, nudged: sync.changed() }), 1500);
+    }
+  },
   // (host.js onClientLine for a run's request: remoteRefusal, then remoteCommand with Remote.tool)
   onRequest: (run, line, respond) => {
     const req = JSON.parse(line);
@@ -138,6 +149,10 @@ async function stop() {
       fs.mkdirSync(path.dirname(trash), { recursive: true });
       fs.renameSync(p, trash);
       say({ deleted: arg, nudged: sync.changed() });
+    } else if (cmd === 'run') {
+      const { runId } = runs.start({ agent: 'claude', site: arg, url: `https://${arg}/`, scope: `phone~${arg}`, phone: { device: 'iPhone SE', width: 375 }, prompt: rest });
+      desktopRuns.add(runId);
+      say({ run: runId });
     } else if (cmd === 'nudge') say({ nudged: sync.changed() });
     else if (cmd === 'synced') { const out = {}; for (const p of store.list()) out[p.id] = sync.status(p.id); say({ synced: out }); }
     else if (cmd === 'held') {

@@ -12,6 +12,9 @@
 //   WRITE        writes mods all over its working folder's sites/: its phone twin, a part of the site's twin,
 //                the site's desktop folder, all-sites/, another site's twin, a new folder, a look-alike
 //   DELETE       deletes sites/<its twin>/old.js in its working folder
+//   EDIT         edits every mod in sites/<its twin>/ of its working folder as a chat's change would: two lines
+//                appended, a red bar at the top (EDIT:<rrggbb>: that colour) (a desktop phone-view chat fine-tuning
+//                a phone mod)
 //   PHONE[args]  after those, runs the real `trif phone <args>` (helper/cli.js, through the run's mailbox, as a
 //                real agent's command would), once for each such word, in order; what each printed is kept in
 //                <bin>/phone/: phoneCalls() → [{args, status, stdout, stderr, shot}] (shot: the mode and first
@@ -62,6 +65,11 @@ function rest() {
     put('phone~other.example/theirs.js', mod('another twin'));
     put('unrelated.example/new.js', mod('a new folder'));
     put('phone~evil' + base + '/x.js', mod('a look-alike'));
+  }
+  if (prompt.includes('EDIT')) {
+    const dir = path.join(process.cwd(), 'sites', scope);
+    const colour = (/EDIT:([0-9a-f]{6})/.exec(prompt) || [])[1] || 'e5484d';
+    for (const f of (fs.existsSync(dir) ? fs.readdirSync(dir) : [])) if (f.endsWith('.js')) fs.appendFileSync(path.join(dir, f), '\\n// Edited on the computer\\ndocument.documentElement.append(Object.assign(document.createElement("style"), { textContent: "body { border-top: 14px solid #' + colour + ' !important; }" }));\\n');
   }
   if (prompt.includes('DELETE')) { try { fs.unlinkSync(path.join(process.cwd(), 'sites', scope, 'old.js')); } catch {} }
   let n = 0;

@@ -29,29 +29,32 @@ iPhone side (ios-poc):
       Unit tests
 - [x] S7. The Mods tab's line, Sync now, Recently deleted, the conflict notice; strings into IOS-APP-STRINGS.md; the
       Mac harness (mobile/test/phonelink.test.js) syncing with the helper
-- [ ] S8. Simulator pass: a mod made on the phone, edited by a desktop phone-view chat (stand-in agent), back on the
+- [x] S8. Simulator pass: a mod made on the phone, edited by a desktop phone-view chat (stand-in agent), back on the
       phone; a conflict; a delete
 
-## Done this round (round 6, 2026-11-17)
+## Done this round (round 7, 2026-11-17)
 
-- S7 (ios-poc 8373e19): the Mods tab's sync line and Sync now (paired only), notices at the top until OK (conflict,
-  came back, couldn't read, too big), Recently deleted with Restore (all sites, folded), "from your computer" on a mod
-  new from the computer; drafts in IOS-APP-STRINGS.md "Phone sync in the Mods tab". Simulator (SE): computer's mods
-  arrived, a computer delete → Recently deleted → Restore went back, a conflict showed its notice (shots 276, 277).
-- Harness (phone-link 010554a): the stand-in computer attaches the sync session (+ held.js's first look) with stdin
-  `twin`, `write`, `delete`, `nudge`, `synced`, `held`; ios-poc's Mac test 8/8, its new last test syncs over the real
-  link. CI green: ios-poc https://github.com/acapellascience/trif/actions/runs/44061257135, phone-link https://github.com/acapellascience/trif/actions/runs/44061245200
-- .ipa built and copied, dSYM 0DB7485B-25B0-32F1-8601-25AC0C3A45B9.
+- S8, the Simulator pass (SE, shots 278-283 and a recording 284-se-sync-pass.mp4 in ios-poc's mobile/browser-probe/shots/):
+  two mods imported on the phone (Add, off) went to the computer's twin; a phone edit went over; a desktop phone-view
+  chat (stand-in agent, `run example.com … EDIT`) edited them, and they came back (red bar, then blue on the app's
+  return to the front); a conflict kept both on both sides with the notice; a phone delete → the computer's trash/, a
+  computer delete → Recently deleted.
+- Bug found and fixed (ios-poc a2bb8b7): a synced change sat in the store and ran only after a relaunch; now the pages'
+  scripts are remade after a sync (Browser.syncApplied) and the shown page reloads if it's affected. Mac test 8/8.
+- Stand-in (phone-link): the computer's `run <site> <words>` (a desktop phone-view run, nudge when done) and the
+  agent's EDIT[:rrggbb]; phone-sync-e2e + phone-link-run 11/11. CI: see below. .ipa built, dSYM F386A367-DD85-31DC-BE66-1680659BAE56.
 
 ## Next step
 
-S8 (ios-poc, if free): the Simulator pass with a desktop phone-view chat: a mod made on the phone (Add this mod? or
--import), edited by a stand-in-agent run on the computer (how a run's accepted write reaches the live twin in the
-stand-in: check Runs/stage, then `nudge`), back on the phone; a conflict; a delete. Screenshots from 278.
+None: every checklist item is done. Left for Tim: the decisions below, and a pass on a real phone when he wants.
 
 ## Notes for next round
 
 - Rounds 1–5's notes still hold.
+- Round 7: a phone whose link has closed (30 s idle) gets a computer change on its next front / Sync now / change, not
+  at once (D9 as designed): the nudge reaches connected phones only. A killed app with mods running trips safe mode
+  (mods switched off) on its next launch: send it to the background (launch Preferences) before `simctl terminate`.
+- Screenshots are 2x: tap at pixel/2.
 - Driving the stand-in computer from a shell: `mkfifo f; tail -f f | node tests/phone-link-computer.js --seconds 900
   > log`, `echo <cmd> > f`; write lines via node (JSON.stringify) to avoid shell quoting. Kill the `tail -f` after.
 - The app's dev step `modsjs` runs JS in the Mods tab: `window.webkit.messageHandlers.app.postMessage({type:'save',

@@ -55,7 +55,9 @@ iPhone side (needs ios-poc free):
   `tests/fake-dns-sd.js`.
 - `tests/phone-link-host.test.js`: one long test against the real host.js (two fake extensions, the fake
   keychain, the stand-in dns-sd and phone; 3 s). Locally the whole suite but update.test.js: 902 tests, 892
-  passed, 10 skipped, 0 failed. CI: see below.
+  passed, 10 skipped, 0 failed. CI green for c0172aa on the first attempt
+  (https://github.com/acapellascience/trif/actions/runs/44001876567); a48e0d0 before it failed on a race in
+  the new test and two known browser flakes.
 
 ## Earlier rounds
 
@@ -82,10 +84,13 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 8, c0172aa: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/44001876567
+  (921 tests, 914 passed, 7 skipped, 0 failed; the host test ran there, the browser tests passed too). The
+  commit that records this line was pushed without waiting for its run (docs only).
 - Round 8, a48e0d0: failed, run 44001116015 (921 tests, 911 passed, 3 failed): the two known browser flakes
   (the clickjacking guard; the phone view's "the site sees an iPhone in that tab only") and this round's own
   host test, on a race in the test (it took an older `phoneLink` message for the one after Remove, then found
-  the listener still closing). Fixed in the next commit: its result is in the line above this one once known.
+  the listener still closing). Fixed in c0172aa (the line above).
 - Round 7, 69375a1: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43998715361
   (920 tests, 913 passed, 7 skipped, 0 failed; all 9 tool tests ran there, the browser tests passed too).
   Locally `npm test` (no browser tests) had one failure, not this branch's: tests/update.test.js "release

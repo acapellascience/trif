@@ -960,7 +960,7 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .pop-menu { position: absolute; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
 .pop-menu[hidden] { display: none; }
 .cv-menu { bottom: calc(100% + 4px); left: 0; }
-.mods-menu { top: calc(100% + 4px); right: 0; }
+.mods-menu { top: calc(100% + 6px); right: 0; min-width: 190px; padding: 5px; border-color: color-mix(in srgb, var(--faint) 50%, var(--line)); box-shadow: 0 12px 32px rgb(0 0 0 / 0.32), 0 2px 6px rgb(0 0 0 / 0.16); }
 .pop-menu .menu-item { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }
 .pop-menu .menu-item:hover { background: var(--raised); }
 .mods > summary { position: relative; padding-right: 28px; }
@@ -972,6 +972,12 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .mods.no-mods > :is(.mod-list, .mods-grip) { display: none; }
 .mods.no-mods > summary { list-style: none; cursor: default; }
 .mods.no-mods > summary::-webkit-details-marker { display: none; }
+/* There the ⋯ opens its menu inside the box, as rows under the header, and closes back to the header (Tim, 11-16:
+   a popup over the chat's first words read as a mess). The ⋯ keeps its place at the header's right. */
+.mods.no-mods > summary .mods-more-wrap { display: contents; }
+.mods.no-mods > summary .mods-more { position: absolute; right: 0; top: 1px; z-index: 6; }
+.mods.no-mods .mods-menu { position: static; min-width: 0; margin: 8px -28px 0 0; padding: 4px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; }
+.mods.no-mods .mods-menu .menu-item { margin: 0 -8px; padding: 6px 8px; color: var(--text); font-weight: 400; }
 .site-files-box { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
 .site-files-box > summary { cursor: pointer; }
 .site-files-box .site-files { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0 2px 14px; }
@@ -981,7 +987,8 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 
 /* the phone view (phone.js): the bar's phone button, pressed in the phone view's panel; the line under the bar */
 .phone-btn[aria-pressed="true"] { color: var(--switch-on); }
-.phone-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
+/* (a card like the notices and the mods box around it, so the stack above the chat reads as one column) */
+.phone-note { flex: none; margin: 10px 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-size: 12px; }
 
 /* ---- sensitive sites and Off (Tim, 2026-11-11) ------------------------------------------------------------ */
 /* Off: no starter suggestions (the agent can't see the page), and the level in words, however narrow. */

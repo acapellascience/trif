@@ -245,6 +245,7 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
   const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
   try {
     const h = await harness(browser);
+    await h.allowUserScripts(); // (as the user has it: no "Mods are paused" over the panels in the screenshots)
     await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
     // (each as the background's status lists mods: uiStatus)
     const mod = (site, name, match) => {
@@ -284,6 +285,7 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
             return;
           }
           const answer = (result) => { const r = { type: 'reply', reqId: msg.reqId, ok: true, result }; setTimeout(() => { for (const fn of fns) fn(r); }, 0); };
+          if (msg && msg.type === 'agent.list') return answer({ agents: [{ id: 'claude', name: 'Claude Code', available: true, loggedIn: true }], default: 'claude' }); // (an agent, as the user has: no "Couldn't list coding agents" in the screenshots)
           if (msg && msg.type === 'downloads.take') return answer({ name: 'offered.js', text: '// ==WebMod==\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n' });
           if (msg && msg.type === 'downloads.done') { window.__offer = null; window.__offerDone = msg.how; return answer({ on: true, state: 'watching' }); }
           if (msg && msg.type === 'mod.import') {
@@ -332,18 +334,22 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
       const sum = box.querySelector('summary').getBoundingClientRect(), b = box.getBoundingClientRect();
       return { shown: shown(box), empty: box.classList.contains('no-mods'), count: document.getElementById('mods-count').textContent,
         more: shown(more), list: shown(document.getElementById('mod-list')), grip: shown(document.getElementById('mods-grip')),
-        marker: getComputedStyle(box.querySelector('summary')).listStyleType, compact: b.height - sum.height <= 24 };
+        marker: getComputedStyle(box.querySelector('summary')).listStyleType, compact: b.height - sum.height <= 24, problem: document.body.dataset.problem || '' };
     })()`;
-    const boxWant = { shown: true, empty: true, count: '(0)', more: true, list: false, grip: false, marker: 'none', compact: true };
-    // The ⋯ clicked: the menu open, Import and Paste each the element on top at its middle; then closed again
+    const boxWant = { shown: true, empty: true, count: '(0)', more: true, list: false, grip: false, marker: 'none', compact: true, problem: '' };
+    // The ⋯ clicked: the menu open, Import and Paste each the element on top at its middle. An empty site's opens
+    // inside the box (rows under the header, the box grown round them: nothing of the chat around or under it);
+    // a site with mods keeps its popup. Then closed again.
     const MENU = `(() => {
-      const menu = document.getElementById('mods-menu');
+      const menu = document.getElementById('mods-menu'), box = document.getElementById('mods');
       const top = (id) => { const e = document.getElementById(id), r = e.getBoundingClientRect(); return r.width > 0 && document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === e; };
+      const m = menu.getBoundingClientRect(), b = box.getBoundingClientRect();
       return { open: !menu.hidden && document.getElementById('mods-more').getAttribute('aria-expanded') === 'true',
-        items: [...menu.querySelectorAll('.menu-item')].filter((b) => !b.hidden).map((b) => b.textContent),
-        onTop: top('import-mod') && top('paste-mod'), boxStill: document.getElementById('mods').classList.contains('no-mods') };
+        items: [...menu.querySelectorAll('.menu-item')].filter((x) => !x.hidden).map((x) => x.textContent),
+        onTop: top('import-mod') && top('paste-mod'), boxStill: box.classList.contains('no-mods'),
+        inline: getComputedStyle(menu).position === 'static' && m.top >= b.top && m.bottom <= b.bottom && m.left >= b.left && m.right <= b.right };
     })()`;
-    const menuWant = { open: true, items: ['Import mod…', 'Paste a mod…'], onTop: true, boxStill: true };
+    const menuWant = { open: true, items: ['Import mod…', 'Paste a mod…'], onTop: true, boxStill: true, inline: true };
     const emptyBox = async (panel, name) => {
       await waitFor(`${name}: the empty box`, async () => JSON.stringify(await panel(BOX)) === JSON.stringify(boxWant)).catch(async (e) => { console.error(JSON.stringify(await panel(BOX))); throw e; });
       await panel.shot(`empty-site-${name}.png`);
@@ -410,6 +416,14 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     await sleep(800);
     const deskWant = { phone: false, box: true, count: '(3)', rows: ['127.0.0.1/desk-one', '127.0.0.1/desk-two', 'all-sites/everywhere'], files: 'Files (5)', asked: '127.0.0.1' };
     await waitFor('the desktop panel\'s list', async () => JSON.stringify(await desk(LIST)) === JSON.stringify(deskWant)).catch(async (e) => { console.error(JSON.stringify(await desk(LIST))); throw e; });
+    // (a site with mods: its ⋯ still a popup over the list, Import, Paste and Export on top)
+    await desk.shot('site-with-mods.png');
+    await desk.click('#mods-more');
+    const withMods = { open: true, items: ['Import mod…', 'Paste a mod…', 'Export all mods for 127.0.0.1'], onTop: true, boxStill: false, inline: false };
+    await waitFor('the menu over the list', async () => JSON.stringify(await desk(MENU)) === JSON.stringify(withMods)).catch(async (e) => { console.error(JSON.stringify(await desk(MENU))); throw e; });
+    await desk.shot('site-with-mods-menu.png');
+    await desk.click('#mods-more'); // (the ⋯ again: closed)
+    await waitFor('the list\'s menu closed', async () => (await desk('document.getElementById("mods-menu").hidden')) === true);
     assert.deepEqual(await desk(DROP), [{ name: 'dropped.js', site: '', phone: false }], 'the desktop panel\'s import: a desktop mod');
     assert.deepEqual(await desk(PASTE), [{ name: 'pasted.js', site: '', phone: false }], 'a pasted one too');
     assert.deepEqual(await desk(OFFER), { imports: [{ name: 'offered.js', site: '', phone: false }], done: 'added' }, 'and one from Downloads');

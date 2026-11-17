@@ -2983,6 +2983,11 @@ test('the panel: an empty site keeps the Mods header and its ⋯ menu, nothing u
   assert.doesNotMatch(panel, /if \(ui\.mods\.hidden\) renderMods\(\)/, 'files arriving re-render an empty box, not only a hidden one');
   assert.match(css, /\.mods\.no-mods > :is\(\.mod-list, \.mods-grip\) \{ display: none; \}/);
   assert.match(css, /\.mods\.no-mods > summary \{ list-style: none; cursor: default; \}/);
+  // (its menu opens inside the box, rows under the header, not as a popup over the chat; elsewhere it's a popup)
+  assert.match(css, /\.mods\.no-mods \.mods-menu \{ position: static;[^}]*background: none; box-shadow: none; \}/);
+  assert.match(css, /\.mods-menu \{ top: calc\(100% \+ 6px\); right: 0;[^}]*box-shadow:/);
+  // (the phone view's line is a card like the notices and the box around it)
+  assert.match(css, /\.phone-note \{ flex: none; margin: 10px 12px 0; padding: 10px 12px; border: 1px solid var\(--line\); border-radius: var\(--radius\); background: var\(--surface\);/);
 });
 
 test('background: robotless (settings.agent "none") refuses agent.start, and nothing reaches the helper', async () => {

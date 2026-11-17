@@ -12,6 +12,10 @@
 //   WRITE        writes mods all over its working folder's sites/: its phone twin, a part of the site's twin,
 //                the site's desktop folder, all-sites/, another site's twin, a new folder, a look-alike
 //   DELETE       deletes sites/<its twin>/old.js in its working folder
+//   PHONE[args]  after those, runs the real `trif phone <args>` (helper/cli.js, through the run's mailbox, as a
+//                real agent's command would), once for each such word, in order; what each printed is kept in
+//                <bin>/phone/: phoneCalls() → [{args, status, stdout, stderr, shot}] (shot: the mode and first
+//                bytes of the screenshot the command named, read while the run is still going)
 //   PAUSE:<word> says "Working", then waits for go('<word>') before it does the rest
 //   SLEEP        says "Thinking" and stays until stopped
 // Each call is kept in <bin>/calls/ with its argv, env, cwd, message, context, and what it could read in
@@ -57,6 +61,16 @@ function rest() {
     put('phone~evil' + base + '/x.js', mod('a look-alike'));
   }
   if (prompt.includes('DELETE')) { try { fs.unlinkSync(path.join(process.cwd(), 'sites', scope, 'old.js')); } catch {} }
+  let n = 0;
+  for (const m of prompt.matchAll(/PHONE\\[([^\\]]*)\\]/g)) {
+    const args = m[1].split(' ').filter(Boolean);
+    const r = require('child_process').spawnSync(process.execPath, [fs.readFileSync(path.join(__dirname, 'cli'), 'utf8'), 'phone', ...args], { encoding: 'utf8', env: process.env, cwd: process.cwd(), timeout: 30000 });
+    const file = (/^screenshot: (.+)$/m.exec(r.stdout || '') || [])[1];
+    let shot = null;
+    if (file) { try { shot = { file, mode: fs.statSync(file).mode & 0o777, head: fs.readFileSync(file).subarray(0, 40).toString('latin1') }; } catch (e) { shot = { file, error: e.message }; } }
+    fs.mkdirSync(path.join(__dirname, 'phone'), { recursive: true });
+    fs.writeFileSync(path.join(__dirname, 'phone', String(Date.now()) + '-' + process.pid + '-' + (n++) + '.json'), JSON.stringify({ args, status: r.status, stdout: r.stdout, stderr: r.stderr, shot }));
+  }
   say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } });
   say({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: session, total_cost_usd: 0 });
 }
@@ -71,7 +85,8 @@ else if (pause) {
 
 /**
  * A temp workspace with the stand-in agent as its `claude`, and this process's env set to it. Call it before
- * runs.js is required. → {home, bin, calls() → [{argv, env, cwd, prompt, context, seen}], go(word)}
+ * runs.js is required. → {home, bin, calls() → [{argv, env, cwd, prompt, context, seen}], go(word),
+ * phoneCalls() → what its `trif phone` commands printed}
  */
 function standInAgent(prefix, extraEnv = {}) {
   const home = tempDir(prefix);
@@ -81,6 +96,7 @@ function standInAgent(prefix, extraEnv = {}) {
   fs.mkdirSync(path.join(home, 'sites'));
   fs.writeFileSync(path.join(bin, 'claude'), FAKE_CLAUDE);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
+  fs.writeFileSync(path.join(bin, 'cli'), path.join(__dirname, '..', 'helper', 'cli.js'));
   fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ env: { PATH: bin } }));
   const calls = () => {
     let names = [];
@@ -88,7 +104,12 @@ function standInAgent(prefix, extraEnv = {}) {
     return names.map((n) => JSON.parse(fs.readFileSync(path.join(bin, 'calls', n), 'utf8')));
   };
   const go = (word) => fs.writeFileSync(path.join(bin, `go-${word}`), '');
-  return { home, bin, calls, go };
+  const phoneCalls = () => {
+    let names = [];
+    try { names = fs.readdirSync(path.join(bin, 'phone')).sort(); } catch { return []; }
+    return names.map((n) => JSON.parse(fs.readFileSync(path.join(bin, 'phone', n), 'utf8')));
+  };
+  return { home, bin, calls, go, phoneCalls };
 }
 
 module.exports = { standInAgent, FAKE_CLAUDE };

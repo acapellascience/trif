@@ -146,7 +146,7 @@ Phone → computer:
 | `run.stop` | `runId` | `ok` (also for a run that has ended); `error` `no-run` |
 | `run.resume` | `runId`, `after` (the last event number seen; 0 or none: all of it) | `ok` `{runId, first, last, done}` (`first`: the oldest event still kept), then each `run.event` after `after`, then `run.result` if the run has ended; from then on this session gets the run's live events. `error` `no-run` |
 | `run.ack` | `runId` (of a run that has ended) | `ok`; the kept run is deleted (`ok` too when there is none) |
-| `tool.result` | `id` (the request's), `text`, `shot` (optional), `error` (true/false) | none |
+| `tool.result` | `id` (the request's), `text`, `shot` (JPEG or PNG, base64, optional), `error` (true: the phone couldn't do it; `text` says why) | none. Taken only from the session the request was sent to, once, within 60 seconds; anything else is dropped without an answer |
 | `ping` | | `pong` |
 
 Computer → phone:
@@ -155,7 +155,7 @@ Computer → phone:
 |---|---|
 | `run.event` | `runId`, `n` (counts from 1), `event`: the run's event exactly as the desktop panel gets it (`text`, `tool`, `error`, `session`, `sandbox`, `login`, `done`) |
 | `run.result` | `runId`, `mods`: `[{id, name, code}]` (the phone twin's files the run wrote or changed), `removed`: ids; sent after `done` |
-| `tool.request` | `id`, `runId`, `tool` (`read_page`, `try_mod`, `screenshot`), `input` (`{selector, limit}`, `{code}`, `{}`) |
+| `tool.request` | `id` (the computer's, random), `runId`, `tool` (`read_page`, `try_mod`, `screenshot`), `input` (`{selector, limit}`, both optional; `{id, code}`, the draft's mod id and its code; `{}`) |
 | `error` | `id`, `code`, `message` |
 
 `error.code`s the app shows as states: `busy` (a run is already working on that site, here or in the desktop
@@ -242,6 +242,16 @@ The record tells the Wi-Fi that this computer runs TRIF with the link on, and it
 
    Each waits up to 60 seconds. With no session (the app is suspended), or outside a remote run: an error that
    says so, and that the user will try the mod themselves when they're back.
+
+   How it is built: `cli.js` `phone` sends `remote.page`, `remote.try` or `remote.screenshot` through the run's
+   mailbox; host.js `onClientLine` hands them to `remoterun.js` `remoteCommand` (refused outside a remote run,
+   and in a helper that doesn't own the link), which calls `remote.js` `Remote.tool`. The request goes to the
+   session that follows the run (the one that started it, or last sent `run.resume`), and only that session's
+   `tool.result` is taken. The draft is read by the helper, not named by a path: a mod id of the run's own twin
+   (`readDraft`: `stage.js` `ownTwin`, the run's working copy, no link followed, 1 MB at most). A screenshot
+   that comes back is written to the run's screenshots folder (`phone-now-<run>-<n>.jpg`, mode 600, 30 at most
+   per run) and deleted when the run ends, as the page copy is. At most 4 requests wait for one run's phone.
+   The phone going away, the run ending, and the phone being removed each end a waiting command at once.
 5. **Events** go to the session as `run.event`, numbered (`remote.js`; host.js gives it every run's events and
    sends the side panel only the ones that aren't a phone's). The helper keeps each run's events and result in
    memory and in `<private>/phone-link/kept/<phone id>/<runId>.json` (mode 600, the folder 700) until the phone

@@ -23,10 +23,15 @@ const SHOT_MAX = 5 * 1024 * 1024; // bytes (as base64 it still fits one 8 MB mes
 // "..", no slash, no "~", no port, no IPv6 literal, nothing empty.
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
+// The commands behind `trif phone` (cli.js) and the phone's tool each one asks for (docs/PHONE-LINK.md section 4,
+// `tool.request`). They are a remote run's alone, answered by the phone it is for, never by the extension.
+const REMOTE_TOOLS = new Map([['remote.page', 'read_page'], ['remote.try', 'try_mod'], ['remote.screenshot', 'screenshot']]);
 // The helper's own commands a remote run may use (host.js onClientLine answers each itself, limited to the
-// run's site). Everything else would go to the extension, to a tab: refused. (Step 7 adds the commands behind
-// `trif phone`.)
-const REMOTE_COMMANDS = new Set(['ping', 'mods', 'mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
+// run's site). Everything else would go to the extension, to a tab: refused.
+const REMOTE_COMMANDS = new Set(['ping', 'mods', 'mod.delete', 'mod.restore', 'mod.code', 'mod.diff', ...REMOTE_TOOLS.keys()]);
+const DRAFT_MAX = 1024 * 1024; // (a draft's code, bytes: one mod, as remote.js sends one in a result)
+const SELECTOR_MAX = 500;
+const TOOL_SHOTS = 30; // (screenshots the phone sent back that one run keeps; the oldest goes)
 // Of those, the ones that change a mod: only one in the run's own phone twin (stage.js ownTwin). The rule for
 // a side-panel chat (trash.js checkScope) takes a phone twin's scope to cover its site's desktop folder too.
 const CHANGES_A_MOD = new Map([['mod.delete', 'delete'], ['mod.restore', 'restore']]);
@@ -131,10 +136,98 @@ function writeRemoteFiles(run) {
 function removeRemoteFiles(run) {
   const files = run.remote && run.remote.files;
   if (!files || !run.screenshotsReal) return;
-  for (const f of [files.page, files.shot]) {
+  for (const f of [files.page, files.shot, ...(files.tools || [])]) {
     if (f) { try { fs.unlinkSync(path.join(run.screenshotsReal, path.basename(f))); } catch { /* gone */ } }
   }
 }
+
+/**
+ * A screenshot the phone sent back for `trif phone try` or `trif phone screenshot` (a Buffer), written into the
+ * run's screenshots folder as writeRemoteFiles writes the first one. Returns the file as the agent names it, or
+ * null when it isn't a JPEG or a PNG. They go with the run (removeRemoteFiles), and before that when a run has
+ * more than TOOL_SHOTS of them.
+ */
+function writeToolShot(run, buf) {
+  const r = run.remote;
+  const kind = Buffer.isBuffer(buf) && buf.length <= SHOT_MAX ? imageKind(buf) : null;
+  if (!kind || !r || !r.files || !run.screenshotsReal) return null;
+  r.shots = (r.shots || 0) + 1;
+  const name = `phone-now-${run.id}-${r.shots}.${kind}`;
+  fs.writeFileSync(path.join(run.screenshotsReal, name), buf, { flag: 'wx', mode: 0o600 });
+  const tools = r.files.tools || (r.files.tools = []);
+  tools.push(path.join(run.screenshots, name));
+  while (tools.length > TOOL_SHOTS) { try { fs.unlinkSync(path.join(run.screenshotsReal, path.basename(tools.shift()))); } catch { /* gone */ } }
+  return tools[tools.length - 1];
+}
+
+/**
+ * The draft `trif phone try <mod>` sends to the phone: a mod of the run's own phone twin, read from the run's
+ * working copy (stage.js: what the agent has just saved, before any of it is in the mods folder). `id`:
+ * `<mod>` (the run's own twin) or `<twin>/<mod>`, with or without `sites/` before and `.js` after. Nothing
+ * else of it is a path: the folder must be the run's own twin (stage.js ownTwin), the name a file's name, and
+ * neither is read through a link. → {id, code}. Throws `bad-request`, `no-mod`, `too-big`.
+ */
+function readDraft(run, id) {
+  const said = (typeof id === 'string' ? id : '').trim().replace(/\\/g, '/').replace(/^(.*\/)?sites\//, '').replace(/\.js$/, '');
+  const parts = said.split('/');
+  const folder = parts.length === 2 ? parts[0] : run.scope;
+  const name = parts[parts.length - 1];
+  if (!said || parts.length > 2 || !/^[^._/\\][^/\\]*$/.test(name) || name.length > 200) throw fail('bad-request', 'usage: trif phone try <mod> (a mod of this run\'s phone twin, e.g. `trif phone try bottom-bar`)');
+  if (!ownTwin(folder, run.scope, run.splits || [])) throw fail('bad-request', `this run can try only phone mods of its own site (sites/${run.scope}/), not one in sites/${folder.slice(0, 120)}/`);
+  if (!run.stage || !run.stage.sites) throw fail('no-mod', 'this run has no working folder (any more)');
+  const dir = path.join(run.stage.sites, folder);
+  const missing = () => fail('no-mod', `there is no sites/${folder}/${name}.js in your working folder: save the draft there first (\`trif new ${folder} ${name}\`)`);
+  let code;
+  try {
+    if (!fs.lstatSync(dir).isDirectory()) throw missing();
+    const fd = fs.openSync(path.join(dir, `${name}.js`), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) throw missing();
+      if (st.size > DRAFT_MAX) throw fail('too-big', `sites/${folder}/${name}.js is over ${DRAFT_MAX / 1024 / 1024} MB: too big to send to the phone`);
+      code = fs.readFileSync(fd, 'utf8');
+    } finally { fs.closeSync(fd); }
+  } catch (e) {
+    if (e.code === 'no-mod' || e.code === 'too-big') throw e;
+    throw missing();
+  }
+  return { id: `${folder}/${name}`, code };
+}
+
+/**
+ * What a `trif phone` command asks the phone for: {tool, input}, as `tool.request` carries them. Throws
+ * `bad-request` (and readDraft's) for what the agent got wrong.
+ */
+function toolRequest(run, cmd, args = {}) {
+  const tool = REMOTE_TOOLS.get(cmd);
+  if (tool === 'read_page') {
+    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+    if (selector.length > SELECTOR_MAX) throw fail('bad-request', `the selector is over ${SELECTOR_MAX} characters`);
+    const limit = Number.isInteger(args.limit) && args.limit > 0 ? Math.min(args.limit, 200) : null;
+    return { tool, input: { ...(selector ? { selector } : {}), ...(limit ? { limit } : {}) } };
+  }
+  if (tool === 'try_mod') {
+    const draft = readDraft(run, args.id);
+    return { tool, input: { id: draft.id, code: draft.code } };
+  }
+  if (tool === 'screenshot') return { tool, input: {} };
+  throw fail('bad-request', 'not a phone command');
+}
+
+/**
+ * A `trif phone` command as the helper answers it (host.js onClientLine): null for any other command; else a
+ * promise of the phone's answer, {text, file (its screenshot, in the run's screenshots folder) | null, error}.
+ * `tool`: (run, cmd, args) → that promise, remote.js `Remote.tool`, in the helper that owns the phone link.
+ * Outside a remote run, and in a helper without the link, it is refused in words the agent can act on.
+ */
+function remoteCommand(run, cmd, args, tool) {
+  if (typeof cmd !== 'string' || !REMOTE_TOOLS.has(cmd)) return null;
+  if (!run || !run.remote) return Promise.reject(fail('not-remote', '`trif phone` reaches the page on the user\'s phone, in a run they started from the phone: this isn\'t one. Here the page is in a tab on this computer (trif text, trif screenshot, trif verify)'));
+  if (typeof tool !== 'function') return Promise.reject(fail('away', AWAY));
+  return new Promise((resolve) => { resolve(tool(run, cmd, args && typeof args === 'object' ? args : {})); });
+}
+// (what an agent is told when the phone can't be asked: finish without it, as its context says)
+const AWAY = 'the phone isn\'t connected right now (the user put it down, or closed TRIF there), so it can\'t show or try anything: finish from what you have, and say in your reply what you couldn\'t try. The user sees the mod when they\'re back';
 
 /** What the agent's context says of the run (agents/index.js contextText `remote`). */
 function remoteContext(run) {
@@ -157,4 +250,7 @@ function remoteRefusal(run, cmd, args = {}) {
   return `this run is for the user's phone: the page is open there, not in a tab on this computer, so "${String(cmd).slice(0, 40)}" isn't available in it. To reach the phone's page: \`trif phone page [selector]\`, \`trif phone try <mod>\`, \`trif phone screenshot\``;
 }
 
-module.exports = { remoteStart, remoteAddress, remoteScope, writeRemoteFiles, removeRemoteFiles, remoteContext, remoteRefusal, REMOTE_COMMANDS, PAGE_MAX, SHOT_MAX, PROMPT_MAX };
+module.exports = {
+  remoteStart, remoteAddress, remoteScope, writeRemoteFiles, removeRemoteFiles, remoteContext, remoteRefusal, remoteCommand, toolRequest, readDraft,
+  writeToolShot, imageKind, REMOTE_COMMANDS, REMOTE_TOOLS, AWAY, PAGE_MAX, SHOT_MAX, PROMPT_MAX, DRAFT_MAX, TOOL_SHOTS,
+};

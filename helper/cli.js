@@ -946,6 +946,37 @@ const handlers = {
     if (r.note) process.stderr.write(`note: ${r.note}\n`);
   },
 
+  // The page on the user's phone, for a run they started from the phone (the phone link, docs/PHONE-LINK.md
+  // section 6): the helper asks the phone and waits up to a minute for its answer.
+  async phone(ctx, pos) {
+    const what = String(pos[0] || '').toLowerCase();
+    const usage = 'usage: trif phone page [selector] [--limit N] | trif phone try <mod> | trif phone screenshot';
+    let cmd;
+    let args = {};
+    if (what === 'page') {
+      const selector = ctx.opts['--selector'] || pos.slice(1).join(' ');
+      const limit = ctx.opts['--limit'] !== undefined ? Number(ctx.opts['--limit']) : null;
+      if (limit !== null && !(Number.isInteger(limit) && limit > 0)) throw new UsageError('--limit takes a number of elements (1 to 200)');
+      cmd = 'remote.page';
+      args = { ...(selector ? { selector: String(selector) } : {}), ...(limit ? { limit } : {}) };
+    } else if (what === 'try') {
+      if (!pos[1] || pos.length > 2) throw new UsageError(usage);
+      cmd = 'remote.try';
+      args = { id: String(pos[1]) };
+    } else if (what === 'screenshot') {
+      cmd = 'remote.screenshot';
+    } else throw new UsageError(usage);
+    if (!envVar('RUN_TOKEN')) throw new UsageError('`trif phone` works inside a run the user started from their phone: it reaches the page that is open there. From a terminal there is no such page');
+    const r = (await ctx.call(cmd, args, 75000)) || {};
+    if (ctx.json) printJson({ text: r.text || '', file: r.file || null, error: !!r.error });
+    else {
+      if (r.text) out(r.text);
+      if (r.file) out(`screenshot: ${r.file}`);
+      if (!r.text && !r.file) out(r.error ? 'the phone couldn\'t do that (it gave no reason)' : 'done (the phone sent nothing back)');
+    }
+    if (r.error) process.exitCode = 1;
+  },
+
   async record(ctx, pos) {
     const site = normalizeSite(pos[0]);
     const mode = (pos[1] || 'on').toLowerCase();

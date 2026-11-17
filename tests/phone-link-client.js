@@ -7,6 +7,9 @@
 //   await phone.request({t: 'ping'})  → the message that repeats the request's id
 //   await phone.next((m) => …)        → the next message that fits (kept ones first)
 //   phone.send(obj), phone.close(), await phone.closed → {bytes} (how many bytes the computer ever sent)
+//   phone.onTool = (request) => ({text, shot, error}) | null    answers each `tool.request` (the app's read_page,
+//                                     try_mod, screenshot) with a `tool.result`; null: no answer. Every request
+//                                     is in phone.tools, answered or not
 //
 // connect() rejects with `e.code === 'closed'` and `e.bytes` when the computer closes before answering the
 // handshake (what an unpaired phone sees: bytes is 0), and with the socket's error when nothing listens.
@@ -25,6 +28,8 @@ class PhoneClient {
     this.kept = [];
     this.waiters = [];
     this.nextId = 1;
+    this.onTool = null;
+    this.tools = [];
     this.isClosed = false;
     this.closed = new Promise((resolve) => { this.resolveClosed = resolve; });
   }
@@ -74,6 +79,12 @@ class PhoneClient {
   }
 
   _got(msg) {
+    if (msg.t === 'tool.request' && this.onTool) {
+      this.tools.push(msg);
+      const answer = this.onTool(msg);
+      if (answer && !this.isClosed) this.send({ t: 'tool.result', id: msg.id, ...answer });
+      return;
+    }
     const i = this.waiters.findIndex((w) => w.fits(msg));
     if (i >= 0) this.waiters.splice(i, 1)[0].resolve(msg);
     else this.kept.push(msg);

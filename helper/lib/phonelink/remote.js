@@ -10,6 +10,8 @@
 //   run.resume  the kept events after a number, then the result if the run is over, then live ones.
 //   run.ack     the phone has the result: the kept run is deleted.
 //   run.stop    stops a run of the phone's own.
+//   tool.request / tool.result   the agent's `trif phone …` (Remote.tool): asked of the session that follows the
+//                 run, answered by that same session within a minute, or the command fails and says why.
 //
 // Kept: each run's events and result, in memory and in <private>/phone-link/kept/<phone id>/<runId>.json (mode
 // 600) until the phone acks it, 7 days at most after it ended; gone at once when the phone is removed (the
@@ -24,8 +26,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const P = require('../paths');
-const { remoteScope, SHOT_MAX } = require('./remoterun');
+const { remoteScope, toolRequest, writeToolShot, REMOTE_TOOLS, AWAY, SHOT_MAX } = require('./remoterun');
 const { ownTwin } = require('../stage');
 const { parseHeader } = require('../mods');
 const { splitsOf } = require('../sitecombos');
@@ -40,6 +43,9 @@ const RESULT_MAX = 6 * 1024 * 1024; // (a result's code together: it must fit on
 const FLUSH_MS = 1000; // (events are written to the kept file this long after the first unwritten one)
 const SESSIONS_PER_TWIN = 5;
 const SESSIONS_FILE = 'sessions.json';
+const TOOL_MS = 60 * 1000; // (how long the phone has to answer a tool.request)
+const TOOL_TEXT_MAX = 200 * 1000; // (characters of a tool.result's text the agent is given)
+const TOOLS_AT_ONCE = 4; // (tool requests waiting for one run's phone)
 
 const PHONE_ID = /^[0-9a-f]{16}$/;
 const RUN_ID = /^r[0-9a-z]{6,40}$/;
@@ -52,6 +58,8 @@ function fail(code, message) {
 }
 
 const word = (v, max) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, max) : '');
+// (a tool's answer: lines and tabs stay, other control characters go)
+const answerText = (v) => (typeof v === 'string' ? v.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, ' ').slice(0, TOOL_TEXT_MAX) : '');
 
 /** The phone's screenshot as it travels (base64 in the message) → a Buffer. Throws `bad-request`, `too-big`. */
 function decodeShot(v) {
@@ -113,7 +121,7 @@ class Remote {
    *   home: the workspace (or getWorkspace: () => {home, private, modsDir}).   log: (line) => void.
    *   agent: () => {id, name, model} | null, the computer's default agent: `id` and `model` start the run,
    *     the whole of it is `hello`'s `agent` (for the phone to show).
-   *   now, keepMs, flushMs: for tests.
+   *   now, keepMs, flushMs, toolMs: for tests.
    */
   constructor(store, server, runs, opts = {}) {
     this.store = store;
@@ -125,6 +133,8 @@ class Remote {
     this.now = typeof opts.now === 'function' ? opts.now : Date.now;
     this.keepMs = opts.keepMs || KEEP_MS;
     this.flushMs = opts.flushMs || FLUSH_MS;
+    this.toolMs = opts.toolMs || TOOL_MS;
+    this.tools = new Map(); // (tool.request id -> what waits for the phone's tool.result)
     this.records = new Map(); // runId -> record
     this.orphans = new Set(); // (run ids still going whose phone was removed: theirs no more, and never the panel's)
     this.started = false;
@@ -140,6 +150,7 @@ class Remote {
     this.server.handle('run.stop', (session, msg) => this._stop(session, msg));
     this.server.handle('run.resume', (session, msg) => this._resume(session, msg));
     this.server.handle('run.ack', (session, msg) => this._ack(session, msg));
+    this.server.handle('tool.result', (session, msg) => this._toolResult(session, msg));
     this.store.on('change', this.onChange);
     try { this._load(); } catch (e) { this.log(`phone link: couldn't read the kept runs (${e.message})`); }
     return this;
@@ -150,8 +161,9 @@ class Remote {
     if (!this.started) return;
     this.started = false;
     this.store.removeListener('change', this.onChange);
-    for (const t of ['run.start', 'run.stop', 'run.resume', 'run.ack']) this.server.handlers.delete(t);
+    for (const t of ['run.start', 'run.stop', 'run.resume', 'run.ack', 'tool.result']) this.server.handlers.delete(t);
     this.server.helloMore = () => ({});
+    for (const p of [...this.tools.values()]) p.fail(fail('away', AWAY));
     for (const rec of this.records.values()) { if (rec.timer) this._write(rec); rec.session = null; }
   }
 
@@ -187,6 +199,62 @@ class Remote {
     this._send(rec, { t: 'run.event', runId, n: item.n, event });
     if (rec.done) this._sendResult(rec);
     return true;
+  }
+
+  /**
+   * A `trif phone` command of a phone run's agent (remoterun.js remoteCommand; `run`: the helper's live run,
+   * found by its token): asks the phone that follows the run and resolves with its answer, {text, file (the
+   * screenshot it sent, in the run's screenshots folder) | null, error (the phone couldn't do it)}. Rejects,
+   * in words for the agent, when the run isn't a phone's, when no session follows it (the app is closed or
+   * asleep), when the phone goes away or the run ends meanwhile, and after a minute without an answer.
+   */
+  tool(run, cmd, args) {
+    return new Promise((resolve, reject) => {
+      const rec = run && run.remote ? this.records.get(run.id) : null;
+      if (!rec || rec.done || rec.phone !== run.remote.phone.id || !REMOTE_TOOLS.has(cmd)) throw fail('not-remote', 'this isn\'t a run for a phone (any more)');
+      const { tool, input } = toolRequest(run, cmd, args);
+      const session = rec.session;
+      if (!session || !session.open) { rec.session = null; throw fail('away', AWAY); }
+      if ([...this.tools.values()].filter((p) => p.rec === rec).length >= TOOLS_AT_ONCE) throw fail('busy', 'the phone is still answering your earlier `trif phone` commands: wait for them');
+      const id = `t${crypto.randomBytes(8).toString('hex')}`;
+      const settle = (fn, v) => {
+        if (!this.tools.delete(id)) return;
+        clearTimeout(p.timer);
+        session.removeListener('close', p.gone);
+        fn(v);
+      };
+      const p = {
+        rec, run, session,
+        done: (v) => settle(resolve, v),
+        fail: (e) => settle(reject, e),
+        gone: () => p.fail(fail('away', `the phone went away before it answered: ${AWAY}`)),
+        timer: setTimeout(() => p.fail(fail('timeout', `the phone didn't answer in ${Math.round(this.toolMs / 1000)} seconds (the page there may be busy, or the user put the phone down): try once more, then finish from what you have and say what you couldn't try`)), this.toolMs),
+      };
+      if (p.timer.unref) p.timer.unref();
+      this.tools.set(id, p);
+      session.once('close', p.gone);
+      let sent = false;
+      try { sent = session.send({ t: 'tool.request', id, runId: rec.runId, tool, input }); } catch (e) { p.fail(fail('too-big', `couldn't send that to the phone (${e.message})`)); return; }
+      if (!sent) p.fail(fail('away', AWAY));
+    });
+  }
+
+  // The phone's answer to a tool.request: taken only from the session it was sent to. Anything else (an id
+  // this computer never made, another phone's, a second answer) is dropped without a word.
+  _toolResult(session, msg) {
+    const p = typeof msg.id === 'string' ? this.tools.get(msg.id) : null;
+    if (!p || p.session !== session) return;
+    let text = answerText(msg.text);
+    let file = null;
+    if (msg.shot !== undefined && msg.shot !== null) {
+      try { file = writeToolShot(p.run, decodeShot(msg.shot)); } catch { file = null; }
+      if (!file) text += `${text ? '\n' : ''}(the phone sent a screenshot that isn't a JPEG or a PNG: not saved)`;
+    }
+    p.done({ text, file, error: msg.error === true });
+  }
+
+  _toolsOver(rec, why) {
+    for (const p of [...this.tools.values()]) { if (p.rec === rec) p.fail(fail('away', why)); }
   }
 
   // ------------------------------------------------------------ what a session asks
@@ -280,6 +348,7 @@ class Remote {
 
   _done(rec, event) {
     rec.done = true;
+    this._toolsOver(rec, 'the run ended before the phone answered');
     rec.endedAt = this.now();
     rec.sessionId = typeof event.sessionId === 'string' && event.sessionId ? event.sessionId : null;
     try { rec.result = resultOf(this.getWorkspace(), rec.scope, rec.splits, event.changedFiles); } catch (e) {
@@ -331,6 +400,7 @@ class Remote {
   }
 
   _forget(rec) {
+    this._toolsOver(rec, 'this run isn\'t the phone\'s any more');
     clearTimeout(rec.timer);
     rec.timer = null;
     rec.session = null;

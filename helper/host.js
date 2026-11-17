@@ -25,7 +25,7 @@ const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
 const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
-const { remoteRefusal } = require('./lib/phonelink/remoterun');
+const { remoteRefusal, remoteCommand } = require('./lib/phonelink/remoterun');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
@@ -1346,6 +1346,9 @@ function helperInfo() {
   };
 }
 
+// The phone link's Remote.tool, in the helper that owns the link (set where the link is started); null without it.
+let remoteTool = null;
+
 function onClientLine(sock, line) {
   let req;
   try { req = JSON.parse(line); } catch (e) {
@@ -1378,6 +1381,13 @@ function onClientLine(sock, line) {
     args.scope = run.scope;
     args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
+  }
+  // `trif phone …`: a phone run's way to the page on its phone, answered by the phone link (phonelink/remote.js
+  // Remote.tool, when this helper owns the link: `remoteTool`), never by the extension. Refused for anyone else.
+  const viaPhone = remoteCommand(run, cmd, args, remoteTool);
+  if (viaPhone) {
+    viaPhone.then((result) => reply(sock, { id, ok: true, result }), (e) => reply(sock, { id, ok: false, error: e.message }));
+    return;
   }
 
   // (an extension from before `run` could use the box would run box code in the page's own world: say so)

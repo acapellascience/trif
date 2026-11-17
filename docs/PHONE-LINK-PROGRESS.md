@@ -21,7 +21,7 @@ Computer side:
       stand-in model; the folder limit proven (nothing written outside `sites/phone~<host>/`)
 - [x] 6b. `remote.js`: `run.start` over a session, events numbered, kept results, `run.resume`/`run.ack`,
       `run.result`, kept results deleted when the phone is removed
-- [ ] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
+- [x] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
 - [ ] 8. `host.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
 - [ ] 9. Desktop panel: Connect a phone (QR encoder in the extension, the list, Remove, the switch), strings
 - [ ] 10. End to end: `tests/phone-link-client.js` (a stand-in phone) against the real helper in a temp HOME, the
@@ -37,24 +37,28 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 6, 2026-11-16)
+## Done this round (round 7, 2026-11-16)
 
-- Built step 6b: `helper/lib/phonelink/remote.js`, class `Remote(store, server, runs, {home, log, agent})`:
-  `run.start` → `runs.startRemote` → `run.started`; every event numbered and sent as `run.event` to the session
-  that started the run or last resumed it; `run.result` after `done` (the run's own twin's `.js` files from
-  `done.changedFiles`, read without following a link); `run.resume`, `run.ack`, `run.stop`; `hello`'s `agent`
-  and `pending`. Kept in `<private>/phone-link/kept/<phone id>/<runId>.json` (600, folder 700), 7 days at most,
-  deleted on ack and when the phone is removed (its run still going is stopped).
-- A phone reaches only its own runs (another phone's run id is answered as `no-run`, the same as none); a
-  `session` is taken only if a run of the same phone in the same twin ended with it (`sessions.json`).
-- host.js is not touched (step 8 wires it): nothing can start a remote run outside a test yet.
-- `tests/phone-link-remote.test.js`: 8 tests, the real Store, Server, Runs and Remote in-process on 127.0.0.1
-  with the stand-in phone and agent. The stand-in agent moved to `tests/phone-link-agent.js` (shared with the
-  run test). All phone-link tests plus stage, phone, run-folders, codex-sandbox and agents: 175 pass locally
-  (43 s). CI green for 71fe8e8 on the first attempt (the commit before it failed: see CI below).
+- Built step 7, the try-on-the-phone round trip. `trif phone page [selector] [--limit N] | try <mod> |
+  screenshot` (cli.js, help.js) → `remote.page|try|screenshot` through the run's mailbox → host.js
+  `onClientLine` → `remoterun.js` `remoteCommand` → `remote.js` `Remote.tool(run, cmd, args)` → `tool.request`
+  on the session that follows the run → the phone's `tool.result` → what the command prints.
+- The draft for `try` is read by the helper from the run's working copy by mod id (`readDraft`: own twin only,
+  no link followed, 1 MB). A screenshot that comes back is a file of the run's (`phone-now-<run>-<n>.jpg|png`,
+  600, 30 at most), deleted with the run. Only the session that was asked can answer, once, within 60 s.
+  No session, the phone going away, the run ending, the phone removed: each fails the command at once, in
+  words for the agent.
+- host.js has `let remoteTool = null` (step 8 sets it): until then a phone run's `trif phone` answers "the
+  phone isn't connected", and everyone else's is refused by the helper; nothing of it reaches the extension.
+- AGENTS.md "Phone runs" (named in the run's context), `trif help phone`, PHONE-LINK.md sections 4 and 6.
+- `tests/phone-link-tool.test.js`: 9 tests (the stand-in agent runs the real cli.js; one against the real
+  host.js with a fake extension). `npm test` locally: see CI below.
 
 ## Earlier rounds
 
+- Round 6: step 6b, `remote.js` (class `Remote`: `run.start`, numbered `run.event`s, `run.result` from the
+  run's own twin, `run.resume`/`run.ack`/`run.stop`, kept runs in `<private>/phone-link/kept/`, a phone's own
+  runs only, deleted with the phone), 8 tests. CI green for 71fe8e8 on the first attempt.
 - Round 5: step 6a, `Runs.startRemote` and `phonelink/remoterun.js` (the site made from the page address, the
   stage's `twinOnly`, `remoteRefusal`, never without the sandbox), 10 tests. CI green for a6878b0 on the first
   attempt.
@@ -99,25 +103,49 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 7: `trif phone page|try|screenshot`. Three parts, in this order: (1) `remote.js`: `remote.tool(run, tool,
-input)` → a promise: sends `tool.request {id, runId, tool, input}` to the run's record's live session
-(`rec.session`), waits up to 60 s for the phone's `tool.result {id, text, shot, error}` (a handler on the
-server; only from the session of the run's own phone; the `id` is the helper's, random), and fails at once with
-a clear text when there is no session (the app is suspended) or the run isn't a phone's; a `shot` (base64, the
-same check as `decodeShot`) is written to the run's screenshots folder as `writeRemoteFiles` does and its path
-is in the answer. (2) cli.js `trif phone page [selector] | try <mod> | screenshot` → the commands `remote.page`,
-`remote.try`, `remote.screenshot`; add them to `REMOTE_COMMANDS` in remoterun.js; `remote.try` reads the draft
-from the run's staged twin (the run's working copy, `run.stage`, own twin only, never a path of the agent's
-choosing beyond a mod id). (3) host.js `onClientLine`: answer the three for a remote run from `remote.tool`,
-before the extension fallthrough; for any other run they are refused ("not a run for a phone"). Since host.js
-has no `Remote` before step 8, part 3 may take a `remoteTool` function that step 8 sets; test parts 1 and 2 with
-the stand-in phone answering `tool.request` (add `phone.onTool` to `tests/phone-link-client.js`) and the stand-in
-agent (a new word, `TRY`, that runs `trif phone try` through its mailbox: see how `tests/agents.test.js` or
-`tests/run-folders.test.js` has a stand-in call `trif`). Then AGENTS.md "Phone runs" and its name in
-`remoteContextText`. Don't start step 8 in the same round.
+Step 8: host.js owns the link. In this order: (1) read host.js around `listen()` (line ~1220) and how
+`helper.sock` changes hands between helpers: the helper that owns `helper.sock` makes the `Store`, the
+`Server`, the `Announcer` and the `Remote` (`agent:` the default agent as the panel would choose it), starts
+them (`server.start()` binds nothing while the link is off), sets `remoteTool = (run, cmd, args) =>
+remote.tool(run, cmd, args)`, and stops them in `shutdown()` (`remote.stop()` after `runs.stopAll()`,
+`announcer.stop()`, `server.stop()`); a helper that loses or never had `helper.sock` has none of it. (2)
+`onAgentEvent`: `if (remote && remote.onEvent(runId, event))` → not sent to the extension, but the `done`
+handling there (`syncMods`, `held`) stays. (3) The panel's commands, in `PANEL_COMMANDS` (the side panel's
+connection only, never the socket, never a run): `phone.status` (the store's `status()`, the announcer's
+`error`), `phone.on`, `phone.off`, `phone.pair.start` (→ `{qr, expires}`; the secret only inside `qr`),
+`phone.pair.stop`, `phone.remove {id}`; and a `phoneLink` message to the extension when the store changes.
+(4) `testEnv` in tests/fake-extension.js gets `TRIF_DNS_SD` pointing at a stand-in (move `makeStandIn` from
+the bonjour test to a shared file), so no host test can announce on the Wi-Fi; the listener in host tests must
+bind 127.0.0.1 (an env for tests only, e.g. `TRIF_PHONE_LINK_HOST`, or the store's port 0 plus a host
+option). Tests: a host test with the fake extension: off by default (nothing listens: check the port file /
+`phone.status`), `phone.on` from the socket refused, from the extension it listens, pair with the stand-in
+phone, `phone.remove`, a second helper doesn't bind. Don't start step 9 (the panel's UI) in the same round.
 
 ## Notes for next round
 
+- Step 7's API. `remote.tool(run, cmd, args)` → a promise of `{text, file | null, error}` (`run`: the helper's
+  live run, from `runs.byToken`; rejects with `e.code` `not-remote`, `away`, `timeout`, `busy`, `bad-request`,
+  `no-mod`, `too-big`; the message is for the agent). `remote.tools` (id → waiting request), `remote.toolMs`
+  (a test may lower it). remoterun.js: `REMOTE_TOOLS` (command → the phone's tool), `remoteCommand(run, cmd,
+  args, tool)` → null (not a `trif phone` command) or a promise (host.js replies with it), `toolRequest`,
+  `readDraft(run, id)` → `{id, code}`, `writeToolShot(run, buf)` → the file or null, `AWAY` (the text).
+- `try_mod`'s `input` is `{id, code}` (the id for the app to name the draft; PHONE-LINK.md's table says so).
+  For step 14: the app answers `tool.result {id, text, shot, error}`; `error: true` makes the agent's command
+  exit 1 with `text` on stdout; a `shot` that isn't a JPEG or PNG is dropped with a line saying so.
+- The stand-in agent has `PHONE[<args>]` (runs the real `trif phone <args>` through the mailbox, in order;
+  `phoneCalls()` → `[{args, status, stdout, stderr, shot}]`), and the stand-in phone `phone.onTool = (request)
+  => ({text, shot, error}) | null` with every request in `phone.tools`. In a test, the Runs' `onRequest` must
+  answer the mailbox as host.js does: copy it from `tests/phone-link-tool.test.js` (step 10 uses the real
+  host.js instead). `WRITE` writes the same files every time: a second `WRITE` run on a site changes nothing,
+  so its result has no mods (use a site no run has written for). Test: `node --test
+  tests/phone-link-tool.test.js` (4 s).
+- A JS regex inside the stand-in agent's template needs its backslashes doubled (`\\[`): round 7 lost a run to
+  `/PHONE[…]/` there; the run's first event carries the agent's syntax error.
+- **The phone view's scoping fix (For Tim item 7) is done on branch `phone-view-scope`** (commits a3c92f1,
+  39c219c; it also fixes the `window.__ask is not a function` flake in tests/phone-pages.js). It is not on
+  main yet and waits for Tim: don't merge it here. Once it is merged (main, then here), a phone run's delete
+  starts working: `trif delete` and a file the run deletes in its own twin, and `run.result`'s `removed`
+  gets real entries; step 10's end-to-end test should then use the stand-in agent's `DELETE`.
 - Step 6b's API: `new Remote(store, server, runs, {home | getWorkspace, log, agent: () => ({id, name, model}) |
   null, now, keepMs, flushMs})`; `start()` (registers `run.start|stop|resume|ack` on the server, sets
   `server.helloMore`, follows the store, reads the kept folder; returns the Remote), `stop()` (writes what isn't
@@ -275,9 +303,9 @@ small, also a default unless Tim objects:
    new Mac restored without it), turning the link on makes a new key, and the phones listed before are removed
    from the list, since they can't reach the new key and must scan a new code anyway.
 
-Item 6 stands as the default (the main session's brief, round 6). Item 7 is being fixed by a separate agent on
-a branch from main; until it is merged here a phone run can't delete a phone mod (the notes above), which
-fails closed and needs no decision.
+Item 6 stands as the default (the main session's brief, round 6). Item 7 is fixed on branch
+`phone-view-scope` (a3c92f1, 39c219c), not on main yet, waiting for Tim: until it is merged here a phone run
+can't delete a phone mod (the notes above), which fails closed and needs no decision.
 
 New in round 6, small, defaults unless Tim objects:
 

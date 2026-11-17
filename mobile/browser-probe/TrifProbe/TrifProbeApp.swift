@@ -296,10 +296,23 @@ struct ContentView: View {
         let _ = Diagnostics.shared.bodyRan("the browser's main view")
         page
         .onChange(of: coverNames, initial: true) { _, now in ContentView.coversNow = now }
-        .onChange(of: phase) { _, p in
+        .onChange(of: phase) { was, p in
             // (safe mode: the record is unclean only while the app is in front; Safety follows UIKit's own notices too)
             browser.safety.active(p == .active)
-            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot(nil, "the app left the front") } }
+            // (inactive on the way in too, from the background: "left the front" only on the way out; 11-17, Tim's
+            // diagnostics read as if the app had left three times)
+            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot(nil, was == .active ? "the app left the front" : "the app is coming to the front") } }
+        }
+        // (a link UIKit handed over that onOpenURL never brought: opened once the app has been in front 2 s)
+        .onChange(of: phase, initial: true) { _, p in
+            guard p == .active, PendingLink.url != nil else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let u = PendingLink.url, phase == .active else { return }
+                PendingLink.url = nil
+                Diagnostics.shared.log("link", "onOpenURL never brought the link (\(Int(Date().timeIntervalSince(PendingLink.since))) s since it came): opened now")
+                openLink(u)
+            }
         }
 
         .alert(item: $safety.offer) { o in
@@ -638,6 +651,8 @@ struct ContentView: View {
     }
     /// A link the app was opened with: a file to import, a mod's trif://add, a Home Screen icon's trif://open.
     private func openLink(_ url: URL) {
+        PendingLink.take(url)
+        if TrifLink.target(url) != nil { Diagnostics.shared.log("icon", "the app takes \(PendingLink.describe(url)), over: \(coverNames)") }
         if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
         else if url.host?.lowercased() == "add", url.scheme?.lowercased() == "trif" {
             // (a mod in a link: a QR code's, from desktop TRIF; offered like any other)

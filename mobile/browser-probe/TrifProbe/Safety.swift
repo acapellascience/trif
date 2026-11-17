@@ -192,6 +192,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions { [] }
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         if options.shortcutItem?.type == AppDelegate.pauseShortcut { ModStore.pauseFromShortcut() }
+        // (a launch by a link, a Home Screen icon's: logged and kept as UIKit hands it over, WebClip.swift PendingLink)
+        if let url = options.urlContexts.first?.url { MainActor.assumeIsolated { PendingLink.came(url, "the app was launched by a link") } }
         let c = UISceneConfiguration(name: nil, sessionRole: session.role)
         c.delegateClass = SceneDelegate.self
         return c
@@ -199,6 +201,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 }
 
 final class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    /// A link while the app runs (SwiftUI's onOpenURL gets it too): logged and kept (PendingLink).
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        if let url = URLContexts.first?.url { MainActor.assumeIsolated { PendingLink.came(url, "a link came in") } }
+    }
+
     func windowScene(_ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem, completionHandler: @escaping (Bool) -> Void) {
         if shortcutItem.type == AppDelegate.pauseShortcut { ModStore.pauseFromShortcut() }
         completionHandler(true)

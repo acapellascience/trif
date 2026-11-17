@@ -39,6 +39,40 @@ enum TrifLink {
     }
 }
 
+/// A link as UIKit hands it to the scene, before SwiftUI's onOpenURL (Tim, 11-17: a YouTube icon tapped at a cold
+/// launch left no line at all in the diagnostics, so whether the link ever came couldn't be told). Each one is logged
+/// here and kept until ContentView.openLink takes it; one still waiting 2 s after the app comes to the front is opened
+/// then (onOpenURL never came with it).
+@MainActor
+enum PendingLink {
+    static var url: URL?
+    static var since = Date()
+    /// The last link ContentView.openLink took, and when: UIKit's openURLContexts can come just after onOpenURL.
+    static var taken: (URL, Date)?
+    static func came(_ link: URL, _ how: String) {
+        if let (u, at) = taken, u == link, Date().timeIntervalSince(at) < 5 {
+            Diagnostics.shared.log("link", "\(how) (already taken): \(describe(link))")
+            return
+        }
+        url = link
+        since = Date()
+        Diagnostics.shared.log("link", "\(how): \(describe(link))")
+    }
+    static func take(_ link: URL) {
+        if url == link { url = nil }
+        taken = (link, Date())
+    }
+    /// What a link is, without its whole text: an icon's site and kind, a mod's code, a file.
+    static func describe(_ link: URL) -> String {
+        if link.isFileURL { return "a file (\(link.pathExtension))" }
+        guard link.scheme?.lowercased() == "trif" else { return "a \(link.scheme ?? "?"): link" }
+        if link.host?.lowercased() == "add" { return "a mod's trif://add link" }
+        guard let site = TrifLink.target(link) else { return "a trif:// link that isn't an http(s) site" }
+        let set = TrifLink.set(link)
+        return "a Home Screen icon's link to \(Diagnostics.place(site))\(TrifLink.wantsFullScreen(link) ? "" : " (an older icon, not full screen)")\(set.map { ", from the profile of several icons \($0)" } ?? "")"
+    }
+}
+
 extension TrifLink {
     /// The link asks for full screen (app=1: the name the icons made since 11-16 have).
     static func wantsFullScreen(_ url: URL) -> Bool {
@@ -54,38 +88,60 @@ extension Browser {
     func openFullScreen(_ target: URL) {
         let site = Site.of(target.host ?? "")
         var map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
-        if let id = map[site].flatMap(UUID.init(uuidString:)), let t = tabs.first(where: { $0.id == id }) {
+        let mapped = map[site].flatMap(UUID.init(uuidString:)).flatMap { id in tabs.first { $0.id == id } }
+        // (its own tab only while it's still on the icon's site: a search typed there, or a link to another site,
+        // made it an ordinary tab, kept as it is; before 11-17 the icon went back to it wherever it had gone, which
+        // was Tim's YouTube icon opening his Google search. A tab whose address was never kept, blank, takes the
+        // icon's address.)
+        let place = mapped.map { Site.of($0.host) }
+        let why: String
+        if let t = mapped, place == site {
             let was = fullScreenTabs.contains(t.id)
             if t !== current { select(t) }
-            report.log("icon", "opened \(site) from its icon: its own tab, \(was ? "already in full screen" : "back to full screen")")
+            why = "its own tab (\(Diagnostics.place(t.url ?? t.savedURL))), \(was ? "already in full screen" : "back to full screen")"
+        } else if let t = mapped, place?.isEmpty ?? true {
+            if t !== current { select(t) }
+            t.savedURL = target
+            go(target.absoluteString)
+            why = "its own tab, which was blank: its address loaded there"
         } else {
             newTab(target.absoluteString)
+            current.savedURL = target // (kept as its address even if the app ends before the page answers)
             map[site] = current.id.uuidString
             UserDefaults.standard.set(map, forKey: "iconTabs")
-            report.log("icon", "opened \(site) from its icon: a new tab of its own, in full screen")
+            why = mapped == nil ? "a new tab of its own (none open)" : "a new tab of its own: its tab had gone to \(place ?? "-"), left as it is"
         }
+        saveTabs()
         setFullScreen(true, note: false)
+        report.log("icon", "opened \(site) from its icon: \(why)")
+        Diagnostics.shared.log("icon", "opened \(site) from its Home Screen icon: \(why); \(tabs.count) tabs")
     }
 
     /// Opened from a site's Home Screen icon: its tab if one is open on that site (as an app comes back where it
     /// was), else a new tab there.
     func openFromIcon(_ target: URL) {
         let site = Site.of(target.host ?? "")
+        let why: String
         if let t = (current.map { [$0] } ?? []).filter({ Site.of($0.host) == site }).first ?? tabs.first(where: { Site.of($0.host) == site }) {
             if t !== current { select(t) }
-            report.log("icon", "opened \(site) from its Home Screen icon: its tab")
+            why = "a tab on it (\(Diagnostics.place(t.url ?? t.savedURL)))"
         } else {
             newTab(target.absoluteString)
-            report.log("icon", "opened \(site) from its Home Screen icon: a new tab")
+            current.savedURL = target
+            saveTabs()
+            why = "a new tab (none on it)"
         }
+        report.log("icon", "opened \(site) from its Home Screen icon: \(why)")
+        Diagnostics.shared.log("icon", "opened \(site) from an older Home Screen icon (made before full screen icons): \(why); \(tabs.count) tabs")
     }
 }
 
 extension Model {
     /// (development) {"iconcheck": "https://…/"}: that site's Home Screen icon link opened from each state the app can
     /// be in while in front (no tab of its own yet; its tab in or out of full screen; another tab in front; the tabs,
-    /// the chat, More's settings, the address screen, the Mods tab, history over the page), as the icon opens it;
-    /// each must end on the icon's own tab, in full screen, nothing over it. One
+    /// the chat, More's settings, the address screen, the Mods tab, history over the page; its tab gone to another
+    /// site, in front or not; its tab blank), as the icon opens it; each must end on the icon's own tab, on its site,
+    /// in full screen, nothing over it, a tab that went to another site left there. One
     /// line a state, PASS or FAIL. Through onOpenURL's own handler (ContentView.openForCheck): the app opening its own
     /// scheme asks "Open in …?" first. A cold launch and the app in the background need `simctl openurl` (notes).
     static func iconCheck(browser: Browser, site: URL) async -> String {
@@ -97,12 +153,25 @@ extension Model {
         }
         var lines: [String] = [], made: [Tab] = []
         func other() { browser.newTab(PageSchemeHandler.home + "plain.html"); made.append(browser.current) }
-        func tap(_ name: String) async {
-            let before = "\(browser.current === own() ? "its tab" : "another tab"), full screen \(browser.fullScreen), covers \(ContentView.coversNow)"
+        // (`keep`: a tab that was its own and went to another site, which must be left there as it is)
+        func tap(_ name: String, keep: Tab? = nil) async {
+            let before = "\(browser.current === own() ? "its tab" : "another tab") on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow)"
             ContentView.openForCheck?(link)
             await wait(1.5)
-            let ok = own() != nil && browser.current === own() && browser.fullScreen && ContentView.coversNow == "none"
-            lines.append("\(ok ? "PASS" : "FAIL") \(name) (was: \(before)) → on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow)")
+            let kept = keep.map { k in browser.tabs.contains { $0 === k } && Site.of(k.host) != host && k !== browser.current } ?? true
+            let ok = own() != nil && browser.current === own() && Site.of(browser.current?.host ?? "") == host && browser.fullScreen && ContentView.coversNow == "none" && kept
+            lines.append("\(ok ? "PASS" : "FAIL") \(name) (was: \(before)) → on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow)\(keep == nil ? "" : kept ? ", the strayed tab left as it was" : ", the strayed tab NOT left as it was")")
+        }
+        // (its own tab sent to another site, as a search typed in it or a link out does: Tim, 11-17, his YouTube icon
+        // opened his Google search, the icon's old tab)
+        func stray() async -> Tab? {
+            guard let t = own() else { return nil }
+            if t !== browser.current { browser.select(t) }
+            browser.setFullScreen(false, note: false)
+            browser.go(PageSchemeHandler.home + "plain.html")
+            await wait(1.5)
+            made.append(t)
+            return t
         }
         // (no tab of its own: the map's entry dropped, so the icon makes one)
         var map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
@@ -124,7 +193,19 @@ extension Model {
             await tap("another tab in front\(cover.isEmpty ? "" : ", \(cover) over it"), its tab in TRIF view")
             if cover == "more" { Model.pane?.choose(more: wasMore) }
         }
-        for t in made where browser.tabs.contains(where: { $0 === t }) { browser.close(t) }
+        let strayed = await stray()
+        await tap("its tab gone to another site and in front (a search typed in it)", keep: strayed)
+        let strayed2 = await stray()
+        other()
+        await tap("its tab gone to another site, another tab in front", keep: strayed2)
+        // (its own tab blank: its address never kept, as when the app ended before a new tab's page answered)
+        browser.newTab()
+        map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
+        map[host] = browser.current.id.uuidString
+        UserDefaults.standard.set(map, forKey: "iconTabs")
+        await wait(1.2)
+        await tap("its tab blank (no address kept), the address screen over it")
+        for t in made where browser.tabs.contains(where: { $0 === t }) && t !== own() { browser.close(t) }
         return lines.joined(separator: "\n")
     }
 }

@@ -336,7 +336,11 @@ the Simulator. `-exitbelow`: the spot before, at the top right 60 points down.
 `trif://open?url=…&app=1`, what Home Screen icons made from 11-16 open, always lands on that site's own tab in full
 screen, whatever it was left in and whatever was open (the tabs, the chat, More, the address screen, the Mods tab,
 history and other sheets close; an Add this mod? stays, as it waits for an OK); each icon's site keeps its own tab
-(`iconTabs`). TRIF's own icon opens it as it was left. A tapped link to another site, or a window the page opens, goes to a new tab
+(`iconTabs`) while that tab stays on the site: once it has gone elsewhere (a search typed in it, a link out) it's left as
+an ordinary tab and the icon makes a new one of its own (11-17: Tim's YouTube icon kept opening his Google search, its
+old tab); a blank own tab takes the icon's address. Every icon link writes Diagnostics lines (kind `link`: the link
+as UIKit handed it over, at launch or later; kind `icon`: taken, and the tab chosen and why), and a link UIKit handed
+over that onOpenURL never brought is opened 2 s after the app comes to the front. TRIF's own icon opens it as it was left. A tapped link to another site, or a window the page opens, goes to a new tab
 in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen`, `resethint`, `view` (the
 tab's site, full screen, what covers it) and `iconcheck` (the icon from every in-app state, PASS/FAIL).)
 

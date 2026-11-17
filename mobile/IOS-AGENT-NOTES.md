@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (266 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (267 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -31,7 +31,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `Model.step`): go, newtab, select, sheet ("chat" opens the robot view), chat, closechat, newchat, chats, showchat,
   service ("Claude"/"ChatGPT"), more (true/false), panejs (JS in the shown chat page), paneljs (JS in More's panel),
   panego, offer/cancelOffer/addOffer, status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve,
-  view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 11 in-app states, PASS/FAIL lines;
+  view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 15 in-app states, PASS/FAIL lines (since 11-17 also: its tab gone to
+  another site, in front or not, and its tab blank; PASS needs the icon's site shown);
   regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`),
   playcheck ("http://…": a page with a <video>/<audio>; ~75 s of PASS/FAIL: a playing background tab is kept past
   20 s and a memory warning, let go once paused; a same-page quiet tab is let go), iconprofile ({"outline", "swatch" 0-5, "badge", "name", "noise"}: the shown
@@ -115,6 +116,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   blocks, never attached files.
 - No private APIs or tokens for the chat sites. The one private call kept: WebKit's `_flushCookiesToDisk`, with the
   public fallback behind `-publicflush`.
+- An icon's own tab (`iconTabs`) counts only while it's on the icon's site (11-17: Tim's YouTube icon opened his Google
+  search, typed in its old tab): off-site it's left as it is and the icon makes a new own tab; a blank one takes the
+  icon's address. Icon links log Diagnostics lines `link` (as UIKit hands them over: AppDelegate
+  configurationForConnecting at launch, SceneDelegate openURLContexts later, which comes just AFTER onOpenURL) and
+  `icon` (taken, the tab and why); PendingLink opens one onOpenURL never brought, 2 s after coming to the front.
 - Full screen: per tab, remembered; the two-finger hold (0.6 s, each finger still) toggles it either way at once, with
   a fading note; ⋯ → Full screen names the hold; a faint exit button at the top right 60 pt down (bright 3 s on entry and
   on scroll-up), hideable in ⋯. A Home Screen icon (`app=1`) ALWAYS lands on its site's own tab in full screen (Tim
@@ -179,6 +185,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   sideloaded build.
 - Exit button placement checked only on logged-out X and Instagram. Three chat pages' memory on the SE.
 - Permission strings still await Tim.
+- Tim's icon report (11-17): the cause found in the Simulator is the icon's old tab gone to Google; his log can't prove
+  it (icon lines went only to report.json then). If it recurs, the new `link`/`icon` lines say whether the link came
+  at all. The real Web Clip path (tap → web app shell → trif://) works cold and warm in the Simulator (26.3) only.
 - Safe mode's banner (mods switched off) lives in the bars, so a tab in full screen (an icon launch) doesn't show it;
   only the Mods tab lists them. Icons made before `app=1` (early 11-16) open in TRIF view: re-add them.
 - Background play never tried on a real phone (YouTube, Tim's mod, AirPods, calls). Lock screen in the Simulator:
@@ -199,6 +208,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- scenePhase passes through .inactive on the way IN from the background too: before 11-17 the tab shot logged "the app
+  left the front" then (now "the app is coming to the front"). Report.log (report.json) isn't in the diagnostics Tim
+  sends: anything needed to read his reports goes to Diagnostics.shared.log.
 
 - iOS profiles (Simulator 26.3, 11-17): same top-level PayloadIdentifier = replace (all its clips remade, new
   SavedIdentifiers); a clip PayloadIdentifier/UUID shared across profiles = both icons stay (no dedupe, no error).

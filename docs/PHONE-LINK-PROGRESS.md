@@ -24,9 +24,9 @@ Computer side:
 - [x] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
 - [x] 8. `host.js` and `link.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
 - [x] 9. Desktop panel: Connect a phone (QR encoder in the extension, the list, Remove, the switch), strings
-- [ ] 10. End to end: `tests/phone-link-client.js` (a stand-in phone) against the real helper in a temp HOME, the
+- [x] 10. End to end: `tests/phone-link-client.js` (a stand-in phone) against the real helper in a temp HOME, the
       stand-in model: pair, run, try on the phone, result, drop and resume, remove
-- [ ] 11. Pointers in docs/PROTOCOL.md and docs/SECURITY.md
+- [x] 11. Pointers in docs/PROTOCOL.md and docs/SECURITY.md
 
 iPhone side (needs ios-poc free):
 - [ ] 12. `PhoneLink.swift`: Noise IK in CryptoKit (the same published vector as a self-test), frames, NWBrowser
@@ -37,28 +37,34 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 9, 2026-11-16)
+## Done this round (round 10, 2026-11-16)
 
-- Built step 9. `extension/qr.js`: TRIF's own QR encoder (byte mode, versions 1 to 10, level M, or L when M
-  has no room; 250 lines, no dependency). Its matrices are the same, module for module and mask included, as
-  macOS's own generator's (CoreImage) for versions 1, 6, 7 and 10; the vectors are in
-  `tests/phone-link-qr.vectors.json`. When they were made, macOS's reader (Vision) read every code of this
-  encoder back to its text, from 4 to 200 bytes.
-- `extension/phonelink.js`: Settings' Connect a phone (the state, what it shows, its elements), a box at the
-  end of Settings (it scrolls with them). The label, a line of 8 words and the explanation behind the line's
-  "i"; the switch; the phones with Remove; the button → the code with Cancel; `here: false` and `announce`
-  lines; the helper's errors as sentences.
-- background.js: `phoneLink.status|on|off|pair.start|pair.stop|remove` from the side panel's page alone → the
-  helper's `phone.*`; the helper's `phoneLink` to the panel's pages alone; a panel that closes with its window
-  open closes the window. The QR's text is in the panel's memory only while the code shows.
-- Tests: `tests/phone-link-qr.test.js` (4), `tests/phone-link-panel.test.js` (6, with a stand-in DOM), one in
-  tests/extension.test.js (the background). Locally the whole suite but update.test.js: 913 tests, 903 passed,
-  10 skipped, 0 failed. No browser run this round (the brief: ask Tim first): **the section hasn't been seen
-  in a real browser yet**. CI for 8e57db2 (run 44003832633): 924 of 925 run tests passed in each of two
-  attempts, a different known browser flake failing each time (the CI section).
+- Built step 10, `tests/phone-link-e2e.test.js`: one story with the stand-in phone against the real host.js
+  in a temp HOME (a fake extension as the panel, the fake keychain, the stand-in dns-sd, 127.0.0.1, the
+  stand-in agent; 2 s). The panel turns the link on and shows a code, the phone pairs from the code's text;
+  `run.start` with a page copy and a screenshot; the agent's `trif phone try` and `trif phone screenshot`
+  answered by the phone; `trif screenshot|text|tabs` refused by the helper in words; the result is the
+  twin's mods and the mods folder has nothing else new; the extension got no request and no `agentEvent`;
+  the page copy and the screenshots are in no file after the run; the phone drops mid-run, the agent's try
+  says "the phone isn't connected", the run is kept, the phone resumes and gets every step once; `run.ack`;
+  a phone sees its own runs alone; `phone.remove` closes it, deletes what was kept, then not one byte for
+  it while a second phone goes on; off and closed: no listener, no dns-sd, no agent left.
+- The stand-in agent has a new word, `CLI[args]` (the real `trif <args>`, in order among the `PHONE[…]` ones).
+- Step 11: "The phone link" sections in docs/PROTOCOL.md and docs/SECURITY.md (pointers to PHONE-LINK.md, and
+  what touches each file's subject); PHONE-LINK.md section 10 names the test.
+- Locally the whole suite but update.test.js: 914 tests, 903 passed, 10 skipped, 1 failed: tests/open-models.test.js
+  "real Codex + stand-in model…" (local only, a real Codex; not this branch's code), which passed alone right
+  after (17 of 17). CI for 2714c89: green on the first attempt, 926 of 926 run tests
+  (https://github.com/acapellascience/trif/actions/runs/44005995592).
+- **The computer side's checklist is done.** What is left there is in "Next step".
 
 ## Earlier rounds
 
+- Round 9: step 9, the side panel's Connect a phone: `extension/qr.js` (TRIF's own QR encoder, the same
+  matrices as macOS's generator, vectors in `tests/phone-link-qr.vectors.json`), `extension/phonelink.js`
+  (the section at the end of Settings), background.js `phoneLink.*` from the panel's page alone, 11 tests.
+  **Not seen in a real browser yet** (needs Tim's OK for a local browser run). CI for 8e57db2: every
+  phone-link test passed in both attempts, one known browser flake failed in each.
 - Round 8: step 8, `link.js` (class `Link`) and host.js: the helper that owns `helper.sock` owns the link;
   `phone.status|on|off|pair.start|pair.stop|remove` as `PANEL_COMMANDS`, the `phoneLink` message; a helper
   without the socket has the store alone (`here: false`); `testEnv` keeps every test helper off the network
@@ -86,6 +92,11 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 10, 2714c89: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/44005995592
+  (933 tests, 926 passed, 7 skipped, 0 failed; the end-to-end test ran there, the browser tests passed too).
+  The commit that records this line was pushed without waiting for its run (docs only).
+- Round 9's docs-only commit a9cd0d9 (the same code as 8e57db2): failed on the clickjacking guard alone, run
+  44005073014 (932 tests, 924 passed, 1 failed): the known flake, not rerun (the next commit's run is green).
 - Round 9, 8e57db2: failed twice on one known browser flake each, run
   https://github.com/acapellascience/trif/actions/runs/44003832633 (932 tests, 924 passed, 7 skipped, 1 failed
   in both attempts): attempt 1 on the clickjacking guard alone, attempt 2 (`gh run rerun --failed`, once, as
@@ -137,19 +148,38 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 10: the end-to-end test, `tests/phone-link-e2e.test.js`: the stand-in phone (`tests/phone-link-client.js`)
-against the real host.js in a temp HOME (a FakeExtension, the fake keychain, the stand-in dns-sd, the stand-in
-agent's variables in the helper's `env`), in one story: the panel's `phone.on` and `phone.pair.start`, the
-phone pairs from the QR's text, `run.start` with a page copy and a screenshot, the agent's `trif phone try`
-answered by the phone, `run.result` with the mod in `sites/phone~<host>/` and nothing outside it
-(`everyFile()`), the fake extension saw no page command and no event of the run, drop and `run.resume`,
-`phone.remove`, then silence for that phone. Copy the helpers the notes name (round 8's and round 6's). Then,
-if calls remain, step 11 (the pointers in docs/PROTOCOL.md and docs/SECURITY.md) is small enough to follow in
-the same round. A look at the panel's section in a real browser (headless, the lock, `--mute-audio`, the
-watchdog) needs the main session to ask Tim first.
+Step 12 (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a self-test, frames,
+NWBrowser), **only when the round's brief says ios-poc is free**. Until then, computer-side work that is left,
+in this order (each small; none is a checklist item):
+1. A look at Settings' Connect a phone in a real browser (headless, the lock, `--mute-audio`, the watchdog):
+   needs the main session to ask Tim first.
+2. A phone run in the real sandboxes with a real agent and a stand-in model, tests/run-sandbox.test.js's way
+   (macOS, local only, no paid call): the private folder's `phone-link.json` and `phone-link/` unreadable from
+   the run, `trif phone …` working from inside the sandbox.
+3. `store.js`: cut a long computer name in the QR's text (the phone shows the name `hello` gives).
+4. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
+   test, `run.result`'s `removed` with real entries.
 
 ## Notes for next round
 
+- Step 10's test: `node --test tests/phone-link-e2e.test.js` (2 s). It calls `standInAgent()` for the temp
+  workspace (which also sets this process's env, unused there) and gives the spawned helper the same through
+  FakeExtension's `testEnv` plus `env: {...chain.env, TRIF_DNS_SD, TRIF_AGENT_KILL_GRACE_MS}`; the helper
+  finds the stand-in `claude` through `<private>/config.json`'s `env.PATH`, and `hello.agent` is
+  `{name: 'Claude Code', model: null}` there. The keychain and dns-sd stand-ins are in a second temp folder.
+- In that test the extension gets one `mods` message during a run (the twin's new mods, for the desktop
+  phone view: expected), no `request`, no `agentEvent`. After a run the private folder has `helper.log`,
+  `runs/<runId>.jsonl`, `phone-link/kept/<phone>/<runId>.json` and `sessions.json`: none has the page copy
+  or a screenshot (the test reads every file but the stand-in agent's own notes in `fakebin/`).
+- `run.resume`'s `first` is the first event the computer still has (1 here), not `after + 1`; the events
+  that follow are the ones past `after`. For step 14: take `last` and `done` from the answer, number from
+  the events themselves.
+- The stand-in agent's `CLI[args]` results are in `phoneCalls()` too, with `cli: true`, in the order of the
+  words in the message.
+- docs/PROTOCOL.md is in the npm package's files: its new section's heading says "branch `phone-link`, not
+  released"; change the heading (and SECURITY.md's) when the branch is merged for a release.
+- tests/open-models.test.js's real-Codex test failed once in the whole local suite and passed alone: load
+  (another batch was building on this Mac), not looked into.
 - Step 9's API. qr.js: `qrMatrix(text, {level, mask})` → `{version, level, mask, size, rows}` (throws "too
   long" past 271 bytes), `qrPath(qr, quiet = 4)` → `{d, size}`, `qrFit(bytes, level)`, `qrPenalty(rows)`.
   phonelink.js: `TEXT` (every string; the panel test checks each is in the strings file, apostrophes aside),

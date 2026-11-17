@@ -50,6 +50,14 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   against the real nodejs.org archive in a temp HOME. CI green: https://github.com/acapellascience/trif/actions/runs/44170185742
   (clickjack-browser flake once, rerun passed; design commit run 44169238711 green).
 
+- Round 2, step 3: setup picks the node with `chooseNode` (lib/setup.js): TRIF's own runtime for copies,
+  downloaded via `ensureRuntimeSync`; fallback with a note; `--runtime`/`--no-runtime`, `TRIF_RUNTIME`;
+  prunes older pins unless the Safari plist names them. tests/setup-runtime.test.js (3: real setup against a
+  local server, wrappers run on the fake runtime, pin bump, fallback). Local non-browser suite 872/875 pass
+  (the only failure: release-script test needs node_modules/.bin/web-ext, absent in this worktree; not this
+  change). CI: https://github.com/acapellascience/trif/actions/runs/44174209142 green after one rerun
+  (codex-sandbox.test.js mailbox-wait timing flake, passes locally).
+
 ## Next step
 
 Step 4: update.js (raise its setup `run` timeout above 120 s for runtime downloads; old updaters keep 120 s,
@@ -84,7 +92,8 @@ bin/node, `--version` runs; say when the wrappers name a system node). Tests.
 
 - **Node 24 vs the tests (found round 1)**: under the runtime's Node 24.22.3, tests/runtime.test.js passes,
   tests/update.test.js runs all 18 tests but `release script: secrets go to security and web-ext in no argv
-  or environment` fails (details not captured; run it alone with `--test-reporter=spec`), and the file's
+  or environment` fails (round 2: on Node 22 too, here it's `spawn node_modules/.bin/web-ext ENOENT`,
+  the worktree has no `npm install`; check that's the whole story on Node 24), and the file's
   process then never exits (an open handle; Node 22 exits). Both are test/release-side, but CI must run on
   the pinned version (step 10): fix them first, then run the whole suite on Node 24 locally (one browser
   suite at a time). Downloaded runtime for local use: re-fetch with `ensureRuntime(<temp home>)`.

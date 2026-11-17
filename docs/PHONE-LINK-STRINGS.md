@@ -82,3 +82,24 @@ docs/IOS-APP-STRINGS.md ("My computer").
 | The computer's agent can't run inside TRIF's sandbox (an organization's settings replace it) | {computer}'s coding agent can't work inside TRIF's sandbox there, so it can't make mods for this iPhone. Chats in TRIF on the computer still can. | round 5: a phone run never goes on without the sandbox, even if that was allowed on the computer (the progress file, "For Tim" 6). Built round 17, in place of the computer's own words |
 | The computer's agent isn't logged in | {computer}'s coding agent isn't logged in. Log in to it in TRIF on {computer}, then ask again. | new round 17 (draft), in place of the computer's own words (which name the agent) |
 | A run was going when the browser on the computer closed (a line in the chat, as the run's other errors are) | TRIF on the computer stopped before the agent finished | round 6 (`remote.js`): said when the next helper reads the kept run. The desktop's own text for the same moment is "the helper shut down (Chrome closed?) before the agent finished" |
+
+## Phone sync (docs/PHONE-SYNC.md; drafts from sync round 1, none built yet)
+
+Phone mods kept the same on the iPhone and the computer. The phone's rows go into docs/IOS-APP-STRINGS.md on
+ios-poc when the iPhone steps build them.
+
+| Where | String | Notes |
+|---|---|---|
+| Desktop, Settings → Connect a phone, under a phone | Synced {time}: {n} from this phone, {k} waiting for your OK. | draft. "{k} waiting…" only when k > 0; nothing synced yet: "Not synced yet." |
+| Desktop, the hold card of a mod a sync brought | From {phone} | draft, beside the hold's reason |
+| Desktop, the sync line, a conflict | {name} changed on both: both are kept. | draft |
+| Phone, Mods tab, after a sync that changed something | Synced with {computer}: {n} changed here, {k} waiting for your OK. | draft |
+| Phone, a conflict | {name} changed on both. Both are kept: “{name} (from your computer)” is beside it. | draft. The sibling's own name: "{name} (from your computer)" |
+| Phone, an edit beat a delete | {name} came back: it was changed on {computer}. | draft |
+| Computer, the same | {name} came back: it was changed on {phone}. | draft |
+| Phone, a mod new from the computer (the mark, as an import's "New") | From your computer | draft |
+| Phone, a file the app couldn't read | {name} on {computer} has an error, so it isn't on this iPhone yet. | draft |
+| Phone, a mod too big to sync (over 1 MB) | {name} is too big to sync. | draft |
+| Phone, Mods tab button | Sync now | draft |
+| Phone, Mods tab, the deleted list | Recently deleted | draft. Each row: the name, "Restore" |
+| Phone, every-site mods if the computer can't take them (D10) | Mods for every site stay on this iPhone for now. | draft, only if step S2 finds the phone view doesn't run phone~all-sites |

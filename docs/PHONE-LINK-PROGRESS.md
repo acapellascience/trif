@@ -54,7 +54,8 @@ iPhone side (needs ios-poc free):
 - Tests: `tests/phone-link-qr.test.js` (4), `tests/phone-link-panel.test.js` (6, with a stand-in DOM), one in
   tests/extension.test.js (the background). Locally the whole suite but update.test.js: 913 tests, 903 passed,
   10 skipped, 0 failed. No browser run this round (the brief: ask Tim first): **the section hasn't been seen
-  in a real browser yet**. CI: see the CI section.
+  in a real browser yet**. CI for 8e57db2 (run 44003832633): 924 of 925 run tests passed in each of two
+  attempts, a different known browser flake failing each time (the CI section).
 
 ## Earlier rounds
 
@@ -85,6 +86,13 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 9, 8e57db2: failed twice on one known browser flake each, run
+  https://github.com/acapellascience/trif/actions/runs/44003832633 (932 tests, 924 passed, 7 skipped, 1 failed
+  in both attempts): attempt 1 on the clickjacking guard alone, attempt 2 (`gh run rerun --failed`, once, as
+  the brief says) on the phone view's "the site sees an iPhone in that tab only" alone. Each passed in the
+  other attempt; every phone-link test (the 11 new ones too) and the rest of tests/extension.test.js passed in
+  both. Not looked into (not this branch's code). The commit that records this line was pushed without
+  waiting for its run (docs only).
 - Round 8, c0172aa: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/44001876567
   (921 tests, 914 passed, 7 skipped, 0 failed; the host test ran there, the browser tests passed too). The
   commit that records this line was pushed without waiting for its run (docs only).

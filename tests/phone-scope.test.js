@@ -2,14 +2,16 @@
 // The phone view's run held to the site's phone twin, sites/phone~<site>/ (docs/MOBILE-EDIT.md "Phone mods"):
 // what reaches the mods folder from its working folder (stage.js ownFolder, ownTwin), the folders its sandbox
 // lets it write (runs.js runLimits), what its `trif delete` and `trif restore` may touch (trash.js), a sensitive
-// site's twin as its own folder; then the same through the real helper with a stand-in agent. The phone link's
-// runs (branch phone-link, stage.js `twinOnly`) are held the same way.
+// site's twin as its own folder; then the same through the real helper with a stand-in agent. And the phone
+// view's group switches, its own (extension/lib.js). The phone link's runs (branch phone-link, stage.js
+// `twinOnly`) are held the same way.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 // A home folder of this process's own (os.homedir(): runLimits' denies), never the user's.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phone-scope-'));
@@ -267,3 +269,28 @@ for (const { site, splits, desktopFolder } of [
     if (!desktopFolder) assert.ok(!fs.existsSync(path.join(h, 'sites', site)), 'no desktop folder made');
   });
 }
+
+// ---- the phone view's group switches (Style, Boxed, Free mods): the phone twin's own
+
+test('groups: the phone view\'s switch (phone~x.com) switches the site\'s phone mods only, the site\'s only its other mods', async () => {
+  const lib = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'lib.js')).href);
+  let g = lib.switchGroup({}, 'phone~x.com', 'page', false);
+  assert.deepEqual(g, { 'phone~x.com': ['page'] });
+  assert.equal(lib.groupOffOn(g, 'page', 'phone~x.com'), true);
+  assert.equal(lib.groupOffOn(g, 'page', 'phone~api.x.com'), true);
+  assert.equal(lib.groupOffOn(g, 'page', 'x.com'), false, 'the desktop panel\'s switch stays on');
+  assert.deepEqual(lib.offSitesFor({ id: 'phone~x.com/a' }, {}, g), ['x.com'], 'a phone mod: off on its site\'s pages');
+  assert.deepEqual(lib.offSitesFor({ id: 'x.com/a' }, {}, g), [], 'a desktop mod: still on');
+  g = lib.switchGroup(g, 'www.x.com', 'rules', false);
+  assert.deepEqual(lib.offSitesFor({ id: 'x.com/a', rules: true }, {}, g), ['x.com']);
+  assert.deepEqual(lib.offSitesFor({ id: 'phone~x.com/a', rules: true }, {}, g), [], 'the desktop switch: not the phone view\'s mods');
+  assert.equal(lib.groupOffOn(g, 'rules', 'phone~x.com'), false);
+  // an all-sites mod is a desktop one: its group off on x.com from the desktop panel
+  assert.deepEqual(lib.offSitesFor({ id: 'all-sites/a', rules: true }, {}, g), ['x.com']);
+  // what storage may hold: cleaned up as before, a twin's entry kept
+  assert.deepEqual(lib.normalizeGroupsOff({ 'phone~www.X.com': ['page', 'nope'], 'phone~': ['page'], 'phone~a b': ['page'], 'y.com': ['rules'] }), { 'phone~x.com': ['page'], 'y.com': ['rules'] });
+  assert.throws(() => lib.switchGroup({}, 'phone~', 'page', false), /isn't a site/);
+  // registered as the site's excludes, never as a "phone~" host
+  const reg = lib.withOffSites({ id: 'phone~x.com/a', matches: ['*://x.com/*'] }, lib.offSitesFor({ id: 'phone~x.com/a' }, {}, { 'phone~x.com': ['page'] }));
+  assert.ok(reg.excludes.length && reg.excludes.every((p) => !p.includes('phone~')), JSON.stringify(reg.excludes));
+});

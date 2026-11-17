@@ -1899,12 +1899,21 @@ export const GROUP_NAMES = { rules: 'Style mods', sandboxed: 'Boxed mods', page:
 export function groupWord(group) { return (GROUP_NAMES[group] || GROUP_NAMES.page).toLowerCase(); }
 export function modGroup(mod) { return mod && mod.rules ? 'rules' : inSandboxWorld(mod) ? 'sandboxed' : 'page'; }
 
+// The phone view's group switches are the site's phone twin's (phone~x.com, from its panel): they switch only the
+// site's phone mods, and the site's own (x.com) only its other mods (docs/MOBILE-EDIT.md "Phone mods").
+function groupSiteName(site) {
+  const s = String(site ?? '').trim().toLowerCase();
+  if (!isPhoneSite(s)) return offSiteName(s);
+  const base = offSiteName(phoneBase(s));
+  return base ? PHONE_PREFIX + base : null;
+}
+
 /** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
 export function normalizeGroupsOff(value) {
   const out = {};
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const [site, list] of Object.entries(value)) {
-      const s = offSiteName(site);
+      const s = groupSiteName(site);
       if (!s || !Array.isArray(list)) continue;
       const groups = [...new Set(list.filter((g) => GROUPS.includes(g)))];
       if (groups.length) out[s] = [...new Set([...(out[s] || []), ...groups])];
@@ -1915,13 +1924,13 @@ export function normalizeGroupsOff(value) {
 
 /** Whether `group` is switched off on `site` (an entry for it or a parent domain). */
 export function groupOffOn(groupsOff, group, site) {
-  const s = offSiteName(site);
-  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && hostInScope(s, o));
+  const s = groupSiteName(site);
+  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && isPhoneSite(o) === isPhoneSite(s) && hostInScope(phoneBase(s), o));
 }
 
 /** `groupsOff` after switching `group` on or off on `site` (a new object). */
 export function switchGroup(groupsOff, site, group, enabled) {
-  const s = offSiteName(site);
+  const s = groupSiteName(site);
   if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
   if (!GROUPS.includes(group)) throw new Error(`"${group}" isn't a group (${GROUPS.join(' or ')})`);
   const out = normalizeGroupsOff(groupsOff);
@@ -1935,7 +1944,9 @@ export function switchGroup(groupsOff, site, group, enabled) {
 export function offSitesFor(mod, offSites, groupsOff) {
   const own = (offSites && offSites[mod.id]) || [];
   const g = modGroup(mod);
-  const group = Object.entries(groupsOff || {}).filter(([, list]) => list.includes(g)).map(([s]) => s);
+  // (a phone mod: its site's phone twin's switches, as their site; any other mod: the sites' own)
+  const phone = isPhoneMod(mod);
+  const group = Object.entries(groupsOff || {}).filter(([s, list]) => list.includes(g) && isPhoneSite(s) === phone).map(([s]) => phoneBase(s));
   return group.length ? [...new Set([...own, ...group])] : own;
 }
 

@@ -20,6 +20,7 @@
 //                run has none of), in the order the words are in, among the PHONE ones (cli: true there)
 //   PAUSE:<word> says "Working", then waits for go('<word>') before it does the rest
 //   SLEEP        says "Thinking" and stays until stopped
+//   LOGGEDOUT    fails at once as a logged-out agent does (a 401 result): the run's `login` error
 // Each call is kept in <bin>/calls/ with its argv, env, cwd, message, context, and what it could read in
 // $TRIF_RUN_SCREENSHOTS: calls() reads them, oldest first.
 
@@ -78,7 +79,8 @@ function rest() {
   say({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: session, total_cost_usd: 0 });
 }
 const pause = /PAUSE:([a-z0-9]+)/.exec(prompt);
-if (prompt.includes('SLEEP')) { say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Thinking' }] } }); setInterval(() => {}, 1000); }
+if (prompt.includes('LOGGEDOUT')) say({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 Invalid API key · Please run /login', session_id: session, total_cost_usd: 0 });
+else if (prompt.includes('SLEEP')) { say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Thinking' }] } }); setInterval(() => {}, 1000); }
 else if (pause) {
   say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Working' }] } });
   const wait = () => (fs.existsSync(path.join(__dirname, 'go-' + pause[1])) ? rest() : setTimeout(wait, 20));

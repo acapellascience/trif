@@ -13,7 +13,8 @@ import Network
 // - The link drops (the app suspended, the Wi-Fi gone): `away`; it reconnects after `retry`'s waits, or at once on
 //   wake() (the app back in front), and sends `run.resume` for each followed run from the last event it has. When
 //   every wait is used up, the followed runs are given up (`onLost`): the computer keeps them, listed in `hello`'s
-//   `pending`, which pickUp follows again (PanelChat does on the panel's start and when the app is back in front).
+//   `pending`, which pickUp follows again (PanelChat does on the panel's start and when the app is back in front)
+//   from the last event its chat already shows (`shown`, kept across launches in `defaults`).
 // Callbacks come on `queue` (main by default).
 
 final class PhoneLinkRemote {
@@ -84,13 +85,21 @@ final class PhoneLinkRemote {
     private var attempt = 0
     private var privateKey = Data()
     private var computer: PairedComputer?
+    private let defaults: UserDefaults
+    private static let shownKey = "phoneLink.shown"
+    /// runId → the newest event handed on, kept across launches (a picked-up run's chat already shows those).
+    private var shown: [String: Int] {
+        get { defaults.dictionary(forKey: Self.shownKey) as? [String: Int] ?? [:] }
+        set { defaults.set(newValue, forKey: Self.shownKey) }
+    }
+    private func forget(_ runId: String) { if shown[runId] != nil { shown[runId] = nil } }
 
     /// phoneName: the handshake's name; device: `hello`'s ({name, width, height}); endpoints: these instead of Bonjour
     /// (development and the Mac test).
     init(keys: PhoneLinkKeys = .shared, phoneName: String, device: [String: Any] = [:], app: String = "TRIF",
-         endpoints: [NWEndpoint]? = nil, queue: DispatchQueue = .main) {
+         endpoints: [NWEndpoint]? = nil, queue: DispatchQueue = .main, defaults: UserDefaults = .standard) {
         self.keys = keys; self.phoneName = phoneName; self.device = device; self.app = app
-        self.fixed = endpoints; self.queue = queue
+        self.fixed = endpoints; self.queue = queue; self.defaults = defaults
     }
 
     // MARK: what the engine asks
@@ -130,15 +139,18 @@ final class PhoneLinkRemote {
     }
 
     /// A run the computer kept (`hello`'s `pending`: the app was closed meanwhile, or gave the run up after a drop),
-    /// followed from its first event: `run.resume` after 0, then its events, its result, as a started run's.
+    /// followed after the last event its chat shows (none: from its first): `run.resume`, then its events, its
+    /// result, as a started run's.
     func pickUp(_ runId: String) {
         guard state == .open, following[runId] == nil else { return }
-        following[runId] = 0
-        request(["t": "run.resume", "runId": runId, "after": 0]) { [weak self] r in
+        let after = shown[runId] ?? 0
+        following[runId] = after
+        request(["t": "run.resume", "runId": runId, "after": after]) { [weak self] r in
             guard let self, r["t"] as? String == "error" else { return }
             let e = Self.error(r)
             guard e.code != "away", e.code != "timeout", self.following[runId] != nil else { return }
             self.following[runId] = nil
+            self.forget(runId)
             self.onLost?(runId, e)
         }
     }
@@ -237,6 +249,9 @@ final class PhoneLinkRemote {
             }
             self.hello = Hello(name: (a["name"] as? String).map(PairCode.cleanName) ?? self.computer?.name ?? PairCode.fallbackName,
                                agent: agent?["name"] as? String, model: agent?["model"] as? String, pending: pending)
+            // (the runs this computer no longer keeps aren't shown again)
+            let kept = Set(pending.map(\.runId)).union(self.following.keys)
+            if self.shown.keys.contains(where: { !kept.contains($0) }) { self.shown = self.shown.filter { kept.contains($0.key) } }
             self.attempt = 0
             self.state = .open
             self.ping()
@@ -247,6 +262,7 @@ final class PhoneLinkRemote {
                     let e = Self.error(r)
                     guard e.code != "away", e.code != "timeout", self.following[id] != nil else { return } // (asked again on the next connection)
                     self.following[id] = nil
+                    self.forget(id)
                     self.onLost?(id, e)
                 }
             }
@@ -308,6 +324,7 @@ final class PhoneLinkRemote {
         let lost = following
         following = [:]
         state = .failed(f)
+        if f == .removed { for id in lost.keys { forget(id) } }
         for id in lost.keys.sorted() { onLost?(id, RunError(code: f == .removed ? "removed" : "away", message: "\(f)")) }
     }
 
@@ -367,10 +384,12 @@ final class PhoneLinkRemote {
             guard let id = m["runId"] as? String, let n = m["n"] as? Int, let ev = m["event"] as? [String: Any],
                   let last = following[id], n > last else { return }
             following[id] = n
+            shown[id] = n
             onEvent?(id, n, ev)
         case "run.result":
             guard let id = m["runId"] as? String, following[id] != nil else { return }
             following[id] = nil
+            forget(id)
             onResult?(id, m)
             request(["t": "run.ack", "runId": id]) { _ in }
         case "tool.request":

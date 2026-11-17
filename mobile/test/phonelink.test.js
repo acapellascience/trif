@@ -284,10 +284,11 @@ test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server
     for (let i = 0; i < 50; i++) { comp.stdin.write('kept\n'); const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"'))); if (!Object.values(k.kept).flat().length) break; assert.ok(i < 49, 'acked runs deleted'); await new Promise((r) => setTimeout(r, 100)); }
 
     // 2b. The app closed while a run waits (the link closed, nothing followed); the computer finishes and keeps it;
-    // the app opened again is told of it in hello's pending and picks it up: every step from the first, the result.
+    // the app opened again is told of it in hello's pending and picks it up after the last step its chat shows
+    // (kept across the close as across launches: none twice), to the result.
     say('run w.com PAUSE:b WRITE');
     await P.next((l) => l.startsWith('started'));
-    await P.next((l) => / text Working$/.test(l));
+    const seen = Number((await P.next((l) => / text Working$/.test(l))).split(' ')[1]);
     say('close');
     comp.stdin.write('go b\n');
     for (let i = 0; i < 100; i++) {
@@ -305,8 +306,9 @@ test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server
     assert.equal(await P.next((l) => l.startsWith('pending')), 'pending w.com done true');
     const kept = await P.next((l) => l.startsWith('result'));
     const evs2 = P.all.slice(mark2).filter((l) => l.startsWith('event '));
-    assert.deepEqual(evs2.map((l) => Number(l.split(' ')[1])), evs2.map((_, i) => i + 1), 'every step from the first');
-    assert.ok(evs2.some((l) => / text Working$/.test(l)));
+    assert.ok(evs2.length > 1, 'the steps after the close');
+    assert.deepEqual(evs2.map((l) => Number(l.split(' ')[1])), evs2.map((_, i) => seen + 1 + i), 'after the last step shown, none twice');
+    assert.ok(!evs2.some((l) => / text Working$/.test(l)), 'Working not shown again');
     assert.match(evs2[evs2.length - 1], /^event \d+ done ok true$/);
     assert.equal(kept, 'result phone~m.w.com/part,phone~w.com/bottom-bar removed 0');
     for (let i = 0; i < 50; i++) { comp.stdin.write('kept\n'); const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"'))); if (!Object.values(k.kept).flat().length) break; assert.ok(i < 49, 'the picked-up run acked'); await new Promise((r) => setTimeout(r, 100)); }

@@ -75,13 +75,19 @@ if args.count > 3, args[1] == "pair" {
 // <mod ids> removed <n>", "state <state>", "lost <code>".
 if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let code = PairCode.parse(args[3]) {
     let keys = PhoneLinkKeys(vault: MemoryVault())
+    // (what the app's chats show, kept across a close and reopen as across launches; this process's own)
+    let shownSuite = "trif.phonelink-check.\(getpid())"
+    let shownStore = UserDefaults(suiteName: shownSuite)!
+    shownStore.removePersistentDomain(forName: shownSuite)
+    atexit { UserDefaults.standard.removePersistentDomain(forName: "trif.phonelink-check.\(getpid())") }
     let at: [NWEndpoint] = [.hostPort(host: "127.0.0.1", port: port)]
     let jpeg = Data([0xff, 0xd8, 0xff, 0xe0]) + Data("the phone's page".utf8)
     let p = PhoneLinkPairer(code: code, keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], endpoints: at)
     var remote: PhoneLinkRemote?
     func json(_ o: Any) -> String { String(data: try! JSONSerialization.data(withJSONObject: o, options: .sortedKeys), encoding: .utf8)! }
     func open() {
-        let r = PhoneLinkRemote(keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], app: "check", endpoints: at)
+        let r = PhoneLinkRemote(keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], app: "check", endpoints: at,
+                                defaults: shownStore)
         r.retry = []
         r.onState = { s in say("state \(s)") }
         r.onEvent = { _, n, ev in

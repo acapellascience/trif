@@ -14,6 +14,14 @@
 //   list          the paired phones: {phones: [{id, name}]}
 //   remove        removes every paired phone: {removed: n}
 //   kept          the kept runs per phone: {kept: {<phone id>: [{runId, done}]}}
+// Phone sync (helper/lib/phonelink/syncsession.js, attached as link.js attaches it; docs/PHONE-SYNC.md):
+//   twin          every phone twin file: {twin: {<sites/-relative path>: text}}
+//   write <rel> <JSON string>   writes a twin file as a desktop edit would (inside sites/phone~*/ only), then
+//                 nudges the phone: {wrote: rel, nudged: n}
+//   delete <rel>  deletes a twin file (into <home>/trash/, as the side panel's delete), then nudges: {deleted, nudged}
+//   nudge         sync.changed to every connected phone: {nudged: n}
+//   synced        the last sync per phone (the Settings line's facts): {synced: {<phone id>: {...} | null}}
+//   held          the held map's twin entries: {held: {<id>: {by, ...}}}
 //   quit          stops (also after --seconds, and on SIGTERM / SIGINT); everything it made is deleted.
 
 const fs = require('fs');
@@ -31,6 +39,9 @@ const { Store } = require('../helper/lib/phonelink/store');
 const { Server } = require('../helper/lib/phonelink/server');
 const { Remote } = require('../helper/lib/phonelink/remote');
 const R = require('../helper/lib/phonelink/remoterun');
+const { PhoneSync } = require('../helper/lib/phonelink/syncsession');
+const held = require('../helper/lib/held');
+const { scanMods } = require('../helper/lib/mods');
 
 const seconds = Number((process.argv.find((a, i) => process.argv[i - 1] === '--seconds')) || 120);
 const chain = makeFakeKeychain(path.join(home, 'keychain'));
@@ -53,6 +64,23 @@ const runs = new Runs({
   },
 });
 remote = new Remote(store, server, runs, { home, log: () => {}, agent: () => ({ id: 'claude', name: 'Stand-in agent', model: null }) });
+const sync = new PhoneSync(store, server, runs, { home, getWorkspace: () => P.workspace(home), log: () => {} });
+const sites = path.join(home, 'sites');
+// A path inside sites/phone~*/ (refused otherwise: this stand-in writes only where the sync may).
+function twinPath(rel) {
+  const p = path.resolve(sites, String(rel || ''));
+  const r = path.relative(sites, p);
+  if (!/^phone~[^/\\]+[/\\][^/\\]+\.js$/.test(r)) throw new Error(`not a phone twin file: ${rel}`);
+  return p;
+}
+function twin() {
+  const out = {};
+  for (const d of fs.readdirSync(sites)) {
+    if (!d.startsWith('phone~')) continue;
+    for (const f of fs.readdirSync(path.join(sites, d))) if (f.endsWith('.js')) out[`${d}/${f}`] = fs.readFileSync(path.join(sites, d, f), 'utf8');
+  }
+  return out;
+}
 
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 let stopping = false;
@@ -62,6 +90,7 @@ async function stop() {
   try {
     await runs.stopAll(300);
     remote.stop();
+    sync.stop();
     store.pairStop();
     await server.stop();
   } finally {
@@ -74,6 +103,12 @@ async function stop() {
   await store.setOn(true);
   await server.start();
   remote.start();
+  sync.start();
+  // (held.js's first look, as the helper's at its start: what's there is the user's, so what a sync brings from now
+  // on is judged; a desktop mod so that the look is remembered)
+  fs.mkdirSync(path.join(sites, 'other.example'), { recursive: true });
+  fs.writeFileSync(path.join(sites, 'other.example', 'seed.js'), '// ==WebMod==\n// @name Seed\n// ==/WebMod==\n');
+  held.updateHeld(P.workspace(home), scanMods(P.workspace(home).modsDir).mods, []);
   const qr = store.pairStart().qr;
   say({ port: await server.sync(), qr, home });
   setTimeout(stop, seconds * 1000).unref();
@@ -83,11 +118,32 @@ async function stop() {
   readline.createInterface({ input: process.stdin }).on('line', (line) => { queue = queue.then(() => command(line)).catch((e) => say({ error: e.message })); });
   async function command(line) {
     const [cmd, arg] = line.trim().split(/\s+/);
+    const rest = line.trim().split(/\s+/).slice(2).join(' ');
     if (cmd === 'pair') { const q = store.pairStart().qr; say({ qr: q, port: await server.sync() }); }
     else if (cmd === 'go') { go(arg); say({ go: arg }); }
     else if (cmd === 'list') say({ phones: store.list().map((p) => ({ id: p.id, name: p.name })) });
     else if (cmd === 'remove') { const all = store.list(); for (const p of all) store.remove(p.id); say({ removed: all.length }); }
     else if (cmd === 'kept') { const kept = {}; for (const [id, r] of remote.records) (kept[r.phone] = kept[r.phone] || []).push({ runId: id, done: !!r.done }); say({ kept }); }
-    else if (cmd === 'quit') await stop();
+    else if (cmd === 'twin') say({ twin: twin() });
+    else if (cmd === 'write') {
+      const p = twinPath(arg);
+      const text = JSON.parse(rest);
+      if (typeof text !== 'string') throw new Error('write <rel> <JSON string>');
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, text);
+      say({ wrote: arg, nudged: sync.changed() });
+    } else if (cmd === 'delete') {
+      const p = twinPath(arg);
+      const trash = path.join(home, 'trash', `${Date.now()}-${path.basename(path.dirname(p))}-${path.basename(p)}`);
+      fs.mkdirSync(path.dirname(trash), { recursive: true });
+      fs.renameSync(p, trash);
+      say({ deleted: arg, nudged: sync.changed() });
+    } else if (cmd === 'nudge') say({ nudged: sync.changed() });
+    else if (cmd === 'synced') { const out = {}; for (const p of store.list()) out[p.id] = sync.status(p.id); say({ synced: out }); }
+    else if (cmd === 'held') {
+      const out = {};
+      for (const [id, h] of Object.entries(held.loadHeld(P.workspace(home).home) || {})) if (id.startsWith('phone~')) out[id] = h;
+      say({ held: out });
+    } else if (cmd === 'quit') await stop();
   }
 })().catch((e) => { process.stderr.write(String(e && e.stack || e) + '\n'); stop(); });

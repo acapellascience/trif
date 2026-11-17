@@ -6,7 +6,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 ## Checklist
 
 - [x] 1. Research and design (docs/NO-NODE.md): private pinned Node runtime; curl|sh front door.
-- [ ] 2. `helper/runtime.json` (Node 24.22.3 pins) + `helper/lib/runtime.js`: platform key, fetch (update.js
+- [x] 2. `helper/runtime.json` (Node 24.22.3 pins) + `helper/lib/runtime.js`: platform key, fetch (update.js
       `fetchUrl`), SHA-256 check, unpack with `tar` into `<home>/runtime/<name>` via a temp folder and rename,
       keep only bin/node + LICENSE, `runtimeNode(home)`, prune old ones. Unit tests with a fake archive.
 - [ ] 3. setup.js: use the runtime's node for both wrappers and the Safari LaunchAgent (fetch it if missing;
@@ -34,17 +34,26 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 
 - Node 24.22.3 archives: darwin-arm64 .tar.xz 27.5 MB, darwin-x64 29.3 MB, linux-x64 32.1 MB,
   linux-arm64 31.0 MB, win-x64 .zip 37.8 MB (nodejs.org Content-Length, 2026-11-17).
-- Today (system Node 22, Intel Mac): `node -e 0` 20-50 ms, `node helper/cli.js --version` 70-130 ms.
+- The real runtime (round 1, this Mac, darwin-arm64): download + verify + unpack 15.7 s; 129 MB on disk
+  (bin/node + LICENSE); no quarantine attribute (only com.apple.provenance); signed
+  "Developer ID Application: Node.js Foundation (HX7739G8FX)"; `trif --version` on it 130-170 ms;
+  `vm.Script` syntax check works.
+- Today (system Node 22): `node -e 0` 20-50 ms, `node helper/cli.js --version` 70-130 ms.
 
 ## Done this round
 
 - Round 1: researched SEA / Bun / Deno / private runtime / rewrite; wrote docs/NO-NODE.md, this file,
   docs/NO-NODE-STRINGS.md. Recommendation: private pinned Node runtime (no signing by Tim, same engine
   as tests, small updates); curl|sh installer.
+- Round 1, step 2: helper/runtime.json (Node 24.22.3 pins, all platforms) + helper/lib/runtime.js
+  (ensureRuntime, installedNode, pruneRuntimes, runtimeInfo) + tests/runtime.test.js (5 pass); smoke-tested
+  against the real nodejs.org archive in a temp HOME. CI: see the run for this commit (`gh run list -b no-node`).
 
 ## Next step
 
-Step 2: `helper/runtime.json` + `helper/lib/runtime.js` with unit tests (tests/runtime.test.js).
+Step 3: setup.js uses `runtime.ensureRuntime(home)` to choose `nodePath` (wrappers + Safari agent), falling
+back to `pickNodePath()` with the draft note; `--no-runtime` (and git-checkout dev installs default to it?
+decide; tests use fake pins via an env/opt so they never hit nodejs.org). Then prune old runtimes.
 
 ## Notes for next round
 
@@ -58,6 +67,9 @@ Step 2: `helper/runtime.json` + `helper/lib/runtime.js` with unit tests (tests/r
 - Pins come from https://nodejs.org/dist/v24.22.3/SHASUMS256.txt (GPG-signed .sig beside it; verifying
   that in release.js is a nice-to-have).
 - Linux: prefer .tar.xz, fall back to .tar.gz when `xz` isn't installed (both pinned).
+
+- Tests must never download the real runtime: inject `pins`/`fetch` (runtime.js takes both), or a
+  TRIF_RUNTIME env switch for subprocess tests (setup via the CLI).
 
 ## For Tim
 

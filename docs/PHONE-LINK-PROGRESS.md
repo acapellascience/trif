@@ -29,7 +29,7 @@ Computer side:
 - [x] 11. Pointers in docs/PROTOCOL.md and docs/SECURITY.md
 
 iPhone side (needs ios-poc free):
-- [ ] 12. `PhoneLink.swift`: Noise IK in CryptoKit (the same published vector as a self-test), frames, NWBrowser
+- [x] 12. `PhoneLink.swift`: Noise IK in CryptoKit (the same published vector as a self-test), frames, NWBrowser
 - [ ] 13. QR scan, pairing, the computer's key and the phone's key in the Keychain; Info.plist (Local Network,
       Bonjour service, camera)
 - [ ] 14. "My computer" engine in More: `run.start` with the page copy and screenshot, events as `agentEvent`s,
@@ -37,27 +37,34 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 13, 2026-11-17)
+## Done this round (round 14, 2026-11-17)
 
-The brief: ios-poc was free, then taken back mid-round for an urgent iOS batch before anything was written
-there (its tree is as it was, 6dc5fa0). So: main merged into this branch, nothing else.
+The brief: ios-poc free (its latest 88722c1). Round 13's uncommitted progress-file edit read and committed
+(2bf47a6); then step 12 on ios-poc, f2f2ded.
 
-- **main (18019be: phone-view-scope, downloads, the skill, the clip page) is merged here**, 88c0640. One
-  conflict, helper/host.js, both sides kept: `PANEL_COMMANDS` has main's five `downloads.*` and this branch's
-  `phone.*`; the socket's refusal of a panel command has a line for each (`phone.`, `downloads.`, the rest).
-  runs.js, stage.js, trash.js, background.js, sidepanel.* merged by themselves; read, nothing to change
-  (`Stage.checkPath` asks `twinOnly` before main's new phone-view line, so a phone's run is refused as before).
-- **Found after the merge and fixed: the skill's build cut this branch's "Phone runs" into the skill**
-  (`skill/build.js` cuts AGENTS.md from "Mods for several sites" to "The CLI", and "Phone runs" sits there):
-  two skill tests failed. The cut now stops at "### Phone runs" (6bc818b), so `skill/trif/` is byte for byte
-  main's; the skill has no helper and no `trif phone`.
-- Tests after the merge: the 12 phone-link files with phone-scope, stage, phone, run-folders and downloads:
-  153 tests, 152 passed, 1 skipped; the whole local suite without update.test.js: 951 tests, 936 passed, 13
-  skipped, 2 failed (the two skill tests above, fixed; tests/skill.test.js 8 of 8 afterwards). No browser run.
-- Not done: step 12, and `DELETE` in the end-to-end test (now possible: see the next step).
+- **`mobile/browser-probe/TrifProbe/PhoneLink.swift`** (ios-poc): `NoiseInitiator` (the phone's side of IK only:
+  the phone always starts) and `NoiseCipher` in CryptoKit, `PhoneLink.selfTest()` (the published cacophony vector
+  the helper's tests use, and a frames vector made by the helper's frames.js), frames (`PacketReader`,
+  `Assembler`, `PhoneLink.seal`), `PhoneLinkBrowser` (NWBrowser on `_trif._tcp`, TXT `id` and `v`, `.denied` on
+  iOS's policy error) and `PhoneLinkSession` (one TCP connection, the handshake, JSON both ways, 5 s limits; `End`:
+  `unreachable`, `refused`, `dropped`, `broken`, `closed`, section 8's states). Nothing in the app uses it yet.
+- **`mobile/test/phonelink.test.js`** (ios-poc, macOS): swiftc builds PhoneLink.swift with
+  `mobile/test/phonelink-check/main.swift`; the self-test, then a stand-in computer made of this branch's own
+  noise.js and frames.js on 127.0.0.1: the pairing payload and the phone's key arrive, a 300 KB message (6 pieces)
+  each way, and each end (refused, unreachable, broken, dropped, closed). 3 of 3 locally, 5 s. Two mutated vectors
+  (the hash; the last transport message) both fail the self-test.
+- In the Simulator (SE, iOS CryptoKit): the new `phonelink` dev step answers "phone link self-test: ok".
+- No .ipa: nothing Tim can try on a phone before steps 13 and 14 (no screen uses the link yet).
+- CI: ios-poc f2f2ded green on the first attempt, https://github.com/acapellascience/trif/actions/runs/44032210025
+  (790 tests, 781 passed; the self-test ran there, the two stand-in-computer tests skipped: no phone-link folder on
+  that runner). phone-link 2bf47a6 (docs only): see the CI section.
 
 ## Earlier rounds
 
+- Round 13: main (18019be: phone-view-scope, downloads, the skill, the clip page) merged here, 88c0640; one
+  conflict, host.js's `PANEL_COMMANDS` (both kept). Found after it and fixed: `skill/build.js`'s cut took this
+  branch's "Phone runs" into the skill; the cut now stops at "### Phone runs" (6bc818b). Its progress-file edit
+  was committed by round 14 (2bf47a6); that commit's CI failed on the clickjacking flake alone, rerun once (see the CI section).
 - Round 12: the look at Settings' Connect a phone in a real browser, `tests/phone-link-browser.test.js`
   (macOS; headless Chrome for Testing with TRIF's own extension, the real host.js by native messaging in a
   temp workspace; each state light and dark, the code read back from the screenshot by macOS's reader and
@@ -109,6 +116,11 @@ there (its tree is as it was, 6dc5fa0). So: main merged into this branch, nothin
 
 ## CI
 
+- Round 14, 2bf47a6 (round 13's progress-file edit, docs only; the code is 6bc818b's): failed in both
+  attempts on one known browser flake each, run https://github.com/acapellascience/trif/actions/runs/44031391641
+  (976 tests, 967 passed, 1 failed each): attempt 1 the clickjacking guard, attempt 2 (`gh run rerun --failed`,
+  once) the phone view's "the site sees an iPhone in that tab only". Every phone-link test passed in both. The
+  commit that records this line was pushed without waiting for its run (docs only).
 - Round 12, 3 runs, each failed on a browser test: 692162f, run 44009878623 (936 tests, 925 passed, 3
   failed): the phone view's "the site sees an iPhone in that tab only" and "desktop mods never run in the
   phone view" (known flakes) and this round's own browser test, which runs there after all (CI's runner is
@@ -190,10 +202,14 @@ there (its tree is as it was, 6dc5fa0). So: main merged into this branch, nothin
 
 ## Next step
 
-**Step 12** (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a self-test,
-frames, NWBrowser), **only when the round's brief says ios-poc is free**; follow ios-poc's own notes too
-(`mobile/IOS-AGENT-NOTES.md`: build, test, its rules). Step 12 alone has nothing for Tim to try on a phone
-(no screen uses it before steps 13 and 14): say so instead of building an .ipa, unless the brief asks.
+**Step 13** on ios-poc, **only when the round's brief says ios-poc is free**: the QR scan (AVFoundation's
+metadata output, or the `trif://pair` link from the Camera app), parsing `trif://pair?v=1&k=&s=&n=`
+(URLComponents; `n` may end in "…"), the phone's key pair and the computer's key in the Keychain (this device only),
+Info.plist's `NSLocalNetworkUsageDescription`, `NSBonjourServices` (`_trif._tcp`), `NSCameraUsageDescription` (the
+words to docs/IOS-APP-STRINGS.md and docs/PHONE-LINK-STRINGS.md), and pairing through `PhoneLinkBrowser` +
+`PhoneLinkSession` with `pair`. Its proof on the Mac: extend mobile/test/phonelink.test.js against the real
+`server.js` + `store.js` (a temp HOME, tests/fake-keychain.js) rather than the bare noise.js. This step is
+user-testable once a screen shows the pairing: build the .ipa then.
 If ios-poc isn't free, the computer-side work that is left (each small; none is a checklist item):
 1. `DELETE` in the end-to-end test, `run.result`'s `removed` with real entries: main's phone-view-scope fix
    is merged here now (round 13), so `trif delete` and a file the run deletes in its own twin should work.
@@ -205,6 +221,24 @@ If ios-poc isn't free, the computer-side work that is left (each small; none is 
 
 ## Notes for next round
 
+- **Step 12's API (ios-poc, PhoneLink.swift):** `PhoneLink.newKeyPair()` → `(privateKey, publicKey)` Data,
+  `PhoneLink.keyId(pub)` (the record's and the store's `id`), `PhoneLink.selfTest()` → nil or what failed (call it
+  before the link is first used; refuse the link if it fails). `PhoneLinkBrowser(queue:)`: `start()`, `stop()`,
+  `onChange(records, state)`, `PhoneLinkBrowser.candidates(records, computerId:)` (try each in turn: a stale
+  record answers `unreachable`). `PhoneLinkSession(endpoint:privateKey:computerKey:hello:queue:)` (`hello`:
+  `{v: 1, name, pair?}`), `start()`, `onOpen(payload)`, `onMessage(obj)`, `onEnd(End)` (once), `send(obj)` → Bool,
+  `close()`. `refused` = closed after the first message with no answer (PHONE-LINK.md 8: "pair again");
+  `unreachable` = no connection or no answer in 5 s. The session doesn't send `ping` or `hello` (the app's
+  message, not the handshake's): step 14 sends `hello` at once on `onOpen` (the server wants a transport message
+  within 5 s) and `ping` every 30 s.
+- ios-poc test: `node --test mobile/test/phonelink.test.js` (5 s; macOS; it finds this worktree's
+  helper/lib/phonelink by path, or `TRIF_PHONE_LINK_LIB`; on ios-poc's CI only the self-test runs). Don't put
+  helper `.js` files under `mobile/test/`: `node --test`'s default glob runs every `.js` under a `test/` folder.
+- Simulator: build as IOS-AGENT-NOTES.md says (a sim.entitlements in the scratchpad: application-identifier and
+  keychain-access-groups `SIMTEST.com.timsrobot.trifprobe.browser`), `simctl install`, `simctl launch <dev>
+  com.timsrobot.trifprobe.browser -noserver -noopen`, then `{"phonelink": 1}` into `Documents/step.json` and
+  `notifyutil -p com.trif.probe.step`; the answer is in `Documents/step-out.txt`.
+- The pbxproj ids used: `…00000028` (build file) and `…00000029` (file ref) for PhoneLink.swift; next free `…2A`.
 - **After merging main again**: run `node --test tests/skill.test.js` too. The skill (`skill/trif/`, main's)
   is cut from helper/workspace/AGENTS.md by `skill/build.js` at headings; anything this branch adds to
   AGENTS.md inside a cut lands in the skill unless the cut is moved. "Phone runs" is kept out (the cut for

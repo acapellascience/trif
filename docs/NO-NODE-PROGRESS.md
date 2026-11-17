@@ -20,7 +20,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
       (dry run only, never a real release).
 - [ ] 7. Front door text: extension `SETUP_COMMAND`, onboarding, background "not connected", help.js, README
       (drafts first in NO-NODE-STRINGS.md; never name agent products).
-- [ ] 8. Clean-machine test (macOS, local): temp HOME, PATH without node, install.sh against a local server
+- [x] 8. Clean-machine test (macOS, local): temp HOME, PATH without node, install.sh against a local server
       with a built package, helper with a stand-in agent, `trif` in a real sandboxed run
       (`tests/run-sandbox.test.js` style), update from a previous build, uninstall.
 - [ ] 9. Upgrade test: a Node-based install of origin/main updates to this build, keeps ~/.trif, settings,
@@ -38,6 +38,10 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   (bin/node + LICENSE); no quarantine attribute (only com.apple.provenance); signed
   "Developer ID Application: Node.js Foundation (HX7739G8FX)"; `trif --version` on it 130-170 ms;
   `vm.Script` syntax check works.
+- Clean-machine test (round 6, this Mac, darwin-arm64, tests/clean-machine.test.js): install.sh with a local
+  server and the cached real archive 7.8 s; on disk runtime 139 MB (du), app 7.5 MB; package (npm pack)
+  2.7 MB; `trif help` on the runtime 57-60 ms warm, ~230 ms the first time; `trif update --install` (local
+  server, runtime kept) 0.26 s; the whole test 18.6 s incl. a Claude Code and a Codex run.
 - Today (system Node 22): `node -e 0` 20-50 ms, `node helper/cli.js --version` 70-130 ms.
 
 ## Done this round
@@ -79,14 +83,32 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   Previous round's CI rerun (44182632765) and 44185286312: only clickjack-browser failed (a timing assert,
   "the second look: 18.10 ms at most"); 3 runs in a row now, all timing; not touched by this branch.
 
+- Round 6, step 8 (before 7: Tim hasn't answered For Tim): tests/clean-machine.test.js, 8/8 pass locally
+  with real Claude Code and Codex runs (18.6 s); helper/install-script/run-sandbox 43/43 still pass.
+  CI: CI_LINK
+
 ## Next step
 
-Step 7: front door text (drafts already in NO-NODE-STRINGS.md; still waiting on Tim's For Tim 2 for the
-URL). If Tim still hasn't answered, consider doing step 8 first (clean-machine test: it needs no wording):
-build a package with `npm pack`, fill install.sh with installScript, point it at a local server (the
-install-script test shows how to swap the URLs), run it with PATH=/usr/bin:/bin and a temp HOME.
+Step 7 (front door text) if Tim has answered For Tim 2 and 4; else step 9 (upgrade test from a Node-based
+install of origin/main), which needs no wording: extend tests/clean-machine.test.js with a second test.
 
 ## Notes for next round
+
+- Step 8 as built: tests/clean-machine.test.js, opt-in `TRIF_CLEAN_MACHINE=1` (skipped otherwise, so CI
+  skips it until step 10 sets it). npm-packs this checkout twice (0.1.0 with a test release key, and the
+  current version as shipped), serves both + the real pinned archive (cached in TRIF_TEST_NODE_CACHE or
+  <tmp>/trif-node-archives, sha-checked) from a child-process server; env has PATH=<agentbin>:/usr/bin:/bin
+  and no NODE_TEST_CONTEXT (else setup turns the runtime off). Subtests: install.sh piped to sh
+  (`--browser chrome,safari --no-link --no-examples`; wrappers, Chrome manifest, Safari plist all name the
+  runtime's node), help/doctor/status, the helper started through bin/trif-host (FakeExtension `command`
+  option, new) + `trif tabs`, real Claude Code and Codex runs (native binaries only; skipped where absent,
+  e.g. CI) running trif status/tabs/new/check/verify/mods/doctor, Codex also `command -v node` = exit 1,
+  `trif update --install` from a signed local feed (keeps a user mod and a config key, same runtime),
+  `trif uninstall --all --yes --bin-dir <tmp>` (workspace, private folder, manifest, plist, keys gone).
+- Commands needing the stand-in extension must run async (runAsync): spawnSync blocks its answers.
+- Linux: the test should run there (no agents, plist checks are darwin-only); not tried yet: step 10.
+- Step 4's open question (should setup re-verify the runtime's hash?): left as is; doctor reports damage.
+- `trif` has no --version (round 1's timing was `node helper/cli.js --version`?); startup timed on `trif help`.
 
 - Step 6 as built: install.sh unpacks Node into its temp folder only, runs `<node> package/helper/cli.js
   setup --copy "$@"` with TRIF_RUNTIME_ARCHIVE=<the archive>; runtime.js `ensureRuntime({archiveFile})` uses it

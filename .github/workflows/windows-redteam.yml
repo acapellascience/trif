@@ -1,0 +1,45 @@
+# Independent red-team of TRIF's Windows fence (not part of TRIF; attack code only, branch windows-redteam).
+# Runs on GitHub's windows-latest runners. Nothing is published, uploaded or signed; no secrets.
+name: windows-redteam
+
+on:
+  push:
+    branches: [windows-redteam]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-redteam-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # New: the helper's OUT-OF-FENCE readback/pushback (stage.js readPlain/writePlain) and the instruction-
+  # file write guard (fenced-files.js), attacked on real NTFS -- what the macOS/Linux unit tests can't reach.
+  helper-surface:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: stage.js readback/pushback on NTFS (links, junctions, hard links, a race)
+        run: node tests/redteam/stage-attacks.js
+      - name: instruction-file write guard, odd NTFS name forms
+        run: node tests/redteam/instruction-guard.js
+
+  # Baseline: the existing in-fence AppContainer attack suite, so this branch reproduces the known-good
+  # result the new attacks sit beside.
+  fence-baseline:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The fence, and attempts to get out of it
+        run: node tests/windows-fence/run.js

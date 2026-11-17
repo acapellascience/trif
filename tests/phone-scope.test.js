@@ -294,3 +294,76 @@ test('groups: the phone view\'s switch (phone~x.com) switches the site\'s phone 
   const reg = lib.withOffSites({ id: 'phone~x.com/a', matches: ['*://x.com/*'] }, lib.offSitesFor({ id: 'phone~x.com/a' }, {}, { 'phone~x.com': ['page'] }));
   assert.ok(reg.excludes.length && reg.excludes.every((p) => !p.includes('phone~')), JSON.stringify(reg.excludes));
 });
+
+// ---- a mod imported from the phone view's panel, and a merge started there: the phone twin's
+
+test('import from the phone view: a phone mod, in the twin of the site its header names; never a desktop folder or all-sites/', () => {
+  const share = require('../helper/lib/share');
+  const home = tempDir();
+  const ws = { home, modsDir: path.join(home, 'sites') };
+  const text = (name, matches) => `// ==WebMod==\n// @name ${name}\n${matches.map((m) => `// @match ${m}\n`).join('')}// ==/WebMod==\nx();\n`;
+  const r = share.importMod(ws, { text: text('Bar', ['*://x.com/*', '*://*.x.com/*']), name: 'bar.js', phone: true });
+  assert.equal(r.id, 'phone~x.com/bar');
+  assert.equal(r.file, path.join(home, 'sites', 'phone~x.com', 'bar.js'));
+  assert.ok(!fs.existsSync(path.join(home, 'sites', 'x.com')), 'no desktop folder');
+  assert.deepEqual(share.importMod(ws, { text: text('Bar', ['*://x.com/*']), name: 'bar.js', phone: true }), { exists: 'phone~x.com/bar', site: 'phone~x.com', name: 'bar' });
+  assert.equal(share.importMod(ws, { text: text('Bar', ['*://x.com/*']), name: 'bar.js', phone: true, choice: 'copy' }).id, 'phone~x.com/bar-2');
+  assert.equal(share.importMod(ws, { text: text('W', ['*://www.y.com/*']), name: 'w.js', phone: true }).id, 'phone~y.com/w');
+  // a site the user chose (its @match names more than one, or every site): that site's twin; every site's isn't one
+  assert.deepEqual(share.importMod(ws, { text: text('Any', ['<all_urls>']), name: 'any.js', phone: true }), { needsSite: [] });
+  assert.deepEqual(share.importMod(ws, { text: text('Two', ['*://a.com/*', '*://b.com/*']), name: 'two.js', phone: true }), { needsSite: ['a.com', 'b.com'] });
+  assert.equal(share.importMod(ws, { text: text('Any', ['<all_urls>']), name: 'any.js', phone: true, site: 'x.com' }).id, 'phone~x.com/any');
+  assert.equal(share.importMod(ws, { text: text('Two', ['*://a.com/*', '*://b.com/*']), name: 'two.js', phone: true, site: 'phone~b.com' }).id, 'phone~b.com/two');
+  assert.throws(() => share.importMod(ws, { text: text('Any', ['<all_urls>']), name: 'any.js', phone: true, site: 'all-sites' }), /a phone mod is for one site/);
+  assert.ok(!fs.existsSync(path.join(home, 'sites', 'all-sites')));
+  // the desktop panel's import: as before
+  assert.equal(share.importMod(ws, { text: text('Bar', ['*://x.com/*']), name: 'bar.js' }).id, 'x.com/bar');
+  assert.deepEqual(share.importMod(ws, { text: text('Any', ['<all_urls>']), name: 'any.js' }), { needsSite: ['all-sites'] });
+});
+
+async function plainHelper() {
+  const h = tempDir();
+  fs.mkdirSync(path.join(h, 'sites'));
+  writeMod(h, 'x.com', 'tidy.js', head('https://x.com/*'));
+  writeMod(h, 'phone~x.com', 'bar.js', head('https://x.com/*'));
+  writeMod(h, 'phone~mail.google.com', 'inbox.js', head('https://mail.google.com/*'));
+  const ext = new FakeExtension({ home: h });
+  cleanups.push(() => ext.close());
+  ext.hello();
+  await ext.waitForSocket();
+  return { h, ext };
+}
+
+test('through the helper: the phone panel\'s import lands in the twin, the desktop panel\'s as before', { timeout: 60000 }, async () => {
+  const { h, ext } = await plainHelper();
+  const code = '// ==WebMod==\n// @name Imported\n// @match *://x.com/*\n// ==/WebMod==\nx();\n';
+  const im = await ask(ext, 'mod.import', { text: code, name: 'imported.js', site: '', choice: '', phone: true });
+  assert.ok(im.ok, im.error);
+  assert.equal(im.result.id, 'phone~x.com/imported');
+  assert.ok(fs.existsSync(path.join(h, 'sites', 'phone~x.com', 'imported.js')));
+  assert.ok(!fs.existsSync(path.join(h, 'sites', 'x.com', 'imported.js')), 'not in the desktop folder');
+  const desk = await ask(ext, 'mod.import', { text: code.replace('Imported', 'Desk'), name: 'desk.js', site: '', choice: '' });
+  assert.equal(desk.result.id, 'x.com/desk', 'the desktop panel\'s: as before');
+});
+
+test('through the helper: a merge started from the phone view takes only its twin\'s mods', { timeout: 60000 }, async () => {
+  const { ext } = await plainHelper();
+  // a merge (a shipped mod's new version, merged by a run) of a desktop mod from the phone view: refused at once
+  const start = (merge, scope, splits = []) => ask(ext, 'agent.start', { agent: 'claude', site: scope.replace(/^phone~/, ''), scope, splits, url: 'https://x.com/', tabId: 1, prompt: 'merge', merge });
+  const m1 = await start('x.com/tidy', 'phone~x.com');
+  assert.equal(m1.ok, false);
+  assert.match(m1.error, /x\.com\/tidy isn't a mod for phone~x\.com: merge it from its own site/);
+  // its own twin's mod gets past that check (then there's no new version to merge: another refusal)
+  const m2 = await start('phone~x.com/bar', 'phone~x.com');
+  assert.equal(m2.ok, false);
+  assert.doesNotMatch(m2.error, /isn't a mod for/);
+  // a sensitive site's twin: its own (it was refused), and not google.com's phone view's
+  const G = ['mail.google.com'];
+  const m3 = await ask(ext, 'agent.start', { agent: 'claude', site: 'mail.google.com', scope: 'phone~mail.google.com', splits: G, url: 'https://mail.google.com/', tabId: 1, prompt: 'merge', merge: 'phone~mail.google.com/inbox' });
+  assert.doesNotMatch(m3.error || '', /isn't a mod for/);
+  const m4 = await ask(ext, 'agent.start', { agent: 'claude', site: 'www.google.com', scope: 'phone~google.com', splits: G, url: 'https://www.google.com/', tabId: 1, prompt: 'merge', merge: 'phone~mail.google.com/inbox' });
+  assert.match(m4.error || '', /isn't a mod for phone~google\.com/);
+  // and a desktop run, a phone mod (as before)
+  const m5 = await start('phone~x.com/bar', 'x.com');
+  assert.match(m5.error || '', /isn't a mod for x\.com/);
+});

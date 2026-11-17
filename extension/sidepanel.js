@@ -3398,7 +3398,7 @@ async function importModFile(file) {
   let choice = '';
   for (let i = 0; i < 4; i++) {
     let r;
-    try { r = await request({ type: 'mod.import', text, name: file.name, site, choice, chatSite: chatSite() }); } catch (e) { return note(`Couldn't import ${file.name}: ${e?.message ?? e}`); }
+    try { r = await request({ type: 'mod.import', text, name: file.name, site, choice, chatSite: chatSite(), ...(inPhone() ? { phone: true } : {}) }); } catch (e) { return note(`Couldn't import ${file.name}: ${e?.message ?? e}`); }
     if (r.needsSite) {
       const sites = [...new Set([...(r.needsSite || []), view.site].filter(Boolean))].slice(0, 5);
       site = await askCard('Which site is this mod for?', `${file.name} doesn't say which site it's for${r.needsSite.length ? ` (its @match lines name ${r.needsSite.join(', ')})` : ''}.`, sites.map((s, k) => [s, s, k === 0 ? 'go' : '']));

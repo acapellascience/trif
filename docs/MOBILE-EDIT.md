@@ -251,7 +251,8 @@ own.
   the desktop" holds. Mods registered before re-register once (their hash gains `:gate`).
 - **The phone's panel** lists only the phone twin's mods; a desktop panel never lists them. Its chat is its own
   (`chat:phone~x.com`), and so is its history. So are its count, its list's order, its files
-  (`sites/phone~x.com/files/`, where a file dropped on it goes) and its Style/Boxed/Free switches (`groupsOff`
+  (`sites/phone~x.com/files/`, where a file dropped on it goes), a mod imported there (a phone mod, in the twin of
+  the site its header names: `share.js importMod` `phone`) and its Style/Boxed/Free switches (`groupsOff`
   under `phone~x.com`: they switch the site's phone mods only, and the desktop panel's only the other mods: lib.js
   `groupSiteName`). The toolbar's error mark, the mods' health checks and `trif status` in the phone tab count
   only phone mods, and only the rest in every other tab (background.js `runsInTab`). Export all mods (from the phone's panel) and a phone mod's Export
@@ -260,7 +261,7 @@ own.
   every desktop folder, `sites/x.com/` and `all-sites/` included, is read-only to it (`runs.js runLimits`), and
   readable; of what it writes in its working folder only the twin's files reach the mods folder (not `all-sites/`,
   a desktop folder made after it started, or a new folder: `stage.js ownFolder`, `ownTwin`), and its `trif delete`
-  and `trif restore` take only the twin's mods (`trash.js`); a sensitive site's twin (`phone~mail.google.com`) is
+  and `trif restore` take only the twin's mods, as does a merge started there (`trash.js siteInScope`); a sensitive site's twin (`phone~mail.google.com`) is
   its own folder. Its context says so, and to take a desktop mod's idea and rebuild it for the mobile page without
   assuming the same selectors or data; AGENTS.md "Phone mods" says the same. A desktop run can read phone mods and
   not write them. A phone run can switch only phone mods (`trif enable/disable`), a desktop run only desktop ones.

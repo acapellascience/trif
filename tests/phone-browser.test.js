@@ -255,6 +255,7 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
       const FILES = ${JSON.stringify(files)};
       const MODS = ${JSON.stringify(mods)};
       window.__filesAsked = [];
+      window.__imports = [];
       const rt = chrome.runtime;
       const connect = rt.connect.bind(rt);
       rt.connect = (...a) => {
@@ -271,6 +272,12 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
           if (msg && msg.type === 'files.list') {
             window.__filesAsked.push(msg.site);
             const r = { type: 'reply', reqId: msg.reqId, ok: true, result: { site: msg.site, files: FILES[msg.site] || [] } };
+            setTimeout(() => { for (const fn of fns) fn(r); }, 0);
+            return;
+          }
+          if (msg && msg.type === 'mod.import') {
+            window.__imports.push({ site: msg.site, phone: msg.phone === true });
+            const r = { type: 'reply', reqId: msg.reqId, ok: true, result: { id: 'stub/imported' } };
             setTimeout(() => { for (const fn of fns) fn(r); }, 0);
             return;
           }
@@ -302,6 +309,14 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
       files: document.getElementById('site-files-box').hidden ? null : document.getElementById('site-files-summary').textContent,
       asked: window.__filesAsked.at(-1) || null,
     }))()`;
+    // A mod file dropped on a panel (its import): what the panel asks the background for
+    const DROP = `(async () => {
+      const dt = new DataTransfer();
+      dt.items.add(new File(['// ==WebMod==\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n'], 'dropped.js', { type: 'text/javascript' }));
+      document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 50 && !window.__imports.length; i++) await new Promise((r) => setTimeout(r, 100));
+      return window.__imports.splice(0);
+    })()`;
     const { phoneTab, homeWin } = await h.E(async (url) => {
       const w = await chrome.windows.create({ url, focused: true, width: 1200, height: 860 });
       await chrome.tabs.create({ windowId: w.id, url: 'about:blank', active: false }); // (the window stays while the tab is the phone)
@@ -313,6 +328,7 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     const desk = await panelOf(`?window=${homeWin}&fallback=1`);
     const deskWant = { phone: false, box: true, count: '(3)', rows: ['127.0.0.1/desk-one', '127.0.0.1/desk-two', 'all-sites/everywhere'], files: 'Files (5)', asked: '127.0.0.1' };
     await waitFor('the desktop panel\'s list', async () => JSON.stringify(await desk(LIST)) === JSON.stringify(deskWant)).catch(async (e) => { console.error(JSON.stringify(await desk(LIST))); throw e; });
+    assert.deepEqual(await desk(DROP), [{ site: '', phone: false }], 'the desktop panel\'s import: a desktop mod');
     // the phone view: its own panel window, the phone twin's (no mods yet, no files)
     const opened = await h.ask({ type: 'phone.open', tabId: phoneTab, screen: { left: 0, top: 25, width: 1470, height: 931 } });
     await waitFor('the phone page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
@@ -321,6 +337,7 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     await waitFor('the phone panel\'s list', async () => JSON.stringify(await phone(LIST)) === JSON.stringify(phoneWant)).catch(async (e) => { console.error(JSON.stringify(await phone(LIST))); throw e; });
     await sleep(1500); // (and it stays so: nothing of the desktop's comes back with a later status)
     assert.deepEqual(await phone(LIST), phoneWant);
+    assert.deepEqual(await phone(DROP), [{ site: '', phone: true }], 'the phone panel\'s import: a phone mod (the helper writes it in the twin)');
     // Back to desktop (from the phone's panel): the tab in its window again, its panel the desktop's
     await phone('document.getElementById("phone-back").click(), 0');
     await waitFor('back to desktop', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && !window.__seen.uaPhone'));

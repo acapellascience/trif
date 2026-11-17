@@ -2456,7 +2456,8 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? ''), ...(Array.isArray(msg.ids) ? { ids: msg.ids.slice(0, 5000).map(String) } : {}) }, 11 * 60 * 1000);
     case 'mod.import': {
       // Import a mod (the panel's button, or a .js dropped on it): its text; the helper checks and writes it
-      const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? '') }, 20000);
+      // (`phone`: from the phone view's panel, a phone mod: the helper writes it in the phone twin, lib/share.js)
+      const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? ''), ...(msg.phone === true ? { phone: true } : {}) }, 20000);
       if (r?.id && msg.chatSite) {
         await updateChat(normalizeSite(msg.chatSite), (chat) => { chat.messages.push({ role: 'mod', text: `Imported ${String(msg.name || 'a mod')} as ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}. Like any mod from outside, it waits for your OK if its code can do more than change the page.`, time: Date.now() }); });
       }

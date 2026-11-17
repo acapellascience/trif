@@ -32,40 +32,44 @@ iPhone side (needs ios-poc free):
 - [x] 12. `PhoneLink.swift`: Noise IK in CryptoKit (the same published vector as a self-test), frames, NWBrowser
 - [x] 13. QR scan, pairing, the computer's key and the phone's key in the Keychain; Info.plist (Local Network,
       Bonjour service, camera)
-- [ ] 14. "My computer" engine in More: `run.start` with the page copy and screenshot, events as `agentEvent`s,
+- [x] 14. "My computer" engine in More: `run.start` with the page copy and screenshot, events as `agentEvent`s,
       `tool.request` → read_page / try_mod / screenshot, resume after suspension
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 15, 2026-11-17)
+## Done this round (round 16, 2026-11-17)
 
-The brief: ios-poc free (its latest f2f2ded). Step 13 on ios-poc, 85166ad.
+The brief: ios-poc free (its latest 85166ad). Step 14 on ios-poc, d66642c; this branch 5dc3e3c.
 
-- **`PhoneLinkPair.swift`** (no UI, built for the Mac too): `PairCode.parse` (`trif://pair`, strict: v=1, a 32-byte
-  key, a 16-byte secret, base64url only, no name twice; the name cleaned, "your computer" if empty),
-  `PhoneLinkKeys` (Keychain, service `TRIF phone link`, accounts `phone` and `computer`, after first unlock, this
-  device only), `PhoneLinkPairer` (Bonjour candidates of the code's `id`, or fixed endpoints; the secret in the
-  first message; the computer kept as soon as the answer decrypts; the app `hello` for its name; 5 s limits;
-  `notFound`, `refused`, `denied`, `broken`, `keychain`, `selfTest`).
-- **`PhoneLinkView.swift`**: the My computer sheet (from the ⋯ menu and from `trif://pair` links, i.e. iOS's Camera
-  app), `QRScanner` (AVCaptureMetadataOutput). Info.plist: `NSLocalNetworkUsageDescription`, `NSBonjourServices`
-  `_trif._tcp`, the camera's words now name the code too. Strings: drafts in both strings files.
-- Proof: `mobile/test/phonelink.test.js` 5 of 5 (two new: the code parser and not found; the pairer against the
-  real `server.js` + `store.js` in a temp HOME: a superseded, a cancelled and a wrong code refused, the right one
-  pairs, the computer lists "Check phone" with the phone's key, the used code again lets the paired phone in,
-  removed → refused, a new code pairs the same key). Simulator (SE): `simctl openurl` of a real stand-in
-  computer's code on loopback (`-linkhost`) paired, the computer listed the phone, the pairing survived a
-  relaunch (Keychain), the camera prompt shows the new words, "no camera" shown. Shots 268–270 (not committed).
-- CI: ios-poc 85166ad, run https://github.com/acapellascience/trif/actions/runs/44034027521: the unit suite
-  passed (792 tests, 781 passed, 0 failed; the new parser and not-found test ran there, the real-helper test
-  skipped: no phone-link folder); the browser suite's first test (bridge.test.js "the page side of site-data")
-  timed out at 60 s in both attempts (rerun once), 5 s on f2f2ded; nothing of its code changed. See the CI section.
-- .ipa built and copied (~/Downloads/TrifProbe.ipa, iCloud TRIF/), dSYM UUID ED316EAA-938F-33AF-8039-0D1235772EBE:
-  Tim can pair it with the code in desktop TRIF's Settings on a computer running branch phone-link (the iPhone's
-  Camera app, or ⋯ → My computer…). Nothing runs over the link yet (step 14).
+- **`PhoneLinkRemote.swift`** (no UI, built for the Mac too): the paired computer by Bonjour (or `-linkhost`), no
+  secret, `hello` at once, `ping` every 30 s; `run.start` (the outline, up to 30,000 characters, as the page copy,
+  a JPEG, the width, the computer's session to go on); events numbered, each handed on once; `tool.request` →
+  `onTool`; `run.result` → `onResult`, then `run.ack`; a drop → `away`, reconnection after 2/4/8/15/30/30 s or at
+  once when the app is back in front (`wake`), `run.resume` from the last event; `onLost` (`no-run`, `away` after
+  the waits, `removed`). States: notPaired, notFound, removed, denied, broken, keychain, selfTest.
+- **More**: the engine `computer` ("My computer") in the agent list (logged out until paired, the notice's link
+  opens the pairing screen); its runs in PanelChat (the computer's `done` held until `run.result`, whose mods go to
+  Add this mod? with their warnings, as the API engines'; tool requests run the same read_page / try_mod /
+  screenshot on the run's tab, a try answered with a screenshot too); More's Settings block "My computer" opens the
+  screen, so the ⋯ item is gone. The phone's name: a field before pairing, "iPhone" prefilled (default 17).
+- Proof: `mobile/test/phonelink.test.js` 6 of 6 locally (new: PhoneLinkRemote against the real Store, Server, Runs
+  and Remote with the stand-in agent, through this branch's new `tests/phone-link-computer.js`: a run with three
+  tools and the twin's mods; dropped mid-run, the computer finishes, resumed with exactly the missed events and the
+  result, acked; removed → refused, `lost removed`, a new run `error removed`). Simulator (SE) against the same
+  stand-in computer: More's Settings block, the name field (the computer listed "Test SE"), a run (three tool
+  lines, the two twin mods on Add this mod?), `phonedrop` mid-run → "Still working on … Reconnecting…" then the
+  rest, and "Can't find …" with the computer stopped. Shots 271–275 (not committed).
+- CI: phone-link 5dc3e3c green (44037688934); ios-poc green at b54bc59 (44038468476) after a one-line fix of the
+  bridge.test.js timeout (see the CI section). .ipa built and copied (~/Downloads, iCloud TRIF/), dSYM UUID
+  62BA5B3D-4FD7-3565-B19C-ADB58794FC0B: with desktop TRIF on branch phone-link, Tim can pair it (More → Settings →
+  Pair with my computer…, or the Camera app) and ask My computer for a mod.
 
 ## Earlier rounds
 
+- Round 15: step 13 on ios-poc, 85166ad: `PhoneLinkPair.swift` (the code's parser, the Keychain, the pairer),
+  `PhoneLinkView.swift` (the My computer sheet, the QR scanner), Info.plist's Local Network, Bonjour and camera
+  words; a Mac test of the pairer against the real server.js and store.js; CI's unit suite green, the browser
+  suite's first test timed out (see the CI section).
 - Round 14: step 12 on ios-poc, f2f2ded: `PhoneLink.swift` (Noise IK in CryptoKit with the published vector as a
   self-test, frames, `PhoneLinkBrowser`, `PhoneLinkSession` and its ends), `mobile/test/phonelink.test.js`
   against this branch's noise.js and frames.js, the `phonelink` dev step. CI green first time, run 44032210025.
@@ -124,6 +128,16 @@ The brief: ios-poc free (its latest f2f2ded). Step 13 on ios-poc, 85166ad.
 
 ## CI
 
+- Round 16: phone-link 5dc3e3c (tests/phone-link-computer.js, strings), success first time,
+  https://github.com/acapellascience/trif/actions/runs/44037688934. ios-poc d66642c (step 14), run 44037674336:
+  failed on bridge.test.js "the page side of site-data" alone again (60 s timeout; 793 tests, 781 passed). Looked:
+  not this branch's code, not the runner's Chrome (157.0.8103.78 on both the passing f2f2ded and the failing runs).
+  Its 60 s limit counts `tests/cdp-page.js` `launch`'s wait for the test browsers' lock (up to 10 min), and test
+  files run side by side: this one, the suite's first browser, waited behind another file's browser. 85166ad and
+  d66642c changed the files' timing (phonelink.test.js's swiftc builds), not the test. Fixed on ios-poc b54bc59
+  (its limit 600 s, a comment says why), run https://github.com/acapellascience/trif/actions/runs/44038468476:
+  success (793 tests, 782 passed, 11 skipped, 0 failed; the new My computer test skipped there: no phone-link
+  folder). The commit that records this line was pushed without waiting for its run (docs only).
 - Round 15, ios-poc 85166ad, run 44034027521: unit suite green; the browser suite's first test, mobile/test/
   bridge.test.js "the page side of site-data", timed out (60 s) in both attempts (the second by `gh run rerun
   --failed`, once). It passed in 5 s on f2f2ded 15 minutes earlier and the commit changes no page code: a new
@@ -216,19 +230,46 @@ The brief: ios-poc free (its latest f2f2ded). Step 13 on ios-poc, 85166ad.
 
 ## Next step
 
-**Step 14** on ios-poc, **only when the round's brief says ios-poc is free**: "My computer" as an engine in More
-(PanelChat.swift / Web/panel-adapter.js / PanelEngines.swift): not paired → the "Before pairing" line and Scan the
-code (open `PhoneLinkModel.shared.shown`, or move the sheet's content into More); paired → `PhoneLinkBrowser` +
-`PhoneLinkSession` with `PhoneLinkKeys.shared` (no `pair`), `hello` at once on `onOpen`, `ping` every 30 s,
-`run.start` with the page copy and screenshot (Browser.swift `pageForChat` and the screenshot the API engines
-send), events as `agentEvent`s, `tool.request` → read_page / try_mod / screenshot answered, `run.resume` after
-suspension. Its Mac proof: extend phonelink.test.js against the real `remote.js` (as tests/phone-link-e2e.test.js
-does with the stand-in agent) if the engine's logic can live in a UI-free file, as PhoneLinkPair.swift does.
-If ios-poc isn't free: the computer-side odds and ends listed in round 14's next step (still open): `DELETE` in
-the end-to-end test; a phone's name cut at 60 characters mid-word (`server.js` `text(d.name, 60)`, use
-`qrName`-style whole characters and "…"); optionally Codex's sandbox.
+**Step 15** on ios-poc, **only when the round's brief says ios-poc is free**: what is left of "the result and the
+states". Already there from step 14: the result's mods go to Add this mod? (`offerFromChat`, its usual warnings),
+and section 8's states are said in the chat (`PanelChat.linkWords`). Left: (1) a run kept from before (the app was
+closed, or `onLost` `away` gave up): read `hello`'s `pending` on connect and pick the run up (`run.resume` with
+after 0, its chat by `chat` = the panel's site), with the drafted line "{computer} finished this while TRIF was
+closed."; (2) Add this mod? says where the mod came from (the computer's phone twin) if Tim wants it (the sheet
+shows "1 of 2 mods in the reply" now); (3) the sandbox state (`sandbox` event) and `login` (`done` with
+`error.kind: 'login'`) said as PHONE-LINK-STRINGS.md drafts them (the panel shows the raw events now: check how);
+(4) the Local Network question's first-time flow in the Simulator (`denied`). Then step 16 (the Simulator proof is
+mostly done: shots 271–275).
+If ios-poc isn't free: the computer-side odds and ends (still open from round 14): `DELETE` in the end-to-end
+test; a phone's name cut at 60 characters mid-word (`server.js` `text(d.name, 60)`; the app now cuts at 60 too,
+`PhoneLinkModel.sentName`); optionally Codex's sandbox.
 
 ## Notes for next round
+
+- **Step 14's API (ios-poc):** `PhoneLinkRemote(keys:phoneName:device:app:endpoints:queue:)`: `connect(done)`,
+  `start(url:prompt:page:shot:chat:session:width:done)` → the computer's runId, `stop`, `unfollow`, `wake`,
+  `close`, `drop` (tests), `retry` (the waits; `[]`: none, `wake()` only), `state`, `hello` (`pending`),
+  `following`; callbacks `onEvent(runId, n, ev)`, `onResult(runId, msg)`, `onTool(runId, tool, input, answer)`,
+  `onLost(runId, RunError)`, `onState`. In PanelChat: `link` (lazy), `goComputer`, `computerEvent/Result/Tool/Lost`,
+  `linkWords(code, message)`, `wakeLink()` (didBecomeActive), `linkChanged()` (PhoneLinkModel's `computer` changed:
+  `window.__trifPanelLinkChanged` repaints the Settings block and re-lists the agents). Panel requests `link.status`,
+  `link.open`; the link https://pair.trif.invalid/ is caught like Ask Claude's.
+- The panel's sessionId for My computer is the computer's agent session (from its `session`/`done` events); the
+  next `run.start` sends it as `session`, which the computer takes only for that phone's own twin (5b).
+- With no phone paired and no pairing window, the computer doesn't listen: a removed last phone finds nothing
+  (`notFound`, "Can't find …"), not `removed`. The Mac test opens a pairing window before removing to see
+  `removed`. Both are honest; Tim may want the removed-last-phone case worded better (it can't be told apart).
+- `tests/phone-link-computer.js` (this branch): the stand-in computer for ios-poc. `node tests/phone-link-computer.js
+  --seconds 600` prints `{port, qr, home}`, then stdin lines `pair`, `go <word>`, `list`, `remove`, `kept`
+  (`{kept: {<phone>: [{runId, done}]}}`), `quit`. For the Simulator: a FIFO for stdin (`mkfifo plc.in`, hold it
+  open with `sleep 900 > plc.in &`, start the node with `< plc.in > plc.out &`, then `echo "go b" > plc.in`); launch
+  the app with `-linkhost 127.0.0.1:<port>`, `simctl openurl` the qr, then More: `paneljs` sets `#agent` to
+  `computer` and submits `#composer` (scratchpad `panelrun.sh` shows the pattern). The stand-in's words in the
+  request: `WRITE PHONE[try bottom-bar] PHONE[page h1] PHONE[screenshot]`, `PAUSE:<word>`, `SLEEP`.
+- In the Simulator the app put in the background (`simctl launch … com.apple.Preferences`) kept its connection
+  for the few seconds tried: use the `phonedrop` step to lose it.
+- The stand-in's mods have no tier (free mods): `try_mod` answers "free mods can't be tried here", an honest
+  error the agent gets; a style mod would be tried for real.
 
 - **Step 13's API (ios-poc):** `PhoneLinkKeys.shared.phoneKey()` (made once; nil if the Keychain refuses),
   `.computer` → `PairedComputer {key, name, pairedAt, id}` or nil, `.save`, `.forget()`. `PhoneLinkModel.shared`
@@ -611,8 +652,14 @@ New in round 11, small, a default unless Tim objects:
     docs/PHONE-LINK-STRINGS.md. One changes words the app already shows: iOS's camera question now reads "To scan
     the code TRIF shows on your computer. Websites you visit can also ask to use the camera, for a photo or a video
     call." (one Info.plist key serves both uses). For now the screen is also in the ⋯ menu as "My computer…" until
-    More's engine (step 14) opens it; Tim may want it only in More then.
+    More's engine (step 14) opens it; Tim may want it only in More then. Round 16: only in More now (the brief); the ⋯ item is gone.
 16. **What the computer lists a phone as**: the phone sends `UIDevice.current.name`, which on iOS 16+ is just
     "iPhone" (a phone's own name needs Apple's user-assigned-device-name entitlement, granted on request). So two
     iPhones are both "iPhone" in the desktop list. Options: ask Apple for the entitlement, or let the user name the
-    phone on the pairing screen.
+    phone on the pairing screen. Decided (the main session's brief, round 16): item 17.
+
+New in round 16, the main session's brief (a default):
+
+17. **The person names the phone at pairing**: a field on the My computer screen before pairing, "iPhone"
+    prefilled and editable, kept for later pairings (at most 60 characters, "iPhone" if left empty). No
+    entitlement asked of Apple. Built on ios-poc (d66642c); strings drafted.

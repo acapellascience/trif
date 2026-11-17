@@ -116,7 +116,7 @@ Phone → computer:
 
 | `t` | Fields | Answer |
 |---|---|---|
-| `sync.begin` | `mods`: `[{id, rev}]`, every mod on the phone (at most 500) | `sync.plan` `{syncId, want: [{id, back?}], give: [{id, rev, back?, conflict?}], remove: [id], later: [id], skipped: [{id, why}]}` (`skipped`: a bad id or a mod over 1 MB) |
+| `sync.begin` | `mods`: `[{id, rev}]`, every mod on the phone (at most 500) | `sync.plan` `{syncId, want: [{id, back?, conflict?}], give: [{id, rev, back?, conflict?}], remove: [id], later: [id], skipped: [{id, why}]}` (`skipped`: a bad id or a mod over 1 MB) |
 | `sync.get` | `syncId`, `mod` (an id from `give`) | `sync.mod` `{mod, name, code}` (`code` is the computer's file as it is now) |
 | `sync.put` | `syncId`, `mod` (an id from `want`), `code` | `ok` `{mod, rev, held}` (`held`: waiting for the user's OK on the computer), or `error` `bad-mod` (not a mod file, or its id), `too-big`, `changed` (the computer's file changed since the plan: the next sync decides) |
 | `sync.end` | `syncId`, `have`: `[{id, rev}]` (the phone's revisions now, for the plan's ids) | `sync.done` `{synced, waiting: [{id, name}] (held on the computer), conflicts: [{id, sibling}]}`; the base moves for each id where `have` matches the computer's file |

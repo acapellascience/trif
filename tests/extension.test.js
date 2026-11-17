@@ -3822,6 +3822,60 @@ test('background: a side-panel run\'s navigate and open keep the tab\'s page loa
   } finally { bg.restore(); }
 });
 
+test('background: trif reload of a tab locked for agent code: once the new page has unlocked it, the page loads again, unlocked', async () => {
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X', status: 'complete' }];
+  const execute = async ({ world: w }) => [{ result: w === 'MAIN' ? JSON.stringify({ ok: true, json: '"ran"' }) : null }];
+  // the tab's document, as the isolated world sees it (tablock.js setMarker/hasMarker) and the site's stored state
+  const page = { marker: null, data: { localStorage: 'l0' } };
+  const scripting = {
+    executeScript: async ({ func, args }) => {
+      if (func.name === 'setMarker') { page.marker = args[0]; return [{ result: true }]; }
+      if (func.name === 'hasMarker') return [{ result: page.marker === args[0] }];
+      if (func.name === 'loadedDomains') return [{ result: ['x.com'] }];
+      if (func.name === 'fingerprint') { fingerprints++; return [{ result: { ...page.data } }]; }
+      return [{ result: null }];
+    },
+  };
+  let fingerprints = 0;
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], agentSites: { 'x.com': 'run' } }, tabs, scripting, userScripts: { configureWorld: async () => {}, getWorldConfigurations: async () => [], execute } });
+  try {
+    const rules = new Map();
+    chrome.declarativeNetRequest = {
+      updateSessionRules: async ({ addRules = [], removeRuleIds = [] }) => { for (const id of removeRuleIds) rules.delete(id); for (const r of addRules) rules.set(r.id, structuredClone(r)); },
+      getSessionRules: async () => [...rules.values()],
+    };
+    const session = {};
+    chrome.storage.session = { get: async (k) => ({ [k]: session[k] }), set: async (o) => { Object.assign(session, structuredClone(o)); } };
+    const tabRules = () => [...rules.values()].filter((r) => r.condition.tabIds?.[0] === 5 || r.condition.initiatorDomains).length;
+    const atLoad = []; // the lock's rules in place as each load's new document starts (its own first requests)
+    chrome.tabs.reload = async (id, o) => {
+      page.marker = null; // a new document
+      atLoad.push(tabRules());
+      setImmediate(() => chrome.tabs.onUpdated.emit(id, { status: 'complete' }));
+    };
+    let r = await bg.native.call('run', { tab: 5, code: 'document.title', expression: true, world: 'page', scope: 'x.com' });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.ok(tabRules() > 0, 'locked');
+    page.data.localStorage = 'written while the code ran';
+    r = await bg.native.call('reload', { tab: 5 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.strictEqual(r.result.locked, undefined);
+    assert.deepStrictEqual(atLoad.map((n) => n > 0), [true, false], 'the reported page loaded with no lock: its first request went through');
+    assert.strictEqual(tabRules(), 0);
+    assert.strictEqual(fingerprints, 2, 'the storage compared on the new page before unlocking');
+    // an unlocked tab: one load, as before
+    r = await bg.native.call('reload', { tab: 5 });
+    assert.strictEqual(atLoad.length, 3);
+    // a reload that doesn't replace the document (the agent's code still there): one load, and it says it's still locked
+    r = await bg.native.call('run', { tab: 5, code: 'document.title', expression: true, world: 'page', scope: 'x.com' });
+    chrome.tabs.reload = async (id) => { atLoad.push(tabRules()); setImmediate(() => chrome.tabs.onUpdated.emit(id, { status: 'complete' })); };
+    r = await bg.native.call('reload', { tab: 5 });
+    assert.strictEqual(r.result.locked, true);
+    assert.strictEqual(atLoad.length, 4);
+    assert.ok(tabRules() > 0, 'still locked');
+  } finally { bg.restore(); }
+});
+
 test('background: trif run in the box needs no lock and no asking; the page\'s own world still does; Look and Off refuse both', async () => {
   const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X', status: 'complete' }];
   // TRIF's sandbox world, as the browser would run it: the runtime is there once its script has been put in

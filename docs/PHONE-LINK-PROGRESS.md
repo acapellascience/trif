@@ -35,28 +35,29 @@ iPhone side (needs ios-poc free):
 - [x] 14. "My computer" engine in More: `run.start` with the page copy and screenshot, events as `agentEvent`s,
       `tool.request` → read_page / try_mod / screenshot, resume after suspension
 - [x] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
-- [ ] 16. Simulator proof against the helper in a temp HOME
+- [x] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 17, 2026-11-17)
+## Done this round (round 18, 2026-11-17)
 
-The brief: merge main (9892edf, a run's commands an allowlist and its reads held to its site; the phone view's
-window), then step 15; ios-poc free (b54bc59).
-- **Merge** 6994b7a: a phone's run goes through main's allowlist (`PHONE_RUN_COMMANDS` in host.js: RUN_COMMANDS'
-  helper commands, none of its page commands, plus `remote.*` = `trif phone page|try|screenshot`, on no other run's
-  list; a desktop run's `remote.*` is told it isn't a phone run). Its `ping`/`mods`/`mod.code`/`mod.diff` are held to
-  its twin by main's `runMod` (siteInScope: a `phone~` scope is its twin alone). Proof: forged mailbox requests from a
-  phone run in phone-link-e2e.test.js, a desktop run's `remote.*` in run-scope-reads.test.js. 175/176 local (1 skip).
-- **Step 15** on ios-poc c888b41: kept runs picked up (the adapter asks `link.pickUp` once loaded, and on coming
-  back to the front: hello's `pending` into their chats, `run.resume` after 0, "{computer} finished this while TRIF
-  was closed." or "Still working on {computer}."); the computer's `sandbox`/`login` errors in the drafted words;
-  "Can't find …" now also covers a removed last phone (string for Tim, below). Mac test 6/6 (new: app closed
-  mid-run, the run picked up from event 1 to the result, acked). Simulator (SE): kept run picked up to Add this
-  mod?; LOGGEDOUT (a new stand-in word) → the login line; no Local Network question in the Simulator (see notes).
-  .ipa built (~/Downloads, iCloud TRIF/), dSYM UUID 00678B70-4289-307A-BD74-B04F43670837.
-- CI: merge green after one rerun of the clickjacking flake (44039586205); ios-poc green (44040898733).
+The brief: step 16 (ios-poc free, c888b41), the picked-up run's repeated steps, then the computer's odds and ends.
+- **Step 16**, one recorded Simulator pass (SE, iOS 26.3) against `tests/phone-link-computer.js`: paired by the
+  code; a run with three tools (try: "free mods can't be tried here", page `h1`: 0 matches on today's
+  example.com, screenshot) to Add this mod? (2 mods, Cancel each); a drop mid-run, reconnected and resumed to
+  Done; the app terminated mid-run, the run picked up ("Stand-in Mac finished this while TRIF was closed.",
+  "Working" once); removed ("This iPhone isn't connected to Stand-in Mac any more…"); computer gone ("Can't find
+  Stand-in Mac…"). Shots: docs/phone-link-shots/sim16/ (6); the video: scratchpad `s16/pass.mov` (17 MB, not committed).
+- **Wart fixed** on ios-poc 14d4ee7: `PhoneLinkRemote` keeps each run's newest shown event in UserDefaults
+  (`phoneLink.shown`), `pickUp` resumes after it. Mac test 6/6 (the pickup now checks it starts after "Working").
+  .ipa built (~/Downloads, iCloud TRIF/), dSYM UUID 8130EB9D-F57B-3734-9590-C84D84DB0602.
+- **Computer** 7c368b1: names cut at 60 at a word with "…" (`cleanName`, also hello's device name); the e2e
+  phone run now DELETEs its twin's old mod (in `removed`, gone, nothing else touched). 101/101 phone-link tests.
+- CI: ios-poc https://github.com/acapellascience/trif/actions/runs/44043058248, phone-link
+  https://github.com/acapellascience/trif/actions/runs/44043417800.
 
 ## Earlier rounds
 
+- Round 17: main merged (6994b7a, the run allowlist: `PHONE_RUN_COMMANDS`); step 15 on ios-poc c888b41 (kept runs
+  picked up, sandbox/login words, "Can't find" for a removed last phone).
 - Round 16: step 14 on ios-poc, d66642c (PhoneLinkRemote.swift, My computer in More, the phone's name at
   pairing; a Mac test against the real Store/Server/Runs/Remote); tests/phone-link-computer.js here (5dc3e3c).
 - Round 15: step 13 on ios-poc, 85166ad: `PhoneLinkPair.swift` (the code's parser, the Keychain, the pairer),
@@ -227,15 +228,19 @@ window), then step 15; ios-poc free (b54bc59).
 
 ## Next step
 
-**Step 16** on ios-poc, **only when the round's brief says ios-poc is free**: the Simulator proof as one recorded
-pass against `tests/phone-link-computer.js` (pair, a run with three tools, a drop and resume, the app closed and
-the run picked up, removed, not found), shots committed or listed; then decide with the main session whether
-anything is left before GOAL COMPLETE (the `denied` flow is device-only: Tim's phone, by Tim). Optional, if Tim
-wants it: Add this mod? saying the mod came from the computer.
-If ios-poc isn't free: the computer-side odds and ends: `DELETE` in the end-to-end test; a phone's name cut at 60
-characters mid-word (`server.js` `text(d.name, 60)`).
+None on the checklist: every item is done. Left for the main session and Tim: the `denied` Local Network flow
+(device-only, Tim's phone, by Tim); optional, Add this mod? saying the mod came from the computer; the phone
+applying `removed` (a deleted twin mod) on its side is not built (the result carries it, the app ignores it);
+the iPhone still cuts its own name hard at 60 before sending (`sentName`), so the computer's word cut only shows
+for longer names from other clients; merging `phone-link` and the iPhone side is Tim's call.
 
 ## Notes for next round
+
+- **Round 18:** the recorded pass's helpers: scratchpad `s16/lib.sh` (`st`, `say`, `shot`, `chat`, `send`,
+  `newchat`). The stand-in agent takes one `PAUSE`; a `trif phone …` asked while the phone is away fails at once
+  (`away`, the agent's error), so a drop with a tool after it shows no tool step. A rerun of WRITE on the same site
+  offers nothing (the twin's mods unchanged). The iOS Simulator tool's taps are in points (SE: 375×667).
+  `phoneLink.shown` is pruned at each hello to the runs the computer keeps or the app follows.
 
 - **Round 17:** a picked-up run replays from event 1, so a chat that already showed the first steps before the app
   was closed shows them twice ("Working" twice in the Simulator). The app keeps no event numbers across launches;
@@ -595,8 +600,7 @@ small, also a default unless Tim objects:
    from the list, since they can't reach the new key and must scan a new code anyway.
 
 Item 6 stands as the default (the main session's brief, round 6). Item 7 is fixed on main
-(`phone-view-scope`, merged) and merged here in round 13; a phone run's delete is still to be proven end to
-end (the next step's list, 1).
+(`phone-view-scope`, merged) and merged here in round 13; a phone run's delete is proven end to end (round 18).
 
 New in round 6, small, defaults unless Tim objects:
 

@@ -10,7 +10,7 @@
 // (tests/phone-link-client.js) pairs with exactly that; that nothing in the section is wider than the panel;
 // that the section scrolls with Settings in a short window.
 //
-// macOS and local only (as tests/run-sandbox.test.js is): TRIF_BROWSER_TESTS=1, with Chrome for Testing
+// macOS only, with the other browser tests (TRIF_BROWSER_TESTS=1 locally; CI's macOS runs it): Chrome for Testing
 // (TRIF_E2E_CHROME) and Xcode's `swift`. PHONE_LINK_SHOTS=<dir> also saves the screenshots there. The codes
 // in them are a scratch helper's: its key and its one-time secrets are gone when the test ends.
 
@@ -28,11 +28,10 @@ const { PhoneClient } = require('./phone-link-client');
 const { generateKeyPair } = require('../helper/lib/phonelink/noise');
 
 const SWIFT = '/usr/bin/swift';
-const skip = process.env.TRIF_BROWSER_TESTS !== '1' ? 'a local look in a real browser: set TRIF_BROWSER_TESTS=1 to run it'
-  : process.platform !== 'darwin' || !fs.existsSync(SWIFT) ? 'needs macOS and swift (Vision reads the code back)'
-    : browserTestsSkip();
+const skip = browserTestsSkip() || (process.platform !== 'darwin' || !fs.existsSync(SWIFT) ? 'needs macOS and swift (Vision reads the code back)' : false);
 
-// macOS's reader: every QR code it finds in a picture, one text a line.
+// macOS's reader: every QR code it finds in a picture, one text a line, each after "QR:" (on a machine
+// without a GPU, CI's, Vision writes a notice of its own to the same output first, with no line end).
 const READER = `import Foundation
 import Vision
 import AppKit
@@ -41,7 +40,7 @@ guard let img = NSImage(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1
 let req = VNDetectBarcodesRequest()
 req.symbologies = [.qr]
 try VNImageRequestHandler(cgImage: cg, options: [:]).perform([req])
-for r in (req.results ?? []) { if let s = r.payloadStringValue { print(s) } }
+for r in (req.results ?? []) { if let s = r.payloadStringValue { print("\\nQR:" + s) } }
 `;
 
 const sh = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -69,7 +68,7 @@ test('Connect a phone in a real browser: each state, the code read back and pair
   /** The one code in a picture, as macOS reads it. (Its text is a secret: never in a message.) */
   const read = (file) => {
     const r = spawnSync(reader, [file], { encoding: 'utf8', timeout: 60000 });
-    const lines = r.stdout.split('\n').filter(Boolean);
+    const lines = r.stdout.split('\n').filter((l) => l.startsWith('QR:')).map((l) => l.slice(3));
     assert.equal(lines.length, 1, `macOS reads one code in ${path.basename(file)} (it read ${lines.length}; ${r.stderr.slice(0, 200)})`);
     return lines[0];
   };

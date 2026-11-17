@@ -370,7 +370,7 @@ always-on network presence. Proposed: one state whose text names both causes. Fo
   `phone-link/`, the keychain's file, this computer's tabs, the site's desktop folder and another site's are
   refused, each by whom it should be (the agent's own rules, `trif`, the helper, the sandbox). Not with Codex
   yet: a phone's run can't choose a model and the stand-in model can't drive Codex's default one.
-- In a real browser (macOS, local only: `TRIF_BROWSER_TESTS=1`, Chrome for Testing, headless and muted):
+- In a real browser (macOS, on CI too; locally with `TRIF_BROWSER_TESTS=1`; Chrome for Testing, headless, muted):
   Settings' Connect a phone in TRIF's own extension, with the real helper started by the browser in a
   temporary workspace (`tests/phone-link-browser.test.js`). Each state of the section, light and dark; the
   code is read back from a screenshot's pixels by macOS's own reader and a stand-in phone pairs with what it

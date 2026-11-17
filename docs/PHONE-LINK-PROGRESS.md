@@ -41,7 +41,7 @@ iPhone side (needs ios-poc free):
 
 The brief: ios-poc isn't free; the look at Settings' Connect a phone in a real browser (Tim's OK).
 
-- **`tests/phone-link-browser.test.js`** (macOS, local only: `TRIF_BROWSER_TESTS=1`, skipped on CI): TRIF's
+- **`tests/phone-link-browser.test.js`** (macOS; with `TRIF_BROWSER_TESTS=1` locally, and on CI, whose runner is macOS): TRIF's
   own extension in headless Chrome for Testing (`tests/cdp-page.js`: muted, the lock, the memory guard), the
   side panel's page in a tab 380 px wide, and the real `helper/host.js` started by the browser itself over
   native messaging in a temp workspace (fake keychain, stand-in dns-sd, the listener on 127.0.0.1). Each
@@ -184,9 +184,7 @@ that is left (each small; none is a checklist item):
 2. A phone's name is cut at 60 characters in the middle of a word, with no "…" (`server.js` `text(d.name,
    60)`; seen in the browser look). The computer's name in the code is cut at whole characters with "…"
    (`store.js` `qrName`): the same for a phone's name, and a test.
-3. Optional: `tests/phone-link-browser.test.js` on CI (Linux has no Vision: the code would be read from the
-   page's path instead, or by a small decoder in the test).
-4. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
+3. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
 
 ## Notes for next round
 

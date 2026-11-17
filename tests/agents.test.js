@@ -23,16 +23,22 @@ const inWs = (...parts) => path.join(...parts);
 const cmdFor = (dir, name) => { if (WIN) fs.writeFileSync(path.join(dir, `${name}.cmd`), `@ECHO off\r\n"${process.execPath}" "%~dp0${name}" %*\r\n`); };
 // The system's own folders on a PATH (Windows starts a .cmd with cmd.exe).
 const SYSTEM_PATH = WIN ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : ['/usr/bin', '/bin'];
-// A folder nothing can be put in until the function this returns is called: by its mode, or on Windows,
-// where a mode does nothing, by a rule against the user for the folder itself (and nothing in it left from
-// an earlier move, which could still be put into).
-function lockFolder(dir) {
-  if (!WIN) { fs.chmodSync(dir, 0o500); return () => fs.chmodSync(dir, 0o700); }
-  const { execFileSync } = require('child_process');
-  const who = require('os').userInfo().username;
-  for (const n of fs.readdirSync(dir)) if (/^from-workspace-/.test(n)) fs.rmSync(path.join(dir, n), { recursive: true, force: true });
-  execFileSync('icacls', [dir, '/deny', `${who}:(WD,AD)`], { stdio: 'pipe' });
-  return () => execFileSync('icacls', [dir, '/remove:d', who], { stdio: 'pipe' });
+// Windows, for a file that can't be moved: a mode locks nothing there, and a rule against the user on the
+// folder (icacls /deny) didn't stop the runner's administrator. A file another program holds open, sharing
+// nothing, can't be moved or read, though: PowerShell makes it and holds it until the function this
+// resolves to is called.
+function heldOpen(file, text) {
+  const { spawn } = require('child_process');
+  const ps = "$f=[System.IO.File]::Open($env:HELD_FILE,'Create','ReadWrite','None');$b=[System.Text.Encoding]::UTF8.GetBytes($env:HELD_TEXT);$f.Write($b,0,$b.Length);$f.Flush();[Console]::Out.WriteLine('held');Start-Sleep -Seconds 120";
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { env: { ...process.env, HELD_FILE: file, HELD_TEXT: text }, stdio: ['ignore', 'pipe', 'pipe'] });
+  return new Promise((resolve, reject) => {
+    let said = '';
+    const release = () => new Promise((r) => { if (child.exitCode !== null) r(); else { child.once('exit', r); child.kill(); } });
+    child.stdout.on('data', (d) => { said += d; if (/held/.test(said)) resolve(release); });
+    child.stderr.on('data', (d) => { said += d; });
+    child.once('error', reject);
+    child.once('exit', () => reject(new Error(`the file wasn't held: ${said}`)));
+  });
 }
 const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -911,15 +917,16 @@ test('a run never starts with private files in the workspace: they\'re moved fir
   assert.ok(callFor(bin, 'MOVEDFIRST'));
   // Can't be moved (the private folder isn't writable): refused, the agent never starts.
   // (the private folder locked before the file appears: nothing can move it in between)
-  const unlock = lockFolder(privDir(home));
+  // (Windows: the file is held open by another program instead, from the moment it's made)
+  const unlock = WIN ? await heldOpen(path.join(home, 'config.json'), '{"handmade":true}') : (fs.chmodSync(privDir(home), 0o500), () => fs.chmodSync(privDir(home), 0o700));
   try {
-    fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
+    if (!WIN) fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
     r = await extRequest(ext, 'agent.start', { ...START, prompt: 'NEVERSTARTS' });
     assert.equal(r.ok, false, `started anyway: ${JSON.stringify(r)}; in the workspace: ${fs.readdirSync(home).join(', ')}; private: ${fs.readdirSync(privDir(home)).join(', ')}`);
     assert.match(r.error, /private files are in the workspace.*config\.json.*trif setup/);
     assert.ok(!callFor(bin, 'NEVERSTARTS'));
   } finally {
-    unlock();
+    await unlock();
   }
 });
 

@@ -54,6 +54,20 @@ Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes 
 Run it again after upgrading TRIF, moving the repo or upgrading Node.`,
     examples: ['npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
   },
+  uninstall: {
+    usage: 'trif uninstall [--all [--yes]] [--home DIR] [--bin-dir DIR] [--native-dir DIR] [--verbose]',
+    summary: "remove TRIF's helper, CLI and browser connections (your mods and settings stay unless --all)",
+    details: `Undoes setup: removes the native messaging host manifests that start this workspace's helper (one
+another workspace wrote stays, and is listed), the Safari bridge's agent (stopped first), the
+/usr/local/bin/trif link (--bin-dir: in that folder), the running helpers, and the workspace's bin/, app/
+and runtime/ (TRIF's own Node). Your mods, the workspace's AGENTS.md and the private folder (settings,
+paired phones, logs) stay, so installing TRIF again picks up where you left off.
+--all also removes the API keys TRIF saved in the Keychain, the private folder, the runs' mailboxes and
+the workspace with your mods (a mods folder set outside it stays). It asks first at a terminal; elsewhere
+it needs --yes. The browser extension isn't touched: remove it in the browser. --verbose lists every path
+removed. The user's alone: never run it unless they ask.`,
+    examples: ['trif uninstall', 'trif uninstall --all'],
+  },
   status: {
     usage: 'trif status [TAB]',
     summary: 'connection, "Allow User Scripts" switch, mods and whether each is registered or off',
@@ -452,7 +466,7 @@ agent-levels/off picks one. Works without the browser, and in side-panel runs.`,
 };
 
 const GROUPS = [
-  ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
+  ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report', 'uninstall']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'export', 'import', 'files', 'add', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'verify', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],

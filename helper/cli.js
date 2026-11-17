@@ -20,7 +20,7 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal', 'export', 'import', 'add']);
+const NOT_IN_RUNS = new Set(['setup', 'uninstall', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal', 'export', 'import', 'add']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -29,7 +29,7 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance', '--to']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--box', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--runtime', '--no-runtime', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor', '--replace', '--as-copy']);
+  '--use-new', '--all', '--yes', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor', '--replace', '--as-copy']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
@@ -255,6 +255,42 @@ const handlers = {
     if (!found.length) throw new UsageError(`no term "${word}" (trif explain lists them)`);
     if (ctx.json) printJson(found);
     else out(found.map(X.termText).join('\n\n'));
+  },
+
+  async uninstall(ctx) {
+    const { uninstall } = require('./lib/uninstall');
+    const all = !!ctx.opts['--all'];
+    const home = ctx.ws.home;
+    if (all && !ctx.opts['--yes']) {
+      if (!process.stdin.isTTY || ctx.json) throw new UsageError('--all deletes your mods and settings: add --yes to confirm');
+      const lines = stdinLines();
+      process.stdout.write(`This deletes your mods (${ctx.ws.modsDir}), TRIF's settings and paired phones, and the API keys TRIF saved. Type "delete" to go on: `);
+      const answer = await lines.next();
+      lines.close();
+      if (String(answer || '').trim().toLowerCase() !== 'delete') { out('Nothing removed.'); process.exitCode = 1; return; }
+    }
+    let r;
+    try {
+      r = await uninstall({ home: ctx.opts['--home'], all, binDir: ctx.opts['--bin-dir'], nativeDir: ctx.opts['--native-dir'] });
+    } catch (e) {
+      if (e instanceof require('./lib/lock').LockBusy) throw new HelperError(e.message);
+      throw new UsageError(e.message);
+    }
+    if (ctx.json) {
+      printJson({ ok: r.ok, home, all, removed: r.removed, kept: r.kept, keys: r.keys, problems: r.problems });
+    } else {
+      const lines = [];
+      if (ctx.opts['--verbose']) for (const p of r.removed) lines.push(`removed  ${p}`);
+      for (const k of r.kept) lines.push(`kept     ${k.path}: ${k.why}`);
+      for (const p of r.problems) lines.push(`problem  ${p}`);
+      if (lines.length) lines.push('');
+      lines.push(all
+        ? `Removed TRIF: its helper, CLI, browser connections, settings, saved API keys and mods.${r.modsOutside ? ` Your mods folder ${r.modsOutside} is outside the workspace and is still there.` : ''}`
+        : `Removed TRIF's helper, CLI and browser connections. Your mods (${home}) and settings (${ctx.ws.private}) are still there: installing TRIF again picks them up. To remove them too, delete those two folders.`);
+      lines.push('Remove the TRIF extension from your browser too: chrome://extensions (Firefox: about:addons; Safari: delete TRIF.app).');
+      out(lines.join('\n'));
+    }
+    if (!r.ok) process.exitCode = 1;
   },
 
   async setup(ctx) {

@@ -251,8 +251,9 @@ own.
   the desktop" holds. Mods registered before re-register once (their hash gains `:gate`).
 - **The phone's panel** lists only the phone twin's mods; a desktop panel never lists them. Its chat is its own
   (`chat:phone~x.com`), and so is its history. So are its count, its list's order, its files
-  (`sites/phone~x.com/files/`, where a file dropped on it goes), a mod imported there (a phone mod, in the twin of
-  the site its header names: `share.js importMod` `phone`) and its Style/Boxed/Free switches (`groupsOff`
+  (`sites/phone~x.com/files/`, where a file dropped on it goes), a mod imported there (a file dropped or chosen, Paste a mod…, or
+  Add on a Downloads offer: a phone mod, in the twin of the site its header names, never `all-sites/`: `share.js
+  importMod` `phone`; Try it here runs only in that tab and writes nothing) and its Style/Boxed/Free switches (`groupsOff`
   under `phone~x.com`: they switch the site's phone mods only, and the desktop panel's only the other mods: lib.js
   `groupSiteName`). The toolbar's error mark, the mods' health checks and `trif status` in the phone tab count
   only phone mods, and only the rest in every other tab (background.js `runsInTab`). Export all mods (from the phone's panel) and a phone mod's Export

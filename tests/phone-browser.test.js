@@ -263,10 +263,15 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
         const fns = [];
         const status = new Set();
         port.onMessage.addListener((m) => {
-          if (m && m.type === 'reply' && status.has(m.reqId) && m.ok && m.result && m.result.helper) { m.result.helper.connected = true; m.result.mods = MODS; }
+          if (m && m.type === 'reply' && status.has(m.reqId) && m.ok && m.result && m.result.helper) {
+            m.result.helper.connected = true;
+            m.result.mods = MODS;
+            m.result.downloads = window.__offer ? { on: true, state: 'watching', offer: window.__offer } : { on: false, state: 'off' };
+          }
           for (const fn of fns) fn(m);
         });
         port.onMessage.addListener = (fn) => { fns.push(fn); };
+        window.__poke = () => { for (const fn of fns) fn({ type: 'statusChanged' }); }; // (as the background's broadcast)
         const post = port.postMessage.bind(port);
         port.postMessage = (msg) => {
           if (msg && msg.type === 'files.list') {
@@ -275,8 +280,11 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
             setTimeout(() => { for (const fn of fns) fn(r); }, 0);
             return;
           }
+          const answer = (result) => { const r = { type: 'reply', reqId: msg.reqId, ok: true, result }; setTimeout(() => { for (const fn of fns) fn(r); }, 0); };
+          if (msg && msg.type === 'downloads.take') return answer({ name: 'offered.js', text: '// ==WebMod==\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n' });
+          if (msg && msg.type === 'downloads.done') { window.__offer = null; window.__offerDone = msg.how; return answer({ on: true, state: 'watching' }); }
           if (msg && msg.type === 'mod.import') {
-            window.__imports.push({ site: msg.site, phone: msg.phone === true });
+            window.__imports.push({ name: msg.name, site: msg.site, phone: msg.phone === true });
             const r = { type: 'reply', reqId: msg.reqId, ok: true, result: { id: 'stub/imported' } };
             setTimeout(() => { for (const fn of fns) fn(r); }, 0);
             return;
@@ -317,6 +325,27 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
       for (let i = 0; i < 50 && !window.__imports.length; i++) await new Promise((r) => setTimeout(r, 100));
       return window.__imports.splice(0);
     })()`;
+    // Paste a mod… (the Mods ⋯ menu): the card, the text, Add
+    const PASTE = `(async () => {
+      document.getElementById('paste-mod').click();
+      const area = await (async () => { for (let i = 0; i < 50; i++) { const a = document.querySelector('#paste-ask textarea'); if (a) return a; await new Promise((r) => setTimeout(r, 100)); } throw new Error('no paste card'); })();
+      area.value = '// ==WebMod==\\n// @name Pasted\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n';
+      area.dispatchEvent(new Event('input'));
+      [...document.querySelectorAll('#paste-ask button')].find((b) => b.textContent === 'Add').click();
+      for (let i = 0; i < 50 && !window.__imports.length; i++) await new Promise((r) => setTimeout(r, 100));
+      return window.__imports.splice(0);
+    })()`;
+    // A mod file in Downloads, offered (the background's status): its card's Add
+    const OFFER = `(async () => {
+      window.__offer = { id: 'o1', name: 'Offered', file: 'offered.js', from: 'example.com', description: '', can: [], kind: 'style' };
+      window.__poke();
+      const add = await (async () => { for (let i = 0; i < 50; i++) { const b = [...document.querySelectorAll('#download-offer button')].find((x) => x.textContent === 'Add'); if (b && !document.getElementById('download-offer').hidden) return b; await new Promise((r) => setTimeout(r, 100)); } throw new Error('no Downloads card'); })();
+      add.click();
+      for (let i = 0; i < 50 && !window.__offerDone; i++) await new Promise((r) => setTimeout(r, 100));
+      const done = window.__offerDone;
+      window.__offerDone = null;
+      return { imports: window.__imports.splice(0), done };
+    })()`;
     const { phoneTab, homeWin } = await h.E(async (url) => {
       const w = await chrome.windows.create({ url, focused: true, width: 1200, height: 860 });
       await chrome.tabs.create({ windowId: w.id, url: 'about:blank', active: false }); // (the window stays while the tab is the phone)
@@ -328,7 +357,9 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     const desk = await panelOf(`?window=${homeWin}&fallback=1`);
     const deskWant = { phone: false, box: true, count: '(3)', rows: ['127.0.0.1/desk-one', '127.0.0.1/desk-two', 'all-sites/everywhere'], files: 'Files (5)', asked: '127.0.0.1' };
     await waitFor('the desktop panel\'s list', async () => JSON.stringify(await desk(LIST)) === JSON.stringify(deskWant)).catch(async (e) => { console.error(JSON.stringify(await desk(LIST))); throw e; });
-    assert.deepEqual(await desk(DROP), [{ site: '', phone: false }], 'the desktop panel\'s import: a desktop mod');
+    assert.deepEqual(await desk(DROP), [{ name: 'dropped.js', site: '', phone: false }], 'the desktop panel\'s import: a desktop mod');
+    assert.deepEqual(await desk(PASTE), [{ name: 'pasted.js', site: '', phone: false }], 'a pasted one too');
+    assert.deepEqual(await desk(OFFER), { imports: [{ name: 'offered.js', site: '', phone: false }], done: 'added' }, 'and one from Downloads');
     // the phone view: its own panel window, the phone twin's (no mods yet, no files)
     const opened = await h.ask({ type: 'phone.open', tabId: phoneTab, screen: { left: 0, top: 25, width: 1470, height: 931 } });
     await waitFor('the phone page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
@@ -337,7 +368,9 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     await waitFor('the phone panel\'s list', async () => JSON.stringify(await phone(LIST)) === JSON.stringify(phoneWant)).catch(async (e) => { console.error(JSON.stringify(await phone(LIST))); throw e; });
     await sleep(1500); // (and it stays so: nothing of the desktop's comes back with a later status)
     assert.deepEqual(await phone(LIST), phoneWant);
-    assert.deepEqual(await phone(DROP), [{ site: '', phone: true }], 'the phone panel\'s import: a phone mod (the helper writes it in the twin)');
+    assert.deepEqual(await phone(DROP), [{ name: 'dropped.js', site: '', phone: true }], 'the phone panel\'s import: a phone mod (the helper writes it in the twin)');
+    assert.deepEqual(await phone(PASTE), [{ name: 'pasted.js', site: '', phone: true }], 'a pasted one too');
+    assert.deepEqual(await phone(OFFER), { imports: [{ name: 'offered.js', site: '', phone: true }], done: 'added' }, 'and one from Downloads');
     // Back to desktop (from the phone's panel): the tab in its window again, its panel the desktop's
     await phone('document.getElementById("phone-back").click(), 0');
     await waitFor('back to desktop', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && !window.__seen.uaPhone'));

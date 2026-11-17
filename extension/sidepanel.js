@@ -1234,6 +1234,7 @@ modsGrip.addEventListener('keydown', (e) => {
 let chatHold = null;
 ui.mods.addEventListener('click', (e) => {
   if (!e.target.closest('summary')) return;
+  if (ui.mods.classList.contains('no-mods') && e.target.closest('summary') === ui.mods.firstElementChild) { e.preventDefault(); return; } // (an empty box's header: nothing to open or close)
   const c = ui.chat;
   chatHold = { fromBottom: c.scrollHeight - c.scrollTop - c.clientHeight, until: performance.now() + 1500 };
 }, true);
@@ -1289,7 +1290,11 @@ function renderMods() {
   if (view.foldFor !== key) { view.foldFor = key; view.foldOpen = false; }
   const shown = view.foldOpen ? mods : mods.filter((m) => !otherIds.has(m.id));
   view.foldedIds = view.foldOpen ? [] : other.map((m) => m.id);
-  ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
+  // (a site with no mods and no files: the box's header alone, "(0)" and its ⋯, so the first mod can be imported
+  // or pasted from it; the phone view's too, into its phone twin. Hidden only where the ⋯ is: renderSiteTools)
+  const empty = mods.length === 0 && !view.siteFileCount;
+  ui.mods.hidden = empty && !(site && status?.helper?.connected);
+  ui.mods.classList.toggle('no-mods', empty);
   updateApprovals(mods);
   // (the count first: a list that empties, the phone twin's with no mods yet, doesn't keep the last one's)
   ui.modsCount.textContent = `(${mods.length})`;
@@ -3327,7 +3332,7 @@ async function loadSiteFiles() {
   const show = el('button', 'link-btn', IS_MAC ? 'Show in Finder' : 'Show in folder');
   show.type = 'button';
   show.addEventListener('click', () => request({ type: 'files.reveal', site }).catch(() => {}));
-  if (ui.mods.hidden) renderMods(); // (a site with files and no mods: the box shows, for them)
+  if (ui.mods.classList.contains('no-mods')) renderMods(); // (a site with files and no mods: the box shows them)
   ui.siteFiles.replaceChildren(...files.slice(0, 12).flatMap((f) => {
     const x = el('button', 'file-x', '×');
     x.type = 'button';

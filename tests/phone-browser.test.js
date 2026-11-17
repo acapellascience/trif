@@ -235,7 +235,9 @@ test('desktop mods never run in the phone view, phone mods only there', { skip, 
 // in the background's status replies (as its uiStatus lists them) and is told it's connected, and answers
 // files.list itself, by site (the panel's requests as sent); the phone view itself is the background's. The
 // phone panel: no rows, no count left over, no files; the desktop panel, before and after Back to desktop: the
-// desktop's mods, their count and files.
+// desktop's mods, their count and files. An empty site, desktop (the panel loaded with no mods or files: the
+// stub's sessionStorage stubEmpty) and the phone view: the box's header alone, "(0)" and its ⋯, which opens
+// the menu for a real click, Import and Paste on top (Tim, 11-16: a fresh site had no way to paste its first mod).
 test('the phone view\'s panel lists the phone twin\'s mods and files, the desktop panel the desktop\'s', { skip, timeout: 900000 }, async () => {
   const { buildMod } = require('../helper/lib/mods');
   const pages = await servePhonePages();
@@ -252,8 +254,9 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     const mods = [mod('127.0.0.1', 'desk-one', '*://127.0.0.1/*'), mod('127.0.0.1', 'desk-two', '*://127.0.0.1/*'), mod('all-sites', 'everywhere', '*://*/*'), mod('phone~example.com', 'elsewhere', '*://example.com/*')];
     const files = { '127.0.0.1': ['a.png', 'b.png', 'c.mp3', 'd.txt', 'e.json'].map((name, i) => ({ name, size: 10, at: 1000 - i })) };
     const stub = `(() => {
-      const FILES = ${JSON.stringify(files)};
-      const MODS = ${JSON.stringify(mods)};
+      const EMPTY = sessionStorage.getItem('stubEmpty') === '1';
+      const FILES = EMPTY ? {} : ${JSON.stringify(files)};
+      const MODS = EMPTY ? [] : ${JSON.stringify(mods)};
       window.__filesAsked = [];
       window.__imports = [];
       const rt = chrome.runtime;
@@ -303,11 +306,53 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
       await browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: stub }, sid);
       await browser.cdp.send('Page.reload', {}, sid);
       await sleep(500);
-      return async (expr) => {
+      const run = async (expr) => {
         const r = await browser.cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sid);
         if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
         return r.result.value;
       };
+      // (a real click, at the element's middle, as the user's: what's on top there gets it)
+      run.click = async (selector) => {
+        const [x, y] = await run(`(() => { const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
+        await browser.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sid);
+        for (const type of ['mousePressed', 'mouseReleased']) await browser.cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1, buttons: type === 'mousePressed' ? 1 : 0 }, sid);
+      };
+      run.shot = async (file) => {
+        if (!process.env.PHONE_SHOTS) return;
+        const { data } = await browser.cdp.send('Page.captureScreenshot', { format: 'png' }, sid);
+        fs.mkdirSync(process.env.PHONE_SHOTS, { recursive: true });
+        fs.writeFileSync(require('path').join(process.env.PHONE_SHOTS, file), Buffer.from(data, 'base64'));
+      };
+      return run;
+    };
+    // An empty site's box: shown, its header alone (no list area, grip or triangle), the ⋯ there
+    const BOX = `(() => {
+      const box = document.getElementById('mods'), more = document.getElementById('mods-more');
+      const shown = (e) => !!e && !e.hidden && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
+      const sum = box.querySelector('summary').getBoundingClientRect(), b = box.getBoundingClientRect();
+      return { shown: shown(box), empty: box.classList.contains('no-mods'), count: document.getElementById('mods-count').textContent,
+        more: shown(more), list: shown(document.getElementById('mod-list')), grip: shown(document.getElementById('mods-grip')),
+        marker: getComputedStyle(box.querySelector('summary')).listStyleType, compact: b.height - sum.height <= 24 };
+    })()`;
+    const boxWant = { shown: true, empty: true, count: '(0)', more: true, list: false, grip: false, marker: 'none', compact: true };
+    // The ⋯ clicked: the menu open, Import and Paste each the element on top at its middle; then closed again
+    const MENU = `(() => {
+      const menu = document.getElementById('mods-menu');
+      const top = (id) => { const e = document.getElementById(id), r = e.getBoundingClientRect(); return r.width > 0 && document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === e; };
+      return { open: !menu.hidden && document.getElementById('mods-more').getAttribute('aria-expanded') === 'true',
+        items: [...menu.querySelectorAll('.menu-item')].filter((b) => !b.hidden).map((b) => b.textContent),
+        onTop: top('import-mod') && top('paste-mod'), boxStill: document.getElementById('mods').classList.contains('no-mods') };
+    })()`;
+    const menuWant = { open: true, items: ['Import mod…', 'Paste a mod…'], onTop: true, boxStill: true };
+    const emptyBox = async (panel, name) => {
+      await waitFor(`${name}: the empty box`, async () => JSON.stringify(await panel(BOX)) === JSON.stringify(boxWant)).catch(async (e) => { console.error(JSON.stringify(await panel(BOX))); throw e; });
+      await panel.shot(`empty-site-${name}.png`);
+      await panel.click('#mods-more');
+      await waitFor(`${name}: the menu`, async () => JSON.stringify(await panel(MENU)) === JSON.stringify(menuWant)).catch(async (e) => { console.error(JSON.stringify(await panel(MENU))); throw e; });
+      await panel.shot(`empty-site-${name}-menu.png`);
+      await panel.click('#mods-count'); // (the header itself, beside the ⋯: the menu closes, the box neither opens nor closes)
+      await waitFor(`${name}: the menu closed`, async () => (await panel('document.getElementById("mods-menu").hidden')) === true);
+      assert.deepEqual(await panel(BOX), boxWant, `${name}: the box as it was`);
     };
     const LIST = `(() => ({
       phone: document.body.classList.contains('phone-view'),
@@ -355,6 +400,14 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     // the desktop panel first: the desktop mods and files
     await h.E((id) => chrome.windows.create({ url: chrome.runtime.getURL(`sidepanel.html?window=${id}&fallback=1`), focused: false }), homeWin);
     const desk = await panelOf(`?window=${homeWin}&fallback=1`);
+    // (first as a fresh site: no mods, no files)
+    await desk('sessionStorage.setItem("stubEmpty", "1"), location.reload(), 0');
+    await sleep(800);
+    await waitFor('the empty desktop panel', async () => (await desk('document.readyState === "complete" && document.getElementById("mods-count").textContent')) === '(0)');
+    await emptyBox(desk, 'desktop');
+    assert.deepEqual(await desk(PASTE), [{ name: 'pasted.js', site: '', phone: false }], 'the empty desktop panel: Paste a mod…');
+    await desk('sessionStorage.removeItem("stubEmpty"), location.reload(), 0');
+    await sleep(800);
     const deskWant = { phone: false, box: true, count: '(3)', rows: ['127.0.0.1/desk-one', '127.0.0.1/desk-two', 'all-sites/everywhere'], files: 'Files (5)', asked: '127.0.0.1' };
     await waitFor('the desktop panel\'s list', async () => JSON.stringify(await desk(LIST)) === JSON.stringify(deskWant)).catch(async (e) => { console.error(JSON.stringify(await desk(LIST))); throw e; });
     assert.deepEqual(await desk(DROP), [{ name: 'dropped.js', site: '', phone: false }], 'the desktop panel\'s import: a desktop mod');
@@ -364,10 +417,11 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     const opened = await h.ask({ type: 'phone.open', tabId: phoneTab, screen: { left: 0, top: 25, width: 1470, height: 931 } });
     await waitFor('the phone page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
     const phone = await panelOf(`?window=${opened.window}&fallback=1`);
-    const phoneWant = { phone: true, box: false, count: '(0)', rows: [], files: null, asked: 'phone~127.0.0.1' };
+    const phoneWant = { phone: true, box: true, count: '(0)', rows: [], files: null, asked: 'phone~127.0.0.1' };
     await waitFor('the phone panel\'s list', async () => JSON.stringify(await phone(LIST)) === JSON.stringify(phoneWant)).catch(async (e) => { console.error(JSON.stringify(await phone(LIST))); throw e; });
     await sleep(1500); // (and it stays so: nothing of the desktop's comes back with a later status)
     assert.deepEqual(await phone(LIST), phoneWant);
+    await emptyBox(phone, 'phone');
     assert.deepEqual(await phone(DROP), [{ name: 'dropped.js', site: '', phone: true }], 'the phone panel\'s import: a phone mod (the helper writes it in the twin)');
     assert.deepEqual(await phone(PASTE), [{ name: 'pasted.js', site: '', phone: true }], 'a pasted one too');
     assert.deepEqual(await phone(OFFER), { imports: [{ name: 'offered.js', site: '', phone: true }], done: 'added' }, 'and one from Downloads');

@@ -967,6 +967,11 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .mods > summary .mods-more-wrap { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 6; } /* (its transform makes it a layer of its own, which the menu can't rise above: without the z-index the list after it, rows and switches, painted over the open menu. Tim, 11-14) */
 .mods-more { border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 6px; border-radius: 6px; cursor: pointer; }
 .mods-more:hover { color: var(--text); background: var(--raised); }
+/* A site with no mods or files yet: the header alone ("(0)" and its ⋯ menu, to import or paste the first one),
+   no list area or grip under it, and no open/close triangle (sidepanel.js renderMods). */
+.mods.no-mods > :is(.mod-list, .mods-grip) { display: none; }
+.mods.no-mods > summary { list-style: none; cursor: default; }
+.mods.no-mods > summary::-webkit-details-marker { display: none; }
 .site-files-box { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
 .site-files-box > summary { cursor: pointer; }
 .site-files-box .site-files { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0 2px 14px; }

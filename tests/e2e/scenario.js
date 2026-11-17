@@ -4248,7 +4248,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       if (!gone) problems.push('the notice stayed');
       // the parent's copy no longer runs on inbox.x.com; the host's own copy does
       await go(at('inbox.x.com', '/'));
-      const inbox = await waitFor('inbox.x.com\'s panel', async () => { const v = await view(); return v.site === 'inbox.x.com' && !v.gate && v.mods ? v : null; }, { timeoutMs: 15000 });
+      const inbox = await waitFor('inbox.x.com\'s panel', async () => { const v = await view(); return v.site === 'inbox.x.com' && !v.gate && v.mods?.length ? v : null; /* (an empty site's box shows too, with no rows) */ }, { timeoutMs: 15000 });
       if (JSON.stringify(inbox.mods) !== '["inbox.x.com/e2e-sens-wide"]') problems.push(`inbox.x.com's mods: ${inbox.mods}`);
       done.push(`the notice (${rows.length} rows); Keep TRIF on there: ${copy.id} on; Block it: post.x.com blocked`);
       // 3b. site approval on a site of its own (helper/lib/sitecombos.js): inbox.x.com's boxed mods are its own

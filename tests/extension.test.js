@@ -2972,6 +2972,19 @@ test('the panel: Settings\' "None (robotless)", the robotless line, and the logi
   assert.match(css, /\[data-face="robotless"\]\) \.eye \{ display: none; \}/);
 });
 
+// A site with no mods and no files keeps the Mods box's header, "(0)" and its ⋯ (Import, Paste a mod…), so the
+// first mod can come in from there, desktop or the phone view; compact: no list area, grip or triangle. In a
+// browser: tests/phone-browser.test.js.
+test('the panel: an empty site keeps the Mods header and its ⋯ menu, nothing under it', () => {
+  const panel = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.css'), 'utf8');
+  assert.match(panel, /const empty = mods\.length === 0 && !view\.siteFileCount;\n\s*ui\.mods\.hidden = empty && !\(site && status\?\.helper\?\.connected\);\n\s*ui\.mods\.classList\.toggle\('no-mods', empty\);/, 'hidden only where the ⋯ is (renderSiteTools: a site and the helper)');
+  assert.match(panel, /const ok = !!site && !!view\.status\?\.helper\?\.connected;\n\s*ui\.modsMore\.hidden = !ok;/, 'the ⋯ shows on the same terms');
+  assert.doesNotMatch(panel, /if \(ui\.mods\.hidden\) renderMods\(\)/, 'files arriving re-render an empty box, not only a hidden one');
+  assert.match(css, /\.mods\.no-mods > :is\(\.mod-list, \.mods-grip\) \{ display: none; \}/);
+  assert.match(css, /\.mods\.no-mods > summary \{ list-style: none; cursor: default; \}/);
+});
+
 test('background: robotless (settings.agent "none") refuses agent.start, and nothing reaches the helper', async () => {
   const bg = await loadBackground({ storage: { settings: { agent: 'none', models: {} } } });
   try {

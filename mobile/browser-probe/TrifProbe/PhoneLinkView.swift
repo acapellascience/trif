@@ -30,6 +30,8 @@ final class PhoneSyncModel: ObservableObject {
     private var scheduler: PhoneSync.Scheduler?
     private var watch: AnyCancellable?
     private var idle: DispatchWorkItem?
+    /// After a sync that changed mods here, with their ids (the app: Browser.syncApplied, so pages run the change).
+    var applied: (([String]) -> Void)?
 
     private(set) lazy var link: PhoneLinkRemote = {
         let screen = UIScreen.main.bounds.size
@@ -66,6 +68,8 @@ final class PhoneSyncModel: ObservableObject {
         case .success(let s):
             last = s; lastProblem = nil
             tell(s)
+            let here = s.taken + s.removed + s.cameBack + s.conflicts.map(\.sibling)
+            if !here.isEmpty { applied?(here) }
             if s.changedAnything || !s.skipped.isEmpty {
                 Diagnostics.shared.log("sync", "synced (\(why)): \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
             }

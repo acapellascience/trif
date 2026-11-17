@@ -463,6 +463,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         noteRunning()
     }
 
+    /// After a sync changed mods here (phone sync: taken, deleted, back, a conflict's sibling): the pages' scripts
+    /// made again, so the change runs; the shown page reloads only when one of those mods is for it.
+    func syncApplied(_ ids: [String]) {
+        let url = webView.url?.absoluteString ?? ""
+        let shown = !url.isEmpty && ids.contains { id in mods.mods.first(where: { $0.id == id }).map { mods.applies($0, to: url) } ?? true }
+        modsChanged(reload: shown)
+    }
+
     /// Pause all mods, or resume them: every page loads again without (or with) them.
     func pauseAll(_ p: Bool) {
         if mods.paused != p { mods.setPaused(p) }

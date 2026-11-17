@@ -75,6 +75,7 @@ final class Model: ObservableObject {
         Model.pane = self.pane
         Model.barsRef = self.bars
         Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
+        PhoneSyncModel.shared.applied = { ids in browser.syncApplied(ids) }
         PhoneSyncModel.shared.start(store: browser.mods)
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
                                         "com.trif.probe.step" as CFString, nil, .deliverImmediately)

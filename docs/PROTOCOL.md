@@ -637,7 +637,7 @@ the raw result as JSON.
 
 Newline-delimited JSON on `~/.trif/helper.sock` (mode 0600). Request `{id, cmd, args, token?}` →
 response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are answered by the helper;
-everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
+everything else is forwarded to the extension (from a run: only the commands a run may send, and `mods` and `ping` for its own site, see "Run scope"). Requests time out after `args.timeout + 5000` ms (default 35 s).
 Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
 `token` is the run token (see "Run scope"): the CLI sends `$TRIF_RUN_TOKEN` when it's set.
 If the socket file exists but nothing listens, the next host to start removes it.
@@ -1213,7 +1213,19 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
   the socket without a token (the user's terminal, the user's own agent outside the panel) are not
   scoped: runs can't reach the socket. The helper answers `mod.delete` and `mod.restore` from a run
-  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
+  itself, only for mods whose every `@match` is in scope. **What a run may send** is a list (`host.js`
+  `RUN_COMMANDS`): the helper's own `ping` and `mods`, the mod-file commands `mod.delete`, `mod.restore`,
+  `mod.code` and `mod.diff`, and the page commands its `trif` sends (`status`, `tabs`, `run`, `reload`,
+  `navigate`, `open`, `close`, `text`, `sweep`, `screenshot`, `record`, `requests`, `request`, `errors`, `logs`,
+  `mod.enable`). Anything else from a run, a command nobody knows included, is refused by the helper and never
+  sent on to the extension. What the helper itself answers a run is its own site's: `mod.code` and `mod.diff`
+  only for a mod in the run's site's folders (the rule its delete goes by, `trash.js` siteInScope: a phone view's
+  run its phone twin's mods only, a sensitive site of its own and its parent each their own), refused before the
+  mod is looked up; `mods` lists only those, with their errors and warnings; and `ping` tells a run of its own
+  mods alone (those, all-sites/ and what it made for another site, which it may change: their holds, waiting
+  changes, updates and errors), of itself among the runs, and of no login. (The files are another matter: a
+  run's working copy has the other sites' mod files to read, docs/STAGING.md, and the extension's `status`
+  lists every mod.) The CLI itself refuses `setup`, `agent`,
   `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
   (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default;

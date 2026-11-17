@@ -9,7 +9,7 @@ the round's brief says it is free.
 
 Computer side:
 - [x] S0. Design and protocol (docs/PHONE-SYNC.md), the strings drafts, this file
-- [ ] S1. `helper/lib/phonelink/sync.js` core, no I/O beyond the base file: ids ↔ twin paths and their refusals,
+- [x] S1. `helper/lib/phonelink/sync.js` core, no I/O beyond the base file: ids ↔ twin paths and their refusals,
       revisions, the three-way plan (every row of section 4, first sync), sibling names and the @name line, the
       base file (mode 600). Unit tests `tests/phone-sync.test.js`
 - [ ] S2. The session side: `sync.begin/get/put/end` handlers and `sync.changed` (a `PhoneSync` class beside
@@ -36,10 +36,14 @@ iPhone side (ios-poc):
 
 - S0: docs/PHONE-SYNC.md (decisions, ids, base, the three-way rule, conflicts and deletes, approval on each side,
   the wire, when, what must hold, what people see, later, proof); strings drafts; this file.
+- S1: `helper/lib/phonelink/sync.js` (parseId/idOf, rev, readManifest, plan, siblingId, renameHeader, the base
+  file) and `tests/phone-sync.test.js` (8 tests, pass locally and on CI). Not wired to anything yet. CI 8627a42:
+  https://github.com/acapellascience/trif/actions/runs/44049845082: 983 pass, 1 fail, the known clickjack flake
+  (test 144), twice (rerun once, as the rule says; the 8 new tests pass both times).
 
 ## Next step
 
-S1 (or what is left of it).
+S2: the session side (`PhoneSync` beside `Remote`, using sync.js's `plan`).
 
 ## Notes for next round
 
@@ -51,7 +55,15 @@ S1 (or what is left of it).
 - On the phone: `ModStore.add(m, source:)` (import rules when source is "import": reuse for "sync"), `saveEdit`'s
   `seeded`/`changeNeeds` for changed mods, `remove` keeps only `lastDeleted` (Recently deleted is new, S6).
 - remote.js's `resultOf` is how a run's twin files are read safely (O_NOFOLLOW, lstat on the twin): reuse it.
-- Phone ids are `<site>/<name>`; the twin is `phone~<site>`; HOST_RE is remoterun.js's.
+- Phone ids are `<site>/<name>`; the twin is `phone~<site>`; HOST_RE is copied from remoterun.js (it lets an
+  IPv4-looking host like 127.0.0.1 through, as remoterun.js does: harmless, a folder name).
+- sync.js `plan` gives a conflict's sibling as `{id: sibling, conflict: id}` with no `rev`: S2 writes the sibling
+  (the computer's text through `renameHeader`) first, then puts its `rev` in the `sync.plan` it sends.
+- `plan`'s `leave` (Map id -> 'later' | why) is how S2 keeps busy twins (Runs.bySite) and mods over 1 MB
+  (`MOD_MAX`) out: without it a too-big computer mod would look deleted there and the phone would trash its copy.
+- APFS ignores case: readManifest drops a second phone id that differs only in capitals; S2 must also check the
+  computer side's ids with `ignoresCase` before writing.
+- `want` entries carry `back` (edit beat a delete) and `conflict` for the lines of section 10.
 
 ## For Tim (decisions)
 
@@ -64,4 +76,4 @@ S1 (or what is left of it).
 
 ## CI
 
-- Round 1: docs only.
+- Round 1: 0bf7006 + 8627a42, run 44049845082: the clickjack flake alone, on the run and its one rerun.

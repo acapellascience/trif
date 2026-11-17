@@ -47,7 +47,8 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   as tests, small updates); curl|sh installer.
 - Round 1, step 2: helper/runtime.json (Node 24.22.3 pins, all platforms) + helper/lib/runtime.js
   (ensureRuntime, installedNode, pruneRuntimes, runtimeInfo) + tests/runtime.test.js (5 pass); smoke-tested
-  against the real nodejs.org archive in a temp HOME. CI: see the run for this commit (`gh run list -b no-node`).
+  against the real nodejs.org archive in a temp HOME. CI green: https://github.com/acapellascience/trif/actions/runs/44170185742
+  (clickjack-browser flake once, rerun passed; design commit run 44169238711 green).
 
 ## Next step
 
@@ -68,6 +69,12 @@ decide; tests use fake pins via an env/opt so they never hit nodejs.org). Then p
   that in release.js is a nice-to-have).
 - Linux: prefer .tar.xz, fall back to .tar.gz when `xz` isn't installed (both pinned).
 
+- **Node 24 vs the tests (found round 1)**: under the runtime's Node 24.22.3, tests/runtime.test.js passes,
+  tests/update.test.js runs all 18 tests but `release script: secrets go to security and web-ext in no argv
+  or environment` fails (details not captured; run it alone with `--test-reporter=spec`), and the file's
+  process then never exits (an open handle; Node 22 exits). Both are test/release-side, but CI must run on
+  the pinned version (step 10): fix them first, then run the whole suite on Node 24 locally (one browser
+  suite at a time). Downloaded runtime for local use: re-fetch with `ensureRuntime(<temp home>)`.
 - Tests must never download the real runtime: inject `pins`/`fetch` (runtime.js takes both), or a
   TRIF_RUNTIME env switch for subprocess tests (setup via the CLI).
 

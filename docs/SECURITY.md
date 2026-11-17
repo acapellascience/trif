@@ -415,6 +415,31 @@ the mods folder: it copies the run's changes over as they're saved (and the mods
 a mod is the run's when it's what the helper copied for it. When the run ends, the copy is synced once more
 and removed; what a leftover process writes there goes nowhere. docs/STAGING.md has the design.
 
+## What a run may ask the helper (November 2026)
+
+A run's `trif` talks to the helper, which no sandbox limits, through the run's mailbox; and a run can write
+any request there itself, without `trif`. The helper forced the run's site onto each one, but three of its
+own answers took no notice of it (found by the Windows red-team, tests/redteam/mailbox-attacks.js on branch
+windows-redteam; the code is shared, so every platform, 0.3.0 included): `mods` listed every site's mods (a
+style mod's whole text among them), `mod.code` and `mod.diff` (the side panel's code card) answered for any
+mod by its id, and a command the helper didn't know went on to the extension to be refused there, so that
+any command the extension learnt later would have been a run's too. `ping` also told a run of every site's
+holds and updates, and of the other runs and their sites.
+
+Now what a run may send is a list (host.js `RUN_COMMANDS`: `ping`, `mods`, the four mod-file commands, and
+the page commands its `trif` sends), and anything else is refused by the helper, never sent on. `mod.code`
+and `mod.diff` from a run answer only for a mod of its own site, by the rule its delete goes by (trash.js
+`siteInScope`: a sensitive site of its own and its parent each their own), and say no before looking the
+mod up; delete and restore now say no first too. `mods` lists a run's own site's mods alone, and `ping` tells it of its own mods and of itself. The side panel and the user's
+terminal are as before. tests/run-scope-reads.test.js.
+
+**What this doesn't change.** A run can still read the other sites' mod files: its working copy holds them
+(every file but their `files/`, read-only: docs/STAGING.md), `trif mods` lists them from there, and the
+extension's `status` (`trif status`) lists every mod's id, whether it's on, and the sites TRIF is on for.
+That's how runs were designed (an agent looks at the mods its change will meet), not something the mailbox
+let through; whether a run should see other sites' mods at all, a sensitive site's above all, is a decision
+of its own.
+
 ## The prompt
 
 The page's address reaches the agent's system prompt as its origin and path only, quoted and capped

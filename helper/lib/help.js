@@ -13,7 +13,7 @@ const STARTER_OFF = S.starterSites().filter((s) => !S.SITES_ON.includes(s));
 
 const COMMANDS = {
   setup: {
-    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
+    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--runtime|--no-runtime] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx timsrobot setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
@@ -42,6 +42,11 @@ Where the wrappers point:
              in a fresh copy only when the files changed.
   --link     run the files where they are, without copying (the default in a git checkout, for
              developing TRIF itself).
+Which node they run:
+  TRIF's own copy of Node (the version pinned in helper/runtime.json, downloaded from nodejs.org and
+  checked against its pinned SHA-256 into <home>/runtime), for --copy installs; the node running setup
+  for --link ones. --runtime uses TRIF's own for --link too; --no-runtime (or TRIF_RUNTIME=off) never.
+  If the download fails, setup uses the node running it and tries again at the next update.
 It also records this terminal's PATH in config.json (env.PATH) so the helper can find your coding
 agent for the side panel, and writes .claude/settings.json (what Claude Code may do in the workspace).
 Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;

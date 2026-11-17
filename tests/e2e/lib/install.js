@@ -13,7 +13,7 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 
 /** The environment for anything that should see the scratch home as ~ (setup, the CLI). */
 function scratchEnv(home, extra = {}) {
-  const env = { ...process.env, HOME: home, TRIF_NO_LAUNCHCTL: '1', ...extra };
+  const env = { ...process.env, HOME: home, TRIF_NO_LAUNCHCTL: '1', TRIF_RUNTIME: 'off', ...extra }; // (the node running the tests)
   for (const k of Object.keys(env)) if (/^(TRIF|WEBMODS)_(HOME|PRIVATE|SOCK|RUN_|INSTALL_LOCK|SAFARI_BRIDGE)/.test(k)) delete env[k];
   // No API keys from the terminal (TRIF reads API keys from the keyring only), so none sit in the scratch
   // browser's and helper's environment.

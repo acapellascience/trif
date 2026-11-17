@@ -94,7 +94,7 @@ async function setup() {
   const PATH = `${agentBin}:/usr/bin:/bin`;
   const env = {
     HOME: home, PATH, TRIF_HOME: path.join(home, '.trif'), // (the default workspace: ~/.trif)
-    TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1',
+    TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1', TRIF_RUNTIME: 'off',
     TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), // (where they are by default)
     TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'), ...kc.env,
   };

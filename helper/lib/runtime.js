@@ -14,6 +14,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile, spawnSync } = require('child_process');
 
+const { envVar, envName } = require('./env');
+
 const PINS = require('../runtime.json');
 const ARCHIVE_MAX = 80 * 1024 * 1024; // the largest archive (linux .tar.gz) is ~55 MB
 const MARK = '.trif-runtime.json'; // in each runtime folder: what it was made from
@@ -126,18 +128,68 @@ async function ensureRuntime(home, { fetch = null, platform = process.platform, 
  * Remove runtimes other than the pinned one (an older pin, after setup has moved the wrappers and the
  * Safari agent onto the new one), and leftover temporary folders. Returns the names removed.
  */
-function pruneRuntimes(home, { platform = process.platform, arch = process.arch, pins = PINS, keep = null } = {}) {
+function pruneRuntimes(home, { platform = process.platform, arch = process.arch, pins = PINS, keep = [] } = {}) {
   const key = platformKey(platform, arch, pins);
-  const keepName = keep || (key ? runtimeName(key, pins) : null);
+  const keepNames = new Set([...(Array.isArray(keep) ? keep : [keep]), key ? runtimeName(key, pins) : null].filter(Boolean));
   let names = [];
   try { names = fs.readdirSync(runtimeRoot(home)); } catch { return []; }
   const removed = [];
   for (const n of names) {
-    if (n === keepName || !(/^node-v\d/.test(n) || n.startsWith('.fetch-'))) continue;
-    fs.rmSync(path.join(runtimeRoot(home), n), { recursive: true, force: true });
-    removed.push(n);
+    if (keepNames.has(n) || !(/^node-v\d/.test(n) || n.startsWith('.fetch-'))) continue;
+    // (Windows can't remove a node.exe that's running: that one goes at a later setup.)
+    try { fs.rmSync(path.join(runtimeRoot(home), n), { recursive: true, force: true }); removed.push(n); } catch { /* in use */ }
   }
   return removed;
+}
+
+/** The runtime folders (node-v…) a file names, as a plist or wrapper does: kept by pruneRuntimes. */
+function runtimesNamedIn(file) {
+  let s = '';
+  try { s = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  return [...new Set(s.match(/node-v\d+\.\d+\.\d+-[a-z]+-[a-z0-9]+/g) || [])];
+}
+
+/**
+ * Which pins setup uses, from TRIF_RUNTIME: unset, the real ones (helper/runtime.json); "off", none (setup
+ * uses the node running it); a file, the pins in it (tests: a fake archive on a local server). Under the
+ * test runner (NODE_TEST_CONTEXT) unset means off, so no test downloads the real runtime by accident.
+ * Returns { pins, file } or { off: why }.
+ */
+function runtimeSetting(env = process.env) {
+  const v = envVar('RUNTIME', env);
+  if (v === undefined || v === '') return env.NODE_TEST_CONTEXT ? { off: 'under tests' } : { pins: PINS, file: null };
+  if (v === 'off' || v === '0') return { off: `${envName('RUNTIME')}=${v}` };
+  let pins;
+  try { pins = JSON.parse(fs.readFileSync(v, 'utf8')); } catch (e) { throw new RuntimeError(`${envName('RUNTIME')} names ${v}, which isn't a pins file: ${e.message}`); }
+  if (!pins || typeof pins.version !== 'string' || typeof pins.base !== 'string' || !pins.archives) throw new RuntimeError(`${v} isn't a pins file (version, base, archives)`);
+  return { pins, file: path.resolve(v) };
+}
+
+/**
+ * ensureRuntime for synchronous callers (setup): in a child node process, so setup stays synchronous.
+ * Resolves to { node, version, fetched } or throws RuntimeError. timeoutMs bounds the whole download.
+ */
+function ensureRuntimeSync(home, { pinsFile = null, timeoutMs = 10 * 60 * 1000, env = process.env } = {}) {
+  const r = spawnSync(process.execPath, [__filename, 'ensure', home, ...(pinsFile ? [pinsFile] : [])], {
+    encoding: 'utf8', timeout: timeoutMs, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...env, NODE_TEST_CONTEXT: '' },
+  });
+  if (r.error && r.error.code === 'ETIMEDOUT') throw new RuntimeError(`the download took longer than ${Math.round(timeoutMs / 1000)} s`);
+  let res = null;
+  try { res = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { /* below */ }
+  if (res && res.node) return res;
+  throw new RuntimeError(res && res.error ? res.error : `the download stopped (${(r.stderr || '').trim().slice(-200) || (r.error ? r.error.message : `exit ${r.status}`)})`);
+}
+
+// `node runtime.js ensure <home> [pinsFile]`: ensureRuntimeSync's child. One JSON line on stdout.
+if (require.main === module && process.argv[2] === 'ensure') {
+  const [home, pinsFile] = process.argv.slice(3);
+  let pins = PINS;
+  try { if (pinsFile) pins = JSON.parse(fs.readFileSync(pinsFile, 'utf8')); } catch (e) { pins = null; process.stdout.write(JSON.stringify({ error: `can't read ${pinsFile}: ${e.message}` }) + '\n'); process.exitCode = 1; }
+  if (pins) ensureRuntime(home, { pins }).then(
+    (r) => process.stdout.write(JSON.stringify(r) + '\n'),
+    (e) => { process.stdout.write(JSON.stringify({ error: e.message }) + '\n'); process.exitCode = 1; },
+  );
 }
 
 /** What the installed runtime folder says it was made from, or null. */
@@ -148,4 +200,7 @@ function runtimeInfo(home, opts = {}) {
   try { return { node, ...JSON.parse(fs.readFileSync(path.join(dir, MARK), 'utf8')) }; } catch { return null; }
 }
 
-module.exports = { PINS, RuntimeError, platformKey, runtimeRoot, runtimeName, nodeIn, installedNode, pickArchive, ensureRuntime, pruneRuntimes, runtimeInfo };
+module.exports = {
+  PINS, RuntimeError, platformKey, runtimeRoot, runtimeName, nodeIn, installedNode, pickArchive, ensureRuntime, ensureRuntimeSync,
+  pruneRuntimes, runtimesNamedIn, runtimeSetting, runtimeInfo,
+};

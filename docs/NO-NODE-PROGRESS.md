@@ -9,7 +9,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 - [x] 2. `helper/runtime.json` (Node 24.22.3 pins) + `helper/lib/runtime.js`: platform key, fetch (update.js
       `fetchUrl`), SHA-256 check, unpack with `tar` into `<home>/runtime/<name>` via a temp folder and rename,
       keep only bin/node + LICENSE, `runtimeNode(home)`, prune old ones. Unit tests with a fake archive.
-- [ ] 3. setup.js: use the runtime's node for both wrappers and the Safari LaunchAgent (fetch it if missing;
+- [x] 3. setup.js: use the runtime's node for both wrappers and the Safari LaunchAgent (fetch it if missing;
       fallback `pickNodePath()` with a note); `--no-runtime` for git checkouts/dev. Tests.
 - [ ] 4. update.js: run the new package's setup with the runtime's node when present; doctor.js: check the
       runtime (present, hash of bin/node, runs) and say when TRIF is still on a system node. Tests.
@@ -52,11 +52,24 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 
 ## Next step
 
-Step 3: setup.js uses `runtime.ensureRuntime(home)` to choose `nodePath` (wrappers + Safari agent), falling
-back to `pickNodePath()` with the draft note; `--no-runtime` (and git-checkout dev installs default to it?
-decide; tests use fake pins via an env/opt so they never hit nodejs.org). Then prune old runtimes.
+Step 4: update.js (raise its setup `run` timeout above 120 s for runtime downloads; old updaters keep 120 s,
+which chooseNode already respects) and doctor.js (runtime present, `.trif-runtime.json` nodeSha256 matches
+bin/node, `--version` runs; say when the wrappers name a system node). Tests.
 
 ## Notes for next round
+
+- Step 3 as built (lib/setup.js `chooseNode`): runtime by default for mode copy (npx, updates, install.sh),
+  the running node for mode link (git checkouts) unless `--runtime`; `--no-runtime` / `TRIF_RUNTIME=off`
+  never; `TRIF_RUNTIME=<pins.json>` for tests (fake archive on a 127.0.0.1 server: tests/setup-runtime.test.js);
+  under `node --test` (NODE_TEST_CONTEXT) unset means off. tests/fake-extension.js `testEnv`, upgrade.test.js,
+  e2e/lib/install.js and run-sandbox.test.js set `TRIF_RUNTIME=off` (steps 8/9 flip it with fake or real pins).
+- setup stays synchronous (mergeable with `windows`): the download runs in a child, `node runtime.js ensure
+  <home> [pins]` (`ensureRuntimeSync`). Under an update (TRIF_INSTALL_LOCK set) it gets 75 s, since old
+  updaters kill setup at 120 s; on failure setup keeps the running node and notes it (exit 0).
+- Pruning runs after the Safari agent is written and keeps any runtime the Safari plist still names (a setup
+  for other browsers doesn't rewrite it). Errors removing a runtime (Windows, node.exe in use) are skipped.
+- install.sh (step 6) should unpack the runtime into `<home>/runtime/<name>` with a `.trif-runtime.json`
+  (installedNode requires it), or into a temp folder and let setup fetch: decide there.
 
 - Windows branch keeps `nodePath` as the single thing wrappers name (win/setup.js `writeWrappers`):
   change how setup *chooses* `nodePath`, not the wrapper writers, to stay mergeable.

@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { tempDir } = require('./fake-extension');
 const { makeFakeKeychain } = require('./fake-keychain');
-const { Store, FILE, SERVICE, ACCOUNT, WINDOW_MS, MAX_TRIES, cleanName, computerName, parse } = require('../helper/lib/phonelink/store');
+const { Store, FILE, SERVICE, ACCOUNT, WINDOW_MS, MAX_TRIES, QR_TEXT_MAX, cleanName, qrName, computerName, parse } = require('../helper/lib/phonelink/store');
 const { generateKeyPair, publicFromPrivate, keyId, Handshake } = require('../helper/lib/phonelink/noise');
 
 const cleanups = [];
@@ -18,7 +18,7 @@ test.after(() => { for (const fn of cleanups.reverse()) { try { fn(); } catch { 
 const b64 = (b) => Buffer.from(b).toString('base64url');
 
 /** A store in a temp workspace with a fake keychain and a clock the test moves. */
-function setup({ kind = 'security', keychain = true } = {}) {
+function setup({ kind = 'security', keychain = true, name = 'Tim’s MacBook' } = {}) {
   const root = tempDir('wm-plink-');
   cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
@@ -26,7 +26,7 @@ function setup({ kind = 'security', keychain = true } = {}) {
   const chain = makeFakeKeychain(path.join(root, 'keychain'), { kind });
   const env = keychain ? { ...chain.env } : { TRIF_KEYCHAIN_BIN: 'not-absolute' }; // (keyring.js: no keyring)
   const clock = { t: Date.parse('2026-11-16T12:00:00Z') };
-  const store = new Store(home, { env, now: () => clock.t, name: 'Tim’s MacBook' });
+  const store = new Store(home, { env, now: () => clock.t, name });
   cleanups.push(() => store.pairStop());
   const file = path.join(`${home}-private`, FILE);
   return { root, home, chain, env, clock, store, file, json: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
@@ -351,6 +351,40 @@ test('names are shown as text: one line, no control characters, 60 characters, a
   assert.equal(cleanName({ toString: () => 'object' }, 'iPhone'), 'iPhone');
   assert.equal(Array.from(cleanName('😀'.repeat(100), 'x')).length, 60);
   assert.equal(cleanName('a'.repeat(59) + ' b', 'x'), 'a'.repeat(59), 'no space left at the cut');
+});
+
+test('a long computer name is cut in the code\'s text, never the code refused: whole characters, then "\u2026", in what the panel\'s code holds', async () => {
+  const { qrMatrix } = await import('../extension/qr.js');
+  const bytes = (s) => Buffer.byteLength(s);
+  // (the name's part alone)
+  assert.equal(qrName('Tim\u2019s MacBook Pro', 200), 'Tim%E2%80%99s%20MacBook%20Pro', 'a name that fits is whole');
+  assert.equal(qrName('abcdefghij', 10), 'abcdefghij');
+  assert.equal(qrName('abcdefghijk', 10), 'a%E2%80%A6', 'room for the "\u2026" is kept');
+  assert.equal(qrName('ab cdefghijklmnop', 14), 'ab%E2%80%A6', 'no space before the "\u2026"');
+  assert.equal(qrName('\u00e9'.repeat(10), 30), '%C3%A9'.repeat(3) + '%E2%80%A6', 'never half a letter\'s bytes');
+  const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'; // (one emoji of five code points: 54 bytes encoded)
+  assert.equal(qrName(family.repeat(3), 130), encodeURIComponent(family.repeat(2)) + '%E2%80%A6', 'an emoji of several code points stays whole or goes');
+  assert.equal(qrName('a\ud83d', 50), 'a', 'half a surrogate pair is left out, nothing thrown');
+  assert.equal(qrName('abc', 2), '');
+  for (const [name, cut] of [['\u{1F600}'.repeat(100), true], ['\u6771'.repeat(100), true], [family.repeat(30), true], ['w '.repeat(100), false], ['Tim\u2019s MacBook Pro', false]]) {
+    const { store } = setup({ name });
+    await store.setOn(true);
+    const w = store.pairStart();
+    assert.ok(bytes(w.qr) <= QR_TEXT_MAX, `${bytes(w.qr)} bytes`);
+    assert.doesNotThrow(() => qrMatrix(w.qr), 'the panel can draw it');
+    const u = new URL(w.qr);
+    const shown = u.searchParams.get('n');
+    assert.equal(shown !== store.name, cut, shown);
+    if (cut) {
+      assert.ok(shown.endsWith('\u2026') && store.name.startsWith(shown.slice(0, -1)) && shown.length > 3, shown);
+      assert.ok(bytes(w.qr) > QR_TEXT_MAX - 60, `as much of the name as fits (${bytes(w.qr)} bytes)`);
+    }
+    // (the rest of the code's text is as before: the key and the secret)
+    assert.equal(u.searchParams.get('s'), w.secret);
+    assert.equal(Buffer.from(u.searchParams.get('k'), 'base64url').length, 32);
+    assert.equal(store.status().name, store.name, 'the name itself is as it was (hello and the panel give it whole)');
+    store.pairStop();
+  }
 });
 
 test('with the noise handshake: the store\'s keys answer a phone that pairs, and the phone\'s key is the one paired', async () => {

@@ -79,6 +79,10 @@ Anything that would weaken one of these stops for Tim's decision (the loop's rul
   trif://pair?v=1&k=<the computer's public key, base64url>&s=<the secret, base64url>&n=<the computer's name>
   ```
 
+  The text is 271 bytes at most (the largest code the panel draws). Everything but the name has a fixed
+  length, so a long name is cut to fit: whole characters, then "…" (`store.js` `qrName`). The name in the code
+  is only for the phone's screen while it pairs; the phone shows the name `hello` gives from then on.
+
   The goal says "the computer's key fingerprint": the QR carries the whole 32-byte key, which is its own
   fingerprint and lets the phone's first message be encrypted to it. The code is drawn in the panel from the
   helper's answer and is never written to disk or the log.
@@ -359,4 +363,11 @@ always-on network presence. Proposed: one state whose text names both causes. Fo
   model and a stand-in keychain (`tests/fake-keychain.js`), no paid calls: pair, run, try on the phone, result,
   drop and resume, remove (`tests/phone-link-e2e.test.js`: the real host.js, a fake extension as the side
   panel, a stand-in dns-sd).
+- In the real sandbox (macOS, local only: needs Claude Code installed, so not on CI): the same stand-in phone
+  pairs with the real helper in a scratch home folder and starts a run of the real Claude Code with a
+  stand-in model, no paid call (`tests/run-sandbox.test.js`, its third test). Inside the run's sandbox
+  `trif phone page|try|screenshot` work and the phone's copy of the page is readable; `phone-link.json`,
+  `phone-link/`, the keychain's file, this computer's tabs, the site's desktop folder and another site's are
+  refused, each by whom it should be (the agent's own rules, `trif`, the helper, the sandbox). Not with Codex
+  yet: a phone's run can't choose a model and the stand-in model can't drive Codex's default one.
 - The iPhone side in the Simulator against the same helper in a temporary HOME.

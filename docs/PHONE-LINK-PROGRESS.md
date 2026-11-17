@@ -37,29 +37,36 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 10, 2026-11-16)
+## Done this round (round 11, 2026-11-16)
 
-- Built step 10, `tests/phone-link-e2e.test.js`: one story with the stand-in phone against the real host.js
-  in a temp HOME (a fake extension as the panel, the fake keychain, the stand-in dns-sd, 127.0.0.1, the
-  stand-in agent; 2 s). The panel turns the link on and shows a code, the phone pairs from the code's text;
-  `run.start` with a page copy and a screenshot; the agent's `trif phone try` and `trif phone screenshot`
-  answered by the phone; `trif screenshot|text|tabs` refused by the helper in words; the result is the
-  twin's mods and the mods folder has nothing else new; the extension got no request and no `agentEvent`;
-  the page copy and the screenshots are in no file after the run; the phone drops mid-run, the agent's try
-  says "the phone isn't connected", the run is kept, the phone resumes and gets every step once; `run.ack`;
-  a phone sees its own runs alone; `phone.remove` closes it, deletes what was kept, then not one byte for
-  it while a second phone goes on; off and closed: no listener, no dns-sd, no agent left.
-- The stand-in agent has a new word, `CLI[args]` (the real `trif <args>`, in order among the `PHONE[…]` ones).
-- Step 11: "The phone link" sections in docs/PROTOCOL.md and docs/SECURITY.md (pointers to PHONE-LINK.md, and
-  what touches each file's subject); PHONE-LINK.md section 10 names the test.
-- Locally the whole suite but update.test.js: 914 tests, 903 passed, 10 skipped, 1 failed: tests/open-models.test.js
-  "real Codex + stand-in model…" (local only, a real Codex; not this branch's code), which passed alone right
-  after (17 of 17). CI for 2714c89: green on the first attempt, 926 of 926 run tests
-  (https://github.com/acapellascience/trif/actions/runs/44005995592).
-- **The computer side's checklist is done.** What is left there is in "Next step".
+The brief: ios-poc isn't free, so the computer-side extras 2 and 3 of round 10's list, as one chunk.
+
+- **A phone run in the real sandbox** (`tests/run-sandbox.test.js`, a third test; macOS, local only, skipped on
+  CI as its two others are): the stand-in phone pairs with the real host.js in a scratch home folder and
+  starts a run of the real Claude Code with the stand-in model, no paid call, the listener on 127.0.0.1.
+  Inside the run's sandbox `trif phone page`, `trif phone try`, `trif phone screenshot`, `trif new|check` for
+  the twin, `trif mods` and `trif explain` work, and the phone's copy of the page is readable (the Read
+  tool); refused, each by whom it should be: `ls phone-link/` and Read of `phone-link.json` and of the
+  keychain's file (Claude Code's rules), `trif check phone-link.json` (trif), `trif tabs|screenshot` (the
+  helper, in words), `trif new` in the site's desktop folder and in another site's (the sandbox). The
+  result is the twin's one mod, the desktop folder has nothing new, the extension got no step, the phone's
+  key reached neither a command's output nor the model, the page copy is gone after the run.
+- **Not with Codex** (three tries, then left): see the notes. The test's fixture now takes a name
+  (`setup('claude')`: a scratch home of its own, since each stand-in model counts its steps from its start).
+- **A long computer name is cut in the QR's text** (`store.js` `qrName`, `QR_TEXT_MAX` 271): whole characters
+  (grapheme clusters), then "…"; the name itself (`hello`, the panel, Bonjour) is as before. One new test
+  in `tests/phone-link-store.test.js` (emoji, CJK, a five-code-point emoji, half a surrogate pair; each
+  code drawn by `extension/qr.js`). PHONE-LINK.md section on pairing and its "Proof" list say both.
+- Locally the whole suite but update.test.js: 916 tests, 906 passed, 10 skipped, 0 failed (72 s).
 
 ## Earlier rounds
 
+- Round 10: step 10, `tests/phone-link-e2e.test.js` (one story with the stand-in phone against the real
+  host.js in a temp HOME: pair from the code's text, a run with a try on the phone, page commands refused in
+  words, the twin's mods alone, nothing for the extension, the page copy in no file afterwards, a drop and a
+  resume, `run.ack`, remove, off; 2 s); the stand-in agent's `CLI[args]`; step 11, the pointers in
+  docs/PROTOCOL.md and docs/SECURITY.md. **The computer side's checklist was done there.** CI green for
+  2714c89 on the first attempt.
 - Round 9: step 9, the side panel's Connect a phone: `extension/qr.js` (TRIF's own QR encoder, the same
   matrices as macOS's generator, vectors in `tests/phone-link-qr.vectors.json`), `extension/phonelink.js`
   (the section at the end of Settings), background.js `phoneLink.*` from the panel's page alone, 11 tests.
@@ -149,19 +156,36 @@ iPhone side (needs ios-poc free):
 ## Next step
 
 Step 12 (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a self-test, frames,
-NWBrowser), **only when the round's brief says ios-poc is free**. Until then, computer-side work that is left,
-in this order (each small; none is a checklist item):
+NWBrowser), **only when the round's brief says ios-poc is free**. Until then, computer-side work that is left
+(each small; none is a checklist item):
 1. A look at Settings' Connect a phone in a real browser (headless, the lock, `--mute-audio`, the watchdog):
-   needs the main session to ask Tim first.
-2. A phone run in the real sandboxes with a real agent and a stand-in model, tests/run-sandbox.test.js's way
-   (macOS, local only, no paid call): the private folder's `phone-link.json` and `phone-link/` unreadable from
-   the run, `trif phone …` working from inside the sandbox.
-3. `store.js`: cut a long computer name in the QR's text (the phone shows the name `hello` gives).
-4. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
+   needs the main session to ask Tim first (not OK'd as of round 11).
+2. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
    test, `run.result`'s `removed` with real entries.
+3. Optional: the phone run in Codex's real sandbox (the notes say what stopped it).
 
 ## Notes for next round
 
+- The real-sandbox phone test: `node --test --test-name-pattern "a run from a paired phone"
+  tests/run-sandbox.test.js` (5 s; the whole file 19 s). It needs the real Claude Code on this Mac and runs
+  it with fake keys against `tests/fake-anthropic-server.js`. Steps that need the run's id (the page copy's
+  file name) are objects in the script that `phoneRun`'s `known({runId, port, pageFile})` fills in once
+  `run.started` is back, before the agent's first step. The page copy is at
+  `<private>/screenshots/phone_<host>/phone-page-<runId>.txt`.
+- Codex and a phone run, what was found: with no model given (a phone's run has none), Codex's requests to
+  the stand-in carry model `gpt-6.1-sol` and **no `tools` field at all**, so `tests/fake-model-server.js`
+  falls back to a call named `shell`, which Codex answers with "unsupported call: shell" (16 times, then the
+  run ends ok with nothing done). `model = "stand-in"` in the scratch home's `~/.codex/config.toml` changed
+  nothing: the request still said `gpt-6.1-sol` (not looked into: whether Codex ignores it there or the
+  helper names a model). Ways on: teach the stand-in what Codex's catalog models call (look at a real
+  request's `input` for the tool list), or a model choice for phone runs ("For Tim" 3). The Codex fixture
+  would be `setup('codex')` with only Codex in `agentbin` (add `only !== 'codex'` to the Claude link line).
+- A stand-in model server's `step` counter is never reset (`setScript` swaps the array's contents only): a
+  second run against the same server starts where the first stopped. One run per server, or a new fixture.
+- `checkRefused(named, refused, info, secrets)` takes the strings no refused command may print (default: the
+  fixture's `SECRET`); `BY.phone` is the helper's refusal to a phone's run.
+- `qrName(name, room)` returns the name percent-encoded (what goes after `&n=`), never more than `room`
+  bytes; the phone's side (step 13) just reads `n` with URLComponents and may see a "…" at its end.
 - Step 10's test: `node --test tests/phone-link-e2e.test.js` (2 s). It calls `standInAgent()` for the temp
   workspace (which also sets this process's env, unused there) and gives the spawned helper the same through
   FakeExtension's `testEnv` plus `env: {...chain.env, TRIF_DNS_SD, TRIF_AGENT_KILL_GRACE_MS}`; the helper
@@ -198,9 +222,6 @@ in this order (each small; none is a checklist item):
 - The section's three layers (label, line, explanation) are in phonelink.js's `TEXT`, not in
   extension/explain.json: the table's terms carry an approval stamp and docs/EXPLAIN.md is written out from
   it, so they move there once Tim approves the words (then `trif explain` has them, and agent notes).
-- A long computer name: the QR's text is about 100 bytes plus the name percent-encoded (9 bytes for an emoji's
-  4); past 271 bytes the panel says the name is too long and closes the window again. `store.js` could cut the
-  name in the QR instead (the phone shows the name it gets in `hello`): a small change for a later round.
 - Step 8's API. `new Link({home, runs, version, log, agent, getWorkspace, env})` (an EventEmitter, `'change'`):
   `start()` (the owner's; async), `closing()`, `stop()` (async), `refresh()`, `onEvent(runId, event)` → true
   for a phone's run, `tool` (a getter: the function for `remoteCommand`, or null without the link),
@@ -459,3 +480,10 @@ New in round 5 (6 is built as the strict default; 7 is for the main session and 
      'phone~mail.google.com', ['mail.google.com'])` is false (`scopeOf` gives `phone~phone~mail.google.com`), so
      its phone twin isn't its own folder (fails closed in the sandbox; the same expression is in `runLimits`).
    Suggested: a separate small fix on main (use `ownTwin` for every phone scope), with Tim's OK.
+
+New in round 11, small, a default unless Tim objects:
+
+14. **A very long computer name is cut in the code** (whole characters, then "…"), only in what the phone
+    shows while it pairs; afterwards the phone shows the whole name. The "name is too long" line of round 9
+    stays in the panel as a backstop the user shouldn't meet any more; Tim may drop it from the strings.
+

@@ -63,6 +63,32 @@ function computerName({ platform = process.platform, read = macName } = {}) {
   return cleanName(name, '') || cleanName(os.hostname().replace(/\.(local|lan|home)$/i, ''), 'Computer');
 }
 
+// The QR code's text: 271 bytes at most (extension/qr.js: version 10 at level L, the largest code the panel
+// draws). Everything in it but the name has a fixed length, so a long name is what is cut: the code is for
+// finding and trusting the computer, and the phone shows the whole name once paired (`hello` gives it).
+const QR_TEXT_MAX = 271;
+const CUT = encodeURIComponent('\u2026');
+const encoded = (s) => { try { return encodeURIComponent(s); } catch { return ''; } }; // (half a surrogate pair: left out)
+function characters(s) {
+  try { return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s), (x) => x.segment); } catch { return Array.from(s); }
+}
+
+/**
+ * A name as the QR code's text carries it, percent-encoded, in `room` bytes at most: whole when it fits, else
+ * its start (whole characters as a reader sees them: an emoji of several code points stays whole or goes) and "…".
+ */
+function qrName(name, room) {
+  const parts = characters(String(name)).map(encoded);
+  const whole = parts.join('');
+  if (whole.length <= room) return whole;
+  let out = '';
+  for (const part of parts) {
+    if (out.length + part.length + CUT.length > room) break;
+    out += part;
+  }
+  return CUT.length <= room ? out.replace(/(%20)+$/, '') + CUT : '';
+}
+
 const time = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
 
 /** What the file says, with nothing in it taken on trust: ids are made from the keys again, bad rows dropped. */
@@ -232,7 +258,8 @@ class Store extends EventEmitter {
     this.window = { secret, expires, tries: 0, timer };
     this.emit('change');
     const text = b64(secret);
-    return { secret: text, qr: `trif://pair?v=1&k=${s.publicKey}&s=${text}&n=${encodeURIComponent(this.name)}`, expires };
+    const head = `trif://pair?v=1&k=${s.publicKey}&s=${text}&n=`;
+    return { secret: text, qr: head + qrName(this.name, QR_TEXT_MAX - head.length), expires };
   }
 
   /** Closes the window (the panel's Settings closed, or its time is up). */
@@ -322,4 +349,4 @@ class Store extends EventEmitter {
   }
 }
 
-module.exports = { Store, FILE, SERVICE, ACCOUNT, WINDOW_MS, MAX_TRIES, NAME_MAX, cleanName, computerName, parse };
+module.exports = { Store, FILE, SERVICE, ACCOUNT, WINDOW_MS, MAX_TRIES, NAME_MAX, QR_TEXT_MAX, cleanName, qrName, computerName, parse };

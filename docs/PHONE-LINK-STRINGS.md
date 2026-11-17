@@ -34,7 +34,7 @@ approved, then can move into extension/explain.json so that `trif explain` knows
 | Instead of the button, in a browser whose TRIF doesn't have the link (`here: false`: another browser's does) | Another browser's TRIF is handling phones just now. Connect a phone from there. | round 8 (draft). The helper's own error for a `phone.pair.start` there is agent-style text, not shown |
 | Under the section, when the link is on and the phone can't find the computer (`announce`: `missing` or `failing`) | Your phone may not find this computer just now. | round 8 (draft); `unsupported` (not a Mac) shouldn't be reachable in version 1 |
 | Connect a phone fails: no port could be opened | This computer couldn't open a port for the phone to reach. | round 8 (draft; the helper's words, as a sentence) |
-| Connect a phone fails: the computer's name makes the code's text longer than the code holds (about 270 bytes; a name of some 30 emoji) | This computer's name is too long for the code. Shorten it in System Settings, then try again. | new in round 9 (draft); the pairing window is closed again |
+| Connect a phone fails: the computer's name makes the code's text longer than the code holds (about 270 bytes; a name of some 30 emoji) | This computer's name is too long for the code. Shorten it in System Settings, then try again. | new in round 9 (draft); the pairing window is closed again. Since round 11 the helper cuts a long name in the code (whole characters, then "…"), so this line is a backstop the user shouldn't meet: Tim may drop it |
 
 ## iPhone: More (not built; needs branch ios-poc)
 

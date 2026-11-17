@@ -605,7 +605,7 @@ test('/clip: the iPhone app\'s Home Screen icon page: only a TRIF icon is accept
   assert.match(csp, /script-src 'self'/);
   assert.strictEqual(res.headers.get('Referrer-Policy'), 'no-referrer');
   const body = await res.text();
-  assert.match(body, /<script src="\/clip.js"><\/script>/);
+  assert.match(body, /<script src="\/clip.js\?v=[0-9a-f]+"><\/script>/);
   assert.doesNotMatch(body, /https?:\/\/(?!timsrobot\.com)/, 'nothing from anywhere else');
   const js = await worker.fetch(new Request('https://timsrobot.com/clip.js'), env());
   assert.strictEqual(js.status, 200);

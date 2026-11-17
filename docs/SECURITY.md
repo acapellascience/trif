@@ -470,6 +470,32 @@ a mod's fix doesn't wait for a release; the holds keep that step from widening w
 user's OK. As with the TRIF feed, a replay inside the 8 weeks still passes, but it can only offer a version
 the user already passed.
 
+## The phone link (branch `phone-link`, not released)
+
+The first network door into the helper: a paired iPhone on the same Wi-Fi can ask this computer's agent for
+a phone mod. docs/PHONE-LINK.md section 2 has the rules, and anything that would weaken one stops for Tim's
+decision. In short:
+
+- **Off until the user turns it on** in the side panel's Settings, and nothing listens until a phone is
+  paired or a pairing window is open. The panel's commands for it are the panel page's alone (not the
+  socket, not a run).
+- **Only the paired keys.** Noise IK: the phone's first message is encrypted to the computer's key, which
+  the phone has from the QR code alone. A connection that isn't a paired phone's (or, during the 5-minute
+  window, doesn't carry its one-time secret) is closed without a byte sent back. A removed phone is a
+  stranger again.
+- **A request can only start a run, and the run is fenced as a side-panel run is**, more tightly: its site
+  is the page's phone twin, made by the helper from the page's address; only that twin's files are copied
+  to the mods folder; it has no tab, so no page command of its reaches the extension; and it never goes on
+  without TRIF's sandbox, even where the user allowed that for the panel's chats.
+- **What the phone sends is a website's content**: the page copy and the screenshot are files of the run
+  and data, deleted when it ends, never kept with its result.
+- **Approval stays on the phone.** No message approves a mod, changes a setting, pairs a phone or reads a
+  desktop mod. The copy in the computer's phone twin is held or not by the computer's own rules.
+
+Tests: tests/phone-link-*.test.js (the published Noise vector, pairing, refusals with nothing sent, the
+folder limit, the commands for the phone's page), and tests/phone-link-e2e.test.js, the whole story with a
+stand-in phone against the real helper on 127.0.0.1.
+
 ## The prompt
 
 The page's address reaches the agent's system prompt as its origin and path only, quoted and capped

@@ -16,6 +16,8 @@
 //                real agent's command would), once for each such word, in order; what each printed is kept in
 //                <bin>/phone/: phoneCalls() → [{args, status, stdout, stderr, shot}] (shot: the mode and first
 //                bytes of the screenshot the command named, read while the run is still going)
+//   CLI[args]    the same for any other command: the real `trif <args>` (a page command, say, which a phone
+//                run has none of), in the order the words are in, among the PHONE ones (cli: true there)
 //   PAUSE:<word> says "Working", then waits for go('<word>') before it does the rest
 //   SLEEP        says "Thinking" and stays until stopped
 // Each call is kept in <bin>/calls/ with its argv, env, cwd, message, context, and what it could read in
@@ -62,14 +64,15 @@ function rest() {
   }
   if (prompt.includes('DELETE')) { try { fs.unlinkSync(path.join(process.cwd(), 'sites', scope, 'old.js')); } catch {} }
   let n = 0;
-  for (const m of prompt.matchAll(/PHONE\\[([^\\]]*)\\]/g)) {
-    const args = m[1].split(' ').filter(Boolean);
-    const r = require('child_process').spawnSync(process.execPath, [fs.readFileSync(path.join(__dirname, 'cli'), 'utf8'), 'phone', ...args], { encoding: 'utf8', env: process.env, cwd: process.cwd(), timeout: 30000 });
+  for (const m of prompt.matchAll(/(PHONE|CLI)\\[([^\\]]*)\\]/g)) {
+    const args = m[2].split(' ').filter(Boolean);
+    const cli = m[1] === 'CLI';
+    const r = require('child_process').spawnSync(process.execPath, [fs.readFileSync(path.join(__dirname, 'cli'), 'utf8'), ...(cli ? [] : ['phone']), ...args], { encoding: 'utf8', env: process.env, cwd: process.cwd(), timeout: 30000 });
     const file = (/^screenshot: (.+)$/m.exec(r.stdout || '') || [])[1];
     let shot = null;
     if (file) { try { shot = { file, mode: fs.statSync(file).mode & 0o777, head: fs.readFileSync(file).subarray(0, 40).toString('latin1') }; } catch (e) { shot = { file, error: e.message }; } }
     fs.mkdirSync(path.join(__dirname, 'phone'), { recursive: true });
-    fs.writeFileSync(path.join(__dirname, 'phone', String(Date.now()) + '-' + process.pid + '-' + (n++) + '.json'), JSON.stringify({ args, status: r.status, stdout: r.stdout, stderr: r.stderr, shot }));
+    fs.writeFileSync(path.join(__dirname, 'phone', String(Date.now()) + '-' + process.pid + '-' + (n++) + '.json'), JSON.stringify({ args, ...(cli ? { cli } : {}), status: r.status, stdout: r.stdout, stderr: r.stderr, shot }));
   }
   say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } });
   say({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: session, total_cost_usd: 0 });

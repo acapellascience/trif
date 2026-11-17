@@ -357,5 +357,6 @@ always-on network presence. Proposed: one state whose text names both causes. Fo
 - End to end: a stand-in phone in Node (`tests/phone-link-client.js`: the same Noise and frames as an initiator)
   against the real helper code in a temporary HOME, listening on 127.0.0.1 on a random port, with the stand-in
   model and a stand-in keychain (`tests/fake-keychain.js`), no paid calls: pair, run, try on the phone, result,
-  drop and resume, remove.
+  drop and resume, remove (`tests/phone-link-e2e.test.js`: the real host.js, a fake extension as the side
+  panel, a stand-in dns-sd).
 - The iPhone side in the Simulator against the same helper in a temporary HOME.

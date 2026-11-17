@@ -930,6 +930,31 @@ overwriting the user's own changes. Only examples whose header says `@source web
   on: off only on sites both were off on. It remembers that in chrome.storage.local `absorbed`, so after
   that the switch is the user's. A new workspace just gets the merged mods.
 
+## The phone link (branch `phone-link`, not released)
+
+The iPhone app's "My computer": a paired phone on the same Wi-Fi asks this computer's agent for a phone mod.
+Its design, its wire protocol (Noise IK over TCP, found over Bonjour as `_trif._tcp`) and its messages
+(`hello`, `run.start`, `run.event`, `run.result`, `run.resume`, `run.ack`, `run.stop`, `tool.request`,
+`tool.result`) are in **docs/PHONE-LINK.md**, not here. What touches this file's protocols:
+
+- **Helper ⇄ extension.** `phone.status`, `phone.on`, `phone.off`, `phone.pair.start`, `phone.pair.stop` and
+  `phone.remove` are requests of the side panel's alone, like `agent.withoutSandbox`: over the extension's own
+  connection, refused on the socket and from a run. The helper sends `{type: "phoneLink", status}` when the
+  link changes, once the panel has asked for the status (PHONE-LINK.md section 7). The extension's messages
+  are `phoneLink.status|on|off|pair.start|pair.stop|remove`, from the panel page only (extension/phonelink.js;
+  the QR code is drawn by extension/qr.js).
+- **Runs.** A phone's run is an ordinary run of the default agent whose site is the page's phone twin
+  (`phone~<host>`, made by the helper from the page's address). Its events go to the phone, never to the
+  extension as `agentEvent`s, and of this file's commands it may use only the helper's own (`ping`, `mods`,
+  `mod.code`, `mod.diff`, and `mod.delete`/`mod.restore` in its own twin): a page command is refused before it
+  reaches the extension, since the page is on the phone (PHONE-LINK.md section 6).
+- **CLI.** `trif phone page [selector] [--limit N]`, `trif phone try <mod>`, `trif phone screenshot`: inside a
+  phone's run only, answered by the phone through the helper (`remote.page`, `remote.try`,
+  `remote.screenshot` on the run's mailbox), within a minute or with the reason in words.
+- **Files.** `<private>/phone-link.json` (on or off, the port, the paired phones' public keys) and
+  `<private>/phone-link/kept/` (runs a phone hasn't fetched yet); the computer's private key is in the
+  keyring (service `TRIF phone link`). Code: helper/lib/phonelink/.
+
 ## Repository layout
 
 ```

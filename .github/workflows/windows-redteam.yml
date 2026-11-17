@@ -30,6 +30,22 @@ jobs:
       - name: instruction-file write guard, odd NTFS name forms
         run: node tests/redteam/instruction-guard.js
 
+  # New: the per-run MAILBOX, attacked with forged request files dropped straight into a live run's box
+  # (no `trif` command), and a tight worker-thread race on the out-of-fence readback. The mailbox step
+  # boots the REAL helper (helper/host.js) and is EXPECTED to exit non-zero: it found cross-scope reads.
+  mailbox:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: stage.js readback, raced with a worker thread (held)
+        run: node tests/redteam/stage-race.js
+      - name: the per-run mailbox, attacked with forged requests (finds cross-scope reads)
+        run: node tests/redteam/mailbox-attacks.js
+
   # Baseline: the existing in-fence AppContainer attack suite, so this branch reproduces the known-good
   # result the new attacks sit beside.
   fence-baseline:

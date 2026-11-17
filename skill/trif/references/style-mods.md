@@ -31,7 +31,8 @@ Use JavaScript only when a style mod can't do the job.
 }
 ```
 
-- `css`: any CSS that loads nothing (`url()` only with `data:`; no `@import`). Recolour with
+- `css`: one string (not a list, unlike a style section's) of any CSS that loads nothing (`url()` only with
+  `data:`; no `@import`). Recolour with
   `background-color`, not `background`: the shorthand wipes the page's background pictures.
 - `hide`: selectors to hide, now and later.
 - `replace`: `{ in?, find, with, regex?, caseless? }`, plain-text replacement.
@@ -42,7 +43,8 @@ Selectors can't contain `{ } ; @`. `trif check <site>/<mod>` says what's wrong. 
 changes.
 
 **Scrolling feeds: start simple.** Hide with `hide`/`filter` first, hiding a row's contents rather than the
-row so the list closes up, and check by scrolling (`trif sweep --scroll`). Go further only if this feed
+row so the list closes up, and check by scrolling: `trif sweep --scroll` scrolls the tab to load more and
+restores it (on the tab the user is looking at, add `--force`). Go further only if this feed
 shows the cost (stutter, blank stretches, the list stops loading because most of it is hidden): then filter
 the response the feed is built from (a boxed mod with `site-data`, BOXED.md; or a free mod, TECHNIQUES.md),
 keeping pagination cursors. Don't fake the feed's scrolling (`scrollY`, the list's measurements). If neither

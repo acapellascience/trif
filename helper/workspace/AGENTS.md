@@ -93,7 +93,8 @@ Use JavaScript only when a style mod can't do the job.
 }
 ```
 
-- `css`: any CSS that loads nothing (`url()` only with `data:`; no `@import`). Recolour with
+- `css`: one string (not a list, unlike a style section's) of any CSS that loads nothing (`url()` only with
+  `data:`; no `@import`). Recolour with
   `background-color`, not `background`: the shorthand wipes the page's background pictures.
 - `hide`: selectors to hide, now and later.
 - `replace`: `{ in?, find, with, regex?, caseless? }`, plain-text replacement.
@@ -104,7 +105,8 @@ Selectors can't contain `{ } ; @`. `trif check <site>/<mod>` says what's wrong. 
 changes.
 
 **Scrolling feeds: start simple.** Hide with `hide`/`filter` first, hiding a row's contents rather than the
-row so the list closes up, and check by scrolling (`trif sweep --scroll`). Go further only if this feed
+row so the list closes up, and check by scrolling: `trif sweep --scroll` scrolls the tab to load more and
+restores it (on the tab the user is looking at, add `--force`). Go further only if this feed
 shows the cost (stutter, blank stretches, the list stops loading because most of it is hidden): then filter
 the response the feed is built from (a boxed mod with `site-data`, BOXED.md; or a free mod, TECHNIQUES.md),
 keeping pagination cursors. Don't fake the feed's scrolling (`scrollY`, the list's measurements). If neither
@@ -194,10 +196,12 @@ Exit code 2: the helper isn't running; ask the user to open the browser, then `t
 Write files with the Write tool, not heredocs or `cat >` (those are refused).
 
 `trif run` takes an expression, or a body with `return`; `await` works. Return small results. It runs in:
-- **TRIF's box** (`--box`; the default in a side-panel chat): the boxed-mod API (`page.find`, `.text`,
-  `.attr()`, `.style()`, `.rect()`; in a run also `el.value` and `el.pageData('props.x')`). It can read and
-  restyle, not send or click. No `document`/`window`. Use this for almost everything. Don't wait inside it;
-  `trif reload`, then run again.
+- **TRIF's box** (`--box`; the default in a side-panel chat): the boxed-mod API: `page.find`/`findAll`, and on
+  an element `.text`, `.attr(name)`, `.style(prop)` (one property name), `.rect()`, `.matches(sel)`,
+  `.children` (a list, not a method); in a run also `el.value` and `el.pageData('props.x')`. There's no
+  `.html`/`innerHTML`: read structure with `trif text` or `trif sweep --json`. Return small, shaped results,
+  not whole elements. It can read and restyle, not send or click. No `document`/`window`. Use this for almost
+  everything. Don't wait inside it; `trif reload`, then run again.
 - **The page's own world** (`--page`; the default from a terminal): `document`, `window`, the site's code. In a
   side-panel chat it locks the site until reload (below). Only for what the page's own code can tell you.
 

@@ -27,44 +27,40 @@ iPhone side (ios-poc):
 - [x] S6. `PhoneSync.swift`: the manifest, the plan applied with ModStore's rules (new as an import, changed as an
       edit, removed to Recently deleted), when it syncs (front, after a change, nudge, Sync now); ModStore trash.
       Unit tests
-- [ ] S7. The Mods tab's line, Sync now, Recently deleted, the conflict notice; strings into IOS-APP-STRINGS.md; the
+- [x] S7. The Mods tab's line, Sync now, Recently deleted, the conflict notice; strings into IOS-APP-STRINGS.md; the
       Mac harness (mobile/test/phonelink.test.js) syncing with the helper
 - [ ] S8. Simulator pass: a mod made on the phone, edited by a desktop phone-view chat (stand-in agent), back on the
       phone; a conflict; a delete
 
-## Done this round (round 5, 2026-11-17)
+## Done this round (round 6, 2026-11-17)
 
-- S5 (phone-link 02de94e): PROTOCOL.md's phone link section has the sync's messages, `phone.sync`, the base and
-  synced.json; SECURITY.md says what a paired phone may write, how it's checked and held. CI run 44056937058: the clickjack
-  flake, green on its rerun (round 4's progress commit, 44056705742, the same flake).
-- S6 (ios-poc 4bcd67d): PhoneSync.swift (`run`: begin, puts, gets taken by the store, removes, end with `have`;
-  `Summary`; `Scheduler`: one at a time, coalesced, a change syncs 3 s later only if a file's rev moved); ModStore
-  as `PhoneSyncStore` (new as an import, off, newOff "computer"; changed as saveEdit judges, history source
-  computer; deletes to `trash`, Recently deleted, 30 days, for every delete now); PhoneSyncModel owns the app's one
-  PhoneLinkRemote (More's `link` is it), syncs on front, changes, `sync.changed`, Sync now; dev steps `sync`,
-  `syncstate`. Mac test 7/7 (new `syncunit`: a scripted computer, 25 checks). Simulator build and the .ipa
-  (dSYM 203EB9E6-FDD6-3BED-ADBD-E5A6FBAF06F3) built. ios-poc CI green: https://github.com/acapellascience/trif/actions/runs/44058240792
+- S7 (ios-poc 8373e19): the Mods tab's sync line and Sync now (paired only), notices at the top until OK (conflict,
+  came back, couldn't read, too big), Recently deleted with Restore (all sites, folded), "from your computer" on a mod
+  new from the computer; drafts in IOS-APP-STRINGS.md "Phone sync in the Mods tab". Simulator (SE): computer's mods
+  arrived, a computer delete → Recently deleted → Restore went back, a conflict showed its notice (shots 276, 277).
+- Harness (phone-link 010554a): the stand-in computer attaches the sync session (+ held.js's first look) with stdin
+  `twin`, `write`, `delete`, `nudge`, `synced`, `held`; ios-poc's Mac test 8/8, its new last test syncs over the real
+  link. CI green: ios-poc https://github.com/acapellascience/trif/actions/runs/44061257135, phone-link https://github.com/acapellascience/trif/actions/runs/44061245200
+- .ipa built and copied, dSYM 0DB7485B-25B0-32F1-8601-25AC0C3A45B9.
 
 ## Next step
 
-S7 (ios-poc, if free): the Mods tab's line (PhoneSyncModel.last / lastProblem), Sync now, Recently deleted with
-Restore, the conflict and came-back notices; strings into IOS-APP-STRINGS.md (drafts from PHONE-LINK-STRINGS.md
-"Phone sync"); the Mac harness syncing with the real helper (a `check sync …` command in main.swift with a store in
-memory, against Store + Server + PhoneSync session in a temp HOME).
+S8 (ios-poc, if free): the Simulator pass with a desktop phone-view chat: a mod made on the phone (Add this mod? or
+-import), edited by a stand-in-agent run on the computer (how a run's accepted write reaches the live twin in the
+stand-in: check Runs/stage, then `nudge`), back on the phone; a conflict; a delete. Screenshots from 278.
 
 ## Notes for next round
 
-- Rounds 1–4's notes still hold.
-- The phone's side never computes a plan: it sends every mod (ids with a `/` only: the proof of concept's old
-  ids are left out) and applies what the computer says. A `give` whose code's rev isn't the plan's is not taken
-  (the next sync decides); `have` lists only ids the phone has after applying.
-- `syncTake` refuses a file whose id comes out different from the plan's (the reader's file+site → id).
-- mods-page.js shows newOff "computer" as "new" with the import's tooltip: S7 words it ("From your computer").
-- For S7's and S8's Simulator runs the stand-in computer (tests/phone-link-computer.js) doesn't attach a
-  `PhoneSync` session yet: add it there (the e2e test's wiring is the model), with stdin commands to write, edit
-  and delete a twin file and to show the twin.
-- ModStore is main-actor: the conformance is `@preconcurrency`; PhoneSync's callbacks run on main (the link's
-  queue).
+- Rounds 1–5's notes still hold.
+- Driving the stand-in computer from a shell: `mkfifo f; tail -f f | node tests/phone-link-computer.js --seconds 900
+  > log`, `echo <cmd> > f`; write lines via node (JSON.stringify) to avoid shell quoting. Kill the `tail -f` after.
+- The app's dev step `modsjs` runs JS in the Mods tab: `window.webkit.messageHandlers.app.postMessage({type:'save',
+  id, text})` edits a mod as the tab's editor does (how round 6 made the phone side of a conflict). Build step.json
+  with node too.
+- A conflict is made by a phone save and, within its 3 s change delay, a computer `write` (its nudge syncs at once).
+- The line's counts are the latest sync's only (a quiet sync after shows just "Synced with … at …"); notices stay
+  until OK, deduped, at most 20.
+- The pairing sheet opens over the app after `simctl openurl` of the qr: tap Done (322, 68) before the Mods tab.
 
 ## For Tim (decisions)
 
@@ -82,3 +78,4 @@ memory, against Store + Server + PhoneSync session in a temp HOME).
 - Round 3: 61c864a, run 44054353924: green.
 - Round 4: 5f48cc5, run 44056254255: green.
 - Round 5: phone-link 02de94e, run 44056937058: the clickjack flake, green on rerun; ios-poc 4bcd67d, run 44058240792: green.
+- Round 6: phone-link 010554a, run 44061245200: green; ios-poc 8373e19, run 44061257135: green.

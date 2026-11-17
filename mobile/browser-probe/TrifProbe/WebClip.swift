@@ -22,13 +22,20 @@ enum TrifLink {
               let t = URL(string: raw), let s = t.scheme?.lowercased(), s == "https" || s == "http", t.host != nil else { return nil }
         return t
     }
-    static func link(to site: URL) -> URL {
+    /// `set`: the tag of the profile with several icons it's in (IconQueue), so TRIF knows that profile was installed
+    /// when it's opened from one of them.
+    static func link(to site: URL, set: String? = nil) -> URL {
         var c = URLComponents()
         c.scheme = "trif"
         c.host = "open"
         // (app=1: the icon opens its site in full screen, no browser around it: Tim, 11-16)
         c.queryItems = [URLQueryItem(name: "url", value: site.absoluteString), URLQueryItem(name: "app", value: "1")]
+        if let set { c.queryItems?.append(URLQueryItem(name: "set", value: set)) }
         return c.url!
+    }
+    /// The profile tag in an icon's link (nil: an icon of its own).
+    static func set(_ url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "set" }?.value
     }
 }
 
@@ -108,7 +115,7 @@ extension Model {
         other()
         await tap("another tab in front, its tab in full screen")
         let wasMore = Model.pane?.more ?? false
-        for cover in ["", "tabs", "chat", "more", "address", "mods", "history"] {
+        for cover in ["", "tabs", "chat", "more", "address", "mods", "history", "iconqueue"] {
             if let t = own() { browser.setFullScreen(false, tab: t, note: false) }
             other()
             if cover == "more" { Model.pane?.choose(more: true); browser.wantsSheet = "chat" }
@@ -145,6 +152,45 @@ extension Model {
         try? png?.write(to: docs.appendingPathComponent("icon-test.png"))
         try? profile?.write(to: docs.appendingPathComponent("icon-test.mobileconfig"))
         return "site \(face.site), name \(face.name), user \(face.user ?? "-"), source \(face.source), png \(png?.count ?? 0) bytes, profile \(profile?.count ?? 0) bytes"
+    }
+}
+
+extension Model {
+    /// (development) {"iconqueue": {…}}: the shown page's icon on the list, with these choices ("name": "onTrif",
+    /// "users", "fixed" or any other text as a custom name; "noise": a worst-case photo as its picture).
+    static func iconQueue(browser: Browser, options o: [String: Any]) async -> String {
+        guard let face = await WebClipMaker.face(of: browser) else { return "no face" }
+        var q = QueuedIcon(site: face.site, start: face.start.absoluteString, siteName: face.name, user: face.user, source: face.source)
+        q.siteIcon = face.icon
+        q.outline = o["outline"] as? Bool ?? true
+        q.swatch = o["swatch"] as? Int ?? 0
+        q.badge = o["badge"] as? Bool ?? false
+        if let n = o["name"] as? String {
+            if let c = IconName(rawValue: n), c != .custom { q.nameChoice = c } else { q.nameChoice = .custom; q.customName = n }
+        }
+        if o["noise"] as? Bool == true { q.picture = noise() }
+        IconQueue.shared.put(q)
+        return "queued \(q.site) as “\(q.label)”: \(IconQueue.shared.items.count) waiting"
+    }
+    /// (development) {"iconbatch": 1}: the list's profile, written to Documents/icon-batch.mobileconfig.
+    static func iconBatch(docs: URL) -> String {
+        let q = IconQueue.shared
+        guard q.items.count > 1 else { return "fewer than 2 waiting" }
+        let tag = q.tag ?? "devtest"
+        guard let (data, px) = WebClipMaker.batchProfile(q.items, tag: tag) else { return "couldn't make it" }
+        try? data.write(to: docs.appendingPathComponent("icon-batch.mobileconfig"))
+        return "\(q.items.count) icons, set \(tag), pictures \(px) px, \(data.count) bytes, \(data.count <= 400_000 ? "the clip page's route" : "too big for the clip page: the server on the phone")"
+    }
+    /// A picture of random pixels, the worst case for a PNG's size (a photo from Photos).
+    static func noise() -> UIImage {
+        let f = UIGraphicsImageRendererFormat()
+        f.scale = 2
+        return WebClipMaker.square(UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200), format: f).image { _ in
+            for x in stride(from: 0, to: 300, by: 0.5) { for y in stride(from: 0, to: 200, by: 0.5) {
+                UIColor(hue: .random(in: 0...1), saturation: 0.8, brightness: .random(in: 0.3...1), alpha: 1).setFill()
+                UIRectFill(CGRect(x: x, y: y, width: 0.5, height: 0.5))
+            } }
+        })
     }
 }
 
@@ -386,8 +432,12 @@ enum WebClipMaker {
     /// The profile: one Web Clip, removable, full screen, identified by its site. `name` is the icon's label on the
     /// Home Screen (the person's choice); the profile itself is named after the site ({Site} for TRIF), so Settings
     /// and Files read plainly whatever the label is.
+    /// A site's own profile's identifier: adding the site's icon again on its own replaces it (iOS replaces a profile
+    /// installed with the same identifier; a Web Clip's own identifier doesn't: 11-17, below IconQueue).
+    static func profileID(_ site: String) -> String { "com.timsrobot.trif.webclip.\(site)" }
+
     static func profile(_ face: SiteFace, name: String, picture: UIImage? = nil, look: IconLook = IconLook()) -> Data? {
-        let id = "com.timsrobot.trif.webclip.\(face.site)"
+        let id = profileID(face.site)
         guard let pic = picture ?? face.icon, let png = iconPNG(pic, look: look) else { return nil }
         let label = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
         guard !label.isEmpty else { return nil }
@@ -436,10 +486,18 @@ final class ProfileHandoff: NSObject, ObservableObject {
     @Published private(set) var installed = false
     /// Whether the timsrobot.com page is there (asked when the sheet opens: which route's steps to show).
     @Published private(set) var pageLive: Bool?
-    func checkPage() async { pageLive = await ProfileHandoff.pageIsThere(ProfileHandoff.clipBase) }
-    /// The sheet opened for a site: its progress kept if it's the same site, else a fresh start.
+    func checkPage() async { pageLive = await ProfileHandoff.pageTakes(ProfileHandoff.clipBase).live }
+    /// The tag of the profile with several icons being handed (IconQueue): TRIF opened from any icon carrying it means
+    /// that profile is installed.
+    private(set) var batchTag: String?
+    /// The site of the one icon handed from the list of icons waiting (its own profile, not a batch).
+    private(set) var handedSite: String?
+    /// The sheet opened for a site (or the list of icons waiting: "batch:…"): its progress kept if it's the same,
+    /// else a fresh start.
     func begin(site s: String) {
         guard s != site else { return }
+        batchTag = nil
+        handedSite = nil
         stop(log: false)
         site = s
         state = .idle
@@ -447,11 +505,13 @@ final class ProfileHandoff: NSObject, ObservableObject {
         installed = false
         openedAt = nil
     }
-    /// TRIF was opened from a Home Screen icon for this site: the icon is there.
-    func opened(fromIconOf s: String) {
-        guard s == site, state != .idle || savedToFiles else { return }
+    /// TRIF was opened from a Home Screen icon for this site (`set`: the tag of the profile with several icons it
+    /// came in): the icon is there.
+    func opened(fromIconOf s: String, set: String? = nil) {
+        guard state != .idle || savedToFiles else { return }
+        if let batchTag { guard set == batchTag else { return } } else { guard set == nil, s == site || s == handedSite else { return } }
         installed = true
-        log("opened from the new icon for \(s): done")
+        log("opened from the new icon for \(s)\(set.map { " (set \($0))" } ?? ""): done")
     }
     private var listener: NWListener?
     private var task: UIBackgroundTaskIdentifier = .invalid
@@ -472,18 +532,22 @@ final class ProfileHandoff: NSObject, ObservableObject {
     /// page, the profile in the # part, which no server sees; no server on the phone. Used once the page is there (one
     /// request for its script, nothing sent with it); else, and if Safari can't be opened that way, the server here.
     /// `page`: the page can take this profile (it takes only icons for https sites, of up to 400,000 bytes): else the
-    /// server here at once.
-    func hand(_ profile: Data, name: String, page: Bool = true) {
+    /// server here at once. `batch`: the profile holds several icons (IconQueue), this tag in their links; a page from
+    /// before 11-17 takes only one, so then the server here too.
+    func hand(_ profile: Data, name: String, page: Bool = true, batch: String? = nil, site one: String? = nil) {
         stop(log: false)
         generation += 1
         let gen = generation
         state = .starting
+        batchTag = batch
+        handedSite = one
         Task { @MainActor in
             let base = ProfileHandoff.clipBase
-            if !page || profile.count > 400_000 { log("the page at \(base)/clip takes only https sites' icons of up to 400,000 bytes: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
-            let live = await ProfileHandoff.pageIsThere(base)
+            if !page || profile.count > 400_000 { log("the page at \(base)/clip takes only https sites' icons of up to 400,000 bytes (this: \(profile.count)): the server on this phone instead"); serve(profile, name: name, gen: gen); return }
+            let takes = await ProfileHandoff.pageTakes(base)
             guard generation == gen else { return }
-            guard live else { log("the page at \(base)/clip isn't there: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
+            guard takes.live else { log("the page at \(base)/clip isn't there: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
+            if batch != nil && !takes.batch { log("the page at \(base)/clip takes one icon a profile, not several: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
             let b64 = profile.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
             let host = base.replacingOccurrences(of: "https://", with: "")
             guard let url = URL(string: "x-safari-https://\(host)/clip#\(b64)") else { serve(profile, name: name, gen: gen); return }
@@ -504,14 +568,14 @@ final class ProfileHandoff: NSObject, ObservableObject {
         }
     }
 
-    /// Whether the page is there: its script answers (a HEAD request, nothing sent).
-    nonisolated static func pageIsThere(_ base: String) async -> Bool {
-        guard let u = URL(string: "\(base)/clip.js") else { return false }
+    /// Whether the page is there (its script answers: one plain request for it, nothing sent), and whether it takes a
+    /// profile with several icons (its script has the words "trif-clip-batch": clip-page branch, 11-17).
+    nonisolated static func pageTakes(_ base: String) async -> (live: Bool, batch: Bool) {
+        guard let u = URL(string: "\(base)/clip.js") else { return (false, false) }
         var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
-        req.httpMethod = "HEAD"
         req.httpShouldHandleCookies = false
-        guard let (_, r) = try? await URLSession.shared.data(for: req) else { return false }
-        return (r as? HTTPURLResponse)?.statusCode == 200
+        guard let (data, r) = try? await URLSession.shared.data(for: req), (r as? HTTPURLResponse)?.statusCode == 200 else { return (false, false) }
+        return (true, String(decoding: data.prefix(200_000), as: UTF8.self).contains("trif-clip-batch"))
     }
 
     /// The fallback: a server on this phone's loopback, Safari opened at it.
@@ -716,7 +780,22 @@ struct ProfileFile: FileDocument {
 
 /// The icon's name (Tim, 11-16: iOS can't rename an icon later, so it's chosen here): "{site} on TRIF", "{user}'s
 /// {site}" (only when the person's name on the site is known), "fixed {site}", or their own.
-enum IconName: Hashable { case onTrif, users, fixed, custom }
+enum IconName: String, Hashable, Codable {
+    case onTrif, users, fixed, custom
+    func text(site: String, user: String?, custom: String) -> String {
+        switch self {
+        case .onTrif: return "\(site) on TRIF"
+        case .users: return "\(user ?? "")'s \(site)"
+        case .fixed: return "fixed \(site)"
+        case .custom: return custom
+        }
+    }
+    /// The label on the Home Screen (an empty custom name: the site's own), at most 60 characters.
+    func label(site: String, user: String?, custom: String) -> String {
+        let l = String(text(site: site, user: user, custom: custom).trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        return l.isEmpty ? site : l
+    }
+}
 
 /// The outline's colours to choose from: TRIF's green first (nil: the app icon's own gradient), then a few, then any
 /// (the colour picker).
@@ -729,15 +808,171 @@ let outlineSwatches: [(name: String, colour: UIColor?)] = [
     ("Graphite", UIColor(red: 0x6b / 255, green: 0x72 / 255, blue: 0x80 / 255, alpha: 1)),
 ]
 
+
+/// What the steps' first button hands over: the profile, whether the timsrobot.com page may take it (https sites
+/// only), and for a profile with several icons its tag (IconQueue).
+struct IconHandoffJob {
+    var data: Data
+    var name: String
+    var page: Bool
+    var batch: String?
+    var log: String
+    /// The one site handed from the list (its own profile).
+    var site: String? = nil
+}
+
+/// What will happen and every step after it, for the route that will be used (Safari, or Files), shown before
+/// anything happens; it stays the whole time, so the person can go to Safari, Files or Settings and come back to read
+/// where they are, the step they're on marked as far as TRIF can tell. Shared by the [+] sheet (one icon) and the list
+/// of icons waiting (several in one profile).
+struct IconHandoffSteps: View {
+    @ObservedObject private var handoff = ProfileHandoff.shared
+    /// How many icons the profile holds (the words say "icon" or "icons").
+    let count: Int
+    /// The file's name on the Files route ("{Site} for TRIF", "TRIF icons").
+    let fileName: String
+    /// The first button's words before anything happened.
+    let addTitle: String
+    let ready: Bool
+    /// The profile (nil: it couldn't be made).
+    let make: () -> IconHandoffJob?
+    @State private var filesRoute = false
+    @State private var saving: ProfileFile?
+    @State private var failed = false
+
+    private var one: Bool { count == 1 }
+    private var started: Bool { handoff.state != .idle || handoff.savedToFiles }
+    private var safariFailed: Bool {
+        switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return false }
+    }
+    private var settingsSteps: [String] {
+        ["Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management).",
+         "Tap Install, enter your passcode, then Install again.",
+         one ? "The icon appears on your Home Screen." : "The icons appear on your Home Screen."]
+    }
+    private var steps: [String] {
+        filesRoute
+            ? ["Choose where to save the file (On My iPhone is fine), then tap Save.",
+               "Open the Files app and tap “\(fileName)”."] + settingsSteps
+            : ["Safari opens and asks to download a profile: tap Allow."] + settingsSteps
+    }
+    private var current: Int {
+        if handoff.installed { return steps.count }
+        if filesRoute { return handoff.savedToFiles ? 1 : 0 }
+        switch handoff.state {
+        case .fetched, .pageBack: return 1
+        default: return 0
+        }
+    }
+    private var didntGet: String { one ? "Safari didn't get the icon. Save it to Files instead." : "Safari didn't get the icons. Save them to Files instead." }
+    private func wrong(_ b: String) -> String { "\(b) opened instead of Safari, and only Safari can add \(one ? "the icon" : "icons"). Save \(one ? "it" : "them") to Files instead." }
+    private var status: String? {
+        if handoff.installed { return one ? "Done: the icon is on your Home Screen." : "Done: the icons are on your Home Screen." }
+        if filesRoute {
+            if handoff.savedToFiles { return "Saved to Files: next, open the Files app and tap it." }
+            if case .wrongBrowser(let b) = handoff.state { return wrong(b) }
+            return safariFailed ? didntGet : nil
+        }
+        switch handoff.state {
+        case .starting: return "Opening Safari…"
+        case .page, .handed: return "Safari is open: tap Allow there, then come back here."
+        case .fetched: return "Safari downloaded it: next, Settings."
+        case .pageBack: return "If Safari asked and you tapped Allow: next, Settings."
+        case .wrongBrowser(let b): return wrong(b)
+        case .failed, .timedOut: return didntGet
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if failed {
+                Text(one ? "Couldn't make the icon for this page." : "Couldn't make the icons.").font(.footnote).foregroundStyle(.secondary)
+            }
+            if let status {
+                Text(status).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
+                    .foregroundStyle(handoff.installed ? Color.trifGreen : .primary).padding(.horizontal, 20)
+            }
+            stepList
+            buttons
+        }
+        .fileExporter(isPresented: Binding(get: { saving != nil }, set: { if !$0 { saving = nil } }), document: saving,
+                      contentType: ProfileFile.type, defaultFilename: fileName) { result in
+            switch result {
+            case .success(let url): handoff.savedToFiles = true; Diagnostics.shared.log("icon", "profile saved to Files (\(url.lastPathComponent))")
+            case .failure(let e): Diagnostics.shared.log("icon", "profile not saved to Files: \(e.localizedDescription)")
+            }
+            saving = nil
+        }
+        // (Safari didn't get it: the Files route's steps, its button first)
+        .onChange(of: safariFailed) { _, now in if now { filesRoute = true } }
+        // (a fresh start, the list changed: Safari again)
+        .onChange(of: handoff.site) { _, _ in filesRoute = handoff.savedToFiles || safariFailed }
+        .onAppear { if handoff.savedToFiles || safariFailed { filesRoute = true } }
+    }
+
+    private var stepList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { n, text in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    ZStack {
+                        Circle().fill(n < current ? Color.trifGreen : n == current && started ? Color.trifGreen.opacity(0.18) : Color(.tertiarySystemFill))
+                        if n < current { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white) }
+                        else { Text("\(n + 1)").font(.system(size: 12, weight: .bold)).foregroundStyle(n == current && started ? Color.trifGreen : .secondary) }
+                    }
+                    .frame(width: 22, height: 22)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    Text(text).font(.subheadline.weight(n == current && started ? .semibold : .regular))
+                        .foregroundStyle(n < current ? .secondary : .primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder private var buttons: some View {
+        if !handoff.installed {
+            Button {
+                guard let job = make() else { failed = true; return }
+                failed = false
+                if filesRoute { saving = ProfileFile(data: job.data); return }
+                Diagnostics.shared.log("icon", job.log)
+                ProfileHandoff.shared.hand(job.data, name: job.name, page: job.page, batch: job.batch, site: job.site)
+            } label: {
+                Text(filesRoute ? (handoff.savedToFiles ? "Save it again" : "Save to Files") : (handoff.state == .idle ? addTitle : "Download it again"))
+                    .bold().frame(maxWidth: 240)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!ready || handoff.state == .starting)
+            if !filesRoute && (safariFailed || started) {
+                Button {
+                    filesRoute = true
+                    Diagnostics.shared.log("icon", "fallback offered: save the profile to Files")
+                } label: { Text("Save to Files instead").frame(maxWidth: 240) }
+                .buttonStyle(.bordered)
+            } else if filesRoute && !handoff.savedToFiles && !safariFailed {
+                Button { filesRoute = false } label: { Text("Use Safari instead").frame(maxWidth: 240) }
+                    .buttonStyle(.bordered)
+            }
+        }
+    }
+}
+
 /// The toolbar's [+] (Tim, 11-16; was the ⋯ menu's Add to Home Screen): first the icon itself (its name, the
-/// outline and its colour, the picture, the fixed badge), then, before anything happens, what will happen and every step after it, for
-/// the route that will be used (Safari, or Files); the sheet stays on that list the whole time, so the person can go
-/// to Safari, Files or Settings and come back to read where they are, the step they're on marked as far as TRIF can
-/// tell. Never closed while they're away; reopened for the same site, it shows where they were.
+/// outline and its colour, the picture, the fixed badge), then the steps (IconHandoffSteps). Never closed while the
+/// person is away; reopened for the same site, it shows where they were. "Add to Home Screen later" puts the icon, with
+/// all its choices, on the list of icons waiting (IconQueue), added later all in one install (Tim, 11-16). `editing`:
+/// one of those, its choices changed here and saved back, no steps.
 struct WebClipSheet: View {
+    var editing: QueuedIcon? = nil
     @EnvironmentObject var browser: Browser
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var handoff = ProfileHandoff.shared
+    @ObservedObject private var queue = IconQueue.shared
     @State private var face: SiteFace?
     @State private var nameChoice: IconName = .onTrif
     @State private var customName = ""
@@ -750,72 +985,32 @@ struct WebClipSheet: View {
     @State private var picked: UIImage?
     @State private var photo: PhotosPickerItem?
     @State private var failed = false
-    @State private var saving: ProfileFile?
-    @State private var filesRoute = false
 
     private var siteName: String { face?.name ?? "" }
-    private func name(_ c: IconName) -> String {
-        switch c {
-        case .onTrif: return "\(siteName) on TRIF"
-        case .users: return "\(face?.user ?? "")'s \(siteName)"
-        case .fixed: return "fixed \(siteName)"
-        case .custom: return customName
-        }
-    }
+    private func name(_ c: IconName) -> String { c.text(site: siteName, user: face?.user, custom: customName) }
     /// The icon's label on the Home Screen (an empty custom name: the site's own).
-    private var label: String {
-        let l = String(name(nameChoice).trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
-        return l.isEmpty ? siteName : l
-    }
+    private var label: String { nameChoice.label(site: siteName, user: face?.user, custom: customName) }
     private var look: IconLook {
         IconLook(outline: outline, colour: swatch < 0 ? UIColor(otherColour) : outlineSwatches[swatch].colour, badge: badge)
     }
     private var preview: UIImage? { (picked ?? face?.icon).map { WebClipMaker.compose($0, look: look) } }
-    private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label, picture: picked, look: look) } }
-    private var started: Bool { handoff.state != .idle || handoff.savedToFiles }
-    /// Safari didn't get it: the Files route is offered.
-    private var safariFailed: Bool {
-        switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return false }
-    }
+    private var started: Bool { editing == nil && (handoff.state != .idle || handoff.savedToFiles) }
+    /// This site's icon is on the list already (the button then updates it).
+    private var queued: QueuedIcon? { face.flatMap { queue.item(for: $0.site) } }
 
-    // MARK: the steps
-    private static let settingsSteps = [
-        "Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management).",
-        "Tap Install, enter your passcode, then Install again.",
-        "The icon appears on your Home Screen.",
-    ]
-    private var steps: [String] {
-        filesRoute
-            ? ["Choose where to save the file (On My iPhone is fine), then tap Save.",
-               "Open the Files app and tap “\(siteName) for TRIF”."] + WebClipSheet.settingsSteps
-            : ["Safari opens and asks to download a profile: tap Allow."] + WebClipSheet.settingsSteps
+    /// The choices as an icon on the list (the one being edited keeps its place and identity).
+    private func asQueued() -> QueuedIcon? {
+        guard let f = face else { return nil }
+        var q = editing ?? queued ?? QueuedIcon(site: f.site, start: f.start.absoluteString, siteName: f.name, user: f.user, source: f.source)
+        q.nameChoice = nameChoice; q.customName = customName; q.outline = outline; q.swatch = swatch
+        q.other = QueuedIcon.rgb(UIColor(otherColour)); q.badge = badge
+        q.siteIcon = f.icon; q.picture = picked
+        return q
     }
-    /// The step the person is on (0-based; steps.count when it's all done), as far as TRIF can tell.
-    private var current: Int {
-        if handoff.installed { return steps.count }
-        if filesRoute { return handoff.savedToFiles ? 1 : 0 }
-        switch handoff.state {
-        case .fetched, .pageBack: return 1
-        default: return 0
-        }
-    }
-    /// Where things are, in a line over the steps (nothing before the button).
-    private var status: String? {
-        if handoff.installed { return "Done: the icon is on your Home Screen." }
-        if filesRoute {
-            if handoff.savedToFiles { return "Saved to Files: next, open the Files app and tap it." }
-            if case .wrongBrowser(let b) = handoff.state { return "\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead." }
-            return safariFailed ? "Safari didn't get the icon. Save it to Files instead." : nil
-        }
-        switch handoff.state {
-        case .starting: return "Opening Safari…"
-        case .page, .handed: return "Safari is open: tap Allow there, then come back here."
-        case .fetched: return "Safari downloaded it: next, Settings."
-        case .pageBack: return "If Safari asked and you tapped Allow: next, Settings."
-        case .wrongBrowser(let b): return "\(b) opened instead of Safari, and only Safari can add the icon. Save it to Files instead."
-        case .failed, .timedOut: return "Safari didn't get the icon. Save it to Files instead."
-        default: return nil
-        }
+    /// The choices from an icon on the list.
+    private func load(_ q: QueuedIcon) {
+        nameChoice = q.nameChoice; customName = q.customName; outline = q.outline; swatch = q.swatch
+        otherColour = Color(q.otherColour); badge = q.badge; picked = q.picture
     }
 
     var body: some View {
@@ -839,39 +1034,25 @@ struct WebClipSheet: View {
                     if failed {
                         Text("Couldn't make the icon for this page.").font(.footnote).foregroundStyle(.secondary)
                     }
-                    if let status {
-                        Text(status).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
-                            .foregroundStyle(handoff.installed ? Color.trifGreen : .primary).padding(.horizontal, 20)
-                    }
-                    stepList
-                    buttons
-                    Text("iOS only lets an icon that opens an app be added this way, with a small profile. It adds just this one icon, and you can remove it in Settings → General → VPN & Device Management.")
-                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading).padding(.horizontal, 20)
-                    if started && !handoff.installed {
-                        Text(filesRoute ? "A profile waits about 8 minutes in Settings. If it's gone, tap the file in Files again." : "A downloaded profile waits about 8 minutes. If it's gone from Settings, tap Download it again here.")
-                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading).padding(.horizontal, 20)
-                    }
+                    if editing == nil { addParts }
                 }
                 .padding(.bottom, 24)
             }
-            .navigationTitle("Add to Home Screen")
+            .navigationTitle(editing == nil ? "Add to Home Screen" : "Edit icon")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: started ? .confirmationAction : .cancellationAction) {
-                    Button(started ? "Done" : "Cancel") { dismiss() }
+                if editing != nil {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { if let q = asQueued() { queue.put(q) }; dismiss() }.bold().disabled(face == nil)
+                    }
+                } else {
+                    ToolbarItem(placement: started ? .confirmationAction : .cancellationAction) {
+                        Button(started ? "Done" : "Cancel") { dismiss() }
+                    }
                 }
             }
         }
-        .fileExporter(isPresented: Binding(get: { saving != nil }, set: { if !$0 { saving = nil } }), document: saving,
-                      contentType: ProfileFile.type, defaultFilename: "\(siteName) for TRIF") { result in
-            switch result {
-            case .success(let url): handoff.savedToFiles = true; Diagnostics.shared.log("icon", "profile saved to Files (\(url.lastPathComponent))")
-            case .failure(let e): Diagnostics.shared.log("icon", "profile not saved to Files: \(e.localizedDescription)")
-            }
-            saving = nil
-        }
-        // (Safari didn't get it: the Files route's steps, its button first)
-        .onChange(of: safariFailed) { _, now in if now { filesRoute = true } }
         // (Custom…: starts from the name that was chosen, to edit)
         .onChange(of: nameChoice) { old, now in if now == .custom && customName.isEmpty { customName = name(old) } }
         .onChange(of: photo) { _, item in
@@ -883,13 +1064,72 @@ struct WebClipSheet: View {
             }
         }
         .task {
+            if let e = editing { face = e.face; load(e); return }
             let site = Site.of(browser.webView.url?.host ?? "")
             handoff.begin(site: site)
-            if handoff.savedToFiles || safariFailed { filesRoute = true }
             async let page: Void = handoff.checkPage()
-            if let f = await WebClipMaker.face(of: browser) { face = f } else { failed = true }
+            if let f = await WebClipMaker.face(of: browser) {
+                face = f
+                // (on the list already: its choices, to change or add now)
+                if handoff.state == .idle && !handoff.savedToFiles, let q = queue.item(for: f.site) { load(q) }
+            } else { failed = true }
             await page
         }
+    }
+
+    /// The steps and buttons, "Add to Home Screen later", the list waiting, and why it's a profile.
+    @ViewBuilder private var addParts: some View {
+        IconHandoffSteps(count: 1, fileName: "\(siteName) for TRIF", addTitle: "Add to Home Screen", ready: face != nil) {
+            guard let f = face, let p = WebClipMaker.profile(f, name: label, picture: picked, look: look) else { return nil }
+            IconQueue.recordHanded(id: WebClipMaker.profileID(f.site), sites: [f.site])
+            return IconHandoffJob(data: p, name: "\(f.name) for TRIF", page: f.start.scheme == "https", batch: nil,
+                                  log: "made the Home Screen icon for \(f.site) (\(picked == nil ? f.source : "a picture from Photos"), \(outline ? "outline \(swatch < 0 ? "own colour" : outlineSwatches[swatch].name)" : "no outline")\(badge ? ", fixed badge" : ""), name \(nameChoice), \(p.count / 1000) kB profile)")
+        }
+        if !started {
+            let full = queued == nil && queue.items.count >= IconQueue.limit
+            Button {
+                guard let q = asQueued() else { return }
+                let update = queued != nil
+                queue.put(q)
+                Diagnostics.shared.log("icon", "\(update ? "updated" : "put") \(q.site) on the list of icons waiting (\(queue.items.count))")
+                let n = queue.items.count
+                browser.status = "Saved for later: \(n) icon\(n == 1 ? "" : "s") waiting, in ⋯ → Home Screen icons to add."
+                dismiss()
+            } label: { Text(queued != nil ? "Update it in the list" : "Add to Home Screen later").frame(maxWidth: 240) }
+            .buttonStyle(.bordered)
+            .disabled(face == nil || full)
+            if full { Text("The list holds up to \(IconQueue.limit) icons.").font(.footnote).foregroundStyle(.secondary) }
+        }
+        if let f = face, !started, !IconQueue.addedBefore([f.site], except: WebClipMaker.profileID(f.site)).isEmpty {
+            Text("You added \(f.name) with other icons before. If that icon is still on your Home Screen, this adds a second one: press and hold the old one, then Delete Bookmark.")
+                .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
+        }
+        if !queue.items.isEmpty && !started { waitingCard }
+        Text("iOS only lets an icon that opens an app be added this way, with a small profile. It adds just this one icon, and you can remove it in Settings → General → VPN & Device Management.")
+            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading).padding(.horizontal, 20)
+        if started && !handoff.installed {
+            Text(handoff.savedToFiles ? "A profile waits about 8 minutes in Settings. If it's gone, tap the file in Files again." : "A downloaded profile waits about 8 minutes. If it's gone from Settings, tap Download it again here.")
+                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading).padding(.horizontal, 20)
+        }
+    }
+
+    /// The list of icons waiting, in a line, and the way to it.
+    private var waitingCard: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Waiting to be added").font(.subheadline.weight(.semibold))
+                Text(queue.items.map(\.siteName).joined(separator: ", ")).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Button("Add them all…") {
+                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { browser.wantsSheet = "iconqueue" }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .padding(.horizontal, 16)
     }
 
     /// The icon's choices, in a card: the name, the outline and its colour, the picture, the badge.
@@ -936,10 +1176,10 @@ struct WebClipSheet: View {
                         .accessibilityLabel(outlineSwatches[i].name)
                         .accessibilityAddTraits(swatch == i ? .isSelected : [])
                     }
-                    ColorPicker("Other colour", selection: $otherColour, supportsOpacity: false)
+                    // (picking a colour chooses it: in the setter, so loading an icon's choices doesn't)
+                    ColorPicker("Other colour", selection: Binding(get: { otherColour }, set: { otherColour = $0; swatch = -1 }), supportsOpacity: false)
                         .labelsHidden()
                         .overlay(Circle().stroke(Color.primary, lineWidth: swatch < 0 ? 2.5 : 0).padding(-4).allowsHitTesting(false))
-                        .onChange(of: otherColour) { _, _ in swatch = -1 }
                 }
                 .padding(.vertical, 2)
             }
@@ -964,54 +1204,5 @@ struct WebClipSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
         .padding(.horizontal, 16)
-    }
-
-    private var stepList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(steps.enumerated()), id: \.offset) { n, text in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    ZStack {
-                        Circle().fill(n < current ? Color.trifGreen : n == current && started ? Color.trifGreen.opacity(0.18) : Color(.tertiarySystemFill))
-                        if n < current { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white) }
-                        else { Text("\(n + 1)").font(.system(size: 12, weight: .bold)).foregroundStyle(n == current && started ? Color.trifGreen : .secondary) }
-                    }
-                    .frame(width: 22, height: 22)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                    Text(text).font(.subheadline.weight(n == current && started ? .semibold : .regular))
-                        .foregroundStyle(n < current ? .secondary : .primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
-        .padding(.horizontal, 16)
-    }
-
-    @ViewBuilder private var buttons: some View {
-        if !handoff.installed {
-            Button {
-                guard let f = face, let p = profile else { failed = true; return }
-                if filesRoute { saving = ProfileFile(data: p); return }
-                Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(picked == nil ? f.source : "a picture from Photos"), \(outline ? "outline \(swatch < 0 ? "own colour" : outlineSwatches[swatch].name)" : "no outline")\(badge ? ", fixed badge" : ""), name \(nameChoice), \(p.count / 1000) kB profile)")
-                ProfileHandoff.shared.hand(p, name: "\(f.name) for TRIF", page: f.start.scheme == "https")
-            } label: {
-                Text(filesRoute ? (handoff.savedToFiles ? "Save it again" : "Save to Files") : (handoff.state == .idle ? "Add to Home Screen" : "Download it again"))
-                    .bold().frame(maxWidth: 240)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(face == nil || handoff.state == .starting)
-            if !filesRoute && (safariFailed || started) {
-                Button {
-                    filesRoute = true
-                    Diagnostics.shared.log("icon", "fallback offered: save the profile to Files")
-                } label: { Text("Save to Files instead").frame(maxWidth: 240) }
-                .buttonStyle(.bordered)
-            } else if filesRoute && !handoff.savedToFiles && !safariFailed {
-                Button { filesRoute = false } label: { Text("Use Safari instead").frame(maxWidth: 240) }
-                    .buttonStyle(.bordered)
-            }
-        }
     }
 }

@@ -249,6 +249,51 @@ person's name on the site is known) · **fixed {Site}** · **Custom…**. The re
 | The profile in Settings (description) | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. | the same when the name is the site's own; else: Adds an icon, “{Name}”, to your Home Screen that opens {Site} in TRIF. |
 | The icon's label on the Home Screen | {Name}, as typed in the sheet | {Name}, as chosen in the sheet |
 
+## Several Home Screen icons in one install (added 11-17, Tim: "have a queue of unexported and then you could batch it")
+
+| Where | Old | New |
+|---|---|---|
+| The [+] sheet, under its main button (before anything starts) | — | **Add to Home Screen later**; when the site is on the list already: **Update it in the list** (its choices load into the sheet) |
+| …when the list is full | — | The list holds up to 20 icons. |
+| The note after Add to Home Screen later | — | Saved for later: {n} icon(s) waiting, in ⋯ → Home Screen icons to add. |
+| The [+] sheet, when icons wait (a card) | — | **Waiting to be added** · {Site, Site, …} · **Add them all…** (closes the sheet, opens the list) |
+| The [+] sheet, when the site went in another profile before | — | You added {Site} with other icons before. If that icon is still on your Home Screen, this adds a second one: press and hold the old one, then Delete Bookmark. |
+| The ⋯ menu (only while icons wait) | — | Home Screen icons to add ({n})… |
+| The list's title / its top-right button | — | Home Screen icons to add · Done |
+| Each row (tap: edit; the red minus: take it off) | — | the icon, its label, its site · accessibility: Edit {label} · Take {label} off the list |
+| Empty list | — | No icons waiting. On a site, tap + and then Add to Home Screen later. |
+| Before the install (2 or more) | — | They go in one profile: one download and one Install in Settings. Removing that profile removes all {n} icons together; you can still delete any one of them from the Home Screen (press and hold it, then Delete Bookmark). |
+| Sites added before | — | Added before: {Site, Site}. If an earlier icon is still on your Home Screen, this adds a second one: press and hold the old one, then Delete Bookmark. |
+| The list's main button | — | Add all {n} to Home Screen (one icon: Add to Home Screen); then Download it again, Save to Files etc. as the [+] sheet |
+| Its steps (as the [+] sheet's, plural) | — | the last step: The icons appear on your Home Screen. · Files route step 2: Open the Files app and tap “TRIF icons”. |
+| Where they are, plural | — | Done: the icons are on your Home Screen. · Safari didn't get the icons. Save them to Files instead. · {Chrome} opened instead of Safari, and only Safari can add icons. Save them to Files instead. · Couldn't make the icons. |
+| Clear | — | **Clear the list** (red), asks: Clear all {n} icons from the list? (one: Clear the icon from the list?) · Clear the list · Cancel |
+| Editing one (a sheet over the list) | — | title Edit icon · Cancel · Save (the same choices as the [+] sheet, no steps) |
+| The profile in Settings (name) | — | TRIF icons: {Site}, {Site}, {Site} (more than four: the first three and “and {n} more”) |
+| The profile in Settings (description) | — | Adds {n} icons to your Home Screen that open their sites in TRIF: “{label}”, “{label}”, …. Removing this profile removes all {n}. |
+| The file on the Files route | — | TRIF icons |
+
+## The toolbar's Home Screen button and the tabs button (changed 11-17, Tim)
+
+| Where | Old | New |
+|---|---|---|
+| The toolbar's last button (Add to Home Screen) | + | an A in a rounded square, like the App Store's (SF Symbol a.square); accessibility unchanged: Add to Home Screen |
+| The toolbar's order (an experiment) | back, forward, chat, [page / +], Mods, tabs, Home Screen | back, forward, chat, [tabs], Mods, page / +, Home Screen (no new words) |
+
+## The full screen exit button (moved 11-17, Tim: "can we move it up?")
+
+No new words: the same button (accessibility: Switch to TRIF view), now beside the clock at the foot of the status bar.
+
+## Add this mod?: what TRIF found, and a mod for another site (added 11-17, Tim approved a stronger out-of-site warning)
+
+The findings reuse the Mods tab's approval card's words unchanged: **TRIF found that this mod:** (boxed: **It asks for these powers. TRIF holds it to them:**, each line “It {finding}.”) and **Together,** it {warning}. New, at the top in coral with a warning sign, when the mod runs on a site other than the one it came from (the chat's site, or the page it was pasted on; not for a file or a code):
+
+| Where | Old | New |
+|---|---|---|
+| Title | — | It runs on another site · It runs on other sites · It runs on every site |
+| Line (one or more other sites) | — | It came from {site}, but it (also) runs on {other sites}. Add it only if you meant it to change that site / those sites. |
+| Line (every site) | — | It came from {site}, but it runs on every site you visit, not just {site}. Add it only if you meant it to. |
+
 ## Full screen (added 11-16 as "the app view"; renamed and changed 11-16, Tim)
 
 | Where | Old | New |

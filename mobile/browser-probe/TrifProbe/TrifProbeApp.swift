@@ -192,8 +192,25 @@ extension Model {
         if step["back"] != nil { browser.back() }
         // ({"openurl": "…"}: opened as the app opens addresses in other apps, UIApplication.open)
         if let u = step["openurl"] as? String, let url = URL(string: u) { out = await UIApplication.shared.open(url) ? "opened" : "not opened" }
+        // ({"hit": [x, y]}: the view UIKit's hit test finds at that window point, and its superviews)
+        if let p = step["hit"] as? [Double], p.count == 2, let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
+            var v = w.hitTest(CGPoint(x: p[0], y: p[1]), with: nil)
+            var chain: [String] = []
+            while let x = v, chain.count < 12 { chain.append("\(type(of: x)) \(Int(x.convert(x.bounds, to: w).minY))..\(Int(x.convert(x.bounds, to: w).maxY))"); v = x.superview }
+            out = chain.joined(separator: " < ")
+            let all = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+            out += "\nwindows: " + all.map { "\(type(of: $0)) level \($0.windowLevel.rawValue) hidden \($0.isHidden) \(Int($0.frame.minY))..\(Int($0.frame.maxY)) hit \($0.hitTest($0.convert(CGPoint(x: p[0], y: p[1]), from: nil), with: nil).map { "\(type(of: $0))" } ?? "nil")" }.joined(separator: "; ")
+        }
+        if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
+        // ({"iconqueue": {…the same as iconprofile}}: the shown page's icon put on the list of icons waiting;
+        // {"iconbatch": 1}: the list's profile as its Add all button makes it, to Documents/icon-batch.mobileconfig
+        // (nothing handed, nothing recorded); {"iconqueueclear": 1}; {"iconqueuelist": 1})
+        if let o = step["iconqueue"] as? [String: Any] { out = await Model.iconQueue(browser: browser, options: o) }
+        if step["iconbatch"] != nil { out = Model.iconBatch(docs: docs) }
+        if step["iconqueueclear"] != nil { IconQueue.shared.clear(why: "development step"); out = "cleared" }
+        if step["iconqueuelist"] != nil { out = IconQueue.shared.items.map { "\($0.site) \($0.label) outline \($0.outline) swatch \($0.swatch) badge \($0.badge) picture \($0.picture != nil)" }.joined(separator: "\n") + "\ntag \(IconQueue.shared.tag ?? "-")" }
         // ({"iconprofile": {"outline": true, "swatch": 0-5, "badge": false, "name": "…"}}: the shown page's Home Screen
         // icon and profile as the sheet would make them, to Documents/icon-test.png and icon-test.mobileconfig)
         if let o = step["iconprofile"] as? [String: Any] { out = await Model.iconProfile(browser: browser, options: o, docs: docs) }
@@ -258,6 +275,9 @@ struct ContentView: View {
     @State private var showHistory = false
     @State private var showMods = false
     @State private var addingIcon = false
+    /// The list of Home Screen icons waiting (IconQueueView).
+    @State private var showIconQueue = false
+    @ObservedObject private var iconQueue = IconQueue.shared
     @State private var pickingFolder = false
     @State private var askingProject = false
     /// ⋯'s Hide the full screen button (off at first): the two-finger hold is then the only way out.
@@ -326,6 +346,12 @@ struct ContentView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             .clipped()
+            // (the full screen exit button: over everything, outside the clip, as it sits in the status bar's row)
+            .overlay {
+                if browser.fullScreen && !hideExitButton && !covered {
+                    FullScreenExit(wake: browser.exitWake, long: browser.exitWakeLong) { browser.setFullScreen(false) }
+                }
+            }
         }
     }
 
@@ -347,7 +373,6 @@ struct ContentView: View {
             .accessibilityHidden(pane.shown)
             if browser.fullScreen {
                 FullScreenNote(text: browser.status, voiceOverExit: hideExitButton, leave: { browser.setFullScreen(false) }) { browser.status = "" }
-                if !hideExitButton { FullScreenExit(wake: browser.exitWake, long: browser.exitWakeLong) { browser.setFullScreen(false) } }
             } else {
             PullActionsView(pull: bars.pull, insets: bars.insets)
             TopBar(bars: bars, full: addressBar, compact: compactBar)
@@ -412,7 +437,8 @@ struct ContentView: View {
             case "import": importing = true
             case "address": showAddress = true
             case "icon": addingIcon = true
-            case "none": addingIcon = false; showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
+            case "iconqueue": showIconQueue = true
+            case "none": addingIcon = false; showIconQueue = false; showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
             default: break
             }
             browser.wantsSheet = ""
@@ -425,6 +451,7 @@ struct ContentView: View {
             if case .success(let urls) = result { browser.importFiles(urls) }
         }
         .sheet(isPresented: $addingIcon) { WebClipSheet().environmentObject(browser) }
+        .sheet(isPresented: $showIconQueue) { IconQueueView().environmentObject(browser) }
         .alert(pane.service.project == nil ? "Keep TRIF chats in a project" : "TRIF chats' project", isPresented: $askingProject) {
             Button(pane.service.project == nil ? "Copy and go" : "Make another") { pane.openProjects() }
             if pane.service.project != nil { Button("Stop using it", role: .destructive) { pane.service.useProject(nil, hasGuide: false) } }
@@ -562,6 +589,10 @@ struct ContentView: View {
                 Text("Or hold two fingers on the page")
             }
             Toggle(isOn: $hideExitButton) { Label("Hide the full screen button", systemImage: "eye.slash") }
+            // (the Home Screen icons put aside with Add to Home Screen later, all added in one install)
+            if !iconQueue.items.isEmpty {
+                Button { onTab { showIconQueue = true } } label: { Label("Home Screen icons to add (\(iconQueue.items.count))…", systemImage: "square.grid.2x2") }
+            }
             Divider()
             Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
             Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
@@ -614,9 +645,13 @@ struct ContentView: View {
             else { browser.status = "That code's mod couldn't be read: it may be cut short or damaged." }
         }
         else if let site = TrifLink.target(url) {
-            // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it)
-            ProfileHandoff.shared.opened(fromIconOf: Site.of(site.host ?? ""))
+            // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it;
+            // likewise the list of icons waiting, if they came from its profile, which also clears the list)
+            let host = Site.of(site.host ?? ""), set = TrifLink.set(url)
+            ProfileHandoff.shared.opened(fromIconOf: host, set: set)
+            IconQueue.shared.opened(site: host, set: set)
             if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
+            if !(showIconQueue && ProfileHandoff.shared.installed) { showIconQueue = false }
             closeCovers(all: true)
             if TrifLink.wantsFullScreen(url) { browser.openFullScreen(site) } else { browser.openFromIcon(site) }
         }
@@ -626,7 +661,7 @@ struct ContentView: View {
     /// What covers the page, by name ("none"), for the dev step {"view": 1} and the icon check (Model.iconCheck).
     private var coverNames: String {
         let all: [(Bool, String)] = [(pane.shown, "chat"), (showTabs, "tabs"), (showMods, "mods"), (showAddress, "address"),
-                                     (showHistory, "history"), (showChecks, "checks"), (showReport, "report"), (addingIcon, "icon"),
+                                     (showHistory, "history"), (showChecks, "checks"), (showReport, "report"), (addingIcon, "icon"), (showIconQueue, "iconqueue"),
                                      (askingProject, "project"), (asking, "ask"), (importing, "import"), (pickingFolder, "folder")]
         return all.filter(\.0).map(\.1).joined(separator: ",").nonEmpty ?? "none"
     }
@@ -672,9 +707,8 @@ struct ContentView: View {
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
                 .frame(maxWidth: .infinity)
-            // (the page: back to it from whatever covers it; on the page, a + for a new tab; in the middle, a little bigger)
-            Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
-                .accessibilityLabel(covered ? backToTab : "New Tab")
+            // (the middle cell, a little bigger: the page button, or with the experiment below the tabs button)
+            Group { if ContentView.tabsInMiddle { tabsButton } else { pageButton } }
                 .frame(width: 64)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { ContentView.pageButtonMidX = $0 }
             // (the mods' button is a switch, on or, with all paused, off: Tim, 11-15; the robot is the chat's now)
@@ -689,17 +723,12 @@ struct ContentView: View {
             }
             .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
                 .frame(maxWidth: .infinity)
-            Button { onTab { browser.snapshot(); showTabs = true } } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
-                    Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))
-                }
-            }
-            .accessibilityLabel("Tabs, \(browser.tabs.count) open")
+            Group { if ContentView.tabsInMiddle { pageButton } else { tabsButton } }
                 .frame(maxWidth: .infinity)
-            // (the last button: a plain + that adds this site to the Home Screen, Tim 11-16; what the ⋯ menu here held
-            // is in the ⋯ at the address bar's left)
-            Button { onTab { addingIcon = true } } label: { Image(systemName: "plus") }
+            // (the last button adds this site to the Home Screen, Tim 11-16; what the ⋯ menu here held is in the ⋯ at the
+            // address bar's left. Its glyph, an A in a rounded square like the App Store's (Tim, 11-17), so it isn't
+            // taken for the new tab's +)
+            Button { onTab { addingIcon = true } } label: { Image(systemName: "a.square") }
                 .disabled(!onWebPage)
                 .accessibilityLabel("Add to Home Screen")
                 .frame(maxWidth: .infinity)
@@ -711,8 +740,29 @@ struct ContentView: View {
         .padding(.vertical, 10)
     }
 
-    /// (development: where the page button's centre is, for the step {"toolbar": 1})
+    /// (development: where the middle button's centre is, for the step {"toolbar": 1})
     static var pageButtonMidX: CGFloat = 0
+
+    /// The toolbar's tabs button and page button swapped (Tim, 11-17, an experiment: does it feel more like a normal
+    /// browser?): the tabs button in the middle, the page button where the tabs were. `true` ships it; `false` (or the
+    /// launch flag `-pagemiddle`) is the layout before: back, forward, chat, [page], Mods, tabs, Home Screen.
+    static let tabsInMiddle = true && !ProcessInfo.processInfo.arguments.contains("-pagemiddle")
+
+    /// The page: back to it from whatever covers it; on the page, a + for a new tab.
+    private var pageButton: some View {
+        Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
+            .accessibilityLabel(covered ? backToTab : "New Tab")
+    }
+    /// The tabs, their count in a rounded square.
+    private var tabsButton: some View {
+        Button { onTab { browser.snapshot(); showTabs = true } } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
+                Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))
+            }
+        }
+        .accessibilityLabel("Tabs, \(browser.tabs.count) open")
+    }
 
 }
 
@@ -1444,26 +1494,53 @@ struct FullScreenExit: View {
     let leave: () -> Void
     @State private var bright = true
     static let robot = ProcessInfo.processInfo.arguments.contains("-exitrobot")
+    /// (`-exitbelow`: where it was before 11-17, 60 points under the status bar at the right)
+    static let belowBar = ProcessInfo.processInfo.arguments.contains("-exitbelow")
     static let below: CGFloat = 60
+    /// (development: `-exity <points>`, the circle's centre that far down)
+    static let devY: CGFloat? = { let a = ProcessInfo.processInfo.arguments; return a.firstIndex(of: "-exity").flatMap { a.indices.contains($0 + 1) ? Double(a[$0 + 1]).map { CGFloat($0) } : nil } }()
     var body: some View {
-        Button(action: leave) {
+        GeometryReader { g in
+            // (Tim, 11-17: "can we move it up?": the round button straddles the foot of the status bar, beside the
+            // clock: on the SE right of the centred clock (most of it in the 20-point strip), on a notch or Dynamic
+            // Island phone between the clock and the cutout, just under the clock's row. iOS keeps every touch in the
+            // status bar itself (the SE's 0-20, the 17 Pro's 0-54: Simulator, 11-17), so the 44-point target starts at
+            // the bar's foot, and the button's lower half and what's under it take the tap)
+            let frame = g.frame(in: .global)
+            let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            let top = scene?.keyWindow?.safeAreaInsets.top ?? 20
+            let bar = scene?.statusBarManager?.statusBarFrame.height ?? top
+            let w = frame.width
+            let cutout = top > 30
+            // (a cutout phone: between the clock, about a quarter across, and the cutout's left edge, the widest gap in
+            // its row (right of it the status icons leave too little); no cutout: just right of the centred clock,
+            // short of where sites put their top bar's right-hand buttons (Wikipedia's search, 11-17))
+            let x = FullScreenExit.belowBar ? w - 8 - 14 : cutout ? (w * 0.24 + w / 2 - 63) / 2 : w / 2 + 63
+            let side: CGFloat = FullScreenExit.belowBar ? 28 : 22
+            // (the circle's centre and the target's top, in the window's points)
+            let cy = FullScreenExit.devY ?? (FullScreenExit.belowBar ? FullScreenExit.below + 14 : bar - 2)
+            // (44 points square; under the bar, 40 wide and from the bar's foot down 44, to cover less of the page)
+            let hit = FullScreenExit.belowBar ? CGRect(x: x - 22, y: cy - 22, width: 44, height: 44) : CGRect(x: x - 20, y: max(bar, cy - 22), width: 40, height: 44)
             Group {
-                if FullScreenExit.robot { RobotGlyph().frame(width: 17, height: 17) }
-                else { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 12, weight: .bold)) }
+                if FullScreenExit.robot { RobotGlyph().frame(width: side * 0.6, height: side * 0.6) }
+                else { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: side * 0.43, weight: .bold)) }
             }
             .foregroundStyle(.white)
-            .frame(width: 28, height: 28)
+            .frame(width: side, height: side)
             .background(Circle().fill(Color.black.opacity(0.45)))
-            .contentShape(Circle().inset(by: -8))
+            .opacity(bright ? 1 : 0.3)
+            .position(x: x, y: cy - frame.minY)
+            // (the taps go to ExitTaps, on the window: here, near the top, neither a SwiftUI button nor a UIKit control
+            // got the Simulator's taps, though UIKit's hit test found them; the page under them did, 11-17)
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityLabel("Switch to TRIF view")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { leave() }
+            .onAppear { place(hit, x: x, cy: cy) }
+            .onChange(of: hit) { _, r in place(r, x: x, cy: cy) }
+            .onDisappear { ExitTaps.shared.remove() }
         }
-        .buttonStyle(.plain)
-        .opacity(bright ? 1 : 0.3)
-        .accessibilityLabel("Switch to TRIF view")
-        // (below a site's own top bar, not on it: X's and Instagram's are about 44 to 53 points tall, with their
-        // buttons at the right; Simulator 11-16. Over the page's content, faint, rather than over its controls)
-        .padding(.top, FullScreenExit.below)
-        .padding(.trailing, 8)
-        .frame(maxWidth: .infinity, alignment: .trailing)
         .task(id: wake) {
             withAnimation(.easeOut(duration: 0.2)) { bright = true }
             try? await Task.sleep(nanoseconds: long ? 3_000_000_000 : 1_500_000_000)
@@ -1471,6 +1548,41 @@ struct FullScreenExit: View {
             withAnimation(.easeInOut(duration: 0.6)) { bright = false }
         }
     }
+    /// (development: where it is, in the window's points, for the step {"exitbutton": 1})
+    static var placed = ""
+    private func place(_ hit: CGRect, x: CGFloat, cy: CGFloat) {
+        ExitTaps.shared.rect = hit
+        ExitTaps.shared.action = leave
+        ExitTaps.shared.install()
+        FullScreenExit.placed = "circle (\(Int(x)), \(Int(cy))), taps \(Int(hit.minX))–\(Int(hit.maxX)) × \(Int(hit.minY))–\(Int(hit.maxY))"
+    }
+}
+
+/// Full screen's exit taps, seen by the window itself (every touch in the app passes the window's recognizers): near
+/// the top of the screen in full screen, the Simulator's taps never reached a SwiftUI button or a UIKit control there,
+/// though UIKit's hit test found it (11-17); the page under it got them. A tap inside `rect` (window points) calls
+/// `action`, and the page doesn't get it.
+@MainActor
+final class ExitTaps: NSObject, UIGestureRecognizerDelegate {
+    static let shared = ExitTaps()
+    var rect: CGRect = .zero
+    var action: () -> Void = {}
+    private var tap: UITapGestureRecognizer?
+    func install() {
+        guard tap == nil, let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+        let t = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        t.delegate = self
+        t.cancelsTouchesInView = true
+        t.delaysTouchesBegan = false
+        w.addGestureRecognizer(t)
+        tap = t
+    }
+    func remove() { tap?.view?.removeGestureRecognizer(tap!); tap = nil }
+    @objc private func tapped(_ t: UITapGestureRecognizer) { if t.state == .ended { action() } }
+    nonisolated func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        MainActor.assumeIsolated { rect.contains(touch.location(in: nil)) }
+    }
+    nonisolated func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
 
 /// Pulling the page down past its top: three choices (+ New Tab, Reload, × Close Tab), Reload chosen at first; the

@@ -623,14 +623,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// with the Add this mod? sheet, over the tab; nothing is added without its Add it. Leaves out one already added
     /// as it is. Returns those offered (none: the chat button shows the reply waiting instead).
     @discardableResult
-    func offerFromChat(_ texts: [String]) async -> [InstalledMod] {
+    func offerFromChat(_ texts: [String], from chatSite: String = "") async -> [InstalledMod] {
         let here = host
+        // (where it came from: the chat's site, else the page shown; Add this mod? warns when it runs elsewhere)
+        let came = chatSite.isEmpty ? Site.of(here) : Site.of(chatSite)
         var found: [InstalledMod] = []
         var why: String?
         for t in texts {
             let r = await mods.readNamedInBackground(t, here: here)
-            guard let m = r.mod else { why = why ?? r.error ?? "no reason given"; continue }
+            guard var m = r.mod else { why = why ?? r.error ?? "no reason given"; continue }
             if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) || offerQueue.contains(where: { $0.id == m.id && $0.code == m.code }) { continue }
+            m.cameFrom = came
             found.removeAll { $0.id == m.id }
             found.append(m)
         }
@@ -663,7 +666,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             let here = host
             Task { @MainActor in
                 let r = await mods.readNamedInBackground(text, here: here)
-                if let m = r.mod { modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
+                if var m = r.mod { m.cameFrom = Site.of(here); modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
             }
             return
         }

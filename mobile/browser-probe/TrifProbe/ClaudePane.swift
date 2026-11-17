@@ -773,7 +773,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             report.log("claude", "\(name): \(what): its code read (\(text.count) characters), to Add this mod?")
             guard let browser else { return }
             Task { @MainActor in
-                let offered = await browser.offerFromChat([text])
+                let offered = await browser.offerFromChat([text], from: v.site)
                 if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             }
         default: break
@@ -788,7 +788,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard v.activity == .working || late else { return }
         guard let browser else { v.activity = .idle; endBackgroundIfIdle(); return }
         Task { @MainActor in
-            let offered = await browser.offerFromChat(texts)
+            let offered = await browser.offerFromChat(texts, from: v.site)
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
             if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) } // (not inactive: an alert of the system's over the app)

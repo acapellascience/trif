@@ -69,6 +69,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// What an edit (or a restore) asks about beyond what the code needs: a site its @match didn't cover before,
     /// becoming a free mod (ModStore.changeNeeds). Kept apart from `needs`, which reading the file again remakes.
     var extraNeeds: [ModNeed] = []
+    /// (offered, not kept) The site it came from: the chat's, or the page it was pasted on (Add this mod? warns when it
+    /// runs on another). nil: from a file or a code, which has no site of its own.
+    var cameFrom: String? = nil
 
     struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String }
 
@@ -533,6 +536,41 @@ struct ModOfferView: View {
     @Environment(\.dismiss) private var dismiss
     let mod: InstalledMod
 
+    /// A boxed mod's findings are its powers ("It can …"), as the approval card says them.
+    private var asks: Bool { mod.tier == "boxed" }
+    /// The approval card's own lines: each need's fact but the "together" warnings and per-site keys.
+    private var findings: [String] {
+        var seen = Set<String>()
+        return mod.needs.filter { n in
+            !n.fact.isEmpty && !n.key.hasPrefix("power:together:") && n.key.range(of: "^site:.+:[a-z+-]+$", options: .regularExpression) == nil
+        }.map(\.fact).filter { seen.insert($0).inserted }
+    }
+    /// The "Together, it …" warnings (a "many" one is said as it is).
+    private var together: [(fact: String, many: Bool)] {
+        var seen = Set<String>()
+        return mod.needs.filter { $0.key.hasPrefix("power:together:") && !$0.fact.isEmpty && seen.insert($0.fact).inserted }
+            .map { ($0.fact, $0.key.hasPrefix("power:together:many:")) }
+    }
+    private func icon(for fact: String) -> String {
+        guard let n = mod.needs.first(where: { $0.fact == fact }) else { return "circle" }
+        if n.key.hasPrefix("match:") { return "arrow.up.right.square" }
+        if n.key.hasPrefix("tier:") { return "cpu" }
+        return "checkmark.shield"
+    }
+    /// It runs on a site other than the one it came from (or on every site): the warning's words.
+    private var elsewhere: (title: String, text: String)? {
+        guard let from = mod.cameFrom, !from.isEmpty else { return nil }
+        if mod.everywhere || mod.sites.contains("all-sites") {
+            return ("It runs on every site", "It came from \(from), but it runs on every site you visit, not just \(from). Add it only if you meant it to.")
+        }
+        let others = Array(Set(mod.sites.map(Site.of).filter { !$0.isEmpty && $0 != from })).sorted()
+        guard !others.isEmpty else { return nil }
+        let list = others.joined(separator: ", ")
+        let also = mod.sites.map(Site.of).contains(from)
+        return ("It runs on \(others.count == 1 ? "another site" : "other sites")",
+                "It came from \(from), but it \(also ? "also " : "")runs on \(list). Add it only if you meant it to change \(others.count == 1 ? "that site" : "those sites").")
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -545,8 +583,34 @@ struct ModOfferView: View {
                         if !mod.description.isEmpty { Text(mod.description).font(.subheadline).foregroundStyle(.secondary) }
                     }
                 }
+                // (Tim, 11-17: a mod that runs on another site than the one it came from stands out, first thing)
+                if let away = elsewhere {
+                    Section {
+                        Label {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(away.title).font(.subheadline.bold())
+                                Text(away.text).font(.footnote)
+                            }
+                        } icon: { Image(systemName: "exclamationmark.triangle.fill") }
+                        .foregroundStyle(Color.trifCoral)
+                        .listRowBackground(Color.trifCoral.opacity(0.12))
+                        .accessibilityElement(children: .combine)
+                    }
+                }
                 Section("Runs on") { Text(mod.sites.joined(separator: ", ")).font(.footnote.monospaced()) }
                 if !mod.powers.isEmpty { Section("Asks for these powers") { Text(mod.powers.joined(separator: ", ")).font(.footnote.monospaced()) } }
+                // (what TRIF found, as the Mods tab's approval card says it: mods-page.js renderApproval)
+                if !findings.isEmpty || !together.isEmpty {
+                    Section {
+                        ForEach(Array(findings.enumerated()), id: \.offset) { _, f in
+                            Label { Text(asks ? "It \(f)." : f).font(.footnote) } icon: { Image(systemName: icon(for: f)).font(.footnote) }
+                        }
+                        ForEach(Array(together.enumerated()), id: \.offset) { _, t in
+                            if t.many { Text(t.fact).font(.footnote).foregroundStyle(Color.trifCoral) }
+                            else { (Text("Together,").bold() + Text(" it \(t.fact).")).font(.footnote).foregroundStyle(Color.trifCoral) }
+                        }
+                    } header: { Text(asks ? "It asks for these powers. TRIF holds it to them:" : "TRIF found that this mod:").textCase(nil) }
+                }
                 if mod.tier == "free" {
                     Section { Text("A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.").font(.footnote).foregroundStyle(Color.trifCoral) }
                 }

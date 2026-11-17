@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (242 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (264 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -36,6 +36,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   playcheck ("http://…": a page with a <video>/<audio>; ~75 s of PASS/FAIL: a playing background tab is kept past
   20 s and a memory warning, let go once paused; a same-page quiet tab is let go), iconprofile ({"outline", "swatch" 0-5, "badge", "name", "noise"}: the shown
   page's Home Screen icon and profile to Documents/icon-test.png and .mobileconfig; "noise" = a worst-case photo),
+  iconqueue (the same options: the shown page's icon onto the list waiting), iconbatch (the list's profile to
+  Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds),
+  exitbutton (where full screen's exit button and its taps are),
   playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
@@ -74,7 +77,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while something plays.
 - Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-pageletter`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
+  `-nobarshift`, `-pageletter`, `-pagemiddle` (the toolbar's order before 11-17), `-exitbelow` (the exit button's old
+  spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`.
 
 ## Map
@@ -85,7 +89,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (pageForChat, feedbackForChat), screenshots, full screen state, ModDownloads (.js downloads to Add this mod?).
 - Tabs.swift: Tab, tab pictures. History.swift: history. Import.swift: importing mod files. FolderWatch.swift: the watched
   iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
-  WebClipMaker.compose; profile hand-off), `trif://open`.
+  WebClipMaker.compose; profile hand-off; IconHandoffSteps, the steps shared with the list), `trif://open`.
+  IconQueue.swift: the list of icons waiting (QueuedIcon, IconQueue, the batch profile, IconQueueView).
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). ModsPanel.swift + Web/mods.html,
   mods-page.js/css: the Mods tab.
 - ClaudePane.swift: the robot view: ChatService, up to 3 ChatViews (Claude/ChatGPT pages), fills, reply watching,
@@ -140,8 +145,25 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   picture on it at 74% of the face), outline colour (TRIF green gradient + 5 swatches + any), own picture (Photos),
   no outline, green checkmark "fixed" badge; names {Site} on TRIF · {user}'s {Site} (GitHub user-login meta and
   MediaWiki #pt-userpage only) · fixed {Site} · Custom…; Tim's labels approved as written. The toolbar's last button
-  is a plain + for it; the ⋯ menu is at the address bar's left (without Add to Home Screen). The profile is named
+  is the A button for it (a plain + until 11-17); the ⋯ menu is at the address bar's left (without Add to Home Screen). The profile is named
   {Site} for TRIF whatever the label (Settings, Files). http sites and profiles over 400,000 bytes skip the clip page.
+- Several icons in one install (Tim, 11-16; built 11-17): "Add to Home Screen later" in the [+] sheet keeps the icon
+  with all its choices on a list (survives restarts, up to 20); ⋯ → Home Screen icons to add / "Add them all…": edit,
+  take off, clear, or add all as ONE profile (one Web Clip each). Its identifier `…webclip.batch.<tag>`, kept until the
+  list is cleared; a new list holding every site of an earlier list reuses that one's tag (replaces it). The list clears
+  when TRIF is opened from one of its icons (link `&set=<tag>`). Profile name "TRIF icons: X, YouTube, NYT". One icon on
+  the list goes as its site's own profile. All its words await Tim (strings doc).
+- Toolbar (Tim, 11-17): the Home Screen button is an A in a rounded square (SF Symbol a.square), not a +. The tabs
+  button and the page button swapped as an experiment: SHIPPED back, forward, chat, [tabs] (middle), Mods, page / +,
+  Home Screen; BEFORE back, forward, chat, [page / +] (middle), Mods, tabs, Home Screen. One line either way:
+  `ContentView.tabsInMiddle` (or launch with `-pagemiddle`).
+- Full screen's exit button (Tim, 11-17, "can we move it up?"; glyph kept): beside the clock at the foot of the status
+  bar: SE right of the clock (circle centre 250, 18), Dynamic Island phones between the clock and the island (17 Pro:
+  117, 52). Its taps go to a window-level recognizer (ExitTaps), 40 × 44 from the bar's foot down.
+- Add this mod? (Tim, 11-17, a stronger out-of-site warning approved): a coral "It runs on another site / other sites /
+  every site" box first when the mod runs beyond the site it came from (the chat's site or the page it was pasted on;
+  files and codes have none), and the approval card's findings ("TRIF found that this mod:", "Together, it …") above
+  the buttons.
 - The chat pages read as TRIF (Tim, 11-16): greeting with the robot in the service's greeting's place, pills "From
   TRIF: …" with the robot, upsell buttons hidden; never their branding, Log in, terms or safety lines. Cosmetic only.
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
@@ -161,18 +183,32 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Background play never tried on a real phone (YouTube, Tim's mod, AirPods, calls). Lock screen in the Simulator:
   WebKit's Now Playing shows the page's mediaSession title, artist and progress (shot 229) but no play/pause
   buttons were visible; Control Center not checked. Media inside iframes isn't replayed (main frame only).
-- Home Screen icons: the new look never installed on a Home Screen (the profile passes the clip page's check, run
-  locally in headless Chrome with the page's own script; the Simulator install flow wasn't rerun). The two + buttons in
-  the toolbar (the middle new-tab + and the last Home Screen +) are as Tim drew it: watch for confusion. "{user}'s"
-  works only where the page shows the name plainly (GitHub, Wikipedia); X, Reddit, YouTube etc. aren't read.
+- Home Screen icons: a 4-icon batch (outline colours, badge, no outline, custom name, a Photos-like picture) installed
+  in the Simulator 11-17 by the server route, opened from an icon (list cleared, sheet said done), removed in Settings
+  (all four went). "{user}'s" works only where the page shows the name plainly (GitHub, Wikipedia).
+- The clip page takes several icons only on branch clip-page (commit "several icons in one profile", 11-17), NOT
+  deployed: until Tim deploys it, the live page lacks "trif-clip-batch" and the app hands batches over by the server on
+  the phone (which failed once on Tim's iPhone, 11-16: then Files). Single icons are unchanged.
+- The exit button's new spot: its taps only proven in the Simulator through the window recognizer; never on a phone.
+  On the SE it slightly covers a site's top bar under the clock's right (Wikipedia's logo row); the target stops short of
+  the right-hand buttons. The SE stayed light after `simctl ui appearance dark` (shots 251/252 are light).
 - The chat look, logged in (can't be checked here): Claude's greeting heading (an h1/h2 with words only? its spark
   logo must stay), Claude's and ChatGPT's pill markup (data-cds card, group/thumbnail, composer-attachment span),
   upsell button words, dark mode by the page's own colours (data-trif-tone). Logged-out chatgpt.com checked (shot 241:
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
-- Add this mod? shows sites, powers and the free warning but not the mod's facts ("names another site: …") that the
-  approval card shows.
 
 ## Gotchas
+
+- iOS profiles (Simulator 26.3, 11-17): same top-level PayloadIdentifier = replace (all its clips remade, new
+  SavedIdentifiers); a clip PayloadIdentifier/UUID shared across profiles = both icons stay (no dedupe, no error).
+  Installed profiles: `…/data/Containers/Shared/SystemGroup/systemgroup.com.apple.configurationprofiles/Library/
+  ConfigurationProfiles` (PayloadManifest.plist, profile-*.stub). Install by hand: serve the .mobileconfig on
+  127.0.0.1, `simctl openurl` it, Allow (312, 339), Close, launch Settings, Profile Downloaded (187, 295), Install ×3.
+- In full screen, taps near the top never reached a SwiftUI Button or a UIKit UIControl (no touchDown at all), though
+  `window.hitTest` found it; the page under it got them. A UITapGestureRecognizer on the window does get them
+  (ExitTaps). The status bar eats its own touches: SE 0–20, 17 Pro 0–54 (statusBarManager's height).
+- The clip page's check, as the last batches ran it: write the page with its script inline (clip-page's CLIP and CLIP_JS),
+  load it in headless Chrome by CDP with the profile base64url after the #, read which of #ready/#none/#bad shows.
 
 - `simctl openurl` cuts URLs at about 2 KB (UIApplication.open doesn't).
 - The app opening its own trif:// with UIApplication.open gets iOS's "Open in …?" prompt (and it can linger over a

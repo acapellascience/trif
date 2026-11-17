@@ -301,7 +301,11 @@ it's doing, its address), `{"closechat": 1}`; `{"boxjs": "…"}` (in the boxed m
 the Add to Home Screen sheet; `{"tabhosts": 1}` lists the tabs' hosts (* on the one shown); `{"bars": "full|compact|state"}` moves the bars and
 says where they and the page are (`-nobarshift` at launch: the page doesn't move with the bars, as before 11-16);
 `{"openurl": "…"}` opens an address as the app opens one in another app; `-pageletter` at
-launch shows the site's letter in the toolbar's page button instead of the page glyph. shared/pages/fixedbars.html
+launch shows the site's letter in the toolbar's page button instead of the page glyph. The toolbar (Tim, 11-17, an
+experiment): back, forward, chat, [tabs] in the middle, Mods, page / +, Home Screen; `-pagemiddle` at launch (or
+`ContentView.tabsInMiddle = false`) is the order before, the page button in the middle and the tabs where it now is.
+`{"hit": [x, y]}` names the view UIKit's hit test finds at a window point, and the windows; `{"exitbutton": 1}` where
+full screen's exit button and its taps are; `-exity <points>` moves it. shared/pages/fixedbars.html
 has a fixed header and an x.com-like fixed tab bar at the bottom, for the bars moving over a page. shared/pages/feed.html draws a feed from feed.json by fetch and by
 XMLHttpRequest, for a boxed mod's site-data power (trif.filterResponse).
 
@@ -322,9 +326,13 @@ chrome (no bars, no pull-down, no pointing at parts of the page), each tab's own
 fingers held still on the page for 0.6 s switch it either way, on any tab (a two-finger tap is too short; a pinch is
 refused, as each finger must stay within 24 points of where it came down: the long press alone measures only their
 centre; a tap the lifting fingers make is let go for 0.8 s); the ⋯ menu's Full screen does too. A note says which, at the
-top in full screen; the first time, how to switch back. A small exit button at the top right, 60 points down so it's
-below a site's own top bar (X's and Instagram's buttons are up there), bright for 3 s on entering and for a moment when
-the page is scrolled back up or the app comes back, otherwise at 30%; ⋯ → Hide the full screen button takes it away.
+top in full screen; the first time, how to switch back. A small exit button beside the clock at the foot of the status
+bar (Tim, 11-17: "can we move it up?"; the SE: right of the centred clock, mostly in the 20-point strip; a notch or
+Dynamic Island phone: between the clock and the cutout, just under the clock's row), bright for 3 s on entering and for a
+moment when the page is scrolled back up or the app comes back, otherwise at 30%; ⋯ → Hide the full screen button takes
+it away. iOS keeps every touch in the status bar itself, so its 40 × 44 target starts at the bar's foot; the taps are
+taken by a recognizer on the window (ExitTaps), as near the top neither a SwiftUI button nor a UIKit control got them in
+the Simulator. `-exitbelow`: the spot before, at the top right 60 points down.
 `trif://open?url=…&app=1`, what Home Screen icons made from 11-16 open, always lands on that site's own tab in full
 screen, whatever it was left in and whatever was open (the tabs, the chat, More, the address screen, the Mods tab,
 history and other sheets close; an Add this mod? stays, as it waits for an OK); each icon's site keeps its own tab
@@ -332,8 +340,8 @@ history and other sheets close; an Add this mod? stays, as it waits for an OK); 
 in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen`, `resethint`, `view` (the
 tab's site, full screen, what covers it) and `iconcheck` (the icon from every in-app state, PASS/FAIL).)
 
-Home Screen icons (WebClip.swift): the toolbar's last button, a plain + (Tim, 11-16; the ⋯ menu moved to the address
-bar's left), opens the sheet. The icon (WebClipMaker.compose) looks like a small TRIF app: the app icon's outline (rim
+Home Screen icons (WebClip.swift): the toolbar's last button (an A in a rounded square since 11-17, so it isn't taken for
+the new tab's +; the ⋯ menu moved to the address bar's left 11-16), opens the sheet. The icon (WebClipMaker.compose) looks like a small TRIF app: the app icon's outline (rim
 100.39/1024, face a continuous-corner square r = 0.26 × its side) in TRIF's green gradient or a chosen colour, round a
 black screen with the picture on it (74% of the face); or just the picture; a green checkmark badge at the top right
 for "fixed". The picture is the site's icon or one from Photos (PhotosPicker, no permission). Its name: "{Site} on
@@ -349,6 +357,22 @@ used once that page answers; else from a server on 127.0.0.1 that stops once Saf
 clip that isn't opens Safari and asks "Open in TRIF Probe?" every time; a full-screen one shows a blank screen for a
 moment and opens the app with no question (Simulator, iOS 26.3). `TargetApplicationBundleIdentifier` is ignored in a
 profile installed by hand. A `trif://open?url=` link goes to a tab already on that site, else a new tab; only http(s).
+
+Several icons in one install (IconQueue.swift, Tim 11-16): the sheet's "Add to Home Screen later" keeps the icon with all
+its choices on a list (Application Support/IconQueue: queue.json and each one's pictures; up to 20); ⋯ → Home Screen
+icons to add (or the sheet's "Add them all…") shows it: edit one (the same sheet, Save), take one off, clear it, or add them
+all as one profile with one Web Clip per site (`com.timsrobot.trif.webclip.batch.<tag>`, each clip `….<tag>.<site>`, its
+link `…&set=<tag>`): one download, one Install. One icon on the list goes as its site's own profile. What iOS does
+(Simulator, 11-17): a profile with the same identifier replaces the one installed (all its icons, made anew); a Web Clip's
+identifier or UUID shared with another profile's does nothing (both icons stay), so the list keeps its tag until it's
+cleared (handing it again replaces what it installed) and a new list whose sites include all of an earlier list's takes
+that one's tag; each icon from a profile can be deleted from the Home Screen on its own (IsRemovable: Delete Bookmark);
+removing the profile removes all of them. The list clears once TRIF is opened from one of its icons (the `set` tag), or
+by hand. The pictures step down together (360, 270, 180 px) to fit the clip page's 400,000 bytes (5 worst-case photos fit
+at 180 px); past that, or while the live page predates batches (its script lacks "trif-clip-batch"), the server on the
+phone hands it over: the same steps for the person. `UserDefaults iconProfiles`: which sites went in which profile (for
+"added before"). Steps: `{"iconqueue": {…as iconprofile}}`, `{"iconbatch": 1}` (Documents/icon-batch.mobileconfig),
+`{"iconqueuelist": 1}`, `{"iconqueueclear": 1}`, `{"sheet": "iconqueue"}`.
 
 ## What isn't probed, because it's known
 

@@ -51,6 +51,16 @@ function remoteAddress(url) {
   return { url: u.href, host };
 }
 
+/**
+ * The phone twin a page address's run works in: {url, host, site, scope}, from the address and the helper's
+ * own list of sensitive sites of their own (`splits`). Throws `bad-url`. (remote.js asks before it starts a
+ * run: which twin a conversation to go on with must be of.)
+ */
+function remoteScope(url, splits) {
+  const a = remoteAddress(url);
+  return { ...a, site: PHONE_PREFIX + a.host, scope: PHONE_PREFIX + scopeOf(a.host, cleanSplits(splits)) };
+}
+
 const JPEG = Buffer.from([0xff, 0xd8, 0xff]);
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 function imageKind(buf) {
@@ -68,7 +78,8 @@ function imageKind(buf) {
 function remoteStart(own = {}, msg = {}) {
   const phone = own.phone && typeof own.phone === 'object' ? own.phone : {};
   if (typeof phone.id !== 'string' || !/^[0-9a-f]{16}$/.test(phone.id)) throw fail('bad-request', 'a remote run needs the paired phone it is for');
-  const { url, host } = remoteAddress(msg.url);
+  const splits = cleanSplits(own.splits);
+  const { url, site, scope } = remoteScope(msg.url, splits);
   if (typeof msg.prompt !== 'string' || !msg.prompt.trim()) throw fail('bad-request', 'missing prompt');
   if (msg.prompt.length > PROMPT_MAX) throw fail('too-big', 'the message is too long');
   if (typeof msg.page !== 'string') throw fail('bad-request', 'the phone sent no copy of the page');
@@ -82,11 +93,10 @@ function remoteStart(own = {}, msg = {}) {
     if (!shotKind) throw fail('bad-request', 'the phone\'s screenshot isn\'t a JPEG or a PNG');
     shot = msg.shot;
   }
-  const splits = cleanSplits(own.splits);
   const width = Number.isInteger(msg.width) && msg.width >= 200 && msg.width <= 2000 ? msg.width : null;
   const args = {
-    site: PHONE_PREFIX + host,
-    scope: PHONE_PREFIX + scopeOf(host, splits),
+    site,
+    scope,
     splits,
     url,
     prompt: msg.prompt,
@@ -147,4 +157,4 @@ function remoteRefusal(run, cmd, args = {}) {
   return `this run is for the user's phone: the page is open there, not in a tab on this computer, so "${String(cmd).slice(0, 40)}" isn't available in it. To reach the phone's page: \`trif phone page [selector]\`, \`trif phone try <mod>\`, \`trif phone screenshot\``;
 }
 
-module.exports = { remoteStart, remoteAddress, writeRemoteFiles, removeRemoteFiles, remoteContext, remoteRefusal, REMOTE_COMMANDS, PAGE_MAX, SHOT_MAX, PROMPT_MAX };
+module.exports = { remoteStart, remoteAddress, remoteScope, writeRemoteFiles, removeRemoteFiles, remoteContext, remoteRefusal, REMOTE_COMMANDS, PAGE_MAX, SHOT_MAX, PROMPT_MAX };

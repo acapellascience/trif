@@ -141,11 +141,11 @@ Phone → computer:
 
 | `t` | Fields | Answer |
 |---|---|---|
-| `hello` | `app` (version), `device` (`{name, width, height}`) | `hello`: `v` (1), `version` (TRIF's), `name` (the computer's), `agent` (the default agent's name and model, to show), `pending` (kept runs, below) |
-| `run.start` | `url`, `prompt`, `page` (the cleaned copy, text), `shot` (JPEG, base64, optional), `chat` (the app's chat id), `session` (to continue a run's conversation) | `run.started` `{runId}` or `error` |
-| `run.stop` | `runId` | `ok` |
-| `run.resume` | `runId`, `after` (the last event number seen) | the events after it, then live ones |
-| `run.ack` | `runId` | `ok`; the kept result is deleted |
+| `hello` | `app` (version), `device` (`{name, width, height}`) | `hello`: `v` (1), `version` (TRIF's), `name` (the computer's), `agent` (`{name, model}` of the default agent, to show, or null), `pending`: this phone's kept runs, oldest first, `[{runId, chat, startedAt, done, last}]` (`last`: the newest event's number) |
+| `run.start` | `url`, `prompt`, `page` (the cleaned copy, text), `shot` (JPEG or PNG, base64, optional), `chat` (the app's chat id, given back in `pending`), `session` (to continue a run's conversation), `width` (the page's, else `hello`'s) | `run.started` `{runId}` or `error` |
+| `run.stop` | `runId` | `ok` (also for a run that has ended); `error` `no-run` |
+| `run.resume` | `runId`, `after` (the last event number seen; 0 or none: all of it) | `ok` `{runId, first, last, done}` (`first`: the oldest event still kept), then each `run.event` after `after`, then `run.result` if the run has ended; from then on this session gets the run's live events. `error` `no-run` |
+| `run.ack` | `runId` (of a run that has ended) | `ok`; the kept run is deleted (`ok` too when there is none) |
 | `tool.result` | `id` (the request's), `text`, `shot` (optional), `error` (true/false) | none |
 | `ping` | | `pong` |
 
@@ -159,9 +159,16 @@ Computer → phone:
 | `error` | `id`, `code`, `message` |
 
 `error.code`s the app shows as states: `busy` (a run is already working on that site, here or in the desktop
-phone view), `no-agent` (no coding agent set up on the computer), `login` (the agent is logged out there),
+phone view, or three runs are going for this phone), `no-agent` (no coding agent set up on the computer),
 `too-big`, `bad-request`, `bad-url` (the page's address has no site TRIF can make a mod for: not http or https, or
-no plain host name).
+no plain host name), `no-run` (the computer has no such run for this phone: acked, older than 7 days, or never
+its own; another phone's run is answered the same way), `failed` (the run couldn't be started; `message` says
+why). Two states come as the run's events, as the desktop panel gets them: an agent that is logged out (`done`
+with `error: {kind: "login"}`) and one whose program is missing (an `error` event with the agent's own text).
+
+**Who gets a run's events** (`remote.js`): the session that started the run, until it closes; after that, the
+session that sends `run.resume` for it. Nothing about a run is pushed to a session that didn't ask: a phone that
+comes back reads `pending` in the `hello` answer and resumes what it wants.
 
 ## 5. Finding the computer
 
@@ -235,13 +242,29 @@ The record tells the Wi-Fi that this computer runs TRIF with the link on, and it
 
    Each waits up to 60 seconds. With no session (the app is suspended), or outside a remote run: an error that
    says so, and that the user will try the mod themselves when they're back.
-5. **Events** go to the session as `run.event`, numbered. The helper keeps each run's events and result in memory
-   and in `<private>/phone-link/kept/<phone id>/<runId>.json` (mode 600) until the phone sends `run.ack`, for at
-   most 7 days. A suspended app changes nothing for the run: it finishes, and the next `hello` lists it in
-   `pending`; `run.resume` plays it from where the phone stopped.
-6. **The result**: after `done`, the files of `sites/phone~<scope>/` that the run wrote or changed (from the
-   run's staging record, `stage.written`, and what it removed). The app takes each as it takes a mod file from
-   outside (Import.swift): held, with Add this mod? and its warnings. The files stay in the computer's phone twin.
+5. **Events** go to the session as `run.event`, numbered (`remote.js`; host.js gives it every run's events and
+   sends the side panel only the ones that aren't a phone's). The helper keeps each run's events and result in
+   memory and in `<private>/phone-link/kept/<phone id>/<runId>.json` (mode 600, the folder 700) until the phone
+   sends `run.ack`, for at most 7 days after the run ended. The page copy and the screenshot are never kept. A
+   suspended app changes nothing for the run: it finishes, and the next `hello` lists it in `pending`;
+   `run.resume` plays it from where the phone stopped. Limits: 4,000 events or 4 MB kept per run (beyond that
+   the oldest go, the end never: `first` in the `run.resume` answer says where what is kept begins), 20 kept
+   runs and 3 going at once per phone. A run that was going when its helper went away (the browser closed) is
+   ended when the next helper reads it: an `error` event and `done`, not ok.
+5a. **The phone's own runs only.** Every request is answered from the session's phone (the paired key), never a
+   field of the message. A run id of another phone's is answered exactly as one that doesn't exist (`no-run`).
+   When a phone is removed, its kept runs and conversations are deleted and a run of its that is still going
+   is stopped (its last events go nowhere: not to the side panel either).
+5b. **`session`** (to go on with a conversation): taken only if a run of the same phone, in the same phone twin,
+   ended with that conversation (`kept/<phone id>/sessions.json`, the last five per twin); anything else starts
+   a new conversation, without an error. So a phone can't go on with a desktop chat's conversation, or another
+   phone's.
+6. **The result**: after `done`, `run.result`: from the run's own changed files (`done.changedFiles`), the `.js`
+   files of its own phone twin (`ownTwin`: `sites/phone~<scope>/`, or a part of the site's), each read from the
+   mods folder without following a link, as `{id, name, code}` (a mod over 1 MB, or past 6 MB together:
+   `{id, name, tooBig: true}`), and `removed`: the ones that aren't there any more. The app takes each as it
+   takes a mod file from outside (Import.swift): held, with Add this mod? and its warnings. The files stay in
+   the computer's phone twin.
 
 ## 7. On the computer's screen
 

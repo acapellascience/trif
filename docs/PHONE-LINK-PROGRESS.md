@@ -19,7 +19,7 @@ Computer side:
 - [x] 6a. The `remote` mark in `runs.js`: a run started for a phone (site forced to `phone~<host>`, the phone's
       page copy and screenshot into the run's screenshots folder, context, page commands refused), with the
       stand-in model; the folder limit proven (nothing written outside `sites/phone~<host>/`)
-- [ ] 6b. `remote.js`: `run.start` over a session, events numbered, kept results, `run.resume`/`run.ack`,
+- [x] 6b. `remote.js`: `run.start` over a session, events numbered, kept results, `run.resume`/`run.ack`,
       `run.result`, kept results deleted when the phone is removed
 - [ ] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
 - [ ] 8. `host.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
@@ -37,26 +37,27 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 5, 2026-11-16)
+## Done this round (round 6, 2026-11-16)
 
-- Built step 6a: `Runs.startRemote(own, msg)` in runs.js (six one-line touches there, the rest in the new
-  `helper/lib/phonelink/remoterun.js`). The site is `phone~<host of the page address>`, made by the helper; a
-  hostile address is refused (`bad-url`); the page copy and screenshot are files of the run's own in its
-  screenshots folder, named in a context of its own (`agents/index.js` `remoteContextText`), removed at the end.
-- Two things had to be tighter than the desktop phone view to make "the phone twin and nothing else" true, both
-  done, neither loosens anything: the stage copies only the twin's files for a remote run (`stage.js`
-  `twinOnly`/`ownTwin`), and `mod.delete`/`mod.restore` from a remote run take only a mod of its own twin. Without
-  them a phone-scope run's copy reached `all-sites/`, new folders, and the site's desktop folder when there was
-  none yet (see "For Tim" 7: the desktop phone view has these today).
-- Page commands: `remoteRefusal` in host.js `onClientLine`: a remote run gets `ping`, `mods`, `mod.code`,
-  `mod.diff`, and delete/restore in its twin; everything else is refused before the extension. A remote run
-  never goes on without the sandbox (`_withoutSandbox`), even with the panel's consent recorded ("For Tim" 6).
-- `tests/phone-link-run.test.js`: 10 tests, the real `Runs` in-process in a temp workspace with a stand-in agent
-  (a fake `claude`, no model). All phone-link tests plus stage, phone, run-folders, codex-sandbox and agents:
-  167 pass locally (44 s). CI green for a6878b0 on the first attempt: see CI below.
+- Built step 6b: `helper/lib/phonelink/remote.js`, class `Remote(store, server, runs, {home, log, agent})`:
+  `run.start` → `runs.startRemote` → `run.started`; every event numbered and sent as `run.event` to the session
+  that started the run or last resumed it; `run.result` after `done` (the run's own twin's `.js` files from
+  `done.changedFiles`, read without following a link); `run.resume`, `run.ack`, `run.stop`; `hello`'s `agent`
+  and `pending`. Kept in `<private>/phone-link/kept/<phone id>/<runId>.json` (600, folder 700), 7 days at most,
+  deleted on ack and when the phone is removed (its run still going is stopped).
+- A phone reaches only its own runs (another phone's run id is answered as `no-run`, the same as none); a
+  `session` is taken only if a run of the same phone in the same twin ended with it (`sessions.json`).
+- host.js is not touched (step 8 wires it): nothing can start a remote run outside a test yet.
+- `tests/phone-link-remote.test.js`: 8 tests, the real Store, Server, Runs and Remote in-process on 127.0.0.1
+  with the stand-in phone and agent. The stand-in agent moved to `tests/phone-link-agent.js` (shared with the
+  run test). All phone-link tests plus stage, phone, run-folders, codex-sandbox and agents: 175 pass locally
+  (43 s). CI: see below.
 
 ## Earlier rounds
 
+- Round 5: step 6a, `Runs.startRemote` and `phonelink/remoterun.js` (the site made from the page address, the
+  stage's `twinOnly`, `remoteRefusal`, never without the sandbox), 10 tests. CI green for a6878b0 on the first
+  attempt.
 - Round 4: step 5, `bonjour.js` (class `Announcer`: one `dns-sd -R` child while the listener is up, restarted
   when it dies, a stand-in binary in tests through `TRIF_DNS_SD`), 11 tests. CI green for 0bd5bdc on the first
   attempt.
@@ -71,6 +72,7 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
+- Round 6: CI_PLACEHOLDER
 - Round 5, a6878b0: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43971467309
   (903 tests, 896 passed, 7 skipped, 0 failed; all 10 remote-run tests ran there)
 - Round 4, 0bd5bdc: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43967487962
@@ -88,24 +90,55 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 6b: `helper/lib/phonelink/remote.js`, the wire side of a phone run, with unit tests on 127.0.0.1 (the
-stand-in phone in `tests/phone-link-client.js`, the stand-in agent of `tests/phone-link-run.test.js`: move
-`FAKE_CLAUDE` and the `Runs` setup there into a shared file, `tests/phone-link-agent.js`). A class
-`Remote(store, server, runs, {log, home})`: `server.handle('run.start')` → `runs.startRemote({phone:
-session.phone, splits: splitsOf(ws.home), sessionId}, {url, prompt, page, shot: Buffer.from(base64), width})` →
-`run.started {runId}`; errors by `e.code` (`bad-url`, `too-big`, `bad-request`; "already working on" → `busy`).
-The run's events (the `Runs` `onEvent`, which host.js owns: give `Remote` an `onEvent(runId, event)` to be
-called from there) are numbered and sent as `run.event` to that phone's live session, kept in memory and in
-`<private>/phone-link/kept/<phone id>/<runId>.json` (mode 600) until `run.ack`, 7 days at most; `run.resume
-{runId, after}` plays the ones after; `hello`'s `pending` lists a phone's kept runs; `run.result` after `done`:
-the twin's files the run wrote (`run.stage.written` is in `runs.scopes()` for 10 s after the end: take it at
-`done`); kept results are deleted when the phone is removed (the store's `'change'`). `session` in `run.start`:
-only a session id that a kept or earlier run of the same phone on the same site ended with becomes
-`own.sessionId`, anything else starts a new conversation. A phone can only resume, ack or read its own runs
-(test it with two paired phones). Don't start step 7 in the same round.
+Step 7: `trif phone page|try|screenshot`. Three parts, in this order: (1) `remote.js`: `remote.tool(run, tool,
+input)` → a promise: sends `tool.request {id, runId, tool, input}` to the run's record's live session
+(`rec.session`), waits up to 60 s for the phone's `tool.result {id, text, shot, error}` (a handler on the
+server; only from the session of the run's own phone; the `id` is the helper's, random), and fails at once with
+a clear text when there is no session (the app is suspended) or the run isn't a phone's; a `shot` (base64, the
+same check as `decodeShot`) is written to the run's screenshots folder as `writeRemoteFiles` does and its path
+is in the answer. (2) cli.js `trif phone page [selector] | try <mod> | screenshot` → the commands `remote.page`,
+`remote.try`, `remote.screenshot`; add them to `REMOTE_COMMANDS` in remoterun.js; `remote.try` reads the draft
+from the run's staged twin (the run's working copy, `run.stage`, own twin only, never a path of the agent's
+choosing beyond a mod id). (3) host.js `onClientLine`: answer the three for a remote run from `remote.tool`,
+before the extension fallthrough; for any other run they are refused ("not a run for a phone"). Since host.js
+has no `Remote` before step 8, part 3 may take a `remoteTool` function that step 8 sets; test parts 1 and 2 with
+the stand-in phone answering `tool.request` (add `phone.onTool` to `tests/phone-link-client.js`) and the stand-in
+agent (a new word, `TRY`, that runs `trif phone try` through its mailbox: see how `tests/agents.test.js` or
+`tests/run-folders.test.js` has a stand-in call `trif`). Then AGENTS.md "Phone runs" and its name in
+`remoteContextText`. Don't start step 8 in the same round.
 
 ## Notes for next round
 
+- Step 6b's API: `new Remote(store, server, runs, {home | getWorkspace, log, agent: () => ({id, name, model}) |
+  null, now, keepMs, flushMs})`; `start()` (registers `run.start|stop|resume|ack` on the server, sets
+  `server.helloMore`, follows the store, reads the kept folder; returns the Remote), `stop()` (writes what isn't
+  written; call it after `runs.stopAll()` in host.js's shutdown so that the runs' last events are kept),
+  `onEvent(runId, event)` → true when the run is a phone's (host.js must then not send it to the extension, but
+  keep its own `done` handling: `syncMods`, `held`), `hello(session)`, `records` (runId → record: `phone`,
+  `scope`, `splits`, `chat`, `n`, `events [{n, event}]`, `done`, `result`, `session`), `orphans` (runs of a
+  removed phone that are still ending). Also exported: `resultOf(ws, scope, splits, changedFiles)`,
+  `decodeShot(base64)`. remoterun.js has `remoteScope(url, splits)` → `{url, host, site, scope}` now.
+- For step 8: the `agent` option is what `hello` shows and what starts the run (`id`, `model`): give it the
+  default agent as the panel would choose it (`agents.listAgents(ws).default` and its name); without it the
+  run uses `Runs.start`'s default and `hello.agent` is null.
+- `run.resume` answers itself (`session.send` with the request's id) so that `ok {first, last, done}` goes
+  before the events; the other handlers return their answer. A run's events go only to `rec.session` (the
+  starter, or the last resumer): a reconnected phone must `run.resume` to follow a run again.
+- **A phone run can't delete a phone mod yet, not even its own twin's**: `trash.js` `checkScope` refuses it
+  (`scopeOf('phone~x.com', ['phone~x.com'])` is `phone~phone~x.com`), both for `trif delete` and for a file the
+  run deletes in its copy ("this chat can only delete mods of phone~x.com; phone~x.com/old is another
+  site's"). It fails closed. This is main's bug ("For Tim" 7, being fixed on a branch from main): once that fix
+  is merged here, `run.result`'s `removed` gets real entries; until then `removed` is proven only in
+  `resultOf`'s unit test. The stand-in agent has a `DELETE` word ready for it (step 10's end-to-end test).
+- The stand-in agent (`tests/phone-link-agent.js`): `standInAgent(prefix)` → `{home, bin, calls, go}`, called
+  before runs.js is required (it sets `process.env`); words in the message: `WRITE`, `DELETE`, `PAUSE:<word>`
+  (waits for `go('<word>')`), `SLEEP`. Its session id is the `--resume` value, else `sess-remote-1`. In a later
+  message of a conversation the context has no `sites/phone~…/`, so `WRITE` there needs the folder in the message.
+- The remote test's helpers to copy for step 10: `connect(keys, name)` (pairs a new phone when a name is given,
+  else comes back with the keys; sends `hello`), `toDone(phone, runId)`, `ended(runId)`. Test: `node --test
+  tests/phone-link-remote.test.js` (1.4 s).
+- A missing agent program and a logged-out agent come as run events (`error`; `done` with `error.kind:
+  'login'`), not as `run.start` errors: for step 14, map them from the events.
 - Step 6a's API: `runs.startRemote(own, msg)` → `{runId, site, scope}`, throws with `e.code` `bad-url`,
   `too-big`, `bad-request` (and the plain "already working on phone~x.com" of `Runs.start`). `own`: `{phone: {id
   (16 hex), name}, splits, sessionId, agent, model}`; `msg`: `{url, prompt, page (string), shot (Buffer, JPEG or
@@ -229,6 +262,18 @@ small, also a default unless Tim objects:
 5. **A lost key drops the listed phones.** If the computer's key is gone from the Keychain (deleted by hand, a
    new Mac restored without it), turning the link on makes a new key, and the phones listed before are removed
    from the list, since they can't reach the new key and must scan a new code anyway.
+
+Item 6 stands as the default (the main session's brief, round 6). Item 7 is being fixed by a separate agent on
+a branch from main; until it is merged here a phone run can't delete a phone mod (the notes above), which
+fails closed and needs no decision.
+
+New in round 6, small, defaults unless Tim objects:
+
+8. **What is kept on the computer for a phone**: what the agent said in each run and the mods it wrote, in the
+   private folder, until the phone has it, 7 days at most, deleted when the phone is removed. Never the page
+   copy or the screenshot. A phone is given at most 3 runs at once and 20 kept ones.
+9. **Removing a phone stops its run** if one is going (what it already wrote to the phone twin stays, as the
+   user's own files).
 
 New in round 5 (6 is built as the strict default; 7 is for the main session and Tim, about main's code):
 

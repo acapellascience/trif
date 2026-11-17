@@ -14,11 +14,12 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { tempDir, privDir, testEnv, waitFor } = require('./fake-extension');
+const { privDir, waitFor } = require('./fake-extension');
+const { standInAgent } = require('./phone-link-agent');
 
-// Before runs.js is loaded: this process is the helper, in a workspace of its own (never ~/.trif).
-const home = tempDir('wm-plrun-');
-Object.assign(process.env, testEnv(home), { TRIF_AGENT_KILL_GRACE_MS: '300' });
+// Before runs.js is loaded: this process is the helper, in a workspace of its own (never ~/.trif), with the
+// stand-in agent on its PATH (tests/phone-link-agent.js).
+const { home, calls } = standInAgent('wm-plrun-');
 
 const P = require('../helper/lib/paths');
 const { Runs, runLimits } = require('../helper/lib/runs');
@@ -29,60 +30,6 @@ const codex = require('../helper/lib/agents/codex');
 const R = require('../helper/lib/phonelink/remoterun');
 
 test.after(() => { try { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(`${home}-private`, { recursive: true, force: true }); } catch { /* left */ } });
-
-// The stand-in agent. What it does comes from words in the message (its env is the run's): WRITE writes mods
-// all over its working folder's sites/ (its phone twin, the site's desktop folder, all-sites/, another site's
-// twin, a new folder), SLEEP stays until stopped. Each call is kept in <bin>/calls/ with its argv, env,
-// context, and what it could read in $TRIF_RUN_SCREENSHOTS.
-const FAKE_CLAUDE = `#!${process.execPath}
-'use strict';
-const fs = require('fs');
-const path = require('path');
-const argv = process.argv.slice(2);
-if (argv[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-const opt = (name) => { const i = argv.indexOf(name); return i === -1 ? null : argv[i + 1]; };
-const prompt = fs.readFileSync(0, 'utf8');
-const context = (() => { try { return fs.readFileSync(opt('--append-system-prompt-file'), 'utf8'); } catch { return ''; } })();
-const shots = process.env.TRIF_RUN_SCREENSHOTS;
-const seen = {};
-try { for (const n of fs.readdirSync(shots)) { const st = fs.statSync(path.join(shots, n)); seen[n] = { mode: st.mode & 0o777, head: fs.readFileSync(path.join(shots, n)).subarray(0, 40).toString('latin1') }; } } catch (e) { seen.error = e.message; }
-const calls = path.join(__dirname, 'calls');
-fs.mkdirSync(calls, { recursive: true });
-fs.writeFileSync(path.join(calls, Date.now() + '-' + process.pid + '.json'), JSON.stringify({ argv, env: process.env, cwd: process.cwd(), prompt, context, seen }));
-const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
-say({ type: 'system', subtype: 'init', session_id: 'sess-remote-1', cwd: process.cwd(), tools: [] });
-if (prompt.includes('SLEEP')) { say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Thinking' }] } }); setInterval(() => {}, 1000); return; }
-if (prompt.includes('WRITE')) {
-  const scope = (/sites\\/(phone~[a-z0-9.-]+)\\//.exec(context) || [])[1];
-  const base = scope.slice(6);
-  const mod = (name) => '// ==WebMod==\\n// @name ' + name + '\\n// ==/WebMod==\\ndocument.documentElement.dataset.trif = "' + name + '";\\n';
-  const put = (rel, text) => { const f = path.join(process.cwd(), 'sites', rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
-  put(scope + '/bottom-bar.js', mod('bottom bar'));
-  put('phone~m.' + base + '/part.js', mod('a part of the site'));
-  put(base + '/mine.js', 'HACKED');
-  put(base + '/new.js', mod('a desktop mod'));
-  try { fs.unlinkSync(path.join(process.cwd(), 'sites', base, 'keep.js')); } catch {}
-  put('all-sites/everywhere.js', mod('every site'));
-  put('phone~other.example/theirs.js', mod('another twin'));
-  put('unrelated.example/new.js', mod('a new folder'));
-  put('phone~evil' + base + '/x.js', mod('a look-alike'));
-}
-say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } });
-say({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: 'sess-remote-1', total_cost_usd: 0 });
-`;
-
-const bin = path.join(home, 'fakebin');
-fs.mkdirSync(bin);
-fs.mkdirSync(path.join(home, 'sites'));
-fs.writeFileSync(path.join(bin, 'claude'), FAKE_CLAUDE);
-fs.chmodSync(path.join(bin, 'claude'), 0o755);
-fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ env: { PATH: bin } }));
-
-function calls() {
-  let names = [];
-  try { names = fs.readdirSync(path.join(bin, 'calls')).sort(); } catch { return []; }
-  return names.map((n) => JSON.parse(fs.readFileSync(path.join(bin, 'calls', n), 'utf8')));
-}
 
 const events = new Map(); // runId -> [event]
 const warnings = [];

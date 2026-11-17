@@ -63,8 +63,6 @@ test('Connect a phone in a real browser: each state, the code read back and pair
   fs.mkdirSync(shots, { recursive: true });
   const reader = path.join(extra, 'reader');
   fs.writeFileSync(`${reader}.swift`, READER);
-  const built = spawnSync('/usr/bin/xcrun', ['swiftc', '-O', '-o', reader, `${reader}.swift`], { encoding: 'utf8', timeout: 180000 });
-  assert.equal(built.status, 0, `the reader didn't build: ${built.stderr}`);
   /** The one code in a picture, as macOS reads it. (Its text is a secret: never in a message.) */
   const read = (file) => {
     const r = spawnSync(reader, [file], { encoding: 'utf8', timeout: 60000 });
@@ -94,6 +92,10 @@ test('Connect a phone in a real browser: each state, the code read back and pair
       },
     });
     await browser.serviceWorker();
+    // (the reader is built here, with the browsers' lock held: a compiler at work beside another browser
+    // test would slow the ones that measure time)
+    const built = spawnSync('/usr/bin/xcrun', ['swiftc', '-O', '-o', reader, `${reader}.swift`], { encoding: 'utf8', timeout: 180000 });
+    assert.equal(built.status, 0, `the reader didn't build: ${built.stderr}`);
     const page = await browser.newPage();
     page.on('pageerror', (e) => errors.push(String(e.message || e)));
     let width = 380, height = 720, dark = false;

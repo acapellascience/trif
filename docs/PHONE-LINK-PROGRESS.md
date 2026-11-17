@@ -110,6 +110,17 @@ The brief: ios-poc isn't free; the look at Settings' Connect a phone in a real b
 
 ## CI
 
+- Round 12, 3 runs, each failed on a browser test: 692162f, run 44009878623 (936 tests, 925 passed, 3
+  failed): the phone view's "the site sees an iPhone in that tab only" and "desktop mods never run in the
+  phone view" (known flakes) and this round's own browser test, which runs there after all (CI's runner is
+  macOS with `TRIF_BROWSER_TESTS=1`): CI's Vision writes a notice of its own to the reader's output before
+  the code's text. The next commit's run, 44010570874, showed that (the text's shape alone); fixed in the
+  one after (the reader marks its lines), run
+  https://github.com/acapellascience/trif/actions/runs/44011280246: 936 tests, 927 passed, 8 skipped, 1
+  failed, the phone view's "the site sees an iPhone in that tab only" alone; the new browser test and every
+  other phone-link test passed. That flake failed in all three runs. One guess, not proven: this round's
+  test built its reader (swiftc) while that test's browser ran; the build now waits for the browsers' lock.
+  The run of the commit that records this line: see the round's report, and the next round's first look.
 - Round 11, 8a7b8f3: failed twice on browser tests alone, run
   https://github.com/acapellascience/trif/actions/runs/44007593328: attempt 1 (935 tests, 926 passed, 8
   skipped, 1 failed) on the clickjacking guard alone; attempt 2 (`gh run rerun --failed`, once, as the brief

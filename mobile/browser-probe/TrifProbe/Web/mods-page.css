@@ -57,3 +57,10 @@ dialog.approval { margin: 12px; max-height: calc(100% - 24px); width: calc(100% 
 .cv-e-problems p { margin: 2px 0; }
 .cv-e-problem .link-btn { font-family: var(--mono); }
 .cv-e-saved .link-btn { margin-left: 4px; }
+/* phone sync (PhoneSyncModel): the line and Sync now under the tools, its notices at the top, Recently deleted */
+.sync-box { margin-top: 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sync-line { margin: 0; flex: 1 1 200px; font-size: 13px; color: var(--muted, inherit); }
+.sync-box .btn { font-size: 14px; flex: none; }
+.deleted-box summary { cursor: pointer; }
+.deleted-list .del-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deleted-list .del-where { flex: none; font-size: 12px; opacity: .7; }

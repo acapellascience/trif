@@ -339,3 +339,88 @@ test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server
     await new Promise((r) => { const t = setTimeout(() => { comp.kill('SIGKILL'); r(); }, 5000); comp.on('exit', () => { clearTimeout(t); r(); }); });
   }
 });
+
+test('PhoneSync.swift against the real helper (Store, Server and the sync session of helper/lib/phonelink, a temp HOME): a phone mod comes over and waits there, a desktop edit nudges the phone and comes back, a conflict keeps both, deletes both ways go to a trash', { skip: noComputer, timeout: 180000 }, async () => {
+  build();
+  const comp = spawn(process.execPath, [computerFixture, '--seconds', '150'], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const C = lineReader(comp, 'computer');
+  let phone = null;
+  const ask = async (line, key) => { comp.stdin.write(line + '\n'); return JSON.parse(await C.next((l) => l.startsWith(`{"${key}"`) || l.startsWith('{"error"'))); };
+  const mod = (name, body) => `// ==WebMod==\n// @name ${name}\n// @match https://example.com/*\n// ==/WebMod==\n${body}\n`;
+  try {
+    const { port, qr } = JSON.parse(await C.next((l) => l.startsWith('{"port"')));
+    phone = spawn(bin, ['remote', String(port), qr], { stdio: ['pipe', 'pipe', 'inherit'] });
+    const P = lineReader(phone, 'phone');
+    const say = (l) => phone.stdin.write(l + '\n');
+    assert.equal(await P.next((l) => l.startsWith('paired') || l.includes('failed')), 'paired Stand-in Mac');
+    await P.next((l) => l.startsWith('hello') || l.includes('failed'));
+    let last = 0;
+    const sync = async () => {
+      const wait = last + 1150 - Date.now(); // (one sync.begin a second per phone)
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      last = Date.now();
+      say('sync');
+      const l = await P.next((x) => x.startsWith('synced') || x.startsWith('sync failed'));
+      assert.match(l, /^synced /, l);
+      const out = {};
+      for (const [, k, v] of l.slice(7).matchAll(/(\w+) (\[[^\]]*\])/g)) out[k] = JSON.parse(v);
+      return out;
+    };
+    const files = async () => { say('files'); const f = JSON.parse((await P.next((l) => l.startsWith('files '))).slice(6)); const t = JSON.parse((await P.next((l) => l.startsWith('trash '))).slice(6)); return { f, t }; };
+
+    // 1. Made on the phone: it comes over into the twin, and a mod that can act waits for the OK there.
+    const v1 = mod('Hello', 'fetch("/x")');
+    say(`pset example.com/hello ${JSON.stringify(v1)}`);
+    say(`pset example.com/look ${JSON.stringify(mod('Look', 'document.body.style.color = "red"'))}`);
+    let s = await sync();
+    assert.deepEqual(s.sent, ['example.com/hello', 'example.com/look']);
+    assert.deepEqual(s.waitingThere, ['example.com/hello'], 'what can act waits there');
+    let twin = (await ask('twin', 'twin')).twin;
+    assert.equal(twin['phone~example.com/hello.js'], v1);
+    const held = (await ask('held', 'held')).held;
+    assert.ok(Object.keys(held).some((k) => k.includes('hello')), JSON.stringify(held));
+
+    // 2. Edited on the computer (as a phone-view chat would): the phone is nudged and takes it.
+    const v2 = mod('Hello', 'fetch("/y")');
+    const w = await ask(`write phone~example.com/hello.js ${JSON.stringify(v2)}`, 'wrote');
+    assert.equal(w.nudged, 1, 'the connected phone is told');
+    await P.next((l) => l === 'nudged');
+    s = await sync();
+    assert.deepEqual(s.taken, ['example.com/hello']);
+    assert.deepEqual(s.held, ['example.com/hello'], 'waits for the OK on the phone too');
+    assert.equal((await files()).f['example.com/hello'], v2);
+
+    // 3. Both change it: both are kept, the computer's beside it, on both devices.
+    const vp = mod('Hello', 'fetch("/phone")'), vc = mod('Hello', 'fetch("/computer")');
+    say(`pset example.com/hello ${JSON.stringify(vp)}`);
+    await ask(`write phone~example.com/hello.js ${JSON.stringify(vc)}`, 'wrote');
+    s = await sync();
+    assert.deepEqual(s.conflicts, ['example.com/hello>example.com/hello-from-computer'], JSON.stringify(s));
+    let { f } = await files();
+    assert.equal(f['example.com/hello'], vp, 'the phone\'s keeps the name');
+    assert.match(f['example.com/hello-from-computer'], /fetch\("\/computer"\)/);
+    assert.match(f['example.com/hello-from-computer'], /@name Hello \(from your computer\)/);
+    twin = (await ask('twin', 'twin')).twin;
+    assert.equal(twin['phone~example.com/hello.js'], vp);
+    assert.equal(twin['phone~example.com/hello-from-computer.js'], f['example.com/hello-from-computer']);
+
+    // 4. Deletes both ways: the phone's into the computer's trash, the computer's into the phone's.
+    say('pdel example.com/look');
+    await ask('delete phone~example.com/hello-from-computer.js', 'deleted');
+    s = await sync();
+    assert.deepEqual(s.removed, ['example.com/hello-from-computer']);
+    twin = (await ask('twin', 'twin')).twin;
+    assert.deepEqual(Object.keys(twin).sort(), ['phone~example.com/hello.js'], 'the phone\'s delete reached the twin');
+    const after = await files();
+    assert.deepEqual(Object.keys(after.f), ['example.com/hello']);
+    assert.deepEqual(after.t, ['example.com/hello-from-computer', 'example.com/look']);
+
+    // 5. Nothing new: a sync that changes nothing.
+    s = await sync();
+    assert.deepEqual([s.taken, s.sent, s.removed, s.conflicts], [[], [], [], []]);
+  } finally {
+    if (phone) phone.kill('SIGKILL');
+    comp.stdin.write('quit\n');
+    await new Promise((r) => { const t = setTimeout(() => { comp.kill('SIGKILL'); r(); }, 5000); comp.on('exit', () => { clearTimeout(t); r(); }); });
+  }
+});

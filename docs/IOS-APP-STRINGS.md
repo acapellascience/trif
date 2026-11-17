@@ -469,3 +469,33 @@ Web/panel-adapter.js). The same lines are in docs/PHONE-LINK-STRINGS.md on branc
 | A mod over the size limit | Too big to bring over: {names}. It stays in TRIF on your computer. |
 | Anything else | {computer} couldn't start it: {the computer's words} |
 
+
+## Phone sync in the Mods tab (added 11-17, drafts; phone sync step S7)
+
+Phone mods kept the same here and in TRIF on the paired computer (docs/PHONE-SYNC.md on branch phone-link; the
+computer's lines are in docs/PHONE-LINK-STRINGS.md there, "Phone sync"). PhoneLinkView.swift (PhoneSyncModel),
+ModsPanel.swift, Web/mods-page.js. The line and Sync now show only while paired; Recently deleted whenever it has
+something.
+
+| Where | New |
+|---|---|
+| The line, while it syncs | Syncing with {computer}… |
+| The line, after a sync | Synced with {computer} at {time}: {parts}. (parts, each only when not 0, joined by ", ": "{n} changed here", "{k} waiting for your OK", "{s} sent to {computer}", "{w} waiting for your OK there"; nothing to say: "Synced with {computer} at {time}."; {time} gets the date when it isn't today) |
+| The line, before the first sync since TRIF opened | Not synced with {computer} yet. |
+| The line, syncing is off on the computer | Not synced: syncing phone mods is off on {computer}. |
+| The line, the computer can't be found | Not synced: can't find {computer} right now. TRIF tries again when it's back. |
+| The line, this iPhone removed there | Not synced: this iPhone isn't connected to {computer} any more. |
+| The line, Local Network off | Not synced: TRIF needs Local Network access to find {computer}. |
+| The line, anything else | Not synced with {computer} this time. TRIF tries again. |
+| The button | Sync now |
+| A notice at the top (until OK), a conflict | {name} changed on both. Both are kept: “{name} (from your computer)” is beside it. |
+| A notice, an edit beat a delete | {name} came back: it was changed on {computer}. |
+| A notice, a file this iPhone couldn't read | {name} on {computer} has an error, so it isn't on this iPhone yet. |
+| A notice, the computer couldn't read this iPhone's | {name} didn't go to {computer}: TRIF there can't read it. |
+| A notice, over 1 MB | {name} is too big to sync. |
+| The notices' button | OK |
+| A mod new from the computer (the row's mark, as an import's "new") | from your computer |
+| Its explanation (the mark's tip) | It came from TRIF on your computer, so TRIF switched it off: switch it on once you've looked at it. |
+| The list under the mods (folded) | Recently deleted (each row: the name, its site or "every site", Restore) |
+| Restore, the mod is gone from the list meanwhile | It isn't in Recently deleted any more. |
+| Restore, one with the same name is here | A mod with the same name is here now. Delete or rename it first. |

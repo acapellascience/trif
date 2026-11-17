@@ -125,6 +125,19 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             browser.safety.dismiss(site: browser.site)
             await refresh()
             return (["ok": true], nil)
+        case "syncNow":
+            PhoneSyncModel.shared.syncNow()
+            await refresh()
+            return (["ok": true], nil)
+        case "syncSeen":
+            PhoneSyncModel.shared.seen()
+            await refresh()
+            return (["ok": true], nil)
+        case "restoreDeleted":
+            guard let entry = d["entry"] as? String, store.trash.contains(where: { $0.id == entry }) else { return (nil, "It isn't in Recently deleted any more.") }
+            guard store.restoreDeleted(entry) else { return (nil, "A mod with the same name is here now. Delete or rename it first.") }
+            browser.report.log("mods", "restored \(entry)")
+            return await done()
         case "undoDelete":
             store.undoDelete()
             return await done()
@@ -245,6 +258,8 @@ struct ModsPanelView: View {
         }
         .task { await panel.refresh() }
         .onChange(of: browser.pageChanged) { _, _ in Task { await panel.refresh() } }
+        // (a sync started, finished or has news: the line, the list, Recently deleted)
+        .onReceive(PhoneSyncModel.shared.objectWillChange) { _ in Task { await panel.refresh() } }
         .sheet(item: $panel.share) { s in ShareSheet(items: s.urls) }
     }
 }
@@ -309,6 +324,8 @@ extension Browser {
             "groupsOff": (mods.groupsOff[site] ?? []).compactMap { tiers[$0] },
             "hidden": report.rules.filter { $0.host == host }.map { ["id": $0.id.uuidString, "selector": $0.selector] },
             "deleted": mods.lastDeleted?.name ?? NSNull(),
+            "sync": PhoneSyncModel.shared.line.map { ["line": $0, "syncing": PhoneSyncModel.shared.syncing, "notices": PhoneSyncModel.shared.notices] as [String: Any] } ?? NSNull(),
+            "trash": mods.trash.map { ["entry": $0.id, "name": $0.mod.name, "site": $0.mod.everywhere ? "every site" : $0.mod.site] },
             "paused": mods.paused,
             "switchedOff": safety.switchedOff[site].map { ["why": $0.why, "ids": $0.ids] } ?? NSNull(),
         ]

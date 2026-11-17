@@ -347,8 +347,9 @@
     light.classList.toggle('on', running);
     light.title = running ? 'Running on this page' : !on ? 'Switched off' : 'Not running on this page';
     const tag = li.querySelector('.tag');
-    tag.textContent = !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
+    tag.textContent = !on && m.newOff ? (m.newOff === 'update' ? 'updated' : m.newOff === 'computer' ? 'from your computer' : 'new') : '';
     tag.title = !on && m.newOff === 'update' ? 'You imported a new version of it, so TRIF switched it off: switch it on once you\'ve looked at it.'
+      : !on && m.newOff === 'computer' ? 'It came from TRIF on your computer, so TRIF switched it off: switch it on once you\'ve looked at it.'
       : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';
     showOneTag(li, false);
     rowError(li, switchError(m.id, switchSite(m)) || (m.cant ? 'Can\'t run here on iPhone: this page didn\'t let it start.' : ''));
@@ -1089,9 +1090,37 @@
     box.hidden = !parts.length;
   }
 
+  // Phone sync (PhoneSyncModel): what the last sync did and Sync now (only while paired), what needs telling (a
+  // conflict, a mod that came back, one that couldn't come over), and Recently deleted with Restore
+  $('sync-now').addEventListener('click', async () => {
+    $('sync-now').disabled = true;
+    try { await ask({ type: 'syncNow' }); } catch (e) { $('sync-line').textContent = errText(e); $('sync-now').disabled = false; }
+  });
+  function renderSync(st) {
+    const sync = st.sync || null;
+    $('sync-box').hidden = !sync;
+    if (sync) { $('sync-line').textContent = sync.line; $('sync-now').disabled = !!sync.syncing; }
+    const notes = $('sync-notes');
+    const list = (sync && sync.notices) || [];
+    notes.replaceChildren(...list.map((t) => el('p', null, t)), ...(list.length ? [button('OK', '', () => ask({ type: 'syncSeen' }))] : []));
+    notes.hidden = !list.length;
+    const trash = st.trash || [];
+    $('deleted-box').hidden = !trash.length;
+    $('deleted-list').replaceChildren(...trash.map((d) => {
+      const li = el('li');
+      const back = button('Restore', 'link-btn', async () => {
+        back.disabled = true;
+        try { await ask({ type: 'restoreDeleted', entry: d.entry }); } catch (e) { back.disabled = false; showUndo(errText(e), false); }
+      });
+      li.append(el('span', 'del-name', d.name), el('span', 'del-where', d.site), back);
+      return li;
+    }));
+  }
+
   window.trifRender = (state, openId) => {
     view.state = state;
     renderSafety(state);
+    renderSync(state);
     renderMods();
     showUndo(state.deleted ? `Deleted ${state.deleted}.` : '', true);
     if (codeView.dialog?.open && codeView.id) {

@@ -22,6 +22,11 @@ final class PhoneSyncModel: ObservableObject {
     @Published private(set) var last: PhoneSync.Summary?
     @Published private(set) var lastProblem: String?
     @Published private(set) var syncing = false
+    /// What the Mods tab tells the person until they tap OK: conflicts, mods that came back, ones that couldn't
+    /// come over (S7; drafts in docs/IOS-APP-STRINGS.md, "Phone sync").
+    @Published private(set) var notices: [String] = []
+    /// For the notices' names (the app's ModStore).
+    private weak var store: ModStore?
     private var scheduler: PhoneSync.Scheduler?
     private var watch: AnyCancellable?
     private var idle: DispatchWorkItem?
@@ -36,6 +41,7 @@ final class PhoneSyncModel: ObservableObject {
     /// Once, at launch (the app's ModStore).
     func start(store: ModStore) {
         guard scheduler == nil else { return }
+        self.store = store
         let sync = PhoneSync(store: store, link: link)
         let s = PhoneSync.Scheduler(files: { store.syncFiles() }) { [weak self] done in
             guard PhoneLinkKeys.shared.computer != nil else { return done(.failure(.init(code: "notPaired", message: ""))) }
@@ -59,6 +65,7 @@ final class PhoneSyncModel: ObservableObject {
         switch r {
         case .success(let s):
             last = s; lastProblem = nil
+            tell(s)
             if s.changedAnything || !s.skipped.isEmpty {
                 Diagnostics.shared.log("sync", "synced (\(why)): \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
             }
@@ -75,6 +82,59 @@ final class PhoneSyncModel: ObservableObject {
         }
         idle = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: w)
+    }
+
+    /// The paired computer's name (nil: not paired, so the Mods tab shows no sync line).
+    var computerName: String? { PhoneLinkKeys.shared.computer?.name }
+
+    /// The Mods tab's line: syncing, the last sync and what it did, or why it didn't happen.
+    var line: String? {
+        guard let c = computerName else { return nil }
+        if syncing { return "Syncing with \(c)…" }
+        if let p = lastProblem {
+            switch p {
+            case "off": return "Not synced: syncing phone mods is off on \(c)."
+            case "notFound": return "Not synced: can't find \(c) right now. TRIF tries again when it's back."
+            case "removed": return "Not synced: this iPhone isn't connected to \(c) any more."
+            case "denied": return "Not synced: TRIF needs Local Network access to find \(c)."
+            default: return "Not synced with \(c) this time. TRIF tries again."
+            }
+        }
+        guard let s = last else { return "Not synced with \(c) yet." }
+        let time = s.at.formatted(date: Calendar.current.isDateInToday(s.at) ? .omitted : .abbreviated, time: .shortened)
+        var parts: [String] = []
+        let here = s.taken.count + s.removed.count
+        if here > 0 { parts.append("\(here) changed here") }
+        if !s.waitingHere.isEmpty { parts.append("\(s.waitingHere.count) waiting for your OK") }
+        if !s.sent.isEmpty { parts.append("\(s.sent.count) sent to \(c)") }
+        if !s.waitingThere.isEmpty { parts.append("\(s.waitingThere.count) waiting for your OK there") }
+        return parts.isEmpty ? "Synced with \(c) at \(time)." : "Synced with \(c) at \(time): \(parts.joined(separator: ", "))."
+    }
+
+    func seen() { notices = [] }
+
+    private func name(_ id: String) -> String {
+        if let m = store?.mods.first(where: { $0.id == id }) { return m.name }
+        if let d = store?.trash.first(where: { $0.mod.id == id }) { return d.mod.name }
+        let file = id.split(separator: "/").last.map(String.init) ?? id
+        return file.hasSuffix(".js") ? String(file.dropLast(3)) : file
+    }
+
+    /// A sync's news for the person (each line once, at most 20 kept).
+    private func tell(_ s: PhoneSync.Summary) {
+        let c = computerName ?? "your computer"
+        var add: [String] = []
+        for (id, sib) in s.conflicts { add.append("\(name(id)) changed on both. Both are kept: “\(name(sib))” is beside it.") }
+        for id in s.cameBack { add.append("\(name(id)) came back: it was changed on \(c).") }
+        for (id, why) in s.refused {
+            if why == "computer: too-big" { add.append("\(name(id)) is too big to sync.") }
+            else if why == "computer: bad-mod" { add.append("\(name(id)) didn't go to \(c): TRIF there can't read it.") }
+            else if !why.hasPrefix("computer:") { add.append("\(name(id)) on \(c) has an error, so it isn't on this iPhone yet.") }
+            // (busy, changed meanwhile: the next sync tries again, nothing to tell)
+        }
+        for (id, why) in s.skipped where why.contains("1 MB") { add.append("\(name(id)) is too big to sync.") }
+        let fresh = add.filter { !notices.contains($0) }
+        if !fresh.isEmpty { notices = Array((notices + fresh).suffix(20)) }
     }
 
     /// (development) the last sync, as the dev step `syncstate` says it.

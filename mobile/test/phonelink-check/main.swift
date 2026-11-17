@@ -174,8 +174,13 @@ if args.count > 3, args[1] == "pair" {
 //   close                 the app closed (PhoneLinkRemote.close: the computer keeps the runs)
 //   reopen                a new PhoneLinkRemote with the same keys, connected ("hello …")
 //   pickup                pickUp for each of its hello's pending runs ("pending <chat> done <bool>")
+//   pset <id> <JSON string>   the phone's own mod made or edited (a store in memory: the app's ModStore stands in)
+//   pdel <id>             the phone deletes one (to its trash)
+//   files                 "files <JSON id → text>", "trash <JSON ids>"
+//   sync                  one PhoneSync.run with that store over this link: "synced <summary>" or "sync failed <code>"
+//                         (the store holds what has a fetch( in it, as the app's approval would: "held" in the summary)
 //   quit
-// and prints: "paired <name>", "hello <name> agent <agent> pending <n>", "started" or "error <code>", "event <n> <kind>
+// and prints: "paired <name>", "nudged" (the computer's sync.changed), "hello <name> agent <agent> pending <n>", "started" or "error <code>", "event <n> <kind>
 // <what>", "tool <tool> <input JSON, code cut to its first line>" (answered at once: canned words, a JPEG), "result
 // <mod ids> removed <n>", "state <state>", "lost <code>".
 if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let code = PairCode.parse(args[3]) {
@@ -189,6 +194,17 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
     let jpeg = Data([0xff, 0xd8, 0xff, 0xe0]) + Data("the phone's page".utf8)
     let p = PhoneLinkPairer(code: code, keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], endpoints: at)
     var remote: PhoneLinkRemote?
+    final class MemStore: PhoneSyncStore {
+        var files: [String: String] = [:], trash: [String: String] = [:]
+        func syncFiles() -> [String: String] { files }
+        func syncTake(_ id: String, code: String, isNew: Bool) -> PhoneSync.Taken {
+            guard code.contains("==WebMod==") else { return .refused("not a mod") }
+            files[id] = code
+            return .taken(held: code.contains("fetch("))
+        }
+        func syncRemove(_ id: String) { trash[id] = files.removeValue(forKey: id) }
+    }
+    let mem = MemStore()
     func json(_ o: Any) -> String { String(data: try! JSONSerialization.data(withJSONObject: o, options: .sortedKeys), encoding: .utf8)! }
     func open() {
         let r = PhoneLinkRemote(keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], app: "check", endpoints: at,
@@ -223,6 +239,7 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
             }
         }
         r.onLost = { _, e in say("lost \(e.code)") }
+        r.onSyncChanged = { say("nudged") }
         remote = r
         r.connect { res in
             switch res {
@@ -253,6 +270,20 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
                     case "reopen": open()
                     case "pickup":
                         for k in remote?.hello?.pending ?? [] { say("pending \(k.chat) done \(k.done)"); remote?.pickUp(k.runId) }
+                    case "pset" where w.count == 3:
+                        if let t = try? JSONSerialization.jsonObject(with: Data(w[2].utf8), options: .fragmentsAllowed) as? String { mem.files[w[1]] = t; say("pset \(w[1])") }
+                    case "pdel" where w.count == 2:
+                        mem.trash[w[1]] = mem.files.removeValue(forKey: w[1]); say("pdel \(w[1])")
+                    case "files": say("files \(json(mem.files))"); say("trash \(json(mem.trash.keys.sorted()))")
+                    case "sync":
+                        guard let r = remote else { say("sync failed closed"); break }
+                        PhoneSync(store: mem, link: r).run { res in
+                            switch res {
+                            case .success(let s):
+                                say("synced taken \(json(s.taken.sorted())) held \(json(s.waitingHere.sorted())) removed \(json(s.removed.sorted())) sent \(json(s.sent.sorted())) waitingThere \(json(s.waitingThere.map(\.id).sorted())) conflicts \(json(s.conflicts.map { "\($0.id)>\($0.sibling)" })) cameBack \(json(s.cameBack)) refused \(json(s.refused.map { "\($0.id): \($0.why)" })) skipped \(json(s.skipped.map(\.id))) later \(json(s.later))")
+                            case .failure(let f): say("sync failed \(f.code)")
+                            }
+                        }
                     case "quit": exit(0)
                     default: say("? \(line)")
                     }

@@ -15,6 +15,7 @@
 <main id="panel" class="phone-mods">
   <p id="mods-review-note" class="mods-review-note" hidden></p>
   <div id="safety-note" class="ap-together safety-note" role="status" hidden></div>
+  <div id="sync-notes" class="ap-together safety-note sync-notes" role="status" hidden></div>
   <p id="mods-loading" class="mods-empty">Loading mods…</p>
   <p id="mods-empty" class="mods-empty" hidden></p>
   <ul id="mod-list" class="mod-list"></ul>
@@ -24,6 +25,14 @@
     <ul id="hidden-list" class="hidden-list"></ul>
   </section>
   <p class="mods-tools"><button id="import-mod" class="btn" type="button">Import mod…</button></p>
+  <section id="sync-box" class="sync-box" hidden>
+    <p id="sync-line" class="sync-line" role="status"></p>
+    <button id="sync-now" class="btn" type="button">Sync now</button>
+  </section>
+  <details id="deleted-box" class="hidden-box deleted-box" hidden>
+    <summary class="mod-group-name">Recently deleted</summary>
+    <ul id="deleted-list" class="hidden-list deleted-list"></ul>
+  </details>
 </main>
 <div id="icon-tip" class="icon-tip" role="tooltip" hidden></div>
 <script src="panel-kit.js"></script>

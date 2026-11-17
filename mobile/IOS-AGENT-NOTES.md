@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (275 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (277 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -143,13 +143,22 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Application Support/mods-deleted.json, `restoreDeleted`; every delete goes there now). PhoneSyncModel
   (PhoneLinkView.swift) owns the app's ONE PhoneLinkRemote (PanelChat's `link` is it: one session per phone) and
   syncs on didBecomeActive, `$mods` changes, `sync.changed` (onSyncChanged), syncNow; closes a sync-only link after
-  30 s unused (`lastUse`). Dev steps `sync`, `syncstate`. No UI yet (S7).
+  30 s unused (`lastUse`). Dev steps `sync`, `syncstate`. The Mods tab (S7): PhoneSyncModel's `line` (syncing, the
+  last sync's counts or why not; paired only) and Sync now under Import mod…; `notices` (conflict, came back, couldn't
+  read, too big) at the top until OK (`seen`); Recently deleted (all sites, folded) with Restore; newOff "computer"
+  marked "from your computer". ModsPanel's state has `sync` and `trash`; messages syncNow, syncSeen, restoreDeleted;
+  the tab refreshes on PhoneSyncModel's changes.
   Test on the Mac: `node --test mobile/test/phonelink.test.js` (swiftc builds the four files with
   mobile/test/phonelink-check/main.swift; a stand-in computer from the phone-link worktree's helper/lib/phonelink
-  and tests/, or TRIF_PHONE_LINK_LIB; 7 tests, under a minute; `check syncunit`: PhoneSync against a scripted computer). The last one runs the real Store, Server, Runs and Remote with
+  and tests/, or TRIF_PHONE_LINK_LIB; 8 tests, about a minute; `check syncunit`: PhoneSync against a scripted computer;
+  the last test: PhoneSync over the real link against the stand-in computer's sync session (`check remote`'s stdin
+  `pset <id> <JSON>`, `pdel`, `files`, `sync`; a store in memory that holds what has `fetch(`)). The last one runs the real Store, Server, Runs and Remote with
   the stand-in agent (phone-link's `tests/phone-link-computer.js`, which is also the Simulator's computer: `node
   tests/phone-link-computer.js --seconds 600`, its first line `{port, qr}`, then stdin `go <word>`, `kept`, `remove`,
-  `pair`, `quit`; launch the app with `-linkhost 127.0.0.1:<port>`).
+  `pair`, `quit`, and for sync `twin`, `write <rel> <JSON string>`, `delete <rel>`, `nudge`, `synced`, `held`;
+  launch the app with `-linkhost 127.0.0.1:<port>`, pair with `simctl openurl` of its qr. Driving it from a shell:
+  `mkfifo f; tail -f f | node tests/phone-link-computer.js --seconds 900 > log`, then `echo twin > f`. Its first
+  look at held.js is at start, so what a sync brings later is judged).
 - make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).

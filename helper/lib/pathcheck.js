@@ -122,6 +122,44 @@ function winOddPath(p) {
 }
 
 /**
+ * Why `rel` isn't a path that stays under the folder it's joined to ('' when it is): for a path that a
+ * side-panel run could have a say in (stage.js). It must be names alone, relative: no root or drive (`/x`,
+ * `\x`, `C:\x`, `C:x`, `C:..`, `\\?\C:\x`, `\\server\share`), no `.` or `..`, no empty name (`a//b`, `a/`),
+ * no NUL. On Windows `/` separates as `\` does, and the names Windows reads as something else (winOddPath:
+ * a trailing dot or space, so `.. ` and `...`; a stream; a device) are refused too. `orRoot`: '' is the
+ * folder itself. `platform`: whose rules (for tests).
+ */
+function relRefused(rel, { platform = process.platform, orRoot = false } = {}) {
+  if (typeof rel !== 'string') return 'not a path';
+  if (rel === '') return orRoot ? '' : 'an empty path';
+  if (rel.includes('\0')) return 'a NUL in the path';
+  const win = platform === 'win32';
+  const P = win ? path.win32 : path.posix;
+  if (P.isAbsolute(rel) || P.parse(rel).root) return 'not a relative path';
+  for (const name of rel.split(win ? /[\\/]/ : '/')) {
+    if (name === '') return 'an empty name in the path';
+    if (name === '.' || name === '..') return `"${name}" in the path`;
+  }
+  if (win && winOddPath(rel)) return 'a name Windows reads as another (a trailing dot or space, a ":", or a device)';
+  return '';
+}
+
+/**
+ * `root`/`rel` as one path, only when `rel` stays under `root` by its names (relRefused) and the path made
+ * of them is inside it (`ci`: whether the volume ignores case). Throws otherwise. Links aren't looked at
+ * here: that's the caller's check, on the path this gives.
+ */
+function joinInside(root, rel, { ci = false, orRoot = false, platform = process.platform } = {}) {
+  const why = relRefused(rel, { platform, orRoot });
+  if (why) throw new Error(`not a path inside the folder (${why})`);
+  const P = platform === 'win32' ? path.win32 : path.posix;
+  const base = P.resolve(String(root));
+  const file = rel === '' ? base : P.join(base, rel);
+  if (!within(file, base, { ci, orEqual: orRoot, sep: P.sep })) throw new Error('not a path inside the folder');
+  return file;
+}
+
+/**
  * Whether `child` is inside `parent`: real paths (links and `..` resolved by the system), a separator
  * boundary, case ignored where the parent's volume ignores it. `orEqual`: the folder itself counts.
  */
@@ -172,4 +210,4 @@ function unsafeName(name) {
 /** `name` for a message: its unsafe characters shown as "?". */
 function shownName(name) { return String(name ?? '').replace(new RegExp(UNSAFE_IN_NAME.source, 'g'), '?').slice(0, 200); }
 
-module.exports = { nativeReal, realish, ignoresCase, within, isInside, samePath, badName, unsafeName, shownName, platformIgnoresCase, winOddPath, stripLongPrefix };
+module.exports = { nativeReal, realish, ignoresCase, within, isInside, samePath, relRefused, joinInside, badName, unsafeName, shownName, platformIgnoresCase, winOddPath, stripLongPrefix };

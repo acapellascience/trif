@@ -453,6 +453,43 @@ test('windows path checks: backslashes, drive letters and names in any case, \\\
   assert.ok(pathcheck.within('/a/b/c', '/a/b', { sep: '/' }));
 });
 
+test('path checks: a relative path that must stay under a folder: no root, drive, `..`, empty name; on Windows none of its odd forms either', () => {
+  const { relRefused, joinInside } = pathcheck;
+  const win = { platform: 'win32' };
+  const posix = { platform: 'linux' };
+  // Refused by both systems' rules.
+  for (const rel of ['', '.', '..', '../secret.txt', 'x.com/../../secret.txt', 'x.com/..', './x.com/a.js', 'x.com/./a.js', '/etc/passwd', '//srv/share/a',
+    'x.com//a.js', 'x.com/', 'x.com/a.js\0', null, undefined, 7, ['x.com', 'a.js']]) {
+    assert.ok(relRefused(rel, win), `win32 ${JSON.stringify(rel)}`);
+    assert.ok(relRefused(rel, posix), `posix ${JSON.stringify(rel)}`);
+  }
+  // Windows' own ways out, and its ways of saying one name as another.
+  for (const rel of ['..\\outside\\secret.txt', 'x.com\\..\\..\\secret.txt', 'x.com/..\\..\\secret.txt', '..\\', 'C:..', 'C:..\\secret.txt', 'C:secret.txt', 'c:', 'C:\\Users\\tim\\secret.txt', 'C:/Users/tim/secret.txt',
+    '\\Users\\tim\\secret.txt', '\\\\?\\C:\\Users\\tim\\secret.txt', '\\\\?\\', '\\\\.\\C:\\secret.txt', '\\\\.\\nul', '\\\\srv\\share\\secret.txt', '\\\\?\\UNC\\srv\\share\\secret.txt', '\\??\\C:\\secret.txt',
+    '.. \\secret.txt', '..  .\\secret.txt', '...\\secret.txt', '. \\secret.txt', 'x.com\\.. \\..\\secret.txt', 'x.com.\\a.js', 'x.com \\a.js', 'x.com\\a.js.', 'x.com\\a.js ', 'x.com\\a.js. . ',
+    'x.com\\a.js:stream', 'x.com\\a.js::$DATA', 'x.com:a.js', 'x.com\\nul', 'x.com\\NUL.js', 'con\\a.js', 'x.com\\com1', 'x.com\\\\a.js', 'x.com\\']) {
+    assert.ok(relRefused(rel, win), `win32 ${JSON.stringify(rel)}`);
+    assert.throws(() => joinInside('C:\\t\\sites', rel, { ...win, ci: true }), /not a path inside the folder/, rel);
+  }
+  // What a folder's own names make is fine, with either separator on Windows.
+  for (const rel of ['x.com\\a.js', 'x.com/a.js', 'x.com\\files\\deep\\beep.mp3', 'a', 'x.com\\..a.js', 'x.com\\a..js', 'x.com\\.hidden', 'x.com\\console.js', 'x.com\\a b.js']) assert.equal(relRefused(rel, win), '', rel);
+  for (const rel of ['x.com/a.js', 'x.com/files/deep/beep.mp3', 'a', 'x.com/..a.js', 'x.com/a..js', 'x.com/.hidden']) assert.equal(relRefused(rel, posix), '', rel);
+  // (on macOS and Linux `\` and `:` are letters of a name like any other: such a file is one in the folder)
+  for (const rel of ['..\\outside\\secret.txt', 'C:..', 'x.com/a.js:stream', 'x.com/nul', 'x.com/a.js.']) assert.equal(relRefused(rel, posix), '', rel);
+  // '' is the folder itself, where that's asked for.
+  assert.equal(relRefused('', { ...win, orRoot: true }), '');
+  assert.equal(joinInside('C:\\t\\sites', '', { ...win, orRoot: true }), 'C:\\t\\sites');
+  assert.throws(() => joinInside('C:\\t\\sites', '', win), /not a path inside/);
+  // The path it gives.
+  assert.equal(joinInside('C:\\t\\sites', 'x.com/a.js', { ...win, ci: true }), 'C:\\t\\sites\\x.com\\a.js');
+  assert.equal(joinInside('C:\\t\\sites\\', 'x.com\\a.js', win), 'C:\\t\\sites\\x.com\\a.js');
+  assert.equal(joinInside('/t/sites', 'x.com/a.js', posix), '/t/sites/x.com/a.js');
+  assert.equal(joinInside('/t/sites/', 'x.com/a.js', posix), '/t/sites/x.com/a.js');
+  assert.equal(joinInside('/', 'a', posix), '/a');
+  assert.equal(joinInside('C:\\', 'a', win), 'C:\\a');
+  for (const rel of ['../sites2/a.js', '/t/sites/x.com/a.js', 'x.com/../../etc/passwd']) assert.throws(() => joinInside('/t/sites', rel, posix), /not a path inside the folder/, rel);
+});
+
 test('windows path checks for real (Windows only): isInside refuses odd names, ignores case and drive letter case', { skip: !IS_WIN && 'needs Windows\' file system' }, () => {
   const root = tempDir('wpc-');
   fs.mkdirSync(path.join(root, 'sites', 'x.com'), { recursive: true });

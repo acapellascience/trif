@@ -7,7 +7,7 @@ const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { Stage, ownFolder, readPlain } = require('../helper/lib/stage');
+const { Stage, ownFolder, readPlain, writePlain, removePlain, plainUnder } = require('../helper/lib/stage');
 const { FakeExtension, tempDir, privDir, waitFor, sleep, runCli, writeMod } = require('./fake-extension');
 
 const cleanups = [];
@@ -191,6 +191,98 @@ test('stage: a folder of the copy swapped for a link is never read or written th
   put(path.join(stage.sites, 'x2.com', 'late.js'), head('https://x2.com/*'));
   assert.deepEqual(stage.sync(), { pushed: [], pulled: [], refused: [] });
   assert.ok(!fs.existsSync(l('x2.com')));
+});
+
+test('stage: the plain-file functions themselves keep a path under their folder, whoever calls them (`..`, an absolute path, a path that comes back in)', () => {
+  const { home, stage, s, l, outside } = setup();
+  const good = path.join('x.com', 'tidy.js');
+  const up = path.relative(stage.sites, outside); // (..\..\..\secret.txt: what the red team's probe gave)
+  assert.match(up, /^\.\.[\\/]/);
+  const victim = put(path.join(home, 'victim.txt'), 'KEEP');
+  const upVictim = path.relative(stage.sites, victim);
+  const bad = [up, outside, `x.com${path.sep}..${path.sep}${up}`, `x.com/../${up}`,
+    path.join('..', 'sites', good), `x.com${path.sep}..${path.sep}${good}`, `.${path.sep}${good}`, `x.com${path.sep}${path.sep}tidy.js`, `${good}${path.sep}`, '', '.', '..', `${good}\0`, null, undefined];
+  for (const rel of bad) {
+    const say = JSON.stringify(rel);
+    assert.throws(() => readPlain(stage.sites, rel, stage.ci), /not a path inside the folder/, `readPlain ${say}`);
+    assert.throws(() => readPlain(stage.liveReal, rel, stage.liveCi), /not a path inside the folder/, `readPlain (mods folder) ${say}`);
+    assert.throws(() => stage._readLive(rel), /not a path inside the folder/, `_readLive ${say}`);
+    assert.throws(() => writePlain(stage.sites, rel, Buffer.from('WRITTEN'), stage.ci), /not a path inside the folder/, `writePlain ${say}`);
+    assert.throws(() => writePlain(stage.liveReal, rel, Buffer.from('WRITTEN'), stage.liveCi), /not a path inside the folder/, `writePlain (mods folder) ${say}`);
+    assert.throws(() => removePlain(stage.sites, rel, stage.ci), /not a path inside the folder/, `removePlain ${say}`);
+    assert.throws(() => stage._deleteLive(rel, 'hash'), /not a path inside the folder/, `_deleteLive ${say}`);
+    if (rel !== '') assert.equal(plainUnder(stage.sites, rel, stage.ci), false, `plainUnder ${say}`);
+  }
+  for (const rel of [upVictim, victim]) {
+    assert.throws(() => writePlain(stage.sites, rel, Buffer.from('WRITTEN'), stage.ci), /not a path inside the folder/);
+    assert.throws(() => removePlain(stage.sites, rel, stage.ci), /not a path inside the folder/);
+    assert.throws(() => stage._deleteLive(rel, 'hash'), /not a path inside the folder/);
+  }
+  // Nothing outside was read into anything, written, removed or moved; no folder was made on the way.
+  assert.equal(read(outside), 'SECRET');
+  assert.equal(read(victim), 'KEEP');
+  assert.ok(!fs.existsSync(path.join(home, 'trash')), 'nothing went to the trash');
+  assert.deepEqual(fs.readdirSync(home).filter((n) => /\.tmp$/.test(n)), []);
+  assert.match(read(s('x.com', 'tidy.js')), /tidy/);
+  assert.match(read(l('x.com', 'tidy.js')), /tidy/);
+  // What a folder's own names make still works: read, written (folders made on the way), removed; '' is the folder itself.
+  assert.match(String(readPlain(stage.sites, good, stage.ci).buf), /tidy/);
+  assert.match(String(stage._readLive(good)), /tidy/);
+  writePlain(stage.sites, path.join('x.com', 'files', 'new', 'a.txt'), Buffer.from('A'), stage.ci);
+  assert.equal(read(s('x.com', 'files', 'new', 'a.txt')), 'A');
+  writePlain(stage.sites, 'top.txt', Buffer.from('T'), stage.ci);
+  assert.equal(read(s('top.txt')), 'T');
+  removePlain(stage.sites, 'top.txt', stage.ci);
+  removePlain(stage.sites, path.join('x.com', 'files', 'new', 'a.txt'), stage.ci);
+  assert.ok(!fs.existsSync(s('top.txt')) && !fs.existsSync(s('x.com', 'files', 'new', 'a.txt')));
+  assert.equal(plainUnder(stage.sites, '', stage.ci), true);
+  assert.equal(plainUnder(stage.sites, 'x.com', stage.ci), true);
+  assert.equal(plainUnder(stage.sites, path.join('x.com', 'files'), stage.ci), true);
+  // (and the copying both ways is as it was)
+  fs.writeFileSync(s('x.com', 'tidy.js'), head('https://x.com/*', '// the run\'s\n'));
+  fs.writeFileSync(l('x.com', '_notes.md'), 'the user\'s notes');
+  stage.sync();
+  assert.match(read(l('x.com', 'tidy.js')), /the run's/);
+  assert.equal(read(s('x.com', '_notes.md')), 'the user\'s notes');
+});
+
+test('stage on Windows: the ways Windows has of saying a path elsewhere are refused by the plain-file functions (..\\, C:.., \\\\?\\, drive-relative, trailing dots and spaces)', { skip: process.platform !== 'win32' && 'needs Windows\' file system' }, () => {
+  const { home, stage, s, l, outside } = setup();
+  const drive = path.parse(outside).root.slice(0, 2); // C:
+  const noDrive = outside.slice(2); // \Users\...\secret.txt: on the current drive
+  const up = path.relative(stage.sites, outside);
+  const ups = up.split('\\').filter((p) => p === '..').length;
+  const dots = (dd) => `${Array(ups).fill(dd).join('\\')}\\secret.txt`;
+  const cwdRel = path.relative(process.cwd(), outside);
+  const bad = [
+    up, up.split('\\').join('/'), `x.com\\..\\${up}`, `x.com/../${up}`, // ..\
+    `${drive}..`, `${drive}..\\secret.txt`, `${drive}${cwdRel}`, `${drive}secret.txt`, drive, `${drive.toLowerCase()}${cwdRel}`, // C:.. and drive-relative
+    outside, outside.toUpperCase(), outside.split('\\').join('/'), noDrive, noDrive.split('\\').join('/'), // absolute, with and without the drive
+    `\\\\?\\${outside}`, `\\\\.\\${outside}`, `\\??\\${outside}`, `\\\\?\\${s('x.com', 'tidy.js')}`, `\\\\localhost\\${drive[0]}$${noDrive}`, // \\?\ and its kin, a share
+    dots('.. '), dots('..  '), dots('.. .'), dots('... '), `x.com\\.. \\${up}`, `x.com\\ ..\\${up}`, // names Windows trims to ..
+    'x.com.\\tidy.js', 'x.com \\tidy.js', 'x.com\\tidy.js.', 'x.com\\tidy.js ', 'x.com\\tidy.js. .', 'X.COM...\\TIDY.JS', // names Windows trims to the mod's own
+    'x.com\\tidy.js::$DATA', 'x.com\\tidy.js:hidden', 'x.com\\nul', 'x.com\\CON.js', 'x.com\\\\tidy.js', 'x.com\\tidy.js\\', '.\\x.com\\tidy.js',
+  ];
+  for (const rel of bad) {
+    assert.throws(() => readPlain(stage.sites, rel, stage.ci), /not a path inside the folder/, `readPlain ${rel}`);
+    assert.throws(() => readPlain(stage.liveReal, rel, stage.liveCi), /not a path inside the folder/, `readPlain (mods folder) ${rel}`);
+    assert.throws(() => stage._readLive(rel), /not a path inside the folder/, `_readLive ${rel}`);
+    assert.throws(() => writePlain(stage.sites, rel, Buffer.from('WRITTEN'), stage.ci), /not a path inside the folder/, `writePlain ${rel}`);
+    assert.throws(() => writePlain(stage.liveReal, rel, Buffer.from('WRITTEN'), stage.liveCi), /not a path inside the folder/, `writePlain (mods folder) ${rel}`);
+    assert.throws(() => removePlain(stage.sites, rel, stage.ci), /not a path inside the folder/, `removePlain ${rel}`);
+    assert.throws(() => stage._deleteLive(rel, 'hash'), /not a path inside the folder/, `_deleteLive ${rel}`);
+    assert.equal(plainUnder(stage.sites, rel, stage.ci), false, `plainUnder ${rel}`);
+  }
+  assert.equal(read(outside), 'SECRET');
+  assert.match(read(s('x.com', 'tidy.js')), /tidy/);
+  assert.match(read(l('x.com', 'tidy.js')), /tidy/);
+  assert.ok(!fs.existsSync(path.join(home, 'trash')), 'nothing went to the trash');
+  const all = (dir) => fs.readdirSync(dir, { recursive: true }).map((n) => path.join(dir, n)).filter((f) => fs.lstatSync(f).isFile());
+  assert.deepEqual(all(home).filter((f) => /WRITTEN/.test(read(f))), [], 'nothing was written anywhere');
+  // The names as the folder has them are read whatever their case (NTFS ignores it), with either separator.
+  assert.match(String(readPlain(stage.sites, 'X.COM\\TIDY.JS', stage.ci).buf), /tidy/);
+  assert.match(String(readPlain(stage.sites, 'x.com/tidy.js', stage.ci).buf), /tidy/);
+  assert.match(String(stage._readLive('x.com\\tidy.js')), /tidy/);
 });
 
 // ------------------------------------------------------------------ through the helper

@@ -21,7 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { scopeFor, scopeOf } = require('./scope');
-const { within, ignoresCase, unsafeName, badName } = require('./pathcheck');
+const { within, ignoresCase, unsafeName, badName, joinInside } = require('./pathcheck');
 
 const ALL_SITES = 'all-sites';
 // Files an agent reads as instructions for the folder they're in (runs.js instructionFiles).
@@ -83,11 +83,21 @@ function walk(root, { want = (parts) => !nameRefused(parts), skipDir = () => fal
   return out;
 }
 
-// The real path of `dir` is `root` + `rel` (no link on the way), compared as the volume does.
+// `root`/`rel`, for the functions below: `rel` is given by the caller, and what it names must be under
+// `root` whoever the caller is (pathcheck.js joinInside: relative, no `..`, no drive, none of the names
+// Windows reads as another; throws otherwise). Today's callers take `rel` from the names found in a folder,
+// which can't be any of those: this is so that a caller with a path from elsewhere is held too. (Without
+// it `..\outside\secret.txt` read a file outside `root`: its real path was what the two joined said.)
+const under = (root, rel, ci) => joinInside(root, rel, { ci });
+// The folder of `rel` ('' for a file directly in the root).
+const dirOf = (rel) => (path.dirname(rel) === '.' ? '' : path.dirname(rel));
+
+// The real path of `dir` is `root` + `rel` (no link on the way), compared as the volume does. (`rel`: ''
+// for `root` itself; one that isn't under `root` is false.)
 function plainUnder(root, rel, ci) {
-  let real;
-  try { real = fs.realpathSync.native(path.join(root, rel)); } catch { return false; }
-  const want = path.join(root, rel);
+  let want, real;
+  try { want = joinInside(root, rel, { ci, orRoot: true }); } catch { return false; }
+  try { real = fs.realpathSync.native(want); } catch { return false; }
   return within(real, want, { ci, orEqual: true }) && within(want, real, { ci, orEqual: true });
 }
 
@@ -98,7 +108,7 @@ function plainUnder(root, rel, ci) {
  * it may not read: the helper, which no sandbox limits, mustn't read through either.)
  */
 function readPlain(root, rel, ci) {
-  const file = path.join(root, rel);
+  const file = under(root, rel, ci);
   // (Windows has no O_NOFOLLOW, and opens what a link points at: there a link is told by its real path, and
   // by the name being a plain file that's the one opened)
   const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
@@ -115,6 +125,7 @@ function readPlain(root, rel, ci) {
 
 // Makes the folders of `rel` under `root` (real), each a plain folder: a link or a file on the way refuses.
 function plainFolders(root, rel) {
+  under(root, rel);
   let dir = root;
   for (const p of rel.split(path.sep).slice(0, -1)) {
     dir = path.join(dir, p);
@@ -127,23 +138,24 @@ function plainFolders(root, rel) {
 
 /** Writes `buf` as `root`/`rel` (a new file, then renamed into place), never through a link. */
 function writePlain(root, rel, buf, ci) {
+  const target = under(root, rel, ci);
   const dir = plainFolders(root, rel);
-  const target = path.join(root, rel);
   const st = lstatOrNull(target);
   if (st && !st.isFile()) throw new Error('not a file there');
   const tmp = path.join(dir, `.trif-stage-${crypto.randomBytes(6).toString('hex')}.tmp`);
   fs.writeFileSync(tmp, buf, { flag: 'wx', mode: 0o644 });
   // (the folder swapped for a link meanwhile: the new file isn't where it should be)
-  if (!plainUnder(root, path.dirname(rel) === '.' ? '' : path.dirname(rel), ci)) { try { fs.unlinkSync(tmp); } catch { /* ignore */ } throw new Error('reached through a link'); }
+  if (!plainUnder(root, dirOf(rel), ci)) { try { fs.unlinkSync(tmp); } catch { /* ignore */ } throw new Error('reached through a link'); }
   fs.renameSync(tmp, target);
 }
 
 function removePlain(root, rel, ci) {
-  const st = lstatOrNull(path.join(root, rel));
+  const file = under(root, rel, ci);
+  const st = lstatOrNull(file);
   if (!st) return;
   if (!st.isFile() && !st.isSymbolicLink()) throw new Error('not a file');
-  if (!plainUnder(root, path.dirname(rel) === '.' ? '' : path.dirname(rel), ci)) throw new Error('reached through a link');
-  fs.unlinkSync(path.join(root, rel));
+  if (!plainUnder(root, dirOf(rel), ci)) throw new Error('reached through a link');
+  fs.unlinkSync(file);
 }
 
 function copyTree(from, to) {
@@ -248,7 +260,7 @@ class Stage {
   // A file of the mods folder, never through a link: `st` is what the walk saw there (looked at here when
   // it's not given), and what's opened must be that file. (Not left to O_NOFOLLOW, which Windows hasn't.)
   _readLive(rel, st) {
-    const file = path.join(this.liveReal, rel);
+    const file = under(this.liveReal, rel, this.liveCi);
     const seen = st || fs.lstatSync(file);
     if (!seen.isFile()) throw new Error('not a file');
     const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
@@ -372,7 +384,7 @@ class Stage {
     if (sha1(buf) !== hash) throw new Error('changed again while it was copied (copied at the next sync)');
     const m = this._modOf(rel);
     if (theirs !== undefined && theirs !== null && m) {
-      try { require('./history').writeEntry(this.ws, m.site, m.mod, fs.readFileSync(path.join(this.liveReal, rel)), Date.now(), 'chat'); } catch { /* not kept */ }
+      try { require('./history').writeEntry(this.ws, m.site, m.mod, this._readLive(rel), Date.now(), 'chat'); } catch { /* not kept */ }
     }
     writePlain(this.liveReal, rel, buf, this.liveCi);
     const st = lstatOrNull(path.join(this.liveReal, rel));
@@ -383,6 +395,7 @@ class Stage {
   // the run's site, unless this run made it), any other file to trash/<site>/files/ (one the run made: gone).
   _deleteLive(rel, l) {
     if (l === null) return;
+    under(this.liveReal, rel, this.liveCi); // (before anything is made or moved by its names)
     const trash = require('./trash');
     const m = this._modOf(rel);
     const mine = this.created.has(rel);
@@ -399,8 +412,8 @@ class Stage {
       const base = parts.slice(parts[1] === 'files' && parts.length > 2 ? 2 : 1).join('_');
       let name = base;
       for (let n = 2; fs.existsSync(path.join(to, name)); n++) name = `${n}-${base}`;
-      if (!plainUnder(this.liveReal, path.dirname(rel), this.liveCi)) throw new Error('reached through a link');
-      fs.renameSync(path.join(this.liveReal, rel), path.join(to, name));
+      if (!plainUnder(this.liveReal, dirOf(rel), this.liveCi)) throw new Error('reached through a link');
+      fs.renameSync(under(this.liveReal, rel, this.liveCi), path.join(to, name));
     }
     this.cache.l.delete(rel);
   }
@@ -435,4 +448,4 @@ class Stage {
   }
 }
 
-module.exports = { Stage, ownFolder, nameRefused, readPlain, writePlain, INSTRUCTION_NAME, ALL_SITES, DOCS };
+module.exports = { Stage, ownFolder, nameRefused, readPlain, writePlain, removePlain, plainUnder, INSTRUCTION_NAME, ALL_SITES, DOCS };

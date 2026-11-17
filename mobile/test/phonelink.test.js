@@ -223,7 +223,7 @@ function lineReader(child, label) {
   return { next, all };
 }
 
-test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server, Runs, Remote, the stand-in agent, a temp HOME): a run with its steps, try on the phone, page and screenshot, the result; dropped and resumed; removed', { skip: noComputer, timeout: 180000 }, async () => {
+test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server, Runs, Remote, the stand-in agent, a temp HOME): a run with its steps, try on the phone, page and screenshot, the result; dropped and resumed; kept while the app was closed and picked up; removed', { skip: noComputer, timeout: 180000 }, async () => {
   build();
   const comp = spawn(process.execPath, [computerFixture, '--seconds', '150'], { stdio: ['pipe', 'pipe', 'inherit'] });
   const C = lineReader(comp, 'computer');
@@ -282,6 +282,34 @@ test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server
     assert.equal(back, 'result phone~m.y.com/part,phone~y.com/bottom-bar removed 0');
     // (acked: the computer keeps nothing)
     for (let i = 0; i < 50; i++) { comp.stdin.write('kept\n'); const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"'))); if (!Object.values(k.kept).flat().length) break; assert.ok(i < 49, 'acked runs deleted'); await new Promise((r) => setTimeout(r, 100)); }
+
+    // 2b. The app closed while a run waits (the link closed, nothing followed); the computer finishes and keeps it;
+    // the app opened again is told of it in hello's pending and picks it up: every step from the first, the result.
+    say('run w.com PAUSE:b WRITE');
+    await P.next((l) => l.startsWith('started'));
+    await P.next((l) => / text Working$/.test(l));
+    say('close');
+    comp.stdin.write('go b\n');
+    for (let i = 0; i < 100; i++) {
+      comp.stdin.write('kept\n');
+      const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"')));
+      const mine = Object.values(k.kept).flat();
+      if (mine.length && mine.every((r) => r.done)) break;
+      assert.ok(i < 99, 'the run kept, done');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    say('reopen');
+    assert.equal(await P.next((l) => l.startsWith('hello') || l.includes('failed')), 'hello Stand-in Mac agent Stand-in agent pending 1');
+    const mark2 = P.all.length;
+    say('pickup');
+    assert.equal(await P.next((l) => l.startsWith('pending')), 'pending w.com done true');
+    const kept = await P.next((l) => l.startsWith('result'));
+    const evs2 = P.all.slice(mark2).filter((l) => l.startsWith('event '));
+    assert.deepEqual(evs2.map((l) => Number(l.split(' ')[1])), evs2.map((_, i) => i + 1), 'every step from the first');
+    assert.ok(evs2.some((l) => / text Working$/.test(l)));
+    assert.match(evs2[evs2.length - 1], /^event \d+ done ok true$/);
+    assert.equal(kept, 'result phone~m.w.com/part,phone~w.com/bottom-bar removed 0');
+    for (let i = 0; i < 50; i++) { comp.stdin.write('kept\n'); const k = JSON.parse(await C.next((l) => l.startsWith('{"kept"'))); if (!Object.values(k.kept).flat().length) break; assert.ok(i < 49, 'the picked-up run acked'); await new Promise((r) => setTimeout(r, 100)); }
 
     // 3. Removed on the computer: the link closes; reconnecting is refused, and a new run says why. (A pairing
     // window is open there, so the listener stays up: with no phone paired and no window, nothing listens, and

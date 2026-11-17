@@ -129,6 +129,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `onLost` (no-run, away after the waits, removed). PanelChat.swift's engine `computer` (PanelEngines' list):
   `goComputer`, the computer's `done` held until its result, whose mods go to `offerFromChat` (Add this mod?); its
   tool requests run `runTool` on the run's tab (try_mod answers with a screenshot too); `linkWords` (the states).
+  Kept runs (11-17): the adapter asks `link.pickUp` once loaded, and the app back in front asks again (at most every
+  30 s): `pickUpKept` connects, takes `hello`'s `pending` into their chats (`window.__trifPanelAdopt`: not into a
+  chat busy with a live run), `PhoneLinkRemote.pickUp` → `run.resume` after 0; nothing pending → the link closed.
+  The computer's `error` events with `reason` sandbox/login are said in the app's words (`linkWords`). The Simulator
+  asks no Local Network question (Bonjour browses with no prompt; a missing computer is `notFound`): `denied` is a
+  device-only check.
   Test on the Mac: `node --test mobile/test/phonelink.test.js` (swiftc builds the three files with
   mobile/test/phonelink-check/main.swift; a stand-in computer from the phone-link worktree's helper/lib/phonelink
   and tests/, or TRIF_PHONE_LINK_LIB; 6 tests, under a minute). The last one runs the real Store, Server, Runs and Remote with

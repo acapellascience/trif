@@ -453,7 +453,11 @@ Web/panel-adapter.js). The same lines are in docs/PHONE-LINK-STRINGS.md on branc
 | A request sent before pairing | This iPhone isn't paired with a computer yet: in Settings, choose Pair with my computer. |
 | The first step line of a request | Asking {computer}… |
 | The link drops in a request (a step line) | Still working on {computer}. Reconnecting… |
-| Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. |
+| Not found (also a phone removed as the computer's last one: the two can't be told apart) | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. If this iPhone was removed there, pair it again: Pair with my computer. (changed 11-17, draft: the last sentence added) |
+| A request the computer kept while TRIF was closed, picked up (a step line; added 11-17, draft) | {computer} finished this while TRIF was closed. |
+| The same, still going there (a step line; added 11-17, draft) | Still working on {computer}. |
+| Its agent can't work in TRIF's sandbox there (added 11-17, draft) | {computer}'s coding agent can't work inside TRIF's sandbox there, so it can't make mods for this iPhone. Chats in TRIF on the computer still can. |
+| Its agent isn't logged in (added 11-17, draft) | {computer}'s coding agent isn't logged in. Log in to it in TRIF on {computer}, then ask again. |
 | Lost touch, given up (or no answer in 20 s) | Lost touch with {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there. |
 | Removed there, or its link turned off | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there: Pair with my computer. |
 | Local Network off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF Probe, then Local Network. |

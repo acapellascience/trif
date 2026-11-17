@@ -13,7 +13,7 @@ import Network
 // - The link drops (the app suspended, the Wi-Fi gone): `away`; it reconnects after `retry`'s waits, or at once on
 //   wake() (the app back in front), and sends `run.resume` for each followed run from the last event it has. When
 //   every wait is used up, the followed runs are given up (`onLost`): the computer keeps them, listed in `hello`'s
-//   `pending`.
+//   `pending`, which pickUp follows again (PanelChat does on the panel's start and when the app is back in front).
 // Callbacks come on `queue` (main by default).
 
 final class PhoneLinkRemote {
@@ -127,6 +127,20 @@ final class PhoneLinkRemote {
     func stop(_ runId: String) {
         guard state == .open else { return }
         request(["t": "run.stop", "runId": runId]) { _ in }
+    }
+
+    /// A run the computer kept (`hello`'s `pending`: the app was closed meanwhile, or gave the run up after a drop),
+    /// followed from its first event: `run.resume` after 0, then its events, its result, as a started run's.
+    func pickUp(_ runId: String) {
+        guard state == .open, following[runId] == nil else { return }
+        following[runId] = 0
+        request(["t": "run.resume", "runId": runId, "after": 0]) { [weak self] r in
+            guard let self, r["t"] as? String == "error" else { return }
+            let e = Self.error(r)
+            guard e.code != "away", e.code != "timeout", self.following[runId] != nil else { return }
+            self.following[runId] = nil
+            self.onLost?(runId, e)
+        }
     }
 
     /// No longer followed (its chat cleared): the computer still keeps it until acked.

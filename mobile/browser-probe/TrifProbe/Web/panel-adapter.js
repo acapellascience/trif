@@ -75,6 +75,8 @@
   const post = (msg) => { for (const p of ports) p.onMessage.fire(clone(msg)); };
   let lib = null;
   const libReady = import('./lib.js').then((m) => { lib = m; });
+  // (the app asks the paired computer, if any, for runs it kept for this iPhone: PanelChat.pickUpKept)
+  libReady.then(() => app({ type: 'link.pickUp' })).catch(() => {});
 
   const runs = new Map(); // runId -> {site, agent, prompt, texts, errored, stopping}
   const chatKey = (site) => `chat:${site}`;
@@ -121,6 +123,17 @@
     });
     if (ev.kind === 'done') post({ type: 'statusChanged' });
   }
+  // A run the app took up that this page didn't start (My computer's, kept while the app was closed): its chat's
+  // run from now on, unless that chat is busy with one of this page's. True when it took it.
+  window.__trifPanelAdopt = async (runId, site, agent) => {
+    await libReady;
+    if (!site || runs.has(runId) || [...runs.values()].some((r) => r.site === site)) return false;
+    runs.set(runId, { site, agent: agent || null, prompt: '', texts: 0, errored: false, stopping: false });
+    // (a run still marked in the chat is one from before the app closed, which nothing follows any more)
+    await updateChat(site, (c) => { c.run = { runId, startedAt: Date.now(), agent: agent || null }; });
+    post({ type: 'statusChanged' });
+    return true;
+  };
   window.__trifPanelEvent = (runId, ev) => { onRunEvent(runId, ev).catch((e) => console.error('[TRIF] run event failed', e)); return true; };
 
   async function status() {

@@ -66,6 +66,9 @@ if args.count > 3, args[1] == "pair" {
 //   run <site> <prompt>   run.start for https://<site>/home with a page copy and a small JPEG
 //   drop                  the connection lost as a suspended app loses it (no reconnection until `wake`)
 //   wake                  reconnect now (run.resume for the followed runs)
+//   close                 the app closed (PhoneLinkRemote.close: the computer keeps the runs)
+//   reopen                a new PhoneLinkRemote with the same keys, connected ("hello …")
+//   pickup                pickUp for each of its hello's pending runs ("pending <chat> done <bool>")
 //   quit
 // and prints: "paired <name>", "hello <name> agent <agent> pending <n>", "started" or "error <code>", "event <n> <kind>
 // <what>", "tool <tool> <input JSON, code cut to its first line>" (answered at once: canned words, a JPEG), "result
@@ -77,7 +80,7 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
     let p = PhoneLinkPairer(code: code, keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], endpoints: at)
     var remote: PhoneLinkRemote?
     func json(_ o: Any) -> String { String(data: try! JSONSerialization.data(withJSONObject: o, options: .sortedKeys), encoding: .utf8)! }
-    func begin() {
+    func open() {
         let r = PhoneLinkRemote(keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], app: "check", endpoints: at)
         r.retry = []
         r.onState = { s in say("state \(s)") }
@@ -116,6 +119,9 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
             case .failure(let f): say("connect failed \(f)")
             }
         }
+    }
+    func begin() {
+        open()
         FileHandle.standardInput.readabilityHandler = { h in
             let d = h.availableData
             if d.isEmpty { exit(0) }
@@ -132,6 +138,10 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
                         }
                     case "drop": remote?.drop()
                     case "wake": remote?.wake()
+                    case "close": remote?.close(); remote = nil
+                    case "reopen": open()
+                    case "pickup":
+                        for k in remote?.hello?.pending ?? [] { say("pending \(k.chat) done \(k.done)"); remote?.pickUp(k.runId) }
                     case "quit": exit(0)
                     default: say("? \(line)")
                     }

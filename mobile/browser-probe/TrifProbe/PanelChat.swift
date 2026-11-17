@@ -235,6 +235,9 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "link.status":
             let c = PhoneLinkKeys.shared.computer
             return (["paired": c != nil, "name": c?.name ?? ""], nil)
+        case "link.pickUp":
+            pickUpKept()
+            return (["asked": true], nil)
         case "link.open":
             PhoneLinkModel.shared.shown = true
             return (["shown": true], nil)
@@ -493,8 +496,50 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     }()
     private func computerRun(_ rid: String) -> Run? { runs.values.first { $0.remoteId == rid } }
 
-    /// The app in front again: a dropped link reconnects at once (its runs resumed).
-    func wakeLink() { if !runs.values.filter({ $0.remoteId != nil }).isEmpty { link.wake() } }
+    /// The app in front again: a dropped link reconnects at once (its runs resumed); else the computer is asked
+    /// whether it kept a run for this iPhone meanwhile.
+    func wakeLink() {
+        if !runs.values.filter({ $0.remoteId != nil }).isEmpty { link.wake() } else { pickUpKept() }
+    }
+
+    /// Runs the computer finished, or is still doing, for this iPhone while the app was closed (or after it gave a
+    /// run up): `hello`'s `pending`, each back in its chat (the chat it was asked from, by its site) and followed
+    /// from its first event to its result. Quiet when the computer isn't there. At most every 30 s.
+    private var lastPickUp: Date?
+    private func pickUpKept() {
+        guard loaded, PhoneLinkKeys.shared.computer != nil else { return }
+        if let t = lastPickUp, Date().timeIntervalSince(t) < 30 { return }
+        lastPickUp = Date()
+        link.connect { [weak self] r in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard case .success(let hello) = r else { return self.report.log("panel", "My computer: kept runs not asked (\(r))") }
+                let kept = hello.pending.filter { !$0.chat.isEmpty && self.link.following[$0.runId] == nil && self.computerRun($0.runId) == nil }
+                if kept.isEmpty {
+                    // (nothing to follow: the link isn't kept open for nothing)
+                    if self.runs.values.allSatisfy({ $0.remoteId == nil }) { self.link.close() }
+                    return
+                }
+                for p in kept { Task { @MainActor in await self.adopt(p) } }
+            }
+        }
+    }
+
+    private func adopt(_ p: PhoneLinkRemote.Pending) async {
+        guard let e = PanelEngine.named("computer") else { return }
+        let run = Run(site: p.chat, url: "", prompt: "", engine: e, model: "", effort: nil, sessionId: "", isNew: false, said: [], tab: browser?.webView)
+        run.remoteId = p.runId
+        let took = try? await webView.callAsyncJavaScript("return window.__trifPanelAdopt ? await window.__trifPanelAdopt(id, site, 'computer') : false;",
+                                                         arguments: ["id": run.id, "site": p.chat], in: nil, contentWorld: .page)
+        // (its chat is busy with another run: asked again next time)
+        guard took as? Bool == true, link.following[p.runId] == nil else { return report.log("panel", "My computer: a kept run not taken (its chat is busy)") }
+        runs[run.id] = run
+        let name = PhoneLinkKeys.shared.computer?.name ?? "your computer"
+        step(run, p.done ? "\(name) finished this while TRIF was closed." : "Still working on \(name).")
+        report.log("panel", "My computer: a kept run picked up (\(p.done ? "done" : "still going"), \(p.last) events)")
+        onActivity(.working)
+        link.pickUp(p.runId)
+    }
     /// Paired, forgotten or paired with another: the panel's agent line and Settings told.
     func linkChanged() {
         guard loaded else { return }
@@ -534,6 +579,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     private func computerEvent(_ rid: String, _ ev: [String: Any]) {
         guard let run = computerRun(rid) else { return }
+        // (the computer's own words for these are for its side panel: the iPhone's say what it means here)
+        if ev["kind"] as? String == "error", let why = ev["reason"] as? String, why == "sandbox" || why == "login" {
+            return emit(run, ["kind": "error", "message": PanelChat.linkWords(why, ev["message"] as? String ?? "")])
+        }
         // (the computer's done waits for its result: the mods go to Add this mod? first, as the other engines' do)
         if ev["kind"] as? String == "done" { run.heldDone = ev; return }
         if ev["kind"] as? String == "session", let s = ev["sessionId"] as? String { run.sessionIdSeen = s }
@@ -599,7 +648,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         let pair = "[Pair with my computer](\(pairLink))"
         switch code {
         case "notPaired": return "This iPhone isn't paired with a computer yet: \(pair)."
-        case "notFound": return "Can't find \(name). It may be asleep, on another Wi-Fi, or have no browser with TRIF open."
+        // (a phone removed there finds nothing either when it was the last one: the computer stops listening)
+        case "notFound": return "Can't find \(name). It may be asleep, on another Wi-Fi, or have no browser with TRIF open. If this iPhone was removed there, pair it again: \(pair)."
+        case "sandbox": return "\(name)'s coding agent can't work inside TRIF's sandbox there, so it can't make mods for this iPhone. Chats in TRIF on the computer still can."
+        case "login": return "\(name)'s coding agent isn't logged in. Log in to it in TRIF on \(name), then ask again."
         case "away", "timeout": return "Lost touch with \(name). It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there."
         case "removed": return "This iPhone isn't connected to \(name) any more. Connect it again from TRIF's Settings there: \(pair)."
         case "denied": return "TRIF needs Local Network access to find \(name). Turn it on in Settings, then TRIF Probe, then Local Network."

@@ -26,7 +26,9 @@ const feed = (pg, by) => pg.evaluate(async (how) => {
   return new Promise((done) => { const x = new XMLHttpRequest(); x.open('GET', 'feed.json?by=xhr'); x.onload = () => done(JSON.parse(x.responseText).entries.map((e) => e.id)); x.send(); });
 }, by);
 
-test('the page side of site-data: only on matching pages, nothing wrapped until a filter, then the filtered response', { skip: browserTestsSkip(), timeout: 60000 }, async () => {
+// (the time limit counts cdp-page's wait for the test browsers' lock too: test files run side by side, and this one,
+// the suite's first browser, can wait behind another file's browser for more than a minute on CI)
+test('the page side of site-data: only on matching pages, nothing wrapped until a filter, then the filtered response', { skip: browserTestsSkip(), timeout: 600000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;

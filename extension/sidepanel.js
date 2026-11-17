@@ -519,7 +519,7 @@ function clickjackCard(li, m) {
 
 async function undoFix(id, b) {
   if (b) b.disabled = true;
-  try { await request({ type: 'mod.undo', ids: [id], site: view.site, tab: view.tab?.id }); } catch (e) {
+  try { await request({ type: 'mod.undo', ids: [id], site: chatSite(), tab: view.tab?.id }); } catch (e) {
     if (b) b.disabled = false;
     request({ type: 'chat.note', site: chatSite(), text: `Couldn't undo the fix: ${e?.message ?? e}` }).catch(() => {});
   }
@@ -647,7 +647,7 @@ function messageNode(m) {
     const undo = button('Undo', '', async () => {
       undo.disabled = true;
       try {
-        await request({ type: 'mod.restore', id: m.undo, site: view.site, tab: view.tab?.id });
+        await request({ type: 'mod.restore', id: m.undo, site: chatSite(), tab: view.tab?.id });
         undo.remove();
       } catch (e) {
         undo.disabled = false;
@@ -682,7 +682,7 @@ function messageNode(m) {
     const undo = button('Undo these changes', '', async () => {
       undo.disabled = true;
       try {
-        await request({ type: 'mod.undo', ids: m.undoChange, site: view.site, tab: view.tab?.id });
+        await request({ type: 'mod.undo', ids: m.undoChange, site: chatSite(), tab: view.tab?.id });
         undo.remove();
       } catch (e) {
         undo.disabled = false;
@@ -1088,7 +1088,8 @@ const GROUP_TEXT = {
   page: [GROUP_NAMES.page, 'Anything code can do.'],
 };
 const TIER_TERMS = { rules: 'style-mods', sandboxed: 'boxed-mods', page: 'free-mods' }; // (explain.json)
-const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
+// (the phone view's switches are its phone twin's: lib.js groupSiteName)
+const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, chatSite());
 const groupHeadings = new Map();
 // Collapsed tiers (this browser's): their heading stays, with its On and Off; the note and the mods hide.
 const collapsedGroups = new Set();
@@ -1127,7 +1128,7 @@ function groupHeading(g) {
     const setGroup = async (on) => {
       if (sw.hasAttribute('aria-busy') || on === !groupOff(g)) return;
       sw.setAttribute('aria-busy', 'true');
-      try { await request({ type: 'mods.group', site: view.site, group: g, enabled: on, tab: view.tab?.id }); await refreshStatus(); } catch (e) {
+      try { await request({ type: 'mods.group', site: chatSite(), group: g, enabled: on, tab: view.tab?.id }); await refreshStatus(); } catch (e) {
         request({ type: 'chat.note', site: chatSite(), text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
       } finally { sw.removeAttribute('aria-busy'); }
     };
@@ -1274,23 +1275,25 @@ function renderMods() {
   const scope = siteScope();
   // (the phone view lists its own mods, the phone twin's, and a desktop panel never lists them: phone.js)
   const phone = inPhone();
+  const key = listKey(); // (the list's order and fold: the phone twin's own in the phone view)
   const listed = orderMods(site && status ? status.mods.filter((m) => isPhoneMod(m) === phone && (limitToSites(m, [scope], sensNow()) || m.held?.site === site)) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
   // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then sandboxed mods, then page scripts,
   // each in its own order.
-  const ordered = orderMods(listed, view.modOrder[scope]);
+  const ordered = orderMods(listed, view.modOrder[key]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
   // The ones whose @match doesn't cover this page (grey light) fold into one line at the bottom, "N more for
   // other <site> pages" (lib.js splitForPage); a click shows them in their groups again (Tim, 2026-11-11).
   const { other } = splitForPage(mods, tab?.url || '');
   const otherIds = new Set(other.map((m) => m.id));
-  if (view.foldFor !== scope) { view.foldFor = scope; view.foldOpen = false; }
+  if (view.foldFor !== key) { view.foldFor = key; view.foldOpen = false; }
   const shown = view.foldOpen ? mods : mods.filter((m) => !otherIds.has(m.id));
   view.foldedIds = view.foldOpen ? [] : other.map((m) => m.id);
   ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
   updateApprovals(mods);
-  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
+  // (the count first: a list that empties, the phone twin's with no mods yet, doesn't keep the last one's)
   ui.modsCount.textContent = `(${mods.length})`;
+  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   // Mods TRIF found can do more than change the page's look, which the user hasn't looked at yet (helper
   // lib/held.js): they keep running; each gets its facts once, below it.
   const toReview = mods.filter((m) => m.review && !m.held).length;
@@ -2493,7 +2496,7 @@ function updateNotice(m, err) {
     const b = e.currentTarget;
     b.disabled = true;
     clearRowError(m.id);
-    try { await request({ type: 'mod.update', id: m.id, choice, site: view.site, tab: view.tab?.id }); } catch (x) { fail(b, x); }
+    try { await request({ type: 'mod.update', id: m.id, choice, site: chatSite(), tab: view.tab?.id }); } catch (x) { fail(b, x); }
   };
   const useNew = button('Use the new version', '', choose('new'));
   useNew.title = m.update.modified ? 'Your copy goes to the trash (Undo in the chat brings it back).' : '';
@@ -3231,6 +3234,8 @@ let lastPhoneLine = '';
 const inPhone = () => !!view.phone?.phone && view.phone.tabId === view.tab?.id;
 /** The chat's site: the phone view's chats are its own, under the site's phone twin (phone~x.com). */
 const chatSite = () => (view.site && inPhone() ? PHONE_PREFIX + view.site : view.site);
+/** The mods list's own key (its order, its fold): the site's, or in the phone view its phone twin's. */
+const listKey = () => { const scope = siteScope(); return scope && inPhone() ? PHONE_PREFIX + scope : scope; };
 async function refreshPhone() {
   const was = chatSite();
   await refreshPhoneState();
@@ -3291,14 +3296,14 @@ function renderSiteTools() {
   const site = view.site;
   const ok = !!site && !!view.status?.helper?.connected;
   ui.modsMore.hidden = !ok;
-  if (!ok) { ui.modsMenu.hidden = true; ui.siteFilesBox.hidden = true; return; }
+  if (!ok) { ui.modsMenu.hidden = true; ui.siteFilesBox.hidden = true; view.filesFor = null; return; } // (read again when a site's back)
   // (the site's own mods as its list has them: those in a folder of its site, on a page under it too, so
   // docs.google.com's panel, which lists google.com's mods, exports them; not all-sites ones. lib/share.js
   // exportSite takes these ids)
   const mine = siteOwnMods();
   ui.exportSite.hidden = !mine.length;
   ui.exportSite.textContent = `Export all mods for ${siteScope()}`;
-  if (view.filesFor !== site) { view.filesFor = site; loadSiteFiles(); }
+  if (view.filesFor !== chatSite()) { view.filesFor = chatSite(); loadSiteFiles(); }
 }
 
 /** The mods of the panel's site (siteScope) that live in its folders: what "Export all mods" exports. */
@@ -3311,10 +3316,10 @@ function siteOwnMods() {
 }
 
 async function loadSiteFiles() {
-  const site = view.site;
+  const site = chatSite(); // (the phone view's: its phone twin's files, sites/phone~x.com/files/)
   let files = [];
   try { files = (await request({ type: 'files.list', site })).files || []; } catch { files = []; }
-  if (site !== view.site) return;
+  if (site !== chatSite()) return;
   view.siteFileCount = files.length;
   ui.siteFilesBox.hidden = !files.length;
   ui.siteFilesSummary.textContent = `Files (${files.length})`;
@@ -3447,7 +3452,7 @@ async function importModFile(file) {
   let choice = '';
   for (let i = 0; i < 4; i++) {
     let r;
-    try { r = await request({ type: 'mod.import', text, name: file.name, site, choice, chatSite: view.site }); } catch (e) { return note(`Couldn't import ${file.name}: ${e?.message ?? e}`); }
+    try { r = await request({ type: 'mod.import', text, name: file.name, site, choice, chatSite: chatSite(), ...(inPhone() ? { phone: true } : {}) }); } catch (e) { return note(`Couldn't import ${file.name}: ${e?.message ?? e}`); }
     if (r.needsSite) {
       const sites = [...new Set([...(r.needsSite || []), view.site].filter(Boolean))].slice(0, 5);
       site = await askCard('Which site is this mod for?', `${file.name} doesn't say which site it's for${r.needsSite.length ? ` (its @match lines name ${r.needsSite.join(', ')})` : ''}.`, sites.map((s, k) => [s, s, k === 0 ? 'go' : '']));
@@ -3491,7 +3496,7 @@ document.addEventListener('drop', async (e) => {
 });
 
 async function addSiteFile(f) {
-  const site = view.site;
+  const site = chatSite(); // (the phone view's: its phone twin's files, and its chat)
   const note = (text) => request({ type: 'chat.note', site, text }).catch(() => {});
   const typing = !!ui.input.value.trim();
   // (a slice at a time, so a big file is never all in memory: the helper appends them, then renames it into place)
@@ -3556,7 +3561,7 @@ function deleteButton(m, labelId, li) {
     b.disabled = true;
     clearRowError(m.id);
     try {
-      await request({ type: 'mod.delete', id: m.id, site: view.site, tab: view.tab?.id });
+      await request({ type: 'mod.delete', id: m.id, site: chatSite(), tab: view.tab?.id });
     } catch (e) {
       b.disabled = false;
       rowError(m.id, String(e?.message ?? e));
@@ -3587,7 +3592,7 @@ const rowName = (li) => li.querySelector('.mod-name > span:not(.light)')?.textCo
 
 /** Keep the list's current order as this site's (the rows are already where they belong). */
 function saveModOrder(li) {
-  const scope = siteScope();
+  const scope = listKey();
   if (!scope) return;
   const ids = rowIds();
   // (the folded ones, "N more for other pages", keep their places after the rest)

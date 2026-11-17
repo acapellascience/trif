@@ -229,3 +229,156 @@ test('desktop mods never run in the phone view, phone mods only there', { skip, 
     fs.rmSync(ext, { recursive: true, force: true });
   }
 });
+
+// The phone view's panel is the phone twin's own (Tim, 11-16: on X the phone window's panel said "Mods on this site
+// (12)" and "Files (5)", the desktop's, with no phone mods yet). No helper here, so the panel page gets the mods
+// in the background's status replies (as its uiStatus lists them) and is told it's connected, and answers
+// files.list itself, by site (the panel's requests as sent); the phone view itself is the background's. The
+// phone panel: no rows, no count left over, no files; the desktop panel, before and after Back to desktop: the
+// desktop's mods, their count and files.
+test('the phone view\'s panel lists the phone twin\'s mods and files, the desktop panel the desktop\'s', { skip, timeout: 900000 }, async () => {
+  const { buildMod } = require('../helper/lib/mods');
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
+  try {
+    const h = await harness(browser);
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    // (each as the background's status lists mods: uiStatus)
+    const mod = (site, name, match) => {
+      const m = buildMod({ site, file: `/w/sites/${site}/${name}.js`, code: `// ==WebMod==\n// @name ${name}\n// @match ${match}\n// ==/WebMod==\ndocument.documentElement.dataset.m = ${JSON.stringify(name)};\n` }).mod;
+      return { id: m.id, name: m.name, description: '', site: m.site, file: m.file, matches: m.matches, excludes: [], registered: false, enabled: true, error: null, held: null, pending: null, review: null, risk: null, from: null, source: null, sourceChanged: false, version: null, update: null, rules: false, sandboxed: false, unsandboxed: false, powers: [], powerInfo: null, siteReach: null, found: [], newOff: null, chatWaiting: false, imported: false, fixUndo: false, broken: [] };
+    };
+    const mods = [mod('127.0.0.1', 'desk-one', '*://127.0.0.1/*'), mod('127.0.0.1', 'desk-two', '*://127.0.0.1/*'), mod('all-sites', 'everywhere', '*://*/*'), mod('phone~example.com', 'elsewhere', '*://example.com/*')];
+    const files = { '127.0.0.1': ['a.png', 'b.png', 'c.mp3', 'd.txt', 'e.json'].map((name, i) => ({ name, size: 10, at: 1000 - i })) };
+    const stub = `(() => {
+      const FILES = ${JSON.stringify(files)};
+      const MODS = ${JSON.stringify(mods)};
+      window.__filesAsked = [];
+      window.__imports = [];
+      const rt = chrome.runtime;
+      const connect = rt.connect.bind(rt);
+      rt.connect = (...a) => {
+        const port = connect(...a);
+        const fns = [];
+        const status = new Set();
+        port.onMessage.addListener((m) => {
+          if (m && m.type === 'reply' && status.has(m.reqId) && m.ok && m.result && m.result.helper) {
+            m.result.helper.connected = true;
+            m.result.mods = MODS;
+            m.result.downloads = window.__offer ? { on: true, state: 'watching', offer: window.__offer } : { on: false, state: 'off' };
+          }
+          for (const fn of fns) fn(m);
+        });
+        port.onMessage.addListener = (fn) => { fns.push(fn); };
+        window.__poke = () => { for (const fn of fns) fn({ type: 'statusChanged' }); }; // (as the background's broadcast)
+        const post = port.postMessage.bind(port);
+        port.postMessage = (msg) => {
+          if (msg && msg.type === 'files.list') {
+            window.__filesAsked.push(msg.site);
+            const r = { type: 'reply', reqId: msg.reqId, ok: true, result: { site: msg.site, files: FILES[msg.site] || [] } };
+            setTimeout(() => { for (const fn of fns) fn(r); }, 0);
+            return;
+          }
+          const answer = (result) => { const r = { type: 'reply', reqId: msg.reqId, ok: true, result }; setTimeout(() => { for (const fn of fns) fn(r); }, 0); };
+          if (msg && msg.type === 'downloads.take') return answer({ name: 'offered.js', text: '// ==WebMod==\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n' });
+          if (msg && msg.type === 'downloads.done') { window.__offer = null; window.__offerDone = msg.how; return answer({ on: true, state: 'watching' }); }
+          if (msg && msg.type === 'mod.import') {
+            window.__imports.push({ name: msg.name, site: msg.site, phone: msg.phone === true });
+            const r = { type: 'reply', reqId: msg.reqId, ok: true, result: { id: 'stub/imported' } };
+            setTimeout(() => { for (const fn of fns) fn(r); }, 0);
+            return;
+          }
+          if (msg && msg.type === 'status') status.add(msg.reqId);
+          post(msg);
+        };
+        return port;
+      };
+    })();`;
+    // A panel window's page, by its address, with the stub in place before its own scripts (loaded again).
+    const panelOf = async (query) => {
+      const t = await waitFor(`the panel ${query}`, async () => (await browser.cdp.send('Target.getTargets')).targetInfos.find((x) => x.type === 'page' && x.url.includes(`/sidepanel.html${query}`)));
+      const sid = await browser._attach(t.targetId);
+      await browser.cdp.send('Page.enable', {}, sid);
+      await browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: stub }, sid);
+      await browser.cdp.send('Page.reload', {}, sid);
+      await sleep(500);
+      return async (expr) => {
+        const r = await browser.cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sid);
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+        return r.result.value;
+      };
+    };
+    const LIST = `(() => ({
+      phone: document.body.classList.contains('phone-view'),
+      box: !document.getElementById('mods').hidden,
+      count: document.getElementById('mods-count').textContent,
+      rows: [...document.querySelectorAll('#mod-list li[data-mod]')].map((li) => li.dataset.mod).sort(),
+      files: document.getElementById('site-files-box').hidden ? null : document.getElementById('site-files-summary').textContent,
+      asked: window.__filesAsked.at(-1) || null,
+    }))()`;
+    // A mod file dropped on a panel (its import): what the panel asks the background for
+    const DROP = `(async () => {
+      const dt = new DataTransfer();
+      dt.items.add(new File(['// ==WebMod==\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n'], 'dropped.js', { type: 'text/javascript' }));
+      document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 50 && !window.__imports.length; i++) await new Promise((r) => setTimeout(r, 100));
+      return window.__imports.splice(0);
+    })()`;
+    // Paste a mod… (the Mods ⋯ menu): the card, the text, Add
+    const PASTE = `(async () => {
+      document.getElementById('paste-mod').click();
+      const area = await (async () => { for (let i = 0; i < 50; i++) { const a = document.querySelector('#paste-ask textarea'); if (a) return a; await new Promise((r) => setTimeout(r, 100)); } throw new Error('no paste card'); })();
+      area.value = '// ==WebMod==\\n// @name Pasted\\n// @match *://127.0.0.1/*\\n// ==/WebMod==\\nx();\\n';
+      area.dispatchEvent(new Event('input'));
+      [...document.querySelectorAll('#paste-ask button')].find((b) => b.textContent === 'Add').click();
+      for (let i = 0; i < 50 && !window.__imports.length; i++) await new Promise((r) => setTimeout(r, 100));
+      return window.__imports.splice(0);
+    })()`;
+    // A mod file in Downloads, offered (the background's status): its card's Add
+    const OFFER = `(async () => {
+      window.__offer = { id: 'o1', name: 'Offered', file: 'offered.js', from: 'example.com', description: '', can: [], kind: 'style' };
+      window.__poke();
+      const add = await (async () => { for (let i = 0; i < 50; i++) { const b = [...document.querySelectorAll('#download-offer button')].find((x) => x.textContent === 'Add'); if (b && !document.getElementById('download-offer').hidden) return b; await new Promise((r) => setTimeout(r, 100)); } throw new Error('no Downloads card'); })();
+      add.click();
+      for (let i = 0; i < 50 && !window.__offerDone; i++) await new Promise((r) => setTimeout(r, 100));
+      const done = window.__offerDone;
+      window.__offerDone = null;
+      return { imports: window.__imports.splice(0), done };
+    })()`;
+    const { phoneTab, homeWin } = await h.E(async (url) => {
+      const w = await chrome.windows.create({ url, focused: true, width: 1200, height: 860 });
+      await chrome.tabs.create({ windowId: w.id, url: 'about:blank', active: false }); // (the window stays while the tab is the phone)
+      await new Promise((r) => setTimeout(r, 1500));
+      return { phoneTab: w.tabs[0].id, homeWin: w.id };
+    }, pages.url('/detect'));
+    // the desktop panel first: the desktop mods and files
+    await h.E((id) => chrome.windows.create({ url: chrome.runtime.getURL(`sidepanel.html?window=${id}&fallback=1`), focused: false }), homeWin);
+    const desk = await panelOf(`?window=${homeWin}&fallback=1`);
+    const deskWant = { phone: false, box: true, count: '(3)', rows: ['127.0.0.1/desk-one', '127.0.0.1/desk-two', 'all-sites/everywhere'], files: 'Files (5)', asked: '127.0.0.1' };
+    await waitFor('the desktop panel\'s list', async () => JSON.stringify(await desk(LIST)) === JSON.stringify(deskWant)).catch(async (e) => { console.error(JSON.stringify(await desk(LIST))); throw e; });
+    assert.deepEqual(await desk(DROP), [{ name: 'dropped.js', site: '', phone: false }], 'the desktop panel\'s import: a desktop mod');
+    assert.deepEqual(await desk(PASTE), [{ name: 'pasted.js', site: '', phone: false }], 'a pasted one too');
+    assert.deepEqual(await desk(OFFER), { imports: [{ name: 'offered.js', site: '', phone: false }], done: 'added' }, 'and one from Downloads');
+    // the phone view: its own panel window, the phone twin's (no mods yet, no files)
+    const opened = await h.ask({ type: 'phone.open', tabId: phoneTab, screen: { left: 0, top: 25, width: 1470, height: 931 } });
+    await waitFor('the phone page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
+    const phone = await panelOf(`?window=${opened.window}&fallback=1`);
+    const phoneWant = { phone: true, box: false, count: '(0)', rows: [], files: null, asked: 'phone~127.0.0.1' };
+    await waitFor('the phone panel\'s list', async () => JSON.stringify(await phone(LIST)) === JSON.stringify(phoneWant)).catch(async (e) => { console.error(JSON.stringify(await phone(LIST))); throw e; });
+    await sleep(1500); // (and it stays so: nothing of the desktop's comes back with a later status)
+    assert.deepEqual(await phone(LIST), phoneWant);
+    assert.deepEqual(await phone(DROP), [{ name: 'dropped.js', site: '', phone: true }], 'the phone panel\'s import: a phone mod (the helper writes it in the twin)');
+    assert.deepEqual(await phone(PASTE), [{ name: 'pasted.js', site: '', phone: true }], 'a pasted one too');
+    assert.deepEqual(await phone(OFFER), { imports: [{ name: 'offered.js', site: '', phone: true }], done: 'added' }, 'and one from Downloads');
+    // Back to desktop (from the phone's panel): the tab in its window again, its panel the desktop's
+    await phone('document.getElementById("phone-back").click(), 0');
+    await waitFor('back to desktop', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && !window.__seen.uaPhone'));
+    await h.E(([tab, win]) => chrome.tabs.update(tab, { active: true }).then(() => chrome.windows.update(win, { focused: true })), [phoneTab, homeWin]);
+    await waitFor('the desktop panel again', async () => JSON.stringify(await desk(LIST)) === JSON.stringify(deskWant)).catch(async (e) => { console.error(JSON.stringify(await desk(LIST))); throw e; });
+  } finally {
+    await browser.close();
+    pages.server.close();
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
+});

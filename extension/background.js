@@ -1506,7 +1506,7 @@ function siteLists() {
 async function modsOnPage(args) {
   const tab = await scopedTab(args);
   const url = tab.url || tab.pendingUrl || '';
-  const mods = state.mods.filter((m) => { if (!isEnabled(m.id) || m.held) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
+  const mods = state.mods.filter((m) => { if (!isEnabled(m.id) || m.held || !runsInTab(m, tab.id)) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
   return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
 }
 
@@ -1615,14 +1615,17 @@ function healthOfPage(since, styleSel, sandbox) {
 }
 
 // (as registered: a parent's mod doesn't run on a sensitive site of its own, lib.js limitToSites)
-const runningOn = (url) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
+// (in the phone view's tab only phone mods run, in every other tab only the rest: lib.js phoneGate; so its health
+// checks, its badge and `trif status` are about its own mods)
+const runsInTab = (m, tabId) => isPhoneMod(m) === (tabId !== undefined && tabId !== null && phones.isPhone(tabId));
+const runningOn = (url, tabId) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held || !runsInTab(m, tabId)) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
 
 async function checkTab(tabId, final = false) {
   if (!checkUserScripts()) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab?.url || '';
   if (!/^https?:/.test(url) || !siteOnFor(url, onSites(), sens())) return;
-  const running = runningOn(url);
+  const running = runningOn(url, tabId);
   if (!running.length) return;
   // (a load from scheduleHealth counts for "may be broken"; one the panel's look finds, or a page that changed
   // its address by itself, only for errors)
@@ -1671,7 +1674,7 @@ function saveHealthSoon() {
 /** The toolbar's mark for a tab: "!" while a mod running there has a new error (or may be broken). */
 async function badgeFor(tab) {
   if (!tab || !chrome.action?.setBadgeText) return;
-  const n = runningOn(tab.url || '').reduce((k, m) => k + openErrors(state.health, m).length, 0);
+  const n = runningOn(tab.url || '', tab.id).reduce((k, m) => k + openErrors(state.health, m).length, 0);
   try {
     await chrome.action.setBadgeText({ tabId: tab.id, text: n ? '!' : '' });
     if (n) await chrome.action.setBadgeBackgroundColor?.({ tabId: tab.id, color: '#d93025' });
@@ -2036,7 +2039,7 @@ async function onPageMessage(msg) {
       for (const fp of fps) dismissError(state.health, m, fp);
       await save({ modHealth: state.health });
       await markCards(m.id, fps, 'ignored');
-      for (const t of await chrome.tabs.query({}).catch(() => [])) if (runningOn(t.url || '').some((x) => x.id === m.id)) await badgeFor(t);
+      for (const t of await chrome.tabs.query({}).catch(() => [])) if (runningOn(t.url || '', t.id).some((x) => x.id === m.id)) await badgeFor(t);
       notifyPanels();
       return { id: m.id, dismissed: fps };
     }
@@ -2504,7 +2507,8 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? ''), ...(Array.isArray(msg.ids) ? { ids: msg.ids.slice(0, 5000).map(String) } : {}) }, 11 * 60 * 1000);
     case 'mod.import': {
       // Import a mod (the panel's button, or a .js dropped on it): its text; the helper checks and writes it
-      const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? '') }, 20000);
+      // (`phone`: from the phone view's panel, a phone mod: the helper writes it in the phone twin, lib/share.js)
+      const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? ''), ...(msg.phone === true ? { phone: true } : {}) }, 20000);
       if (r?.id && msg.chatSite) {
         await updateChat(normalizeSite(msg.chatSite), (chat) => { chat.messages.push({ role: 'mod', text: `Imported ${String(msg.name || 'a mod')} as ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}. Like any mod from outside, it waits for your OK if its code can do more than change the page.`, time: Date.now() }); });
       }
@@ -2756,7 +2760,8 @@ async function startAgent(msg) {
     chat.last = null;
   });
   // (files the message attaches, "[attached: files/<name>]": where they are, for the agent)
-  const attached = [...prompt.matchAll(/\[attached: files\/([^\]\n]{1,200})\]/g)].map((x) => `sites/${site}/files/${x[1]}`);
+  // (the phone view's chat: its phone twin's files, sites/phone~x.com/files/, where its panel adds them)
+  const attached = [...prompt.matchAll(/\[attached: files\/([^\]\n]{1,200})\]/g)].map((x) => `sites/${chatSite}/files/${x[1]}`);
   // (the run's scope: the site this host is in, a sensitive one of its own too; and the sites of their own
   // TRIF knows of, so the helper gives the run the right folder: helper/lib/scope.js scopeOf)
   // (a chat in the phone view: the agent is told the tab is one, phone.js)

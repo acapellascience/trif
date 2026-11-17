@@ -822,7 +822,7 @@ function agentCommand(cmd, args) {
     // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so
     // the next sync holds it like any (held.js), and marked imported
     case 'mod.import': {
-      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? '') });
+      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? ''), phone: args.phone === true });
       if (r.id) { logger.info(`imported ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}`); syncMods('import', false); }
       return r.file ? { ...r, file: path.relative(ws.home, r.file) } : r;
     }
@@ -979,7 +979,8 @@ function startRun(args) {
     return r;
   }
   const id = String(args.merge).trim();
-  if (require('./lib/scope').scopeOf(id.split('/')[0], [...(Array.isArray(args.splits) ? args.splits : []), scope]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
+  // (its own site's mods only; from the phone view, its phone twin's: trash.js siteInScope)
+  if (!require('./lib/trash').siteInScope(id.split('/')[0], scope, Array.isArray(args.splits) ? args.splits : [])) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });

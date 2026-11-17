@@ -15,7 +15,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
       runtime (present, hash of bin/node, runs) and say when TRIF is still on a system node. Tests.
 - [x] 5. `trif uninstall` (manifests, LaunchAgent, bin, app, runtime; mods and private folder kept unless
       `--all`). Tests. Strings to NO-NODE-STRINGS.md.
-- [ ] 6. `scripts/install.sh` template + release.js step that fills it (package URL/sha, runtime pins) and a
+- [x] 6. `scripts/install.sh` template + release.js step that fills it (package URL/sha, runtime pins) and a
       `release.js refresh-runtime` dry-runnable step that rewrites runtime.json from SHASUMS256.txt. Tests
       (dry run only, never a real release).
 - [ ] 7. Front door text: extension `SETUP_COMMAND`, onboarding, background "not connected", help.js, README
@@ -69,13 +69,39 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   running helper stopped, non-workspace refused). Locally cli/install/setup-runtime/runtime/explain/
   extension/sweep 256/256 pass. CI: https://github.com/acapellascience/trif/actions/runs/44182632765 (attempt 1: 892 pass, only the known clickjack-browser flake failed; rerun: the same, 892 pass, only clickjack-browser failed again; the known flake, moved on per the rules)
 
+- Round 5, step 6: scripts/install.sh (POSIX sh template: platform incl. Rosetta, xz-or-gz, curl https-only
+  with --proto-redir, shasum/sha256sum, all in main() so a cut-off pipe runs nothing, setup's stdin
+  /dev/null, `sh -s -- <setup args>`); release.js `installScript` (fills it, attached as release asset
+  install.sh), `runtimePins`/`runtimePinsProblem` (preflight check), `refresh-runtime [<ver>] [--dry-run]`
+  (dry run against nodejs.org reproduces helper/runtime.json byte for byte); runtime.js `archiveFile` /
+  TRIF_RUNTIME_ARCHIVE so setup keeps install.sh's download (still hash-checked). Tests: install-script (4,
+  incl. `cat | sh` with no node on PATH vs a local server), runtime (+1), setup-runtime (+1). CI: https://github.com/acapellascience/trif/actions/runs/44186997274 green on attempt 1 (clickjack passed this time).
+  Previous round's CI rerun (44182632765) and 44185286312: only clickjack-browser failed (a timing assert,
+  "the second look: 18.10 ms at most"); 3 runs in a row now, all timing; not touched by this branch.
+
 ## Next step
 
-Step 6: `scripts/install.sh` template + release.js step that fills it (package URL/sha, runtime pins) and a
-dry-runnable `release.js refresh-runtime` that rewrites runtime.json from SHASUMS256.txt. Tests (dry run
-only). Decide there whether install.sh unpacks the runtime itself or leaves it to setup (see notes).
+Step 7: front door text (drafts already in NO-NODE-STRINGS.md; still waiting on Tim's For Tim 2 for the
+URL). If Tim still hasn't answered, consider doing step 8 first (clean-machine test: it needs no wording):
+build a package with `npm pack`, fill install.sh with installScript, point it at a local server (the
+install-script test shows how to swap the URLs), run it with PATH=/usr/bin:/bin and a temp HOME.
 
 ## Notes for next round
+
+- Step 6 as built: install.sh unpacks Node into its temp folder only, runs `<node> package/helper/cli.js
+  setup --copy "$@"` with TRIF_RUNTIME_ARCHIVE=<the archive>; runtime.js `ensureRuntime({archiveFile})` uses it
+  when its basename is one of this platform's pins (sha still checked), else downloads as usual; so the
+  MARK file and folder shape stay owned by runtime.js. setup skips its "Downloading Node" line then.
+- release() writes dist/release/<v>/install.sh (mode 755) from src's template and pins and attaches it;
+  releases/latest/download/install.sh is then a stable link. Not exercised by a full `release.js <v>
+  --dry-run` this round (needs a CHANGELOG section for a new version); step 8 should run one in a copy, or
+  call installScript on an `npm pack` result directly.
+- installScript accepts only plain https package URLs and 64-hex SHAs (single-quoted into the script);
+  tests rewrite the filled lines to point at 127.0.0.1 (install.sh allows http only to 127.0.0.1/localhost).
+- refresh-runtime: default = newest release of the pinned major from nodejs.org/dist/index.json;
+  `TRIF_NODE_DIST` overrides the dist URL (tests); SHASUMS256.txt.sig (GPG) still not checked.
+- Windows: install.sh refuses MINGW/MSYS/Cygwin; branch `windows` needs an install.ps1 counterpart (win-x64
+  .zip pins are already in runtime.json; installScript leaves them out of install.sh).
 
 - Step 5 as built: uninstall takes the install lock (refuses during an update), removes only manifests
   whose `path` is in this workspace's bin (all browserTable dirs, or `--native-dir`), Safari plists whose
@@ -150,3 +176,7 @@ Not blocking steps 2-6 (they follow the recommendation and are easy to change):
 3. **Uninstall** (built in step 5, easy to change): `trif uninstall` keeps mods and settings by default;
    `--all` removes them and the saved API keys, after typing "delete" at a terminal or with `--yes`.
    Wording drafts in NO-NODE-STRINGS.md.
+4. **Where install.sh lives** (step 6 built it as a release asset): the command can name GitHub's
+   `https://github.com/acapellascience/trif/releases/latest/download/install.sh` directly (works today, no
+   site change), or timsrobot.com/install.sh redirecting there (a site deploy, yours). Recommended: the
+   timsrobot.com address, as a redirect, so the panel text survives a repo move.

@@ -131,23 +131,26 @@ async function main() {
   const VICTIM = 'victim.com/secret';
   const got = (r) => (r.timedOut ? '(timed out)' : r.msg ? (r.msg.ok ? `ok: ${JSON.stringify(r.msg.result).slice(0, 80)}` : `refused: ${String(r.msg.error).slice(0, 80)}`) : `raw: ${String(r.text).slice(0, 80)}`);
   const leaked = (r) => !r.timedOut && r.msg && r.msg.ok && JSON.stringify(r.msg.result).includes(SECRET);
+  // The box watcher can be a beat behind the first drop (fs.watch setup); warm it up and retry a timeout once.
+  const forge = async (cmd, args, opts) => { let r = await boxRequest(box, cmd, args, opts); if (r.timedOut) r = await boxRequest(box, cmd, args, opts); return r; };
+  await boxRequest(box, 'ping', {}).catch(() => {});
 
   // 1) mod.code for another site's mod: the code-viewer command, which `trif` never sends. No scope check?
   {
-    const r = await boxRequest(box, 'mod.code', { id: VICTIM });
+    const r = await forge('mod.code', { id: VICTIM });
     record(leaked(r) ? 'BREAK' : 'PASS', 'mod.code for another site\'s mod', leaked(r) ? `read victim.com's mod source across scope -- ${got(r)}` : got(r));
   }
   // 2) mod.diff for another site's mod: it answers for another site's mod id at all (its hash and, when a
   //    change is pending, its text) -- crossing the run's scope.
   {
-    const r = await boxRequest(box, 'mod.diff', { id: VICTIM });
+    const r = await forge('mod.diff', { id: VICTIM });
     const crossed = !r.timedOut && r.msg && r.msg.ok && r.msg.result && r.msg.result.id === VICTIM;
     const body = crossed && JSON.stringify(r.msg.result.lines || '').includes(SECRET);
     record(crossed ? 'BREAK' : 'PASS', 'mod.diff for another site\'s mod', crossed ? `answered for victim.com's mod across scope${body ? ' (leaked its text)' : ' (leaked its hash/diff)'} -- ${got(r)}` : got(r));
   }
   // 3) mods: the whole mod list (every site), reachable with or without a token.
   {
-    const r = await boxRequest(box, 'mods', {});
+    const r = await forge('mods', {});
     const sees = !r.timedOut && r.msg && r.msg.ok && Array.isArray(r.msg.result.mods) && r.msg.result.mods.some((m) => m.id === VICTIM);
     record(sees ? 'BREAK' : 'PASS', 'mods: enumerate every site\'s mods', sees ? 'the run saw victim.com/secret in the full mod list' : got(r));
   }
@@ -172,7 +175,7 @@ async function main() {
   }
   // 7) unknown command.
   {
-    const r = await boxRequest(box, 'totally.made.up', { x: 1 });
+    const r = await forge('totally.made.up', { x: 1 });
     const ran = !r.timedOut && r.msg && r.msg.ok;
     record(ran ? 'BREAK' : 'PASS', 'unknown command', got(r));
   }

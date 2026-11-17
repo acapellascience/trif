@@ -13,7 +13,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
       fallback `pickNodePath()` with a note); `--no-runtime` for git checkouts/dev. Tests.
 - [x] 4. update.js: run the new package's setup with the runtime's node when present; doctor.js: check the
       runtime (present, hash of bin/node, runs) and say when TRIF is still on a system node. Tests.
-- [ ] 5. `trif uninstall` (manifests, LaunchAgent, bin, app, runtime; mods and private folder kept unless
+- [x] 5. `trif uninstall` (manifests, LaunchAgent, bin, app, runtime; mods and private folder kept unless
       `--all`). Tests. Strings to NO-NODE-STRINGS.md.
 - [ ] 6. `scripts/install.sh` template + release.js step that fills it (package URL/sha, runtime pins) and a
       `release.js refresh-runtime` dry-runnable step that rewrites runtime.json from SHASUMS256.txt. Tests
@@ -63,13 +63,34 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   in setup-runtime (3) and update (1 + asserts); locally update/cli/runtime/upgrade + 9 related files pass
   (only the known web-ext ENOENT release test fails, no npm install here). CI: https://github.com/acapellascience/trif/actions/runs/44177557546 green (attempt 1 cancelled: no macOS runner within 15 min; rerun passed)
 
+- Round 4, step 5: `trif uninstall [--all [--yes]]` (helper/lib/uninstall.js; cli.js handler, help.js, NOT_IN_RUNS);
+  tests/uninstall.test.js (4 pass: real setup then uninstall in a temp HOME, another workspace's manifest
+  kept, setup again restores, --all needs --yes off a TTY, fake-keychain key removed, outside modsDir kept,
+  running helper stopped, non-workspace refused). Locally cli/install/setup-runtime/runtime/explain/
+  extension/sweep 256/256 pass. CI: https://github.com/acapellascience/trif/actions/runs/44182632765 (attempt 1: 892 pass, only the known clickjack-browser flake failed; rerun started, result not yet seen: check it first next round)
+
 ## Next step
 
-Step 5: `trif uninstall` (manifests, Safari LaunchAgent, bin, app, runtime; mods and the private folder
-kept unless `--all`). Tests in a temp HOME only. Strings to NO-NODE-STRINGS.md. (Still unconfirmed by Tim,
-For Tim 3; build it as designed, easy to change.)
+Step 6: `scripts/install.sh` template + release.js step that fills it (package URL/sha, runtime pins) and a
+dry-runnable `release.js refresh-runtime` that rewrites runtime.json from SHASUMS256.txt. Tests (dry run
+only). Decide there whether install.sh unpacks the runtime itself or leaves it to setup (see notes).
 
 ## Notes for next round
+
+- Step 5 as built: uninstall takes the install lock (refuses during an update), removes only manifests
+  whose `path` is in this workspace's bin (all browserTable dirs, or `--native-dir`), Safari plists whose
+  TRIF_HOME is this home (none = the default home), `trif`/`webmods` links in `--bin-dir` (default
+  /usr/local/bin) to this workspace's wrappers, SIGTERMs helpers from `helper-<pid>.sock` whose `ps`
+  command has host.js, then bin/, app/, runtime/, `.app.new-*`/`.app.old-*`/`.update-*`, sockets.
+  `--all`: keyring keys (agentkeys AGENT_KEYS + codex-oss removeKey; skipped when the keyring tool is
+  missing), private folder, boxRoot() (and its empty parent unless TRIF_BOX_ROOT), ~/.webmods link, home;
+  a modsDir outside home is kept. Refuses a folder without bin/app/sites/AGENTS.md, and the home folder.
+  Interactive --all asks to type "delete". Windows: deleting runtime/node.exe while it runs fails (it's the
+  process running uninstall): branch `windows` needs a deferred delete (a .cmd that waits, or
+  MoveFileEx on reboot) and its registry keys (HKCU NativeMessagingHosts) removed here.
+- uninstall leaves the extension itself (Chrome loads it unpacked from <home>/app/extension, now gone: Chrome
+  shows it as failed to load); the last line tells the user to remove it. README Uninstall rewrite is a
+  step-7 draft in NO-NODE-STRINGS.md.
 
 - Step 4 as built: update.js `updateNode(home)` (the running node if it's already a runtime, else
   `R.installedNode(home)`, else `process.execPath`); setup run with `timeout: SETUP_TIMEOUT_MS` (10 min,
@@ -126,4 +147,6 @@ Not blocking steps 2-6 (they follow the recommendation and are easy to change):
 2. **Front door** (needed by step 7): `curl -fsSL https://timsrobot.com/install.sh | sh` shown in the panel
    and README (recommended), and/or a signed .pkg later (needs your Developer ID Installer certificate and
    notarization in release.js). Keep `npx timsrobot setup` as the alternative for people with Node?
-3. **Uninstall**: add `trif uninstall` keeping mods and settings by default (`--all` removes them)?
+3. **Uninstall** (built in step 5, easy to change): `trif uninstall` keeps mods and settings by default;
+   `--all` removes them and the saved API keys, after typing "delete" at a terminal or with `--yes`.
+   Wording drafts in NO-NODE-STRINGS.md.

@@ -1746,6 +1746,9 @@ class Scenario {
       // main after the trim, before the fewer-steps changes (27581c9)
       trim: { 'AGENTS.md': show('27581c9', 'AGENTS.md'), 'TECHNIQUES.md': show('27581c9', 'TECHNIQUES.md'), 'BOXED.md': show('27581c9', 'BOXED.md') },
       now: { 'AGENTS.md': here('AGENTS.md'), 'TECHNIQUES.md': here('TECHNIQUES.md'), 'BOXED.md': here('BOXED.md') },
+      // the 2026-11-17 head-to-head: main's guides (67c16d5) against the condensed ones on lean-guides (8334aa2)
+      current: Object.fromEntries(DOCS.map((f) => [f, show('67c16d5', f)])),
+      lean: Object.fromEntries(DOCS.map((f) => [f, show('8334aa2', f)])),
       // next to nothing: where mods go, and that trif --help exists
       none: { 'AGENTS.md': '# TRIF workspace\n\nMods are files in `sites/<site>/<mod>.js`. `trif --help` lists the commands for looking at and testing the user\'s page.\n' },
     };
@@ -1821,6 +1824,35 @@ class Scenario {
       return { ...m, loadsMore: after.posts > m.posts + 1 && !after.error, shot: shot && path.basename(shot) };
     };
 
+    // the scrolling-feed task: after a reload, the feed scrolled to its end three times (three more pages, each
+    // with a Sponsored post); what's left of the Sponsored posts, the friends' posts (the ones that say
+    // "sponsored" in their text among them), blank cards a hidden post left, and whether the feed still loads
+    const measureFeed = async (label) => {
+      await this.cli(['reload', '--url', 'hearth-feed.html']);
+      await sleep(1500);
+      const ctx = await pageCtx('hearth-feed.html');
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      const before = await this.d.eval(ctx, `async () => document.querySelectorAll('[role=feed] > .x3pst').length`);
+      for (let i = 0; i < 3; i++) {
+        await this.d.eval(ctx, `async () => { scrollTo(0, document.documentElement.scrollHeight); }`);
+        await sleep(1500);
+      }
+      const m = await this.d.eval(ctx, `async () => {
+        const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).opacity !== '0';
+        const items = [...document.querySelectorAll('[role=feed] > .x3pst')];
+        const isAd = (p) => /Sponsored/.test((p.querySelector('.x0sub') || {}).textContent || '');
+        const ads = items.filter(isAd), posts = items.filter((p) => !isAd(p));
+        const decoys = posts.filter((p) => /sponsored/i.test(p.textContent));
+        const shown = (p) => vis(p) && p.getBoundingClientRect().height > 30 && vis(p.querySelector('b'));
+        const blank = items.filter((p) => vis(p) && p.getBoundingClientRect().height > 4 && !shown(p)).length;
+        const right = document.querySelector('[role=complementary] section');
+        return { items: items.length, ads: ads.length, adsLeft: ads.filter(shown).length, posts: posts.length, postsLeft: posts.filter(shown).length,
+          decoys: decoys.length, decoysLeft: decoys.filter(shown).length, blank, error: !!document.querySelector('.x0err'),
+          rightSponsored: right ? vis(right.querySelector('h3')) || [...right.querySelectorAll('a.x2ad')].some(vis) : null };
+      }`);
+      return { ...m, before, loadsMore: m.items >= before + 9 && !m.error, shot: shot && path.basename(shot) };
+    };
+
     // ---- how a run worked, from its log in the scratch home (the newest one)
     const runLog = (since) => {
       const files = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl')).map((f) => path.join(runsDir, f)).filter((f) => fs.statSync(f).mtimeMs >= since) : [];
@@ -1834,7 +1866,7 @@ class Scenario {
       const texts = [];
       for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
         let o; try { o = JSON.parse(line); } catch { continue; }
-        if (o.webmods === 'start') started = o.time;
+        if (o.webmods === 'start') { started = o.time; st.effort = o.effort || null; }
         if (o.type === 'assistant' && o.message && st.firstWords === null && started && o.timestamp) {
           const t = (o.message.content || []).find((c) => c.type === 'text' && c.text.trim());
           if (t) { st.firstWords = Math.round((Date.parse(o.timestamp) - started) / 100) / 10; st.firstLine = t.text.trim().split('\n')[0].slice(0, 160); }
@@ -1866,7 +1898,11 @@ class Scenario {
             if (c && c.type === 'tool_result' && /ran in TRIF's box/.test(JSON.stringify(c.content || ''))) st.boxMisses++;
           }
         }
-        if (o.type === 'result') { st.turns = o.num_turns ?? null; st.cost = o.total_cost_usd ?? null; }
+        if (o.type === 'result') {
+          st.turns = o.num_turns ?? null; st.cost = o.total_cost_usd ?? null; st.agentMs = o.duration_ms ?? null;
+          const u = o.usage || {};
+          st.tokens = { input: u.input_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, output: u.output_tokens || 0 };
+        }
       }
       st.reply = texts.length ? texts[texts.length - 1] : '';
       st.replyAll = texts.join('\n\n');
@@ -1905,7 +1941,7 @@ class Scenario {
     const agentRun = async (file, prompt, session) => {
       const tab = ((await this.cli(['tabs'], { json: true })).json || []).find((t) => t.url.includes(file));
       const t0 = Date.now();
-      const args = ['agent', 'run', '--agent', 'claude', '--model', model, '--tab', String(tab && tab.id), ...(session ? ['--session', session] : []), prompt];
+      const args = ['agent', 'run', '--agent', 'claude', '--model', model, ...(this.o.studyEffort ? ['--effort', this.o.studyEffort] : []), '--tab', String(tab && tab.id), ...(session ? ['--session', session] : []), prompt];
       const out = await this.cli(args, { timeoutMs: 15 * 60000 });
       const stdout = `${out.stdout}\n${out.stderr}`;
       return { secs: Math.round((Date.now() - t0) / 1000), stdout, session: (/^session: (\S+)/m.exec(out.stdout) || [])[1] || null, log: runLog(t0 - 1000) };
@@ -1918,13 +1954,14 @@ class Scenario {
         'hide the sponsored stuff in the right column, and make the birthdays box really compact',
         'make the right column much thinner and let the posts use the space it frees up',
       ], measure: measureHearth },
+      { key: 'feed', file: 'hearth-feed.html', turns: ['hide the sponsored posts in my feed'], measure: measureFeed },
     ].filter((t) => !this.o.studyTasks || this.o.studyTasks.includes(t.key));
 
     const baselines = {};
-    for (const file of ['promos.html', 'hearth.html']) {
+    for (const file of ['promos.html', 'hearth.html', 'hearth-feed.html']) {
       if (!tasks.some((t) => t.file === file)) continue;
       await openPage(file);
-      baselines[file] = file === 'hearth.html' ? await measureHearth('baseline') : await measurePromos();
+      baselines[file] = file === 'hearth.html' ? await measureHearth('baseline') : file === 'hearth-feed.html' ? await measureFeed('feed-baseline') : await measurePromos();
     }
     r.log(`--study baselines: ${JSON.stringify(baselines)}`);
     const rows = [];

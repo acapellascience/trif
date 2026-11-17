@@ -348,7 +348,10 @@ addEventListener('scroll', () => {
 // runs): a header, a left nav, a feed column that loads more posts with a POST as you scroll (so a tab locked by
 // `trif run` can't), and a right column with a Sponsored section, a Birthdays box and Contacts. Class names are
 // generated-looking, as on Facebook: roles and headings are what an agent (and the study's measure) can hold on to.
-const HEARTH_PAGE = () => PAGE('Hearth', `
+// feed: true (/hearth-feed.html, the study's scrolling-feed task) adds a Sponsored post to every page the feed
+// loads, and two friends' posts that say "sponsored" in their text (which a fix by text alone would hide too).
+const HEARTH_DECOY = (n) => (n === 2 ? 'Our 5k run was sponsored by the corner bakery. Thanks, all!' : `Post ${n}: something that happened today.`);
+const HEARTH_PAGE = ({ feed = false } = {}) => PAGE('Hearth', `
 <style>
   body { margin: 0; max-width: none; background: #f0f2f5; font: 15px/1.35 system-ui, sans-serif; color: #1c1e21; }
   .x9f2k { position: sticky; top: 0; z-index: 3; height: 56px; background: #fff; box-shadow: 0 1px 2px #0002; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
@@ -380,7 +383,7 @@ const HEARTH_PAGE = () => PAGE('Hearth', `
     <a href="#">Tim B</a><a href="#">Friends</a><a href="#">Groups</a><a href="#">Marketplace</a><a href="#">Memories</a><a href="#">Saved</a>
   </div>
   <div class="x5mid"><div role="main"><div role="feed" id="x0feed">
-    ${[1, 2, 3].map((n) => `<div class="x3pst"><b>Friend ${n}</b><div class="x0sub">${n}h</div><div>Post ${n}: something that happened today.</div><div class="x0img"></div></div>`).join('')}
+    ${[1, 2, 3].map((n) => `<div class="x3pst"><b>Friend ${n}</b><div class="x0sub">${n}h</div><div>${feed ? HEARTH_DECOY(n) : `Post ${n}: something that happened today.`}</div><div class="x0img"></div></div>`).join('')}
     <div class="x3pst"><b>Lamps Inc.</b><div class="x0sub">Sponsored</div><div>Big sale on lamps.</div><div class="x0img"></div></div>
     ${[4, 5].map((n) => `<div class="x3pst"><b>Friend ${n}</b><div class="x0sub">${n}h</div><div>Post ${n}: something that happened today.</div><div class="x0img"></div></div>`).join('')}
   </div><div id="x0more" style="height: 40px"></div></div></div>
@@ -404,7 +407,7 @@ addEventListener('scroll', async () => {
   if (busy || scrollY + innerHeight < document.documentElement.scrollHeight - 400) return;
   busy = true;
   try {
-    const r = await fetch('/api/hearth-more', { method: 'POST', body: JSON.stringify({ page: ++page }) });
+    const r = await fetch('/api/hearth-more${feed ? '?ads=1' : ''}', { method: 'POST', body: JSON.stringify({ page: ++page }) });
     const items = await r.json();
     for (const it of items) {
       const d = document.createElement('div');
@@ -596,6 +599,18 @@ async function startServers(dir) {
     if (u.pathname === '/e2e-sw.js') return send(200, 'text/javascript', SW_SCRIPT);
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/hearth.html') return send(200, 'text/html; charset=utf-8', HEARTH_PAGE());
+    if (u.pathname === '/hearth-feed.html') return send(200, 'text/html; charset=utf-8', HEARTH_PAGE({ feed: true }));
+    // (the scrolling-feed task's next posts: two friends', a Sponsored one, and a friend's that says "sponsored" every other page)
+    if (u.pathname === '/api/hearth-more' && u.search === '?ads=1' && req.method === 'POST') {
+      const n = requests.filter((x) => x.url === '/api/hearth-more?ads=1').length;
+      const f = (i) => 5 + 3 * (n - 1) + i;
+      return send(200, 'application/json', JSON.stringify([
+        { who: `Friend ${f(1)}`, when: '1d', text: `Older post ${f(1)}.` },
+        { who: ['Lamps Inc.', 'Acrobat', 'Berry Effects', 'Cheap Flights'][n % 4], when: 'Sponsored', text: `Deal ${n}: don't miss it.` },
+        { who: `Friend ${f(2)}`, when: '1d', text: `Older post ${f(2)}.` },
+        { who: `Friend ${f(3)}`, when: '2d', text: n % 2 ? 'My podcast this week is sponsored by nobody, as usual.' : `Older post ${f(3)}.` },
+      ]));
+    }
     // (the Hearth feed's next posts: a POST, as Facebook's are, so a tab locked by trif run can't load them)
     if (u.pathname === '/api/hearth-more' && req.method === 'POST') {
       const n = requests.filter((x) => x.url === '/api/hearth-more').length;

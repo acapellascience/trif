@@ -26,7 +26,7 @@ const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update'
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
-  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
+  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--effort', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance', '--to']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--box', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor', '--replace', '--as-copy']);
@@ -1382,6 +1382,7 @@ async function agentRun(ctx, pos) {
   const args = { prompt };
   if (ctx.opts['--agent']) args.agent = ctx.opts['--agent'];
   if (ctx.opts['--model']) args.model = ctx.opts['--model'];
+  if (ctx.opts['--effort']) args.effort = String(ctx.opts['--effort']); // (as the panel's Effort setting)
   if (ctx.opts['--session']) args.sessionId = ctx.opts['--session'];
   if (ctx.opts['--tab'] !== undefined) args.tabId = tabArgs(ctx.opts).tab;
   if (ctx.opts['--url'] !== undefined) {

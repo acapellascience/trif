@@ -43,7 +43,10 @@ third by its window size.
   outer size, frame included. A popup has no tab strip or toolbar, only a title bar and a line with the
   address; for the page to be 390 px wide the window is 390 plus the frame (0 on macOS), so TRIF measures the
   page after the window opens (`innerWidth`/`innerHeight` from TRIF's isolated world, which the page script
-  doesn't touch) and resizes once (`phone.js fit`).
+  doesn't touch) and resizes it (`phone.js fitPhoneWindow`). The measure waits for the window and the page to
+  agree (the same twice running): right after the tab moves, and after a resize, the page can still say its
+  old window's size for a moment, longer on a busy machine, and a window sized from that is wrong (CI's
+  776 × 813 page). So it measures again after the resize, and again if needed, a few rounds at most.
 - **Is 390 × 844 reachable?** The width, yes: Chrome's popup windows go well under 390 (password managers open
   360 px popups). Headless Chrome took a popup down to 200 × 300 with `windows.update`. The height: Chrome
   keeps windows on the screen, and a 13" MacBook Air has about 856 px under the menu bar with the Dock shown,

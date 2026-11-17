@@ -103,6 +103,64 @@ export function phoneBounds({ frame = { width: 0, height: 0 }, screen = null, ho
 // and the address line). Corrected from the real window right after it opens.
 const FRAME_GUESS = { width: 0, height: 62 };
 
+const BOUNDS = ['left', 'top', 'width', 'height'];
+
+/** A tab's page size, as the page itself sees it (the isolated world: the page script doesn't reach it). */
+async function pageSize(chrome, tabId) {
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func: () => ({ w: innerWidth, h: innerHeight }), injectImmediately: true });
+    return r?.result && r.result.w > 0 ? r.result : null;
+  } catch { return null; }
+}
+
+/**
+ * The window's bounds and its page's size once they agree: the same in two looks in a row. Right after the
+ * tab moves (or the window is resized) the page can still have its old window's size, or one on the way, for
+ * a moment, longer on a busy machine: a frame measured from that is wrong, and so is the window sized by it
+ * (CI, on a busy runner: a 776 x 813 page). null if the page can't be measured.
+ */
+async function settled(chrome, tabId, windowId, pause) {
+  let last = null;
+  for (let i = 0; i < 20; i++) {
+    const win = await chrome.windows.get(windowId).catch(() => null);
+    const size = await pageSize(chrome, tabId);
+    if (!win || !size) return null;
+    const now = { win, size };
+    if (last && BOUNDS.every((k) => last.win[k] === win[k]) && last.size.w === size.w && last.size.h === size.h) return now;
+    last = now;
+    await new Promise((r) => setTimeout(r, pause));
+  }
+  return last;
+}
+
+/**
+ * Makes phone window `windowId`'s page area (tab `tabId`'s) the phone's: the window's parts measured, the
+ * window resized, then measured again until it's right (a look taken while the page still had another size is
+ * corrected there), a few rounds at most. `screen`, `home`: as phoneBounds takes them. Returns the page's
+ * size, {w, h}, or null if it can't be measured yet. `pause`: ms between looks.
+ */
+export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, home = null, log = () => {}, pause = 100 }) {
+  let before = null;
+  for (let round = 0; round < 4; round++) {
+    const m = await settled(chrome, tabId, windowId, pause);
+    if (!m) return null;
+    const frame = { width: m.win.width - m.size.w, height: m.win.height - m.size.h };
+    const want = phoneBounds({ frame, screen, home });
+    if (!BOUNDS.some((k) => finite(want[k]) && Math.abs(want[k] - m.win[k]) > 1)) return m.size;
+    // (the browser kept the window as it was though asked last round: it won't go there, so this is as close as it gets)
+    if (before && BOUNDS.every((k) => before[k] === m.win[k])) return m.size;
+    before = m.win;
+    await chrome.windows.update(windowId, want).catch((e) => log(`phone window: ${e?.message ?? e}`));
+    // (the page takes the new size a moment later: until its size changes, or 15 looks)
+    for (let i = 0; i < 15; i++) {
+      const now = await pageSize(chrome, tabId);
+      if (now && (now.w !== m.size.w || now.h !== m.size.h)) break;
+      await new Promise((r) => setTimeout(r, pause));
+    }
+  }
+  return pageSize(chrome, tabId);
+}
+
 /**
  * The phone views of this browser, kept in session storage (`phones`) across service worker restarts: tab id
  * -> {window, home: {windowId, index}, ids, site, since}. Listeners are added by `listen()`.
@@ -160,34 +218,6 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
     if (p?.ids?.length) await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: p.ids }).catch((e) => log(`phone rules: ${e?.message ?? e}`));
     save();
     if (!phones.size) await unregister();
-  }
-
-  /** The page's own size, as the page itself sees it (the isolated world: the page script doesn't reach it). */
-  async function pageSize(tabId) {
-    try {
-      const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func: () => ({ w: innerWidth, h: innerHeight }), injectImmediately: true });
-      return r?.result && r.result.w > 0 ? r.result : null;
-    } catch { return null; }
-  }
-
-  /** Makes the window's page area the phone's: the window's parts measured, the window resized once. */
-  async function fit(tabId, windowId, screen, home) {
-    const win = await chrome.windows.get(windowId).catch(() => null);
-    const size = await pageSize(tabId);
-    if (!win || !size) return null;
-    const frame = { width: win.width - size.w, height: win.height - size.h };
-    const want = phoneBounds({ frame, screen, home });
-    if (['left', 'top', 'width', 'height'].some((k) => finite(want[k]) && Math.abs(want[k] - win[k]) > 1)) {
-      await chrome.windows.update(windowId, want).catch((e) => log(`phone window: ${e?.message ?? e}`));
-      // (the page takes the new size a moment later: until it has the phone's width, or a second and a half)
-      const width = PHONE.viewport.width;
-      for (let i = 0; i < 15; i++) {
-        const now = await pageSize(tabId);
-        if (now && Math.abs(now.w - width) <= 1) return now;
-        await new Promise((r) => setTimeout(r, 100));
-      }
-    }
-    return pageSize(tabId);
   }
 
   /**
@@ -280,7 +310,7 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
         // the phone's size from its first script)
         let viewport = null;
         for (let i = 0; i < 20 && !viewport; i++) {
-          viewport = await fit(tabId, win.id, screen, home);
+          viewport = await fitPhoneWindow({ chrome, tabId, windowId: win.id, screen, home, log });
           if (!viewport) await new Promise((r) => setTimeout(r, 150));
         }
         // A hard reload: past the HTTP cache and the site's service worker. A page a service worker serves (X

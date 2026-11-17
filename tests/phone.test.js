@@ -1,8 +1,8 @@
 'use strict';
 // The phone view's parts that need no browser (extension/phone.js, phone-page.js; docs/MOBILE-EDIT.md): its
-// rules, its window's bounds, the page script's profile matching phone.js's, resolveTab finding the phone's
-// tab, tab locks leaving its rules alone, what the agent is told, and the @device header. The real thing in a
-// browser: tests/phone-browser.test.js.
+// rules, its window's bounds and fit, the page script's profile matching phone.js's, resolveTab finding the
+// phone's tab, tab locks leaving its rules alone, what the agent is told, and the @device header. The real
+// thing in a browser: tests/phone-browser.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -43,6 +43,50 @@ test('phoneBounds: the phone\'s page area when the screen has room, shorter when
   // no screen known: the user's window's corner, or nothing
   assert.deepEqual(phoneBounds({ frame, home: { left: 5, top: 6 } }), { width: 390, height: 812, left: 5, top: 6 });
   assert.deepEqual(phoneBounds({}), { width: 390, height: 750 });
+});
+
+// A browser for fitPhoneWindow: a window whose page is the window less its frame, except that after the tab
+// moves in, and after each resize, the page still says its old size for `lag` looks (CI, a busy runner: the
+// window sized from one such look left a 776 x 813 page).
+function fakeWindow({ frame, win, stale, lag, refuse = false }) {
+  const w = { ...win };
+  let page = { ...stale };
+  let since = 0;
+  const updates = [];
+  const chrome = {
+    windows: {
+      get: async () => ({ ...w }),
+      update: async (id, b) => { updates.push(b); if (refuse) return { ...w }; Object.assign(w, b); since = 0; return { ...w }; },
+    },
+    scripting: {
+      executeScript: async () => {
+        if (since++ >= lag) page = { w: w.width - frame.width, h: w.height - frame.height };
+        return [{ result: { ...page } }];
+      },
+    },
+  };
+  return { chrome, w, updates };
+}
+
+test('fitPhoneWindow: the page area is the phone\'s, also when the page still says its old window\'s size for a while', async () => {
+  const { fitPhoneWindow } = await load('phone.js');
+  const screen = { left: 0, top: 25, width: 1470, height: 931 };
+  const frame = { width: 0, height: 84 };
+  const win = { left: 0, top: 25, width: 1280, height: 720 };
+  for (const lag of [0, 1, 3, 6]) {
+    const b = fakeWindow({ frame, win, stale: { w: 894, h: 657 }, lag });
+    const size = await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, screen, pause: 1 });
+    assert.deepEqual(size, { w: 390, h: 750 }, `lag ${lag}`);
+    assert.deepEqual([b.w.width, b.w.height], [390, 834], `lag ${lag}: the window`);
+    if (lag === 0) assert.equal(b.updates.length, 1, 'one resize when the page has the window\'s size right away');
+  }
+  // a window the browser won't resize: no endless asking, the page as it is
+  const b = fakeWindow({ frame, win, stale: { w: 1280, h: 636 }, lag: 0, refuse: true });
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, screen, pause: 1 }), { w: 1280, h: 636 });
+  assert.equal(b.updates.length, 1);
+  // a page that can't be measured yet (the tab still moving)
+  const none = { windows: { get: async () => win }, scripting: { executeScript: async () => { throw new Error('moving'); } } };
+  assert.equal(await fitPhoneWindow({ chrome: none, tabId: 1, windowId: 2, screen, pause: 1 }), null);
 });
 
 test('phone-page.js says what phone.js PHONE says', async () => {

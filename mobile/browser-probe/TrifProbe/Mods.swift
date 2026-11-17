@@ -642,7 +642,7 @@ struct ModOfferView: View {
                 // scroll down"), after all that says what Add it agrees to: name, what it does, sites, powers, warning)
                 Section {
                     Button("Add it") { browser.addMod(mod); dismiss() }.bold()
-                    Button("Cancel", role: .cancel) { dismiss() }
+                    Button("Cancel", role: .cancel) { browser.offerClosed(declined: true); dismiss() }
                 }
                 Section("Its code") {
                     ScrollView(.horizontal) { Text(mod.code).font(.caption2.monospaced()).textSelection(.enabled) }.frame(maxHeight: 260)

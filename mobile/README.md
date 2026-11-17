@@ -105,11 +105,9 @@ an app", below.
 
 - **Checks → Run the checks on this page.** About twenty seconds; the last two reload the page. Run on all
   five test pages, then on real sites.
-- **Long-press anything** on a page. The app marks it and offers Hide this, All N like it, or Wider. Reload:
-  it's hidden before the page draws, because the rules are part of the script WebKit runs first.
-  Note what the long press fights with: text selection, the page's own long-press menus.
-- **Wand → Ask the phone's own model.** Say what bothers you; the model gets the page outline and picks a
-  part; the app marks it and you confirm.
+- (Point-and-hide, the long press with Hide this / Wider / Point TRIF at this, and Ask the phone's own model,
+  which picked a part for it, were taken out on 11-17: a resting thumb set it off, and one element of many nested
+  ones was the wrong layer or fragile to hide. What they hid stays hidden, each with Show again in the Mods tab.)
 - **The chat** (Claude or ChatGPT, the switch at its top). Tap the bubble: the chat opens full screen over the
   tab, with the tab's data already in its message box (in a chat without TRIF's instructions yet: how mods are
   written, the page's outline and a screenshot, as TRIF instruction; in one that has them: the page now, the

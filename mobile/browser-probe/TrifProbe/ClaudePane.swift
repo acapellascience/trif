@@ -480,7 +480,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// The chat button: the chat for the shown tab's site, full screen. In a chat that isn't writing a reply, the tab's
     /// data goes into the message box (fillContext); at a reply waiting to be read, it opens there. `then`: one more
-    /// thing to put in the message box after (Point TRIF at this).
+    /// thing to put in the message box after.
     func open(then extra: (() async -> Void)? = nil) {
         Diagnostics.shared.mark("opening the chat")
         // (More: the side panel's chat, which has its own context and fills nothing)
@@ -765,6 +765,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let text = d["text"] as? String ?? ""
             let file = d["name"] as? String ?? ""
             let what = "\(d["why"] as? String ?? "a viewer")\(file.isEmpty ? "" : " on \(file)") at \(d["path"] as? String ?? "?")"
+            if let skipped = d["skipped"] as? String {
+                // (a viewer the chat opened by itself, with no tap and no new reply: old code, not offered)
+                Diagnostics.shared.log("chat offers", "viewer from \(v.site.isEmpty ? "no site" : v.site): skipped \(file.isEmpty ? "its file" : file) (\(skipped))")
+                return
+            }
             if text.isEmpty {
                 report.log("claude", "\(name): \(what), no mod's code read off it")
                 if file.lowercased().hasSuffix(".js") { Diagnostics.shared.log("chat files", "\(name)'s viewer opened \(what), and no mod's code could be read off it") }
@@ -773,7 +778,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             report.log("claude", "\(name): \(what): its code read (\(text.count) characters), to Add this mod?")
             guard let browser else { return }
             Task { @MainActor in
-                let offered = await browser.offerFromChat([text], from: v.site)
+                let offered = await browser.offerFromChat([text], from: v.site, path: "viewer")
                 if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             }
         default: break
@@ -788,7 +793,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard v.activity == .working || late else { return }
         guard let browser else { v.activity = .idle; endBackgroundIfIdle(); return }
         Task { @MainActor in
-            let offered = await browser.offerFromChat(texts, from: v.site)
+            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto")
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
             if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) } // (not inactive: an alert of the system's over the app)
@@ -974,8 +979,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
-        if let link = Browser.modLink(url, source: "Claude's pane") {
-            browser?.offer(link)
+        if Browser.isModLink(url) {
+            browser?.stopModLink(url, from: "Claude's pane")
             return .cancel
         }
         let scheme = url.scheme ?? ""
@@ -1065,8 +1070,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// A window Claude's page opens (signing in with Google or Apple does): a second web view made from the
     /// configuration WebKit hands over, so the two pages can still talk, shown as a sheet.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, let link = Browser.modLink(url, source: "Claude's pane (a link that opens a new window)") {
-            browser?.offer(link)
+        if let url = navigationAction.request.url, Browser.isModLink(url) {
+            browser?.stopModLink(url, from: "Claude's pane (a link that opens a new window)")
             return nil
         }
         note("opened a window for", navigationAction.request.url, view(of: webView))

@@ -11,28 +11,6 @@ import WebKit
 import PDFKit
 import AVFoundation
 
-/// What the kit says about the element under a finger (mobile/shared/kit.js describe).
-struct Picked: Equatable {
-    var tag: String
-    var text: String
-    var selector: String
-    var how: String
-    var matches: Int
-    var similarSelector: String?
-    var similarCount: Int
-    var everywhereSelector: String? = nil
-    var everywhereCount: Int = 0
-    var from: String
-}
-
-/// A mod link the browser stopped: an address ending /trif-install, with what it carries after the #.
-struct ModLink: Identifiable {
-    let id = UUID()
-    let address: String
-    let hide: [String]   // selectors, from #hide=…
-    let source: String   // which web view it came from: the page, or Claude's pane
-}
-
 @MainActor
 final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply, UIGestureRecognizerDelegate {
     static let trifWorld = WKContentWorld.world(name: "trif")
@@ -84,11 +62,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     private(set) var exitWakeLong = false
     func wakeExit(long: Bool = false) { exitWakeLong = long; exitWake += 1 }
     func toggleFullScreen() { setFullScreen(!fullScreen) }
-    @Published var picked: Picked?
-    /// The last thing hidden, while it can be undone (the status strip's Undo: Tim, 11-14, hid a whole page).
-    @Published var lastHide: HideRule?
-    /// Everywhere on <site>: its matches outlined on the page, waiting for Hide them.
-    @Published var previewing = false
     /// Set when something asks for the chat to open; the app opens it.
     @Published var wantsChat = false
     /// Counts the times a mod came in and the chat should get out of the way, so the page with the mod shows
@@ -100,7 +73,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     var offerBatch = 0, offerShown = 0
     /// The last mod added from the chat, for what the chat is told next (feedbackForChat).
     private var lastAdded: (id: String, name: String)?
-    @Published var modLink: ModLink?
     /// Whole mods (Mods.swift): those kept, and one from the clipboard waiting for an OK.
     let mods = ModStore()
     /// Safe mode, Pause all, a runaway page (Safety.swift).
@@ -165,10 +137,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         wv.allowsBackForwardNavigationGestures = true
         wv.allowsLinkPreview = false
         wv.isInspectable = true
-        let press = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
-        press.minimumPressDuration = 0.45
-        press.delegate = self
-        wv.addGestureRecognizer(press)
         // (full screen and back: two fingers held still on the page; pages don't use it, and it never blocks them. A
         // pinch moves too far, a two-finger tap is too short)
         let two = UILongPressGestureRecognizer(target: self, action: #selector(twoFingerPress(_:)))
@@ -334,7 +302,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         letGo[tab.id]?.cancel()
         if let was = current, was !== tab { TabShots.shared.take(was, "left"); letGoLater(was) }
         current = tab
-        picked = nil; previewing = false; lastHide = nil; status = ""
+        status = ""
         if !tab.started && !waitingForFront { start(tab) }
         address = tab.webView.url?.absoluteString ?? tab.savedURL?.absoluteString ?? ""
         title = tab.webView.title ?? tab.title
@@ -438,6 +406,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// for it, with TRIF's approval card in the Mods tab, and doesn't run until then.
     func addMod(_ m: InstalledMod, source: String = "chat") {
         Diagnostics.shared.mark("adding \(m.id) (\(source))")
+        chatOffers.note(m.code, .added)
         hideChat += 1
         let added = mods.add(m, source: source)
         report.log("mods", "added \(added.tierName.lowercased()) \(added.id) (\(source))\(added.held ? ", waiting for an OK" : "")")
@@ -550,7 +519,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func go(_ text: String) {
         guard let url = Browser.address(for: text) else { status = "That isn't an address."; return }
-        picked = nil
         // (a tab not started yet, waiting for the app to come to the front: this is its page now, not what was kept)
         if let t = current, !t.started { t.started = true; t.savedState = nil }
         webView.load(URLRequest(url: url))
@@ -577,9 +545,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return URL(string: (local ? "http://" : "https://") + entry)
     }
 
-    func reload() { picked = nil; webView.reload() }
-    func back() { picked = nil; webView.goBack() }
-    func forward() { picked = nil; webView.goForward() }
+    func reload() { webView.reload() }
+    func back() { webView.goBack() }
+    func forward() { webView.goForward() }
 
     var host: String { webView.url?.host ?? "" }
 
@@ -602,51 +570,53 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     // MARK: mod links
 
-    /// Is this address a mod link? (An https address whose path ends /trif-install, or anything trif:.)
-    static func modLink(_ url: URL, source: String) -> ModLink? {
-        let isLink = url.scheme == "trif" || url.path.hasSuffix("/trif-install")
-        guard isLink else { return nil }
-        var hide: [String] = []
-        if let fragment = url.fragment {
-            for part in fragment.components(separatedBy: "&") {
-                let pair = part.components(separatedBy: "=")
-                if pair.count >= 2, pair[0] == "hide" {
-                    let value = pair.dropFirst().joined(separator: "=")
-                    if let selector = value.removingPercentEncoding, !selector.isEmpty { hide.append(selector) }
-                }
-            }
-        }
-        return ModLink(address: url.absoluteString, hide: hide, source: source)
-    }
+    /// Is this address an old mod link (an https address whose path ends /trif-install, or anything trif:)? Stopped,
+    /// with a line in the report: they carried #hide= selectors for point-and-hide, gone since 11-17 (Tim: it caught a
+    /// resting thumb, and one element of many nested ones is fragile to hide); a trif: link never goes to iOS from a page.
+    static func isModLink(_ url: URL) -> Bool { url.scheme == "trif" || url.path.hasSuffix("/trif-install") }
+    func stopModLink(_ url: URL, from source: String) { report.log("mod link", "from \(source), not followed: \(url.absoluteString)") }
 
-    func offer(_ link: ModLink) {
-        report.log("mod link", "from \(link.source): \(link.address)")
-        modLink = link
-    }
-
-    /// A mod link, or a bare selector, on the clipboard (what a chat gives when it can't make a link).
+    /// A whole mod on the clipboard.
     func offerFromClipboard() { offer(text: UIPasteboard.general.string) }
 
     /// The mod files in a reply that's just done (Web/chat.js): each read (off the main thread), and offered in turn
     /// with the Add this mod? sheet, over the tab; nothing is added without its Add it. Leaves out one already added
     /// as it is. Returns those offered (none: the chat button shows the reply waiting instead).
+    /// `path`: how the chat handed it over (auto: a reply done; late: one that turned up after it; viewer; panel;
+    /// computer), for the Diagnostics line. Never offered (ChatOffers.swift): code a chat offered before, an installed
+    /// mod's current or earlier version, a mod's in Recently deleted.
     @discardableResult
-    func offerFromChat(_ texts: [String], from chatSite: String = "") async -> [InstalledMod] {
+    func offerFromChat(_ texts: [String], from chatSite: String = "", path: String) async -> [InstalledMod] {
         let here = host
         // (where it came from: the chat's site, else the page shown; Add this mod? warns when it runs elsewhere)
         let came = chatSite.isEmpty ? Site.of(here) : Site.of(chatSite)
         var found: [InstalledMod] = []
         var why: String?
+        var skipped: [String] = []
+        let known = { (m: InstalledMod) in ChatOfferJudge.Known(id: m.id, code: m.code, history: m.history.map(\.code)) }
         for t in texts {
             let r = await mods.readNamedInBackground(t, here: here)
             guard var m = r.mod else { why = why ?? r.error ?? "no reason given"; continue }
-            if mods.mods.contains(where: { $0.id == m.id && $0.code == m.code }) || offerQueue.contains(where: { $0.id == m.id && $0.code == m.code }) { continue }
+            if let no = ChatOfferJudge.skip(id: m.id, code: m.code, installed: mods.mods.map(known), deleted: mods.trash.map { known($0.mod) },
+                                            queued: (offerQueue + found + [modOffer].compactMap { $0 }).map(known), memory: chatOffers) {
+                skipped.append("\(m.id) (\(no))")
+                continue
+            }
             m.cameFrom = came
             found.removeAll { $0.id == m.id }
             found.append(m)
         }
-        if found.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
+        // (a line for each hand-over, so a report shows what a chat offered and why not: ids and reasons only)
+        if !found.isEmpty || !skipped.isEmpty || why != nil {
+            var parts: [String] = []
+            if !found.isEmpty { parts.append("offered \(found.map(\.id).joined(separator: ", "))") }
+            if !skipped.isEmpty { parts.append("skipped \(skipped.joined(separator: ", "))") }
+            if let why { parts.append("unreadable (\(why))") }
+            Diagnostics.shared.log("chat offers", "\(path) from \(chatSite.isEmpty ? "no site" : chatSite): \(parts.joined(separator: "; "))")
+        }
+        if found.isEmpty, skipped.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
         guard !found.isEmpty else { return [] }
+        for m in found { chatOffers.note(m.code, .offered) }
         if offerQueue.isEmpty && modOffer == nil { offerBatch = 0; offerShown = 0 }
         offerQueue += found
         offerBatch += found.count
@@ -656,14 +626,26 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// The next of a reply's mods, once no other sheet is up (the app calls it again as each one closes).
     func nextOffer() {
-        guard modOffer == nil, modLink == nil else { return }
+        guard modOffer == nil else { return }
         guard !offerQueue.isEmpty else { offerPlace = nil; return }
         offerShown += 1
         offerPlace = offerBatch > 1 ? (offerShown, offerBatch) : nil
         modOffer = offerQueue.removeFirst()
+        offerOpen = modOffer
     }
 
-    /// What was pasted (iOS's own Paste button hands it over without asking): a whole mod, a mod link, or a selector.
+    /// Mods offered from a chat, remembered across launches (ChatOffers.swift), with what came of each.
+    let chatOffers = ChatOfferMemory.standard()
+    /// (the offer the sheet shows: dismissed when it closes without Add it or Cancel)
+    private var offerOpen: InstalledMod?
+    /// Add this mod?'s Cancel (declined) or the sheet gone (dismissed, if neither button said otherwise).
+    func offerClosed(declined: Bool) {
+        guard let m = offerOpen else { return }
+        if declined { chatOffers.note(m.code, .declined) } else { chatOffers.note(m.code, .dismissed); offerOpen = nil }
+        if let o = chatOffers.outcome(m.code), declined || o == .dismissed { Diagnostics.shared.log("chat offers", "\(m.id) \(o.rawValue)") }
+    }
+
+    /// What was pasted (iOS's own Paste button hands it over without asking), or an Add to TRIF tap: a whole mod.
     func offer(text pasted: String?) {
         guard let text = pasted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             status = "Nothing on the clipboard."
@@ -678,35 +660,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             }
             return
         }
-        let words = text.components(separatedBy: .whitespacesAndNewlines)
-        if let found = words.first(where: { $0.contains("trif-install") }), let url = URL(string: found), let link = Browser.modLink(url, source: "clipboard") {
-            offer(link)
-        } else if text.count < 300, !text.contains("\n") {
-            offer(ModLink(address: "(pasted selector)", hide: [text], source: "clipboard"))
-        } else {
-            status = "The clipboard has no mod link or selector."
-        }
+        status = "The clipboard has no mod."
     }
 
-    // MARK: hiding
-
-    func hide(_ selector: String, how: String, from: String) async {
-        let host = self.host
-        guard !host.isEmpty else { return }
-        // (never the page itself: the html or body element)
-        if (await call("return String([...document.querySelectorAll(sel)].some((e) => e === document.documentElement || e === document.body));", ["sel": selector], in: Browser.trifWorld)).text == "true" {
-            report.log("hidden", "\(host): not \(selector), which is the whole page")
-            return
-        }
-        let rule = HideRule(host: host, selector: selector, how: how, from: from, at: Date())
-        report.add(rule)
-        lastHide = rule
-        report.log("hidden", "\(host): \(selector) (named by \(how), from \(from))")
-        installScripts()
-        await applyRulesNow()
-        picked = nil; previewing = false
-        _ = await call("globalThis.__trifKit && globalThis.__trifKit.unmark(); return 'ok';", in: Browser.trifWorld)
-    }
+    // MARK: hiding (what point-and-hide hid before 11-17: still hidden, each shown again from the Mods tab)
 
     func applyRulesNow() async {
         let selectors = report.rules.filter { $0.host == host }.map { $0.selector }
@@ -714,22 +671,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let error = result.error { status = "Couldn't hide: \(error)" }
     }
 
-    /// Shows a hidden thing again, at once (no reload): the last one (Undo), or any from the list.
+    /// Shows a hidden thing again, at once (no reload), from the Mods tab's list.
     func unhide(_ rule: HideRule) async {
         report.remove(rule)
-        if lastHide?.id == rule.id { lastHide = nil }
         report.log("hidden", "\(rule.host): shown again: \(rule.selector)")
         installScripts()
         if rule.host == host { await applyRulesNow() }
     }
 
-    func forgetRulesHere() async {
-        report.forgetRules(for: host)
-        installScripts()
-        reload()
-    }
-
-    // MARK: pointing
+    // MARK: the two-finger hold
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
@@ -774,101 +724,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     return 'ok';
     """
 
-    @objc private func longPressed(_ press: UILongPressGestureRecognizer) {
-        // (no pointing at parts of the page in full screen; and not with two fingers down: that's full screen's hold)
-        guard press.state == .began, !fullScreen, press.numberOfTouches < 2 else { return }
-        let point = press.location(in: webView)
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        Task { await pick(at: point) }
-    }
-
-    /// The element under a point of the web view (in points; the page works out its own zoom and scroll).
-    func pick(at point: CGPoint) async {
-        let body = """
-        const vv = window.visualViewport;
-        const cx = vv ? vv.offsetLeft + x / vv.scale : x, cy = vv ? vv.offsetTop + y / vv.scale : y;
-        return JSON.stringify(globalThis.__trifKit.at(cx, cy));
-        """
-        let result = await call(body, ["x": Double(point.x), "y": Double(point.y)], in: Browser.trifWorld)
-        show(result, from: "pointing")
-    }
-
-    func widen() async {
-        show(await call("return JSON.stringify(globalThis.__trifKit.wider());", in: Browser.trifWorld), from: picked?.from ?? "pointing")
-    }
-
-    func mark(selector: String, from: String) async -> Bool {
-        let result = await call("return JSON.stringify(globalThis.__trifKit.pick(selector));", ["selector": selector], in: Browser.trifWorld)
-        show(result, from: from)
-        return picked != nil
-    }
-
-    /// Point TRIF at this: what was long-pressed, as the chat needs it (where it is, its text and HTML, a picture
-    /// of it), into the chat's message box as an attachment; the pane opens. (Agent-facing words.)
-    var chatPoint: ((String, Data?) async -> Void)?
-    func pointToChat() async {
-        guard let p = picked, let point = chatPoint else { return }
-        let js = """
-        const el = globalThis.__trifKit && globalThis.__trifKit.chosen();
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        const html = el.outerHTML.replace(/\\s+/g, ' ');
-        return JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height),
-          top: Math.round(r.top + scrollY), pageH: document.documentElement.scrollHeight, viewW: innerWidth, viewH: innerHeight,
-          html: html.length > 4000 ? html.slice(0, 4000) + ' …(cut)' : html, text: (el.innerText || '').trim().slice(0, 600) });
-        """
-        guard let d = Browser.parse((await call(js, in: Browser.trifWorld)).text) as? [String: Any] else { return }
-        let n = { (k: String) in (d[k] as? NSNumber)?.intValue ?? 0 }
-        var crop: Data?
-        let rect = CGRect(x: n("x"), y: n("y"), width: n("w"), height: n("h")).intersection(webView.bounds)
-        if !rect.isNull, rect.width > 4, rect.height > 4 {
-            let cfg = WKSnapshotConfiguration()
-            cfg.rect = rect
-            crop = await Browser.within(5, nil) { await withCheckedContinuation { c in self.webView.takeSnapshot(with: cfg) { image, _ in c.resume(returning: image?.pngData()) } } }
-        }
-        let text = """
-        I'm pointing at this part of \(webView.url?.absoluteString ?? host) (a picture of it is attached, if it was on the screen):
-
-        Selector: \(p.selector)  (finds \(p.matches); named by \(p.how))
-        \(p.similarSelector.map { "Others like it: \($0) (finds \(p.similarCount))\n" } ?? "")Where: \(n("w"))×\(n("h")) px, \(n("top")) px from the top of a page \(n("pageH")) px tall (the screen is \(n("viewW"))×\(n("viewH")))
-        Its text: “\(d["text"] as? String ?? "")”
-
-        Its HTML:
-        ```html
-        \(d["html"] as? String ?? "")
-        ```
-        """
-        report.log("pointed", "\(host): \(p.selector)\(crop == nil ? "" : ", with a picture")")
-        await cancelPick()
-        await point(text, crop)
-    }
-
-    /// Everywhere on <site>, first tap: outline what it would hide on this page; the second hides it site-wide.
-    func previewEverywhere() async {
-        guard let s = picked?.everywhereSelector else { return }
-        _ = await call("globalThis.__trifKit.preview(sel); return 'ok';", ["sel": s], in: Browser.trifWorld)
-        previewing = true
-    }
-
-    func cancelPick() async {
-        previewing = false
-        picked = nil
-        _ = await call("globalThis.__trifKit && globalThis.__trifKit.unmark(); return 'ok';", in: Browser.trifWorld)
-    }
-
-    private func show(_ result: (text: String?, error: String?), from: String) {
-        if let error = result.error { status = "Couldn't look: \(error)"; picked = nil; return }
-        guard let d = Browser.parse(result.text) as? [String: Any], let selector = d["selector"] as? String else { picked = nil; return }
-        let similar = d["similar"] as? [String: Any]
-        let all = d["everywhere"] as? [String: Any]
-        previewing = false
-        picked = Picked(tag: d["tag"] as? String ?? "", text: d["text"] as? String ?? "", selector: selector,
-                        how: d["how"] as? String ?? "", matches: d["matches"] as? Int ?? 0,
-                        similarSelector: similar?["selector"] as? String, similarCount: similar?["matches"] as? Int ?? 0,
-                        everywhereSelector: all?["selector"] as? String, everywhereCount: all?["matches"] as? Int ?? 0, from: from)
-    }
-
-    // MARK: the outline, and asking the phone's own model
+    // MARK: the outline
 
     /// `budgetMs`: the walk stops after that long (a big page's whole walk took seconds on an iPhone SE), and the
     /// outline then says it's partial (agent-facing words).
@@ -880,6 +736,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         if o["partial"] as? Bool == true { text += "\n(Partial: the page is big, so TRIF stopped outlining it after \(budgetMs) ms. The screenshot shows what's on the screen.)" }
         return (text, o["chars"] as? Int ?? text.count, o["tokens"] as? Int ?? 0)
+    }
+
+    /// Copy diagnostics (the ⋯ menu): the text Send diagnostics… sends, on the clipboard, and "Copied.".
+    func copyDiagnostics() {
+        UIPasteboard.general.string = Diagnostics.shared.text()
+        status = "Copied."
+        report.log("diagnostics", "copied")
     }
 
     func copyOutline() async {
@@ -919,7 +782,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
         I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
 
-        A screenshot of what I see is attached. If I attach TRIF pointer files, those are the parts of the page I mean. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
+        A screenshot of what I see is attached. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 
         --- How TRIF mods are written ---
         \(Browser.resource("mod-guide", "txt"))
@@ -1176,20 +1039,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return await Task.detached(priority: .userInitiated) { image.pngData() }.value
     }
 
-    func askPhone(_ question: String) async {
-        guard let o = await outline(2800) else { return }
-        status = "Asking the phone's own model…"
-        let answer = await OnDevice.ask(question, outline: o.text)
-        guard let reply = answer.text else {
-            status = "The phone's model didn't answer: \(answer.error ?? "no reason given")"
-            report.log("on-device", "\(host): “\(question)” → no answer in \(answer.ms) ms: \(answer.error ?? "")")
-            return
-        }
-        let found = await mark(selector: reply, from: "the on-device model")
-        report.log("on-device", "\(host): “\(question)” → \(reply) in \(answer.ms) ms; \(found ? "found on the page" : "finds nothing on the page")")
-        status = found ? "The phone's model chose this, in \(answer.ms) ms." : "The phone's model answered “\(reply)” (\(answer.ms) ms), which finds nothing on this page."
-    }
-
     // MARK: the app end of TRIF's world
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
@@ -1216,8 +1065,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
-        if navigationAction.targetFrame?.isMainFrame ?? true, let link = Browser.modLink(url, source: "the page") {
-            offer(link)
+        if navigationAction.targetFrame?.isMainFrame ?? true, Browser.isModLink(url) {
+            stopModLink(url, from: "the page")
             return .cancel
         }
         let scheme = url.scheme ?? ""
@@ -1258,7 +1107,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         address = webView.url?.absoluteString ?? ""
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
-        picked = nil
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1303,7 +1151,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A link or page that opens a window: a new tab after this one (made from the configuration WebKit hands over,
     /// so the page that opened it can still talk to it, as a sign-in window needs).
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, let link = Browser.modLink(url, source: "the page") { offer(link); return nil }
+        if let url = navigationAction.request.url, Browser.isModLink(url) { stopModLink(url, from: "the page"); return nil }
         let t = makeTab(configuration: configuration)
         t.started = true
         // (a window the page opens: a new tab, in TRIF view)

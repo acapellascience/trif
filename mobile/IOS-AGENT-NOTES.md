@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (284 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (290 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -30,7 +30,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`xcrun simctl spawn <dev> notifyutil -p com.trif.probe.step`) and writes `Documents/step-out.txt`. Steps (TrifProbeApp
   `Model.step`): go, newtab, select, sheet ("chat" opens the robot view), chat, closechat, newchat, chats, showchat,
   service ("Claude"/"ChatGPT"), more (true/false), panejs (JS in the shown chat page), paneljs (JS in More's panel),
-  panego, offer/cancelOffer/addOffer, status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve,
+  panego, offer/cancelOffer/addOffer, offerchat ([code…], site, path: as a chat hands mods over: what was offered),
+  offerstate (the offer shown, the queue), copydiag (⋯ → Copy diagnostics), status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve,
   view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 15 in-app states, PASS/FAIL lines (since 11-17 also: its tab gone to
   another site, in front or not, and its tab blank; PASS needs the icon's site shown);
   regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`),
@@ -51,7 +52,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `-chathome http://localhost:8377/chat.html` (`?greet`: an empty-state heading and an Upgrade plan button, for TRIF's
   greeting and upsell hiding). A saved project (`chatProject.Claude` in the app's prefs plist) sends the chat to
   /project/… instead and drops the query: delete it with PlistBuddy (`Delete :chatProject.Claude`) while the app is stopped. Message words steer it: "two", "no mod", "file", "file and block",
-  "viewer", "wait N". Query flags: `?gpt` (/c/ addresses), `?slow`, `?nostop`, `?draft`, `?gptpaste`, `?viewerroute`,
+  "viewer", "wait N". Query flags: `?history` (a long conversation's older messages rendering late: an older
+  exchange with an earlier Calmer feed put at the top 1.5 s after load and 2 s after each reply), `?reopen` (the
+  chat reopens a viewer on an old file by itself, no tap), `?gpt` (/c/ addresses), `?slow`, `?nostop`, `?draft`, `?gptpaste`, `?viewerroute`,
   `?octane` (ChatGPT's newer mobile page: li[data-message-role], data-message-complete, a 3 s pause, picture-only
   inputs), `?cm` (code as .cm-editor/.cm-line), `?slowload`. `/project/<id>` serves it as a project page.
 - Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner) and is the best check of
@@ -71,7 +74,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   browser-checks.json, mods.js, panel-kit.js, mod-guide.txt, page-bridge.js, RobotShape.swift, and the side panel folder
   `shared/gen/panel`. Never edit those by hand.
 - Browser tests (headless Chrome, muted): `TRIF_BROWSER_TESTS=1 TRIF_E2E_CHROME="/Users/tim/WebMods/tests/e2e/.browsers/chrome/mac_arm-156.0.8078.80/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" node --test mobile/test/chat.test.js`
-  (6 tests: fill, send, watch, pickup, viewers, ChatGPT's new page). One browser suite at a time; small payloads.
+  (7 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late). One browser suite at a time; small payloads.
+- What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
+  mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -89,8 +94,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 - TrifProbeApp.swift: the app's views (toolbar, bars, sheets, the ⋯ menu at the address bar's left (moreMenu), full
   screen note and exit button), `Model`, dev steps, BarState.
-- Browser.swift: tabs' web views, navigation, mod offers (Add this mod?), hide/point, outline and chat context
+- Browser.swift: tabs' web views, navigation, mod offers (Add this mod?; offerFromChat with ChatOffers.swift's judge
+  and memory), old hide rules (applied, Show again from the Mods tab), outline and chat context
   (pageForChat, feedbackForChat), screenshots, full screen state, ModDownloads (.js downloads to Add this mod?).
+- ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
+  normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
+  (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
+  `chat offers`: one line per hand-over (path auto/late/viewer/panel/computer, ids offered and skipped with why) and
+  declined/dismissed.
 - Tabs.swift: Tab, tab pictures. History.swift: history. Import.swift: importing mod files. FolderWatch.swift: the watched
   iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
   WebClipMaker.compose; profile hand-off; IconHandoffSteps, the steps shared with the list), `trif://open`.
@@ -217,10 +228,24 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   when TRIF is opened from one of its icons (link `&set=<tag>`). Profile name "TRIF icons: X, YouTube, NYT". One icon on
   the list goes as its site's own profile. All its words await Tim (strings doc).
 - Toolbar (Tim, 11-17): the Home Screen button is an A in a rounded square (SF Symbol a.square), not a +. Order
-  SHIPPED: back, forward, chat, [page / +] (centre, 4th of 7, exactly centred: SE 187.5, 17 Pro 201), tabs, Mods, A.
-  BEFORE: back, forward, chat, [page / +], Mods, tabs, A. One line either way: `ContentView.tabsBeforeMods` (or launch
-  with `-modsfirst`). (A first try put the tabs in the centre and the page where the tabs were: Tim said wrong, the swap
-  he meant was tabs and Mods.)
+  SHIPPED (Tim, later 11-17: "the old order" again): back, forward, chat, [page / +] (centre, 4th of 7, exactly
+  centred: SE 187.5, 17 Pro 201), Mods, tabs, A. Tried earlier that day: tabs before Mods. One line either way:
+  `ContentView.tabsBeforeMods` (false; launch with `-tabsfirst` for the other). It's the only view that draws the
+  bottom bar (full screen has none).
+- Point-and-hide is gone (Tim, 11-17: a resting thumb set it off; with many nested divs the right layer can't be
+  picked, and hiding one div is fragile): the long press, its bar (Hide this, All like it, Wider, Point TRIF at this,
+  Everywhere on…), the Hidden/Undo note, Ask the phone's own model (it only fed that bar), Show everything hidden, the
+  #hide= mod link sheet (trif: and /trif-install links in pages are now just not followed, a report line), the
+  clipboard's selector path. Rules it made stay applied, each with Show again in the Mods tab. Pointing may come back
+  later in the desktop mod tools, only if the right layer can be picked reliably.
+- ⋯ → Copy diagnostics (Tim, 11-17; after Import…, visible without scrolling on an SE): the same text as the Mods
+  tab's Send diagnostics…, then the 2 s note "Copied." (draft).
+- Chat offers (Tim, 11-17, "spurious asks to add old code when I open Claude chat"): a chat never offers the same
+  code twice (whatever came of it), nor an installed mod's current or earlier version, nor one in Recently deleted;
+  Add to TRIF under a block still offers anything. chat.js: the reply's and `late` pickups take only blocks after the
+  person's latest message (older messages render late on a long conversation, and after the page reloads); a viewer
+  is offered only if a tap (kept in sessionStorage `__trifTap`, 6 s) or a reply in this page (2 min) came before it,
+  else posted with `skipped` (a Diagnostics line).
 - Full screen's exit button (Tim, 11-17, "can we move it up?"; glyph kept): beside the clock at the foot of the status
   bar: SE right of the clock (circle centre 250, 18), Dynamic Island phones between the clock and the island (17 Pro:
   117, 52). Its taps go to a window-level recognizer (ExitTaps), 40 × 44 from the bar's foot down.
@@ -233,6 +258,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
+
+- Chat offers on the real claude.ai (signed in, can't be checked here): whether its older messages render before
+  the person's latest in the DOM (the page side assumes document order; the app's memory is the guarantee either
+  way), whether the USER selector still matches (without it the page side falls back to all blocks), and a viewer
+  opened by a tap that does a full page load (the tap time survives in sessionStorage). Tim's next diagnostics
+  should have `chat offers` lines.
 
 - Never run on a real phone: the local model after the freeze fix (Tim tests next: compare Runs on processor vs graphics
   chip; diagnostics lines have the numbers), real model downloads from Hugging Face, background download events.
@@ -265,6 +296,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- Simulator screenshots lag ~2 s, so a 2 s note ("Copied.") is usually gone from them: poll `{"status": 1}` instead.
 
 - scenePhase passes through .inactive on the way IN from the background too: before 11-17 the tab shot logged "the app
   left the front" then (now "the app is coming to the front"). Report.log (report.json) isn't in the diagnostics Tim

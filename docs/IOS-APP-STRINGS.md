@@ -280,6 +280,7 @@ person's name on the site is known) · **fixed {Site}** · **Custom…**. The re
 |---|---|---|
 | The toolbar's last button (Add to Home Screen) | + | an A in a rounded square, like the App Store's (SF Symbol a.square); accessibility unchanged: Add to Home Screen |
 | The toolbar's order (Tim, 11-17) | back, forward, chat, [page / +], Mods, tabs, Home Screen | back, forward, chat, [page / +], tabs, Mods, Home Screen (no new words) |
+| The toolbar's order (Tim, 11-17, later: "the old order") | back, forward, chat, [page / +], tabs, Mods, Home Screen | back, forward, chat, [page / +], Mods, tabs, Home Screen again (no new words) |
 
 ## The full screen exit button (moved 11-17, Tim: "can we move it up?")
 
@@ -499,3 +500,29 @@ something.
 | The list under the mods (folded) | Recently deleted (each row: the name, its site or "every site", Restore) |
 | Restore, the mod is gone from the list meanwhile | It isn't in Recently deleted any more. |
 | Restore, one with the same name is here | A mod with the same name is here now. Delete or rename it first. |
+
+## Copy diagnostics, point-and-hide taken out, and offers from a chat (changed 11-17, Tim)
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| The ⋯ menu at the address bar's left, after Import… (shows without scrolling on an SE) | — | **Copy diagnostics** (the same text as the Mods tab's Send diagnostics…, which stays); the note after: **Copied.** |
+| Add a mod from the clipboard, with no whole mod on it | The clipboard has no mod link or selector. | The clipboard has no mod. |
+| Add this mod? from a chat | (an old version, a declined or deleted one, offered again when the chat was opened) | no new words: code a chat offered before, an installed mod's earlier version or one in Recently deleted isn't offered again (Add to TRIF under the block still offers it) |
+
+Removed with point-and-hide (Tim, 11-17: a resting thumb set it off; with many nested elements the right layer
+can't be picked, and hiding one element is fragile). What it hid stays hidden; each still has **Show again** under
+**Hidden by pointing** in the Mods tab (unchanged).
+
+- The long press's bar: **Hide this** · **All {n} like it** · **Wider** · **Cancel** · **Point TRIF at this** ·
+  **Everywhere on {site} ({n} here)** · **Hide them**; its error "Couldn't look: {why}".
+- The note after hiding: **Hidden: {selector}** with **Undo**.
+- The ⋯ menu: **Ask the phone's own model…** (its question "What bothers you on this page?", the field's "the
+  cookie notice", **Ask the phone**, Cancel, "The phone's own model gets the page's outline and your words, and picks
+  a part. Nothing leaves the phone.", and its notes "Asking the phone's own model…", "The phone's model chose this,
+  in {n} ms.", "The phone's model answered "{reply}" ({n} ms), which finds nothing on this page.", "The phone's
+  model didn't answer: {why}"), and **Show everything hidden on this site again**.
+- The mod link sheet (a /trif-install#hide= or trif: link): Add this mod? · "A mod, from {source}" · "It would hide,
+  on {site}" · **Show me first** · **Add it** · **Don't** · "This link carries nothing the probe knows how to add.
+  (It reads #hide=selector.)". Such links are now just not followed (a line in the report).
+- The Probe menu's test page item **a mod link**.
+

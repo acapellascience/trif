@@ -466,7 +466,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             var offered = 0
             if let browser = self.browser {
                 let mods = texts.flatMap(PanelChat.modFiles)
-                if !mods.isEmpty { offered = await browser.offerFromChat(mods).count }
+                if !mods.isEmpty { offered = await browser.offerFromChat(mods, path: "panel").count }
             }
             self.emit(run, ["kind": "done", "ok": ok, "sessionId": run.sessionId, "contextTokens": lastTokens])
             self.runs[run.id] = nil
@@ -597,7 +597,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             let big = mods.filter { $0["tooBig"] as? Bool == true }.compactMap { $0["name"] as? String ?? $0["id"] as? String }
             if !big.isEmpty { self.emit(run, ["kind": "error", "message": "Too big to bring over: \(big.joined(separator: ", ")). It stays in TRIF on your computer."]) }
             var offered = 0
-            if let browser = self.browser, !codes.isEmpty { offered = await browser.offerFromChat(codes, from: run.site).count }
+            if let browser = self.browser, !codes.isEmpty { offered = await browser.offerFromChat(codes, from: run.site, path: "computer").count }
             var done = run.heldDone ?? ["kind": "done", "ok": true]
             if done["sessionId"] == nil, let s = run.sessionIdSeen { done["sessionId"] = s }
             self.report.log("panel", "My computer: the run ended, \(mods.count) mod(s) from the computer, \(offered) offered")

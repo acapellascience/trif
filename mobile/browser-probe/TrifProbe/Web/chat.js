@@ -102,6 +102,14 @@
   }
   /** (each viewer once: what it showed, by its text) */
   let viewerSeen = '';
+  // (the person's last tap on the page, kept across a load: a viewer is offered only when a tap opened it, or a reply
+  // in this page did; one the chat reopens by itself (on load, its address) shows old code: Tim, 11-17, "spurious
+  // asks to add old code when I open Claude chat")
+  const TAP_KEY = '__trifTap';
+  let lastTap = 0;
+  try { lastTap = Number(sessionStorage.getItem(TAP_KEY)) || 0; } catch (e) { /* (no storage: this load's taps only) */ }
+  const tapped = (e) => { if (!e.isTrusted) return; lastTap = Date.now(); try { sessionStorage.setItem(TAP_KEY, String(lastTap)); } catch (e) { /* (as above) */ } };
+  for (const t of ['pointerdown', 'touchstart', 'click']) document.addEventListener(t, tapped, { capture: true, passive: true });
   function lookAtViewer() {
     const v = viewer();
     if (!v) { viewerSeen = ''; return; }
@@ -110,7 +118,11 @@
     const key = `${name}|${code ? code.length : 0}|${(code || '').slice(0, 200)}`;
     if (key === viewerSeen) return;
     viewerSeen = key;
-    post({ type: 'viewer', why: v.why, name, path: location.pathname.replace(/[^/]{24,}/g, '…'), text: code || '' });
+    const path = location.pathname.replace(/[^/]{24,}/g, '…');
+    const now = Date.now();
+    const fresh = now - lastTap < 6000 || !!watch || (!!last && now - last.at < 120000);
+    if (!fresh) { if (code) post({ type: 'viewer', why: v.why, name, path, text: '', skipped: 'opened with no tap and no new reply' }); return; }
+    post({ type: 'viewer', why: v.why, name, path, text: code || '' });
   }
 
   /** One paste into the message box: true if the page took it (its paste handler cancelled the event). */
@@ -506,7 +518,7 @@
   /** The reply's done: told to the app (the dots stop), with its new mod files. */
   function finish(w, why) {
     stopWatch();
-    last = { seen: w.seen, path: location.pathname };
+    last = { seen: w.seen, path: location.pathname, at: Date.now() };
     const mods = autoPickup(w.seen);
     // (code in the reply but no mod read from it: said, with what there was, for the diagnostics)
     if (!mods.length) {
@@ -518,13 +530,20 @@
     }
     post({ type: 'done', why, mods, stop: w.saw });
   }
+  /** The person's latest message: only code after it is a new reply's. A long conversation's older messages render
+   *  late (claude.ai draws them a little at a time, and again after WebKit ended the page), after the snapshot of
+   *  what was seen: without this their old mods counted as new (Tim, 11-17). */
+  function latestUser() {
+    const users = document.querySelectorAll(USER);
+    return users[users.length - 1] || null;
+  }
   /** (AUTO path) The mod files in code blocks that weren't there before the send, the latest of each (by its header);
-   *  all of them then count as seen. */
+   *  all of them then count as seen. Only the latest reply's (after the person's latest message). */
   function autoPickup(seen) {
     // (a mod by its header, ==WebMod== to ==/WebMod==, whatever is around it)
     const keyOf = (t) => { const end = t.search(/==\/WebMod==/); return end === -1 ? t : t.slice(t.indexOf('==WebMod=='), end).replace(/\s+/g, ' '); };
     const byKey = new Map();
-    for (const b of modBlocks()) if (!seen.has(b.raw)) { const t = b.text(); byKey.set(keyOf(t), t); }
+    for (const b of modBlocks(latestUser())) if (!seen.has(b.raw)) { const t = b.text(); byKey.set(keyOf(t), t); }
     for (const b of modBlocks()) seen.add(b.raw);
     return [...byKey.values()];
   }
@@ -534,7 +553,11 @@
   let lateTimer = 0;
   function late() {
     if (!last || watch || sending || replying() || location.pathname !== last.path) return;
-    const fresh = modBlocks().filter((b) => !last.seen.has(b.raw));
+    // (old code rendering late, before the person's latest message: seen, never offered)
+    const after = new Set(modBlocks(latestUser()).map((b) => b.pre));
+    const all = modBlocks();
+    for (const b of all) if (!after.has(b.pre)) last.seen.add(b.raw);
+    const fresh = all.filter((b) => after.has(b.pre) && !last.seen.has(b.raw));
     const sig = fresh.map((b) => b.raw).join('\n');
     // (offered once it's the same on two looks, the second a moment later even if nothing else changes)
     if (!fresh.length || sig !== lateSig) { lateSig = sig; if (fresh.length) { clearTimeout(lateTimer); lateTimer = setTimeout(late, 1500); } return; }

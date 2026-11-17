@@ -280,3 +280,50 @@ test('the chat script on chatgpt.com\'s newer mobile page (11-16): pictures-only
     server.close();
   }
 });
+
+test('the chat script: a long conversation\'s older messages that render late (Tim, 11-17: "spurious asks to add old code"): their old mods never offered, by the reply or late; a viewer the chat reopens with no tap isn\'t either', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    await page.goto(`${base}/chat.html?history`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    // (sent before the older messages render: they turn up during the reply, after the snapshot of what was seen)
+    await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'make the headings green, wait 3'); });
+    await page.click('button[aria-label="Send message"]');
+    const [done] = await waitPost(page, 'done');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('pre').length) >= 2, true, 'the older message rendered during the reply');
+    assert.equal(done.mods.length, 1, 'the new reply\'s mod only');
+    assert.match(done.mods[0], /#1f8a5b/);
+    // (another older message renders 2 s after the reply: no late offer of it)
+    await page.waitForFunction(() => document.querySelectorAll('pre').length >= 3, null, { timeoutMs: 8000 });
+    await page.waitForTimeout(3500);
+    assert.equal((await posts(page)).filter((m) => m.type === 'done' && m.why === 'late').length, 0, 'no late offer of old code');
+    // (a second send: still only its own reply's mod)
+    await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'two please'); });
+    await page.click('button[aria-label="Send message"]');
+    const second = (await waitPost(page, 'done', 2))[1];
+    // (its Calmer feed is the first reply's, the same code: seen already; the cookie box is new)
+    assert.equal(second.mods.length, 1);
+    assert.match(second.mods[0], /No cookie box/);
+    await page.waitForTimeout(4000);
+    assert.equal((await posts(page)).filter((m) => m.type === 'done' && m.why === 'late').length, 0);
+    await page.close();
+    // (a viewer the chat reopens by itself on load: said as skipped, with no code)
+    const p2 = await browser.newPage();
+    await p2.goto(`${base}/chat.html?reopen`);
+    await p2.addScriptTag({ content: STUB });
+    await p2.addScriptTag({ content: CHAT });
+    const [v] = await waitPost(p2, 'viewer');
+    assert.equal(v.text, '');
+    assert.match(v.skipped, /no tap/);
+    await p2.close();
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

@@ -210,6 +210,29 @@ ${JSON.stringify(body, null, 2)}`;
     reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0));
   }
 
+  // (?history: a long conversation whose older messages render late, as claude.ai draws them a little at a time: an
+  // older exchange with an earlier version of the mod put at the top 1.5 s after the load, and another 2 s after
+  // each reply ends. Their code is old: never offered (Tim, 11-17). ?reopen: the chat reopens a viewer by itself on
+  // an old file 1 s after the load, with no tap)
+  const older = location.search.includes('history');
+  let olderN = 0;
+  function addOlder() {
+    olderN++;
+    const u = document.createElement(octane ? 'li' : 'div');
+    if (octane) u.setAttribute('data-message-role', 'user'); else u.setAttribute('data-testid', 'user-message');
+    u.textContent = `an older ask (${olderN})`;
+    const r = document.createElement(octane ? 'li' : 'div');
+    if (octane) r.setAttribute('data-message-role', 'assistant'); else r.className = 'font-claude-response';
+    const pre = document.createElement('pre');
+    const code = document.createElement('code');
+    code.textContent = modFor('http://localhost', 'Calmer feed', { css: `.feed-item h2 { color: #b2${olderN}2${olderN}2 }` });
+    pre.append(code);
+    r.append(Object.assign(document.createElement('p'), { textContent: 'An older version:' }), pre);
+    log.prepend(u, r);
+  }
+  if (older) setTimeout(addOlder, 1500);
+  if (location.search.includes('reopen')) setTimeout(() => openViewer('old-feed.js', modFor('http://localhost', 'Calmer feed', { css: '.feed-item h2 { color: #b22222 }' })), 1000);
+
   // (Claude's file viewer, as far as it matters here: over the whole chat, the message box left underneath)
   function openViewer(name, code) {
     const v = document.createElement('div');
@@ -300,6 +323,7 @@ ${JSON.stringify(body, null, 2)}`;
       send.textContent = '↑';
       stop.replaceWith(send);
       refresh();
+      if (older) setTimeout(addOlder, 2000);
     };
     setTimeout(tick, 600);
   }

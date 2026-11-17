@@ -41,9 +41,6 @@ final class Model: ObservableObject {
         self.pane = ClaudePane(report: report, browser: browser)
         LocalModels.shared.wake() // (a model download iOS kept going while the app was away)
         self.modsPanel = ModsPanel(browser: browser)
-        // (Point TRIF at this: the chat opens, with the tab's data and then the part pointed at in its message box)
-        let pane = self.pane
-        browser.chatPoint = { text, png in pane.open { await pane.fill(text, png: png, picture: "TRIF pointer.png", as: "TRIF pointer.txt") } }
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
         let args = ProcessInfo.processInfo.arguments
@@ -244,9 +241,17 @@ extension Model {
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
         if step["cancelOffer"] != nil { browser.modOffer = nil }
+        // ({"offerchat": [code…], "site": "…", "path": "auto"}: as a chat hands mods over; what was offered, and the
+        // offer shown. {"offerstate": 1}: the offer shown and the queue)
+        if let texts = step["offerchat"] as? [String] {
+            let got = await browser.offerFromChat(texts, from: step["site"] as? String ?? "", path: step["path"] as? String ?? "auto")
+            out = "offered: \(got.map(\.id).joined(separator: ", ").nonEmpty ?? "none")"
+        }
+        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count)" } ?? "none"), queued: \(browser.offerQueue.count)" }
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
+        if step["copydiag"] != nil { browser.copyDiagnostics() }
         if step["resethint"] != nil { UserDefaults.standard.removeObject(forKey: "fullScreenHinted") }
         if step["fullscreen"] != nil { browser.toggleFullScreen(); out = "full screen: \(browser.fullScreen), note: \(browser.status)" }
         if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
@@ -305,8 +310,6 @@ struct ContentView: View {
     @AppStorage("fullScreenButtonHidden") private var hideExitButton = false
     @ObservedObject private var folder = FolderWatch.shared
     @State private var importing = false
-    @State private var asking = false
-    @State private var question = ""
 
     /// Mods waiting for the user's OK on this site (the Mods button's badge, as the panel's waiting badge).
     private var waitingHere: Int {
@@ -417,7 +420,6 @@ struct ContentView: View {
                 notes
             } bars: {
                 VStack(spacing: 0) {
-                    if let picked = browser.picked { PickedBar(picked: picked) }
                     if let off = safety.switchedOff[browser.site] {
                         SafetyBanner(site: browser.site, off: off, open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
                     }
@@ -502,15 +504,7 @@ struct ContentView: View {
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
-        .sheet(item: $browser.modLink) { link in ModLinkView(link: link).environmentObject(browser) }
         .sheet(item: $browser.modOffer, onDismiss: nextOfferSoon) { mod in ModOfferView(mod: mod).environmentObject(browser) }
-        .alert("What bothers you on this page?", isPresented: $asking) {
-            TextField("the cookie notice", text: $question)
-            Button("Ask the phone") { let q = question; Task { await browser.askPhone(q) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The phone's own model gets the page's outline and your words, and picks a part. Nothing leaves the phone.")
-        }
     }
 
     /// The small notes at the foot of the page (Tim, 11-15: closing each by hand was annoying): each goes by itself,
@@ -518,14 +512,6 @@ struct ContentView: View {
     /// that matters stays where it already is (a mod's errors on its row and in diagnostics).
     private var notes: some View {
         VStack(spacing: 0) {
-            if let h = browser.lastHide {
-                HStack {
-                    Text("Hidden: \(h.selector)").font(.footnote.monospaced()).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Undo") { Task { await browser.unhide(h) } }.font(.footnote.bold())
-                }
-                .modifier(NoteStyle(seconds: 5, key: h.id.uuidString) { if browser.lastHide?.id == h.id { browser.lastHide = nil } })
-            }
             if !browser.status.isEmpty {
                 Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
                     .modifier(NoteStyle(seconds: 2, key: browser.status) { browser.status = "" })
@@ -536,6 +522,7 @@ struct ContentView: View {
     /// A reply's next mod, a moment after a sheet has gone (one sheet can't open while another is closing), unless the
     /// Mods tab has opened meanwhile (a mod just added that waits for an OK): then once it closes.
     private func nextOfferSoon() {
+        browser.offerClosed(declined: false)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             if !showMods { browser.nextOffer() }
@@ -615,6 +602,9 @@ struct ContentView: View {
             Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
             Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
             Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+            // (Tim, 11-17: Send diagnostics… is in the Mods tab's ⋯, and he forgets it; the same text, copied. Near the top,
+            // so it shows without scrolling the menu on an SE)
+            Button { browser.copyDiagnostics() } label: { Label("Copy diagnostics", systemImage: "doc.on.clipboard") }
             Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
             if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
             Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
@@ -631,8 +621,6 @@ struct ContentView: View {
             Divider()
             Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
             Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
-            Button("Ask the phone's own model…") { onTab { question = ""; asking = true } }
-            Button("Show everything hidden on this site again", role: .destructive) { onTab { Task { await browser.forgetRulesHere() } } }
             Divider()
             Menu("The probe") {
                 Button("Checks") { onTab { showChecks = true } }
@@ -641,7 +629,6 @@ struct ContentView: View {
                     ForEach(browser.pages.pageNames, id: \.self) { name in
                         Button(name) { onTab { browser.go(PageSchemeHandler.home + name) } }
                     }
-                    Button("a mod link") { onTab { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") } }
                 }
                 Section("Real sites") {
                     ForEach(["github.com", "x.com", "youtube.com", "reddit.com", "en.wikipedia.org", "nytimes.com"], id: \.self) { site in
@@ -669,7 +656,7 @@ struct ContentView: View {
         showAddress = false
         guard all else { return }
         showHistory = false; showChecks = false; showReport = false
-        askingProject = false; asking = false; importing = false; pickingFolder = false
+        askingProject = false; importing = false; pickingFolder = false
     }
     /// A link the app was opened with: a file to import, a mod's trif://add, a Home Screen icon's trif://open.
     private func openLink(_ url: URL) {
@@ -703,7 +690,7 @@ struct ContentView: View {
     private var coverNames: String {
         let all: [(Bool, String)] = [(pane.shown, "chat"), (showTabs, "tabs"), (showMods, "mods"), (showAddress, "address"),
                                      (showHistory, "history"), (showChecks, "checks"), (showReport, "report"), (addingIcon, "icon"), (showIconQueue, "iconqueue"),
-                                     (askingProject, "project"), (asking, "ask"), (importing, "import"), (pickingFolder, "folder")]
+                                     (askingProject, "project"), (importing, "import"), (pickingFolder, "folder")]
         return all.filter(\.0).map(\.1).joined(separator: ",").nonEmpty ?? "none"
     }
     static var coversNow = "none"
@@ -752,7 +739,7 @@ struct ContentView: View {
             pageButton
                 .frame(width: 64)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { ContentView.pageButtonMidX = $0 }
-            // (Tim, 11-17: the tabs next, then the Mods switch; `-modsfirst`: Mods before the tabs, as until 11-17)
+            // (Tim, 11-17, later: back to the Mods switch next, then the tabs; `-tabsfirst`: the tabs first, as for a while that day)
             if ContentView.tabsBeforeMods { tabsButton.frame(maxWidth: .infinity); modsButton.frame(maxWidth: .infinity) }
             else { modsButton.frame(maxWidth: .infinity); tabsButton.frame(maxWidth: .infinity) }
             // (the last button adds this site to the Home Screen, Tim 11-16; what the ⋯ menu here held is in the ⋯ at the
@@ -773,10 +760,10 @@ struct ContentView: View {
     /// (development: where the middle button's centre is, for the step {"toolbar": 1})
     static var pageButtonMidX: CGFloat = 0
 
-    /// The toolbar's tabs button before the Mods switch (Tim, 11-17: back, forward, chat, [page], tabs, Mods, Home
-    /// Screen, more like a normal browser). `false` (or the launch flag `-modsfirst`) is the order before: back,
-    /// forward, chat, [page], Mods, tabs, Home Screen.
-    static let tabsBeforeMods = true && !ProcessInfo.processInfo.arguments.contains("-modsfirst")
+    /// The toolbar's tabs button before the Mods switch. `false` (Tim, 11-17, later the same day: "the old order"):
+    /// back, forward, chat, [page], Mods, tabs, Home Screen. `true` (or the launch flag `-tabsfirst`) is the order he
+    /// tried that day: back, forward, chat, [page], tabs, Mods, Home Screen.
+    static let tabsBeforeMods = false || ProcessInfo.processInfo.arguments.contains("-tabsfirst")
 
     /// The Mods tab: a switch, on or, with all paused, off (Tim, 11-15; the robot is the chat's now), with the count
     /// waiting for an OK.
@@ -928,96 +915,6 @@ struct NoteStyle: ViewModifier {
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeOut(duration: 0.3)) { dismiss() }
             }
-    }
-}
-
-/// What a long press chose, and what to do with it.
-struct PickedBar: View {
-    @EnvironmentObject var browser: Browser
-    let picked: Picked
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(picked.text.isEmpty ? "<\(picked.tag)>" : "“\(picked.text)”").font(.subheadline).lineLimit(2)
-            Text("\(picked.selector)  (named by \(picked.how)\(picked.matches == 1 ? "" : ", finds \(picked.matches)"))")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-            HStack {
-                Button("Hide this") { Task { await browser.hide(picked.selector, how: picked.how, from: picked.from) } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                if let similar = picked.similarSelector, picked.similarCount > 1 {
-                    Button("All \(picked.similarCount) like it") { Task { await browser.hide(similar, how: picked.how, from: picked.from) } }
-                        .buttonStyle(.bordered)
-                }
-                Button("Wider") { Task { await browser.widen() } }.buttonStyle(.bordered)
-                Spacer()
-                Button("Cancel") { Task { await browser.cancelPick() } }
-            }
-            .font(.subheadline)
-            Button("Point TRIF at this") { Task { await browser.pointToChat() } }
-                .buttonStyle(.bordered)
-                .font(.subheadline)
-            // (the element's own name, site-wide: outlined first, then hidden: Tim, 11-14)
-            if let all = picked.everywhereSelector {
-                Group {
-                    if browser.previewing {
-                        Button("Hide them") { Task { await browser.hide(all, how: "everywhere", from: picked.from) } }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                    } else {
-                        Button("Everywhere on \(browser.host) (\(picked.everywhereCount) here)") { Task { await browser.previewEverywhere() } }
-                            .buttonStyle(.bordered)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                }
-                .font(.subheadline)
-            }
-        }
-        .padding(12)
-        .background(Color(.secondarySystemBackground))
-    }
-}
-
-/// A mod link the browser stopped: what it would do, before it does anything.
-struct ModLinkView: View {
-    @EnvironmentObject var browser: Browser
-    @Environment(\.dismiss) private var dismiss
-    let link: ModLink
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("A mod, from \(link.source)") {
-                    Text(link.address).font(.footnote.monospaced())
-                }
-                if link.hide.isEmpty {
-                    Section { Text("This link carries nothing the probe knows how to add. (It reads #hide=selector.)") }
-                } else {
-                    Section("It would hide, on \(browser.host)") {
-                        ForEach(link.hide, id: \.self) { selector in Text(selector).font(.footnote.monospaced()) }
-                    }
-                    Section {
-                        Button("Show me first") {
-                            let first = link.hide[0]
-                            Task { _ = await browser.mark(selector: first, from: "a mod link") }
-                            dismiss()
-                        }
-                        Button("Add it") {
-                            browser.hideChat += 1
-                            let selectors = link.hide
-                            Task { for s in selectors { await browser.hide(s, how: "given", from: "a mod link") } }
-                            dismiss()
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Add this mod?")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Don't") { dismiss() } } }
-        }
     }
 }
 

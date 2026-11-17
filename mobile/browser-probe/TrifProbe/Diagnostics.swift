@@ -187,13 +187,18 @@ final class Diagnostics {
     }
 
     /// The log as a file to share: a header, then one line per event, oldest first.
-    func file() -> URL? {
+    /// The diagnostics as text: what Send diagnostics… sends and Copy diagnostics copies.
+    func text() -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var text = "TRIF iPhone app diagnostics\nmade \(f.string(from: Date())) on \(Diagnostics.device()), iOS \(UIDevice.current.systemVersion), app \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))\n\n"
         for e in events { text += "\(f.string(from: e.at))  \(e.kind)  \(e.text)\n" }
+        return text
+    }
+
+    func file() -> URL? {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("TRIF diagnostics.txt")
-        do { try text.write(to: url, atomically: true, encoding: .utf8); return url } catch { return nil }
+        do { try text().write(to: url, atomically: true, encoding: .utf8); return url } catch { return nil }
     }
 
     func clear() { events = []; log("start", "the log was cleared") }

@@ -5114,19 +5114,19 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         const pause = getComputedStyle(document.querySelector('#bar-robot .pause')).display !== 'none';
         const eyes = getComputedStyle(document.querySelector('#bar-robot .eye')).display !== 'none';
         // The state colour: red or yellow if one applies (they win), else the paused white (dark grey on
-        // light); and with those taken away for a moment, the paused colour, the bars white
+        // light); and with those taken away for a moment, the paused colour, the bars the same (one colour)
         const b = document.body.classList;
         const colour = (v) => { const s = document.createElement('span'); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
         const fills = () => ({ rim: getComputedStyle(document.querySelector('#bar-robot .rim')).fill, bars: getComputedStyle(document.querySelector('#bar-robot .pause')).fill });
         const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--led-coral)' : b.contains('needs-login') ? 'var(--led-yellow)' : 'var(--paused)') };
         const had = ['blocked', 'needs-login'].filter((c) => b.contains(c));
         b.remove(...had);
-        const paused = { ...fills(), want: colour('var(--paused)'), white: colour('#fff') };
+        const paused = { ...fills(), want: colour('var(--paused)') };
         b.add(...had);
         return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes, state, paused, had };
       }`), { timeoutMs: 10000 });
       if (lock.state.rim !== lock.state.want) throw new Error(`the robot's rim on the paused tab (${lock.had.join(', ') || 'nothing else'} in the way): ${JSON.stringify(lock.state)}`);
-      if (lock.paused.rim !== lock.paused.want || lock.paused.bars !== lock.paused.white) throw new Error(`the paused colours: ${JSON.stringify(lock.paused)}`);
+      if (lock.paused.rim !== lock.paused.want || lock.paused.bars !== lock.paused.want) throw new Error(`the paused colours: ${JSON.stringify(lock.paused)}`);
       if (!/^Posting is paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
       if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);

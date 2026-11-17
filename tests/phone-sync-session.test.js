@@ -1,0 +1,283 @@
+'use strict';
+// Phone sync, the session side (helper/lib/phonelink/syncsession.js; docs/PHONE-SYNC.md sections 4-7), against a
+// fake session and server in a temp workspace: the real held.js, history.js and trash layout. No network.
+// What is proven here: adds and edits both ways; deletes go to the trash; a conflict keeps both; a change that
+// can do more than style waits for the user's OK on the computer (held.js, naming the phone) and a style mod runs
+// at once; history before replace; a twin with a run is left for later; every-site mods stay on the phone; the
+// refusals (bad ids, not a mod, too big, changed since the plan, a link for a twin, a stale or second sync, off);
+// a removed phone's base goes; the nudge carries nothing and comes at most every 2 s.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
+const { EventEmitter } = require('events');
+const { tempDir } = require('./fake-extension');
+const S = require('../helper/lib/phonelink/sync');
+const { PhoneSync } = require('../helper/lib/phonelink/syncsession');
+const held = require('../helper/lib/held');
+const { scanMods } = require('../helper/lib/mods');
+
+const cleanups = [];
+test.after(() => { for (const c of cleanups) c(); });
+
+const PHONE = { id: '0123456789abcdef', name: 'Test iPhone' };
+const mod = (name, body = 'document.body.style.color = "red"') => `// ==WebMod==\n// @name ${name}\n// ==/WebMod==\n${body}\n`;
+const style = (name, css = '#ad') => `// ==WebMod==\n// @name ${name}\n// @match https://example.com/*\n// @style\n// ==/WebMod==\n{ "hide": ["${css}"] }\n`;
+const CLICKS = 'document.querySelector("button").click()';
+
+function setup({ enabled = () => true, runs = [] } = {}) {
+  const home = tempDir('wm-psync-');
+  const priv = `${home}-private`;
+  fs.mkdirSync(path.join(home, 'sites'), { recursive: true });
+  fs.mkdirSync(priv, { recursive: true });
+  cleanups.push(() => { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(priv, { recursive: true, force: true }); });
+  const ws = { home, modsDir: path.join(home, 'sites'), private: priv };
+  const store = new EventEmitter();
+  store.phones = [PHONE];
+  store.list = () => store.phones;
+  const server = { handlers: new Map(), sessions: new Set(), handle(t, fn) { this.handlers.set(t, fn); } };
+  const session = { phone: PHONE, open: true, sent: [], send(o) { this.sent.push(o); return true; } };
+  server.sessions.add(session);
+  let t = 1e12;
+  const fakeRuns = { list: () => runs, scopes: () => [] };
+  const sync = new PhoneSync(store, server, fakeRuns, { getWorkspace: () => ws, enabled, now: () => t }).start();
+  // (held.js's first look: what's there is the user's, as it is; a desktop mod so that it's remembered)
+  fs.mkdirSync(path.join(ws.modsDir, 'other.com'));
+  fs.writeFileSync(path.join(ws.modsDir, 'other.com', 'seed.js'), mod('Seed'));
+  held.updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  const ask = async (msg) => {
+    const fn = server.handlers.get(msg.t);
+    return fn(session, msg);
+  };
+  const later = (ms = 1500) => { t += ms; };
+  const file = (rel) => path.join(ws.modsDir, rel);
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(file(rel)), { recursive: true }); fs.writeFileSync(file(rel), text); };
+  const read = (rel) => fs.readFileSync(file(rel), 'utf8');
+  /** One whole sync as the phone does it: begin, take what's given, send what's wanted, end. `phone`: id -> text (changed in place). */
+  const round = async (phone) => {
+    later();
+    const plan = await ask({ t: 'sync.begin', mods: Object.entries(phone).map(([id, text]) => ({ id, rev: S.rev(text) })) });
+    const puts = {};
+    for (const w of plan.want) puts[w.id] = await ask({ t: 'sync.put', syncId: plan.syncId, mod: w.id, code: phone[w.id] });
+    for (const g of plan.give) {
+      const got = await ask({ t: 'sync.get', syncId: plan.syncId, mod: g.id });
+      assert.equal(S.rev(got.code), g.rev);
+      phone[g.id] = got.code;
+    }
+    for (const id of plan.remove) delete phone[id];
+    const done = await ask({ t: 'sync.end', syncId: plan.syncId, have: Object.entries(phone).map(([id, text]) => ({ id, rev: S.rev(text) })) });
+    return { plan, puts, done };
+  };
+  return { ws, store, server, session, sync, ask, later, file, write, read, round };
+}
+
+const fails = (code) => (e) => e instanceof S.SyncError && e.code === code;
+
+test('adds and edits both ways; deletes go to the trash; then in sync, nothing to do', async () => {
+  const s = setup();
+  s.write('phone~example.com/from-computer.js', mod('From the computer'));
+  const phone = { 'example.com/from-phone': mod('From the phone') };
+  let r = await s.round(phone);
+  assert.deepEqual(r.plan.want, [{ id: 'example.com/from-phone' }]);
+  assert.deepEqual(r.plan.give.map((g) => g.id), ['example.com/from-computer']);
+  assert.equal(s.read('phone~example.com/from-phone.js'), phone['example.com/from-phone']);
+  assert.equal(phone['example.com/from-computer'], mod('From the computer'));
+  assert.deepEqual(r.puts['example.com/from-phone'], { mod: 'example.com/from-phone', rev: S.rev(mod('From the phone')), held: false });
+  assert.equal(r.done.synced, 2);
+  assert.deepEqual(Object.keys(S.loadBase(s.ws.private, PHONE.id)).sort(), ['example.com/from-computer', 'example.com/from-phone']);
+  assert.equal(fs.statSync(S.basePath(s.ws.private, PHONE.id)).mode & 0o777, 0o600);
+  // (a new file has a history marker: the desktop's Undo takes it away again)
+  const hist = fs.readdirSync(path.join(s.ws.home, 'history', 'phone~example.com'));
+  assert.ok(hist.some((n) => /^from-phone@.*\.created$/.test(n)), hist.join());
+  assert.equal(s.sync.status(PHONE.id).fromPhone, 1);
+  assert.equal(s.sync.status(PHONE.id).toPhone, 1);
+
+  r = await s.round(phone);
+  assert.deepEqual([r.plan.want, r.plan.give, r.plan.remove], [[], [], []]);
+
+  // edited on each side
+  phone['example.com/from-computer'] = mod('From the computer', 'document.title = "phone"');
+  s.write('phone~example.com/from-phone.js', mod('From the phone', 'document.title = "computer"'));
+  const before = s.read('phone~example.com/from-computer.js');
+  r = await s.round(phone);
+  assert.deepEqual(r.plan.want, [{ id: 'example.com/from-computer' }]);
+  assert.deepEqual(r.plan.give.map((g) => g.id), ['example.com/from-phone']);
+  assert.match(s.read('phone~example.com/from-computer.js'), /"phone"/);
+  assert.match(phone['example.com/from-phone'], /"computer"/);
+  // (history keeps what it replaced, marked as the phone's change)
+  const dir = path.join(s.ws.home, 'history', 'phone~example.com');
+  const entry = fs.readdirSync(dir).find((n) => /^from-computer@.*\.js$/.test(n));
+  assert.equal(fs.readFileSync(path.join(dir, entry), 'utf8'), before);
+  assert.equal(fs.readFileSync(path.join(dir, entry.replace(/\.js$/, '.source')), 'utf8'), 'phone');
+
+  // deleted on the phone: to the computer's trash
+  delete phone['example.com/from-computer'];
+  r = await s.round(phone);
+  assert.ok(!fs.existsSync(s.file('phone~example.com/from-computer.js')));
+  const trashed = fs.readdirSync(path.join(s.ws.home, 'trash', 'phone~example.com'));
+  assert.ok(trashed.some((n) => /^from-computer@\d{8}T\d{9}Z\.js$/.test(n)), trashed.join());
+  // deleted on the computer: the phone is told to remove it, and the base lets go of it
+  fs.unlinkSync(s.file('phone~example.com/from-phone.js'));
+  r = await s.round(phone);
+  assert.deepEqual(r.plan.remove, ['example.com/from-phone']);
+  assert.deepEqual(phone, {});
+  assert.deepEqual(S.loadBase(s.ws.private, PHONE.id), {});
+});
+
+test('a conflict keeps both: the phone\'s at the name, the computer\'s beside it, on both sides', async () => {
+  const s = setup();
+  s.write('phone~example.com/dark.js', mod('Dark'));
+  const phone = {};
+  await s.round(phone);
+  phone['example.com/dark'] = mod('Dark', 'document.title = "phone"');
+  s.write('phone~example.com/dark.js', mod('Dark', 'document.title = "computer"'));
+  const r = await s.round(phone);
+  assert.deepEqual(r.plan.want, [{ id: 'example.com/dark', conflict: true }]);
+  assert.deepEqual(r.plan.give.map((g) => [g.id, g.conflict]), [['example.com/dark-from-computer', 'example.com/dark']]);
+  assert.deepEqual(r.done.conflicts, [{ id: 'example.com/dark', sibling: 'example.com/dark-from-computer' }]);
+  assert.match(s.read('phone~example.com/dark.js'), /"phone"/);
+  const sibling = s.read('phone~example.com/dark-from-computer.js');
+  assert.match(sibling, /@name Dark \(from your computer\)/);
+  assert.match(sibling, /"computer"/);
+  assert.equal(phone['example.com/dark-from-computer'], sibling);
+  // (the computer's version is in history too)
+  const dir = path.join(s.ws.home, 'history', 'phone~example.com');
+  assert.ok(fs.readdirSync(dir).some((n) => n.startsWith('dark@') && /"computer"/.test(fs.readFileSync(path.join(dir, n), 'utf8'))));
+  const again = await s.round(phone);
+  assert.deepEqual([again.plan.want, again.plan.give, again.plan.remove], [[], [], []]);
+  // an edit beats a delete: deleted on the phone while changed on the computer, it comes back
+  delete phone['example.com/dark'];
+  s.write('phone~example.com/dark.js', mod('Dark', 'document.title = "edited"'));
+  const back = await s.round(phone);
+  assert.deepEqual(back.plan.give.map((g) => [g.id, !!g.back]), [['example.com/dark', true]]);
+  assert.match(phone['example.com/dark'], /"edited"/);
+});
+
+test('approval on the computer: a change that can do more waits, naming the phone; a style mod runs at once', async () => {
+  const s = setup();
+  const phone = { 'example.com/clicker': mod('Clicker', CLICKS), 'example.com/no-ads': style('No ads') };
+  const r = await s.round(phone);
+  assert.equal(r.puts['example.com/clicker'].held, true);
+  assert.equal(r.puts['example.com/no-ads'].held, false);
+  const h = held.loadHeld(s.ws.home)['phone~example.com/clicker'];
+  assert.equal(h.by, 'outside');
+  assert.equal(h.phone, 'Test iPhone');
+  assert.deepEqual(r.done.waiting, [{ id: 'example.com/clicker', name: 'Clicker' }]);
+  assert.equal(s.sync.status(PHONE.id).waiting, 1);
+  // a style change to a style mod: at once
+  phone['example.com/no-ads'] = style('No ads', '.promo');
+  const r2 = await s.round(phone);
+  assert.equal(r2.puts['example.com/no-ads'].held, false);
+  // a mod the computer allowed before isn't helped by the phone: a new clicking line waits again
+  held.approveHeld(s.ws.home, 'phone~example.com/clicker');
+  phone['example.com/clicker'] = mod('Clicker', `${CLICKS}\ndocument.querySelector("a.next").click()`);
+  const r3 = await s.round(phone);
+  assert.equal(r3.puts['example.com/clicker'].held, true);
+});
+
+test('left alone: a twin with a run working (later), every-site mods, bad ids, too big, links', async () => {
+  const runs = [{ runId: 'r1', site: 'busy.com', scope: 'phone~busy.com' }];
+  const s = setup({ runs });
+  s.write('phone~busy.com/a.js', mod('A'));
+  s.write('phone~all-sites/everywhere.js', mod('Everywhere'));
+  s.write('phone~example.com/huge.js', `${mod('Huge')}//${'x'.repeat(S.MOD_MAX)}`);
+  fs.mkdirSync(path.join(s.ws.home, 'elsewhere'));
+  fs.writeFileSync(path.join(s.ws.home, 'elsewhere', 'secret.js'), mod('Secret'));
+  fs.symlinkSync(path.join(s.ws.home, 'elsewhere'), s.file('phone~linked.com'));
+  fs.mkdirSync(s.file('phone~example.com'), { recursive: true });
+  fs.symlinkSync(path.join(s.ws.home, 'elsewhere', 'secret.js'), s.file('phone~example.com/pointer.js'));
+  s.later();
+  const plan = await s.ask({ t: 'sync.begin', mods: [
+    { id: 'busy.com/b', rev: S.rev('x') }, { id: 'all-sites/dark', rev: S.rev('y') }, { id: '../etc/passwd', rev: S.rev('z') },
+    { id: 'example.com/pointer', rev: S.rev('w') }, { id: 'linked.com/secret', rev: S.rev(mod('Other')) },
+  ] });
+  assert.deepEqual(plan.later.sort(), ['busy.com/a', 'busy.com/b']);
+  const why = Object.fromEntries(plan.skipped.map((k) => [k.id, k.why]));
+  assert.match(why['../etc/passwd'], /site/);
+  assert.equal(why['all-sites/dark'], 'every-site mods stay on the phone for now');
+  assert.equal(why['all-sites/everywhere'], 'every-site mods stay on the phone for now');
+  assert.equal(why['example.com/huge'], 'over 1 MB');
+  assert.match(why['example.com/pointer'], /isn't a mod file/);
+  assert.match(why['linked.com/secret'], /isn't a plain folder/);
+  assert.deepEqual([plan.want, plan.give], [[], []], 'nothing read or written through a link, nothing too big, nothing of a busy twin');
+  await assert.rejects(s.ask({ t: 'sync.put', syncId: plan.syncId, mod: 'linked.com/secret', code: mod('Other') }), fails('bad-mod'));
+  assert.equal(fs.readFileSync(path.join(s.ws.home, 'elsewhere', 'secret.js'), 'utf8'), mod('Secret'));
+  assert.ok(!fs.existsSync(path.join(s.ws.home, 'elsewhere', '.sync')), 'nothing written there');
+  // a run starting on a twin after the plan: its put waits for the next sync
+  runs.length = 0;
+  s.later();
+  const p2 = await s.ask({ t: 'sync.begin', mods: [{ id: 'busy.com/b', rev: S.rev(mod('B')) }] });
+  assert.deepEqual(p2.want, [{ id: 'busy.com/b' }]);
+  runs.push({ runId: 'r2', site: 'busy.com', scope: 'phone~busy.com' });
+  await assert.rejects(s.ask({ t: 'sync.put', syncId: p2.syncId, mod: 'busy.com/b', code: mod('B') }), fails('changed'));
+  assert.ok(!fs.existsSync(s.file('phone~busy.com/b.js')));
+});
+
+test('the Mac\'s disk ignores capitals: a phone mod named like a computer one but for them is left alone', { skip: !require('../helper/lib/pathcheck').ignoresCase(require('os').tmpdir()) && 'a disk that tells capitals apart' }, async () => {
+  const s = setup();
+  s.write('phone~example.com/dark.js', mod('Dark'));
+  s.later();
+  const plan = await s.ask({ t: 'sync.begin', mods: [{ id: 'example.com/Dark', rev: S.rev(mod('Other')) }] });
+  assert.deepEqual(plan.skipped, [{ id: 'example.com/Dark', why: 'the same name as a mod on the computer but for capitals' }]);
+  assert.deepEqual(plan.want, []);
+  assert.equal(s.read('phone~example.com/dark.js'), mod('Dark'));
+});
+
+test('refusals: not a mod, too big, not asked for, changed since the plan, a stale or second sync, off', async () => {
+  let on = true;
+  const s = setup({ enabled: () => on });
+  s.write('phone~example.com/keep.js', mod('Keep'));
+  await s.round({ 'example.com/keep': mod('Keep') });
+  s.later();
+  const wanted = { 'example.com/new': mod('New'), 'example.com/keep': mod('Keep', 'document.title = "p"') };
+  const plan = await s.ask({ t: 'sync.begin', mods: Object.entries(wanted).map(([id, text]) => ({ id, rev: S.rev(text) })) });
+  const put = (mod, code) => s.ask({ t: 'sync.put', syncId: plan.syncId, mod, code });
+  await assert.rejects(put('example.com/new', 'alert(1)'), fails('bad-mod'), 'no header');
+  await assert.rejects(put('example.com/new', `${mod('New')}\0`), fails('bad-mod'), 'a NUL');
+  await assert.rejects(put('example.com/new', '// ==WebMod==\n// @style\n// @boxed\n// ==/WebMod==\n'), fails('bad-mod'), 'a header the reader refuses');
+  await assert.rejects(put('example.com/new', `${mod('New')}//${'x'.repeat(S.MOD_MAX)}`), fails('too-big'));
+  await assert.rejects(put('example.com/new', `${mod('New')}\ud800`), fails('bad-mod'), 'not UTF-8');
+  await assert.rejects(put('example.com/other', mod('Other')), fails('bad-mod'), 'not in the plan');
+  await assert.rejects(s.ask({ t: 'sync.get', syncId: plan.syncId, mod: 'example.com/keep' }), fails('bad-mod'), 'not given');
+  await assert.rejects(s.ask({ t: 'sync.put', syncId: 'sdeadbeef', mod: 'example.com/new', code: mod('New') }), fails('no-sync'));
+  assert.ok(!fs.existsSync(s.file('phone~example.com/new.js')));
+  // changed on the computer since the plan: not overwritten, the next sync decides
+  s.write('phone~example.com/keep.js', mod('Keep', 'document.title = "c"'));
+  await assert.rejects(put('example.com/keep', wanted['example.com/keep']), fails('changed'));
+  assert.match(s.read('phone~example.com/keep.js'), /"c"/);
+  // a second begin within a second: busy; after it, the first sync is over
+  await assert.rejects(s.ask({ t: 'sync.begin', mods: [] }), fails('busy'));
+  s.later();
+  await s.ask({ t: 'sync.begin', mods: [] });
+  await assert.rejects(put('example.com/new', mod('New')), fails('no-sync'));
+  // more than 500 mods
+  s.later();
+  await assert.rejects(s.ask({ t: 'sync.begin', mods: Array.from({ length: 501 }, (_, i) => ({ id: `example.com/m${i}`, rev: S.rev(String(i)) })) }), fails('too-big'));
+  // off: nothing answers, nothing is touched
+  on = false;
+  s.later();
+  await assert.rejects(s.ask({ t: 'sync.begin', mods: [] }), fails('off'));
+  assert.equal(s.sync.changed(), 0);
+});
+
+test('the nudge: no mod, no name, at most every 2 s, not during a sync; a removed phone\'s base goes', async () => {
+  const s = setup();
+  assert.equal(s.sync.changed(), 1);
+  assert.equal(s.sync.changed(), 0);
+  s.later(2100);
+  assert.equal(s.sync.changed(), 1);
+  assert.deepEqual(s.session.sent, [{ t: 'sync.changed' }, { t: 'sync.changed' }]);
+  const plan = await s.ask({ t: 'sync.begin', mods: [] });
+  s.later(2100);
+  assert.equal(s.sync.changed(), 0, 'a sync going on');
+  await s.ask({ t: 'sync.end', syncId: plan.syncId, have: [] });
+  assert.equal(s.sync.changed(), 1);
+  assert.ok(fs.existsSync(S.basePath(s.ws.private, PHONE.id)));
+  s.store.phones = [];
+  s.store.emit('change');
+  assert.ok(!fs.existsSync(S.basePath(s.ws.private, PHONE.id)));
+  assert.equal(s.sync.status(PHONE.id), null);
+  s.sync.stop();
+  assert.ok(!s.server.handlers.has('sync.begin'));
+});

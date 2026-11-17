@@ -27,7 +27,7 @@ named.
 | D7 | **Deletes go to the trash**, never hard: the computer's `trash/` (30 days, `trif restore`); on the phone a new Recently deleted list (30 days) in the Mods tab, since the app keeps only the last delete today. | 5 |
 | D8 | **A mod new to the phone** (made on the computer) **arrives as an import does**: off, marked new ("From your computer"), waiting for an OK if its code can do more than change the page. A changed mod keeps its switch. | 6 |
 | D9 | **When:** the phone syncs when the app comes to the front (if paired), a few seconds after one of its phone mods changes, when the computer nudges it, and from Sync now in the Mods tab. The computer never sends a mod unasked: it sends a nudge with no data (section 7). | 8 |
-| D10 | **The phone's every-site mods** (`all-sites`) sync to `sites/phone~all-sites/` if the desktop phone view runs that folder; to check in step S2, else they're left out of v1 and said so in the Mods tab. | 2 |
+| D10 | **The phone's every-site mods** (`all-sites`) stay on the phone in v1: checked in S2, the desktop phone view has no every-site folder (a `sites/phone~all-sites/` mod without `@match` would get `*://all-sites/*`, mods.js `defaultMatches`). They're `skipped` ("every-site mods stay on the phone for now") and said so in the Mods tab. Later: `defaultMatches` and the phone view taught that folder. | 2 |
 
 ## 2. What is synced, and the ids
 
@@ -90,8 +90,10 @@ either trash is a change like any other and syncs again.
 **On the computer** a synced file is a change from outside the helper, and held.js already judges those:
 `updateHeld` holds it while its code can do something not allowed for that mod there (`by: 'outside'`; style
 mods and style-section-only changes run at once). The sync adds a mark so the panel can say where it came from:
-`$TRIF_HOME/synced.json`, mod id → `{hash, phone, at}`, written before the file (as edit.js's mark), read by
-`updateHeld` to record `by: 'phone'`. Before a file is replaced, its old text goes to `history/` (`writeEntry`,
+`$TRIF_HOME/synced.json`, mod id → `{hash, phone, name, at}`, written before the file (as edit.js's mark), read by
+`updateHeld`: the hold stays `by: 'outside'` (so every place that reads `by` judges and words it as today) and gets
+`phone: <the phone's name>` for "From {phone}". A conflict's `-from-computer` sibling is a new mod there, so held.js
+judges it as one (it may wait once, though it's the computer's own text): never a way round a hold. Before a file is replaced, its old text goes to `history/` (`writeEntry`,
 source `phone`), so the desktop's Undo puts it back. What the phone approved counts for nothing here.
 
 **On the phone** (Mods.swift, as the app's own changes are judged):
@@ -127,7 +129,14 @@ Computer → phone:
 |---|---|
 | `sync.changed` | none. A phone twin's file changed on the computer (a desktop phone-view chat, an edit, a restore). Sent to that phone's live session, at most every 2 seconds; the phone answers with `sync.begin` when it's ready. It carries no mod and names none. |
 
-Error codes: `bad-mod`, `too-big`, `changed`, `no-sync`, `busy` (more than one `sync.begin` a second).
+Error codes: `bad-mod`, `too-big`, `changed`, `no-sync`, `busy` (more than one `sync.begin` a second), `off`
+(syncing is switched off on the computer: `PhoneSync`'s `enabled`, every `sync.*` answered so, nothing read or
+written).
+
+Built (S2): `helper/lib/phonelink/syncsession.js`, class `PhoneSync` beside `Remote`. The computer does its own
+part in `sync.begin` (a mod deleted on the phone to the trash, a conflict's sibling written), so the plan's `give`
+carries the sibling's `rev`. `skipped` also names what the computer leaves on its side: a file over 1 MB, a link
+or not UTF-8 at a mod's name, a twin that's a link, an id differing from a computer one only in capitals (APFS).
 
 Limits: a mod 1 MB (larger ones are `skipped` both ways and named in the line); 500 mods a side; the phone twins
 together 16 MB (helper's own limit for all mods); a `sync.put` is checked as an import is before anything is

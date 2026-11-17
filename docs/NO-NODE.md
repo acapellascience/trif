@@ -102,7 +102,9 @@ The installed old helper updates the usual way: it downloads the package and run
 setup --copy` with *its own* node (update.js). The new setup fetches the runtime and rewrites the wrappers
 and the LaunchAgent to point at it; ~/.trif, the private folder (settings, paired phones) are untouched,
 as in every update. If the runtime can't be fetched, setup keeps the current node and retries at the next
-update check; doctor shows it. So the first no-node release must still run on the user's node (18+): it
+update check; doctor shows it. Old updaters kill setup at 120 s, so then the download gets 75 s; new ones
+give setup 10 min and say so (`TRIF_SETUP_TIMEOUT_MS`), and run it on TRIF's own node when it's installed.
+So the first no-node release must still run on the user's node (18+): it
 does, it's the same JS.
 
 ### Uninstall

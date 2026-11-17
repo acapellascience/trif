@@ -156,3 +156,81 @@ test('trif setup --copy: downloads the pinned runtime, the wrappers run on it, a
     srv.stop();
   }
 });
+
+test('downloadBudget: ten minutes for a person; under an update, what the updater gives less a minute, or 75 s from an old one', () => {
+  const { downloadBudget } = require('../helper/lib/setup');
+  assert.equal(downloadBudget({}), 600000);
+  assert.equal(downloadBudget({ TRIF_INSTALL_LOCK: 't' }), 75000, 'an updater from before the runtime');
+  assert.equal(downloadBudget({ WEBMODS_INSTALL_LOCK: 't' }), 75000);
+  assert.equal(downloadBudget({ TRIF_INSTALL_LOCK: 't', TRIF_SETUP_TIMEOUT_MS: '600000' }), 540000);
+  assert.equal(downloadBudget({ TRIF_INSTALL_LOCK: 't', TRIF_SETUP_TIMEOUT_MS: '40000' }), 30000);
+  assert.equal(downloadBudget({ TRIF_INSTALL_LOCK: 't', TRIF_SETUP_TIMEOUT_MS: 'soon' }), 75000);
+});
+
+// A runtime folder made by hand, as ensureRuntime leaves one: bin/node (a script answering --version) and its mark.
+function handRuntime(home, version) {
+  const dir = path.join(R.runtimeRoot(home), `node-v${version}-${KEY || 'darwin-arm64'}`);
+  const node = path.join(dir, 'bin', 'node');
+  fs.mkdirSync(path.dirname(node), { recursive: true });
+  fs.writeFileSync(node, `#!/bin/sh\necho v${version}\n`, { mode: 0o755 });
+  const sha = crypto.createHash('sha256').update(fs.readFileSync(node)).digest('hex');
+  fs.writeFileSync(path.join(dir, R.MARK), JSON.stringify({ version, nodeSha256: sha }));
+  return { dir, node };
+}
+
+test('doctor: TRIF\'s own Node whole, an older pin, damaged; this computer\'s Node for copies, checkouts and with the runtime off', { skip: process.platform === 'win32' }, () => {
+  const { runtimeCheck } = require('../helper/lib/doctor');
+  const home = tempDir('rt-doctor-');
+  const fix = 'run: trif setup';
+  const pinned = handRuntime(home, R.PINS.version);
+  assert.equal(R.runtimeOf(pinned.node, home).version, R.PINS.version);
+  assert.equal(R.runtimeOf('/usr/local/bin/node', home), null);
+  assert.equal(R.runtimeOf(path.join(pinned.dir, 'node'), home), null, 'not where node lives in a runtime');
+  assert.equal(R.checkRuntime('/usr/local/bin/node', home), null);
+
+  let c = runtimeCheck(pinned.node, home, { copy: true, setupFix: fix });
+  assert.equal(c.status, 'ok', c.title);
+  assert.match(c.title, new RegExp(`own Node v${R.PINS.version.replace(/\./g, '\\.')}`));
+
+  const old = handRuntime(home, '20.1.0');
+  c = runtimeCheck(old.node, home, { copy: true, setupFix: fix });
+  assert.deepStrictEqual([c.status, c.fix], ['warn', fix]);
+  assert.match(c.title, /v20\.1\.0; this TRIF uses v/);
+
+  fs.appendFileSync(pinned.node, '# changed\n');
+  c = runtimeCheck(pinned.node, home, { copy: true, setupFix: fix });
+  assert.equal(c.status, 'fail');
+  assert.match(c.title, /changed since it was downloaded/);
+  assert.match(c.fix, /rm -rf .*then run: trif setup/);
+  fs.rmSync(path.join(old.dir, R.MARK));
+  assert.match(runtimeCheck(old.node, home, { copy: true, setupFix: fix }).title, /record .* is missing/);
+  // Runs, but isn't the version its folder says.
+  const liar = handRuntime(home, '22.0.0');
+  assert.match(R.checkRuntime(liar.node, home, { runVersion: () => 'v18.0.0' }).problem, /doesn't run \(v18\.0\.0\)/);
+
+  const sys = '/usr/local/bin/node';
+  assert.equal(runtimeCheck(sys, home, { copy: true, setupFix: fix, env: {} }).status, KEY ? 'warn' : 'info');
+  assert.equal(runtimeCheck(sys, home, { copy: true, setupFix: fix, env: {} }).fix, KEY ? 'run: trif setup --runtime' : undefined);
+  assert.equal(runtimeCheck(sys, home, { copy: true, setupFix: fix, env: { TRIF_RUNTIME: 'off' } }).status, 'info');
+  assert.equal(runtimeCheck(sys, home, { copy: false, setupFix: fix, env: {} }).status, 'info', 'a git checkout');
+});
+
+test('trif doctor after setup --copy on the runtime reports it; a damaged one fails', { skip: !KEY || process.platform === 'win32' }, async () => {
+  const dir = tempDir('rt-doc-srv-');
+  const home = tempDir('rt-doc-home-');
+  const arch = fakeArchive(dir, R.PINS.version);
+  const server = await serve(dir);
+  try {
+    const pins = pinsFile(dir, R.PINS.version, server.base, arch);
+    // Pins identical to the real ones in version, so doctor (which uses the build's pins) sees it as current.
+    const native = path.join(dir, 'native');
+    let r = await runCli(['setup', '--copy', '--no-link', '--no-examples', '--native-dir', native], { home, env: { TRIF_RUNTIME: pins }, timeout: 90000 });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    const doctor = () => runCli(['doctor', '--native-dir', native], { home, env: { TRIF_RUNTIME: pins }, timeout: 30000 });
+    r = await doctor();
+    assert.match(r.stdout, new RegExp(`ok\\s+TRIF's own Node v${R.PINS.version.replace(/\./g, '\\.')}`), r.stdout + r.stderr);
+    fs.appendFileSync(wrapperNode(home), '# changed\n');
+    r = await doctor();
+    assert.match(r.stdout, /FAIL\s+TRIF's own Node in .* is damaged: its node has changed/, r.stdout + r.stderr);
+  } finally { server.stop(); }
+});

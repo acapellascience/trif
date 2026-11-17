@@ -13,6 +13,7 @@ const { browserFamily, browserLabel } = require('./browsers');
 const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
 const { isExecutable } = require('./setup');
 const { firefoxAddonUrl } = require('./update');
+const R = require('./runtime');
 
 const EXT_URL = `chrome://extensions/?id=${P.EXTENSION_ID}`;
 
@@ -56,6 +57,26 @@ function checkWrapperScript(script, ws) {
     return { status: 'warn', title: `host wrapper runs ${script}, inside npm's npx cache, which npm may delete` };
   }
   return { status: 'warn', title: `host wrapper runs ${script}, not this copy (${P.HOST_JS})` };
+}
+
+/**
+ * Which Node the wrapper runs: TRIF's own (docs/NO-NODE.md), whole and the version this build pins, or the
+ * computer's. A copy install on the computer's Node warns (it breaks when that Node is removed or
+ * upgraded), unless TRIF_RUNTIME turned the runtime off or there's none for this platform; a git
+ * checkout on it is expected. Returns { status, title, fix? } or null.
+ */
+function runtimeCheck(node, home, { copy, setupFix, env = process.env, check = R.checkRuntime } = {}) {
+  const rt = check(node, home);
+  if (rt) {
+    if (rt.problem) return { status: 'fail', title: `TRIF's own Node in ${rt.dir} is damaged: ${rt.problem}`, fix: `remove that folder (rm -rf ${JSON.stringify(rt.dir)}), then ${setupFix}` };
+    if (rt.version !== rt.pinned) return { status: 'warn', title: `TRIF's own Node is v${rt.version}; this TRIF uses v${rt.pinned}`, fix: setupFix };
+    return { status: 'ok', title: `TRIF's own Node v${rt.version} (${rt.dir})` };
+  }
+  let off = null;
+  try { const s = R.runtimeSetting(env); off = s.off || (R.platformKey(process.platform, process.arch, s.pins) ? null : `none for ${process.platform}-${process.arch}`); } catch (e) { off = e.message; }
+  if (!copy) return { status: 'info', title: `TRIF runs on this computer's Node (${node}), as a git checkout does (trif setup --runtime for TRIF's own)` };
+  if (off) return { status: 'info', title: `TRIF runs on this computer's Node (${node}); its own is off (${off})` };
+  return { status: 'warn', title: `TRIF runs on this computer's Node (${node}), not its own: it stops working if that Node is removed or upgraded`, fix: 'run: trif setup --runtime' };
 }
 
 const SAFARI_PORT = require('../safari-bridge').PORT;
@@ -212,6 +233,8 @@ async function doctor(opts = {}) {
         add('ok', `host wrapper ${ws.hostWrapper} -> ${w.script} (${copy ? 'installed copy' : 'linked'}, node ${v})`);
         const problem = checkWrapperScript(w.script, ws);
         if (problem) add(problem.status, problem.title, problem.fix || setupFix);
+        const rt = runtimeCheck(w.node, ws.home, { copy, setupFix });
+        if (rt) add(rt.status, rt.title, rt.fix);
       }
     }
   }
@@ -450,4 +473,4 @@ function formatDoctor({ ok, checks }) {
   return out.join('\n');
 }
 
-module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript, helperDownFix };
+module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript, helperDownFix, runtimeCheck };

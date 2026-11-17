@@ -200,7 +200,44 @@ function runtimeInfo(home, opts = {}) {
   try { return { node, ...JSON.parse(fs.readFileSync(path.join(dir, MARK), 'utf8')) }; } catch { return null; }
 }
 
+/**
+ * The runtime folder a node path lies in, { dir, name, version }, when it's <home>/runtime/node-v…/bin/node
+ * (node.exe on Windows); else null (a system node).
+ */
+function runtimeOf(nodePath, home, { platform = process.platform } = {}) {
+  if (!nodePath || !home) return null;
+  const rel = path.relative(path.resolve(runtimeRoot(home)), path.resolve(nodePath));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const name = rel.split(/[\\/]/)[0];
+  const m = name.match(/^node-v(\d+\.\d+\.\d+)-[a-z]+-[a-z0-9]+$/);
+  if (!m) return null;
+  const dir = path.join(runtimeRoot(home), name);
+  if (path.resolve(nodeIn(dir, platform)) !== path.resolve(nodePath)) return null;
+  return { dir, name, version: m[1] };
+}
+
+/**
+ * For doctor: is the runtime a wrapper names whole and runnable? Reads its folder's mark, checks bin/node's
+ * SHA-256 against what was recorded when it was unpacked, and runs `--version`. Returns null for a node
+ * that isn't a TRIF runtime, else { dir, version, pinned (this build's pin), problem: null | string }.
+ */
+function checkRuntime(nodePath, home, { platform = process.platform, pins = PINS, runVersion = null } = {}) {
+  const rt = runtimeOf(nodePath, home, { platform });
+  if (!rt) return null;
+  const out = { dir: rt.dir, version: rt.version, pinned: pins.version, problem: null };
+  let mark = null;
+  try { mark = JSON.parse(fs.readFileSync(path.join(rt.dir, MARK), 'utf8')); } catch { /* below */ }
+  if (!mark || !mark.nodeSha256) { out.problem = `its record ${MARK} is missing`; return out; }
+  let sha;
+  try { sha = crypto.createHash('sha256').update(fs.readFileSync(nodePath)).digest('hex'); } catch (e) { out.problem = `its node can't be read (${e.code || e.message})`; return out; }
+  if (sha !== mark.nodeSha256) { out.problem = 'its node has changed since it was downloaded'; return out; }
+  const v = runVersion ? runVersion(nodePath) : String(spawnSync(nodePath, ['--version'], { encoding: 'utf8', timeout: 10000 }).stdout || '').trim();
+  if (v !== `v${rt.version}`) out.problem = `its node doesn't run (${v || 'no output'})`;
+  return out;
+}
+
 module.exports = {
+  runtimeOf, checkRuntime, MARK,
   PINS, RuntimeError, platformKey, runtimeRoot, runtimeName, nodeIn, installedNode, pickArchive, ensureRuntime, ensureRuntimeSync,
   pruneRuntimes, runtimesNamedIn, runtimeSetting, runtimeInfo,
 };

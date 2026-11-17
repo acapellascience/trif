@@ -36,6 +36,8 @@ const { execFile } = require('child_process');
 const P = require('./paths');
 const { browserTable, browsersSetUp: setUpIn } = require('./browsers');
 const { acquireInstallLock, LockBusy, LOCK_ENV } = require('./lock');
+const { envName } = require('./env');
+const R = require('./runtime');
 
 const CHECK_EVERY_MS = 20 * 60 * 60 * 1000; // a cached answer is good for this long
 const FEED_MAX_AGE_MS = 8 * 7 * 24 * 60 * 60 * 1000; // a feed signed longer ago than this is refused (above)
@@ -271,6 +273,17 @@ function browsersSetUp() {
   return setUpIn(browserTable()).map((b) => b.key);
 }
 
+// How long the new version's setup may take, and what it's told (TRIF_SETUP_TIMEOUT_MS) so it can give a
+// download of TRIF's own Node most of it. Updaters from before the runtime kill setup at 120 s and say
+// nothing; setup then keeps the download to 75 s (setup.js chooseNode). Under the install lock's 15 min.
+const SETUP_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** The node to run the new version's setup with: TRIF's own when it's installed, else the one running this. */
+function updateNode(home, { execPath = process.execPath, installed = R.installedNode } = {}) {
+  if (R.runtimeOf(execPath, home)) return execPath;
+  return installed(home) || execPath;
+}
+
 function run(file, args, opts) {
   return new Promise((resolve) => {
     execFile(file, args, { maxBuffer: 4 * 1024 * 1024, timeout: 120000, ...opts }, (error, stdout, stderr) => {
@@ -286,7 +299,8 @@ function run(file, args, opts) {
  * version went into <home>/app but its setup failed at a later step (a browser's manifest, the Safari
  * bridge): it's installed, and the setup output says what to fix.
  */
-async function install(ws, { root = P.REPO_ROOT, fetch = fetchUrl, browsers = browsersSetUp(), node = process.execPath, ...feedOpts } = {}) {
+async function install(ws, { root = P.REPO_ROOT, fetch = fetchUrl, browsers = browsersSetUp(), node = null, ...feedOpts } = {}) {
+  if (!node) node = updateNode(ws.home);
   const inst = installable(ws, root);
   if (!inst.ok) throw new UpdateError(inst.why);
   const url = feedUrl(ws, packageJson(root));
@@ -328,8 +342,8 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
     const args = [path.join(pkgRoot, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--home', ws.home];
     if (browsers.length) args.push('--browser', browsers.join(','));
     const recordedPath = typeof ws.config?.env?.PATH === 'string' && ws.config.env.PATH ? ws.config.env.PATH : process.env.PATH;
-    const env = { ...process.env, PATH: recordedPath, TRIF_HOME: ws.home, [LOCK_ENV]: lock.token };
-    const r = await run(node, args, { cwd: tmp, env });
+    const env = { ...process.env, PATH: recordedPath, TRIF_HOME: ws.home, [LOCK_ENV]: lock.token, [envName('SETUP_TIMEOUT_MS')]: String(SETUP_TIMEOUT_MS) };
+    const r = await run(node, args, { cwd: tmp, env, timeout: SETUP_TIMEOUT_MS });
     const tail = r.out.trim().split('\n').slice(-6).join('\n');
     // Setup exits 1 for any problem, including ones after the copy; what matters is whether <home>/app
     // now holds the new version.
@@ -356,5 +370,5 @@ function installedVersion(ws) {
 module.exports = {
   packageJson, UpdateError, CHECK_EVERY_MS, FEED_MAX_AGE_MS, feedSignedAt, feedTooOld, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
   readState, writeState, setConfigKey, autoUpdateOn, checksOn, installable, summary, check, install, installedVersion,
-  browsersSetUp,
+  browsersSetUp, updateNode, SETUP_TIMEOUT_MS,
 };

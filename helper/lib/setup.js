@@ -52,6 +52,19 @@ function pickNodePath() {
  * download: the node running setup (pickNodePath), saying why. Returns { node, how: 'runtime'|'system',
  * version?, fetched?, pins? (the runtime's), error?, why? }.
  */
+/**
+ * How long setup lets the runtime download take. Under an update (it holds the install lock) the updater
+ * says how long it gives setup (TRIF_SETUP_TIMEOUT_MS, update.js); the download gets all but a minute of
+ * it. Updaters from before the runtime say nothing and kill setup at 120 s: 75 s then, and the next update
+ * tries again. Otherwise (a person running setup) ten minutes.
+ */
+function downloadBudget(env = process.env) {
+  if (!envVar('INSTALL_LOCK', env)) return 10 * 60 * 1000;
+  const given = Number(envVar('SETUP_TIMEOUT_MS', env));
+  if (!Number.isFinite(given) || given <= 0) return 75000;
+  return Math.max(30000, Math.min(10 * 60 * 1000, given - 60000));
+}
+
 function chooseNode(home, { mode, want, env = process.env, ensure = R.ensureRuntimeSync } = {}) {
   const system = (why, error = null) => ({ node: pickNodePath(), how: 'system', why, ...(error ? { error } : {}) });
   if (want === false) return system('--no-runtime');
@@ -62,12 +75,9 @@ function chooseNode(home, { mode, want, env = process.env, ensure = R.ensureRunt
   if (!R.platformKey(process.platform, process.arch, setting.pins)) return system(`no runtime for ${process.platform}-${process.arch}`);
   const have = R.installedNode(home, { pins: setting.pins });
   if (have) return { node: have, how: 'runtime', version: setting.pins.version, fetched: false, pins: setting.pins };
-  // Under an update (it holds the install lock) an updater from before this one gives the whole setup
-  // two minutes: the download gets 75 s of them, and the next update tries again.
-  const underUpdate = !!(envVar('INSTALL_LOCK', env));
   if (process.stderr.isTTY) process.stderr.write(`Downloading Node ${setting.pins.version} for TRIF…\n`);
   try {
-    const r = ensure(home, { pinsFile: setting.file, timeoutMs: underUpdate ? 75000 : 10 * 60 * 1000, env });
+    const r = ensure(home, { pinsFile: setting.file, timeoutMs: downloadBudget(env), env });
     return { node: r.node, how: 'runtime', version: r.version, fetched: !!r.fetched, pins: setting.pins };
   } catch (e) {
     return system('the download failed', e.message);
@@ -832,5 +842,5 @@ function setup(opts = {}) {
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, chooseNode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
+  chooseMode, chooseNode, downloadBudget, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
 };

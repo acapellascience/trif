@@ -301,9 +301,9 @@ it's doing, its address), `{"closechat": 1}`; `{"boxjs": "…"}` (in the boxed m
 the Add to Home Screen sheet; `{"tabhosts": 1}` lists the tabs' hosts (* on the one shown); `{"bars": "full|compact|state"}` moves the bars and
 says where they and the page are (`-nobarshift` at launch: the page doesn't move with the bars, as before 11-16);
 `{"openurl": "…"}` opens an address as the app opens one in another app; `-pageletter` at
-launch shows the site's letter in the toolbar's page button instead of the page glyph. The toolbar (Tim, 11-17, an
-experiment): back, forward, chat, [tabs] in the middle, Mods, page / +, Home Screen; `-pagemiddle` at launch (or
-`ContentView.tabsInMiddle = false`) is the order before, the page button in the middle and the tabs where it now is.
+launch shows the site's letter in the toolbar's page button instead of the page glyph. The toolbar (Tim, 11-17): back,
+forward, chat, [page / +] in the middle, tabs, Mods, Home Screen; `-modsfirst` at launch (or
+`ContentView.tabsBeforeMods = false`) is the order before, Mods before the tabs.
 `{"hit": [x, y]}` names the view UIKit's hit test finds at a window point, and the windows; `{"exitbutton": 1}` where
 full screen's exit button and its taps are; `-exity <points>` moves it. shared/pages/fixedbars.html
 has a fixed header and an x.com-like fixed tab bar at the bottom, for the bars moving over a page. shared/pages/feed.html draws a feed from feed.json by fetch and by

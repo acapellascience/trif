@@ -707,24 +707,13 @@ struct ContentView: View {
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
                 .frame(maxWidth: .infinity)
-            // (the middle cell, a little bigger: the page button, or with the experiment below the tabs button)
-            Group { if ContentView.tabsInMiddle { tabsButton } else { pageButton } }
+            // (the page: back to it from whatever covers it; on the page, a + for a new tab; in the middle, a little bigger)
+            pageButton
                 .frame(width: 64)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { ContentView.pageButtonMidX = $0 }
-            // (the mods' button is a switch, on or, with all paused, off: Tim, 11-15; the robot is the chat's now)
-            Button { onTab { showMods = true } } label: {
-                SwitchGlyph(on: !store.paused).frame(width: 30, height: 24)
-                    .overlay(alignment: .topTrailing) {
-                        if waitingHere > 0 {
-                            Text("\(waitingHere)").font(.caption2.bold()).foregroundStyle(.black)
-                                .padding(.horizontal, 4).background(Capsule().fill(Color.trifYellow)).offset(x: 8, y: -6)
-                        }
-                    }
-            }
-            .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
-                .frame(maxWidth: .infinity)
-            Group { if ContentView.tabsInMiddle { pageButton } else { tabsButton } }
-                .frame(maxWidth: .infinity)
+            // (Tim, 11-17: the tabs next, then the Mods switch; `-modsfirst`: Mods before the tabs, as until 11-17)
+            if ContentView.tabsBeforeMods { tabsButton.frame(maxWidth: .infinity); modsButton.frame(maxWidth: .infinity) }
+            else { modsButton.frame(maxWidth: .infinity); tabsButton.frame(maxWidth: .infinity) }
             // (the last button adds this site to the Home Screen, Tim 11-16; what the ⋯ menu here held is in the ⋯ at the
             // address bar's left. Its glyph, an A in a rounded square like the App Store's (Tim, 11-17), so it isn't
             // taken for the new tab's +)
@@ -743,10 +732,25 @@ struct ContentView: View {
     /// (development: where the middle button's centre is, for the step {"toolbar": 1})
     static var pageButtonMidX: CGFloat = 0
 
-    /// The toolbar's tabs button and page button swapped (Tim, 11-17, an experiment: does it feel more like a normal
-    /// browser?): the tabs button in the middle, the page button where the tabs were. `true` ships it; `false` (or the
-    /// launch flag `-pagemiddle`) is the layout before: back, forward, chat, [page], Mods, tabs, Home Screen.
-    static let tabsInMiddle = true && !ProcessInfo.processInfo.arguments.contains("-pagemiddle")
+    /// The toolbar's tabs button before the Mods switch (Tim, 11-17: back, forward, chat, [page], tabs, Mods, Home
+    /// Screen, more like a normal browser). `false` (or the launch flag `-modsfirst`) is the order before: back,
+    /// forward, chat, [page], Mods, tabs, Home Screen.
+    static let tabsBeforeMods = true && !ProcessInfo.processInfo.arguments.contains("-modsfirst")
+
+    /// The Mods tab: a switch, on or, with all paused, off (Tim, 11-15; the robot is the chat's now), with the count
+    /// waiting for an OK.
+    private var modsButton: some View {
+        Button { onTab { showMods = true } } label: {
+            SwitchGlyph(on: !store.paused).frame(width: 30, height: 24)
+                .overlay(alignment: .topTrailing) {
+                    if waitingHere > 0 {
+                        Text("\(waitingHere)").font(.caption2.bold()).foregroundStyle(.black)
+                            .padding(.horizontal, 4).background(Capsule().fill(Color.trifYellow)).offset(x: 8, y: -6)
+                    }
+                }
+        }
+        .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
+    }
 
     /// The page: back to it from whatever covers it; on the page, a + for a new tab.
     private var pageButton: some View {

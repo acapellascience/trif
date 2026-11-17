@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (264 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (266 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -77,7 +77,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while something plays.
 - Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-pageletter`, `-pagemiddle` (the toolbar's order before 11-17), `-exitbelow` (the exit button's old
+  `-nobarshift`, `-pageletter`, `-modsfirst` (the toolbar's order before 11-17), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`.
 
@@ -153,10 +153,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   list is cleared; a new list holding every site of an earlier list reuses that one's tag (replaces it). The list clears
   when TRIF is opened from one of its icons (link `&set=<tag>`). Profile name "TRIF icons: X, YouTube, NYT". One icon on
   the list goes as its site's own profile. All its words await Tim (strings doc).
-- Toolbar (Tim, 11-17): the Home Screen button is an A in a rounded square (SF Symbol a.square), not a +. The tabs
-  button and the page button swapped as an experiment: SHIPPED back, forward, chat, [tabs] (middle), Mods, page / +,
-  Home Screen; BEFORE back, forward, chat, [page / +] (middle), Mods, tabs, Home Screen. One line either way:
-  `ContentView.tabsInMiddle` (or launch with `-pagemiddle`).
+- Toolbar (Tim, 11-17): the Home Screen button is an A in a rounded square (SF Symbol a.square), not a +. Order
+  SHIPPED: back, forward, chat, [page / +] (centre, 4th of 7, exactly centred: SE 187.5, 17 Pro 201), tabs, Mods, A.
+  BEFORE: back, forward, chat, [page / +], Mods, tabs, A. One line either way: `ContentView.tabsBeforeMods` (or launch
+  with `-modsfirst`). (A first try put the tabs in the centre and the page where the tabs were: Tim said wrong, the swap
+  he meant was tabs and Mods.)
 - Full screen's exit button (Tim, 11-17, "can we move it up?"; glyph kept): beside the clock at the foot of the status
   bar: SE right of the clock (circle centre 250, 18), Dynamic Island phones between the clock and the island (17 Pro:
   117, 52). Its taps go to a window-level recognizer (ExitTaps), 40 × 44 from the bar's foot down.

@@ -278,7 +278,7 @@ person's name on the site is known) · **fixed {Site}** · **Custom…**. The re
 | Where | Old | New |
 |---|---|---|
 | The toolbar's last button (Add to Home Screen) | + | an A in a rounded square, like the App Store's (SF Symbol a.square); accessibility unchanged: Add to Home Screen |
-| The toolbar's order (an experiment) | back, forward, chat, [page / +], Mods, tabs, Home Screen | back, forward, chat, [tabs], Mods, page / +, Home Screen (no new words) |
+| The toolbar's order (Tim, 11-17) | back, forward, chat, [page / +], Mods, tabs, Home Screen | back, forward, chat, [page / +], tabs, Mods, Home Screen (no new words) |
 
 ## The full screen exit button (moved 11-17, Tim: "can we move it up?")
 

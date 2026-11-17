@@ -20,11 +20,11 @@ Computer side:
       changes from syncMods), the desktop lines (Settings' phone row, "From {phone}" on a hold), panel strings test
 - [x] S4. Stand-in phone sync (`tests/phone-link-client.js`) and the end-to-end test against the real helper in a
       temp HOME on 127.0.0.1: add, edit both ways, conflict, deletes both ways, held, style at once, refusals
-- [ ] S5. ~~PHONE-LINK.md rules 3 and 5 reworded~~ (done in round 3, Tim confirmed 11-17), pointers in
+- [x] S5. ~~PHONE-LINK.md rules 3 and 5 reworded~~ (done in round 3, Tim confirmed 11-17), pointers in
       docs/PROTOCOL.md and docs/SECURITY.md
 
 iPhone side (ios-poc):
-- [ ] S6. `PhoneSync.swift`: the manifest, the plan applied with ModStore's rules (new as an import, changed as an
+- [x] S6. `PhoneSync.swift`: the manifest, the plan applied with ModStore's rules (new as an import, changed as an
       edit, removed to Recently deleted), when it syncs (front, after a change, nudge, Sync now); ModStore trash.
       Unit tests
 - [ ] S7. The Mods tab's line, Sync now, Recently deleted, the conflict notice; strings into IOS-APP-STRINGS.md; the
@@ -32,35 +32,39 @@ iPhone side (ios-poc):
 - [ ] S8. Simulator pass: a mod made on the phone, edited by a desktop phone-view chat (stand-in agent), back on the
       phone; a conflict; a delete
 
-## Done this round (round 4, 2026-11-17)
+## Done this round (round 5, 2026-11-17)
 
-- S4: `PhoneClient.sync(mods)` in tests/phone-link-client.js (begin, get each give, put each want, remove to
-  `phone.trash`, end with `have`; `PhoneClient.rev`; `beforePuts` for races). tests/phone-sync-e2e.test.js: the
-  real helper in a temp HOME on 127.0.0.1, one story: the first sync joins (held clicker "From Tim's iPhone" in the
-  mods message, style and plain at once, every-site and 7 bad ids skipped), no nudge for its own writes, desktop
-  edit nudges and goes over, phone edit with history (source phone), a race (`changed`) then the conflict kept
-  both ways, deletes both ways to the trashes, `later` during a paused phone run, bad-mod/too-big/bad-mod id/
-  no-sync/busy, a linked twin left alone, phone B's own base, the switch off. Desktop mods untouched.
-- Passes 3 of 3 locally (~22 s); phone-link-e2e, -host, sync-session, sync: 17 pass. CI 5f48cc5
-  green: https://github.com/acapellascience/trif/actions/runs/44056254255
-- Browser tests once locally (headless, muted, cdp-page.js's lock and 1.5 GB watchdog, one at a time;
-  TRIF_E2E_CHROME = ~/WebMods/tests/e2e/.browsers' Chrome, the worktree has none): phone-link-browser 1/1,
-  phone-browser 5/5 pass.
+- S5 (phone-link 02de94e): PROTOCOL.md's phone link section has the sync's messages, `phone.sync`, the base and
+  synced.json; SECURITY.md says what a paired phone may write, how it's checked and held. CI run 44056937058: the clickjack
+  flake, green on its rerun (round 4's progress commit, 44056705742, the same flake).
+- S6 (ios-poc 4bcd67d): PhoneSync.swift (`run`: begin, puts, gets taken by the store, removes, end with `have`;
+  `Summary`; `Scheduler`: one at a time, coalesced, a change syncs 3 s later only if a file's rev moved); ModStore
+  as `PhoneSyncStore` (new as an import, off, newOff "computer"; changed as saveEdit judges, history source
+  computer; deletes to `trash`, Recently deleted, 30 days, for every delete now); PhoneSyncModel owns the app's one
+  PhoneLinkRemote (More's `link` is it), syncs on front, changes, `sync.changed`, Sync now; dev steps `sync`,
+  `syncstate`. Mac test 7/7 (new `syncunit`: a scripted computer, 25 checks). Simulator build and the .ipa
+  (dSYM 203EB9E6-FDD6-3BED-ADBD-E5A6FBAF06F3) built. ios-poc CI green: https://github.com/acapellascience/trif/actions/runs/44058240792
 
 ## Next step
 
-S5: pointers in docs/PROTOCOL.md and docs/SECURITY.md (short: sync rides the session; rules 3 and 5). Then, with
-ios-poc free, S6 (PhoneSync.swift).
+S7 (ios-poc, if free): the Mods tab's line (PhoneSyncModel.last / lastProblem), Sync now, Recently deleted with
+Restore, the conflict and came-back notices; strings into IOS-APP-STRINGS.md (drafts from PHONE-LINK-STRINGS.md
+"Phone sync"); the Mac harness syncing with the real helper (a `check sync …` command in main.swift with a store in
+memory, against Store + Server + PhoneSync session in a temp HOME).
 
 ## Notes for next round
 
-- Rounds 1–3's notes still hold. S4 found no helper bug. What it settled:
-- A conflict's `want` carries `conflict: true` (the doc's table says `conflict?`); `give` carries `conflict: <id>`.
-- The panel's `mods` message can come between puts: wait for one with every expected id (`nextMods`).
-- History and trash entries have `.source` / `.created` beside the `.js`: filter on `.js`.
-- The stand-in agent's `PAUSE:<word>` phone run is enough to make a twin busy (`later`); after `done` a sync or
-  two may still say `later` while the run winds down (the test retries).
-- For S7's Mac harness: `PhoneClient.sync` is the reference for the order of messages the app sends.
+- Rounds 1–4's notes still hold.
+- The phone's side never computes a plan: it sends every mod (ids with a `/` only: the proof of concept's old
+  ids are left out) and applies what the computer says. A `give` whose code's rev isn't the plan's is not taken
+  (the next sync decides); `have` lists only ids the phone has after applying.
+- `syncTake` refuses a file whose id comes out different from the plan's (the reader's file+site → id).
+- mods-page.js shows newOff "computer" as "new" with the import's tooltip: S7 words it ("From your computer").
+- For S7's and S8's Simulator runs the stand-in computer (tests/phone-link-computer.js) doesn't attach a
+  `PhoneSync` session yet: add it there (the e2e test's wiring is the model), with stdin commands to write, edit
+  and delete a twin file and to show the twin.
+- ModStore is main-actor: the conformance is `@preconcurrency`; PhoneSync's callbacks run on main (the link's
+  queue).
 
 ## For Tim (decisions)
 
@@ -77,3 +81,4 @@ ios-poc free, S6 (PhoneSync.swift).
 - Round 2: efebdc6, run 44052653702: green.
 - Round 3: 61c864a, run 44054353924: green.
 - Round 4: 5f48cc5, run 44056254255: green.
+- Round 5: phone-link 02de94e, run 44056937058: the clickjack flake, green on rerun; ios-poc 4bcd67d, run 44058240792: green.

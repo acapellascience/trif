@@ -196,7 +196,8 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 
 | Key | New |
 |---|---|
-| Camera | Websites you visit can ask to use the camera, for a photo or a video call. |
+| Camera | To scan the code TRIF shows on your computer. Websites you visit can also ask to use the camera, for a photo or a video call. (changed 11-17, draft, the phone link: was "Websites you visit can ask to use the camera, for a photo or a video call.") |
+| Local Network (added 11-17, draft, the phone link) | TRIF looks for your computer on your Wi-Fi when you choose My computer. |
 | Microphone | Websites you visit can ask to use the microphone, for a voice or video call. |
 | Saving to Photos | To save pictures from websites to your photos. |
 
@@ -396,3 +397,37 @@ allow, Not now); the code card (Code, Details, History, Running now, Waiting for
 differences, Restore, the History sources, The version from {date}., What changed since the version from {date} (-
 then, + now)., Restored the version from {date}. The one before is in History., Copy, Copied, Export); every power's
 and warning's "i" (explain.json); Import mod…; Export all mods for {site}; Couldn't export: {why}.
+
+## My computer: pairing with TRIF on the computer (added 11-17, drafts; the phone link, step 13)
+
+The phone link's pairing screen (PhoneLinkView.swift). For now it opens from the ⋯ menu and from a `trif://pair`
+link (iOS's Camera app scanning the code in desktop TRIF's Settings); the phone link's step 14 opens it from More's
+"My computer" engine. The same lines are in docs/PHONE-LINK-STRINGS.md on branch phone-link.
+
+| Where | New |
+|---|---|
+| The ⋯ menu (for now) | My computer… |
+| The screen's title | My computer |
+| Before pairing | Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code. |
+| The button | Scan the code (once paired: Scan a new code) |
+| Under the camera | Scan the code in TRIF's Settings on your computer: Connect a phone. |
+| The camera, for a screen reader | The camera, to scan the code |
+| A QR code (or link) that isn't TRIF's pairing code | That isn't a code from TRIF on your computer. |
+| No camera | This iPhone has no camera to scan with. |
+| Camera access off | TRIF can't use the camera. Turn it on in Settings, then TRIF Probe, then Camera. · Open Settings |
+| Looking | Looking for {computer} on your Wi-Fi… |
+| Connecting | Connecting to {computer}… |
+| Done | Connected to {computer}. |
+| Paired, later | Connected to {computer} since {date}. |
+| Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. |
+| The code was used, cancelled or is over 5 minutes old | That code didn't work: it may have been used already or be more than 5 minutes old. Show a new one on {computer} and scan it again. |
+| Local Network access off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF Probe, then Local Network. · Open Settings |
+| An answer that doesn't decrypt (not the code's computer) | Something on your Wi-Fi answered as {computer} but isn't it. TRIF didn't connect. |
+| The Keychain refused | This iPhone couldn't keep the connection's key. Try again. |
+| The encryption's self-test failed | TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect. |
+| Forgetting | Forget {computer} |
+| Under it | Your computer still lists this iPhone until you remove it there. |
+| The button at the top | Done |
+
+{computer} is the name in the code until the computer's own `hello` names it ("your computer" if the code has none).
+

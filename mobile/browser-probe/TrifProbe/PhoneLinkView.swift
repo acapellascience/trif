@@ -1,0 +1,233 @@
+import AVFoundation
+import Network
+import SwiftUI
+import UIKit
+
+// The phone link's screen for now (step 13 of the phone link): My computer, from the ⋯ menu, and from a
+// `trif://pair` link (iOS's Camera app scanning desktop TRIF's code opens it here). Scans the code with the camera
+// (QRScanner), pairs (PhoneLinkPairer, PhoneLinkPair.swift) and shows the paired computer. Step 14 opens it from
+// More's "My computer" engine. Every word is a draft in docs/IOS-APP-STRINGS.md and docs/PHONE-LINK-STRINGS.md.
+//
+// Development: `-linkhost 127.0.0.1:<port>` pairs with that address instead of looking on the Wi-Fi (a loopback
+// address only), for the Simulator against a helper in a temp HOME.
+
+@MainActor
+final class PhoneLinkModel: ObservableObject {
+    static let shared = PhoneLinkModel()
+    @Published var shown = false
+    @Published private(set) var computer: PairedComputer? = PhoneLinkKeys.shared.computer
+    @Published private(set) var step: PhoneLinkPairer.Step?
+    @Published private(set) var codeName: String?
+    @Published var scanning = false
+    @Published var note: String?
+    private var pairer: PhoneLinkPairer?
+
+    /// A `trif://pair` link (the Camera app, or a scan): pairs at once. False when it isn't a code.
+    @discardableResult
+    func open(_ text: String) -> Bool {
+        shown = true
+        scanning = false
+        guard let code = PairCode.parse(text) else { note = "That isn't a code from TRIF on your computer."; return false }
+        pair(code)
+        return true
+    }
+
+    func pair(_ code: PairCode) {
+        pairer?.cancel()
+        note = nil
+        codeName = code.name
+        let screen = UIScreen.main.bounds.size
+        let p = PhoneLinkPairer(code: code, phoneName: UIDevice.current.name,
+                                device: ["name": UIDevice.current.model, "width": Int(screen.width), "height": Int(screen.height)],
+                                endpoints: Self.devEndpoints)
+        p.onStep = { [weak self] s in
+            Task { @MainActor in
+                guard let self, self.pairer === p else { return }
+                self.step = s
+                if case .paired = s { self.computer = PhoneLinkKeys.shared.computer }
+            }
+        }
+        pairer = p
+        step = .finding
+        p.start()
+    }
+
+    func forget() {
+        pairer?.cancel(); pairer = nil
+        PhoneLinkKeys.shared.forget()
+        computer = nil
+        step = nil
+    }
+
+    func reset() { pairer?.cancel(); pairer = nil; step = nil; note = nil; scanning = false }
+
+    /// (development) `-linkhost 127.0.0.1:<port>`: loopback only.
+    static var devEndpoints: [NWEndpoint]? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-linkhost"), i + 1 < args.count else { return nil }
+        let parts = args[i + 1].split(separator: ":")
+        guard parts.count == 2, ["127.0.0.1", "localhost"].contains(String(parts[0])), let port = NWEndpoint.Port(String(parts[1])) else { return nil }
+        return [.hostPort(host: "127.0.0.1", port: port)]
+    }
+
+    /// One line for the dev step {"phonepair": …}.
+    var describe: String {
+        let c = computer.map { "paired \($0.name) id \($0.id)" } ?? "not paired"
+        let s: String
+        switch step {
+        case nil: s = "idle"
+        case .finding?: s = "finding"
+        case .connecting?: s = "connecting"
+        case .paired(let n)?: s = "paired(\(n))"
+        case .failed(let f)?: s = "failed(\(f))"
+        }
+        return "\(c); step \(s)" + (note.map { "; note \($0)" } ?? "")
+    }
+}
+
+struct PhoneLinkView: View {
+    @ObservedObject var model = PhoneLinkModel.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var camera = AVCaptureDevice.authorizationStatus(for: .video)
+
+    private var computerName: String { model.codeName ?? model.computer?.name ?? PairCode.fallbackName }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if model.scanning {
+                    Section { scanner } footer: { Text("Scan the code in TRIF's Settings on your computer: Connect a phone.") }
+                } else if let step = model.step {
+                    Section { progress(step) }
+                } else if let c = model.computer {
+                    Section {
+                        Text("Connected to \(c.name) since \(c.pairedAt.formatted(date: .abbreviated, time: .omitted)).")
+                    }
+                }
+                if let note = model.note { Section { Text(note).foregroundStyle(.red) } } // (a QR that isn't TRIF's, too)
+                if !model.scanning {
+                    if model.computer == nil && model.step == nil {
+                        Section {
+                            Text("Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code.")
+                        }
+                    }
+                    Section {
+                        Button(model.computer == nil ? "Scan the code" : "Scan a new code") { model.reset(); model.scanning = true }
+                        if let c = model.computer {
+                            Button("Forget \(c.name)", role: .destructive) { model.forget() }
+                        }
+                    } footer: {
+                        if model.computer != nil { Text("Your computer still lists this iPhone until you remove it there.") }
+                    }
+                }
+            }
+            .navigationTitle("My computer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { model.reset(); dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var scanner: some View {
+        switch camera {
+        case .authorized:
+            if QRScanner.available {
+                QRScanner { text in
+                    if PairCode.parse(text) != nil { model.open(text) } else { model.note = "That isn't a code from TRIF on your computer." }
+                }
+                .frame(height: 300)
+                .listRowInsets(EdgeInsets())
+                .accessibilityLabel("The camera, to scan the code")
+            } else {
+                Text("This iPhone has no camera to scan with.")
+            }
+        case .notDetermined:
+            ProgressView().task {
+                _ = await AVCaptureDevice.requestAccess(for: .video)
+                camera = AVCaptureDevice.authorizationStatus(for: .video)
+            }
+        default:
+            Text("TRIF can't use the camera. Turn it on in Settings, then TRIF Probe, then Camera.")
+            Button("Open Settings") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
+        }
+    }
+
+    @ViewBuilder private func progress(_ step: PhoneLinkPairer.Step) -> some View {
+        switch step {
+        case .finding: Label { Text("Looking for \(computerName) on your Wi-Fi…") } icon: { ProgressView() }
+        case .connecting: Label { Text("Connecting to \(computerName)…") } icon: { ProgressView() }
+        case .paired(let name): Label("Connected to \(name).", systemImage: "checkmark.circle")
+        case .failed(let f):
+            Text(Self.words(f, computerName)).foregroundStyle(.red)
+            if f == .denied {
+                Button("Open Settings") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
+            }
+        }
+    }
+
+    static func words(_ f: PhoneLinkPairer.Failure, _ computer: String) -> String {
+        switch f {
+        case .notFound: return "Can't find \(computer). It may be asleep, on another Wi-Fi, or have no browser with TRIF open."
+        case .refused: return "That code didn't work: it may have been used already or be more than 5 minutes old. Show a new one on \(computer) and scan it again."
+        case .denied: return "TRIF needs Local Network access to find \(computer). Turn it on in Settings, then TRIF Probe, then Local Network."
+        case .broken: return "Something on your Wi-Fi answered as \(computer) but isn't it. TRIF didn't connect."
+        case .keychain: return "This iPhone couldn't keep the connection's key. Try again."
+        case .selfTest: return "TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect."
+        }
+    }
+}
+
+/// The camera, reading QR codes: `found` with each code's text (once per text).
+struct QRScanner: UIViewRepresentable {
+    let found: (String) -> Void
+    static var available: Bool { AVCaptureDevice.default(for: .video) != nil }
+
+    func makeCoordinator() -> Coordinator { Coordinator(found) }
+
+    func makeUIView(context: Context) -> Preview {
+        let v = Preview()
+        let c = context.coordinator
+        guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device),
+              c.session.canAddInput(input) else { return v }
+        c.session.addInput(input)
+        let output = AVCaptureMetadataOutput()
+        guard c.session.canAddOutput(output) else { return v }
+        c.session.addOutput(output)
+        output.setMetadataObjectsDelegate(c, queue: .main)
+        output.metadataObjectTypes = [.qr]
+        v.layer.session = c.session
+        v.layer.videoGravity = .resizeAspectFill
+        let s = c.session
+        DispatchQueue.global(qos: .userInitiated).async { s.startRunning() }
+        return v
+    }
+
+    func updateUIView(_ uiView: Preview, context: Context) {}
+
+    static func dismantleUIView(_ uiView: Preview, coordinator: Coordinator) {
+        let s = coordinator.session
+        DispatchQueue.global(qos: .userInitiated).async { s.stopRunning() }
+    }
+
+    final class Preview: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+        override var layer: AVCaptureVideoPreviewLayer { super.layer as! AVCaptureVideoPreviewLayer }
+    }
+
+    final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
+        let session = AVCaptureSession()
+        let found: (String) -> Void
+        private var last: String?
+        init(_ found: @escaping (String) -> Void) { self.found = found }
+        func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
+            for case let o as AVMetadataMachineReadableCodeObject in objects {
+                guard let text = o.stringValue, text != last else { continue }
+                last = text
+                found(text)
+            }
+        }
+    }
+}

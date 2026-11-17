@@ -203,6 +203,13 @@ extension Model {
         }
         // ({"phonelink": 1}: the phone link's self-test, PhoneLink.swift: the published Noise vector and the frames vector)
         if step["phonelink"] != nil { out = "phone link self-test: " + (PhoneLink.selfTest() ?? "ok") }
+        // ({"phonepair": 1}: the pairing's state; {"phonepair": "trif://pair?…"}: pair with that code (with
+        // -linkhost, at that address); {"phonepair": "forget"}: forget the computer)
+        if let v = step["phonepair"] {
+            let m = PhoneLinkModel.shared
+            if let text = v as? String, text == "forget" { m.forget() } else if let text = v as? String { m.open(text) }
+            out = "phone link: " + m.describe
+        }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
@@ -277,6 +284,7 @@ struct ContentView: View {
     @State private var showHistory = false
     @State private var showMods = false
     @State private var addingIcon = false
+    @ObservedObject private var phoneLink = PhoneLinkModel.shared
     /// The list of Home Screen icons waiting (IconQueueView).
     @State private var showIconQueue = false
     @ObservedObject private var iconQueue = IconQueue.shared
@@ -467,6 +475,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $addingIcon) { WebClipSheet().environmentObject(browser) }
         .sheet(isPresented: $showIconQueue) { IconQueueView().environmentObject(browser) }
+        .sheet(isPresented: $phoneLink.shown) { PhoneLinkView() }
         .alert(pane.service.project == nil ? "Keep TRIF chats in a project" : "TRIF chats' project", isPresented: $askingProject) {
             Button(pane.service.project == nil ? "Copy and go" : "Make another") { pane.openProjects() }
             if pane.service.project != nil { Button("Stop using it", role: .destructive) { pane.service.useProject(nil, hasGuide: false) } }
@@ -612,6 +621,8 @@ struct ContentView: View {
             Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
             Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
             Button("Ask the phone's own model…") { onTab { question = ""; asking = true } }
+            // (the phone link's pairing; step 14 of the phone link opens it from More's My computer engine too)
+            Button { onTab { phoneLink.shown = true } } label: { Label("My computer…", systemImage: "desktopcomputer") }
             Button("Show everything hidden on this site again", role: .destructive) { onTab { Task { await browser.forgetRulesHere() } } }
             Divider()
             Menu("The probe") {
@@ -656,6 +667,10 @@ struct ContentView: View {
         PendingLink.take(url)
         if TrifLink.target(url) != nil { Diagnostics.shared.log("icon", "the app takes \(PendingLink.describe(url)), over: \(coverNames)") }
         if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
+        else if url.host?.lowercased() == "pair", url.scheme?.lowercased() == "trif" {
+            // (desktop TRIF's Connect a phone code, scanned with iOS's Camera app: My computer pairs at once)
+            closeCovers(); PhoneLinkModel.shared.open(url.absoluteString)
+        }
         else if url.host?.lowercased() == "add", url.scheme?.lowercased() == "trif" {
             // (a mod in a link: a QR code's, from desktop TRIF; offered like any other)
             if let m = ModLinkInURL.read(url) { closeCovers(); Task { await browser.offerFiles([(m.name, m.text)], from: "a code") } }

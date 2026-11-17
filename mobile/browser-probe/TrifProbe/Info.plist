@@ -22,7 +22,8 @@
 			</array>
 		</dict>
 	</array>
-	<!-- (trif://open?url=<a site>: the address of a site's Home Screen icon, WebClip.swift) -->
+	<!-- (trif://open?url=<a site>: the address of a site's Home Screen icon, WebClip.swift; trif://add, a mod's code;
+	     trif://pair, desktop TRIF's Connect a phone code, PhoneLinkView.swift) -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -48,11 +49,19 @@
 	<!-- (a page asking for the camera or microphone, x.com's compose for a photo: without these iOS ends the app at
 	     once. Tim's phone, 11-15 23:08, a TCC abort) -->
 	<key>NSCameraUsageDescription</key>
-	<string>Websites you visit can ask to use the camera, for a photo or a video call.</string>
+	<string>To scan the code TRIF shows on your computer. Websites you visit can also ask to use the camera, for a photo or a video call.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Websites you visit can ask to use the microphone, for a voice or video call.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>To save pictures from websites to your photos.</string>
+	<!-- (the phone link, PhoneLinkPair.swift: finding TRIF on the user's computer over Bonjour, `_trif._tcp`, and
+	     connecting to it; docs/PHONE-LINK.md section 5 on branch phone-link) -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TRIF looks for your computer on your Wi-Fi when you choose My computer.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_trif._tcp</string>
+	</array>
 	<!-- (sound and video go on with the app in the background or the phone locked: Browser.swift
 	     BackgroundPlay. Tim, 11-16: YouTube with his Background Play mod) -->
 	<key>UIBackgroundModes</key>

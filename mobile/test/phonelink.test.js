@@ -15,7 +15,8 @@ const net = require('net');
 const { execFileSync, spawn } = require('child_process');
 
 const HERE = __dirname;
-const SWIFT = [path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLink.swift'), path.join(HERE, 'phonelink-check', 'main.swift')];
+const SWIFT = [path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLink.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkPair.swift'),
+  path.join(HERE, 'phonelink-check', 'main.swift')];
 const mac = process.platform === 'darwin';
 const lib = [process.env.TRIF_PHONE_LINK_LIB, path.join(os.homedir(), 'WebMods-worktrees', 'phone-link', 'helper', 'lib', 'phonelink'),
   path.join(HERE, '..', '..', 'helper', 'lib', 'phonelink')].find((d) => d && fs.existsSync(path.join(d, 'noise.js')) && fs.existsSync(path.join(d, 'frames.js')));
@@ -30,9 +31,9 @@ function build() {
 }
 
 /** Runs the check: {lines, code}; killed after `ms`. */
-function run(args, ms = 20000) {
+function run(args, ms = 20000, env = {}) {
   return new Promise((resolve) => {
-    const child = spawn(build(), args, { stdio: ['ignore', 'pipe', 'inherit'] });
+    const child = spawn(build(), args, { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, ...env } });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     const t = setTimeout(() => child.kill('SIGKILL'), ms);
@@ -121,4 +122,79 @@ test('PhoneLink.swift: the ends a phone shows as states (refused, unreachable, b
   assert.match(ends.broken[0], /^end broken\(/);
   assert.equal(ends.dropped[0], 'open {"v":1}');
   assert.match(ends.dropped[1], /^end dropped\(/);
+});
+
+test('PhoneLinkPair.swift: PairCode reads the helper\'s code and nothing else; nobody at the address is not found', { skip: !mac && 'macOS only', timeout: 180000 }, async () => {
+  const k = Buffer.alloc(32, 7).toString('base64url');
+  const sec = Buffer.alloc(16, 9).toString('base64url');
+  const id = require('crypto').createHash('sha256').update(Buffer.alloc(32, 7)).digest().subarray(0, 8).toString('hex');
+  const good = `trif://pair?v=1&k=${k}&s=${sec}&n=Tim%E2%80%99s%20MacBook%20Pro%E2%80%A6`;
+  const { lines } = await run(['parse', good, `TRIF://PAIR?v=1&k=${k}&s=${sec}&n=`, `trif://pair?v=2&k=${k}&s=${sec}&n=x`,
+    `trif://pair?v=1&k=${k.slice(1)}&s=${sec}&n=x`, `trif://pair?v=1&k=${k}&s=${sec}=&n=x`, `trif://pair?v=1&k=${k}&k=${k}&s=${sec}&n=x`,
+    `trif://add?v=1&k=${k}&s=${sec}&n=x`, `https://pair?v=1&k=${k}&s=${sec}&n=x`, `trif://pair?v=1&k=${k}&s=${sec}&n=a%0Ab%E2%80%8Ec`]);
+  assert.deepEqual(lines, [`code ${id} ${sec} Tim’s MacBook Pro…`, `code ${id} ${sec} your computer`, 'none', 'none', 'none', 'none', 'none', 'none',
+    `code ${id} ${sec} abc`]);
+  // nobody at the address (a stale record, or the computer gone): not found, nothing kept
+  const free = net.createServer();
+  await new Promise((r) => free.listen(0, '127.0.0.1', r));
+  const port = free.address().port;
+  await new Promise((r) => free.close(r));
+  const gone = await run(['pair', String(port), good]);
+  assert.deepEqual(gone.lines.slice(0, 4).map((l) => l.replace(/\(\w+\.PhoneLinkPairer\.Failure\./, '(')),
+    ['step finding', 'step connecting', 'step failed(notFound)', 'kept none']);
+});
+
+const helperLib = lib && ['store.js', 'server.js'].every((f) => fs.existsSync(path.join(lib, f))) && fs.existsSync(path.join(lib, '..', '..', '..', 'tests', 'fake-keychain.js'));
+const noHelper = noLib || (!helperLib && 'the helper\'s store.js and server.js (branch phone-link) aren\'t here');
+
+test('PhoneLinkPair.swift against the real helper (server.js, store.js, a temp HOME): pairs, the computer lists the phone; a used, a cancelled and a wrong code are refused; a removed phone pairs again', { skip: noHelper, timeout: 180000 }, async () => {
+  const { makeFakeKeychain } = require(path.join(lib, '..', '..', '..', 'tests', 'fake-keychain.js'));
+  const { Store } = require(path.join(lib, 'store.js'));
+  const { Server } = require(path.join(lib, 'server.js'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-phonelink-pair-'));
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home);
+  const chain = makeFakeKeychain(path.join(root, 'keychain'));
+  const store = new Store(home, { env: { ...chain.env }, name: 'Stand-in Mac' });
+  const server = new Server(store, { version: '9.9.9', host: '127.0.0.1', port: 0, log: () => {} });
+  try {
+    await store.setOn(true);
+    await server.start();
+    const computerId = require('crypto').createHash('sha256').update((await store.keys()).publicKey).digest().subarray(0, 8).toString('hex');
+    const first = store.pairStart().qr;
+    let port = await server.sync();
+    // (a code whose window was cancelled; a code with a wrong secret, for an open window: each refused, and the
+    // wrong one doesn't close the window, the right one pairs after it)
+    const cancelled = store.pairStart().qr; // (replaces `first`'s secret: `first` is now refused too)
+    store.pairStop();
+    const right = store.pairStart().qr;
+    port = await server.sync();
+    const wrong = right.replace(/&s=[^&]+/, '&s=' + Buffer.alloc(16, 1).toString('base64url'));
+    const keys = phoneKeys();
+    const env = { CHECK_PHONE_KEY: keys.privateKey.toString('hex') };
+    const { lines } = await run(['pair', String(port), first, String(port), cancelled, String(port), wrong, String(port), right, String(port), right], 60000, env);
+    const phone = lines.pop();
+    assert.equal(phone, 'phone ' + keys.publicKey.toString('hex'), 'the phone\'s key from the vault');
+    const plain = (ls) => ls.map((l) => l.replace(/\(\w+\.PhoneLinkPairer\.Failure\./, '('));
+    const refused = ['step finding', 'step connecting', 'step failed(refused)', 'kept none'];
+    const paired = ['step finding', 'step connecting', 'step paired("Stand-in Mac")', `kept Stand-in Mac ${computerId}`];
+    // (the last: the same code again, its window closed, but this phone is paired: let in as the phone it is)
+    assert.deepEqual(plain(lines), [...refused, ...refused, ...refused, ...paired, ...paired]);
+    const listed = store.list();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].name, 'Check phone');
+    assert.equal(listed[0].id, require('crypto').createHash('sha256').update(keys.publicKey).digest().subarray(0, 8).toString('hex'));
+    // removed on the computer: the old code is refused; a new code pairs the same phone key again
+    store.remove(listed[0].id);
+    const again = store.pairStart().qr;
+    port = await server.sync();
+    const second = await run(['pair', String(port), right, String(port), again], 60000, env);
+    assert.deepEqual(plain(second.lines.slice(0, 8)), [...refused, ...paired]);
+    assert.equal(second.lines[8], phone, 'the same phone key');
+    assert.equal(store.list().length, 1);
+  } finally {
+    store.pairStop();
+    await server.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

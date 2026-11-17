@@ -82,6 +82,11 @@ iPhone side (needs ios-poc free):
   Locally `npm test` (no browser tests) had one failure, not this branch's: tests/update.test.js "release
   script: secrets go to security and web-ext…", which needs `web-ext` and this worktree's node_modules has
   none (alone, it hangs until killed: don't run it locally here; CI runs it and it passes).
+- Round 7's docs-only commit 2126d2b (the same code as 69375a1): failed twice on the phone view's browser
+  tests alone, run 43999029519: attempt 1 on "the site sees an iPhone in that tab only", attempt 2 (`gh run
+  rerun --failed`, once, as the brief says) on that one and "TRIF as installed, on a site without access".
+  Every phone-link test passed in both. Known flakes, not looked into; the commit that records this line was
+  pushed without waiting for its run.
 - Round 6, 71fe8e8: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43994465011
   (911 tests, 904 passed, 7 skipped, 0 failed; all 8 remote tests ran there). The commit before it, 766ae0d,
   failed (run 43993766535: 901 passed, 3 failed): the clickjacking guard's timing check and the phone view's

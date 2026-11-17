@@ -31,6 +31,12 @@ export const TEXT = {
   elsewhere: 'Another browser’s TRIF is handling phones just now. Connect a phone from there.',
   announce: 'Your phone may not find this computer just now.',
   tooLong: 'This computer’s name is too long for the code. Shorten it in System Settings, then try again.',
+  // Phone sync (docs/PHONE-SYNC.md; D11: on for a paired phone, the user can turn it off here)
+  syncToggle: 'Keep phone mods the same here and on connected phones',
+  synced: 'Synced {time}: {n} from this phone.',
+  syncedWaiting: 'Synced {time}: {n} from this phone, {k} waiting for your OK.',
+  notSynced: 'Not synced yet.',
+  conflict: '{name} changed on both: both are kept.',
 };
 
 const fill = (s, values) => s.replace(/\{(\w+)\}/g, (m, k) => (k in values ? String(values[k]) : m));
@@ -44,14 +50,31 @@ const shortDate = (t) => {
   const d = new Date(t);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }) });
 };
+const shortTime = (t) => {
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+};
+/** A phone's sync line and its conflicts, while syncing is on (null: off, or a helper from before the sync). */
+function syncOf(st, p, time) {
+  if (st.sync !== true) return { sync: null, conflicts: [] };
+  const r = p.synced;
+  if (!r || typeof r !== 'object') return { sync: TEXT.notSynced, conflicts: [] };
+  const n = Number.isInteger(r.fromPhone) ? r.fromPhone : 0;
+  const k = Number.isInteger(r.waiting) ? r.waiting : 0;
+  return {
+    sync: fill(k > 0 ? TEXT.syncedWaiting : TEXT.synced, { time: time(r.at), n, k }),
+    conflicts: (Array.isArray(r.conflicts) ? r.conflicts : []).slice(0, 20).map((name) => fill(TEXT.conflict, { name: String(name) })),
+  };
+}
 
 /**
  * What the section shows, from its state: {hidden} alone while the helper hasn't said how the link is (no
  * helper, or one from before the link), else {label, line, explanation, toggle: {label, on} | null, phones:
- * [{id, label, remove}], qr: {text, over, under, cancel} | null, button: {label, disabled} | null, elsewhere,
- * notes: [{text, error}]}. One of qr, elsewhere and button is there.
+ * [{id, label, remove, sync, conflicts}], syncToggle: {label, on, disabled} | null, qr: {text, over, under, cancel}
+ * | null, button: {label, disabled} | null, elsewhere, notes: [{text, error}]}. One of qr, elsewhere and button is
+ * there. `sync` (a phone's line) and `syncToggle` only from a helper that has the phone sync (its status has `sync`).
  */
-export function phoneLinkView(state, now = Date.now(), date = shortDate) {
+export function phoneLinkView(state, now = Date.now(), date = shortDate, time = shortTime) {
   const st = state?.status;
   if (!st || typeof st !== 'object') return { hidden: true };
   const phones = Array.isArray(st.phones) ? st.phones : [];
@@ -68,7 +91,9 @@ export function phoneLinkView(state, now = Date.now(), date = shortDate) {
     explanation: TEXT.explanation,
     // (the switch once there is something to switch: the link on, or phones kept from when it was)
     toggle: st.on || phones.length ? { label: TEXT.toggle, on: !!st.on, disabled: !!state.busy } : null,
-    phones: phones.map((p) => ({ id: p.id, label: fill(TEXT.row, { phone: p.name, date: date(p.pairedAt) }), remove: TEXT.remove })),
+    // (syncing phone mods: its own switch, under the link's, while the link is on)
+    syncToggle: st.on && typeof st.sync === 'boolean' ? { label: TEXT.syncToggle, on: st.sync, disabled: !!state.busy } : null,
+    phones: phones.map((p) => ({ id: p.id, label: fill(TEXT.row, { phone: p.name, date: date(p.pairedAt) }), remove: TEXT.remove, ...syncOf(st, p, time) })),
     qr: pairing ? { text: pairing.qr, over: TEXT.over, under: TEXT.under, cancel: TEXT.cancel } : null,
     elsewhere: !pairing && st.here === false ? TEXT.elsewhere : null,
     button: !pairing && st.here !== false ? { label: TEXT.button, disabled: !!state.busy } : null,
@@ -124,7 +149,7 @@ export function createPhoneLink({ request, changed = () => {}, now = () => Date.
 
   return {
     state,
-    view: (date) => phoneLinkView(state, now(), date),
+    view: (date, time) => phoneLinkView(state, now(), date, time),
     /** Settings opened (or the helper came back while they are open): how the link is. */
     async open(helper = true) {
       opened = true;
@@ -169,6 +194,10 @@ export function createPhoneLink({ request, changed = () => {}, now = () => Date.
       state.removed = ''; state.added = '';
       if (!on) dropPairing();
       take(await request({ type: on ? 'phoneLink.on' : 'phoneLink.off' }));
+    }),
+    syncToggle: (on) => act(async () => {
+      state.removed = ''; state.added = '';
+      take(await request({ type: 'phoneLink.sync', on: on !== false }));
     }),
     remove: (id) => act(async () => {
       const r = await request({ type: 'phoneLink.remove', id });
@@ -218,30 +247,35 @@ export function renderPhoneLink(root, link, { doc = document, addMore = (host) =
   if (wasOpen) line.querySelector('.more-btn')?.click();
   out.push(line);
 
-  if (v.toggle) {
+  const toggle = (t, id, onClick) => {
     const row = el('div', 'pl-toggle');
-    const name = el('span', null, v.toggle.label);
-    name.id = 'pl-toggle-label';
+    const name = el('span', null, t.label);
+    name.id = id;
     const sw = el('button', 'switch');
     sw.type = 'button';
     sw.setAttribute('role', 'switch');
-    sw.setAttribute('aria-checked', String(v.toggle.on));
+    sw.setAttribute('aria-checked', String(t.on));
     sw.setAttribute('aria-labelledby', name.id);
-    if (v.toggle.disabled) sw.setAttribute('aria-busy', 'true');
+    if (t.disabled) sw.setAttribute('aria-busy', 'true');
     const knob = el('span', 'knob');
     knob.setAttribute('aria-hidden', 'true');
     sw.append(knob);
-    sw.addEventListener('click', () => link.toggle(!v.toggle.on));
+    sw.addEventListener('click', onClick);
     row.append(sw, name);
-    out.push(row);
-  }
+    return row;
+  };
+  if (v.toggle) out.push(toggle(v.toggle, 'pl-toggle-label', () => link.toggle(!v.toggle.on)));
+  if (v.syncToggle) out.push(toggle(v.syncToggle, 'pl-sync-label', () => link.syncToggle(!v.syncToggle.on)));
   if (v.phones.length) {
     const ul = el('ul', 'blocked-list pl-phones');
     for (const p of v.phones) {
       const li = el('li');
       const remove = btn(p.remove, '', () => link.remove(p.id));
       remove.setAttribute('aria-label', `${p.remove}: ${p.label}`);
-      li.append(el('span', 'pl-phone', p.label), remove);
+      const who = el('span', 'pl-phone', p.label);
+      // (its last sync, under its name: the line, then each conflict)
+      for (const line of p.sync ? [p.sync, ...p.conflicts] : []) { who.append(doc.createElement('br'), el('span', 'pl-sync', line)); }
+      li.append(who, remove);
       ul.append(li);
     }
     out.push(ul);

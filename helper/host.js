@@ -22,7 +22,7 @@ const { envVar } = require('./lib/env');
 const { workspace, VERSION, examplesDir } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
-const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
+const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1, isIgnoredName } = require('./lib/mods');
 const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
 const { remoteRefusal, remoteCommand, REMOTE_COMMANDS, REMOTE_TOOLS, NOT_REMOTE } = require('./lib/phonelink/remoterun');
@@ -41,7 +41,7 @@ const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = requir
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash, siteInScope } = require('./lib/trash');
 const { ownFolder } = require('./lib/stage');
-const { runScope } = require('./lib/scope');
+const { runScope, isPhoneSite } = require('./lib/scope');
 const update = require('./lib/update');
 const modsFeed = require('./lib/modsfeed');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
@@ -97,6 +97,8 @@ const state = {
   updates: {}, // mod id -> new shipped version waiting (see lib/preinstalled.js pendingUpdates)
   lastSignature: null,
   lastFingerprint: null,
+  twinStamp: undefined, // (the phone twins' files as syncMods last saw them: a change nudges a connected phone to sync)
+  syncWriting: false, // (syncMods for the phone sync's own write: no nudge for it)
   modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
   resentFor: null, // the signature of the last set re-sent because the extension asked (modsResend)
   sentMods: null, // id -> hash of the last set sent to this extension, for 'modsSame' (null: send every mod whole)
@@ -308,11 +310,33 @@ function pageFactsOf(m) {
   return pageFactsCache.get(key);
 }
 
+/** The phone twins' mod files (sites/phone~<site>/<name>.js), by name, size and time: what a phone sync would see change. */
+function twinStamp() {
+  const out = [];
+  let folders = [];
+  try { folders = fs.readdirSync(ws.modsDir).filter(isPhoneSite).sort(); } catch { return ''; }
+  for (const folder of folders) {
+    let files = [];
+    try { files = fs.readdirSync(path.join(ws.modsDir, folder)).filter((f) => f.endsWith('.js') && !isIgnoredName(f)).sort(); } catch { continue; }
+    for (const f of files) {
+      try { const st = fs.lstatSync(path.join(ws.modsDir, folder, f)); out.push(`${folder}/${f}:${st.size}:${st.mtimeMs}`); } catch { /* gone */ }
+    }
+  }
+  return out.join('\n');
+}
+
 function syncMods(reason, force) {
   if (state.shuttingDown) return;
   clearTimeout(debounceTimer);
   ensureWatchers();
   state.lastFingerprint = fingerprint();
+  // A phone twin changed here (an edit, a chat's change, a delete), not by the phone sync itself: the connected
+  // phones are nudged (docs/PHONE-SYNC.md section 7; nothing when syncing is off, link.syncChanged).
+  const twins = twinStamp();
+  if (state.twinStamp !== undefined && twins !== state.twinStamp && !state.syncWriting) {
+    try { link.syncChanged(); } catch (e) { logger.warn(`phone sync: ${e.message}`); }
+  }
+  state.twinStamp = twins;
   const scanned = scanMods(ws.modsDir);
   let { mods } = scanned;
   const { problems, warnings } = scanned;
@@ -373,6 +397,8 @@ function syncMods(reason, force) {
     const h = state.held[m.id], r = state.review && state.review[m.id];
     const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
       ...(h.reach ? { reach: h.reach } : {}), ...(h.runId ? { runId: h.runId } : {}),
+      // (a change the phone sync brought: the phone's name, for "From {phone}" on the card)
+      ...(h.phone ? { phone: String(h.phone).slice(0, 80) } : {}),
       // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
       ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^(power|site):/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
@@ -597,6 +623,12 @@ const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloa
 const link = new Link({
   home: ws.home, runs, version: VERSION, log: (line) => logger.info(line),
   getWorkspace: () => workspace(ws.home),
+  // (the phone sync wrote a twin's file: the mods looked at again now, held.js judging it, and no nudge back)
+  afterWrite: () => {
+    state.syncWriting = true;
+    try { syncMods('phone sync', false); } finally { state.syncWriting = false; }
+    return state.held;
+  },
   // (a phone's run uses this computer's default agent: the first one that is installed, as agent.list says)
   agent: () => {
     const r = agents.listAgents(workspace(ws.home), { version: false });

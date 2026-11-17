@@ -28,6 +28,7 @@ named.
 | D8 | **A mod new to the phone** (made on the computer) **arrives as an import does**: off, marked new ("From your computer"), waiting for an OK if its code can do more than change the page. A changed mod keeps its switch. | 6 |
 | D9 | **When:** the phone syncs when the app comes to the front (if paired), a few seconds after one of its phone mods changes, when the computer nudges it, and from Sync now in the Mods tab. The computer never sends a mod unasked: it sends a nudge with no data (section 7). | 8 |
 | D10 | **The phone's every-site mods** (`all-sites`) stay on the phone in v1: checked in S2, the desktop phone view has no every-site folder (a `sites/phone~all-sites/` mod without `@match` would get `*://all-sites/*`, mods.js `defaultMatches`). They're `skipped` ("every-site mods stay on the phone for now") and said so in the Mods tab. Later: `defaultMatches` and the phone view taught that folder. | 2 |
+| D11 | **A switch, on for a paired phone.** Pairing is the opt-in, so a paired phone syncs; Settings' Connect a phone has "Keep phone mods the same here and on connected phones" under the link's switch to turn it off (the store's `sync`, only `false` is off; `phone.sync`, the panel's alone). Off, every `sync.*` is answered `off` and no nudge goes out. Tim, 2026-11-17 (in place of the round-3 draft's off by default). | 9 |
 
 ## 2. What is synced, and the ids
 
@@ -153,8 +154,8 @@ if More isn't using one: hello, sync, closed after 30 s of nothing); 3 seconds a
 
 ## 9. What must hold
 
-PHONE-LINK.md section 2 stands. The sync touches two of its rules' wording, which the goal decides; nothing else
-changes:
+PHONE-LINK.md section 2 stands. The sync touches two of its rules' wording, which the goal decides and Tim
+confirmed on 2026-11-17 (PHONE-LINK.md rules 3 and 5 now say so); nothing else changes:
 
 - **Rule 3** ("the link has no message that names a folder, a file path or a desktop mod") becomes: no message
   names a folder or a path; a sync names a phone mod by its id, which the helper turns into
@@ -174,7 +175,8 @@ its private folder; everything arriving is checked like an import (section 7); n
 
 ## 10. What the user sees
 
-- **Computer**: in Settings' Connect a phone, under each phone: "Synced {time}: {n} from this phone, {k} waiting
+- **Computer**: in Settings' Connect a phone, the switch "Keep phone mods the same here and on connected phones"
+  (D11, on), and under each phone while it's on: "Synced {time}: {n} from this phone, {k} waiting
   for your OK." In the desktop phone view's list, a mod waiting because of a sync says "From {phone}" in its hold
   card. A conflict: the twin's list shows both, and the sync line says "{name} changed on both: both are kept."
 - **Phone**: in the Mods tab, a line at the top after a sync that changed something: "Synced with {computer}: {n}

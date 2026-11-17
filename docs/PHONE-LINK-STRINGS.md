@@ -83,15 +83,17 @@ docs/IOS-APP-STRINGS.md ("My computer").
 | The computer's agent isn't logged in | {computer}'s coding agent isn't logged in. Log in to it in TRIF on {computer}, then ask again. | new round 17 (draft), in place of the computer's own words (which name the agent) |
 | A run was going when the browser on the computer closed (a line in the chat, as the run's other errors are) | TRIF on the computer stopped before the agent finished | round 6 (`remote.js`): said when the next helper reads the kept run. The desktop's own text for the same moment is "the helper shut down (Chrome closed?) before the agent finished" |
 
-## Phone sync (docs/PHONE-SYNC.md; drafts from sync round 1, none built yet)
+## Phone sync (docs/PHONE-SYNC.md; drafts from sync round 1; the desktop's built in sync round 3, extension/phonelink.js and sidepanel.js)
 
 Phone mods kept the same on the iPhone and the computer. The phone's rows go into docs/IOS-APP-STRINGS.md on
 ios-poc when the iPhone steps build them.
 
 | Where | String | Notes |
 |---|---|---|
-| Desktop, Settings → Connect a phone, under a phone | Synced {time}: {n} from this phone, {k} waiting for your OK. | draft. "{k} waiting…" only when k > 0; nothing synced yet: "Not synced yet." |
-| Desktop, the hold card of a mod a sync brought | From {phone} | draft, beside the hold's reason |
+| Desktop, Settings → Connect a phone, the switch under the link's (D11: on for a paired phone, the user can turn it off) | Keep phone mods the same here and on connected phones | draft, round 3. Shown while the link is on |
+| Desktop, Settings → Connect a phone, under a phone, while syncing is on | Synced {time}: {n} from this phone, {k} waiting for your OK. | draft. When k is 0: "Synced {time}: {n} from this phone." Nothing synced since the helper started: "Not synced yet." |
+| Desktop, the hold card of a mod a sync brought | From {phone}. | draft, in place of "It's new or changed since TRIF last let it run." (the generic reason for a change from outside) |
+| Desktop, a mod's History, a version kept before a sync replaced it | before a sync from your phone | draft, as the other sources' ("before an import replaced it") |
 | Desktop, the sync line, a conflict | {name} changed on both: both are kept. | draft |
 | Phone, Mods tab, after a sync that changed something | Synced with {computer}: {n} changed here, {k} waiting for your OK. | draft |
 | Phone, a conflict | {name} changed on both. Both are kept: “{name} (from your computer)” is beside it. | draft. The sibling's own name: "{name} (from your computer)" |

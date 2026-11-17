@@ -2474,11 +2474,13 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'phoneLink.off':
     case 'phoneLink.pair.start':
     case 'phoneLink.pair.stop':
-    case 'phoneLink.remove': {
+    case 'phoneLink.remove':
+    case 'phoneLink.sync': { // (syncing phone mods with connected phones: docs/PHONE-SYNC.md D11, on unless turned off)
       if (!fromPanel) throw new Error('only the side panel can change this');
       const cmd = `phone.${msg.type.slice('phoneLink.'.length)}`;
+      const args = cmd === 'phone.remove' ? { id: String(msg.id ?? '') } : cmd === 'phone.sync' ? { on: msg.on !== false } : {};
       // (turning it on may wait for the system keyring, as saving a key does)
-      return helperRequest(cmd, cmd === 'phone.remove' ? { id: String(msg.id ?? '') } : {}, cmd === 'phone.on' ? 60000 : 20000);
+      return helperRequest(cmd, args, cmd === 'phone.on' ? 60000 : 20000);
     }
     // Settings' Log out (helper agents/index.js logout): only from the panel, as a run could otherwise log
     // the user out of their agent everywhere.

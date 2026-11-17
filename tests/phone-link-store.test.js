@@ -34,6 +34,23 @@ function setup({ kind = 'security', keychain = true, name = 'Tim’s MacBook' } 
 
 const phoneKey = () => generateKeyPair().publicKey;
 
+test('syncing phone mods (D11): on by default, turned off by the panel, the switch kept through the link off and on', async () => {
+  const { store, json } = setup();
+  assert.equal(store.status().sync, true);
+  let changes = 0;
+  store.on('change', () => changes++);
+  assert.equal(store.setSync(false), false);
+  assert.deepEqual([store.status().sync, json().sync, changes], [false, false, 1]);
+  assert.equal(store.setSync(false), false);
+  assert.equal(changes, 1, 'no change, no event');
+  await store.setOn(true);
+  await store.setOn(false);
+  await store.setOn(true);
+  assert.equal(store.status().sync, false, 'the link off and on keeps it off');
+  assert.equal(store.setSync(true), true);
+  assert.equal(json().sync, true);
+});
+
 test('a new install: off, no file, no key, nobody paired, no pairing', async () => {
   const { store, file, chain } = setup();
   const s = store.status();
@@ -56,7 +73,8 @@ for (const kind of ['security', 'secret-tool']) {
     const privateText = items[0][1];
     assert.match(privateText, /^[A-Za-z0-9_-]{43}$/);
     const saved = json();
-    assert.deepEqual(Object.keys(saved).sort(), ['on', 'phones', 'port', 'publicKey']);
+    assert.deepEqual(Object.keys(saved).sort(), ['on', 'phones', 'port', 'publicKey', 'sync']);
+    assert.equal(saved.sync, true, 'syncing phone mods is on for a paired phone until the panel turns it off (D11)');
     assert.equal(saved.on, true);
     assert.equal(saved.publicKey, b64(publicFromPrivate(Buffer.from(privateText, 'base64url'))));
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
@@ -319,13 +337,13 @@ test('seen and setPort are kept; a second store on the same workspace reads the 
 });
 
 test('a file that isn\'t what the store wrote: off, or its bad rows dropped; ids come from the keys', () => {
-  const off = { on: false, publicKey: null, port: 0, phones: [] };
+  const off = { on: false, sync: true, publicKey: null, port: 0, phones: [] };
   for (const text of ['', 'not json', '[]', 'null', '"on"', '{"on":true}', '{"on":true,"publicKey":"short"}', `{"on":true,"publicKey":"${'A'.repeat(44)}"}`]) assert.deepEqual(parse(text), off, text);
   const pk = b64(generateKeyPair().publicKey);
   const k1 = phoneKey();
   const k2 = phoneKey();
   const got = parse(JSON.stringify({
-    on: 'yes', publicKey: pk, port: 70000,
+    on: 'yes', sync: 'yes', publicKey: pk, port: 70000,
     phones: [
       { id: 'ffffffffffffffff', name: 'Lied about its id', key: b64(k1), pairedAt: 'never', lastSeen: '2026-11-16T12:00:00.000Z' },
       { id: keyId(k1), name: 'The same key again', key: b64(k1) },
@@ -336,6 +354,8 @@ test('a file that isn\'t what the store wrote: off, or its bad rows dropped; ids
     ],
   }));
   assert.equal(got.on, false, 'on only when it says true');
+  assert.equal(got.sync, true, 'syncing is off only when it says false');
+  assert.equal(parse(JSON.stringify({ sync: false })).sync, false);
   assert.equal(got.port, 0);
   assert.deepEqual(got.phones.map((p) => p.id), [keyId(k1), keyId(k2)]);
   assert.deepEqual(got.phones[0], { id: keyId(k1), name: 'Lied about its id', key: b64(k1), pairedAt: null, lastSeen: '2026-11-16T12:00:00.000Z' });

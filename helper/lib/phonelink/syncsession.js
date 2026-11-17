@@ -17,7 +17,7 @@
 // view has no every-site folder). Approval is held.js's, on the computer, as for any file from outside: what the
 // phone approved counts for nothing here.
 //
-// The switch: `enabled` (a function; host.js passes the user's setting in S3). Off, every sync.* is `off` and
+// The switch: `enabled` (a function; link.js passes the user's setting: on for a paired phone, D11). Off, every sync.* is `off` and
 // nothing is read or written.
 
 const fs = require('fs');
@@ -342,6 +342,8 @@ class PhoneSync {
       agreed++;
     }
     try { S.saveBase(ws.private, sync.phone.id, base, this.now()); } catch (e) { this.log(`phone sync: couldn't save the base (${e.code || e.message})`); }
+    // (a mod's name as the user sees it: its @name, else the id's)
+    const nameOf = (id) => { try { const f = this._current(ws, id); const n = f && f.text ? parseHeader(f.text).name : null; if (n) return String(n).slice(0, 120); } catch { /* the id's */ } return S.parseId(id).name; };
     const heldMap = held.loadHeld(ws.home);
     const marks = held.loadSynced(ws.home);
     const waiting = [];
@@ -351,15 +353,13 @@ class PhoneSync {
       if (!syncedBy || syncedBy.phone !== sync.phone.id) continue;
       const id = S.idOf(hid.split('/')[0], `${hid.slice(hid.indexOf('/') + 1)}.js`);
       if (!id) continue;
-      let name = null;
-      try { const f = this._current(ws, id); name = f && f.text ? parseHeader(f.text).name : null; } catch { /* the id's name */ }
-      waiting.push({ id, name: name || S.parseId(id).name });
+      waiting.push({ id, name: nameOf(id) });
     }
     const toPhone = [...sync.give.keys()].filter((id) => have.get(id) === sync.give.get(id).rev).length + [...sync.remove].filter((id) => !have.has(id)).length;
     const done = { synced: agreed, waiting, conflicts: sync.conflicts };
     this.last.set(sync.phone.id, {
       at: this.now(), fromPhone: sync.written.length + sync.trashed.length, toPhone, waiting: waiting.length,
-      conflicts: sync.conflicts.map((c) => c.id), skipped: sync.skipped.length,
+      conflicts: sync.conflicts.map((c) => nameOf(c.id)), skipped: sync.skipped.length,
     });
     return { t: 'sync.done', ...done };
   }

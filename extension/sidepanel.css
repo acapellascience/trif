@@ -172,6 +172,8 @@ body.site-blocked .gate-title { color: var(--blocked); }
 .phone-link[hidden] { display: none; }
 .pl-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .pl-phones .pl-phone { min-width: 0; overflow-wrap: anywhere; }
+.pl-phones .pl-sync { color: var(--muted); font-size: 11px; }
+.pl-toggle + .pl-toggle { margin-top: 6px; }
 .pl-phones .btn, .pl-pair .btn { flex: none; padding: 2px 10px; font-size: 12px; }
 .pl-connect { justify-self: start; }
 .pl-pair { display: grid; gap: 6px; justify-items: start; }

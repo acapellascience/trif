@@ -2014,6 +2014,8 @@ test('background: phoneLink.* is the side panel\'s alone, the helper\'s phoneLin
       ['phoneLink.pair.start', { id: 'x', secret: 'y' }, 'phone.pair.start', {}, { qr: 'trif://pair?v=1&k=K&s=S&n=N', expires: 5, ...st }],
       ['phoneLink.pair.stop', {}, 'phone.pair.stop', {}, st],
       ['phoneLink.remove', { id: 'a1b2c3d4e5f60718', more: 1 }, 'phone.remove', { id: 'a1b2c3d4e5f60718' }, { removed: { id: 'a1b2c3d4e5f60718', name: 'iPhone' }, ...st }],
+      ['phoneLink.sync', { on: false, id: 'x' }, 'phone.sync', { on: false }, { ...st, sync: false }],
+      ['phoneLink.sync', { on: 'yes' }, 'phone.sync', { on: true }, { ...st, sync: true }],
       ['phoneLink.off', {}, 'phone.off', {}, { ...st, on: false }],
     ]) {
       const replyP = panel.ask({ type, ...extra });
@@ -2034,7 +2036,7 @@ test('background: phoneLink.* is the side panel\'s alone, the helper\'s phoneLin
       { id: lib.EXTENSION_ID, url: 'https://evil.example/sidepanel.html' },
     ].map((sender) => bg.connectPanel(sender));
     for (const other of others) {
-      for (const type of ['phoneLink.status', 'phoneLink.on', 'phoneLink.off', 'phoneLink.pair.start', 'phoneLink.pair.stop', 'phoneLink.remove']) {
+      for (const type of ['phoneLink.status', 'phoneLink.on', 'phoneLink.off', 'phoneLink.pair.start', 'phoneLink.pair.stop', 'phoneLink.remove', 'phoneLink.sync']) {
         const r = await other.ask({ type, id: 'a1b2c3d4e5f60718' });
         assert.deepStrictEqual([r.ok, r.error], [false, 'only the side panel can change this'], `${type} from ${other.sender.url}`);
       }

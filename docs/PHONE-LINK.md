@@ -47,13 +47,19 @@ the phone link: no browser, no listener. With several helpers (several browsers 
    `phone~<host of the page address>`, whatever the phone says. From there it is a phone run like the desktop phone
    view's: `runLimits` gives it `sites/phone~<scope>/` writable, every desktop folder read-only. The link has no
    message that names a folder, a file path or a desktop mod. The helper copies only that twin's files from
-   the run's working copy into the mods folder (section 6, 3a), whatever the agent wrote there.
+   the run's working copy into the mods folder (section 6, 3a), whatever the agent wrote there. Phone sync
+   (docs/PHONE-SYNC.md; confirmed by Tim 2026-11-17) names a phone mod by its id, `<site>/<name>`, which the helper
+   turns into `sites/phone~<site>/<name>.js` itself after its checks: the computer writes only there (and its
+   history, trash and private folder), and what arrives is held like any mod from outside (held.js).
 4. **The same fence.** A phone run goes through `Runs.start` → `_launch`: the same sandbox, the same staging, the
    same run token limits. It can't be asked to run without the sandbox, and doesn't run without it even
    where the user allowed that for the side panel's chats (section 6, 3b).
-5. **The link can ask for runs and nothing else.** No message approves a mod on the computer, changes a setting,
-   pairs another phone, reads a mod that isn't a phone twin's, or reaches a tab. Pairing, the list and removal are
-   the desktop panel's alone (`PANEL_COMMANDS`: not the socket, not a run).
+5. **The link can ask for runs and the phone twins' files, nothing else.** Runs, and (phone sync, confirmed by Tim
+   2026-11-17) a paired phone may read and write the mod files of the computer's phone twins, `sites/phone~*/`,
+   held there like any mod from outside. No message approves a mod on the computer, changes a setting or a
+   switch, pairs another phone, reads a mod that isn't a phone twin's, or reaches a tab. Pairing, the list,
+   removal and the sync's switch (Settings, on for a paired phone) are the desktop panel's alone
+   (`PANEL_COMMANDS`: not the socket, not a run).
 6. **Approval on the phone.** What a run made goes to the phone as a file; the app holds it and shows its usual
    approval screen with its usual warnings. The copy that stays in the computer's phone twin is held or not by the
    computer's own rules, for the desktop phone view, and neither side's approval counts for the other.

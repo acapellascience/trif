@@ -13,6 +13,10 @@
 //     socket, never a run). What it answers has no key and no secret but the QR's text, which goes to the
 //     panel that asked and nowhere else (not the log, not the `phoneLink` message).
 //
+//   - Phone sync (docs/PHONE-SYNC.md; syncsession.js) rides the owner's server: on for a paired phone (pairing is
+//     the opt-in), and its sync.* handlers answer `off` once the user turns syncing off in Settings (`phone.sync`,
+//     the store's `sync`, D11).
+//
 // TRIF_PHONE_LINK_HOST (tests): 127.0.0.1 or ::1, so a test's listener is never on the network. Anything else
 // is not taken: the variable can only narrow where the listener is.
 
@@ -21,9 +25,12 @@ const { Store } = require('./store');
 const { Server } = require('./server');
 const { Announcer } = require('./bonjour');
 const { Remote } = require('./remote');
+const { PhoneSync } = require('./syncsession');
+const { deleteBase } = require('./sync');
+const P = require('../paths');
 const { envVar } = require('../env');
 
-const COMMANDS = ['phone.status', 'phone.on', 'phone.off', 'phone.pair.start', 'phone.pair.stop', 'phone.remove'];
+const COMMANDS = ['phone.status', 'phone.on', 'phone.off', 'phone.pair.start', 'phone.pair.stop', 'phone.remove', 'phone.sync'];
 const LOOPBACK = new Set(['127.0.0.1', '::1']);
 
 function fail(code, message) { const e = new Error(message); e.code = code; return e; }
@@ -32,10 +39,11 @@ class Link extends EventEmitter {
   /**
    * home: the workspace. runs: the helper's Runs. version: TRIF's. log: (line) => void.
    * agent: () => {id, name, model} | null (the computer's default agent: remote.js).
-   * getWorkspace: for remote.js. env: the helper's (the keyring's stand-in and dns-sd's, in tests).
+   * getWorkspace: for remote.js and the sync. afterWrite: () => held map | null (syncsession.js: the helper looks
+   * at the mods again after the sync wrote one). env: the helper's (the keyring's stand-in and dns-sd's, in tests).
    * Emits 'change' when what `status()` says may have changed.
    */
-  constructor({ home, runs, version, log, agent, getWorkspace, env = process.env, name } = {}) {
+  constructor({ home, runs, version, log, agent, getWorkspace, afterWrite, env = process.env, name } = {}) {
     super();
     this.log = typeof log === 'function' ? log : () => {};
     this.env = env;
@@ -44,10 +52,12 @@ class Link extends EventEmitter {
     this.version = version;
     this.agent = agent;
     this.getWorkspace = getWorkspace;
+    this.afterWrite = afterWrite;
     this.home = home;
     this.server = null;
     this.announcer = null;
     this.remote = null; // (kept after stop(): a phone run still ending is still not the panel's)
+    this.sync = null;
     this.owner = false;
     this.seen = this._signature();
     this.changed = () => { this.seen = this._signature(); this.emit('change'); };
@@ -58,7 +68,7 @@ class Link extends EventEmitter {
   _signature() {
     let s;
     try { s = this.store.read(); } catch { return ''; }
-    return JSON.stringify([s.on, s.publicKey, s.phones.map((p) => [p.id, p.name])]);
+    return JSON.stringify([s.on, s.sync, s.publicKey, s.phones.map((p) => [p.id, p.name])]);
   }
 
   /** The file as another helper left it: when it changed, the store says so (the listener follows, the panel is told). */
@@ -75,6 +85,10 @@ class Link extends EventEmitter {
     this.announcer = new Announcer(this.store, this.server, { env: this.env, log: this.log });
     this.remote = new Remote(this.store, this.server, this.runs, { home: this.home, getWorkspace: this.getWorkspace, log: this.log, agent: this.agent });
     this.remote.start();
+    this.sync = new PhoneSync(this.store, this.server, this.runs, {
+      home: this.home, getWorkspace: this.getWorkspace, log: this.log, afterWrite: this.afterWrite,
+      enabled: () => { try { return this.store.read().sync !== false; } catch { return false; } },
+    }).start();
     for (const ev of ['listening', 'stopped']) this.server.on(ev, () => this.emit('change'));
     this.announcer.on('change', () => this.emit('change'));
     const server = this.server;
@@ -94,14 +108,24 @@ class Link extends EventEmitter {
   async stop() {
     if (!this.owner) return;
     this.owner = false;
-    const { server, announcer, remote } = this;
+    const { server, announcer, remote, sync } = this;
     this.server = null;
+    this.sync = null;
+    if (sync) sync.stop();
     this.announcer = null;
     this.store.pairStop();
     if (remote) remote.stop();
     if (announcer) announcer.stop();
     if (server) { try { await server.stop(); } catch { /* closed anyway */ } }
     this.emit('change');
+  }
+
+  /**
+   * A phone twin changed on this computer (host.js syncMods, not for the sync's own writes): each connected phone
+   * is nudged to sync. Nothing when syncing is off or this helper doesn't own the link.
+   */
+  syncChanged() {
+    return this.owner && this.sync ? this.sync.changed() : 0;
   }
 
   /** A run's event: true when the run is a phone's (then it isn't the extension's to see). */
@@ -118,10 +142,14 @@ class Link extends EventEmitter {
    * For the panel: the store's status (no key, no secret), and
    *   here: this helper owns the link (else another browser's does: pairing is done from there)
    *   listening: a listener is up              announce: null | 'unsupported' | 'missing' | 'failing'
+   *   sync: the switch (D11); each phone's `synced`: what its last sync did, since this helper started, or null
+   *     ({at, fromPhone, toPhone, waiting, conflicts: [name], skipped}: syncsession.js status)
    */
   status() {
     const a = this.announcer ? this.announcer.status() : null;
-    return { ...this.store.status(), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null };
+    const st = this.store.status();
+    const synced = (id) => { const r = this.sync ? this.sync.status(id) : null; return r ? { ...r } : null; };
+    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null };
   }
 
   /** A `phone.*` command from the side panel. Resolves what the panel is answered. */
@@ -149,9 +177,19 @@ class Link extends EventEmitter {
         return this.status();
       case 'phone.remove': {
         const removed = this.store.remove(typeof args.id === 'string' ? args.id : '');
-        if (removed) this.log(`phone link: removed the phone ${removed.id}`);
+        if (removed) {
+          this.log(`phone link: removed the phone ${removed.id}`);
+          // (its sync base goes with it: pairing again starts from none, PHONE-SYNC.md section 3)
+          try { deleteBase((this.getWorkspace ? this.getWorkspace() : P.workspace(this.home)).private, removed.id); } catch (e) { this.log(`phone sync: couldn't delete a removed phone's base (${e.code || e.message})`); }
+        }
         if (this.server) await this.server.sync();
         return { removed, ...this.status() };
+      }
+      case 'phone.sync': {
+        const on = this.store.setSync(args.on !== false);
+        this.log(`phone sync: turned ${on ? 'on' : 'off'} in the side panel`);
+        if (!on && this.sync) this.sync.syncs.clear(); // (a sync going on ends: its next sync.* is answered off)
+        return this.status();
       }
       default: throw new Error(`unknown command "${cmd}"`);
     }

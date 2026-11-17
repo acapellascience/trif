@@ -162,6 +162,31 @@ test('the phone link in the real helper: off until the panel turns it on, the ow
   // (the window is closed: its secret pairs nobody else)
   await assert.rejects(PhoneClient.connect({ port, computerKey, pair: secret }), (e) => e.code === 'closed' && e.bytes === 0);
 
+  // Phone sync (docs/PHONE-SYNC.md) rides this session: on for a paired phone (D11), the panel's switch turns it off.
+  assert.equal(told.status.sync, true);
+  const empty = await a.request({ t: 'sync.begin', mods: [] });
+  assert.equal(empty.t, 'sync.plan');
+  const done = await a.request({ t: 'sync.end', syncId: empty.syncId, have: [] });
+  assert.equal(done.t, 'sync.done');
+  assert.ok(fs.existsSync(path.join(`${home}-private`, 'phone-link', 'sync', `${idA}.json`)), 'the base');
+  const after = await panel(first, 'phone.status');
+  assert.deepEqual([after.phones[0].synced.fromPhone, after.phones[0].synced.waiting, after.phones[0].synced.conflicts], [0, 0, []]);
+  // A phone twin changed on the computer (an edit, a chat): the phone is nudged, with no mod and no name in it.
+  const twin = path.join(home, 'sites', 'phone~example.com');
+  fs.mkdirSync(twin, { recursive: true });
+  fs.writeFileSync(path.join(twin, 'dark.js'), '// ==WebMod==\n// @name Dark\n// ==/WebMod==\ndocument.body.style.background = "#000";\n');
+  assert.deepEqual(await a.next((m) => m.t === 'sync.changed', { timeout: 10000 }), { t: 'sync.changed' });
+  // Off in the panel: every sync.* is refused, and a twin's change nudges nobody.
+  const syncOff = await panel(first, 'phone.sync', { on: false });
+  assert.equal(syncOff.sync, false);
+  await new Promise((r) => setTimeout(r, 1100)); // (one sync.begin a second)
+  const refused = await a.request({ t: 'sync.begin', mods: [] });
+  assert.deepEqual([refused.t, refused.code], ['error', 'off']);
+  fs.writeFileSync(path.join(twin, 'dark.js'), '// ==WebMod==\n// @name Dark\n// ==/WebMod==\ndocument.body.style.background = "#111";\n');
+  await assert.rejects(a.next((m) => m.t === 'sync.changed', { timeout: 3000 }), /no such message/);
+  assert.equal((await panel(first, 'phone.sync', { on: true })).sync, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(`${home}-private`, 'phone-link.json'), 'utf8')).sync, true);
+
   // Another browser's helper: the store alone.
   const second = helper();
   await second.waitForSocket(5000, second.ownSock);
@@ -175,6 +200,8 @@ test('the phone link in the real helper: off until the panel turns it on, the ow
   const removed = await panel(second, 'phone.remove', { id: idA });
   assert.deepEqual(removed.removed, { id: idA, name: 'Phone A' });
   await a.closed;
+  // (its sync base goes with it)
+  assert.equal(fs.existsSync(path.join(`${home}-private`, 'phone-link', 'sync', `${idA}.json`)), false);
   // (the owner's panel is told too; the listener is closed a moment after the phone is)
   await first.next((m) => m.type === 'phoneLink' && m.status.phones.length === 0 && !m.status.listening, { since: mark, timeout: 10000 });
   await waitFor(async () => !(await listening(port)), { message: 'the listener to close' });

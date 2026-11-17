@@ -1853,6 +1853,9 @@ function siteBoxes(reach) {
   });
 }
 
+// A hold the phone sync brought (helper held.js: `phone`, the phone's name): where it came from, beside the
+// reason (draft: docs/PHONE-LINK-STRINGS.md "Phone sync").
+const fromPhone = (info) => (info && typeof info.phone === 'string' && info.phone ? `From ${info.phone}.` : '');
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
   box.append(el('p', 'facts-head', kind === 'held' && info.asks ? 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
@@ -1872,7 +1875,7 @@ function factsBox(m, info, kind) {
   // by 'edit': the user's own, in the code card)
   const who = info.by === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : info.by === 'edit' ? 'You edited it.'
-    : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+    : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : fromPhone(info) || 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}${info.asks ? ' Allow is for these powers: a new version that asks for nothing more runs without asking again.' : ''}`));
   if (info.claim) {
@@ -2365,7 +2368,7 @@ function renderApproval() {
   P.siteBox.replaceChildren(...siteBoxes(info.reach));
   P.siteBox.hidden = !P.siteBox.childNodes.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside' && info.by !== 'switch' && info.by !== 'edit';
-  const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : info.by === 'edit' ? 'You edited it.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : info.by === 'edit' ? 'You edited it.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : fromPhone(info) || 'It\'s new or changed since TRIF last let it run.';
   P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
@@ -2937,6 +2940,7 @@ function renderDetails(P, m) {
 const HISTORY_SOURCE = {
   chat: 'before your agent changed it in a chat', fix: 'before a fix', restore: 'before you restored an older version',
   import: 'before an import replaced it', undo: 'before an undo', edit: 'before you edited it',
+  phone: 'before a sync from your phone', // (draft: docs/PHONE-LINK-STRINGS.md "Phone sync")
 };
 // The tabs: the code, or History (the versions kept; one clicked is shown in place, with Diff and Restore)
 function setCodeTab(which) {

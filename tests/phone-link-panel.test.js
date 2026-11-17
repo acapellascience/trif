@@ -82,7 +82,7 @@ test('connect a phone: the button turns the link on, opens the window and shows 
   assert.strictEqual(v.qr, null);
   assert.strictEqual(s.link.state.pairing, null);
   assert.ok(!JSON.stringify(s.link.state).includes('Zm9v'), 'the secret is gone from the panel');
-  assert.deepStrictEqual(v.phones, [{ id: PHONE.id, label: 'Tim’s iPhone · connected d16', remove: 'Remove' }]);
+  assert.deepStrictEqual(v.phones, [{ id: PHONE.id, label: 'Tim’s iPhone · connected d16', remove: 'Remove', sync: null, conflicts: [] }]);
   assert.deepStrictEqual(v.notes, [{ text: 'Tim’s iPhone is connected.', error: false }]);
   assert.deepStrictEqual(v.button, { label: 'Connect a phone', disabled: false });
   assert.deepStrictEqual(s.types().slice(3), [], 'nothing to stop: the window was the phone\'s');
@@ -208,7 +208,8 @@ function fakeDoc() {
       addEventListener: (t, f) => (listeners[t] ||= []).push(f),
       click: () => (listeners.click || []).forEach((f) => f({ stopPropagation() {} })),
       all: () => [e, ...e.children.flatMap((c) => (c.all ? c.all() : []))],
-      querySelector: (sel) => e.all().slice(1).find((c) => sel.split('.').filter(Boolean).every((cls) => ` ${c.className || c.getAttribute('class') || ''} `.includes(` ${cls} `))) || null,
+      querySelectorAll: (sel) => e.all().slice(1).filter((c) => sel.split('.').filter(Boolean).every((cls) => ` ${c.className || c.getAttribute('class') || ''} `.includes(` ${cls} `))),
+      querySelector: (sel) => e.querySelectorAll(sel)[0] || null,
       text: () => e.textContent + e.children.map((c) => (c.text ? c.text() : '')).join(''),
     };
     return e;
@@ -254,6 +255,47 @@ test('connect a phone: its elements: the switch, the phones with Remove, the cod
   draw();
   assert.deepStrictEqual([root.querySelector('.pl-qr'), root.querySelector('.switch').getAttribute('aria-checked')], [null, 'false']);
   assert.deepStrictEqual(s.types(), ['phoneLink.status', 'phoneLink.pair.start', 'phoneLink.off']);
+});
+
+test('connect a phone: syncing phone mods (D11): its own switch while the link is on (on for a paired phone, off by the user); each phone\'s line', async () => {
+  const mod = await load();
+  const date = () => 'Nov 16';
+  const time = () => '9:41';
+  const view = (st) => mod.phoneLinkView({ status: st }, 1000, date, time);
+  // (a helper from before the sync: no switch, no line; the link off: no switch)
+  assert.strictEqual(view(status({ on: true, phones: [PHONE] })).syncToggle, null);
+  assert.strictEqual(view(status({ on: true, phones: [PHONE] })).phones[0].sync, null);
+  assert.strictEqual(view(status({ on: false, sync: true, phones: [PHONE] })).syncToggle, null);
+  // Off (the user turned it off): the switch, off, and no line under the phone
+  let v = view(status({ on: true, sync: false, phones: [{ ...PHONE, synced: null }] }));
+  assert.deepStrictEqual(v.syncToggle, { label: 'Keep phone mods the same here and on connected phones', on: false, disabled: false });
+  assert.deepStrictEqual([v.phones[0].sync, v.phones[0].conflicts], [null, []]);
+  // On: "Not synced yet.", then what the last sync did
+  v = view(status({ on: true, sync: true, phones: [{ ...PHONE, synced: null }] }));
+  assert.deepStrictEqual([v.syncToggle.on, v.phones[0].sync], [true, 'Not synced yet.']);
+  v = view(status({ on: true, sync: true, phones: [{ ...PHONE, synced: { at: 5, fromPhone: 2, toPhone: 1, waiting: 0, conflicts: [], skipped: 0 } }] }));
+  assert.strictEqual(v.phones[0].sync, 'Synced 9:41: 2 from this phone.');
+  v = view(status({ on: true, sync: true, phones: [{ ...PHONE, synced: { at: 5, fromPhone: 3, waiting: 1, conflicts: ['Dark mode'] } }] }));
+  assert.deepStrictEqual([v.phones[0].sync, v.phones[0].conflicts], ['Synced 9:41: 3 from this phone, 1 waiting for your OK.', ['Dark mode changed on both: both are kept.']]);
+
+  // The switch asks the helper (phoneLink.sync, on: true or false), and its elements
+  const on = status({ on: true, sync: false, phones: [{ ...PHONE, synced: null }] });
+  const s = setup(mod, { 'phoneLink.status': on, 'phoneLink.sync': (msg) => ({ ...on, sync: msg.on, phones: [{ ...PHONE, synced: { at: 5, fromPhone: 1, waiting: 1, conflicts: ['Dark mode'] } }] }) });
+  await s.link.open(true);
+  const doc = fakeDoc();
+  const root = doc.createElement('div');
+  const draw = () => mod.renderPhoneLink(root, s.link, { doc });
+  draw();
+  const sws = () => root.querySelectorAll('.switch');
+  assert.deepStrictEqual(sws().map((x) => [x.getAttribute('aria-labelledby'), x.getAttribute('aria-checked')]), [['pl-toggle-label', 'true'], ['pl-sync-label', 'false']]);
+  assert.strictEqual(root.querySelectorAll('.pl-sync').length, 0);
+  sws()[1].click();
+  await tick(); await tick();
+  draw();
+  assert.deepStrictEqual(s.asked.at(-1), { type: 'phoneLink.sync', on: true });
+  assert.strictEqual(sws()[1].getAttribute('aria-checked'), 'true');
+  assert.deepStrictEqual(root.querySelectorAll('.pl-sync').map((e) => e.textContent).length, 2);
+  assert.match(root.text(), /Keep phone mods the same here and on connected phones.*Tim’s iPhone · connected .*Synced .*: 1 from this phone, 1 waiting for your OK\..*Dark mode changed on both: both are kept\..*Remove/s);
 });
 
 test('connect a phone: every string the panel shows is in docs/PHONE-LINK-STRINGS.md, and none names another product', async () => {

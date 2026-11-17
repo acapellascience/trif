@@ -4,9 +4,11 @@
 //
 //   the computer's private key   the system keyring (keyring.js, service "TRIF phone link", account "computer"),
 //                                base64url, and nowhere else: not in the file, a log, an error or an argv
-//   <private>/phone-link.json    { on, publicKey, port, phones: [{ id, name, key, pairedAt, lastSeen }] }, mode 600,
+//   <private>/phone-link.json    { on, sync, publicKey, port, phones: [{ id, name, key, pairedAt, lastSeen }] }, mode 600,
 //                                written whole (a temp file, then rename). Public keys only. In the private folder,
-//                                which no run can read.
+//                                which no run can read. `sync`: the user's switch for syncing phone mods
+//                                (docs/PHONE-SYNC.md D11): on (pairing is the opt-in) unless the side panel
+//                                turned it off; only `false` in the file is off.
 //   the pairing window           in memory only: a 16-byte secret, 5 minutes, one phone, closed after 5 wrong tries
 //
 // A new install has no file and no key: the link is off (rule 1). A file that doesn't read as one is the same as
@@ -101,7 +103,7 @@ const time = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v :
 
 /** What the file says, with nothing in it taken on trust: ids are made from the keys again, bad rows dropped. */
 function parse(text) {
-  const empty = { on: false, publicKey: null, port: 0, phones: [] };
+  const empty = { on: false, sync: true, publicKey: null, port: 0, phones: [] };
   let raw;
   try { raw = JSON.parse(text); } catch { return empty; }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
@@ -118,6 +120,7 @@ function parse(text) {
   }
   return {
     on: raw.on === true && !!publicKey, // (no key, no link)
+    sync: raw.sync !== false,
     publicKey,
     port: Number.isInteger(raw.port) && raw.port > 0 && raw.port < 65536 ? raw.port : 0,
     phones: publicKey ? phones : [], // (phones are paired to a key)
@@ -171,6 +174,7 @@ class Store extends EventEmitter {
     const pairing = this.pairing();
     return {
       on: s.on,
+      sync: s.sync,
       id: s.publicKey ? keyId(key32(s.publicKey)) : null,
       name: this.name,
       port: s.port,
@@ -208,9 +212,17 @@ class Store extends EventEmitter {
       throw new Error(keyring.backend({ env: this.env }) ? `couldn't keep this computer's phone link key: ${e.message}` : 'the phone link needs a system keyring to keep this computer\'s key in (the macOS Keychain, or a Secret Service on Linux)');
     }
     this._closeWindow();
-    this.write({ on: true, publicKey: b64(pair.publicKey), port: s.port, phones: [] });
+    this.write({ on: true, sync: s.sync, publicKey: b64(pair.publicKey), port: s.port, phones: [] });
     this.emit('change');
     return { on: true, created: true };
+  }
+
+  /** The switch for syncing phone mods (D11; the side panel's alone, as everything here). Returns it. */
+  setSync(on) {
+    const s = this.read();
+    const sync = on !== false; // (only false turns it off)
+    if (s.sync !== sync) { this.write({ ...s, sync }); this.emit('change'); }
+    return sync;
   }
 
   async _turnOff() {

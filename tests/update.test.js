@@ -251,6 +251,7 @@ test('release script: secrets go to security and web-ext in no argv or environme
       p.stdout.on('data', (d) => { out += d; });
       p.stderr.on('data', (d) => { out += d; });
       const t = setTimeout(() => p.kill(), 60000);
+      p.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: `${out}\n${e.message}` }); });
       p.on('exit', (code) => { clearTimeout(t); resolve({ code, out }); });
     });
     amo.close();

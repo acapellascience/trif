@@ -55,7 +55,7 @@ export const HEAD_TAGS = `<meta name="description" content="Fix any website with
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="${SITE}/og.png">`;
 
-function page(title, body, { script = '', style = '', after = '', head = '' } = {}) {
+export function page(title, body, { script = '', style = '', after = '', head = '' } = {}) {
   return `<!doctype html>
 <html lang="en">
 <head>

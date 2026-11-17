@@ -87,9 +87,9 @@ test('first sync registers the runtime first, then each mod, wrapped and in the 
   assert.strictEqual(a.runAt, 'document_idle');
   assert.deepStrictEqual(a.excludeMatches, ['*://x.com/settings*']);
   assert.strictEqual(b.runAt, 'document_end');
-  assert.strictEqual(a.js[0].code, lib.wrapModCode('x.com/a', '/* x.com/a */'));
+  assert.strictEqual(a.js[0].code, lib.phoneGate(false, lib.wrapModCode('x.com/a', '/* x.com/a */')), 'wrapped, behind the phone view gate');
   assert.ok(!lib.RUNTIME_ID.startsWith('_'));
-  assert.strictEqual(res.applied['x.com/a'], 'h1');
+  assert.strictEqual(res.applied['x.com/a'], 'h1:gate');
 });
 
 test('the runtime follows the mods and recorded sites; with neither, nothing is registered', async () => {
@@ -126,7 +126,7 @@ test('unchanged mods are skipped by hash; changed are updated; missing unregiste
   assert.deepStrictEqual(us.calls, [['unregister', ['x.com/b']], ['update', ['x.com/a']], ['register', ['x.com/c']]]);
   assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
   assert.match(us.scripts[1].js[0].code, /changed\(\)/);
-  assert.deepStrictEqual(r.applied, { [lib.RUNTIME_ID]: lib.quickHash(runtimeCode + '\n' + JSON.stringify(['*://x.com/*'])), 'x.com/a': 'h2', 'x.com/c': 'h1' });
+  assert.deepStrictEqual(r.applied, { [lib.RUNTIME_ID]: lib.quickHash(runtimeCode + '\n' + JSON.stringify(['*://x.com/*'])), 'x.com/a': 'h2:gate', 'x.com/c': 'h1:gate' });
 });
 
 test('a lost hash map updates existing scripts instead of re-registering', async () => {
@@ -3599,10 +3599,10 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   assert.ok(!s.worldId);
   assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
   // (the mod's code first on the script's first line, so its errors keep their line numbers; then TRIF's API)
-  assert.ok(s.js[0].code.startsWith('(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
+  assert.ok(s.js[0].code.startsWith(lib.phoneGate(false, '') + '(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
   assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod, {\"powers\":[],\"args\":{}}, {\"actPartners\":{"));
   new Function(s.js[0].code);
-  assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
+  assert.strictEqual(r.applied['y.com/boxed'], 'H:page:gate', 'registered differently from the sandboxed form');
   // a new version waits again
   const [again] = lib.sandboxFallback([{ ...boxed, hash: 'H2' }], { canSandbox: false, allowed: { 'y.com/boxed': 'H' } });
   assert.strictEqual(again.held.by, 'sandbox');

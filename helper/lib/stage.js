@@ -20,7 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { scopeFor, scopeOf } = require('./scope');
+const { scopeFor, scopeOf, isPhoneSite, phoneBase } = require('./scope');
 const { within, ignoresCase, unsafeName, badName, joinInside } = require('./pathcheck');
 
 const ALL_SITES = 'all-sites';
@@ -40,8 +40,19 @@ const statKey = (st) => `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
 
 /** Whether the folder `name` under sites/ is the run's own (its site, a part of it, or all-sites/). */
 function ownFolder(name, scope, splits = []) {
+  if (isPhoneSite(scope)) return ownTwin(name, scope, splits); // (a phone view's run: its phone twin's folder only)
   if (name === ALL_SITES) return true;
   return scopeOf(name, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) === scope;
+}
+
+/**
+ * Whether the folder `name` under sites/ is the phone twin a run for a phone writes (`twinOnly`: runs.js
+ * startRemote, docs/PHONE-LINK.md): its own site's twin, sites/phone~<site>/ (or a part of the site's), and
+ * nothing else: not all-sites/, no desktop folder, not a new folder for another site.
+ */
+function ownTwin(name, scope, splits = []) {
+  if (!isPhoneSite(name) || !isPhoneSite(scope)) return false;
+  return scopeOf(phoneBase(name), [...splits, phoneBase(scope)]) === phoneBase(scope);
 }
 
 // Why a path under sites/ (`parts`: its names) is never staged, or ''.
@@ -308,6 +319,8 @@ class Stage {
     if (why) return why;
     const site = parts[0];
     if (ownFolder(site, this.scope, this.splits) || this.newFolders.has(site)) return '';
+    // (a phone view's run, scope phone~x.com: no all-sites/, desktop folder or new folder either, ownFolder)
+    if (isPhoneSite(this.scope)) return `a phone view's run writes its phone twin's folder only (sites/${this.scope}/), not ${site}/`;
     if (this.otherAtStart.has(site)) return `${site} is another site's folder`;
     const st = lstatOrNull(path.join(this.liveReal, site));
     if (st) return `${site} is another site's folder`; // (made meanwhile, not by this run)
@@ -448,4 +461,4 @@ class Stage {
   }
 }
 
-module.exports = { Stage, ownFolder, nameRefused, readPlain, writePlain, removePlain, plainUnder, INSTRUCTION_NAME, ALL_SITES, DOCS };
+module.exports = { Stage, ownFolder, ownTwin, nameRefused, readPlain, writePlain, removePlain, plainUnder, INSTRUCTION_NAME, ALL_SITES, DOCS };

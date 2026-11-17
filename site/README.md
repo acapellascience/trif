@@ -12,6 +12,11 @@ every request there to the same path on `timsrobot.com`, so older installs' "Rep
 - `src/report.js`: checking a report and writing its email (tested in `tests/site.test.js`).
 - `src/demo.js`: the home page's demo (below).
 - `src/notes.js`: `/notes/<slug>`, Tim's longer posts from X, for people who aren't on X (below).
+- `src/clip.js`: `/clip` and `/clip.js`, the iPhone app's Home Screen icon. The app opens
+  `x-safari-https://timsrobot.com/clip#<profile>`; the page reads the profile from the `#` part (never sent here),
+  clears it from the address bar, checks it is a TRIF Home Screen icon and nothing else (one Web Clip opening
+  `trif://open?url=https://…`), and hands it to Safari as a download ("Profile Downloaded"). No requests, no
+  cookies, nothing stored. Its words: docs/CLIP-PAGE-STRINGS.md.
 
 ## The demo
 

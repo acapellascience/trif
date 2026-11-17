@@ -570,3 +570,53 @@ test('the site\'s files for deploys: the side panel\'s (only those the demo uses
   assert.match(toml, /\[build\]\s*\ncommand = "node build-demo.js --stage"/);
   assert.match(toml, /\[assets\]\s*\ndirectory = "\.assets"\s*\nbinding = "ASSETS"\s*\nrun_worker_first = true/);
 });
+
+test('/clip: the iPhone app\'s Home Screen icon page: only a TRIF icon is accepted; nothing asked for', async () => {
+  const [{ default: worker }] = await load();
+  const { CHECK_SRC, TOP_KEYS, CLIP_KEYS, CLIP_JS } = await import('../site/src/clip.js');
+  // (the page's own check, from the same source text the page runs)
+  const check = new Function(`${CHECK_SRC}\nreturn checkClip;`)();
+  const checkClip = (p) => check(p, TOP_KEYS, CLIP_KEYS);
+  assert.ok(CLIP_JS.includes(CHECK_SRC), 'the page runs the check as written, not a bundler\'s copy of it');
+  const clip = (over = {}, top = {}) => ({
+    PayloadType: 'Configuration', PayloadVersion: 1, PayloadIdentifier: 'com.timsrobot.trif.webclip.x.com', PayloadUUID: 'U',
+    PayloadDisplayName: 'X for TRIF', PayloadDescription: 'Adds an X icon…', PayloadOrganization: 'TRIF', PayloadRemovalDisallowed: false,
+    PayloadContent: [{ PayloadType: 'com.apple.webClip.managed', PayloadVersion: 1, PayloadIdentifier: 'com.timsrobot.trif.webclip.x.com.clip',
+      PayloadUUID: 'V', PayloadDisplayName: 'X for TRIF', Label: 'X', URL: 'trif://open?url=https://x.com/&app=1', Icon: { data: 'iVBOR' },
+      IsRemovable: true, FullScreen: true, Precomposed: true, ...over }],
+    ...top,
+  });
+  assert.strictEqual(checkClip(clip()), '');
+  assert.match(checkClip(clip({ URL: 'https://evil.example/' })), /opens TRIF/);
+  assert.match(checkClip(clip({ URL: 'trif://open?url=javascript:alert(1)' })), /opens TRIF/);
+  assert.match(checkClip(clip({ PayloadType: 'com.apple.wifi.managed' })), /Web Clip/);
+  assert.match(checkClip(clip({ Password: 'x' })), /unexpected key/);
+  assert.match(checkClip(clip({}, { PayloadIdentifier: 'com.evil.profile' })), /identifier/);
+  // (several icons in one profile: the app's list of icons waiting, added in one install; each one checked)
+  const second = { ...clip().PayloadContent[0], PayloadIdentifier: 'com.timsrobot.trif.webclip.batch.b.youtube.com', Label: 'YouTube', URL: 'trif://open?url=https://youtube.com/&app=1' };
+  assert.strictEqual(checkClip(clip({}, { PayloadIdentifier: 'com.timsrobot.trif.webclip.batch.b', PayloadContent: [clip().PayloadContent[0], second] })), '');
+  assert.strictEqual(checkClip(clip({}, { PayloadContent: Array(20).fill(second) })), '');
+  assert.match(checkClip(clip({}, { PayloadContent: Array(21).fill(second) })), /one to twenty/);
+  assert.match(checkClip(clip({}, { PayloadContent: [] })), /one to twenty/);
+  assert.match(checkClip(clip({}, { PayloadContent: [second, { ...second, URL: 'https://evil.example/' }] })), /opens TRIF/);
+  assert.match(checkClip(clip({}, { PayloadContent: [second, { ...second, PayloadType: 'com.apple.wifi.managed' }] })), /Web Clip/);
+  assert.match(checkClip(clip({}, { PayloadContent: [second, { ...second, Password: 'x' }] })), /unexpected key/);
+  assert.match(CLIP_JS, /trif-clip-batch/, 'the words the app looks for before it sends several icons');
+  assert.match(checkClip(clip({}, { ConsentText: 'x' })), /unexpected key/);
+  assert.match(checkClip(clip({ Icon: 'x' })), /picture/);
+  assert.match(checkClip(null), /not a profile/);
+  assert.doesNotThrow(() => new Function(CLIP_JS));
+  const res = await worker.fetch(new Request('https://timsrobot.com/clip'), env());
+  assert.strictEqual(res.status, 200);
+  const csp = res.headers.get('Content-Security-Policy');
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /connect-src 'none'/);
+  assert.match(csp, /script-src 'self'/);
+  assert.strictEqual(res.headers.get('Referrer-Policy'), 'no-referrer');
+  const body = await res.text();
+  assert.match(body, /<script src="\/clip.js\?v=[0-9a-f]+"><\/script>/);
+  assert.doesNotMatch(body, /https?:\/\/(?!timsrobot\.com)/, 'nothing from anywhere else');
+  const js = await worker.fetch(new Request('https://timsrobot.com/clip.js'), env());
+  assert.strictEqual(js.status, 200);
+  assert.doesNotMatch(await js.text(), /fetch\(|XMLHttpRequest|sendBeacon|document\.cookie|localStorage|sessionStorage/);
+});

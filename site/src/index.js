@@ -18,6 +18,7 @@ import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
 import { IMAGES } from './images.js';
 import { noteHasFile, notePage } from './notes.js';
+import { CLIP, CLIP_JS } from './clip.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -68,6 +69,9 @@ async function extensionFile(request, env, file) {
 }
 
 // A note's page: its videos and pictures are this site's own files.
+// The iPhone app's Home Screen icon page (clip.js): it asks for nothing at all, and is framed by nothing.
+const CLIP_PAGE = { 'Content-Security-Policy': csp({ 'connect-src': "'none'", 'form-action': "'none'" }) };
+
 const NOTE_PAGE = { 'Content-Security-Policy': csp({ 'media-src': "'self'" }) };
 const MEDIA_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp4: 'video/mp4' };
 
@@ -244,6 +248,8 @@ export default {
     if (pathname === '/report.js') return script(REPORT_JS);
     if (pathname === '/windows' || pathname === '/windows/') return html(pageWith(WINDOWS, searchParams.get('mods')), 200, undefined, FORM_PAGE);
     if (pathname === '/windows.js') return script(WINDOWS_JS);
+    if (pathname === '/clip' || pathname === '/clip/') return html(CLIP, 200, undefined, CLIP_PAGE);
+    if (pathname === '/clip.js') return script(CLIP_JS);
     // The icons and the link preview card (pages.js HEAD_TAGS).
     if (pathname === '/favicon.svg') return respond(FAVICON_SVG, 'image/svg+xml', 200, CACHE);
     if (pathname === '/favicon.ico') return extensionFile(request, env, 'icons/robot-32.png');

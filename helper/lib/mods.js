@@ -2,6 +2,7 @@
 // Mod discovery and header parsing. Shared by host.js (pushes mods to the extension) and
 // cli.js (`trif mods`, `status`, `doctor`), so both always agree on what a mod is.
 
+const { isPhoneSite, phoneBase } = require('./scope');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -84,6 +85,12 @@ function parseHeader(code) {
       case 'version':
         if (value) out.version = value;
         break;
+      // `@device phone`: made in the phone view ("Edit for mobile", extension/phone.js) for TRIF on a phone; it
+      // runs wherever its @match says, here too (AGENTS.md "Phone mods"). Only set when the header says.
+      case 'device':
+        if (/^(phone|desktop)$/i.test(value)) out.device = value.toLowerCase();
+        else out.warnings.push(`@device should be phone or desktop (got "${value}")`);
+        break;
       // `@style` (or `@rules`, its name before): a style mod (lib/rules.js): data after the header, run by
       // TRIF's own code. Inside TRIF it's still a "rules" mod (`rules: true`).
       case 'style':
@@ -132,7 +139,8 @@ const ALL_SITES = 'all-sites';
 
 function defaultMatches(site) {
   if (site === ALL_SITES) return ['*://*/*'];
-  const host = String(site).toLowerCase().replace(/:\d+$/, '');
+  // (a phone twin, sites/phone~x.com/: the site's own pages, run only in the phone view: lib/scope.js)
+  const host = phoneBase(String(site).toLowerCase()).replace(/:\d+$/, '');
   // `*.<ip>` is not a meaningful (or valid) host pattern, so IPs only get the exact pattern.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[')) return [`*://${host}/*`];
   return [`*://${host}/*`, `*://*.${host}/*`];
@@ -172,6 +180,8 @@ function buildMod({ site, file, code }) {
     risk: header.risk, // {tier, why} or null when the header doesn't say
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
+    ...(header.device ? { device: header.device } : {}), // (informational: where a phone mod is is what counts)
+    ...(isPhoneSite(site) ? { phone: true } : {}), // (a phone mod: in a phone twin's folder; runs only in the phone view)
   };
   // (`sandboxed` only when it is: the hashes of every other mod stay as they were. The code is hashed with its
   // header's new names spelled the old way, so a mod that only changes `@rules` to `@style`, or `@sandboxed` to

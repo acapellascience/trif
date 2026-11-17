@@ -20,6 +20,8 @@ const { envVar } = require('./env');
 const { modFile, revealPath } = require('./reveal');
 const history = require('./history');
 const mods = require('./mods');
+const { PHONE_PREFIX, phoneBase } = require('./scope');
+const { ALL_SITES } = mods;
 
 class ShareError extends Error {}
 // (a site's files have no size limit of their own: they come in slices, checked against the free disk space)
@@ -27,13 +29,14 @@ const SLICE_MAX = 8 * 1024 * 1024;
 const DISK_MARGIN = 64 * 1024 * 1024; // (what stays free after a file)
 const IMPORTED = 'imported.json';
 // (a host name, a single label too: localhost is a site TRIF can be on)
-const SITE_RE = /^(?:all-sites|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)$/;
+// (and a site's phone twin, phone~x.com: phone mods, lib/scope.js)
+const SITE_RE = /^(?:all-sites|(?:phone~)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)$/;
 
 /** Where exports go: ~/Downloads (TRIF_DOWNLOADS, for tests). */
 function downloadsDir(env = process.env) { return envVar('DOWNLOADS', env) || path.join(os.homedir(), 'Downloads'); }
 
 function checkSite(site) {
-  const s = String(site || '').trim().toLowerCase().replace(/^www\./, '');
+  const s = String(site || '').trim().toLowerCase().replace(/^www\./, '').replace(/^phone~www\./, 'phone~');
   if (!SITE_RE.test(s)) throw new ShareError(`"${String(site).slice(0, 80)}" isn't a site (a host name like x.com)`);
   return s;
 }
@@ -118,10 +121,12 @@ function markImported(home, id) { const v = loadImported(home); v[id] = { at: Da
 
 /**
  * Import a mod's text. `name`: the file's name (or the mod's @name), `site`: the user's choice when its
- * @match doesn't say, `choice`: 'copy' or 'replace' when a mod of that name is there. Returns
- * {needsSite: [candidates]}, {exists: id, site, name}, or {id, file, replaced?}.
+ * @match doesn't say, `choice`: 'copy' or 'replace' when a mod of that name is there. `phone`: from the phone
+ * view's panel: a phone mod, in the phone twin of the site its header names (sites/phone~x.com/), never a
+ * desktop folder or all-sites/ (docs/MOBILE-EDIT.md "Phone mods"). Returns {needsSite: [candidates]},
+ * {exists: id, site, name}, or {id, file, replaced?}.
  */
-function importMod(ws, { text, name = '', site = '', choice = '' } = {}) {
+function importMod(ws, { text, name = '', site = '', choice = '', phone = false } = {}) {
   const code = String(text ?? '');
   if (!code.trim()) throw new ShareError('the file is empty');
   if (Buffer.byteLength(code) > mods.MAX_MOD_BYTES) throw new ShareError(`the file is bigger than a mod can be (${mods.MAX_MOD_BYTES / 1024 / 1024} MB)`);
@@ -130,8 +135,15 @@ function importMod(ws, { text, name = '', site = '', choice = '' } = {}) {
   let s = site ? checkSite(site) : null;
   if (!s) {
     const found = sitesOf(code);
-    if (!found.site) return { needsSite: found.candidates };
+    // (a phone mod is for one site: every site's isn't a choice there)
+    const candidates = phone ? found.candidates.filter((x) => x !== ALL_SITES) : found.candidates;
+    if (!found.site || (phone && found.site === ALL_SITES)) return { needsSite: candidates };
     s = found.site;
+  }
+  if (phone) {
+    const base = phoneBase(s);
+    if (base === ALL_SITES) throw new ShareError('a phone mod is for one site: choose it');
+    s = checkSite(PHONE_PREFIX + base);
   }
   let base = nameOf(name) || nameOf(header.name) || 'imported-mod';
   const dir = path.join(ws.modsDir, s);

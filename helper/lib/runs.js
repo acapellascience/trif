@@ -10,10 +10,11 @@ const { envVar } = require('./env');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
-const { scopeFor, scopeOf, runScope, cleanSplits } = require('./scope');
+const { scopeFor, scopeOf, runScope, cleanSplits, isPhoneSite } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
+const { ownFolder } = require('./stage'); // (which site folders are a run's own: its phone twin's only, for a phone scope)
 const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
@@ -483,7 +484,10 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
   // the run's scope: held.js), with the version before running meanwhile.
   // (a sensitive host's own site, mail.google.com, is another site to a google.com run, and the other way
   // round: scope.js scopeOf with the sites of their own the extension sent)
-  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && n !== ALL_SITES_DIR);
+  // (A run from the phone view, scope phone~x.com: its phone twin's folder only, a sensitive site's twin too
+  // (phone~mail.google.com); every desktop folder, all-sites/ too, is read-only to it, the site's own desktop mods
+  // there for reference: stage.js ownFolder, ownTwin)
+  const otherSites = names.filter((n) => !ownFolder(n, scope, splits));
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
@@ -640,6 +644,8 @@ class Runs {
       ws,
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
+      // (the panel's tab is TRIF's phone view, "Edit for mobile": extension/phone.js; {device, width})
+      phone: args.phone && typeof args.phone === 'object' && typeof args.phone.device === 'string' ? { device: args.phone.device.slice(0, 40), width: Number(args.phone.width) || null } : null,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
@@ -839,7 +845,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, noShell: this.platform === 'win32' ? (adapter.fencedFiles ? 'files' : true) : false };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, noShell: this.platform === 'win32' ? (adapter.fencedFiles ? 'files' : true) : false };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));

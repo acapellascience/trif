@@ -38,7 +38,8 @@ const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = re
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = require('./lib/browsers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
-const { deleteMod, emptyTrash } = require('./lib/trash');
+const { deleteMod, emptyTrash, siteInScope } = require('./lib/trash');
+const { ownFolder } = require('./lib/stage');
 const { runScope } = require('./lib/scope');
 const update = require('./lib/update');
 const modsFeed = require('./lib/modsfeed');
@@ -60,6 +61,12 @@ const PIPES = pipes.usesPipes();
 ws.ownSock = PIPES ? pipes.newPipeName() : ownSock(ws.home);
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
 const logger = createLogger(ws.log, { stderr: true });
+// Phone mods from before they had a folder of their own (`@device phone` in a desktop folder): to the site's
+// phone twin, once (lib/phonemods.js)
+try {
+  const r = require('./lib/phonemods').movePhoneMods(ws.modsDir, ws.private);
+  for (const m of r.moved) logger.info(`moved the phone mod ${m.from} to ${m.to}: the phone view has a folder of its own now`);
+} catch (e) { logger.warn(`phone mods: ${e.message}`); }
 
 // Protect the native messaging channel: anything that tries to print goes to the log instead.
 console.log = (...a) => logger.info(...a);
@@ -221,6 +228,9 @@ function onExtensionMessage(msg) {
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${state.hello.browserVersion || msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       sendUpdate();
+      // (mod files the user downloads: only when they switched it on, lib/downloads.js)
+      if (ws.config?.watchDownloads === true) downloadsWatcher().start().catch((e) => logger.warn(`downloads: ${e.message}`));
+      else sendDownloads();
       break;
     case 'requestWaiting':
       onRequestWaiting(msg);
@@ -568,18 +578,47 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
+const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.toPhone', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit']);
+  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.preview']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout']);
-// Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore']);
+// Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
+// The page commands a run's `trif` sends (cli.js; AGENTS.md "Commands"): the only ones that go on from a run
+// to the extension, which holds each to the run's site (args.scope: background.js scopedTab, checkScopeUrl).
+const RUN_PAGE_COMMANDS = new Set(['status', 'tabs', 'run', 'reload', 'navigate', 'open', 'close', 'text', 'sweep', 'screenshot',
+  'record', 'requests', 'request', 'errors', 'logs', 'mod.enable']);
+// Everything a run may ask, by its token or through its mailbox (onClientLine): the helper's own `ping` and
+// `mods` (answered for the run's site alone: helperInfo, runMod), the mod-file commands and those page
+// commands. Anything else from a run is refused there and never sent on to the extension, whatever the
+// extension would make of it: a command added later is a run's only once it's named here.
+const RUN_COMMANDS = new Set(['ping', 'mods', ...MOD_FILE_COMMANDS, ...RUN_PAGE_COMMANDS]);
+
+const siteOfId = (id) => String(id ?? '').trim().split('/')[0];
+/**
+ * Whether a mod is a run's site's, by its id: the rule its delete and restore go by (lib/trash.js siteInScope).
+ * A phone view's run: its phone twin's mods only; a sensitive site of its own and its parent: each other's
+ * aren't. `scope`, `splits`: the run's (onClientLine sets args.scope and args.scopeSplits from its token).
+ */
+function runMod(id, scope, splits) {
+  return !!scope && siteInScope(siteOfId(id), scope, Array.isArray(splits) ? splits : []);
+}
+/**
+ * A mod's text or diff asked for by id (mod.code, mod.diff): from a run, its own site's mods only, said before
+ * the mod is looked up (so the answer doesn't tell which other mods there are). The side panel and the user's
+ * terminal send no scope: every mod.
+ */
+function checkRunReads(id, args) {
+  if (args.scope === undefined && args.agentRun === undefined) return;
+  if (runMod(id, args.scope, args.scopeSplits)) return;
+  throw new Error(`this chat can only show mods of ${args.scope || 'its own site'}; ${String(id || '(no id)').slice(0, 200)} is another site's`);
+}
 
 // Merges proposed in a side-panel chat (agent.start with `merge`): mod id -> {scope, hash, version,
 // before} (preinstalled.js mergeRequest). The proposing run only explains and asks; the user's go-ahead
@@ -741,6 +780,7 @@ function agentCommand(cmd, args) {
     case 'mod.diff': {
       // "Show what changed" on a waiting change: the version that last ran against the waiting one
       const id = typeof args.id === 'string' ? args.id.trim() : '';
+      checkRunReads(id, args);
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const before = lastRun(ws.home, id);
@@ -805,10 +845,20 @@ function agentCommand(cmd, args) {
         return { site: r.site, dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };
       });
     }
+    // Send to iPhone (lib/tophone.js): a copy of the mod's file to the Mac's AirDrop, which the iPhone app opens
+    // ("Add this mod?"); without AirDrop's window, the copy shown in Finder. No server.
+    case 'mod.toPhone': {
+      const id = String(args.id ?? '');
+      if (!state.mods.find((x) => x.id === id)) throw new Error(`no mod ${id || '(no id)'}`);
+      return require('./lib/tophone').sendToPhone(ws, state.mods, id, { logger }).then((r) => {
+        logger.info(`sent ${r.id} to the phone: ${r.how}`);
+        return { id: r.id, file: path.basename(r.file), how: r.how, ...(r.airdrop === false ? { airdrop: false } : {}) };
+      });
+    }
     // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so
     // the next sync holds it like any (held.js), and marked imported
     case 'mod.import': {
-      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? '') });
+      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? ''), phone: args.phone === true });
       if (r.id) { logger.info(`imported ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}`); syncMods('import', false); }
       return r.file ? { ...r, file: path.relative(ws.home, r.file) } : r;
     }
@@ -831,6 +881,7 @@ function agentCommand(cmd, args) {
       // mod: its rules (the file), not the code TRIF makes of them. `version: 'ran'`: a mod with a change
       // waiting, the version that's running meanwhile (held.js lastRun).
       const id = typeof args.id === 'string' ? args.id.trim() : '';
+      checkRunReads(id, args);
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const CAP = 200000;
@@ -943,6 +994,8 @@ function agentCommand(cmd, args) {
       if (args.on && info.available) maybeAutoInstall(info);
       return info;
     }
+    // A mod's text read as TRIF reads it, nothing written: the cards before an import, and "Try it here" (lib/preview.js)
+    case 'mod.preview': return require('./lib/preview').previewMod(String(args.text ?? ''), { name: String(args.name ?? ''), site: String(args.site ?? ''), forTry: !!args.forTry });
     case 'report.build': return report(args);
     default: return logins.cancel(args.loginId);
   }
@@ -963,7 +1016,8 @@ function startRun(args) {
     return r;
   }
   const id = String(args.merge).trim();
-  if (require('./lib/scope').scopeOf(id.split('/')[0], [...(Array.isArray(args.splits) ? args.splits : []), scope]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
+  // (its own site's mods only; from the phone view, its phone twin's: trash.js siteInScope)
+  if (!require('./lib/trash').siteInScope(id.split('/')[0], scope, Array.isArray(args.splits) ? args.splits : [])) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });
@@ -998,6 +1052,42 @@ function extensionBehind() {
   let older = false;
   try { older = update.compareVersions(String(h.version), VERSION) < 0; } catch { return null; }
   return older ? `The ${h.browser} add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
+}
+
+// Mod files the user downloads (lib/downloads.js): the panel's Settings switch, and its "Add this mod?" card. The
+// side panel's alone (PANEL_COMMANDS): a terminal or a run can't switch it on or take a file from the user's downloads.
+function downloadsCommand(cmd, args) {
+  switch (cmd) {
+    case 'downloads.status': return downloads ? downloads.status() : { on: false, state: 'off' };
+    case 'downloads.setWatch': {
+      update.setConfigKey(ws.home, 'watchDownloads', args.on ? true : undefined);
+      ws.config = { ...(ws.config || {}), watchDownloads: args.on ? true : undefined };
+      logger.info(`offering downloaded mod files ${args.on ? 'on' : 'off'}`);
+      return args.on ? downloadsWatcher().start() : downloads ? downloads.stop() : { on: false, state: 'off' };
+    }
+    case 'downloads.take': {
+      if (!downloads) throw new Error('TRIF isn\'t looking at your downloads');
+      return downloads.take(String(args.id ?? ''));
+    }
+    case 'downloads.done': return downloads ? downloads.done(String(args.id ?? ''), args.how === 'added' ? 'added' : 'dismissed') : { on: false, state: 'off' };
+    case 'downloads.ignore': return downloads ? downloads.ignore(String(args.id ?? '')) : { on: false, state: 'off' };
+    default: throw new Error(`unknown command "${cmd}"`);
+  }
+}
+
+let downloads = null;
+function downloadsWatcher() {
+  if (!downloads) {
+    downloads = require('./lib/downloads').createWatcher({
+      dir: require('./lib/share').downloadsDir(), stateFile: path.join(ws.private, 'downloads.json'), onChange: sendDownloads,
+      log: (level, m) => (level === 'warn' ? logger.warn(m) : logger.info(m)),
+    });
+  }
+  return downloads;
+}
+function sendDownloads(status = downloads ? downloads.status() : { on: false, state: 'off' }) {
+  if (!state.stdoutOpen) return;
+  try { sendToExtension({ type: 'downloads', downloads: status }); } catch (e) { logger.warn(`could not send the downloads offer: ${e.message}`); }
 }
 
 function sendUpdate(info = updateInfo()) {
@@ -1176,6 +1266,7 @@ function panelCommand(cmd, args) {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
   }
+  if (cmd.startsWith('downloads.')) return downloadsCommand(cmd, args);
   if (cmd !== 'agent.withoutSandbox') throw new Error(`unknown command "${cmd}"`);
   const agent = typeof args.agent === 'string' ? args.agent : '';
   if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');
@@ -1323,7 +1414,48 @@ function onClient(sock) {
   });
 }
 
-function helperInfo() {
+/**
+ * `ping`. For a run (`run`: the one whose token or mailbox asked), what the helper knows of its own mods alone:
+ * its site's and the others it may change or made (runsOwn), itself of the runs, and no login. `trif status`
+ * and `trif verify` in a run read their mod's hold, waiting change and errors from this.
+ */
+function helperInfo(run = null) {
+  const info = allHelperInfo();
+  if (!run) return info;
+  const mine = (id) => runsOwn(run, id);
+  const only = (o) => Object.fromEntries(Object.entries(o || {}).filter(([id]) => mine(id)));
+  const byId = (list) => (Array.isArray(list) ? list : []).filter((e) => e && mine(e.id));
+  return {
+    ...info,
+    mods: info.mods.filter(mine),
+    modErrors: byId(info.modErrors),
+    modWarnings: byId(info.modWarnings),
+    modsApplied: info.modsApplied ? { ...info.modsApplied, registered: info.modsApplied.registered.filter(mine), errors: byId(info.modsApplied.errors) } : info.modsApplied,
+    runs: info.runs.filter((r) => r.runId === run.id),
+    held: only(info.held),
+    pending: info.pending.filter(mine),
+    review: only(info.review),
+    updates: only(info.updates),
+    login: null,
+  };
+}
+
+/**
+ * The mods a run is told about by `ping`: its site's (runMod), the other folders it may change (stage.js
+ * ownFolder: all-sites/ for a run that isn't a phone view's), a folder it made for another site, and a mod held
+ * as this chat's (held.js: its change to an every-site mod waits, what it wrote for another site is held; `trif
+ * verify` says so from the hold). Other sites' mods, holds and updates aren't its to ask the helper about.
+ */
+function runsOwn(run, id) {
+  const site = siteOfId(id);
+  if (!site || typeof id !== 'string') return false;
+  if (runMod(id, run.scope, run.splits) || ownFolder(site, run.scope, run.splits || [])) return true;
+  if (run.stage && run.stage.newFolders && run.stage.newFolders.has(site)) return true;
+  const h = state.held[id];
+  return !!h && (h.runId === run.id || (!!h.scope && h.scope === run.scope));
+}
+
+function allHelperInfo() {
   return {
     helper: VERSION,
     pid: process.pid,
@@ -1360,7 +1492,7 @@ function onClientLine(sock, line) {
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
-  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
+  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {
@@ -1375,6 +1507,8 @@ function onClientLine(sock, line) {
             ? 'only the user adds Tim\'s mods (on the setup page, or in Settings in the side panel)'
             : `"${cmd}" isn't available inside an agent run` });
     }
+    // (and nothing but what a run may ask: RUN_COMMANDS. Not sent on for the extension to refuse.)
+    if (!RUN_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: `"${cmd.slice(0, 60)}" isn't a command an agent run can send (\`trif help\` lists the ones there are)` });
     args.scope = run.scope;
     args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
@@ -1384,13 +1518,15 @@ function onClientLine(sock, line) {
   if (cmd === 'run' && args.world === 'box' && !(state.hello && Array.isArray(state.hello.features) && state.hello.features.includes('boxRun'))) {
     return reply(sock, { id, ok: false, error: 'this browser\'s TRIF extension is from before `trif run` could use TRIF\'s box (it updates by itself; in Chrome, reload it on chrome://extensions). Until then: `trif run --page`, which runs in the page\'s own world (document, window) and pauses the site\'s posting until the tab reloads' });
   }
-  if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
+  if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo(run) });
   if (cmd === 'mods') {
+    // (from a run: its own site's mods, and what's wrong with those, alone: runMod)
+    const mine = run ? (e) => !!e && runMod(e.id, run.scope, run.splits) : () => true;
     return reply(sock, {
       id, ok: true,
       result: {
-        modsDir: ws.modsDir, errors: state.modErrors, warnings: state.modWarnings,
-        mods: state.mods.map((m) => ({
+        modsDir: ws.modsDir, errors: state.modErrors.filter(mine), warnings: state.modWarnings.filter(mine),
+        mods: state.mods.filter(mine).map((m) => ({
           ...summarize(m), ...(state.held[m.id] ? { held: state.held[m.id] } : {}), ...(state.updates[m.id] ? { update: state.updates[m.id] } : {}),
         })),
       },
@@ -1414,9 +1550,11 @@ function onClientLine(sock, line) {
     return;
   }
 
-  // Everything else is a page command for the extension. One that loads a page: a mod file changed since
+  // Everything else is a page command for the extension (from a run: one of RUN_PAGE_COMMANDS, checked again
+  // here, where it would go out). One that loads a page: a mod file changed since
   // the last sync (written just before `trif reload`, inside the 150 ms debounce, or before the watcher
   // fired) goes to the extension first, which registers it before loading the page (background.js).
+  if (run && !RUN_PAGE_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: `"${cmd.slice(0, 60)}" isn't a command an agent run can send` });
   if (LOADS_PAGE.has(cmd) && fingerprint() !== state.lastFingerprint) syncMods(`before ${cmd}`, false);
   const extId = `h${++requestCounter}`;
   const timeoutMs = typeof args.timeout === 'number' && args.timeout > 0 ? args.timeout + GRACE_MS : DEFAULT_TIMEOUT_MS;

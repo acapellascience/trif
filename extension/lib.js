@@ -143,11 +143,24 @@ export function modToUserScript(mod) {
   // the values to its `trif`; a free mod's CSS is a script of TRIF's before its code, its values in its wrapper)
   const style = styleOf(mod);
   const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.siteOk) && mod.siteOk.length ? { ...args, site: mod.siteOk } : args, ...(style ? { style } : {}) };
-  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
-  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
-  const js = [{ code: wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null) }];
-  if (style && style.css) js.unshift({ code: styleSectionCode(mod.id, style.css) });
+  // (each piece only where it belongs: a phone mod in the phone view's tab, any other mod everywhere else: phoneGate)
+  const gate = (code) => phoneGate(isPhoneMod(mod), code);
+  if (inSandboxWorld(mod)) return { ...base, js: [{ code: gate(sandboxModCode(mod.id, String(mod.code ?? ''), powers)) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  if (mod.sandboxed) return { ...base, js: [{ code: gate(sandboxPageCode(mod.id, String(mod.code ?? ''), powers)) }], world: 'MAIN' };
+  const js = [{ code: gate(wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null)) }];
+  if (style && style.css) js.unshift({ code: gate(styleSectionCode(mod.id, style.css)) });
   return { ...base, js, world: 'MAIN' };
+}
+
+// The phone view (phone.js, docs/MOBILE-EDIT.md) is a TRIF of its own: in its tab only phone mods run, and phone
+// mods run nowhere else. A mod registers for its pages as any does (user scripts can't be given a tab), and its
+// code waits behind a test of the page's own document: the phone tab's rules mark its documents with a
+// `Server-Timing: trif-phone` entry (phone.js phoneRules), which the Performance timeline shows in every world,
+// at once. Each wrapper is one expression statement (wrapModCode, styleSectionCode, sandboxModCode,
+// sandboxPageCode), so `if (…) ` before it keeps the mod's own line numbers.
+export const PHONE_MARK_TEST = "((n) => !!n && Array.isArray(n.serverTiming) && n.serverTiming.some((e) => e.name === 'trif-phone'))(globalThis.performance && performance.getEntriesByType('navigation')[0])";
+export function phoneGate(phone, code) {
+  return `if (${phone ? '' : '!'}${PHONE_MARK_TEST}) ${code}`;
 }
 
 /** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
@@ -283,7 +296,8 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     // (a sandboxed mod run as a page script registers differently: a hash of its own)
     // (and one whose sites' approved powers changed: they're in its registration)
     const withHash = Array.isArray(reg.siteOk) && reg.siteOk.length ? `:site:${quickHash(reg.siteOk.join('|'))}` : '';
-    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}` } : withHash ? { ...reg, hash: `${reg.hash ?? ''}${withHash}` } : reg);
+    // (`:gate`: registered with its phone view gate, phoneGate: one registered before has none, and goes again)
+    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}:gate` } : { ...reg, hash: `${reg.hash ?? ''}${withHash}:gate` });
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
@@ -574,12 +588,17 @@ export async function lastFocusedNormalWindow(chromeApi, firefox = FIREFOX) {
   return win && (!win.type || win.type === 'normal') ? win : null;
 }
 
-/** Resolve a tab selector using chrome.windows/chrome.tabs. */
-export async function resolveTab(chromeApi, args = {}) {
-  const [tabs, win] = await Promise.all([
+/**
+ * Resolve a tab selector using chrome.windows/chrome.tabs: the tabs of normal windows, and those of `also`
+ * (window ids: the phone view's windows, which are popups, phone.js).
+ */
+export async function resolveTab(chromeApi, args = {}, also = []) {
+  const [normal, win, extra] = await Promise.all([
     chromeApi.tabs.query({ windowType: 'normal' }),
     lastFocusedNormalWindow(chromeApi),
+    Promise.all((also || []).filter(Number.isInteger).map((windowId) => chromeApi.tabs.query({ windowId }).catch(() => []))),
   ]);
+  const tabs = [...normal, ...extra.flat().filter((t) => !normal.some((n) => n.id === t.id))];
   tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
   return selectTab(tabs, win?.id, args);
 }
@@ -682,6 +701,16 @@ export function normalizeNewOff(value) {
  * what the user had on there stays on.
  * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
  */
+/**
+ * The file name a pasted mod is imported under (sidepanel.js "Paste a mod…"): its @name in kebab-case, as the
+ * helper names a mod (helper/lib/share.js nameOf), or "pasted-mod". Pure.
+ */
+export function pastedModName(text) {
+  const m = /^\s*\/\/\s*@name\s+(.+?)\s*$/m.exec(String(text || ''));
+  const base = (m ? m[1] : '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  return `${base || 'pasted-mod'}.js`;
+}
+
 export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {}, waits = () => false } = {}) {
   const list = (mods || []).filter((m) => typeof m?.id === 'string');
   const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
@@ -1025,8 +1054,17 @@ export function renameInOrder(modOrder, renames) {
 // Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
 // (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.
 
+// Phone mods' folders, sites/phone~<site>/ (helper/lib/scope.js, docs/MOBILE-EDIT.md): a site's phone twin, a
+// site of its own for lists, chats and runs, on the same pages. A run's scope can be one (from the phone view).
+export const PHONE_PREFIX = 'phone~';
+export const isPhoneSite = (s) => String(s || '').startsWith(PHONE_PREFIX);
+export const phoneBase = (s) => (isPhoneSite(s) ? String(s).slice(PHONE_PREFIX.length) : String(s || ''));
+/** Whether a mod is a phone mod: its folder is a phone twin (the helper says so too: `phone`). */
+export const isPhoneMod = (mod) => !!mod && (mod.phone === true || isPhoneSite(String(mod.id || '').split('/')[0]));
+
 /** "x.com" is in scope "x.com", and so is "api.x.com"; "notx.com" isn't. */
 export function hostInScope(hostname, scope) {
+  scope = phoneBase(scope); // (a phone twin's pages are its site's)
   const h = String(hostname || '').toLowerCase().replace(/\.$/, '');
   return !!scope && (h === scope || h.endsWith('.' + scope));
 }
@@ -1072,6 +1110,7 @@ const SHARED_SUFFIXES = new Set([
 
 /** The registrable domain for a host or site name: "www.news.bbc.co.uk" -> "bbc.co.uk", "x.com" -> "x.com". */
 export function scopeFor(host) {
+  if (isPhoneSite(String(host || '').trim().toLowerCase())) return PHONE_PREFIX + scopeFor(phoneBase(String(host).trim().toLowerCase()));
   const h = String(host || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
   if (!h || !h.includes('.') || /^[\d.]+$/.test(h) || h.includes(':') || h.startsWith('[')) return h;
   const labels = h.split('.');
@@ -1157,7 +1196,7 @@ export function sensitiveHit(host, list = null, pending = []) {
 export function sensitiveSites({ list = null, pending = [], hosts = [] } = {}) {
   const memo = new Map();
   const hit = (h) => { const k = cleanHostName(h); if (!memo.has(k)) memo.set(k, sensitiveHit(k, list, pending)); return memo.get(k); };
-  const scopeOf = (h) => hit(h)?.scope || scopeFor(h);
+  const scopeOf = (h) => (isPhoneSite(h) ? PHONE_PREFIX + (hit(phoneBase(h))?.scope || scopeFor(phoneBase(h))) : hit(h)?.scope || scopeFor(h));
   const splits = new Set();
   const consider = (h) => { const x = hit(h); if (x && x.scope !== scopeFor(x.scope)) splits.add(x.scope); };
   for (const x of sensitiveList(list)) if (!x.pattern.includes('*')) consider(x.pattern);
@@ -1870,12 +1909,21 @@ export const GROUP_NAMES = { rules: 'Style mods', sandboxed: 'Boxed mods', page:
 export function groupWord(group) { return (GROUP_NAMES[group] || GROUP_NAMES.page).toLowerCase(); }
 export function modGroup(mod) { return mod && mod.rules ? 'rules' : inSandboxWorld(mod) ? 'sandboxed' : 'page'; }
 
+// The phone view's group switches are the site's phone twin's (phone~x.com, from its panel): they switch only the
+// site's phone mods, and the site's own (x.com) only its other mods (docs/MOBILE-EDIT.md "Phone mods").
+function groupSiteName(site) {
+  const s = String(site ?? '').trim().toLowerCase();
+  if (!isPhoneSite(s)) return offSiteName(s);
+  const base = offSiteName(phoneBase(s));
+  return base ? PHONE_PREFIX + base : null;
+}
+
 /** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
 export function normalizeGroupsOff(value) {
   const out = {};
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const [site, list] of Object.entries(value)) {
-      const s = offSiteName(site);
+      const s = groupSiteName(site);
       if (!s || !Array.isArray(list)) continue;
       const groups = [...new Set(list.filter((g) => GROUPS.includes(g)))];
       if (groups.length) out[s] = [...new Set([...(out[s] || []), ...groups])];
@@ -1886,13 +1934,13 @@ export function normalizeGroupsOff(value) {
 
 /** Whether `group` is switched off on `site` (an entry for it or a parent domain). */
 export function groupOffOn(groupsOff, group, site) {
-  const s = offSiteName(site);
-  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && hostInScope(s, o));
+  const s = groupSiteName(site);
+  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && isPhoneSite(o) === isPhoneSite(s) && hostInScope(phoneBase(s), o));
 }
 
 /** `groupsOff` after switching `group` on or off on `site` (a new object). */
 export function switchGroup(groupsOff, site, group, enabled) {
-  const s = offSiteName(site);
+  const s = groupSiteName(site);
   if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
   if (!GROUPS.includes(group)) throw new Error(`"${group}" isn't a group (${GROUPS.join(' or ')})`);
   const out = normalizeGroupsOff(groupsOff);
@@ -1906,7 +1954,9 @@ export function switchGroup(groupsOff, site, group, enabled) {
 export function offSitesFor(mod, offSites, groupsOff) {
   const own = (offSites && offSites[mod.id]) || [];
   const g = modGroup(mod);
-  const group = Object.entries(groupsOff || {}).filter(([, list]) => list.includes(g)).map(([s]) => s);
+  // (a phone mod: its site's phone twin's switches, as their site; any other mod: the sites' own)
+  const phone = isPhoneMod(mod);
+  const group = Object.entries(groupsOff || {}).filter(([s, list]) => list.includes(g) && isPhoneSite(s) === phone).map(([s]) => phoneBase(s));
   return group.length ? [...new Set([...own, ...group])] : own;
 }
 

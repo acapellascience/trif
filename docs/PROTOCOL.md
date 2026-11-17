@@ -126,6 +126,10 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.), unless its header says 
   the groups `rules`, `sandboxed`, `page`): only what people see says style, boxed and free mods. A mod's
   hash is taken with its header's `@style`/`@boxed` lines spelled `@rules`/`@sandboxed`, so switching
   spelling alone keeps its hash (what was allowed for it, holds, the extension's `unsandboxedOk`).
+- `@device phone` (or `desktop`): informational, parsed into `device`. What makes a phone mod is its folder: a
+  site's phone twin, `sites/phone~<site>/` (docs/MOBILE-EDIT.md "Phone mods, a sandbox of their own"): its own
+  site for scope, runs, holds and lists, on the site's pages (default `@match` the site's), sent as `phone: true`,
+  run only in the phone view (and every other mod only outside it: extension/lib.js `phoneGate`).
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/detox-timeline`). The helper parses headers; the extension never parses.
@@ -155,6 +159,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"browser", name}` | The browser's name as the helper knows it from the executable that started it (its parent process: `lib/browsers.js` `launchingBrowser`, `reconcileBrowser`), sent after each hello when it knows one. The extension uses it from then on (over its own guess: Arc and Vivaldi say they're Chrome) and its pages take it from `status`. Since 0.3.1; older extensions ignore it. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
+| `{type:"downloads", downloads:{on, state, folder?, offer, waiting?}}` | Mod files in the user's downloads (helper/lib/downloads.js), after the hello and whenever it changes: `state` `off`, `starting`, `watching`, `no-access` (the system refused the folder) or `missing`; `offer` the one to show, or null: `{id, file, from (the site the system recorded it came from, or null), app, name, description, kind, site, can (what TRIF finds it can do, as a hold says it), asks (its powers)}`. The panel's card and Settings switch; a badge on the toolbar button while an offer waits. |
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
@@ -399,6 +404,16 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   on that tab (also where the panel opens in a window instead: see "The panel in a window"). Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
   that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).
 
+### The phone view (`phone.open`, `phone.close`, `phone.state`)
+
+From the panel only (docs/MOBILE-EDIT.md, extension/phone.js): `{type: "phone.open", tabId, screen}` moves the
+tab into a phone-sized popup window with Safari-on-iPhone rules for that tab (session rules from id 1,000,000,
+which tab locks leave alone) and the page script (phone-page.js), and opens the panel window beside it;
+`{type: "phone.close", tabId}` puts it back; `{type: "phone.state", tabId}` says whether a tab is one. Page
+commands find the phone's tab (resolveTab's extra windows), `tabs` marks it `phone: "iPhone"`, and `agent.start`
+from it carries `phone: {device, width}` to the helper, which tells the agent. `mod.toPhone {id}` (helper,
+lib/tophone.js): a copy of the mod's file to AirDrop, or shown in Finder: `{id, file, how: "airdrop"|"folder"}`.
+
 ### Mod switches (`mod.enable`)
 
 Each mod can be switched off without touching its file. The switched-off set lives in the extension's
@@ -622,7 +637,7 @@ the raw result as JSON.
 
 Newline-delimited JSON on `~/.trif/helper.sock` (mode 0600). Request `{id, cmd, args, token?}` →
 response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are answered by the helper;
-everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
+everything else is forwarded to the extension (from a run: only the commands a run may send, and `mods` and `ping` for its own site, see "Run scope"). Requests time out after `args.timeout + 5000` ms (default 35 s).
 Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
 `token` is the run token (see "Run scope"): the CLI sends `$TRIF_RUN_TOKEN` when it's set.
 If the socket file exists but nothing listens, the next host to start removes it.
@@ -1096,7 +1111,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel"}`, `{type: "agent.openModel.set", provider, model, baseUrl}`,
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
-  `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}` and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
+  `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}`, `{type: "downloads.setWatch", on}`, `{type: "downloads.take" | "downloads.done" | "downloads.ignore", id, how?}`, `{type: "mod.preview", text, name}`, `{type: "mod.try", text, name?, tabId}` and `{type: "mod.untry", tabId}` (the panel page only: "Try it here" runs a style mod's rules in the page's world, or a boxed mod in TRIF's sandbox with no powers, once, in that tab, if TRIF is on there and the mod's @match covers it; never a free mod; `mod.untry` reloads the tab; background.js tryMod) and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
   `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
@@ -1128,6 +1143,8 @@ New native request commands (answered with a normal `response`):
 | `mod.export` | `id` | `{id, file, dir}`: the mod's file copied to the downloads folder as `<site>-<mod>.js` (a number added if taken) and shown in Finder; found by its id, as `mod.reveal` does (helper/lib/share.js; `TRIF_DOWNLOADS` for tests). Not from a run |
 | `mod.exportSite` | `site` | `{site, dir, ids}`: all of a site's mods into a folder `<site> mods` there, shown. Not from a run |
 | `mod.import` | `text, name, site?, choice?` | a mod's text (from a file the user chose or dropped): `{needsSite: [sites]}` when its @match doesn't name one site, `{exists, site, name}` when a mod of that name is there (`choice`: `copy` or `replace`, which keeps the old one in history), else `{id, file, replaced?}`. The header must parse; `@source`/`@version` are taken out; recorded in `imported.json` (the mod is sent with `imported: true`), and held like any mod from outside. Not from a run |
+| `mod.preview` | `text, name?, site?, forTry?` | a mod's text read as TRIF reads it, nothing written (helper/lib/preview.js): `{kind, name, file, description, site, matches, excludes, can, asks}`, and with `forTry`, for a style or boxed mod, `run: {id, kind, code, matches, excludes, style?}`: what "Try it here" runs, built under a name of its own (`<site>/~try-<name>`), with no powers. Throws when TRIF couldn't import it. Not from a run |
+| `downloads.status`, `downloads.setWatch`, `downloads.take`, `downloads.done`, `downloads.ignore` | `on` / `id` / `id, how` / `id` | Mod files in the user's downloads: the state above; the Settings switch (config.json `watchDownloads`, off by default); the offer's file read again, `{text, name}`, only if it's what was offered; Add (`how: added`) or Not now (each file offered once, kept in the private folder's `downloads.json`, which every browser's helper reads); Ignore files from its site. From the extension's connection only (the side panel's clicks), as `agent.withoutSandbox`: refused on the socket |
 | `files.add` | `site, name, data` | `{site, name, rel, size}`: `data` (base64) saved as `sites/<site>/files/<name>`: the name's last part, cleaned; never over another file. Nothing in `files/` is scanned as a mod. Not from a run |
 | `files.begin` | `site, name, size` | `{id}`: starts a file of any size, in slices; refused if the disk hasn't room for it. Not from a run |
 | `files.slice` | `id, offset, data` | `{written}`: appends `data` (base64, up to 8 MB), which must start at `offset` |
@@ -1269,7 +1286,19 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
   the socket without a token (the user's terminal, the user's own agent outside the panel) are not
   scoped: runs can't reach the socket. The helper answers `mod.delete` and `mod.restore` from a run
-  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
+  itself, only for mods whose every `@match` is in scope. **What a run may send** is a list (`host.js`
+  `RUN_COMMANDS`): the helper's own `ping` and `mods`, the mod-file commands `mod.delete`, `mod.restore`,
+  `mod.code` and `mod.diff`, and the page commands its `trif` sends (`status`, `tabs`, `run`, `reload`,
+  `navigate`, `open`, `close`, `text`, `sweep`, `screenshot`, `record`, `requests`, `request`, `errors`, `logs`,
+  `mod.enable`). Anything else from a run, a command nobody knows included, is refused by the helper and never
+  sent on to the extension. What the helper itself answers a run is its own site's: `mod.code` and `mod.diff`
+  only for a mod in the run's site's folders (the rule its delete goes by, `trash.js` siteInScope: a phone view's
+  run its phone twin's mods only, a sensitive site of its own and its parent each their own), refused before the
+  mod is looked up; `mods` lists only those, with their errors and warnings; and `ping` tells a run of its own
+  mods alone (those, all-sites/ and what it made for another site, which it may change: their holds, waiting
+  changes, updates and errors), of itself among the runs, and of no login. (The files are another matter: a
+  run's working copy has the other sites' mod files to read, docs/STAGING.md, and the extension's `status`
+  lists every mod.) The CLI itself refuses `setup`, `agent`,
   `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
   (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default;

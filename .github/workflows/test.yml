@@ -65,6 +65,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ steps.pin.outputs.node }}
+      - name: Coding agents (native binaries), for real sandboxed runs on macOS (the test skips each one that's missing)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash || echo "Claude Code didn't install: its run is skipped"
+          brew install --cask codex || echo "Codex didn't install: its run is skipped"
+          ls -l ~/.local/bin/claude /opt/homebrew/bin/codex 2>&1 || true
       - name: Delete every other node on the runner
         run: |
           keep=$(dirname "$(command -v node)")

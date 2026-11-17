@@ -433,6 +433,7 @@ addEventListener('scroll', async () => {
 const STREAMLY_EPS = ['The Pilot', 'Graveyard Shift', 'Overtime', 'Call Back', 'Double Shift', 'Last Call'];
 const STREAMLY_PAGE = () => PAGE('Night Shift · Streamly', `
 <style>
+  [hidden] { display: none !important; }
   body { margin: 0; max-width: none; background: #141414; color: #e5e5e5; font: 15px/1.4 system-ui, sans-serif; }
   .q1top { height: 56px; display: flex; align-items: center; padding: 0 24px; gap: 24px; background: #000; }
   .q1top b { color: #e50914; font-size: 24px; letter-spacing: 1px; } .q1top a { color: #ccc; text-decoration: none; }

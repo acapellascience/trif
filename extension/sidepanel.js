@@ -16,6 +16,7 @@ import { iconSvg } from './icons.js';
 import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
+import { createPhoneLink, renderPhoneLink } from './phonelink.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -145,6 +146,9 @@ function openTab(props) {
   return chrome.tabs.create({ ...props, ...(FALLBACK ? { windowId: OPENED_FOR } : {}) });
 }
 
+// Settings' Connect a phone: its state, drawn into its own box whenever it changes.
+const phoneLink = createPhoneLink({ request, changed: () => renderPhoneLink($('#phone-link'), phoneLink, { addMore }) });
+
 function request(msg) {
   if (!port) connectPort();
   const reqId = ++reqSeq;
@@ -174,6 +178,8 @@ function onPortMessage(msg) {
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
+  } else if (msg?.type === 'phoneLink') {
+    phoneLink.onMessage(msg.status); // (Settings' Connect a phone: how the link is now)
   } else if (msg?.type === 'agentAsk') {
     showAgentAsk(msg.id, msg.site);
   } else if (msg?.type === 'agentAskDone') {
@@ -197,6 +203,8 @@ async function refreshStatus() {
     // (the background's name for the browser, which it may have learned since this panel opened)
     if (view.status?.browser) setBrowser(view.status.browser);
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
+    // (Settings open while the helper comes or goes: Connect a phone follows it)
+    if (!ui.settings.hidden && view.status.helper.connected !== wasConnected) phoneLink.open(view.status.helper.connected);
     // Storage stopped working: switches can't be read from it, so they come with the status.
     if (view.status.storageBroken) {
       view.disabled = view.status.disabled || {};
@@ -4070,6 +4078,8 @@ function toggleSettings(open = ui.settings.hidden) {
   ui.settings.hidden = !open;
   ui.settingsBtn.setAttribute('aria-expanded', String(open));
   if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
+  // Connect a phone (phonelink.js): asked for when Settings open; closing them closes a pairing window
+  if (open) phoneLink.open(!!view.status?.helper?.connected); else phoneLink.close();
 }
 const openSettings = () => { if (ui.settings.hidden) toggleSettings(true); };
 ui.using.addEventListener('click', () => { openSettings(); try { ui.model.focus(); } catch { /* disabled */ } });

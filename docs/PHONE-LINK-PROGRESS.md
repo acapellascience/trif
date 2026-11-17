@@ -23,7 +23,7 @@ Computer side:
       `run.result`, kept results deleted when the phone is removed
 - [x] 7. `trif phone page|try|screenshot` (cli.js, the mailbox, `tool.request` round trip), AGENTS.md
 - [x] 8. `host.js` and `link.js`: the helper that owns `helper.sock` owns the link; `phone.*` as `PANEL_COMMANDS`
-- [ ] 9. Desktop panel: Connect a phone (QR encoder in the extension, the list, Remove, the switch), strings
+- [x] 9. Desktop panel: Connect a phone (QR encoder in the extension, the list, Remove, the switch), strings
 - [ ] 10. End to end: `tests/phone-link-client.js` (a stand-in phone) against the real helper in a temp HOME, the
       stand-in model: pair, run, try on the phone, result, drop and resume, remove
 - [ ] 11. Pointers in docs/PROTOCOL.md and docs/SECURITY.md
@@ -37,30 +37,31 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 8, 2026-11-16)
+## Done this round (round 9, 2026-11-16)
 
-- Built step 8. New `helper/lib/phonelink/link.js` (class `Link`: makes the Store, and in the owner the Server,
-  the Announcer and the Remote); host.js has one `link` and about 30 lines for it: started where the helper
-  becomes primary (`becomePrimary`), `link.closing()` at the start of `shutdown()` (the announcement ends, no new
-  phone run), `link.stop()` after `runs.stopAll()`; a phone run's events no longer go to the extension
-  (`onAgentEvent`, the `done` handling kept); `trif phone` now reaches `link.tool`.
-- The panel's commands (`PANEL_COMMANDS`, refused on the socket and from a run): `phone.status`, `phone.on`,
-  `phone.off`, `phone.pair.start`, `phone.pair.stop`, `phone.remove {id}`; a `phoneLink` message to the
-  extension on every change once the panel has asked `phone.status` (PHONE-LINK.md section 7 has the table).
-- Two helpers: the one without `helper.sock` has the store alone (`here: false`): status, on, off and remove
-  work there (the owner follows the file from its 2-second poll: `link.refresh()`), a pairing window is refused.
-  A helper whose `helper.sock` isn't its own any more gives the link up (the same poll).
-- Tests can't reach the network or the Keychain by default now: `testEnv` (tests/fake-extension.js) gives every
-  helper a `TRIF_DNS_SD` that isn't there and `TRIF_PHONE_LINK_HOST=127.0.0.1`; the stand-in dns-sd moved to
-  `tests/fake-dns-sd.js`.
-- `tests/phone-link-host.test.js`: one long test against the real host.js (two fake extensions, the fake
-  keychain, the stand-in dns-sd and phone; 3 s). Locally the whole suite but update.test.js: 902 tests, 892
-  passed, 10 skipped, 0 failed. CI green for c0172aa on the first attempt
-  (https://github.com/acapellascience/trif/actions/runs/44001876567); a48e0d0 before it failed on a race in
-  the new test and two known browser flakes.
+- Built step 9. `extension/qr.js`: TRIF's own QR encoder (byte mode, versions 1 to 10, level M, or L when M
+  has no room; 250 lines, no dependency). Its matrices are the same, module for module and mask included, as
+  macOS's own generator's (CoreImage) for versions 1, 6, 7 and 10; the vectors are in
+  `tests/phone-link-qr.vectors.json`. When they were made, macOS's reader (Vision) read every code of this
+  encoder back to its text, from 4 to 200 bytes.
+- `extension/phonelink.js`: Settings' Connect a phone (the state, what it shows, its elements), a box at the
+  end of Settings (it scrolls with them). The label, a line of 8 words and the explanation behind the line's
+  "i"; the switch; the phones with Remove; the button → the code with Cancel; `here: false` and `announce`
+  lines; the helper's errors as sentences.
+- background.js: `phoneLink.status|on|off|pair.start|pair.stop|remove` from the side panel's page alone → the
+  helper's `phone.*`; the helper's `phoneLink` to the panel's pages alone; a panel that closes with its window
+  open closes the window. The QR's text is in the panel's memory only while the code shows.
+- Tests: `tests/phone-link-qr.test.js` (4), `tests/phone-link-panel.test.js` (6, with a stand-in DOM), one in
+  tests/extension.test.js (the background). Locally the whole suite but update.test.js: 913 tests, 903 passed,
+  10 skipped, 0 failed. No browser run this round (the brief: ask Tim first): **the section hasn't been seen
+  in a real browser yet**. CI: see the CI section.
 
 ## Earlier rounds
 
+- Round 8: step 8, `link.js` (class `Link`) and host.js: the helper that owns `helper.sock` owns the link;
+  `phone.status|on|off|pair.start|pair.stop|remove` as `PANEL_COMMANDS`, the `phoneLink` message; a helper
+  without the socket has the store alone (`here: false`); `testEnv` keeps every test helper off the network
+  and the Keychain; `tests/phone-link-host.test.js`. CI green for c0172aa on the first attempt.
 - Round 7: step 7, `trif phone page|try|screenshot` (cli.js → the run's mailbox → host.js → `remoterun.js`
   `remoteCommand` → `Remote.tool` → `tool.request` on the session that follows the run), AGENTS.md "Phone
   runs", 9 tests. CI green for 69375a1 on the first attempt.
@@ -128,22 +129,40 @@ iPhone side (needs ios-poc free):
 
 ## Next step
 
-Step 9: the desktop panel's Connect a phone, in Settings (extension/sidepanel.js, sidepanel.html,
-sidepanel.css; background.js passes `phone.*` requests from the panel page alone, as it does
-`agent.withoutSandbox`: grep that name in extension/ to find the path, and passes the helper's `phoneLink`
-message on to the panel). In this order: (1) a QR encoder in the extension, no dependency (byte mode, level M,
-versions up to about 10: the QR's text is about 110 characters), with a unit test against a known matrix; (2)
-the section: the switch (`phone.on`/`phone.off`), the button (`phone.pair.start` → the QR and "Good for 5
-minutes", `phone.pair.stop` when Settings closes or the window's time is up), the list with Remove
-(`phone.remove`), the `here: false` line instead of the button, the `announce` line; strings from
-docs/PHONE-LINK-STRINGS.md as drafts; the section scrolls with Settings (Tim's rule: panels scroll). (3) Tests:
-unit tests for the encoder and whatever the panel's code can be tested without a browser; a browser test only
-with the shared lock, headless, `--mute-audio` and the memory watchdog, and the main session asks Tim "done
-editing?" before any browser run, so prefer leaving the browser test to CI. Don't start step 10 in the same
-round.
+Step 10: the end-to-end test, `tests/phone-link-e2e.test.js`: the stand-in phone (`tests/phone-link-client.js`)
+against the real host.js in a temp HOME (a FakeExtension, the fake keychain, the stand-in dns-sd, the stand-in
+agent's variables in the helper's `env`), in one story: the panel's `phone.on` and `phone.pair.start`, the
+phone pairs from the QR's text, `run.start` with a page copy and a screenshot, the agent's `trif phone try`
+answered by the phone, `run.result` with the mod in `sites/phone~<host>/` and nothing outside it
+(`everyFile()`), the fake extension saw no page command and no event of the run, drop and `run.resume`,
+`phone.remove`, then silence for that phone. Copy the helpers the notes name (round 8's and round 6's). Then,
+if calls remain, step 11 (the pointers in docs/PROTOCOL.md and docs/SECURITY.md) is small enough to follow in
+the same round. A look at the panel's section in a real browser (headless, the lock, `--mute-audio`, the
+watchdog) needs the main session to ask Tim first.
 
 ## Notes for next round
 
+- Step 9's API. qr.js: `qrMatrix(text, {level, mask})` → `{version, level, mask, size, rows}` (throws "too
+  long" past 271 bytes), `qrPath(qr, quiet = 4)` → `{d, size}`, `qrFit(bytes, level)`, `qrPenalty(rows)`.
+  phonelink.js: `TEXT` (every string; the panel test checks each is in the strings file, apostrophes aside),
+  `createPhoneLink({request, changed, now, setTimer, clearTimer})` → `{state, view(), open(helperConnected),
+  close(), onMessage(status), connect(), cancel(), toggle(on), remove(id)}`, `phoneLinkView(state, now, date)`,
+  `renderPhoneLink(root, link, {doc, addMore})`, `sentence(e)`. sidepanel.js has four touches: the import, the
+  `phoneLink` const above `request()`, the `phoneLink` message in `onPortMessage`, `toggleSettings` and
+  `refreshStatus` (the helper coming or going while Settings are open).
+- The reference tool for the QR vectors is not in the repo (a 40-line Swift file: `CIQRCodeGenerator` with
+  `inputCorrectionLevel`, the bitmap read back as rows; `VNDetectBarcodesRequest` to read a matrix). Apple's
+  generator uses alphanumeric mode for texts of capitals and digits alone, so compare with texts that have a
+  lower-case letter. The iPhone side (step 13) reads the code with the same Vision/AVFoundation reader.
+- The fake port's sender in tests/extension.test.js: a port whose sender id isn't the extension's gets no
+  reply at all (`onConnect` ignores it), so "not the panel" senders there are the extension's other pages and
+  content scripts (the existing test's three).
+- The section's three layers (label, line, explanation) are in phonelink.js's `TEXT`, not in
+  extension/explain.json: the table's terms carry an approval stamp and docs/EXPLAIN.md is written out from
+  it, so they move there once Tim approves the words (then `trif explain` has them, and agent notes).
+- A long computer name: the QR's text is about 100 bytes plus the name percent-encoded (9 bytes for an emoji's
+  4); past 271 bytes the panel says the name is too long and closes the window again. `store.js` could cut the
+  name in the QR instead (the phone shows the name it gets in `hello`): a small change for a later round.
 - Step 8's API. `new Link({home, runs, version, log, agent, getWorkspace, env})` (an EventEmitter, `'change'`):
   `start()` (the owner's; async), `closing()`, `stop()` (async), `refresh()`, `onEvent(runId, event)` → true
   for a phone's run, `tool` (a getter: the function for `remoteCommand`, or null without the link),
@@ -371,6 +390,17 @@ New in round 8, small, defaults unless Tim objects:
     only while its browser is open). What the agent already wrote to the phone twin stays; the phone gets the run
     as ended, with what was written, when it next connects. Another open browser takes the link over
     within a few seconds, for new runs.
+
+New in round 9, small, defaults unless Tim objects:
+
+12. **The Connect a phone button turns the link on** when it was off (also after the user had switched it
+    off with phones listed: those phones can reach the computer again from then). The switch appears once the
+    link is on or a phone is listed. A **Cancel** button under the code closes the pairing window; closing
+    Settings or the panel does too.
+13. **New strings in round 9** (docs/PHONE-LINK-STRINGS.md, drafts): the section's line ("Your iPhone asks
+    this computer's agent for mods.") and the explanation behind its "i", which replace round 1's two
+    sentences under the name; "Cancel"; "{phone} is connected."; the too-long-name line; the code's name for
+    a screen reader.
 
 New in round 5 (6 is built as the strict default; 7 is for the main session and Tim, about main's code):
 

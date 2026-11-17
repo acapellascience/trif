@@ -1032,6 +1032,13 @@ async function onOtherHelperMessage(msg) {
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'the helper reported an error'));
   } else if (msg.type === 'agentEvent') {
     await onAgentEvent(msg.runId, msg.event);
+  } else if (msg.type === 'phoneLink') {
+    // How the phone link is (Settings' Connect a phone; helper/lib/phonelink/link.js): to the side panel's
+    // own pages, which asked for it. It names the paired phones and never holds the QR's text.
+    for (const port of state.panels) {
+      if (!isPanelPage(port.sender)) continue;
+      try { port.postMessage({ type: 'phoneLink', status: msg.status }); } catch { state.panels.delete(port); }
+    }
   } else if (msg.type === 'update') {
     state.update = msg.update && typeof msg.update === 'object' ? msg.update : null;
     notifyPanels();
@@ -2256,8 +2263,13 @@ function watchFocus() {
 
 function onPanelConnect(port) {
   state.panels.add(port);
-  port.onDisconnect.addListener(() => { state.panels.delete(port); state.panelWindows.delete(port); });
   const fromPanel = isPanelPage(port.sender);
+  // (the panel closed with its pairing window open: the window closes with it, not 5 minutes later)
+  let pairing = false;
+  port.onDisconnect.addListener(() => {
+    state.panels.delete(port); state.panelWindows.delete(port);
+    if (pairing) helperRequest('phone.pair.stop', {}, 10000).catch(() => {});
+  });
   port.onMessage.addListener((msg) => {
     // A panel says which window it follows (and, in a window of its own, which that is): the toolbar
     // button's next click there closes it, and a side panel saying so is how a click knows it opened.
@@ -2270,7 +2282,11 @@ function onPanelConnect(port) {
       return;
     }
     ready.then(() => onPanelMessage(msg, { fromPanel })).then(
-      (result) => reply(port, msg, { ok: true, result: result === undefined ? null : result }),
+      (result) => {
+        if (msg?.type === 'phoneLink.pair.start') pairing = true;
+        else if (/^phoneLink\.(pair\.stop|off)$/.test(msg?.type)) pairing = false;
+        reply(port, msg, { ok: true, result: result === undefined ? null : result });
+      },
       (e) => reply(port, msg, { ok: false, error: errMsg(e) }),
     );
   });
@@ -2394,6 +2410,21 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
       const r = await helperRequest('agent.withoutSandbox', { agent: String(msg.agent ?? ''), allow: msg.allow }, 10000);
       if (msg.site && msg.card !== undefined) await answerCard(normalizeSite(msg.site), msg.card, msg.allow ? 'allowed' : 'stop');
       return r;
+    }
+    // Settings' Connect a phone (extension/phonelink.js → the helper's phone.*, docs/PHONE-LINK.md section 7):
+    // the switch, the pairing window whose answer holds the QR's text (the one-time secret: passed on to the
+    // panel that asked and kept nowhere here), Remove. Only from the panel: a page or a mod must never be
+    // able to open this computer to a phone, or learn the secret.
+    case 'phoneLink.status':
+    case 'phoneLink.on':
+    case 'phoneLink.off':
+    case 'phoneLink.pair.start':
+    case 'phoneLink.pair.stop':
+    case 'phoneLink.remove': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      const cmd = `phone.${msg.type.slice('phoneLink.'.length)}`;
+      // (turning it on may wait for the system keyring, as saving a key does)
+      return helperRequest(cmd, cmd === 'phone.remove' ? { id: String(msg.id ?? '') } : {}, cmd === 'phone.on' ? 60000 : 20000);
     }
     // Settings' Log out (helper agents/index.js logout): only from the panel, as a run could otherwise log
     // the user out of their agent everywhere.

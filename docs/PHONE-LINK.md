@@ -302,7 +302,20 @@ owner goes (its browser closed), the helper that takes `helper.sock` takes the l
 `helper.sock` isn't its own any more gives the link up. A run that was going for a phone ends with its helper,
 as a panel's does.
 
-The QR is drawn by a small encoder in the extension (no dependency, no network).
+**The panel's side** (built): `extension/phonelink.js` is the section (its state, what it shows, its
+elements), at the end of Settings. It asks the background with `phoneLink.status|on|off|pair.start|pair.stop|
+remove` (named apart from `phone.open|close|state`, which are the desktop's phone view); background.js passes
+them to the helper's `phone.*` from the side panel's own page alone (`isPanelPage`, as `agent.withoutSandbox`)
+and passes the helper's `phoneLink` message to the panel's pages alone. The button turns the link on when it
+was off, then opens the window. The QR's text is kept in the panel's memory only while the code is on screen:
+it goes when a phone pairs, when the 5 minutes are up, on Cancel, when Settings close, when the link is turned
+off; and when the panel itself closes with a window open, the background closes the window
+(`phone.pair.stop`). Nothing of it is stored or logged in the extension.
+
+The QR is drawn by a small encoder of TRIF's own in the extension (`extension/qr.js`: byte mode, versions 1 to
+10, level M, or L when M has no room; no dependency, no network), as an SVG, dark on white in either theme.
+Its matrices are the same, module for module, as macOS's own generator's for the test texts
+(tests/phone-link-qr.test.js).
 While a phone's run works, the desktop shows nothing new in version 1 (the run is in the helper's log and
 `agent.running`); a line in the panel is a later option.
 

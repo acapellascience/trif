@@ -1998,6 +1998,75 @@ test('background: a switch that fails to apply is reverted and reported', async 
   } finally { bg.restore(); }
 });
 
+// Settings' Connect a phone (extension/phonelink.js, docs/PHONE-LINK.md section 7): the side panel's page alone
+// reaches the helper's phone.* (another of the extension's pages or a page's content script could otherwise
+// open this computer to a phone, or read the pairing secret from the answer); the helper's `phoneLink` goes
+// to the panel's pages alone; a panel that closes with its pairing window open closes the window.
+test('background: phoneLink.* is the side panel\'s alone, the helper\'s phoneLink goes to panels alone, a closed panel closes its pairing window', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const requests = () => bg.native.sent.filter((m) => m.type === 'request' && m.cmd.startsWith('phone.')).map((m) => [m.cmd, m.args]);
+    const st = { on: true, phones: [{ id: 'a1b2c3d4e5f60718', name: 'iPhone', pairedAt: 1, lastSeen: 1 }], pairing: null, here: true, listening: true, announce: null };
+    for (const [type, extra, cmd, args, result] of [
+      ['phoneLink.status', {}, 'phone.status', {}, st],
+      ['phoneLink.on', {}, 'phone.on', {}, st],
+      ['phoneLink.pair.start', { id: 'x', secret: 'y' }, 'phone.pair.start', {}, { qr: 'trif://pair?v=1&k=K&s=S&n=N', expires: 5, ...st }],
+      ['phoneLink.pair.stop', {}, 'phone.pair.stop', {}, st],
+      ['phoneLink.remove', { id: 'a1b2c3d4e5f60718', more: 1 }, 'phone.remove', { id: 'a1b2c3d4e5f60718' }, { removed: { id: 'a1b2c3d4e5f60718', name: 'iPhone' }, ...st }],
+      ['phoneLink.off', {}, 'phone.off', {}, { ...st, on: false }],
+    ]) {
+      const replyP = panel.ask({ type, ...extra });
+      const req = await answerNative(bg.native, cmd, result);
+      assert.deepStrictEqual(req.args, args, `${type}: only what the command takes`);
+      assert.deepStrictEqual(await replyP.then((r) => [r.ok, r.result]), [true, result], type);
+    }
+    // the helper's refusal comes back as it is (the panel puts it in a sentence)
+    const failing = panel.ask({ type: 'phoneLink.pair.start' });
+    await answerNative(bg.native, 'phone.pair.start', 'this computer couldn\'t open a port for the phone to reach', false);
+    assert.deepStrictEqual(await failing.then((r) => [r.ok, r.error]), [false, 'this computer couldn\'t open a port for the phone to reach']);
+
+    // Not the panel's page: refused before the helper hears of it
+    const before = requests().length;
+    const others = [
+      { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/onboarding.html` },
+      { id: lib.EXTENSION_ID, url: 'https://x.com/home', tab: { id: 5 } },
+      { id: lib.EXTENSION_ID, url: 'https://evil.example/sidepanel.html' },
+    ].map((sender) => bg.connectPanel(sender));
+    for (const other of others) {
+      for (const type of ['phoneLink.status', 'phoneLink.on', 'phoneLink.off', 'phoneLink.pair.start', 'phoneLink.pair.stop', 'phoneLink.remove']) {
+        const r = await other.ask({ type, id: 'a1b2c3d4e5f60718' });
+        assert.deepStrictEqual([r.ok, r.error], [false, 'only the side panel can change this'], `${type} from ${other.sender.url}`);
+      }
+    }
+    assert.strictEqual(requests().length, before, 'the helper was asked nothing');
+
+    // The helper's message, on a change: to the panel's pages alone
+    const panel2 = bg.connectPanel();
+    bg.native.emit({ type: 'phoneLink', status: st });
+    await tick();
+    const got = (p) => p.sent.filter((m) => m.type === 'phoneLink');
+    assert.deepStrictEqual([got(panel), got(panel2)], [[{ type: 'phoneLink', status: st }], [{ type: 'phoneLink', status: st }]]);
+    for (const other of others) assert.deepStrictEqual(got(other), [], other.sender.url);
+
+    // A panel that closes with its window open: the window is closed. One that stopped it, or never opened one: nothing
+    const stops = () => requests().filter(([cmd]) => cmd === 'phone.pair.stop').length;
+    const n = stops();
+    panel.onDisconnect.emit(panel); // (its window was stopped, then its second start failed, then the link was turned off)
+    others[0].onDisconnect.emit(others[0]);
+    await tick();
+    assert.strictEqual(stops(), n);
+    const opening = panel2.ask({ type: 'phoneLink.pair.start' });
+    await answerNative(bg.native, 'phone.pair.start', { qr: 'trif://pair?v=1&k=K&s=S2&n=N', expires: 9, ...st });
+    await opening;
+    panel2.onDisconnect.emit(panel2);
+    await tick();
+    assert.strictEqual(stops(), n + 1);
+    // (the secret is in no storage of the extension's)
+    assert.ok(!JSON.stringify(bg.store).includes('trif://pair'));
+  } finally { bg.restore(); }
+});
+
 // A few DOM methods, enough for modswitch.js.
 function fakeDoc() {
   const make = (tag) => {

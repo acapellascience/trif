@@ -324,7 +324,16 @@ history and other sheets close; an Add this mod? stays, as it waits for an OK); 
 in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen`, `resethint`, `view` (the
 tab's site, full screen, what covers it) and `iconcheck` (the icon from every in-app state, PASS/FAIL).)
 
-Home Screen icons (WebClip.swift): the ⋯ menu's Add to Home Screen makes a configuration profile with one Web Clip
+Home Screen icons (WebClip.swift): the toolbar's last button, a plain + (Tim, 11-16; the ⋯ menu moved to the address
+bar's left), opens the sheet. The icon (WebClipMaker.compose) looks like a small TRIF app: the app icon's outline (rim
+100.39/1024, face a continuous-corner square r = 0.26 × its side) in TRIF's green gradient or a chosen colour, round a
+black screen with the picture on it (74% of the face); or just the picture; a green checkmark badge at the top right
+for "fixed". The picture is the site's icon or one from Photos (PhotosPicker, no permission). Its name: "{Site} on
+TRIF", "{user}'s {Site}" (when the page shows the person's name plainly: GitHub's user-login meta, MediaWiki's
+#pt-userpage), "fixed {Site}" or Custom… (60 characters, the clip page's limit). The PNG steps down 360 → 270 → 180 px
+to stay under 270 kB, so the profile fits the page's 400,000 bytes; http sites and bigger profiles go to the server
+route. `{"iconprofile": {"outline", "swatch", "badge", "name", "noise"}}` writes the shown page's icon and profile to
+Documents/icon-test.png and .mobileconfig. The sheet makes a configuration profile with one Web Clip
 (`trif://open?url=<site>`, full screen, identifier `com.timsrobot.trif.webclip.<site>` so adding a site again replaces
 its icon) and hands it to Safari: first at timsrobot.com/clip, the profile in the address's # part (x-safari-https, so Safari
 whatever the default browser is; the main repo's clip-page branch, `-clipbase https://localhost:8443` for a local copy),

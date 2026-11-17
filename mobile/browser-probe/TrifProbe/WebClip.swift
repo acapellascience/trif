@@ -8,6 +8,7 @@
 
 import CryptoKit
 import Network
+import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -121,13 +122,52 @@ extension Model {
     }
 }
 
+extension Model {
+    /// (development) The step {"iconprofile": {…}}: the face read from the shown page, the icon composed, the profile.
+    static func iconProfile(browser: Browser, options o: [String: Any], docs: URL) async -> String {
+        guard let face = await WebClipMaker.face(of: browser), var pic = face.icon else { return "no face" }
+        // ("noise": a picture of random pixels, the worst case for the PNG's size, as a photo chosen from Photos)
+        if o["noise"] as? Bool == true {
+            let f = UIGraphicsImageRendererFormat()
+            f.scale = 2
+            pic = WebClipMaker.square(UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200), format: f).image { _ in
+                for x in stride(from: 0, to: 300, by: 0.5) { for y in stride(from: 0, to: 200, by: 0.5) {
+                    UIColor(hue: .random(in: 0...1), saturation: 0.8, brightness: .random(in: 0.3...1), alpha: 1).setFill()
+                    UIRectFill(CGRect(x: x, y: y, width: 0.5, height: 0.5))
+                } }
+            })
+        }
+        let sw = o["swatch"] as? Int ?? 0
+        let look = IconLook(outline: o["outline"] as? Bool ?? true, colour: outlineSwatches[max(0, min(sw, outlineSwatches.count - 1))].colour, badge: o["badge"] as? Bool ?? false)
+        let name = o["name"] as? String ?? "\(face.name) on TRIF"
+        let png = WebClipMaker.iconPNG(pic, look: look)
+        let profile = WebClipMaker.profile(face, name: name, picture: pic, look: look)
+        try? png?.write(to: docs.appendingPathComponent("icon-test.png"))
+        try? profile?.write(to: docs.appendingPathComponent("icon-test.mobileconfig"))
+        return "site \(face.site), name \(face.name), user \(face.user ?? "-"), source \(face.source), png \(png?.count ?? 0) bytes, profile \(profile?.count ?? 0) bytes"
+    }
+}
+
 /// What the page says about itself for an icon: its touch icons, manifest, favicons and names.
 struct SiteFace {
     var site: String
     var start: URL
     var name: String
+    /// The site's own picture, a 180-point square (what shows on the icon's screen, or the whole icon without the outline).
     var icon: UIImage?
     var source: String
+    /// The person's name on the site, when the page shows it plainly (for the name "{user}'s {site}"; nil: not known).
+    var user: String? = nil
+}
+
+/// How a Home Screen icon looks (Tim, 11-16): a small TRIF app, TRIF's outline (the app icon's rim and face, option
+/// A) around a black screen with the picture on it; or, without the outline, just the picture. A green checkmark
+/// badge can say the site has been fixed.
+struct IconLook: Equatable {
+    var outline = true
+    /// The outline's colour: nil, TRIF's own green gradient; else a gradient made from this colour.
+    var colour: UIColor? = nil
+    var badge = false
 }
 
 @MainActor
@@ -141,7 +181,17 @@ enum WebClipMaker {
     const man = document.querySelector('link[rel="manifest"]');
     return JSON.stringify({ touch: links('link[rel~="apple-touch-icon"], link[rel~="apple-touch-icon-precomposed"]'),
       icons: links('link[rel~="icon"]'), manifest: man ? abs(man.getAttribute('href')) : null,
-      appName: meta('apple-mobile-web-app-title') || meta('application-name'), siteName: meta('og:site_name'), title: document.title || '', agent: navigator.userAgent });
+      appName: meta('apple-mobile-web-app-title') || meta('application-name'), siteName: meta('og:site_name'), title: document.title || '', agent: navigator.userAgent,
+      user: (() => {
+        // (the person's name where a page shows it plainly in its markup: GitHub's user-login meta, MediaWiki's
+        // personal link (Wikipedia). Anything else: not known, and the name "{user}'s {site}" isn't offered)
+        const clean = (t) => { t = String(t || '').replace(/\\s+/g, ' ').trim(); return t.length > 0 && t.length <= 30 ? t : ''; };
+        const gh = clean(meta('user-login'));
+        if (gh) return gh;
+        const wiki = document.querySelector('#pt-userpage a, #pt-userpage-2 a');
+        if (wiki) return clean(wiki.textContent);
+        return '';
+      })() });
     """
 
     /// The page's site, its name and best icon (fetched as the page would fetch it: a plain request to the address
@@ -153,6 +203,7 @@ enum WebClipMaker {
         let r = await browser.call(readPage, in: Browser.trifWorld)
         let d = Browser.parse(r.text) as? [String: Any] ?? [:]
         let agent = d["agent"] as? String ?? ""
+        let user = (d["user"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         func list(_ k: String) -> [(URL, Int)] { (d[k] as? [[String: Any]] ?? []).compactMap { e in (e["href"] as? String).flatMap(URL.init(string:)).map { ($0, e["size"] as? Int ?? 0) } } }
         var manifest: [String: Any] = [:]
         if let m = (d["manifest"] as? String).flatMap(URL.init(string:)), let data = await fetch(m, agent), let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { manifest = j }
@@ -185,9 +236,9 @@ enum WebClipMaker {
             // (a small picture, or a favicon, goes on a padded tile; a touch icon or a big manifest icon fills it)
             let px = img.size.width * img.scale
             let fill = kind != "favicon" && px >= 120
-            return SiteFace(site: site, start: start, name: name, icon: render(img, fill: fill), source: kind)
+            return SiteFace(site: site, start: start, name: name, icon: render(img, fill: fill), source: kind, user: user)
         }
-        return SiteFace(site: site, start: start, name: name, icon: letterTile(name), source: "letter")
+        return SiteFace(site: site, start: start, name: name, icon: letterTile(name), source: "letter", user: user)
     }
 
     nonisolated static func fetch(_ url: URL, _ agent: String) async -> Data? {
@@ -231,6 +282,88 @@ enum WebClipMaker {
         }
     }
 
+    /// A picture the person chose (Photos), cropped to a square from its middle, as a 180-point square.
+    static func square(_ img: UIImage) -> UIImage {
+        let f = UIGraphicsImageRendererFormat()
+        f.scale = 2
+        f.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: f).image { _ in
+            let k = max(side / max(img.size.width, 1), side / max(img.size.height, 1))
+            let s = CGSize(width: img.size.width * k, height: img.size.height * k)
+            img.draw(in: CGRect(x: (side - s.width) / 2, y: (side - s.height) / 2, width: s.width, height: s.height))
+        }
+    }
+
+    /// The outline's two colours, top left to bottom right: TRIF's rim (the app icon's #44e0a8 → #1e9a6c), or the
+    /// chosen colour a little lighter to a little darker.
+    static func rimColours(_ c: UIColor?) -> (UIColor, UIColor) {
+        guard let c else { return (UIColor(red: 0x44 / 255, green: 0xe0 / 255, blue: 0xa8 / 255, alpha: 1), UIColor(red: 0x1e / 255, green: 0x9a / 255, blue: 0x6c / 255, alpha: 1)) }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)).getRed(&r, green: &g, blue: &b, alpha: &a)
+        func mix(_ t: CGFloat, _ to: CGFloat) -> UIColor { UIColor(red: r + (to - r) * t, green: g + (to - g) * t, blue: b + (to - b) * t, alpha: 1) }
+        return (mix(0.18, 1), mix(0.28, 0))
+    }
+
+    /// The icon as it goes on the Home Screen (iOS's mask rounds its corners): with the outline, TRIF's rim (the app
+    /// icon's geometry: 100.39 of 1024 wide, the face a continuous-corner square, radius 0.26 × its side) around a
+    /// black screen, the picture on the screen with a black margin round it; without, the picture filling it. The
+    /// badge: a green checkmark at the top right, inside iOS's corner.
+    static func compose(_ picture: UIImage, look: IconLook, scale: CGFloat = 2) -> UIImage {
+        let f = UIGraphicsImageRendererFormat()
+        f.scale = scale
+        f.opaque = true
+        let full = CGRect(x: 0, y: 0, width: side, height: side)
+        return UIGraphicsImageRenderer(size: full.size, format: f).image { ctx in
+            let cg = ctx.cgContext
+            if look.outline {
+                let (a, b) = rimColours(look.colour)
+                if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [a.cgColor, b.cgColor] as CFArray, locations: [0, 1]) {
+                    cg.drawLinearGradient(g, start: .zero, end: CGPoint(x: side, y: side), options: [])
+                }
+                let rim = side * 100.39 / 1024, faceSide = side - 2 * rim
+                UIColor.black.setFill()
+                UIBezierPath(roundedRect: CGRect(x: rim, y: rim, width: faceSide, height: faceSide), cornerRadius: 0.26 * faceSide).fill()
+                let inner = (faceSide * screenFill).rounded()
+                let box = CGRect(x: (side - inner) / 2, y: (side - inner) / 2, width: inner, height: inner)
+                cg.saveGState()
+                UIBezierPath(roundedRect: box, cornerRadius: 0.26 * inner).addClip()
+                picture.draw(in: box)
+                cg.restoreGState()
+            } else {
+                picture.draw(in: full)
+            }
+            if look.badge {
+                let r = side * 0.135, c = CGPoint(x: side * 0.755, y: side * 0.245)
+                UIColor.white.setFill()
+                UIBezierPath(arcCenter: c, radius: r + side * 0.022, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+                UIColor(red: 0x16 / 255, green: 0xa3 / 255, blue: 0x4a / 255, alpha: 1).setFill()
+                UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+                let tick = UIBezierPath()
+                tick.move(to: CGPoint(x: c.x - r * 0.46, y: c.y + r * 0.02))
+                tick.addLine(to: CGPoint(x: c.x - r * 0.12, y: c.y + r * 0.36))
+                tick.addLine(to: CGPoint(x: c.x + r * 0.5, y: c.y - r * 0.34))
+                tick.lineWidth = r * 0.26
+                tick.lineCapStyle = .round
+                tick.lineJoinStyle = .round
+                UIColor.white.setStroke()
+                tick.stroke()
+            }
+        }
+    }
+    /// How much of the face (the black screen) the picture takes, the rest a black margin round it.
+    static let screenFill: CGFloat = 0.74
+
+    /// The icon's PNG, small enough for the timsrobot.com page (it takes a profile of up to 400,000 bytes, and the
+    /// PNG goes in it as base64): 360 px, else 270, else 180.
+    static func iconPNG(_ picture: UIImage, look: IconLook) -> Data? {
+        var last: Data?
+        for scale: CGFloat in [2, 1.5, 1] {
+            last = compose(picture, look: look, scale: scale).pngData()
+            if let d = last, d.count <= 270_000 { return d }
+        }
+        return last
+    }
+
     /// A UUID that's always the same for the same text (so the same site's profile replaces itself).
     static func stableUUID(_ text: String) -> String {
         let h = Array(SHA256.hash(data: Data(text.utf8)))
@@ -250,15 +383,20 @@ enum WebClipMaker {
         return ("AEIOU".contains(c) || (spelled && "FHLMNRSX".contains(c))) ? "an" : "a"
     }
 
-    /// The profile: one Web Clip, removable, not full screen, identified by its site.
-    static func profile(_ face: SiteFace, name: String) -> Data? {
+    /// The profile: one Web Clip, removable, full screen, identified by its site. `name` is the icon's label on the
+    /// Home Screen (the person's choice); the profile itself is named after the site ({Site} for TRIF), so Settings
+    /// and Files read plainly whatever the label is.
+    static func profile(_ face: SiteFace, name: String, picture: UIImage? = nil, look: IconLook = IconLook()) -> Data? {
         let id = "com.timsrobot.trif.webclip.\(face.site)"
-        guard let png = face.icon?.pngData() else { return nil }
+        guard let pic = picture ?? face.icon, let png = iconPNG(pic, look: look) else { return nil }
+        let label = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        guard !label.isEmpty else { return nil }
+        let siteName = face.name
         let clip: [String: Any] = [
             "PayloadType": "com.apple.webClip.managed", "PayloadVersion": 1,
             "PayloadIdentifier": "\(id).clip", "PayloadUUID": stableUUID("\(id).clip"),
-            "PayloadDisplayName": "\(name) for TRIF",
-            "Label": name, "URL": TrifLink.link(to: face.start).absoluteString, "Icon": png,
+            "PayloadDisplayName": "\(siteName) for TRIF",
+            "Label": label, "URL": TrifLink.link(to: face.start).absoluteString, "Icon": png,
             // (full screen, though a site's own icon wouldn't be: a clip that isn't opens Safari, which then asks "Open in
             // TRIF?" every time; a full-screen one opens a blank web-app screen for a moment and then TRIF, no question.
             // Simulator, iOS 26.3, 11-16. TargetApplicationBundleIdentifier, which should open TRIF itself, is ignored
@@ -268,8 +406,9 @@ enum WebClipMaker {
         let p: [String: Any] = [
             "PayloadType": "Configuration", "PayloadVersion": 1,
             "PayloadIdentifier": id, "PayloadUUID": stableUUID(id),
-            "PayloadDisplayName": "\(name) for TRIF",
-            "PayloadDescription": "Adds \(article(name)) \(name) icon to your Home Screen that opens \(name) in TRIF.",
+            "PayloadDisplayName": "\(siteName) for TRIF",
+            "PayloadDescription": label == siteName ? "Adds \(article(siteName)) \(siteName) icon to your Home Screen that opens \(siteName) in TRIF."
+                : "Adds an icon, “\(label)”, to your Home Screen that opens \(siteName) in TRIF.",
             "PayloadOrganization": "TRIF", "PayloadRemovalDisallowed": false,
             "PayloadContent": [clip],
         ]
@@ -332,13 +471,16 @@ final class ProfileHandoff: NSObject, ObservableObject {
     /// The main route (Tim, 11-16): Safari opened by name (x-safari-https, whatever the default browser is) at the
     /// page, the profile in the # part, which no server sees; no server on the phone. Used once the page is there (one
     /// request for its script, nothing sent with it); else, and if Safari can't be opened that way, the server here.
-    func hand(_ profile: Data, name: String) {
+    /// `page`: the page can take this profile (it takes only icons for https sites, of up to 400,000 bytes): else the
+    /// server here at once.
+    func hand(_ profile: Data, name: String, page: Bool = true) {
         stop(log: false)
         generation += 1
         let gen = generation
         state = .starting
         Task { @MainActor in
             let base = ProfileHandoff.clipBase
+            if !page || profile.count > 400_000 { log("the page at \(base)/clip takes only https sites' icons of up to 400,000 bytes: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
             let live = await ProfileHandoff.pageIsThere(base)
             guard generation == gen else { return }
             guard live else { log("the page at \(base)/clip isn't there: the server on this phone instead"); serve(profile, name: name, gen: gen); return }
@@ -572,7 +714,23 @@ struct ProfileFile: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
-/// The ⋯ menu's Add to Home Screen (Tim, 11-16): before anything happens, what will happen and every step after it, for
+/// The icon's name (Tim, 11-16: iOS can't rename an icon later, so it's chosen here): "{site} on TRIF", "{user}'s
+/// {site}" (only when the person's name on the site is known), "fixed {site}", or their own.
+enum IconName: Hashable { case onTrif, users, fixed, custom }
+
+/// The outline's colours to choose from: TRIF's green first (nil: the app icon's own gradient), then a few, then any
+/// (the colour picker).
+let outlineSwatches: [(name: String, colour: UIColor?)] = [
+    ("TRIF green", nil),
+    ("Blue", UIColor(red: 0x3b / 255, green: 0x82 / 255, blue: 0xf6 / 255, alpha: 1)),
+    ("Purple", UIColor(red: 0x8b / 255, green: 0x5c / 255, blue: 0xf6 / 255, alpha: 1)),
+    ("Pink", UIColor(red: 0xec / 255, green: 0x48 / 255, blue: 0x99 / 255, alpha: 1)),
+    ("Orange", UIColor(red: 0xf9 / 255, green: 0x73 / 255, blue: 0x16 / 255, alpha: 1)),
+    ("Graphite", UIColor(red: 0x6b / 255, green: 0x72 / 255, blue: 0x80 / 255, alpha: 1)),
+]
+
+/// The toolbar's [+] (Tim, 11-16; was the ⋯ menu's Add to Home Screen): first the icon itself (its name, the
+/// outline and its colour, the picture, the fixed badge), then, before anything happens, what will happen and every step after it, for
 /// the route that will be used (Safari, or Files); the sheet stays on that list the whole time, so the person can go
 /// to Safari, Files or Settings and come back to read where they are, the step they're on marked as far as TRIF can
 /// tell. Never closed while they're away; reopened for the same site, it shows where they were.
@@ -581,13 +739,39 @@ struct WebClipSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var handoff = ProfileHandoff.shared
     @State private var face: SiteFace?
-    @State private var name = ""
+    @State private var nameChoice: IconName = .onTrif
+    @State private var customName = ""
+    @State private var outline = true
+    /// The outline's colour: an index into outlineSwatches, or -1 for the colour picker's.
+    @State private var swatch = 0
+    @State private var otherColour = Color(UIColor(red: 0x0e / 255, green: 0xa5 / 255, blue: 0xe9 / 255, alpha: 1))
+    @State private var badge = false
+    /// A picture from Photos instead of the site's own (a square from its middle).
+    @State private var picked: UIImage?
+    @State private var photo: PhotosPickerItem?
     @State private var failed = false
     @State private var saving: ProfileFile?
     @State private var filesRoute = false
 
-    private var label: String { name.isEmpty ? (face?.name ?? "") : name }
-    private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label) } }
+    private var siteName: String { face?.name ?? "" }
+    private func name(_ c: IconName) -> String {
+        switch c {
+        case .onTrif: return "\(siteName) on TRIF"
+        case .users: return "\(face?.user ?? "")'s \(siteName)"
+        case .fixed: return "fixed \(siteName)"
+        case .custom: return customName
+        }
+    }
+    /// The icon's label on the Home Screen (an empty custom name: the site's own).
+    private var label: String {
+        let l = String(name(nameChoice).trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        return l.isEmpty ? siteName : l
+    }
+    private var look: IconLook {
+        IconLook(outline: outline, colour: swatch < 0 ? UIColor(otherColour) : outlineSwatches[swatch].colour, badge: badge)
+    }
+    private var preview: UIImage? { (picked ?? face?.icon).map { WebClipMaker.compose($0, look: look) } }
+    private var profile: Data? { face.flatMap { WebClipMaker.profile($0, name: label, picture: picked, look: look) } }
     private var started: Bool { handoff.state != .idle || handoff.savedToFiles }
     /// Safari didn't get it: the Files route is offered.
     private var safariFailed: Bool {
@@ -603,7 +787,7 @@ struct WebClipSheet: View {
     private var steps: [String] {
         filesRoute
             ? ["Choose where to save the file (On My iPhone is fine), then tap Save.",
-               "Open the Files app and tap “\(label) for TRIF”."] + WebClipSheet.settingsSteps
+               "Open the Files app and tap “\(siteName) for TRIF”."] + WebClipSheet.settingsSteps
             : ["Safari opens and asks to download a profile: tap Allow."] + WebClipSheet.settingsSteps
     }
     /// The step the person is on (0-based; steps.count when it's all done), as far as TRIF can tell.
@@ -638,21 +822,20 @@ struct WebClipSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    Group {
-                        if let icon = face?.icon {
-                            Image(uiImage: icon).resizable().frame(width: 80, height: 80)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    // (the icon as the Home Screen will show it: iOS's corner, 0.26 × the side, and its label under it)
+                    VStack(spacing: 6) {
+                        if let icon = preview {
+                            Image(uiImage: icon).resizable().frame(width: 84, height: 84)
+                                .clipShape(RoundedRectangle(cornerRadius: 84 * 0.26, style: .continuous))
                                 .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                                .accessibilityLabel("The icon")
                         } else {
-                            ProgressView().frame(width: 80, height: 80)
+                            ProgressView().frame(width: 84, height: 84)
                         }
+                        Text(face == nil ? " " : label).font(.caption).lineLimit(1).truncationMode(.tail).frame(maxWidth: 96)
                     }
                     .padding(.top, 12)
-                    TextField("Name", text: $name)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 240)
-                        .disabled(face == nil || started)
+                    if face != nil { options.disabled(started) }
                     if failed {
                         Text("Couldn't make the icon for this page.").font(.footnote).foregroundStyle(.secondary)
                     }
@@ -680,7 +863,7 @@ struct WebClipSheet: View {
             }
         }
         .fileExporter(isPresented: Binding(get: { saving != nil }, set: { if !$0 { saving = nil } }), document: saving,
-                      contentType: ProfileFile.type, defaultFilename: "\(label) for TRIF") { result in
+                      contentType: ProfileFile.type, defaultFilename: "\(siteName) for TRIF") { result in
             switch result {
             case .success(let url): handoff.savedToFiles = true; Diagnostics.shared.log("icon", "profile saved to Files (\(url.lastPathComponent))")
             case .failure(let e): Diagnostics.shared.log("icon", "profile not saved to Files: \(e.localizedDescription)")
@@ -689,14 +872,98 @@ struct WebClipSheet: View {
         }
         // (Safari didn't get it: the Files route's steps, its button first)
         .onChange(of: safariFailed) { _, now in if now { filesRoute = true } }
+        // (Custom…: starts from the name that was chosen, to edit)
+        .onChange(of: nameChoice) { old, now in if now == .custom && customName.isEmpty { customName = name(old) } }
+        .onChange(of: photo) { _, item in
+            guard let item else { return }
+            Task {
+                if let d = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: d) { picked = WebClipMaker.square(img) }
+                else { Diagnostics.shared.log("icon", "the chosen picture couldn't be read") }
+                photo = nil
+            }
+        }
         .task {
             let site = Site.of(browser.webView.url?.host ?? "")
             handoff.begin(site: site)
             if handoff.savedToFiles || safariFailed { filesRoute = true }
             async let page: Void = handoff.checkPage()
-            if let f = await WebClipMaker.face(of: browser) { face = f; if name.isEmpty { name = f.name } } else { failed = true }
+            if let f = await WebClipMaker.face(of: browser) { face = f } else { failed = true }
             await page
         }
+    }
+
+    /// The icon's choices, in a card: the name, the outline and its colour, the picture, the badge.
+    private var options: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Name")
+                Spacer(minLength: 8)
+                // (a menu whose label is the chosen name on one line, cut short if it must: a menu Picker wraps it)
+                Menu {
+                    Picker("Name", selection: $nameChoice) {
+                        Text(name(.onTrif)).tag(IconName.onTrif)
+                        if face?.user != nil { Text(name(.users)).tag(IconName.users) }
+                        Text(name(.fixed)).tag(IconName.fixed)
+                        Text("Custom…").tag(IconName.custom)
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(nameChoice == .custom ? "Custom…" : label).lineLimit(1).truncationMode(.middle)
+                        Image(systemName: "chevron.up.chevron.down").font(.footnote.weight(.semibold))
+                    }
+                }
+                .accessibilityLabel("Name, \(label)")
+            }
+            if nameChoice == .custom {
+                TextField(siteName, text: $customName)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: customName) { _, t in if t.count > 60 { customName = String(t.prefix(60)) } }
+            }
+            Text("iOS can't rename the icon once it's on your Home Screen.").font(.footnote).foregroundStyle(.secondary)
+            Divider()
+            Toggle("TRIF outline", isOn: $outline.animation(.easeOut(duration: 0.15)))
+            if outline {
+                HStack(spacing: 10) {
+                    ForEach(outlineSwatches.indices, id: \.self) { i in
+                        Button { swatch = i } label: {
+                            let (a, b) = WebClipMaker.rimColours(outlineSwatches[i].colour)
+                            Circle().fill(LinearGradient(colors: [Color(a), Color(b)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 28, height: 28)
+                                .overlay(Circle().stroke(Color.primary, lineWidth: swatch == i ? 2.5 : 0).padding(-4))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(outlineSwatches[i].name)
+                        .accessibilityAddTraits(swatch == i ? .isSelected : [])
+                    }
+                    ColorPicker("Other colour", selection: $otherColour, supportsOpacity: false)
+                        .labelsHidden()
+                        .overlay(Circle().stroke(Color.primary, lineWidth: swatch < 0 ? 2.5 : 0).padding(-4).allowsHitTesting(false))
+                        .onChange(of: otherColour) { _, _ in swatch = -1 }
+                }
+                .padding(.vertical, 2)
+            }
+            Divider()
+            HStack {
+                Text("Picture")
+                Spacer(minLength: 8)
+                if picked != nil {
+                    Button("Use the site's icon") { picked = nil }
+                }
+                PhotosPicker(selection: $photo, matching: .images) { Text(picked == nil ? "Choose…" : "Change…") }
+            }
+            Divider()
+            Toggle(isOn: $badge) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Fixed badge")
+                    Text("A green checkmark: this site has been fixed.").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .padding(.horizontal, 16)
     }
 
     private var stepList: some View {
@@ -727,8 +994,8 @@ struct WebClipSheet: View {
             Button {
                 guard let f = face, let p = profile else { failed = true; return }
                 if filesRoute { saving = ProfileFile(data: p); return }
-                Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(f.source), \(p.count / 1000) kB profile)")
-                ProfileHandoff.shared.hand(p, name: label)
+                Diagnostics.shared.log("icon", "made the Home Screen icon for \(f.site) (\(picked == nil ? f.source : "a picture from Photos"), \(outline ? "outline \(swatch < 0 ? "own colour" : outlineSwatches[swatch].name)" : "no outline")\(badge ? ", fixed badge" : ""), name \(nameChoice), \(p.count / 1000) kB profile)")
+                ProfileHandoff.shared.hand(p, name: "\(f.name) for TRIF", page: f.start.scheme == "https")
             } label: {
                 Text(filesRoute ? (handoff.savedToFiles ? "Save it again" : "Save to Files") : (handoff.state == .idle ? "Add to Home Screen" : "Download it again"))
                     .bold().frame(maxWidth: 240)

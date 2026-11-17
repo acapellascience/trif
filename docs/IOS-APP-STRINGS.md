@@ -205,16 +205,27 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | The toolbar's back and forward while the chat shows | closed the chat | the chat's own back and forward (Back · Forward); the page button goes back to the tab |
 | When the page's data couldn't go in (diagnostics only) | — | (no words shown) |
 
-## Home Screen icons (added 11-16; the sheet's steps changed 11-16, Tim)
+## Home Screen icons (added 11-16; the sheet's steps changed 11-16, Tim; the icon's look and name, and the [+], 11-16, Tim's design)
+
+Tim's own labels, approved as he wrote them: the name choices **{Site} on TRIF** · **{user}'s {Site}** (only when the
+person's name on the site is known) · **fixed {Site}** · **Custom…**. The rest of this table awaits Tim.
 
 | Where | Old | New |
 |---|---|---|
-| The ⋯ menu | — | Add to Home Screen (greyed on a page that isn't a website) |
+| The toolbar's last button | ⋯ (accessibility: More), a menu | + (accessibility: Add to Home Screen; greyed on a page that isn't a website) |
+| The ⋯ menu | in the toolbar's last button; had Add to Home Screen | at the address bar's left (accessibility: More); the same items, without Add to Home Screen (the + has it) |
+| The sheet's icon preview | the site's icon (accessibility: none) | the icon as it will look, its label under it as the Home Screen shows it (cut short with … where iOS would); accessibility: The icon |
+| The sheet's name (replaces the Name field) | Name (a text field, filled with the site's short name) | **Name** with a menu: Tim's choices above; Custom… shows a text field (placeholder: the site's name), filled with the name that was chosen, up to 60 characters |
+| Under the name | — | iOS can't rename the icon once it's on your Home Screen. |
+| The outline switch | — | TRIF outline (on: TRIF's outline round a black screen with the picture on it; off: just the picture) |
+| The outline's colours (accessibility) | — | TRIF green · Blue · Purple · Pink · Orange · Graphite · Other colour (iOS's colour picker) |
+| The picture row | — | Picture · Choose… (Photos, which shows only what the person picks) · once chosen: Use the site's icon · Change… |
+| The badge switch | — | Fixed badge, with the line: A green checkmark: this site has been fixed. |
 | The sheet's title | — | Add to Home Screen |
 | Its top-left button | — | Cancel; once started: Done (top right) |
 | The sheet's name field (placeholder) | — | Name (filled in with the site's own short name, e.g. X) |
 | Steps, the Safari route (shown before anything happens; the step they're on marked) | — | 1. Safari opens and asks to download a profile: tap Allow. · 2. Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management). · 3. Tap Install, enter your passcode, then Install again. · 4. The icon appears on your Home Screen. |
-| Steps, the Files route | — | 1. Choose where to save the file (On My iPhone is fine), then tap Save. · 2. Open the Files app and tap “{Name} for TRIF”. · then Settings' three steps as above |
+| Steps, the Files route | — | 1. Choose where to save the file (On My iPhone is fine), then tap Save. · 2. Open the Files app and tap “{Site} for TRIF”. · then Settings' three steps as above (was “{Name} for TRIF”: the file is now named after the site, whatever the icon's name) |
 | Why (always shown) | — | iOS only lets an icon that opens an app be added this way, with a small profile. It adds just this one icon, and you can remove it in Settings → General → VPN & Device Management. |
 | Once started (Safari route) | — | A downloaded profile waits about 8 minutes. If it's gone from Settings, tap Download it again here. |
 | Once started (Files route) | — | A profile waits about 8 minutes in Settings. If it's gone, tap the file in Files again. |
@@ -222,9 +233,9 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 | When Safari didn't get it | — | Safari didn't get the icon. Save it to Files instead. · {Chrome} opened instead of Safari, and only Safari can add the icon. Save it to Files instead. |
 | Buttons | — | Add to Home Screen; then Download it again · Save to Files instead (after a start, or when Safari didn't get it) · Files route: Save to Files, then Save it again · Use Safari instead |
 | If the page's icon and name couldn't be read | — | Couldn't make the icon for this page. |
-| The profile in Settings (name) | — | {Name} for TRIF (the publisher line shows TRIF) |
-| The profile in Settings (description) | — | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. |
-| The icon's label on the Home Screen | — | {Name}, as typed in the sheet |
+| The profile in Settings (name) | {Name} for TRIF | {Site} for TRIF (the publisher line shows TRIF) |
+| The profile in Settings (description) | Adds {a/an} {Name} icon to your Home Screen that opens {Name} in TRIF. | the same when the name is the site's own; else: Adds an icon, “{Name}”, to your Home Screen that opens {Site} in TRIF. |
+| The icon's label on the Home Screen | {Name}, as typed in the sheet | {Name}, as chosen in the sheet |
 
 ## Full screen (added 11-16 as "the app view"; renamed and changed 11-16, Tim)
 

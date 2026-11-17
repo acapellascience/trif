@@ -194,6 +194,9 @@ extension Model {
         if let u = step["openurl"] as? String, let url = URL(string: u) { out = await UIApplication.shared.open(url) ? "opened" : "not opened" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
+        // ({"iconprofile": {"outline": true, "swatch": 0-5, "badge": false, "name": "…"}}: the shown page's Home Screen
+        // icon and profile as the sheet would make them, to Documents/icon-test.png and icon-test.mobileconfig)
+        if let o = step["iconprofile"] as? [String: Any] { out = await Model.iconProfile(browser: browser, options: o, docs: docs) }
         if let u = step["playcheck"] as? String, let page = URL(string: u) { out = await Model.playCheck(browser: browser, page: page) }
         if step["playing"] != nil { out = await Model.playingStates(browser: browser) }
         // ({"tabjs": "…", "tab": n}: JavaScript in tab n's page, shown or not)
@@ -509,7 +512,8 @@ struct ContentView: View {
     /// The full address bar: the site, centred (a lock for https), and Share inside it; tap it for the address screen.
     /// Reload (Stop while loading) beside it.
     private var addressBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
+            moreMenu
             Button { closeCovers(); showAddress = true } label: {
                 HStack(spacing: 5) {
                     if browser.webView.url?.scheme == "https" { Image(systemName: "lock.fill").font(.system(size: 11)).foregroundStyle(.secondary) }
@@ -540,6 +544,49 @@ struct ContentView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+    }
+
+    /// The ⋯ menu at the address bar's left (Tim, 11-16: moved there from the toolbar's last button, which is now the
+    /// Home Screen [+]): new tab, history, importing, the folder, the project, full screen, the page's tools, the probe.
+    private var moreMenu: some View {
+        Menu {
+            Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
+            Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
+            Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+            Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
+            if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
+            Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
+            // (full screen for this tab; the line under it names the shortcut, which also switches back)
+            Button { onTab { browser.setFullScreen(true) } } label: {
+                Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                Text("Or hold two fingers on the page")
+            }
+            Toggle(isOn: $hideExitButton) { Label("Hide the full screen button", systemImage: "eye.slash") }
+            Divider()
+            Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
+            Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
+            Button("Ask the phone's own model…") { onTab { question = ""; asking = true } }
+            Button("Show everything hidden on this site again", role: .destructive) { onTab { Task { await browser.forgetRulesHere() } } }
+            Divider()
+            Menu("The probe") {
+                Button("Checks") { onTab { showChecks = true } }
+                Button("Report") { onTab { showReport = true } }
+                Section("The probe's own pages") {
+                    ForEach(browser.pages.pageNames, id: \.self) { name in
+                        Button(name) { onTab { browser.go(PageSchemeHandler.home + name) } }
+                    }
+                    Button("a mod link") { onTab { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") } }
+                }
+                Section("Real sites") {
+                    ForEach(["github.com", "x.com", "youtube.com", "reddit.com", "en.wikipedia.org", "nytimes.com"], id: \.self) { site in
+                        Button(site) { onTab { browser.go(site) } }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.system(size: 19)).frame(width: 34, height: 38).contentShape(Rectangle())
+        }
+        .accessibilityLabel("More")
     }
 
     /// The shown tab is on a website (for Add to Home Screen).
@@ -650,44 +697,11 @@ struct ContentView: View {
             }
             .accessibilityLabel("Tabs, \(browser.tabs.count) open")
                 .frame(maxWidth: .infinity)
-            Menu {
-                Button { onTab { browser.newTab() } } label: { Label("New tab", systemImage: "plus.square.on.square") }
-                Button { onTab { showHistory = true } } label: { Label("History", systemImage: "clock") }
-                Button { onTab { importing = true } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
-                Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
-                if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
-                Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
-                Button { onTab { addingIcon = true } } label: { Label("Add to Home Screen", systemImage: "plus.app") }
-                    .disabled(!onWebPage)
-                // (full screen for this tab; the line under it names the shortcut, which also switches back)
-                Button { onTab { browser.setFullScreen(true) } } label: {
-                    Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
-                    Text("Or hold two fingers on the page")
-                }
-                Toggle(isOn: $hideExitButton) { Label("Hide the full screen button", systemImage: "eye.slash") }
-                Divider()
-                Button("Copy this page for the chat") { onTab { Task { await browser.copyOutline() } } }
-                Button("Add a mod from the clipboard") { onTab { browser.offerFromClipboard() } }
-                Button("Ask the phone's own model…") { onTab { question = ""; asking = true } }
-                Button("Show everything hidden on this site again", role: .destructive) { onTab { Task { await browser.forgetRulesHere() } } }
-                Divider()
-                Menu("The probe") {
-                    Button("Checks") { onTab { showChecks = true } }
-                    Button("Report") { onTab { showReport = true } }
-                    Section("The probe's own pages") {
-                        ForEach(browser.pages.pageNames, id: \.self) { name in
-                            Button(name) { onTab { browser.go(PageSchemeHandler.home + name) } }
-                        }
-                        Button("a mod link") { onTab { browser.go(PageSchemeHandler.home + "trif-install#hide=.cookie-consent") } }
-                    }
-                    Section("Real sites") {
-                        ForEach(["github.com", "x.com", "youtube.com", "reddit.com", "en.wikipedia.org", "nytimes.com"], id: \.self) { site in
-                            Button(site) { onTab { browser.go(site) } }
-                        }
-                    }
-                }
-            } label: { Image(systemName: "ellipsis.circle") }
-            .accessibilityLabel("More")
+            // (the last button: a plain + that adds this site to the Home Screen, Tim 11-16; what the ⋯ menu here held
+            // is in the ⋯ at the address bar's left)
+            Button { onTab { addingIcon = true } } label: { Image(systemName: "plus") }
+                .disabled(!onWebPage)
+                .accessibilityLabel("Add to Home Screen")
                 .frame(maxWidth: .infinity)
         }
         .font(.title3)

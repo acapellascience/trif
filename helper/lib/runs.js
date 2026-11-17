@@ -14,6 +14,7 @@ const { scopeFor, scopeOf, runScope, cleanSplits, isPhoneSite } = require('./sco
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
+const { ownFolder } = require('./stage'); // (which site folders are a run's own: its phone twin's only, for a phone scope)
 const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
@@ -481,9 +482,10 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
   // the run's scope: held.js), with the version before running meanwhile.
   // (a sensitive host's own site, mail.google.com, is another site to a google.com run, and the other way
   // round: scope.js scopeOf with the sites of their own the extension sent)
-  // (A run from the phone view, scope phone~x.com: its phone twin's folder only; every desktop folder, all-sites/
-  // too, is read-only to it, the site's own desktop mods there for reference: lib/scope.js)
-  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && (n !== ALL_SITES_DIR || isPhoneSite(scope)));
+  // (A run from the phone view, scope phone~x.com: its phone twin's folder only, a sensitive site's twin too
+  // (phone~mail.google.com); every desktop folder, all-sites/ too, is read-only to it, the site's own desktop mods
+  // there for reference: stage.js ownFolder, ownTwin)
+  const otherSites = names.filter((n) => !ownFolder(n, scope, splits));
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.

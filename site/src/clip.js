@@ -3,7 +3,8 @@
 // is; only Safari installs a profile). The profile, a configuration profile with one Web Clip, travels in the
 // address's # part, which a browser never sends to a server: this site never sees it. The page reads it, takes it
 // out of the address bar (so it isn't left in the history), checks it is a TRIF Home Screen icon and nothing else
-// (one com.apple.webClip.managed payload opening trif://open?url=https://…), and only then hands it to Safari as a
+// (one to twenty com.apple.webClip.managed payloads, each opening trif://open?url=https://…: the app's Add to Home
+// Screen makes one, its list of icons waiting several in one profile), and only then hands it to Safari as a
 // download (a Blob), which offers "Profile Downloaded". Anything else: an error, and nothing made. No requests,
 // no cookies, nothing stored, nothing logged.
 
@@ -28,14 +29,15 @@ const CHECK_SRC = String.raw`function checkClip(p, topKeys, clipKeys) {
   if (p.PayloadType !== 'Configuration') return 'not a configuration profile';
   for (var k of Object.keys(p)) if (topKeys.indexOf(k) === -1) return 'an unexpected key: ' + k;
   if (typeof p.PayloadIdentifier !== 'string' || p.PayloadIdentifier.indexOf('com.timsrobot.trif.webclip.') !== 0) return 'not a TRIF icon’s identifier';
-  if (!Array.isArray(p.PayloadContent) || p.PayloadContent.length !== 1) return 'not exactly one payload';
-  var c = p.PayloadContent[0];
-  if (!isDict(c) || c.PayloadType !== 'com.apple.webClip.managed') return 'not a Web Clip';
-  for (var k2 of Object.keys(c)) if (clipKeys.indexOf(k2) === -1) return 'an unexpected key in the Web Clip: ' + k2;
-  if (typeof c.URL !== 'string' || c.URL.indexOf('trif://open?url=https://') !== 0) return 'not an icon that opens TRIF';
-  if (/[\s<>"]/.test(c.URL)) return 'an odd address';
-  if (typeof c.Label !== 'string' || !c.Label.trim() || c.Label.length > 60) return 'no name';
-  if (c.Icon !== undefined && !(c.Icon && typeof c.Icon.data === 'string')) return 'an icon that isn’t a picture';
+  if (!Array.isArray(p.PayloadContent) || p.PayloadContent.length < 1 || p.PayloadContent.length > 20) return 'not one to twenty payloads';
+  for (var c of p.PayloadContent) {
+    if (!isDict(c) || c.PayloadType !== 'com.apple.webClip.managed') return 'not a Web Clip';
+    for (var k2 of Object.keys(c)) if (clipKeys.indexOf(k2) === -1) return 'an unexpected key in the Web Clip: ' + k2;
+    if (typeof c.URL !== 'string' || c.URL.indexOf('trif://open?url=https://') !== 0) return 'not an icon that opens TRIF';
+    if (/[\s<>"]/.test(c.URL)) return 'an odd address';
+    if (typeof c.Label !== 'string' || !c.Label.trim() || c.Label.length > 60) return 'no name';
+    if (c.Icon !== undefined && !(c.Icon && typeof c.Icon.data === 'string')) return 'an icon that isn’t a picture';
+  }
   return '';
 }`;
 export { CHECK_SRC, TOP_KEYS, CLIP_KEYS };
@@ -50,19 +52,11 @@ export const CLIP_WORDS = {
   bad: 'This link doesn’t hold a TRIF Home Screen icon, so nothing was made.',
 };
 
-export const CLIP = page(CLIP_WORDS.title, `
-<h1>${CLIP_WORDS.heading}</h1>
-<div class="card">
-  <p id="ready" class="clip-line" hidden>${CLIP_WORDS.ready}</p>
-  <p id="none" class="clip-line">${CLIP_WORDS.none}</p>
-  <p id="bad" class="clip-line error" hidden>${CLIP_WORDS.bad}</p>
-  <button id="again" type="button" hidden>${CLIP_WORDS.again}</button>
-  <p id="debug" class="note" hidden></p>
-</div>`, { script: '/clip.js', style: '.clip-line { margin: 0 0 14px; } .clip-line:last-of-type { margin-bottom: 0; } #again { margin-top: 6px; }' });
-
 // The page's script: the # part read and cleared, the profile parsed (DOMParser: XML only) and checked, then the
 // download. checkClip's own source, so the page and the tests check the same way.
 export const CLIP_JS = `(() => {
+  // (trif-clip-batch: the app looks for these words in this script before it sends a profile with several icons:
+  // a page from before takes only one, and the app then hands a batch to Safari itself)
   const $ = (id) => document.getElementById(id);
   const show = (id) => { for (const x of ['ready', 'none', 'bad']) $(x).hidden = x !== id; };
   const TOP_KEYS = ${JSON.stringify(TOP_KEYS)};
@@ -115,3 +109,18 @@ export const CLIP_JS = `(() => {
   hand();
 })();
 `;
+
+// The script's address carries a hash of the script, so a phone that loaded the page before a deploy fetches the new
+// script with the new page instead of a cached old one (both are cached for 5 minutes).
+const CLIP_VERSION = (() => { let h = 0x811c9dc5; for (let i = 0; i < CLIP_JS.length; i++) h = Math.imul(h ^ CLIP_JS.charCodeAt(i), 0x01000193) >>> 0; return h.toString(16); })();
+
+export const CLIP = page(CLIP_WORDS.title, `
+<h1>${CLIP_WORDS.heading}</h1>
+<div class="card">
+  <p id="ready" class="clip-line" hidden>${CLIP_WORDS.ready}</p>
+  <p id="none" class="clip-line">${CLIP_WORDS.none}</p>
+  <p id="bad" class="clip-line error" hidden>${CLIP_WORDS.bad}</p>
+  <button id="again" type="button" hidden>${CLIP_WORDS.again}</button>
+  <p id="debug" class="note" hidden></p>
+</div>`, { script: `/clip.js?v=${CLIP_VERSION}`, style: '.clip-line { margin: 0 0 14px; } .clip-line:last-of-type { margin-bottom: 0; } #again { margin-top: 6px; }' });
+

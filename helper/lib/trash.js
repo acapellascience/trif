@@ -9,7 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 const { buildMod, isIgnoredName, readModFile } = require('./mods');
-const { outOfScope, scopeOf } = require('./scope');
+const { outOfScope, scopeOf, isPhoneSite } = require('./scope');
+const { ownTwin } = require('./stage');
 const { badName, samePath } = require('./pathcheck');
 
 const TRASH = 'trash';
@@ -36,11 +37,19 @@ const timeOf = (stamp) => {
   return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6], +m[7]) : NaN;
 };
 
+/**
+ * Whether the mods in the folder sites/<site>/ are a chat's of `scope`. (A mod in another site's folder isn't,
+ * even when its @match is: sites/mail.google.com/ to a google.com chat, where mail.google.com is a site of its
+ * own, scope.js scopeOf. A phone view's chat, scope phone~x.com: its phone twin's mods only, never x.com's:
+ * stage.js ownTwin.) Also host.js startRun's merge.
+ */
+function siteInScope(site, scope, splits = []) {
+  return isPhoneSite(scope) ? ownTwin(site, scope, splits) : scopeOf(site, [...splits, scope]) === scope;
+}
+
 function checkScope(site, file, scope, verb, splits = []) {
   if (!scope) return;
-  // (a mod in another site's folder isn't this chat's, even when its @match is: sites/mail.google.com/ to a
-  // google.com chat, where mail.google.com is a site of its own, scope.js scopeOf)
-  if (scopeOf(site, [...splits, scope]) !== scope) {
+  if (!siteInScope(site, scope, splits)) {
     throw new TrashError(`this chat can only ${verb} mods of ${scope}; ${site}/${path.basename(file, '.js')} is another site's. Ask the user to do it from the side panel there or their terminal.`);
   }
   // (A link out of the mods folder, or the trash, isn't read: readModFile.)
@@ -130,4 +139,4 @@ function restoreMod(ws, id, { scope, splits = [] } = {}) {
   return { id: `${site}/${mod}`, file };
 }
 
-module.exports = { deleteMod, restoreMod, listTrash, emptyTrash, parseId, TrashError, TRASH_DAYS };
+module.exports = { siteInScope, deleteMod, restoreMod, listTrash, emptyTrash, parseId, TrashError, TRASH_DAYS };

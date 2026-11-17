@@ -107,6 +107,9 @@
   <p id="instructions-note" class="note" role="status">Applies from your next message, here and in Claude Code in ~/.trif.</p>
   <label class="check"><input id="pause-all" type="checkbox"> Pause all mods in this browser</label>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
+  <!-- Mod files the user downloads (sidepanel.js renderDownloads; helper/lib/downloads.js): off by default -->
+  <label class="check"><input id="watch-downloads" type="checkbox"> Offer to add mod files I download</label>
+  <p id="downloads-note" class="note"></p>
   <p id="update-note" class="note"></p>
   <!-- What went wrong with the last check for new versions of Tim's mods (the mods feed), if anything. -->
   <p id="mods-feed-note" class="note" hidden></p>
@@ -197,12 +200,14 @@
 <section id="update" class="notice" hidden></section>
 <!-- The phone view's line: this panel follows a phone window (sidepanel.js renderPhone). -->
 <p id="phone-note" class="phone-note" hidden><span id="phone-note-text"></span> <button id="phone-back" class="link-btn" type="button">Back to desktop</button></p>
+<!-- A mod file in the user's Downloads: "Add this mod?" (sidepanel.js renderDownloadOffer) -->
+<section id="download-offer" class="notice download-offer" hidden></section>
 
 <details id="mods" class="mods" hidden>
   <summary>Mods on this site <span id="mods-count" class="count"></span>
     <!-- Import, and export the site's mods (sidepanel.js renderSiteTools; helper lib/share.js) -->
     <span class="mods-more-wrap"><button id="mods-more" class="mods-more" type="button" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false" hidden>⋯</button>
-    <span id="mods-menu" class="pop-menu mods-menu" role="menu" hidden><button id="import-mod" class="btn menu-item" type="button" role="menuitem">Import mod…</button><button id="export-site" class="btn menu-item" type="button" role="menuitem" hidden></button></span></span>
+    <span id="mods-menu" class="pop-menu mods-menu" role="menu" hidden><button id="import-mod" class="btn menu-item" type="button" role="menuitem">Import mod…</button><button id="paste-mod" class="btn menu-item" type="button" role="menuitem">Paste a mod…</button><button id="export-site" class="btn menu-item" type="button" role="menuitem" hidden></button></span></span>
   </summary>
   <p id="mods-review-note" class="mods-review-note" hidden></p>
   <ul id="mod-list" class="mod-list"></ul>

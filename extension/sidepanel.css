@@ -1087,3 +1087,11 @@ body.resizing-mods, body.resizing-mods * { cursor: ns-resize !important; user-se
 .code-view[data-group] .cv-details :is(.ap-together, .ap-site) .more-btn:is(:hover, .open) { color: var(--tier); }
 .code-view .cv-details .cv-d-free p { margin: 0; color: var(--text); }
 .code-view .cv-details .cv-d-free p + p { margin-top: 6px; }
+
+/* "Paste a mod…" (sidepanel.js pasteCard): the mod's text, in the import card */
+.paste-mod .paste-text { width: 100%; box-sizing: border-box; min-height: 9em; max-height: 50vh; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; margin: 4px 0 10px; }
+/* "Add this mod?" (sidepanel.js renderDownloadOffer) */
+.download-offer .head { margin: 0 0 2px; font-size: 11px; opacity: .7; }
+.download-offer .offer-can { margin: 4px 0 6px 18px; padding: 0; font-size: 12px; }
+.download-offer .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.paste-mod .paste-tried { margin: 0 0 8px; }

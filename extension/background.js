@@ -15,7 +15,7 @@ import {
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, isRobotless,
 } from './lib.js';
 import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
-import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS } from './sandbox.js';
+import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS, sandboxModCode } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
@@ -57,6 +57,7 @@ const state = {
   connectedAt: 0,
   helperError: null,     // last disconnect reason (shown on the onboarding page)
   update: null,          // the helper's update summary (helper/lib/update.js), for the panel's notice
+  downloads: null,       // mod files in the user's downloads (helper/lib/downloads.js): the watch's state and its offer, for the panel
   backoff: 0,
   retryTimer: null,
   userScripts: null,     // null until first checked
@@ -1042,6 +1043,12 @@ async function onOtherHelperMessage(msg) {
   } else if (msg.type === 'update') {
     state.update = msg.update && typeof msg.update === 'object' ? msg.update : null;
     notifyPanels();
+  } else if (msg.type === 'downloads') {
+    // A mod file in the user's downloads, offered (helper/lib/downloads.js), or the watch's state: the panel's card
+    // and Settings switch, and a mark on the toolbar button while an offer waits
+    state.downloads = msg.downloads && typeof msg.downloads === 'object' ? msg.downloads : null;
+    notifyPanels();
+    try { await chrome.action?.setBadgeText?.({ text: state.downloads?.offer ? '1' : '' }); if (state.downloads?.offer) await chrome.action?.setBadgeBackgroundColor?.({ color: '#1a73e8' }); } catch { /* no badge here */ }
   } else if (msg.type === 'browser') {
     // The helper's name for this browser, from what started it (Arc, Vivaldi): better than this one's guess.
     if (setBrowser(msg.name) === msg.name) { helperBrowser = msg.name; notifyPanels(); }
@@ -1506,7 +1513,7 @@ function siteLists() {
 async function modsOnPage(args) {
   const tab = await scopedTab(args);
   const url = tab.url || tab.pendingUrl || '';
-  const mods = state.mods.filter((m) => { if (!isEnabled(m.id) || m.held) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
+  const mods = state.mods.filter((m) => { if (!isEnabled(m.id) || m.held || !runsInTab(m, tab.id)) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
   return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
 }
 
@@ -1615,14 +1622,17 @@ function healthOfPage(since, styleSel, sandbox) {
 }
 
 // (as registered: a parent's mod doesn't run on a sensitive site of its own, lib.js limitToSites)
-const runningOn = (url) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
+// (in the phone view's tab only phone mods run, in every other tab only the rest: lib.js phoneGate; so its health
+// checks, its badge and `trif status` are about its own mods)
+const runsInTab = (m, tabId) => isPhoneMod(m) === (tabId !== undefined && tabId !== null && phones.isPhone(tabId));
+const runningOn = (url, tabId) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held || !runsInTab(m, tabId)) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
 
 async function checkTab(tabId, final = false) {
   if (!checkUserScripts()) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab?.url || '';
   if (!/^https?:/.test(url) || !siteOnFor(url, onSites(), sens())) return;
-  const running = runningOn(url);
+  const running = runningOn(url, tabId);
   if (!running.length) return;
   // (a load from scheduleHealth counts for "may be broken"; one the panel's look finds, or a page that changed
   // its address by itself, only for errors)
@@ -1671,7 +1681,7 @@ function saveHealthSoon() {
 /** The toolbar's mark for a tab: "!" while a mod running there has a new error (or may be broken). */
 async function badgeFor(tab) {
   if (!tab || !chrome.action?.setBadgeText) return;
-  const n = runningOn(tab.url || '').reduce((k, m) => k + openErrors(state.health, m).length, 0);
+  const n = runningOn(tab.url || '', tab.id).reduce((k, m) => k + openErrors(state.health, m).length, 0);
   try {
     await chrome.action.setBadgeText({ tabId: tab.id, text: n ? '!' : '' });
     if (n) await chrome.action.setBadgeBackgroundColor?.({ tabId: tab.id, color: '#d93025' });
@@ -1887,6 +1897,50 @@ async function boxedRun(tab, args, timeout) {
   }
 }
 
+// "Try it here" (the import cards' button: a downloaded or pasted mod, before it's added). The user's click runs a
+// style or boxed mod once in the tab the card is for, with TRIF's own runtime: a style mod's rules with TRIF's
+// code, as when it's added; a boxed mod in TRIF's sandbox, with no powers whatever its header asks for. Never a
+// free mod (it would run with everything the page has). Only on a page TRIF is on for, and the mod's @match must
+// cover it. It lasts until the tab reloads (Undo reloads it). By the tab, not the panel: the card names its tab,
+// so it works from any window that shows the panel's cards (the side panel, a panel window, a phone-sized one).
+const tries = new Map(); // tab id -> {id, kind, at}
+chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'loading') tries.delete(tabId); });
+chrome.tabs.onRemoved?.addListener((tabId) => tries.delete(tabId));
+async function tryMod(msg) {
+  requireUserScripts();
+  const tab = await chrome.tabs.get(Number(msg.tabId)).catch(() => null);
+  if (!tab) throw new Error('that tab is gone');
+  const url = tab.url || '';
+  if (!/^https?:/.test(url)) throw new Error('TRIF can only try a mod on a website');
+  if (!siteOnFor(url, onSites(), sens())) throw new Error(`TRIF is off on ${hostOf(url)}: turn it on there first`);
+  const p = await helperRequest('mod.preview', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), forTry: true }, 20000);
+  if (!p || !p.run) throw new Error('Only style and boxed mods can be tried here. This is a free mod, which would run with everything the page has: add it, and it waits for your OK.');
+  if (!modAppliesTo({ matches: p.run.matches, excludes: p.run.excludes }, url)) throw new Error('This mod isn\'t for this page: its @match lines don\'t include it.');
+  const target = { tabId: tab.id };
+  const token = crypto.randomUUID();
+  const why = await rawPageCall(tab.id, 'ISOLATED', pageGuard, [null, onSites(), token, apartFrom(null)]);
+  if (why) throw new Error(why);
+  let errors = [];
+  if (p.run.kind === 'style') {
+    await chrome.userScripts.execute({ target, world: 'MAIN', injectImmediately: true, js: [{ code: p.run.code }] });
+  } else {
+    if (!(await sandboxWorld())) throw new Error(`${BROWSER} has no box for boxed mods here, so TRIF won't try one`);
+    const inBox = async (js) => firstInjectionResult(await chrome.userScripts.execute({ target, world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, injectImmediately: true, js }));
+    const have = await inBox([{ code: 'typeof globalThis.__trifSandbox !== "object" ? "none" : typeof globalThis.__trifSandbox.run === "function" ? "ready" : "old"' }]);
+    if (have === 'old') throw new Error('this tab has TRIF\'s sandbox from before an update: reload it, then try again');
+    if (have !== 'ready') await chrome.userScripts.execute({ target, world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, injectImmediately: true, js: sandboxRuntimeScript([]).js });
+    await inBox([{ code: sandboxModCode(p.run.id, String(p.run.code ?? ''), { powers: [], args: {}, ...(p.run.style ? { style: p.run.style } : {}) }) }]);
+    await sleep(600);
+    const got = await inBox([{ code: `(globalThis.__trifSandbox && Array.isArray(globalThis.__trifSandbox.errors) ? globalThis.__trifSandbox.errors : []).filter((e) => e && e.mod === ${JSON.stringify(p.run.id)}).slice(-3).map((e) => String(e.message).slice(0, 300))` }]).catch(() => null);
+    errors = Array.isArray(got) ? got : [];
+  }
+  const same = await rawPageCall(tab.id, 'ISOLATED', (t) => window.__trifPageGuard === t, [token]).catch(() => false);
+  if (!same) throw new Error('the tab went to another page meanwhile: try again');
+  tries.set(tab.id, { id: p.run.id, kind: p.run.kind, at: Date.now() });
+  log('info', `tried ${p.run.id} (${p.run.kind}) in tab ${tab.id}`);
+  return { tried: true, kind: p.run.kind, tabId: tab.id, errors };
+}
+
 function noRuntime() {
   return 'the TRIF runtime is not running in this tab (the page was loaded before TRIF was ready, or it is a page extensions cannot access). Reload the tab and try again.';
 }
@@ -1992,7 +2046,7 @@ async function onPageMessage(msg) {
       for (const fp of fps) dismissError(state.health, m, fp);
       await save({ modHealth: state.health });
       await markCards(m.id, fps, 'ignored');
-      for (const t of await chrome.tabs.query({}).catch(() => [])) if (runningOn(t.url || '').some((x) => x.id === m.id)) await badgeFor(t);
+      for (const t of await chrome.tabs.query({}).catch(() => [])) if (runningOn(t.url || '', t.id).some((x) => x.id === m.id)) await badgeFor(t);
       notifyPanels();
       return { id: m.id, dismissed: fps };
     }
@@ -2083,7 +2137,7 @@ async function uiStatus() {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER, browserVersion,
     recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, sensitiveBlocked: s.sensitiveBlocked, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
-    starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
+    starter: state.connected ? state.starter : null, update: state.connected ? state.update : null, downloads: state.connected ? state.downloads : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
@@ -2484,11 +2538,45 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? ''), ...(Array.isArray(msg.ids) ? { ids: msg.ids.slice(0, 5000).map(String) } : {}) }, 11 * 60 * 1000);
     case 'mod.import': {
       // Import a mod (the panel's button, or a .js dropped on it): its text; the helper checks and writes it
-      const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? '') }, 20000);
+      // (`phone`: from the phone view's panel, a phone mod: the helper writes it in the phone twin, lib/share.js)
+      const r = await helperRequest('mod.import', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200), site: String(msg.site ?? ''), choice: String(msg.choice ?? ''), ...(msg.phone === true ? { phone: true } : {}) }, 20000);
       if (r?.id && msg.chatSite) {
         await updateChat(normalizeSite(msg.chatSite), (chat) => { chat.messages.push({ role: 'mod', text: `Imported ${String(msg.name || 'a mod')} as ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}. Like any mod from outside, it waits for your OK if its code can do more than change the page.`, time: Date.now() }); });
       }
       return r;
+    }
+    // Mod files in the user's downloads (helper/lib/downloads.js): the Settings switch, and the card's buttons.
+    // The panel's alone: each is a click there.
+    case 'downloads.setWatch': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('downloads.setWatch', { on: !!msg.on }, 60000);
+    }
+    case 'downloads.take': {
+      if (!fromPanel) throw new Error('only the side panel can do this');
+      return helperRequest('downloads.take', { id: String(msg.id ?? '') }, 15000);
+    }
+    case 'downloads.done': {
+      if (!fromPanel) throw new Error('only the side panel can do this');
+      return helperRequest('downloads.done', { id: String(msg.id ?? ''), how: msg.how === 'added' ? 'added' : 'dismissed' }, 15000);
+    }
+    case 'downloads.ignore': {
+      if (!fromPanel) throw new Error('only the side panel can do this');
+      return helperRequest('downloads.ignore', { id: String(msg.id ?? '') }, 15000);
+    }
+    // What an import card shows of a mod's text: what TRIF finds it can do (helper/lib/preview.js)
+    case 'mod.preview': return helperRequest('mod.preview', { text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), name: String(msg.name ?? '').slice(0, 200) }, 20000);
+    // "Try it here": the user's click on an import card runs the mod once in the card's tab (tryMod). Never a page's.
+    case 'mod.try': {
+      if (!fromPanel) throw new Error('only the side panel can do this');
+      return tryMod(msg);
+    }
+    case 'mod.untry': {
+      if (!fromPanel) throw new Error('only the side panel can do this');
+      const tabId = Number(msg.tabId);
+      if (!tries.has(tabId)) return { reloaded: false };
+      tries.delete(tabId);
+      await chrome.tabs.reload(tabId);
+      return { reloaded: true };
     }
     case 'files.add': {
       // A file dropped on the panel (not a mod): into the site's files, with a line in its chat (or, while the
@@ -2703,7 +2791,8 @@ async function startAgent(msg) {
     chat.last = null;
   });
   // (files the message attaches, "[attached: files/<name>]": where they are, for the agent)
-  const attached = [...prompt.matchAll(/\[attached: files\/([^\]\n]{1,200})\]/g)].map((x) => `sites/${site}/files/${x[1]}`);
+  // (the phone view's chat: its phone twin's files, sites/phone~x.com/files/, where its panel adds them)
+  const attached = [...prompt.matchAll(/\[attached: files\/([^\]\n]{1,200})\]/g)].map((x) => `sites/${chatSite}/files/${x[1]}`);
   // (the run's scope: the site this host is in, a sensitive one of its own too; and the sites of their own
   // TRIF knows of, so the helper gives the run the right folder: helper/lib/scope.js scopeOf)
   // (a chat in the phone view: the agent is told the tab is one, phone.js)

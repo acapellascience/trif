@@ -225,6 +225,9 @@ function onExtensionMessage(msg) {
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${state.hello.browserVersion || msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       sendUpdate();
+      // (mod files the user downloads: only when they switched it on, lib/downloads.js)
+      if (ws.config?.watchDownloads === true) downloadsWatcher().start().catch((e) => logger.warn(`downloads: ${e.message}`));
+      else sendDownloads();
       break;
     case 'requestWaiting':
       onRequestWaiting(msg);
@@ -580,12 +583,12 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.toPhone', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit']);
+  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.preview']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', ...PHONE_COMMANDS]);
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore', ...PHONE_COMMANDS]);
 
 // The phone link (lib/phonelink/link.js; docs/PHONE-LINK.md). Every helper has the store; the listener, the
 // announcer and the phones' runs are in the helper that owns helper.sock alone (becomePrimary), and nothing
@@ -853,7 +856,7 @@ function agentCommand(cmd, args) {
     // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so
     // the next sync holds it like any (held.js), and marked imported
     case 'mod.import': {
-      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? '') });
+      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? ''), phone: args.phone === true });
       if (r.id) { logger.info(`imported ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}`); syncMods('import', false); }
       return r.file ? { ...r, file: path.relative(ws.home, r.file) } : r;
     }
@@ -988,6 +991,8 @@ function agentCommand(cmd, args) {
       if (args.on && info.available) maybeAutoInstall(info);
       return info;
     }
+    // A mod's text read as TRIF reads it, nothing written: the cards before an import, and "Try it here" (lib/preview.js)
+    case 'mod.preview': return require('./lib/preview').previewMod(String(args.text ?? ''), { name: String(args.name ?? ''), site: String(args.site ?? ''), forTry: !!args.forTry });
     case 'report.build': return report(args);
     default: return logins.cancel(args.loginId);
   }
@@ -1008,7 +1013,8 @@ function startRun(args) {
     return r;
   }
   const id = String(args.merge).trim();
-  if (require('./lib/scope').scopeOf(id.split('/')[0], [...(Array.isArray(args.splits) ? args.splits : []), scope]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
+  // (its own site's mods only; from the phone view, its phone twin's: trash.js siteInScope)
+  if (!require('./lib/trash').siteInScope(id.split('/')[0], scope, Array.isArray(args.splits) ? args.splits : [])) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });
@@ -1043,6 +1049,42 @@ function extensionBehind() {
   let older = false;
   try { older = update.compareVersions(String(h.version), VERSION) < 0; } catch { return null; }
   return older ? `The ${h.browser} add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
+}
+
+// Mod files the user downloads (lib/downloads.js): the panel's Settings switch, and its "Add this mod?" card. The
+// side panel's alone (PANEL_COMMANDS): a terminal or a run can't switch it on or take a file from the user's downloads.
+function downloadsCommand(cmd, args) {
+  switch (cmd) {
+    case 'downloads.status': return downloads ? downloads.status() : { on: false, state: 'off' };
+    case 'downloads.setWatch': {
+      update.setConfigKey(ws.home, 'watchDownloads', args.on ? true : undefined);
+      ws.config = { ...(ws.config || {}), watchDownloads: args.on ? true : undefined };
+      logger.info(`offering downloaded mod files ${args.on ? 'on' : 'off'}`);
+      return args.on ? downloadsWatcher().start() : downloads ? downloads.stop() : { on: false, state: 'off' };
+    }
+    case 'downloads.take': {
+      if (!downloads) throw new Error('TRIF isn\'t looking at your downloads');
+      return downloads.take(String(args.id ?? ''));
+    }
+    case 'downloads.done': return downloads ? downloads.done(String(args.id ?? ''), args.how === 'added' ? 'added' : 'dismissed') : { on: false, state: 'off' };
+    case 'downloads.ignore': return downloads ? downloads.ignore(String(args.id ?? '')) : { on: false, state: 'off' };
+    default: throw new Error(`unknown command "${cmd}"`);
+  }
+}
+
+let downloads = null;
+function downloadsWatcher() {
+  if (!downloads) {
+    downloads = require('./lib/downloads').createWatcher({
+      dir: require('./lib/share').downloadsDir(), stateFile: path.join(ws.private, 'downloads.json'), onChange: sendDownloads,
+      log: (level, m) => (level === 'warn' ? logger.warn(m) : logger.info(m)),
+    });
+  }
+  return downloads;
+}
+function sendDownloads(status = downloads ? downloads.status() : { on: false, state: 'off' }) {
+  if (!state.stdoutOpen) return;
+  try { sendToExtension({ type: 'downloads', downloads: status }); } catch (e) { logger.warn(`could not send the downloads offer: ${e.message}`); }
 }
 
 function sendUpdate(info = updateInfo()) {
@@ -1222,6 +1264,7 @@ function panelCommand(cmd, args) {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
   }
+  if (cmd.startsWith('downloads.')) return downloadsCommand(cmd, args);
   if (cmd !== 'agent.withoutSandbox') throw new Error(`unknown command "${cmd}"`);
   const agent = typeof args.agent === 'string' ? args.agent : '';
   if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');
@@ -1393,7 +1436,12 @@ function onClientLine(sock, line) {
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
-  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
+  if (PANEL_COMMANDS.has(cmd)) {
+    const error = cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)'
+      : cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)'
+        : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)';
+    return reply(sock, { id, ok: false, error });
+  }
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {

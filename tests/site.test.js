@@ -592,7 +592,16 @@ test('/clip: the iPhone app\'s Home Screen icon page: only a TRIF icon is accept
   assert.match(checkClip(clip({ PayloadType: 'com.apple.wifi.managed' })), /Web Clip/);
   assert.match(checkClip(clip({ Password: 'x' })), /unexpected key/);
   assert.match(checkClip(clip({}, { PayloadIdentifier: 'com.evil.profile' })), /identifier/);
-  assert.match(checkClip(clip({}, { PayloadContent: [clip().PayloadContent[0], clip().PayloadContent[0]] })), /exactly one/);
+  // (several icons in one profile: the app's list of icons waiting, added in one install; each one checked)
+  const second = { ...clip().PayloadContent[0], PayloadIdentifier: 'com.timsrobot.trif.webclip.batch.b.youtube.com', Label: 'YouTube', URL: 'trif://open?url=https://youtube.com/&app=1' };
+  assert.strictEqual(checkClip(clip({}, { PayloadIdentifier: 'com.timsrobot.trif.webclip.batch.b', PayloadContent: [clip().PayloadContent[0], second] })), '');
+  assert.strictEqual(checkClip(clip({}, { PayloadContent: Array(20).fill(second) })), '');
+  assert.match(checkClip(clip({}, { PayloadContent: Array(21).fill(second) })), /one to twenty/);
+  assert.match(checkClip(clip({}, { PayloadContent: [] })), /one to twenty/);
+  assert.match(checkClip(clip({}, { PayloadContent: [second, { ...second, URL: 'https://evil.example/' }] })), /opens TRIF/);
+  assert.match(checkClip(clip({}, { PayloadContent: [second, { ...second, PayloadType: 'com.apple.wifi.managed' }] })), /Web Clip/);
+  assert.match(checkClip(clip({}, { PayloadContent: [second, { ...second, Password: 'x' }] })), /unexpected key/);
+  assert.match(CLIP_JS, /trif-clip-batch/, 'the words the app looks for before it sends several icons');
   assert.match(checkClip(clip({}, { ConsentText: 'x' })), /unexpected key/);
   assert.match(checkClip(clip({ Icon: 'x' })), /picture/);
   assert.match(checkClip(null), /not a profile/);
@@ -605,7 +614,7 @@ test('/clip: the iPhone app\'s Home Screen icon page: only a TRIF icon is accept
   assert.match(csp, /script-src 'self'/);
   assert.strictEqual(res.headers.get('Referrer-Policy'), 'no-referrer');
   const body = await res.text();
-  assert.match(body, /<script src="\/clip.js"><\/script>/);
+  assert.match(body, /<script src="\/clip.js\?v=[0-9a-f]+"><\/script>/);
   assert.doesNotMatch(body, /https?:\/\/(?!timsrobot\.com)/, 'nothing from anywhere else');
   const js = await worker.fetch(new Request('https://timsrobot.com/clip.js'), env());
   assert.strictEqual(js.status, 200);

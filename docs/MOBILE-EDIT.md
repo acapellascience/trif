@@ -250,11 +250,20 @@ own.
   User scripts can't be given a tab, so this is how "desktop mods never in the phone window, phone mods never on
   the desktop" holds. Mods registered before re-register once (their hash gains `:gate`).
 - **The phone's panel** lists only the phone twin's mods; a desktop panel never lists them. Its chat is its own
-  (`chat:phone~x.com`), and so is its history. Export all mods (from the phone's panel) and a phone mod's Export
+  (`chat:phone~x.com`), and so is its history. So are its count, its list's order, its files
+  (`sites/phone~x.com/files/`, where a file dropped on it goes), a mod imported there (a file dropped or chosen, Paste a mod…, or
+  Add on a Downloads offer: a phone mod, in the twin of the site its header names, never `all-sites/`: `share.js
+  importMod` `phone`; Try it here runs only in that tab and writes nothing) and its Style/Boxed/Free switches (`groupsOff`
+  under `phone~x.com`: they switch the site's phone mods only, and the desktop panel's only the other mods: lib.js
+  `groupSiteName`). The toolbar's error mark, the mods' health checks and `trif status` in the phone tab count
+  only phone mods, and only the rest in every other tab (background.js `runsInTab`). Export all mods (from the phone's panel) and a phone mod's Export
   and Send to iPhone take the phone twin's files; Send to iPhone shows only on phone mods.
 - **The agent in the phone view**: its run's scope is `phone~x.com`, so it can write only `sites/phone~x.com/`;
   every desktop folder, `sites/x.com/` and `all-sites/` included, is read-only to it (`runs.js runLimits`), and
-  readable. Its context says so, and to take a desktop mod's idea and rebuild it for the mobile page without
+  readable; of what it writes in its working folder only the twin's files reach the mods folder (not `all-sites/`,
+  a desktop folder made after it started, or a new folder: `stage.js ownFolder`, `ownTwin`), and its `trif delete`
+  and `trif restore` take only the twin's mods, as does a merge started there (`trash.js siteInScope`); a sensitive site's twin (`phone~mail.google.com`) is
+  its own folder. Its context says so, and to take a desktop mod's idea and rebuild it for the mobile page without
   assuming the same selectors or data; AGENTS.md "Phone mods" says the same. A desktop run can read phone mods and
   not write them. A phone run can switch only phone mods (`trif enable/disable`), a desktop run only desktop ones.
   Page commands from a phone run work on the site's tabs, as any run's.

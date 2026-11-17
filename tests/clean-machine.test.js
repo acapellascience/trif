@@ -336,6 +336,11 @@ test('a computer with no Node: install.sh, the helper, `trif` in sandboxed runs,
 // packed one patch version up. Skipped when the ref isn't in this clone.
 const FROM = process.env.TRIF_UPGRADE_FROM || 'v0.3.0';
 const hasFrom = spawnSync('git', ['rev-parse', '-q', '--verify', `${FROM}^{commit}`], { cwd: REPO }).status === 0;
+// The phone link (branch phone-link, docs/PHONE-LINK.md), once it's in this checkout: the upgrade test then seeds
+// its real state (a computer key in the keyring, a paired phone in phone-link.json) and, on TRIF's own Node, the
+// stand-in phone (tests/phone-link-client.js) reconnects to the installed helper: X25519, ChaCha20-Poly1305 and
+// a TCP listener (on 127.0.0.1 alone) on the runtime. Before it's merged, a stand-in file is kept instead.
+const PHONE_LINK = fs.existsSync(path.join(REPO, 'helper', 'lib', 'phonelink', 'noise.js'));
 test(`upgrade: a Node-based install (${FROM}) updates to this build and ends on TRIF's own Node, keeping everything`, { skip: skip || (!hasFrom && `no git ref ${FROM} here`), timeout: 600000 }, async (t) => {
   const S = scratch();
   cleanups.push(() => fs.rmSync(S, { recursive: true, force: true }));
@@ -366,7 +371,10 @@ test(`upgrade: a Node-based install (${FROM}) updates to this build and ends on 
   fs.mkdirSync(sysBin);
   fs.symlinkSync(process.execPath, path.join(sysBin, 'node'));
   const kc = makeFakeKeychain(path.join(home, 'Library', 'Keychains', 'trif-test'));
-  const base = { HOME: home, TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1', TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), ...kc.env };
+  // (the phone link: never the real dns-sd, which would announce on the Wi-Fi; a listener on this computer alone)
+  const dnsSd = path.join(S, 'dns-sd');
+  fs.writeFileSync(dnsSd, '#!/bin/sh\nexec /bin/sleep 86400\n', { mode: 0o755 });
+  const base = { HOME: home, TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1', TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), TRIF_DNS_SD: dnsSd, TRIF_PHONE_LINK_HOST: '127.0.0.1', ...kc.env };
   const withNode = { ...base, PATH: `${sysBin}:${NO_NODE_PATH}`, TRIF_RUNTIME: pinsFile };
   const noNode = { ...base, PATH: NO_NODE_PATH };
   const browsers = process.platform === 'darwin' ? 'chrome,safari' : 'chrome';
@@ -375,7 +383,12 @@ test(`upgrade: a Node-based install (${FROM}) updates to this build and ends on 
   const plistText = () => fs.readdirSync(plistDir).map((f) => fs.readFileSync(path.join(plistDir, f), 'utf8')).join('\n');
   const cfgFile = path.join(priv, 'config.json');
   const phoneFile = path.join(priv, 'phone-link.json');
-  const phone = { v: 1, phones: [{ id: 'p1', name: "Tim's phone", key: 'AAAA', paired: '2026-11-15T10:00:00Z' }] };
+  const b64 = (buf) => Buffer.from(buf).toString('base64url');
+  const noise = PHONE_LINK ? require('../helper/lib/phonelink/noise') : null;
+  const computerKeys = noise && noise.generateKeyPair();
+  const phoneKeys = noise && noise.generateKeyPair();
+  const phone = !noise ? { v: 1, phones: [{ id: 'p1', name: "Tim's phone", key: 'AAAA', paired: '2026-11-15T10:00:00Z' }] }
+    : { on: true, sync: true, publicKey: b64(computerKeys.publicKey), port: 0, phones: [{ id: noise.keyId(phoneKeys.publicKey), name: "Tim's phone", key: b64(phoneKeys.publicKey), pairedAt: '2026-11-15T10:00:00.000Z', lastSeen: '2026-11-15T10:00:00.000Z' }] };
 
   await t.test(`${FROM}, installed the way it is today: on the computer's Node`, () => {
     const pkgDir = path.join(S, 'npx');
@@ -393,7 +406,7 @@ test(`upgrade: a Node-based install (${FROM}) updates to this build and ends on 
     fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, updateFeed: `${srv.base}latest.json`, keepMe: 'yes' }));
     fs.writeFileSync(phoneFile, JSON.stringify(phone));
   });
-  await require('../helper/lib/keyring').setKey('computer', 'phone-private-key', { service: 'TRIF phone link', env: kc.env });
+  await require('../helper/lib/keyring').setKey('computer', noise ? b64(computerKeys.privateKey) : 'phone-private-key', { service: 'TRIF phone link', env: kc.env });
   await require('../helper/lib/agentkeys').setAgentKey('claude', 'sk-ant-fake-upgrade', { env: kc.env });
   const keysBefore = kc.items();
 
@@ -443,6 +456,29 @@ test(`upgrade: a Node-based install (${FROM}) updates to this build and ends on 
     assert.ok(cmd.startsWith(R.installedNode(ws)), cmd);
     const tabsR = await runAsync(path.join(ws, 'bin', P.CLI_NAME), ['tabs'], noNode);
     assert.match(tabsR.out, /example\.com\/page/, tabsR.out);
+    if (PHONE_LINK) {
+      // The phone paired before the upgrade reaches the helper on TRIF's own Node with the keys it has.
+      let asked = 0;
+      const panel = async (cmd) => {
+        const id = `p${++asked}`;
+        ext.send({ type: 'request', id, cmd, args: {} });
+        const r = await ext.next((m) => m.type === 'response' && m.id === id, { timeout: 15000 });
+        assert.ok(r.ok, r.error);
+        return r.result;
+      };
+      let st = null;
+      await waitFor(async () => { st = await panel('phone.status'); return st.listening && st.port; }, { timeout: 15000, message: 'the phone link listening' });
+      assert.strictEqual(st.on, true);
+      assert.deepStrictEqual(st.phones.map((p) => p.name), ["Tim's phone"]);
+      const { PhoneClient } = require('./phone-link-client');
+      const t0 = process.hrtime.bigint();
+      const ph = await PhoneClient.connect({ port: st.port, computerKey: computerKeys.publicKey, keys: phoneKeys, name: "Tim's phone" });
+      cleanups.push(() => ph.close());
+      const hello = await ph.request({ t: 'hello', app: '1.0', device: { name: 'iPhone', width: 393, height: 852 } });
+      assert.strictEqual(hello.t, 'hello', JSON.stringify(hello));
+      console.log(`# phone link on TRIF's own Node: handshake + hello ${ms(t0)} ms`);
+      await ph.close();
+    }
     await ext.close();
   });
 });

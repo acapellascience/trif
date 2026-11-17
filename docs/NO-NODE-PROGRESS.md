@@ -27,7 +27,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
       paired phones (phone-link state if merged), and ends on the runtime.
 - [x] 10. CI: job on macos-latest and ubuntu-latest that builds, removes node from PATH, runs 8 and 9; CI
       tests on the pinned Node version.
-- [ ] 11. Size and startup time recorded here; phone-link branch checked on the runtime (crypto X25519, http).
+- [x] 11. Size and startup time recorded here; phone-link branch checked on the runtime (crypto X25519, http).
 - [ ] 12. Windows: list what's left for branch `windows` (node.exe zip, .cmd wrappers) once it's on main.
 
 ## Measurements
@@ -48,6 +48,9 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 - CI (round 8, run 44193233783, tests/clean-machine.test.js): macos-latest (arm64) install.sh 12.0 s,
   runtime 135 MB, app 7.5 MB, `trif help` 114-256 ms, update 0.4 s, upgrade from v0.3.0 5.6 s; ubuntu-latest
   (x64) install.sh 3.0 s, runtime 127 MB, app 6.2 MB, `trif help` 49-53 ms, update 0.2 s, upgrade 1.7 s.
+- Phone link on the runtime (round 9, this Mac, origin/phone-link 564528f merged with no-node in a scratch
+  worktree, not pushed): stand-in phone's Noise_IK handshake + hello to the installed helper on TRIF's own
+  Node 9-12 ms; the phone-link suites on bare Node 24.22.3 (PATH = its bin + /usr/bin:/bin) 132/132 in 31.7 s.
 - Today (system Node 22): `node -e 0` 20-50 ms, `node helper/cli.js --version` 70-130 ms.
 
 ## Done this round
@@ -108,12 +111,38 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   CI: https://github.com/acapellascience/trif/actions/runs/44193233783 (all green; unit needed one
   rerun for the clickjack-browser flake), https://github.com/acapellascience/trif/actions/runs/44192560390 green.
 
+- Round 9, step 11 (7 still waits on For Tim 2 and 4): phone-link checked on the runtime. origin/phone-link
+  (564528f) merges into no-node with no conflicts. On bare Node 24.22.3 with no other node on PATH: its 15
+  non-browser phone suites 132/132 (pure branch), and on the merge those + extension/run-sandbox/
+  run-scope-reads/runtime/setup-runtime/uninstall/install-script 308 pass, 2 skipped (opt-in), 0 fail; the
+  merged tree's clean-machine file 13/13 (real Claude Code and Codex runs). New: the upgrade test seeds real
+  phone-link state once the branch is merged and the paired phone reconnects to the helper on the runtime.
+  CI: see below.
+
 ## Next step
 
-Step 7 (front door text) if Tim has answered For Tim 2 and 4; else step 11 (phone-link branch on the
-runtime: crypto X25519, http; startup/size already recorded below and from CI).
+Step 7 (front door text) once Tim has answered For Tim 2 and 4. Step 12 (Windows list) waits on `windows`
+reaching main. Nothing else is open: if neither has moved, stop and report rather than start new work.
 
 ## Notes for next round
+
+- Step 11 as built: tests/clean-machine.test.js `PHONE_LINK` (helper/lib/phonelink/noise.js exists, i.e. after
+  phone-link merges): the upgrade test then seeds the store's real format (computer key pair in the keyring,
+  service "TRIF phone link"/account "computer", base64url; phone-link.json {on, sync, publicKey, port: 0,
+  phones:[{id: keyId, name, key, pairedAt, lastSeen}]}) and, after the system node is deleted, asks the
+  installed helper `phone.status` (listening, port) and connects tests/phone-link-client.js with the phone's
+  keys: hello answered. Before the merge it seeds the old stand-in file (only "kept byte for byte" is checked).
+  Every helper in that test gets TRIF_DNS_SD = a /bin/sh stand-in (sleep) and TRIF_PHONE_LINK_HOST=127.0.0.1.
+- What phone-link needs from Node: crypto x25519 (generateKeyPairSync, diffieHellman, raw keys via DER
+  wrappers), chacha20-poly1305, sha256/hmac, timingSafeEqual, net (TCP listener), child_process for
+  /usr/bin/dns-sd and /usr/sbin/scutil (system binaries, not node). All in the official Node build's OpenSSL 3.
+  Keychain items are made by /usr/bin/security, so their ACL doesn't name node: the runtime's new path
+  brings no Keychain prompt.
+- Not tested (needs a real iPhone on Wi-Fi; the phone-link branch's device rounds cover the link itself): the
+  macOS firewall, when on, asks about incoming connections per program, so after the upgrade the listener's
+  program is TRIF's node (signed by the Node.js Foundation), not the system node: possibly one new "accept
+  incoming connections?" prompt, and maybe again when a pin bump replaces the binary. Check on a Mac with
+  the firewall on when phone-link and no-node both reach main.
 
 - Step 10 as built: the clean-machine job's test runner keeps the setup-node toolcache node on PATH (it
   needs `npm pack` and `node --test`); TRIF's processes only ever get PATH=/usr/bin:/bin, and with the
@@ -231,6 +260,11 @@ runtime: crypto X25519, http; startup/size already recorded below and from CI).
   TRIF_RUNTIME env switch for subprocess tests (setup via the CLI).
 
 ## For Tim
+
+5. **Phone link + firewall** (not a choice yet, a heads-up): with the macOS firewall on, the phone link's
+   listener moves from the computer's node to TRIF's own, which may bring one "accept incoming connections?"
+   prompt after the upgrade. A one-line note in the phone-link guide may be enough; checked once both
+   branches are on main.
 
 Not blocking steps 2-6 (they follow the recommendation and are easy to change):
 1. **Runtime choice**: private pinned Node (recommended: ~28 MB download, ~110 MB on disk, no signing for

@@ -169,6 +169,13 @@ async function harness(browser) {
     const t = targetInfos.find((x) => x.type === 'page' && x.url.endsWith('/sidepanel.html'));
     if (t) panelSid = await browser._attach(t.targetId); else await sleep(200);
   }
+  // (the target can be the window's first blank page a moment longer, without chrome.runtime: "Cannot read
+  // properties of undefined (reading 'connect')", CI: until the panel page itself has loaded)
+  for (let i = 0; i < 100; i++) {
+    const r = await browser.cdp.send('Runtime.evaluate', { expression: 'location.protocol === "chrome-extension:" && document.readyState === "complete" && typeof chrome?.runtime?.connect === "function"', returnByValue: true }, panelSid).catch(() => null);
+    if (r?.result?.value === true) break;
+    await sleep(100);
+  }
   // (defined again whenever it's missing: the page can still be loading when it's first defined, which wipes it:
   // "window.__ask is not a function", CI on the phone-link branch)
   const ASK = `(window.__ask || (window.__ask = (msg) => new Promise((resolve, reject) => {

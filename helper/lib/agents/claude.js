@@ -230,9 +230,11 @@ const adapter = {
       else if (msg.compact_result === 'success') emit({ kind: 'tool', name: 'compacted the conversation', summary: '' });
       else if (msg.compact_result) emit({ kind: 'error', message: `Couldn't compact the conversation (${msg.compact_result})` });
     } else if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-      // After compacting, Claude Code replays the messages it kept (old replies, already in the chat)
-      // until the command's own output; don't show them twice.
-      state.replaying = true;
+      // After `/compact`, Claude Code replays the messages it kept (old replies, already in the chat)
+      // until the command's own output; don't show them twice. Not after an automatic compaction in the
+      // middle of a run (2.1.319: trigger "auto"), which replays nothing and has no command output to end
+      // the replay: the run goes on, and its later replies and result are new.
+      state.replaying = msg.compact_metadata?.trigger !== 'auto';
     } else if (msg.type === 'user' && msg.message) {
       // A slash command's output (`/context`, `/cost`…) comes back as <local-command-stdout>.
       const text = typeof msg.message.content === 'string' ? msg.message.content : '';
@@ -242,8 +244,9 @@ const adapter = {
         const said = out[1].trim();
         if (said && !/^Compacted\b/.test(said)) emit({ kind: 'text', text: said });
       }
-    } else if (state.replaying) {
-      // (replayed messages: see compact_boundary)
+    } else if (state.replaying && msg.type !== 'result') {
+      // (replayed messages: see compact_boundary. Never the result, which isn't replayed: without it the
+      // run would end "without finishing".)
     } else if (msg.type === 'assistant' && msg.message && Array.isArray(msg.message.content)) {
       // How much the conversation weighs now: what this step read (the panel suggests a new chat when it's long)
       const u = msg.message.usage;
@@ -289,6 +292,11 @@ const adapter = {
     }
   },
 
+  // stderr lines that are no reason a run stopped, left out of its error (runs.js _finish). Claude Code
+  // 2.1.319 ignores the allow rules in the run folder's .claude/settings.json (the folder is never
+  // "trusted"); the same rules go on the command line (--allowedTools), which it uses.
+  stderrNoise: /^Ignoring \d+ permissions\.allow entr(y|ies) from \.claude\/settings\.json: this workspace has not been trusted\b/,
+
   // The process ended without a result line: a friendlier message than the raw stderr when we can.
   explainExit({ stderr, state = {} }) {
     const s = String(stderr || '');
@@ -314,6 +322,8 @@ const adapter = {
   //   If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&…
   //   Paste code here if prompted >
   // and waits for the code (shown by the redirect page) on stdin.
+  // Settings' Log out (agents/index.js logout): Claude Code's one login on this computer, the terminal's too.
+  logout: { args: ['auth', 'logout'] },
   login: {
     args: ['auth', 'login'],
     parseLine: parseLoginLine,

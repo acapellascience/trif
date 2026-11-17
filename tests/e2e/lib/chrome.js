@@ -345,6 +345,13 @@ class ChromeDriver {
     }
   }
 
+  /** A trusted right-button press and release at (x, y): what a press does, without a click's action. */
+  async rightPress(ctx, x, y) {
+    const sid = await this._attach(ctx);
+    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sid);
+    for (const type of ['mousePressed', 'mouseReleased']) await this.cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'right', clickCount: 1 }, sid);
+  }
+
   /** A trusted press of `key` ('Escape') in the page `ctx`. */
   async key(ctx, key) {
     const sid = await this._attach(ctx);
@@ -400,4 +407,4 @@ class ChromeDriver {
   }
 }
 
-module.exports = { ChromeDriver, EXTENSION_ID, SITE_ACCESS_HOSTS, findChrome };
+module.exports = { ChromeDriver, Cdp, EXTENSION_ID, SITE_ACCESS_HOSTS, findChrome };

@@ -10,10 +10,11 @@ const { envVar } = require('./env');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
-const { scopeFor, scopeOf, runScope, cleanSplits } = require('./scope');
+const { scopeFor, scopeOf, runScope, cleanSplits, isPhoneSite } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
+const { ownFolder } = require('./stage'); // (which site folders are a run's own: its phone twin's only, for a phone scope)
 const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
@@ -277,7 +278,8 @@ function workspaceLinks(ws, realMods, deniedTarget) {
 // helper reads: the terms' table that `trif explain` reads, extension/explain.json, and the page-wide rules
 // sitecombos.js loads at start, extension/pagewide.js) and the examples (`trif install-example`): not the
 // whole package folder, which in a git checkout holds .git, keys and build output. tests/runcode.test.js
-// fails when the helper reads another extension file that isn't here.
+// fails when the helper reads another extension file that isn't here; tests/run-sandbox.test.js when a
+// real `trif` command in a real run's sandbox can't read a file it needs.
 const CODE_ITEMS = ['helper', 'package.json', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'examples'];
 function trifCode(root = path.join(__dirname, '..', '..')) {
   return CODE_ITEMS.map((n) => path.join(root, n)).filter((p) => fs.existsSync(p)).map(realOrResolved);
@@ -479,7 +481,10 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
   // the run's scope: held.js), with the version before running meanwhile.
   // (a sensitive host's own site, mail.google.com, is another site to a google.com run, and the other way
   // round: scope.js scopeOf with the sites of their own the extension sent)
-  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && n !== ALL_SITES_DIR);
+  // (A run from the phone view, scope phone~x.com: its phone twin's folder only, a sensitive site's twin too
+  // (phone~mail.google.com); every desktop folder, all-sites/ too, is read-only to it, the site's own desktop mods
+  // there for reference: stage.js ownFolder, ownTwin)
+  const otherSites = names.filter((n) => !ownFolder(n, scope, splits));
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
@@ -629,6 +634,8 @@ class Runs {
       ws,
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
+      // (the panel's tab is TRIF's phone view, "Edit for mobile": extension/phone.js; {device, width})
+      phone: args.phone && typeof args.phone === 'object' && typeof args.phone.device === 'string' ? { device: args.phone.device.slice(0, 40), width: Number(args.phone.width) || null } : null,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
@@ -826,7 +833,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -1112,7 +1119,9 @@ class Runs {
       done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, ...(Number.isFinite(d.contextTokens) ? { contextTokens: d.contextTokens } : {}), sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
-        const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
+        // (without the agent's own notices that say nothing about why it stopped: adapter.stderrNoise)
+        const noise = run.adapter.stderrNoise;
+        const tail = run.stderr.trim().split('\n').filter((l) => !(noise && noise.test(l))).slice(-12).join('\n').trim().slice(-2000);
         // (A message, or a whole error event: util.js loginError.)
         const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;

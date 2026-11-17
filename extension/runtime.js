@@ -326,7 +326,429 @@ export function runtimeMain(RECORDING, safeStringify) {
   }
 }
 
-/** Source of the `__webmods_runtime` user script with the recording set embedded. */
+/**
+ * The clickjacking guard (RT-3: docs/SANDBOX-TIER-NOTES.md, docs/SECURITY-TIERS.md). CSS can make one of the
+ * page's controls invisible and float it over something else, so the user's own click lands on it unseen. On a
+ * trusted press (pointer, touch, a click with no press before it, Enter or Space on a control), before the page
+ * sees it, TRIF looks at the control pressed: is it unseen (opacity under FADE all the way up, masked out, a few
+ * pixels small, or showing nothing at all: no text, border, background or picture)? Almost every press stops
+ * there. If it is, TRIF looks again with the mods' styles taken away for that moment (their style elements and
+ * adopted sheets disabled, boxed mods' inline styles and animations on its ancestors undone by sandbox.js,
+ * the transitions that starts cancelled; all put back before anything paints): unseen without them too, it's the site's own design
+ * (a file input the site made invisible) and the press goes on; seen without them, the mods hid it, and the press
+ * and the rest of its gesture (up, click, its keyup) are stopped and the mod named in its errors (by the sheet's
+ * owner: `data-trif-style` on TRIF's style elements, `sheetOwner` for adopted ones), which the panel shows.
+ * Also stopped, without that comparison: a press through a boxed mod's own element drawn over the control with
+ * pointer-events: none (sandbox.js answers trif:cj-cover). A frame the mods hid is made unclickable while the
+ * pointer is over it (its presses happen inside it, out of TRIF's reach). Free mods' code isn't covered: it
+ * runs in the page and can do anything the page can.
+ * Costs: `window.__webmods.guard.stats` (ms per press checked, and for the rarer second look).
+ */
+export function clickGuard(sheetOwner) {
+  if (window.__trifGuardOn) return;
+  Object.defineProperty(window, '__trifGuardOn', { value: true });
+  const W = window.__webmods || null;
+  const gcs = window.getComputedStyle;
+  const look = (el, pseudo) => gcs.call(window, el, pseudo || null);
+  const now = () => performance.now();
+  const FADE = 0.25; // (combined opacity under which a control counts as unseen)
+  const TINY = 4; // (px: narrower or shorter than this, unseen)
+  const INK_MAX = 60; // (elements looked at for anything a control shows; more: it shows something)
+  const stats = { presses: 0, checked: 0, ms: 0, maxMs: 0, firstMs: null, deep: 0, deepMs: 0, maxDeepMs: 0, covers: 0, coverMs: 0, stopped: 0 };
+  const stoppedList = [];
+  if (W) W.guard = { stats, stopped: stoppedList };
+
+  const parentOf = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || null;
+  const ROLES = /^(button|link|checkbox|radio|switch|menuitem|menuitemcheckbox|menuitemradio|tab|option|slider|combobox|treeitem|spinbutton)$/;
+  const FRAMES = /^(iframe|frame|embed|object)$/;
+  const LINKS = /^(a|area)$/;
+  const interactive = (el) => {
+    const t = el.localName;
+    if (LINKS.test(t)) return el.hasAttribute('href');
+    if (t === 'input') return String(el.type) !== 'hidden';
+    if (t === 'button' || t === 'select' || t === 'textarea' || t === 'label' || t === 'summary' || FRAMES.test(t)) return true;
+    if (el.hasAttribute('onclick') || el.hasAttribute('contenteditable')) return true;
+    const r = el.getAttribute('role');
+    if (r && ROLES.test(r.trim().split(/\s+/)[0])) return true;
+    const ti = el.getAttribute('tabindex');
+    return ti !== null && ti.trim() !== '-1';
+  };
+  const TOP = /^(html|body)$/;
+  // The control a press is on: the element hit or its nearest interactive ancestor; for a control the page
+  // made of plain elements, the outermost with the pointer cursor. null: not a control.
+  const controlOf = (path) => {
+    const hit = path.find((n) => n && n.nodeType === 1);
+    if (!hit) return null;
+    let i = 0;
+    for (let n = hit; n && i < 40 && !TOP.test(n.localName); n = parentOf(n), i++) if (interactive(n)) return { el: n, hit };
+    let top = null;
+    i = 0;
+    for (let n = hit; n && i < 40 && !TOP.test(n.localName); n = parentOf(n), i++) { if (look(n).cursor !== 'pointer') break; top = n; }
+    return top ? { el: top, hit } : null;
+  };
+
+  const num = (s) => { const t = String(s).trim(); const v = parseFloat(t); return Number.isFinite(v) ? (t.endsWith('%') ? v / 100 : v) : 1; };
+  // (a computed colour's alpha: rgb()/rgba() with commas, or a / alpha)
+  const alpha = (c) => {
+    if (!c || c === 'transparent') return 0;
+    const m = /\(([^)]*)\)/.exec(c);
+    if (!m) return 1;
+    const slash = m[1].split('/');
+    if (slash.length > 1) return num(slash[1]);
+    const parts = m[1].split(',');
+    return parts.length >= 4 ? num(parts[3]) : 1;
+  };
+  // (what a filter leaves of the opacity: opacity(); a heavy blur or an SVG filter (url()), which can make it
+  // transparent, as nothing)
+  const filterFade = (f) => {
+    if (!f || f === 'none') return 1;
+    if (/url\(/.test(f)) return 0;
+    let k = 1;
+    for (const m of f.matchAll(/opacity\(\s*([^)]*)\)/g)) k *= Math.max(0, Math.min(1, num(m[1])));
+    for (const m of f.matchAll(/blur\(\s*([\d.]+)px\s*\)/g)) if (parseFloat(m[1]) >= 8) k = 0;
+    return k;
+  };
+  // (a mask that hides it: an image (TRIF can't see what it leaves), or a gradient of transparent colours only)
+  const maskHides = (c) => {
+    const m = c.maskImage || c.webkitMaskImage || '';
+    if (!m || m === 'none') return false;
+    if (/url\(/.test(m)) return true;
+    const cs = m.match(/rgba?\([^)]*\)|color\([^)]*\)|transparent/g) || [];
+    return cs.length > 0 && cs.every((x) => alpha(x) < 0.1);
+  };
+  const SIDES = ['Top', 'Right', 'Bottom', 'Left'];
+  const borderInk = (c) => SIDES.some((s) => { const st = c[`border${s}Style`]; return st !== 'none' && st !== 'hidden' && parseFloat(c[`border${s}Width`]) > 0 && alpha(c[`border${s}Color`]) >= 0.1; });
+  const boxInk = (c) => alpha(c.backgroundColor) >= 0.1 || (!!c.backgroundImage && c.backgroundImage !== 'none') || (!!c.boxShadow && c.boxShadow !== 'none') || borderInk(c)
+    || (c.outlineStyle !== 'none' && parseFloat(c.outlineWidth) > 0 && alpha(c.outlineColor) >= 0.1);
+  const textShows = (c) => parseFloat(c.fontSize) >= 4 && (alpha(c.webkitTextFillColor || c.color) >= 0.1 || (!!c.textShadow && c.textShadow !== 'none') || parseFloat(c.webkitTextStrokeWidth) > 0);
+  const hasText = (el) => { for (let t = el.firstChild; t; t = t.nextSibling) if (t.nodeType === 3 && /\S/.test(t.data)) return true; return false; };
+  const pseudoInk = (el) => {
+    for (const p of ['::before', '::after']) {
+      const c = look(el, p);
+      const ct = c.content;
+      if (!ct || ct === 'none' || ct === 'normal' || c.display === 'none' || c.visibility !== 'visible' || num(c.opacity) * filterFade(c.filter) < FADE) continue;
+      if (boxInk(c) || /url\(/.test(ct)) return true;
+      if (ct !== '""' && ct !== "''" && textShows(c)) return true;
+    }
+    return false;
+  };
+  const REPLACED = /^(img|svg|video|canvas|iframe|frame|embed|object|math)$/;
+  const FIELDS = /^(input|select|textarea|meter|progress)$/;
+  // Whether a control shows anything: itself or something in it (not what's faded or masked out inside it)
+  const shows = (top) => {
+    const stack = [[top, 1]];
+    let seen = 0;
+    while (stack.length) {
+      const [el, o0] = stack.pop();
+      if (++seen > INK_MAX) return true;
+      const c = look(el);
+      if (c.display === 'none') continue;
+      let o = o0;
+      const box = c.display !== 'contents';
+      if (el !== top && box) { o *= num(c.opacity) * filterFade(c.filter); if (o < FADE || maskHides(c)) continue; }
+      const t = el.localName;
+      if (box && c.visibility === 'visible') {
+        if (REPLACED.test(t)) { const r = el.getBoundingClientRect(); if (r.width >= 2 && r.height >= 2) return true; }
+        else if (FIELDS.test(t)) { if ((c.appearance && c.appearance !== 'none') || (c.webkitAppearance && c.webkitAppearance !== 'none') || boxInk(c) || textShows(c)) return true; }
+        else if (boxInk(c) || (hasText(el) && textShows(c)) || pseudoInk(el)) return true;
+      }
+      if (REPLACED.test(t)) continue;
+      const kids = el.shadowRoot ? [...el.children, ...el.shadowRoot.children] : el.children;
+      for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], o]);
+    }
+    return false;
+  };
+  const tiny = (el) => { const r = el.getBoundingClientRect(); return r.width < TINY || r.height < TINY; };
+  // (an element's opacity where its running transitions end: a control fading in as the pointer reaches it,
+  // the site's own hover effect, is judged as it will be; an animation's value is taken as it is now)
+  const atRest = (n, c) => {
+    let o = num(c.opacity), f = c.filter;
+    let anims = [];
+    try { anims = n.getAnimations(); } catch (e) { anims = []; }
+    for (const a of anims) {
+      if (typeof CSSTransition !== 'function' || !(a instanceof CSSTransition) || a.playState !== 'running' || !a.effect) continue;
+      let kf = [];
+      try { kf = a.effect.getKeyframes(); } catch (e) { kf = []; }
+      const end = kf[kf.length - 1] || {};
+      if (a.transitionProperty === 'opacity' && end.opacity !== undefined) o = num(end.opacity);
+      if (a.transitionProperty === 'filter' && end.filter !== undefined) f = String(end.filter);
+    }
+    return o * filterFade(f);
+  };
+  // Why the control is unseen, or null: faded, masked, tiny or inkless
+  const unseen = (ctl) => {
+    let o = 1;
+    let i = 0;
+    const chain = [];
+    for (let n = ctl.el; n && i < 300; n = parentOf(n), i++) {
+      const c = look(n);
+      if (c.display === 'contents') continue;
+      chain.push([n, c]);
+      o *= num(c.opacity) * filterFade(c.filter);
+      if (maskHides(c)) return 'masked';
+    }
+    if (o < FADE) {
+      let r = 1;
+      for (const [n, c] of chain) r *= atRest(n, c);
+      if (r < FADE) return 'faded';
+    }
+    if (tiny(ctl.el) && (ctl.hit === ctl.el || tiny(ctl.hit))) return 'tiny';
+    return shows(ctl.el) ? null : 'inkless';
+  };
+
+  // ---- the look without the mods' styles
+  // (the tree scopes whose styles reach the control: its own root, its host's, …, the document)
+  const scopesOf = (el) => { const out = []; for (let n = el; n;) { const r = n.getRootNode(); if (out.includes(r)) break; out.push(r); n = r.host || null; } return out; };
+  const sheetsIn = (scopes) => {
+    const out = [];
+    for (const root of scopes) {
+      const els = root === document ? document.getElementsByTagName('style') : (root.querySelectorAll ? root.querySelectorAll('style') : []);
+      for (const st of els) { const o = st.getAttribute('data-trif-style'); if (o && st.sheet) out.push({ sheet: st.sheet, owner: o, was: false }); }
+      let ad = [];
+      try { ad = root.adoptedStyleSheets || []; } catch (e) { ad = []; }
+      for (const sh of ad) { const o = typeof sheetOwner === 'function' ? sheetOwner(sh) : null; if (o) out.push({ sheet: sh, owner: o, was: false }); }
+    }
+    return out;
+  };
+  // A style change starts the page's transitions, and a look would read their first frame (the value before):
+  // so the transitions TRIF's look starts are cancelled as they start (the page gets transitioncancel), on the
+  // way there and on the way back, and the page never shows them. (A sheet that makes every element's
+  // transition none costs 30 ms on a page of 9000 elements: this costs well under one.)
+  const animsNow = () => { try { return document.getAnimations(); } catch (e) { return []; } };
+  const settle = (before) => {
+    if (typeof CSSTransition !== 'function') return;
+    for (const a of animsNow()) if (a instanceof CSSTransition && !before.has(a)) { try { a.cancel(); } catch (e) { /* gone */ } }
+  };
+  // TRIF's sandbox world (sandbox.js), during the dispatch: undo the boxed mods' inline styles and animations on
+  // the control and its ancestors (all but `keep`'s), say whose they were, and whether a mod made or moved it
+  let answers = null;
+  // (whether TRIF's sandbox world is on this page, and whether a mod there made an element: it says so, and
+  // answers trif:cj-hello; without it, no event crosses to it on a press)
+  let boxes = false, made = false;
+  document.addEventListener('trif:cj-here', (e) => { boxes = true; try { if (JSON.parse(String(e.detail)).made) made = true; } catch (err) { /* not one */ } }, true);
+  document.addEventListener('trif:cj-answer', (e) => { if (answers && typeof e.detail === 'string') answers.push(e.detail); }, true);
+  const ask = (el, type, detail) => {
+    answers = [];
+    try { el.dispatchEvent(new CustomEvent(type, { detail, composed: true })); } catch (e) { /* none */ }
+    const got = answers;
+    answers = null;
+    const out = [];
+    for (const t of got) { try { const o = JSON.parse(t); if (o && typeof o === 'object') out.push(o); } catch (e) { /* not one */ } }
+    return out;
+  };
+  const boxOff = (el, keep) => {
+    const out = { mods: [], made: null, moved: null };
+    if (!boxes) return out;
+    for (const o of ask(el, 'trif:cj-off', JSON.stringify({ keep: keep || null }))) {
+      if (Array.isArray(o.mods)) for (const m of o.mods) if (typeof m === 'string') out.mods.push(m);
+      if (typeof o.made === 'string') out.made = o.made;
+      if (typeof o.moved === 'string') out.moved = o.moved;
+    }
+    return out;
+  };
+  const boxOn = (el) => { if (!boxes) return; try { el.dispatchEvent(new CustomEvent('trif:cj-on', { composed: true })); } catch (e) { /* none */ } };
+  const cover = (el, x, y) => { if (!made) return null; for (const o of ask(el, 'trif:cj-cover', JSON.stringify({ x, y }))) if (typeof o.covered === 'string') return o.covered; return null; };
+  // (a mod's own element pressed: only one with a default action of the page's kind counts)
+  const OWN_ACTS = /^(a|area|button|input|select|textarea|label|summary)$/;
+  // Whose sheet it was, without restyling the page for each: the sheets with a rule that changes how something
+  // looks and matches the control, an ancestor, or something in it (only when that leaves more than one, each
+  // of those alone is tried)
+  const LOOKS = /^(opacity|filter|mask|-webkit-mask|visibility|color|-webkit-text|background|border|outline|box-shadow|font|width|height|min-|max-|transform|scale|zoom|display|content|clip|padding|inset|position|top|left|right|bottom|text-|line-height|appearance|-webkit-appearance|mix-blend)/;
+  const PSEUDO_EL = /::?(before|after|marker|placeholder|selection|first-line|first-letter|backdrop|file-selector-button|-webkit-[\w-]+|-moz-[\w-]+)/g;
+  const touches = (sheet, els) => {
+    let rules;
+    try { rules = sheet.cssRules; } catch (e) { return true; }
+    const hits = (sel) => {
+      if (/:host|::part|::slotted|&/.test(sel)) return true;
+      const s = sel.replace(PSEUDO_EL, '').trim() || '*';
+      for (const el of els) { try { if (el.matches(s)) return true; } catch (e) { return true; } }
+      return false;
+    };
+    const looks = (st) => { for (let i = 0; i < st.length; i++) if (LOOKS.test(st[i])) return true; return false; };
+    let budget = 5000;
+    const walk = (list, depth) => {
+      for (const r of list) {
+        if (--budget < 0) return true;
+        if (r.style && typeof r.selectorText === 'string' && looks(r.style) && hits(r.selectorText)) return true;
+        if (r.cssRules && r.cssRules.length && depth < 10 && walk(r.cssRules, depth + 1)) return true;
+      }
+      return false;
+    };
+    return walk(rules, 0);
+  };
+  const near = (el) => {
+    const out = [];
+    for (let n = el, i = 0; n && i < 300; n = parentOf(n), i++) out.push(n);
+    const inside = el.querySelectorAll ? el.querySelectorAll('*') : [];
+    for (let i = 0; i < inside.length && i < INK_MAX; i++) out.push(inside[i]);
+    return out;
+  };
+
+  const recent = new WeakMap(); // control -> when it was unseen without the mods too (the site's own)
+  const deep = (ctl, why) => {
+    const r = recent.get(ctl.el);
+    if (r && now() - r < 2000) return null;
+    const t0 = now();
+    stats.deep++;
+    const scopes = scopesOf(ctl.el);
+    const sheets = sheetsIn(scopes);
+    const before = new Set(animsNow());
+    const sheetsOff = (keep) => { for (const s of sheets) { s.was = s.sheet.disabled; if (s.owner !== keep) s.sheet.disabled = true; } };
+    const sheetsBack = () => { for (const s of sheets) s.sheet.disabled = s.was; };
+    // (unseen with `keep`'s styles alone)
+    const alone = (keep) => {
+      sheetsOff(keep);
+      boxOff(ctl.el, keep);
+      try { settle(before); return !!unseen(ctl); } finally { sheetsBack(); boxOn(ctl.el); }
+    };
+    try {
+      sheetsOff(null);
+      const off = boxOff(ctl.el, null);
+      let without;
+      try { settle(before); without = unseen(ctl); } finally { sheetsBack(); boxOn(ctl.el); }
+      if (off.made && !OWN_ACTS.test(ctl.el.localName)) return null;
+      if (off.moved) return { why, mods: [off.moved], el: ctl.el };
+      if (without) { recent.set(ctl.el, now()); return null; }
+      const els = near(ctl.el);
+      const owners = [...new Set([...sheets.filter((s) => touches(s.sheet, els)).map((s) => s.owner), ...off.mods])];
+      const all = [...new Set([...sheets.map((s) => s.owner), ...off.mods])];
+      if (!all.length) return null;
+      let mods = owners.length ? owners : all;
+      if (mods.length > 1 && mods.length <= 6) { const one = mods.filter((o) => alone(o)); if (one.length) mods = one; }
+      return { why, mods, el: ctl.el };
+    } finally {
+      // (and the ones the way back started: the page goes on from where it was, as if TRIF hadn't looked)
+      settle(before);
+      const ms = now() - t0;
+      stats.deepMs += ms;
+      if (ms > stats.maxDeepMs) stats.maxDeepMs = ms;
+    }
+  };
+  const verdict = (ctl, x, y) => {
+    const t0 = now();
+    stats.checked++;
+    try {
+      if (!ctl.el.isConnected) return null;
+      const why = unseen(ctl);
+      if (!why) {
+        if (x === null || x === undefined || !made) return null;
+        const c0 = now();
+        const mod = cover(ctl.el, x, y);
+        stats.covers++;
+        stats.coverMs += now() - c0;
+        return mod ? { why: 'covered', mods: [mod], el: ctl.el } : null;
+      }
+      return deep(ctl, why);
+    } finally { const ms = now() - t0; stats.ms += ms; if (ms > stats.maxMs) stats.maxMs = ms; if (stats.firstMs === null) stats.firstMs = ms; }
+  };
+
+  // ---- telling: the mod's errors (trif errors; the panel's card: background.js), once per mod and reason here
+  const WHY = {
+    faded: 'made it nearly transparent',
+    masked: 'masked it out',
+    tiny: 'made it a few pixels small',
+    inkless: 'left nothing of it showing (no text, border, background or picture)',
+    covered: 'covered it with one of the mod\'s own elements, which lets clicks through to it',
+  };
+  const said = new Set();
+  const describe = (el) => {
+    const label = String(el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || el.getAttribute('value') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    return `<${el.localName}${el.id ? `#${el.id}` : ''}>${label ? ` ${label}` : ''}`.replace(/"/g, '\'');
+  };
+  const report = (v) => {
+    stats.stopped++;
+    const what = describe(v.el);
+    stoppedList.push({ mods: v.mods, why: v.why, control: what, time: Date.now() });
+    if (stoppedList.length > 50) stoppedList.shift();
+    for (const mod of v.mods) {
+      const key = `${mod}|${v.why}`;
+      if (said.has(key)) continue;
+      said.add(key);
+      if (W && Array.isArray(W.errors)) {
+        W.errors.push({ mod, kind: 'clickjack', why: v.why, stack: '', time: Date.now(), message: `TRIF stopped a click on the page's "${what}": this mod's style ${WHY[v.why] || 'hid it'}, and without the mod it shows, so the click would have landed on it unseen.` });
+        if (W.errors.length > 200) W.errors.splice(0, W.errors.length - 200);
+      }
+    }
+    try { document.dispatchEvent(new CustomEvent('trif:cj-stopped')); } catch (e) { /* none */ }
+  };
+
+  // ---- the presses
+  let g = null; // the gesture: {t, ptr (began with pointerdown), key (began with a key), stop}
+  const halt = (ev) => { try { if (ev.cancelable && ev.type !== 'touchstart') ev.preventDefault(); } catch (e) { /* passive */ } ev.stopImmediatePropagation(); };
+  const judge = (ev, x, y) => {
+    let ctl = null;
+    try { ctl = controlOf(ev.composedPath()); } catch (e) { ctl = null; }
+    if (!ctl) return;
+    let v = null;
+    try { v = verdict(ctl, x, y); } catch (e) { v = null; }
+    if (v) { g.stop = true; halt(ev); report(v); }
+  };
+  // (a frame the mods hid: unclickable while it's hidden, as its presses go inside it, where TRIF isn't)
+  const shielded = new Set();
+  let shieldSheet = null;
+  const shield = (el) => {
+    if (!shieldSheet) { shieldSheet = new CSSStyleSheet(); shieldSheet.replaceSync('[data-trif-guard] { pointer-events: none !important; }'); }
+    const r = el.getRootNode();
+    try { if (!r.adoptedStyleSheets.includes(shieldSheet)) r.adoptedStyleSheets = [...r.adoptedStyleSheets, shieldSheet]; } catch (e) { /* none */ }
+    el.setAttribute('data-trif-guard', '');
+    shielded.add(el);
+  };
+  const unshield = (x, y) => {
+    for (const f of [...shielded]) {
+      const b = f.getBoundingClientRect();
+      if (!f.isConnected || x < b.left || x > b.right || y < b.top || y > b.bottom) { f.removeAttribute('data-trif-guard'); shielded.delete(f); }
+    }
+  };
+  const onPress = (ev) => {
+    if (!ev.isTrusted) return;
+    stats.presses++;
+    const t = now();
+    if (ev.type !== 'pointerdown' && g && g.ptr && t - g.t < 1500) { if (g.stop) halt(ev); return; } // (the same press)
+    g = { t, ptr: ev.type === 'pointerdown', key: false, stop: false };
+    const pt = ev.type === 'touchstart' ? ev.touches && ev.touches[0] : ev;
+    if (shielded.size && pt) unshield(pt.clientX, pt.clientY);
+    judge(ev, pt ? pt.clientX : null, pt ? pt.clientY : null);
+  };
+  const onFollow = (ev) => {
+    if (!ev.isTrusted) return;
+    const t = now();
+    if (g && g.stop && t - g.t < 30000) { halt(ev); return; }
+    // (a click with no press before it: assistive technology's, say)
+    if (ev.type === 'click' && (!g || t - g.t >= 30000)) {
+      g = { t, ptr: false, key: false, stop: false };
+      judge(ev, ev.detail > 0 ? ev.clientX : null, ev.detail > 0 ? ev.clientY : null);
+    }
+  };
+  const PRESSES_KEYS = /^(checkbox|radio|button|submit|reset|file|image|color|range)$/;
+  const onKey = (ev) => {
+    if (!ev.isTrusted || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+    if (ev.type === 'keyup' || ev.repeat) { if (g && g.key && g.stop) halt(ev); return; }
+    const el = ev.composedPath()[0];
+    if (!el || el.nodeType !== 1 || el.localName === 'textarea' || el.isContentEditable) return; // (typing)
+    if (el.localName === 'input' && ev.key === ' ' && !PRESSES_KEYS.test(String(el.type))) return;
+    g = { t: now(), ptr: false, key: true, stop: false };
+    judge(ev, null, null);
+  };
+  const onOver = (ev) => {
+    if (!ev.isTrusted) return;
+    const el = ev.composedPath()[0];
+    if (!el || el.nodeType !== 1 || !FRAMES.test(el.localName) || shielded.has(el)) return;
+    let v = null;
+    try { v = verdict({ el, hit: el }, ev.clientX, ev.clientY); } catch (e) { v = null; }
+    if (v) { shield(el); report(v); }
+  };
+  try { document.dispatchEvent(new CustomEvent('trif:cj-hello')); } catch (e) { /* none */ }
+  const hard = { capture: true, passive: false };
+  window.addEventListener('pointerdown', onPress, hard);
+  window.addEventListener('mousedown', onPress, hard);
+  // (passive: a touch listener that can cancel makes every scroll wait for the page; the click is what acts)
+  window.addEventListener('touchstart', onPress, { capture: true, passive: true });
+  for (const t of ['pointerup', 'mouseup', 'touchend', 'click', 'dblclick', 'auxclick', 'contextmenu']) window.addEventListener(t, onFollow, hard);
+  window.addEventListener('keydown', onKey, hard);
+  window.addEventListener('keyup', onKey, hard);
+  window.addEventListener('pointerover', onOver, { capture: true, passive: true });
+}
+
 /**
  * The page's side of two boxed-mod powers (docs/POWERS.md), TRIF's code in the page's world. Talks to TRIF's
  * sandbox world only through events on the shared DOM, with JSON text: the boxed mod never touches the page's
@@ -341,7 +763,7 @@ export function runtimeMain(RECORDING, safeStringify) {
  *   it; `trif:shadow-css` (trif.css with { shadow }): a checked sheet, as text, for the roots of hosts that match.
  * The page can see and send these events too: it learns or changes only its own data.
  */
-export function pageBridge() {
+export function pageBridge(guard) {
   if (window.__trifBridge) return;
   Object.defineProperty(window, '__trifBridge', { value: true });
   const MAX = 5 * 1024 * 1024;
@@ -429,6 +851,7 @@ export function pageBridge() {
   // (and inside other roots, at any depth: each root found is watched too, for hosts that come into it later)
   const roots = new WeakMap(); // host -> its root
   const shadowSheets = new Map(); // id -> { sel, sheet }
+  const sheetOwners = new WeakMap(); // sheet -> the boxed mod whose it is (the clickjacking guard names it)
   const watchedRoots = new WeakSet();
   let shadowMo = null;
   const rootOf = (h) => roots.get(h) || h.shadowRoot;
@@ -474,6 +897,7 @@ export function pageBridge() {
     let sheet;
     try { sheet = new CSSStyleSheet(); sheet.replaceSync(o.text); } catch (err) { return; }
     shadowSheets.set(o.id, { sel: o.sel, sheet });
+    sheetOwners.set(sheet, o.id.split('#')[0]);
     if (!shadowMo && document.documentElement) {
       shadowMo = new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1) { adopt(n); eachRoot(n, (h) => adopt(h)); } });
       shadowMo.observe(document.documentElement, { childList: true, subtree: true });
@@ -672,6 +1096,8 @@ export function pageBridge() {
     startRewriting();
   }, true);
 
+  // the clickjacking guard (clickGuard, above), which knows these sheets' owners
+  if (typeof guard === 'function') { try { guard((sh) => sheetOwners.get(sh) || null); } catch (e) { /* the page goes on without it */ } }
   // (a boxed mod that asked before this was here: it asks again when it sees this)
   document.dispatchEvent(new CustomEvent('trif:bridge-ready'));
 }
@@ -681,7 +1107,7 @@ export function runtimeCode(recordingSites) {
 const RECORDING = ${JSON.stringify((recordingSites || []).map((s) => String(s).toLowerCase()))};
 try { (${runtimeMain.toString()})(RECORDING, ${safeStringify.toString()}); }
 catch (e) { console.error('[TRIF] runtime failed', e); }
-try { (${pageBridge.toString()})(); }
+try { (${pageBridge.toString()})(${clickGuard.toString()}); }
 catch (e) { console.error('[TRIF] bridge failed', e); }
 })();
 //# sourceURL=trif-runtime.js`;

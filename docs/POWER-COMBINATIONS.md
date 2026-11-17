@@ -50,7 +50,7 @@ A hold lists each warning its mod's powers make, one line each, in this order (t
 | 19 | Together, it could pass what it reads to the site a video comes from, by which video it offers you. | a read + `embeds` (5); `site-storage` + `embeds`; `image-variants` + `embeds`; `embeds` + `edit-uploads` |
 | 20 | Together, it could turn what it reads into sounds that a device nearby could pick up. | a read + `sound` (5); `site-storage` + `sound`; `image-variants` + `sound`; `sound` + `edit-uploads` |
 
-A mod with more than 3 powers gets, in place of these lines: **Mods with many powers can act in unspecific or powerful ways. Treat this with caution.** (keyed by its exact set of powers; its
+A mod with more than 3 powers gets, in place of these lines: **Mods with many powers could act in surprising ways. Treat them with caution.** (keyed by its exact set of powers; its
 combinations are still needs of their own, so a later version with fewer of them doesn't ask again for what was allowed).
 
 ## Pairs (210)

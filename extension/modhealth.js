@@ -79,9 +79,11 @@ export function recordErrors(health, mods, errors, now = Date.now()) {
     const fp = fingerprint(err, mod.id);
     const had = e.errors[fp];
     if (had) { had.count = (had.count || 1) + 1; had.last = now; continue; }
-    e.errors[fp] = { message: String(err.message ?? '').slice(0, 2000), stack: String(err.stack ?? '').slice(0, 4000), line: errorLine(err, mod.id), count: 1, first: now, last: now };
+    // (clickjack: a click TRIF's guard stopped, runtime.js clickGuard; not the mod's error, though kept as one)
+    const cj = err?.kind === 'clickjack' ? { clickjack: true } : {};
+    e.errors[fp] = { message: String(err.message ?? '').slice(0, 2000), stack: String(err.stack ?? '').slice(0, 4000), line: errorLine(err, mod.id), count: 1, first: now, last: now, ...cj };
     trim(e.errors, MAX_FP, (x) => x.last || 0);
-    fresh.push({ mod: mod.id, fp, message: e.errors[fp].message, stack: e.errors[fp].stack, line: e.errors[fp].line });
+    fresh.push({ mod: mod.id, fp, message: e.errors[fp].message, stack: e.errors[fp].stack, line: e.errors[fp].line, ...cj });
   }
   trim(health, MAX_MODS, (x) => Math.max(0, ...Object.values(x?.errors || {}).map((y) => y.last || 0)));
   return fresh;
@@ -116,7 +118,7 @@ export function openErrors(health, mod) {
   const e = health[mod.id];
   if (!e || e.hash !== mod.hash) return [];
   return Object.entries(e.errors || {}).filter(([fp]) => !e.dismissed?.[fp])
-    .map(([fp, x]) => ({ fp, message: x.message, line: x.line || 0, count: x.count || 1, ...(x.quiet ? { quiet: true, page: x.page } : {}), last: x.last || 0 }))
+    .map(([fp, x]) => ({ fp, message: x.message, line: x.line || 0, count: x.count || 1, ...(x.quiet ? { quiet: true, page: x.page } : {}), ...(x.clickjack ? { clickjack: true } : {}), last: x.last || 0 }))
     .sort((a, b) => b.last - a.last);
 }
 

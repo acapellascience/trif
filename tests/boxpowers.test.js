@@ -198,9 +198,9 @@ test('combinations: each warned one a mod has is a need of its own, the stronges
   assert.deepEqual(bp.factLines(two.map((n) => n.key), two.map((n) => n.fact)).filter((l) => /^together/.test(l)), ['together, it could put what it reads into something you post']);
   // (four powers: the general warning, keyed by the set; the combinations still needs, without lines)
   const many = bp.powerNeeds(build(head('read-drafts, sound, media, write-drafts')).mod).filter((n) => n.power === 'together');
-  assert.deepEqual(many[0], { key: 'power:together:many:read-drafts+sound+media+write-drafts', fact: 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.', power: 'together', soft: false, lines: [] });
+  assert.deepEqual(many[0], { key: 'power:together:many:read-drafts+sound+media+write-drafts', fact: 'Mods with many powers could act in surprising ways. Treat them with caution.', power: 'together', soft: false, lines: [] });
   assert.deepEqual(many.slice(1).map((n) => [n.key, n.fact]), [['power:together:read-drafts+write-drafts', ''], ['power:together:read-drafts+media', ''], ['power:together:read-drafts+sound', '']]);
-  assert.equal(bp.factLine(many[0].key, many[0].fact), 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.');
+  assert.equal(bp.factLine(many[0].key, many[0].fact), 'Mods with many powers could act in surprising ways. Treat them with caution.');
   // the hold: write-drafts and keys each allowed alone, then the pair asks; the pair allowed, adding click asks for the triple
   const home = tempDir('trif-pw-');
   const ws = { home, modsDir: path.join(home, 'sites') };

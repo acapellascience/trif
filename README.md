@@ -2,7 +2,7 @@
 
 Customize any website by asking your coding agent. Open the TRIF side panel in Chrome (or Firefox, or
 Safari), say what you want ("hide the trending sidebar", "only show people I follow"), and your agent
-writes a small mod that runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
+writes a small mod that runs every time that site loads. Mods are small files on your computer; switch each one off
 and on from the side panel.
 
 TRIF uses the coding agent you already have (Claude Code or Codex), on your own account, or an open model
@@ -33,7 +33,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## Install
 
-These steps install the latest release, **0.2.7**, from npm. GitHub's `main` branch is where work in progress
+These steps install the latest release, **0.3.0**, from npm. GitHub's `main` branch is where work in progress
 lands: it can have features the release doesn't (and new bugs), so don't install from a checkout of it
 unless you're working on TRIF.
 
@@ -43,10 +43,10 @@ unless you're working on TRIF.
    npx timsrobot setup
    ```
 
-   If you were sent a file (`timsrobot-0.2.7.tgz`) instead, run this from the folder it's in:
+   If you were sent a file (`timsrobot-0.3.0.tgz`) instead, run this from the folder it's in:
 
    ```sh
-   npx --yes --package ./timsrobot-0.2.7.tgz trif setup
+   npx --yes --package ./timsrobot-0.3.0.tgz trif setup
    ```
 
    npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
@@ -134,23 +134,22 @@ Settings → Extensions and delete the old WebMods app.
 ### Tim's starter mods
 
 Optional: the setup page asks, site by site, before adding them (or `trif setup --examples [sites]`;
-Settings in the side panel can add any site's later). They're plain JavaScript in `~/.trif/sites`, which
-you can read first ([examples/sites](examples/sites)). TRIF starts on for each of Google, X, Amazon and
-Instagram you add, with these mods. Each has a switch in the side panel on its site; the ones marked *(off)* wait for you to switch
-them on.
+Settings in the side panel can add any site's later). They're small files in `~/.trif/sites` (style mods,
+boxed mods and a few free mods), which you can read first ([examples/sites](examples/sites)). TRIF starts on
+for each of Google, X, Amazon and Instagram you add, and the mods start off: switch each one on in the side
+panel on its site.
 
 - **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
-  or extra sections), and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD
-  screensaver.
+  or extra sections), DVD Logo (the logo on the home page bounces around like an old DVD screensaver), and
+  Oppish (Google in Oppish).
 - **X:** **Detox Timeline**: Home is just the people you follow, newest first, with no ads or suggestions. It
   starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
   menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
-  trends column, tidies post pages, and turns Explore into a plain search field. Rainbow Rave *(off)*,
-  for fun.
+  trends column, tidies post pages, and turns Explore into a plain search field. Rainbow Rave, for fun.
 - **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and
   stars; no sponsored items, ads or recommendations).
 - **Instagram:** Only Following (no suggested posts or ads), Hide Reposts, Hide AI, and
-  Desaturate *(off)*: colours down to 35%.
+  Desaturate (colours down to 35%).
 
 ## Open models (experimental)
 
@@ -215,6 +214,13 @@ click the gear, then **Check for Updates**. From a terminal: `~/.trif/bin/trif u
 Updates are signed: TRIF installs only versions signed with its release key, so a copy from anywhere
 else is refused.
 
+Tim's mods can also get fixes between TRIF releases, checked along with TRIF's updates and signed the same
+way. With **Install updates automatically** on, a mod you haven't changed gets the new version (marked
+"updated", switched off until you turn it on); otherwise its row offers **Use the new version**. A mod you
+changed is never replaced, and a new version that can do more than the one TRIF shipped waits for your OK.
+If the check fails, Settings says why under the update status. `"checkForUpdates": false` in config.json
+stops both checks.
+
 ## If something's wrong
 
 ```sh
@@ -272,6 +278,13 @@ you're on, and sends what it reads to its provider (Anthropic for Claude Code, O
 you picked for an open model; nobody for a model on your own computer) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).
 
+## Security
+
+How TRIF keeps an agent that reads the web, and the mods it writes, from acting as you, and what's still
+open: [docs/SECURITY.md](docs/SECURITY.md). A shorter brief for reviewers, on the three kinds of mod and
+what each one guarantees: [docs/SECURITY-TIERS.md](docs/SECURITY-TIERS.md). Found a hole? Please send it
+through [timsrobot.com/report](https://timsrobot.com/report), not a public issue.
+
 ## For developers
 
 How the pieces fit together, and the full CLI, are in [docs/PROTOCOL.md](docs/PROTOCOL.md). Run the tests
@@ -328,7 +341,10 @@ keychain as `trif-amo-issuer` and `trif-amo-secret`; and the release signing key
 `node scripts/release.js keygen` (private half in the keychain as `trif-release-key`, public half in
 `helper/lib/release-key.js`). Back the private key up: installs only accept updates signed with it.
 Installs also refuse a feed signed more than 8 weeks ago, so with no release for about six weeks, run
-`node scripts/release.js refresh-feed` (it signs updates/latest.json again, nothing else changed) and push
-`updates/` on main.
+`node scripts/release.js refresh-feed` (it signs updates/latest.json and updates/mods.json again, nothing
+else changed) and push `updates/` on main. To ship a fixed or improved shipped mod without a release, bump
+its `@version`, commit it on main, and run `node scripts/release.js mods-feed` (`--dry-run` first; `--only
+<ids>` to pick): it signs updates/mods.json with every shipped mod changed since the last release, and asks
+before committing and pushing it.
 (Keychain items under their WebMods-era names, `webmods-amo-issuer`, `webmods-amo-secret` and
 `webmods-release-key`, are found too.)

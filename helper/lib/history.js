@@ -47,8 +47,9 @@ function modOf(ws, rel) {
 }
 
 // (each entry may have a <name>.source beside it: what replaced that version, `chat` (a side-panel run), `fix`
-// (a run Fix it started), `restore` (an older one put back), `import` (an import replaced it), `undo`)
-const SOURCES = new Set(['chat', 'fix', 'restore', 'import', 'undo']);
+// (a run Fix it started), `restore` (an older one put back), `import` (an import replaced it), `undo`, `edit` (the
+// user's edit in the code card: lib/edit.js))
+const SOURCES = new Set(['chat', 'fix', 'restore', 'import', 'undo', 'edit']);
 function writeEntry(ws, site, mod, content, at = Date.now(), source = null) {
   const dir = path.join(historyDir(ws), site);
   fs.mkdirSync(dir, { recursive: true });
@@ -131,15 +132,15 @@ function entryText(ws, id, stamp) {
 }
 
 /**
- * Put back a kept version: the current one is kept too (source `restore`), so this can be undone the same
- * way; the version stays in the history. The helper's next sync judges it as any change from outside
- * (held.js). Returns {id, restored: stamp, at}.
+ * Put back a kept version: the current one is kept too (source `restore`, or `undo` for the code card's Undo
+ * after an edit), so this can be undone the same way; the version stays in the history. The helper's next sync
+ * judges it as any change from outside (held.js). Returns {id, restored: stamp, at}.
  */
-function restoreEntry(ws, id, stamp) {
+function restoreEntry(ws, id, stamp, source = 'restore') {
   const { site, mod } = trash.parseId(id);
   const text = entryText(ws, `${site}/${mod}`, stamp);
   const file = path.join(ws.modsDir, site, `${mod}.js`);
-  if (fs.existsSync(file)) writeEntry(ws, site, mod, fs.readFileSync(file), Date.now(), 'restore');
+  if (fs.existsSync(file)) writeEntry(ws, site, mod, fs.readFileSync(file), Date.now(), source === 'undo' ? 'undo' : 'restore');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, text);

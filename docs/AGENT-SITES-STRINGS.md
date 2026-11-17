@@ -2,7 +2,7 @@
 
 **Approved by Tim, 2026-11-10.**
 
-Every user- and agent-facing string the per-site agent setting adds, exact, **all awaiting Tim's OK**.
+Every user- and agent-facing string the per-site agent setting adds, exact (all approved: see above).
 
 ## How it works (decisions to check)
 
@@ -29,7 +29,11 @@ Every user- and agent-facing string the per-site agent setting adds, exact, **al
   Mail, Proton, iCloud; PayPal, the Stripe dashboard, Wise, Revolut, Monzo, N26, Chase, Wells Fargo, Citi,
   Capital One, Amex, Schwab, Fidelity, Vanguard, HSBC, Barclays, TD, RBC, BMO, CIBC, Tangerine, Desjardins,
   any host with "bank" in a label (`*bank*`) and the `.bank` domain; 1Password, Bitwarden, LastPass,
-  Dashlane; Discord, WhatsApp Web; ChatGPT, OpenAI, Claude.ai. Editable in Settings (the user's list
+  Dashlane; Discord, WhatsApp Web; ChatGPT, OpenAI, Claude.ai; Google Docs and Drive, Dropbox, Box,
+  OneDrive, SharePoint ("your files"); Coinbase, Binance, Kraken, Gemini, Crypto.com, Bitstamp, Bitfinex,
+  KuCoin, OKX, Bybit, Blockchain.com, Shakepay, Robinhood ("a crypto exchange"), Wealthsimple; the CRA,
+  GCKey, Service Canada's accounts, Revenu Québec, the IRS, SSA, Login.gov, ID.me, GOV.UK One Login, HMRC
+  and the Government Gateway, myGov, the ATO, IRD, RealMe ("a government account"). Editable in Settings (the user's list
   replaces TRIF's; "Use TRIF's list" brings it back).
 - The agent sees its site's level in the side panel's context, in AGENTS.md ("Agent on this site"), and in
   every refused command.
@@ -47,7 +51,7 @@ Every user- and agent-facing string the per-site agent setting adds, exact, **al
   account**, **payments**, **banking**, **a password manager**, **your messages**, **your chats with
   another AI**, or the user's own words; without one: **on your list of sensitive sites**)
 
-## Moved to the chat line (branch faces, 2026-11-11; **new strings awaiting Tim's OK**)
+## Moved to the chat line (branch faces, 2026-11-11; **approved by Tim 2026-11-14**, AWAITING-STRINGS.md)
 
 The control left the header. It's now the third part of the line over the message box, after the agent and
 model ("Claude Code · Default model · Agent asks before running code ▾"), shown only where there's a chat
@@ -68,7 +72,7 @@ The menu (new):
 - Heading: **What your agent can do on {site}**
 - **Off:** it can’t see or touch this site. (Was "Nothing"; renamed 2026-11-11 to match Settings.)
 - **Look:** it can read the page and take screenshots.
-- **Ask first:** it can look, and asks you before running code here.
+- **Ask first:** it can look, and asks you before running code on the site.
 - **Run code:** it can change the page live; posting is paused until the page reloads.
 - Footer (muted): **Whatever you pick, a mod that can do more than change this page waits for your OK.**
 

@@ -35,8 +35,10 @@ trif.css(`.trif-box-calm-long { outline: 2px solid ${prefs.value.color} }`);
 
 What it has (everything else is simply not there, and `trif check` lists what you used that isn't):
 
-- **`trif`**: `css(text)` (CSS that loads nothing new: `url()` only with `data:`, `#somewhere`, or an
-  address an image on the page shows or one of the page's style sheets uses; returns `{remove}`),
+- **`trif`**: `css(text)` (CSS that loads nothing new: `url()` only with `data:`, `#somewhere`, the `src`
+  of an `<img>` on the page, or an address one of the page's style sheets uses. Not one from an element's
+  `style` attribute: a picture the page draws with `style="background-image: url(…)"` can't be named, so a
+  boxed mod can't put it back once something hides it (fix what hides it instead); returns `{remove}`),
   `css(text, {shadow: 'host-selector'})` (the same CSS into the shadow roots, open or closed, of the hosts
   that match, roots inside roots too, now and as they're made), `hide(selector)`, `observe(selector, fn, {attributes: ['class',
   'hidden']})` (each matching element, now and as they appear, and with `attributes` again as one of those

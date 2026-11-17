@@ -3,6 +3,7 @@
 // The `trif` command. Talks to the helper (host.js) over $TRIF_HOME/helper.sock.
 // Exit codes: 0 ok, 1 command error, 2 helper not running.
 
+const { isPhoneSite, phoneBase } = require('./lib/scope');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -14,6 +15,7 @@ const { realish, isInside, badName } = require('./lib/pathcheck');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
+const { browserFamily, browserLabel } = require('./lib/browsers');
 const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
@@ -327,12 +329,12 @@ const handlers = {
     if (!ext) {
       lines.push('extension     connected, but it has not said hello yet');
     } else {
-      const firefox = ext.browser === 'Firefox';
-      lines.push(`extension     v${ext.version} on ${ext.browser || 'Chrome'} ${ext.chrome}`);
+      const firefox = browserFamily(ext) === 'firefox';
+      lines.push(`extension     v${ext.version} on ${browserLabel(ext)}`);
       lines.push(ext.userScripts
         ? 'user scripts  on'
         : firefox
-          ? 'user scripts  OFF: mods can\'t run. Fix: click the TRIF toolbar button in Firefox, then "Allow user scripts"'
+          ? `user scripts  OFF: mods can't run. Fix: click the TRIF toolbar button in ${ext.browser || 'Firefox'}, then "Allow user scripts"`
           : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
@@ -646,13 +648,30 @@ const handlers = {
       return;
     }
     const s = await update.check(ctx.ws, { force: true });
-    if (ctx.json) return printJson(s);
+    // The mods feed too (lib/modsfeed.js): new versions of Tim's mods between releases, brought to the
+    // user's copies as setup brings a release's (not inside a run, which can't write them).
+    let mods = null;
+    if (!inRun) {
+      const modsFeed = require('./lib/modsfeed');
+      const c = await modsFeed.check(ctx.ws, { force: true });
+      let applied = { updated: [], waiting: [] };
+      try { applied = modsFeed.apply(ctx.ws); } catch (e) { c.error = c.error || e.message; }
+      mods = { error: c.error || null, available: c.available || [], skipped: c.skipped || [], failed: c.failed || [], ...applied };
+    }
+    if (ctx.json) return printJson(mods ? { ...s, mods } : s);
     if (s.error) out(`TRIF ${s.current}: couldn't check for updates (${s.error})`);
     else if (s.available) {
       out(`TRIF ${s.latest} is available (you have ${s.current}).`);
       if (s.notes) out(`\n${s.notes}\n`);
       out(s.canInstall ? 'Install it with: trif update --install' : s.why);
     } else out(`TRIF ${s.current} is up to date.`);
+    if (mods) {
+      const vers = (m) => `${m.id} (version ${m.version})`;
+      if (mods.error) out(`Tim's mods: couldn't check the mods feed (${mods.error})`);
+      for (const f of mods.failed) out(`Tim's mods: couldn't use ${f.id} version ${f.version} from the mods feed (${f.why})`);
+      if (mods.updated.length) out(`Tim's mods updated (switched off until the user turns them on): ${mods.updated.map(vers).join(', ')}`);
+      if (mods.waiting.length) out(`Tim's mods with a new version waiting (the side panel offers it, or trif mod-update): ${mods.waiting.map(vers).join(', ')}`);
+    }
     out(`Automatic updates: ${s.auto ? 'on (trif update --auto off)' : 'off (trif update --auto on)'}`);
   },
 
@@ -1044,7 +1063,7 @@ const handlers = {
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : held[m.id].by === 'edit' ? 'the user edited it in the side panel\'s code card' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (broken.has(m.id)) out(`  ${brokenText(broken.get(m.id))}`);
       if (m.description) out(`  ${m.description}`);
@@ -1079,6 +1098,10 @@ const handlers = {
     let text = tpl;
     // all-sites mods run everywhere until the agent narrows the @match lines.
     if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');
+    // (a phone mod, `trif new phone~x.com <mod>`: the site's own pages, and marked as made for the phone)
+    if (isPhoneSite(site)) {
+      text = text.replace(/^(\/\/ @match\s+\S*?)\{\{site\}\}/gm, `$1${phoneBase(site)}`).replace(/^(\/\/ ==\/WebMod==)$/m, '// @device      phone\n$1');
+    }
     text = text.replace(/\{\{site\}\}/g, site).replace(/\{\{mod\}\}/g, mod).replace(/\{\{name\}\}/g, titleCase(mod));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);

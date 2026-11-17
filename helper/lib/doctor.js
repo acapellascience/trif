@@ -9,6 +9,7 @@ const P = require('./paths');
 const { browserTable, browsersSetUp, manifestFiles, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
 const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
+const { browserFamily, browserLabel } = require('./browsers');
 const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
 const { isExecutable } = require('./setup');
 const { firefoxAddonUrl } = require('./update');
@@ -336,10 +337,10 @@ async function doctor(opts = {}) {
     if (!info.extension) {
       add('fail', 'the helper is running but the extension never said hello', `reload the extension at ${EXT_URL} (or restart Chrome) and run trif doctor again; check ${ws.log}`);
     } else {
-      const firefox = info.extension.browser === 'Firefox';
-      add('ok', `extension v${info.extension.version} on ${info.extension.browser || 'Chrome'} ${info.extension.chrome}`);
+      const firefox = browserFamily(info.extension) === 'firefox';
+      add('ok', `extension v${info.extension.version} on ${browserLabel(info.extension)}`);
       if (info.extension.userScripts) add('ok', firefox ? 'user scripts are allowed' : '"Allow User Scripts" is on');
-      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', 'click the TRIF toolbar button in Firefox, then "Allow user scripts", then reload your tabs');
+      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', `click the TRIF toolbar button in ${info.extension.browser || 'Firefox'}, then "Allow user scripts", then reload your tabs`);
       else add('fail', '"Allow User Scripts" is OFF, so mods can\'t run', `open ${EXT_URL}, turn on "Allow User Scripts", then reload your tabs`);
     }
     for (const e of (info.modsApplied && info.modsApplied.errors) || []) {
@@ -360,13 +361,20 @@ async function doctor(opts = {}) {
   const advice = {
     mod: `make the mod smaller: keep sounds, pictures and other big data out of its code (a mod can be up to ${mb(MAX_MOD_BYTES)})`,
     total: `remove mods you don't use, or make big ones smaller: all of them together can be up to ${mb(MAX_MODS_BYTES)}`,
-    extension: info?.extension?.browser === 'Firefox' ? 'update the add-on: about:addons, the gear, Check for Updates'
-      : info?.extension?.browser === 'Safari' ? 'build and open TRIF.app from this version' : `update the extension: reload TRIF on ${EXT_URL}`,
+    extension: info?.extension && browserFamily(info.extension) === 'firefox' ? 'update the add-on: about:addons, the gear, Check for Updates'
+      : info?.extension && browserFamily(info.extension) === 'safari' ? 'build and open TRIF.app from this version' : `update the extension: reload TRIF on ${EXT_URL}`,
   };
   if (fs.existsSync(ws.modsDir)) {
     if (!modProblems.length) add('ok', `${plural(mods.length, 'mod')} in ${ws.modsDir}`);
     for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, advice[p.limit] || 'check the file');
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
+  }
+  // The mods feed (new versions of Tim's mods between releases, lib/modsfeed.js): its last check's problem.
+  let feed = null;
+  try { feed = require('./modsfeed').status(ws); } catch { /* not checked */ }
+  if (feed && feed.problem) {
+    add('warn', `Tim's mods: the last check for their new versions (the mods feed${feed.checkedAt ? `, ${new Date(feed.checkedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''}) failed: ${feed.problem}`,
+      "nothing changed because of it; it's checked again with TRIF's update check (trif update checks now)");
   }
 
   // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside

@@ -2,11 +2,22 @@
 
 Two suites:
 
-- **Unit tests** (fast, no browser): `node --test --test-concurrency=2 --test-timeout=120000`. That's
-  what `npm test` runs, and what `scripts/release.js` runs. `tests/upgrade.test.js` among them is a real
+- **Unit tests** (fast, no browser unless asked): `node --test --test-concurrency=2 --test-timeout=120000`.
+  That's what `npm test` runs, and what `scripts/release.js` runs. `tests/upgrade.test.js` among them is a real
   upgrade without a browser: the v0.1.2 updater (from `git archive v0.1.2`, set up by its own setup in a
   scratch home) installs this checkout packed at the next version, with a test signing key; skipped
-  without the tag.
+  without the tag. `tests/run-sandbox.test.js` runs real `trif` commands (status, check, new, verify,
+  explain, errors, doctor…) inside the real sandbox of a side-panel run: the real helper starts real
+  Claude Code and Codex runs against stand-in models (no paid call), with TRIF as a git checkout inside a
+  scratch home folder (the strictest layout: only runs.js CODE_ITEMS readable), and checks no command
+  hits a file runs can't read, and that the private folder, the keychain, other sites' mods and the
+  network are refused. macOS with the agents installed (about 15 s); it skips elsewhere, CI included.
+  A few use a real browser: `tests/sandbox-browser.test.js` (the sandbox runtime under
+  real SES), `tests/css-browser.test.js` (the CSS check against a browser's parsing), `mobile/test/smoke.js`
+  (the phone probes), `tests/skill-browser.test.js` (the TRIF skill's page scripts: skill/trif/scripts/page) and
+  `tests/cdp-page.test.js` (their helper). They drive headless Chrome for Testing
+  over CDP (`tests/cdp-page.js`, no Playwright), one browser at a time with a memory guard, and run only with
+  `TRIF_BROWSER_TESTS=1` (CI sets it) and Chrome for Testing installed as below; otherwise they skip.
 - **End-to-end browser suite** (opt-in, real browsers): `node tests/e2e/run.js`. Run it before each
   release. It isn't part of `node --test`.
 
@@ -123,7 +134,14 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    Banisher and Just Results, on stand-ins for Google's results and home pages
    (`https://www.google.com:<port>/search?q=trif` and `/`, in background tabs, with the parts of Google's
    markup they key on): what they hide is hidden, and the web results, the other tabs and the search
-   box stay.
+   box stay. Then DVD Logo, which ships as a boxed mod, switched on: registered in the sandbox (no hold:
+   its shipped version is what's allowed), its copy of the home page's logo bounces, the logo hidden in
+   place. Chrome: X's real profile pictures (`https://x.com:<port>/e2e_pics`, a stand-in profile page under
+   X's CSP whose pictures are X's own logo from X's real image server, shown at 200×200 and, `?s=400`,
+   already at 400×400): Profile Styler, Post Styler and Tune Composer switched on and allowed in the panel's
+   card each read the 400×400 copy's pixels (nothing in `trif logs` about a picture it couldn't read; Tune
+   Composer's From picture: "has no tune in it"), and Post Styler remembers the picture as read. Skipped
+   without the internet. (Decoding a code from a picture: the conversion cases' fixtures.)
 5. With `--agent`: real Claude Code runs (model haiku unless `--claude-model`): a panel chat (`/model`,
    then a request) that must write a mod under `sites/127.0.0.1/` that shows on the page; `trif agent
    run` asked which browser it's in (must name it); and asked to read TRIF's `config.json` in the private

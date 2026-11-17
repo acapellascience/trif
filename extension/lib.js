@@ -11,7 +11,24 @@ export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdo
 // The Firefox build (scripts/build-extension.js firefox) runs the same code; these cover the differences.
 export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
 export const SAFARI = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('safari-web-extension:');
-export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
+// (Before BROWSER, which uses them at once.) What a browser name may be: a short word or two (what a brand or a Firefox fork calls itself is data).
+export const BROWSER_NAME_RE = /^[A-Za-z][\w .+-]{0,39}$/;
+// navigator.userAgentData.brands: each Chromium browser lists Chromium, a made-up "Not A Brand" (GREASE,
+// in any spelling) and usually its own brand; these name the ones TRIF knows.
+const BRANDS = [['Microsoft Edge', 'Edge'], ['Opera GX', 'Opera GX'], ['Opera Air', 'Opera Air'], ['Opera', 'Opera'], ['Brave', 'Brave'], ['Vivaldi', 'Vivaldi'], ['Google Chrome', 'Chrome']];
+const isGrease = (b) => /not.?a.?brand/i.test(b) || /[^\w .-]/.test(b);
+// The kind of browser: what the code does differently. The browser's name (BROWSER) is what the user sees.
+export const FAMILY = FIREFOX ? 'firefox' : SAFARI ? 'safari' : 'chromium';
+// The browser's own name: Brave, Edge, Opera, Vivaldi, Arc, Chromium, Chrome; Firefox (or a fork's name);
+// Safari. Worked out at once from what's known without waiting (browserFromSignals), then better by
+// detectBrowser (its answers that take a moment) and by the helper, which knows what started it: whoever
+// learns a better name calls setBrowser, and every module importing BROWSER sees the new one.
+export let BROWSER = browserFromSignals({ brands: globalThis.navigator?.userAgentData?.brands, userAgent: globalThis.navigator?.userAgent });
+/** Use `name` as the browser's name from now on (a name from detectBrowser, the helper or the status). */
+export function setBrowser(name) {
+  if (typeof name === 'string' && BROWSER_NAME_RE.test(name)) BROWSER = name;
+  return BROWSER;
+}
 // What the browser calls TRIF's panel: Chrome's side panel, Firefox's sidebar, Safari's window.
 export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
@@ -94,15 +111,17 @@ export function styleOf(mod) {
 }
 
 // (in the page, by itself: the section's CSS in a style element of its own, as a style mod's is)
-function putStyle(css) {
+// (marked with the mod's id, for TRIF's clickjacking guard: runtime.js clickGuard)
+function putStyle(css, id) {
   const style = document.createElement('style');
+  if (id) style.setAttribute('data-trif-style', String(id));
   style.textContent = css;
   const put = () => (document.head || document.documentElement).append(style);
   if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
 }
 /** The script that puts a free mod's style section CSS on the page (before the mod's code, in its registration). */
 export function styleSectionCode(id, css) {
-  return `(${putStyle.toString()})(${JSON.stringify(String(css))});\n//# sourceURL=trif-style://${scriptName(id)}.css`;
+  return `(${putStyle.toString()})(${JSON.stringify(String(css))}, ${JSON.stringify(String(id))});\n//# sourceURL=trif-style://${scriptName(id)}.css`;
 }
 
 export function modToUserScript(mod) {
@@ -124,11 +143,24 @@ export function modToUserScript(mod) {
   // the values to its `trif`; a free mod's CSS is a script of TRIF's before its code, its values in its wrapper)
   const style = styleOf(mod);
   const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.siteOk) && mod.siteOk.length ? { ...args, site: mod.siteOk } : args, ...(style ? { style } : {}) };
-  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
-  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
-  const js = [{ code: wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null) }];
-  if (style && style.css) js.unshift({ code: styleSectionCode(mod.id, style.css) });
+  // (each piece only where it belongs: a phone mod in the phone view's tab, any other mod everywhere else: phoneGate)
+  const gate = (code) => phoneGate(isPhoneMod(mod), code);
+  if (inSandboxWorld(mod)) return { ...base, js: [{ code: gate(sandboxModCode(mod.id, String(mod.code ?? ''), powers)) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  if (mod.sandboxed) return { ...base, js: [{ code: gate(sandboxPageCode(mod.id, String(mod.code ?? ''), powers)) }], world: 'MAIN' };
+  const js = [{ code: gate(wrapModCode(mod.id, String(mod.code ?? ''), style ? style.values : null)) }];
+  if (style && style.css) js.unshift({ code: gate(styleSectionCode(mod.id, style.css)) });
   return { ...base, js, world: 'MAIN' };
+}
+
+// The phone view (phone.js, docs/MOBILE-EDIT.md) is a TRIF of its own: in its tab only phone mods run, and phone
+// mods run nowhere else. A mod registers for its pages as any does (user scripts can't be given a tab), and its
+// code waits behind a test of the page's own document: the phone tab's rules mark its documents with a
+// `Server-Timing: trif-phone` entry (phone.js phoneRules), which the Performance timeline shows in every world,
+// at once. Each wrapper is one expression statement (wrapModCode, styleSectionCode, sandboxModCode,
+// sandboxPageCode), so `if (…) ` before it keeps the mod's own line numbers.
+export const PHONE_MARK_TEST = "((n) => !!n && Array.isArray(n.serverTiming) && n.serverTiming.some((e) => e.name === 'trif-phone'))(globalThis.performance && performance.getEntriesByType('navigation')[0])";
+export function phoneGate(phone, code) {
+  return `if (${phone ? '' : '!'}${PHONE_MARK_TEST}) ${code}`;
 }
 
 /** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
@@ -264,7 +296,8 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     // (a sandboxed mod run as a page script registers differently: a hash of its own)
     // (and one whose sites' approved powers changed: they're in its registration)
     const withHash = Array.isArray(reg.siteOk) && reg.siteOk.length ? `:site:${quickHash(reg.siteOk.join('|'))}` : '';
-    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}` } : withHash ? { ...reg, hash: `${reg.hash ?? ''}${withHash}` } : reg);
+    // (`:gate`: registered with its phone view gate, phoneGate: one registered before has none, and goes again)
+    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}:gate` } : { ...reg, hash: `${reg.hash ?? ''}${withHash}:gate` });
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
@@ -541,7 +574,7 @@ export function selectTab(tabs, focusedWindowId, args = {}) {
   }
   // A run works on its site's tab even when the user has moved to another one.
   const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active) || (scope ? tabs[0] : null);
-  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : 'no active tab (is a Chrome window open?)');
+  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : `no active tab (is a ${BROWSER} window open?)`);
   return t;
 }
 
@@ -555,12 +588,17 @@ export async function lastFocusedNormalWindow(chromeApi, firefox = FIREFOX) {
   return win && (!win.type || win.type === 'normal') ? win : null;
 }
 
-/** Resolve a tab selector using chrome.windows/chrome.tabs. */
-export async function resolveTab(chromeApi, args = {}) {
-  const [tabs, win] = await Promise.all([
+/**
+ * Resolve a tab selector using chrome.windows/chrome.tabs: the tabs of normal windows, and those of `also`
+ * (window ids: the phone view's windows, which are popups, phone.js).
+ */
+export async function resolveTab(chromeApi, args = {}, also = []) {
+  const [normal, win, extra] = await Promise.all([
     chromeApi.tabs.query({ windowType: 'normal' }),
     lastFocusedNormalWindow(chromeApi),
+    Promise.all((also || []).filter(Number.isInteger).map((windowId) => chromeApi.tabs.query({ windowId }).catch(() => []))),
   ]);
+  const tabs = [...normal, ...extra.flat().filter((t) => !normal.some((n) => n.id === t.id))];
   tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
   return selectTab(tabs, win?.id, args);
 }
@@ -663,6 +701,16 @@ export function normalizeNewOff(value) {
  * what the user had on there stays on.
  * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
  */
+/**
+ * The file name a pasted mod is imported under (sidepanel.js "Paste a mod…"): its @name in kebab-case, as the
+ * helper names a mod (helper/lib/share.js nameOf), or "pasted-mod". Pure.
+ */
+export function pastedModName(text) {
+  const m = /^\s*\/\/\s*@name\s+(.+?)\s*$/m.exec(String(text || ''));
+  const base = (m ? m[1] : '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  return `${base || 'pasted-mod'}.js`;
+}
+
 export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {}, waits = () => false } = {}) {
   const list = (mods || []).filter((m) => typeof m?.id === 'string');
   const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
@@ -1006,8 +1054,17 @@ export function renameInOrder(modOrder, renames) {
 // Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
 // (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.
 
+// Phone mods' folders, sites/phone~<site>/ (helper/lib/scope.js, docs/MOBILE-EDIT.md): a site's phone twin, a
+// site of its own for lists, chats and runs, on the same pages. A run's scope can be one (from the phone view).
+export const PHONE_PREFIX = 'phone~';
+export const isPhoneSite = (s) => String(s || '').startsWith(PHONE_PREFIX);
+export const phoneBase = (s) => (isPhoneSite(s) ? String(s).slice(PHONE_PREFIX.length) : String(s || ''));
+/** Whether a mod is a phone mod: its folder is a phone twin (the helper says so too: `phone`). */
+export const isPhoneMod = (mod) => !!mod && (mod.phone === true || isPhoneSite(String(mod.id || '').split('/')[0]));
+
 /** "x.com" is in scope "x.com", and so is "api.x.com"; "notx.com" isn't. */
 export function hostInScope(hostname, scope) {
+  scope = phoneBase(scope); // (a phone twin's pages are its site's)
   const h = String(hostname || '').toLowerCase().replace(/\.$/, '');
   return !!scope && (h === scope || h.endsWith('.' + scope));
 }
@@ -1053,6 +1110,7 @@ const SHARED_SUFFIXES = new Set([
 
 /** The registrable domain for a host or site name: "www.news.bbc.co.uk" -> "bbc.co.uk", "x.com" -> "x.com". */
 export function scopeFor(host) {
+  if (isPhoneSite(String(host || '').trim().toLowerCase())) return PHONE_PREFIX + scopeFor(phoneBase(String(host).trim().toLowerCase()));
   const h = String(host || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
   if (!h || !h.includes('.') || /^[\d.]+$/.test(h) || h.includes(':') || h.startsWith('[')) return h;
   const labels = h.split('.');
@@ -1138,7 +1196,7 @@ export function sensitiveHit(host, list = null, pending = []) {
 export function sensitiveSites({ list = null, pending = [], hosts = [] } = {}) {
   const memo = new Map();
   const hit = (h) => { const k = cleanHostName(h); if (!memo.has(k)) memo.set(k, sensitiveHit(k, list, pending)); return memo.get(k); };
-  const scopeOf = (h) => hit(h)?.scope || scopeFor(h);
+  const scopeOf = (h) => (isPhoneSite(h) ? PHONE_PREFIX + (hit(phoneBase(h))?.scope || scopeFor(phoneBase(h))) : hit(h)?.scope || scopeFor(h));
   const splits = new Set();
   const consider = (h) => { const x = hit(h); if (x && x.scope !== scopeFor(x.scope)) splits.add(x.scope); };
   for (const x of sensitiveList(list)) if (!x.pattern.includes('*')) consider(x.pattern);
@@ -1209,7 +1267,8 @@ export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [
       if (!force) { if (!(sitesOn.includes(host) || own.length)) out.block.push(host); out.done.push(host); }
       continue;
     }
-    const parentMods = mods.filter((m) => folder(m) !== 'all-sites' && scopeFor(folder(m)) === parent && !hostInScope(folder(m), host) && reaches(m));
+    // (the parent's own: not another site apart's under it, mail.google.com's for docs.google.com, which run only there)
+    const parentMods = mods.filter((m) => folder(m) !== 'all-sites' && scopeFor(folder(m)) === parent && !hostInScope(folder(m), host) && !sensitiveHit(folder(m), list) && reaches(m));
     const allSites = mods.filter((m) => folder(m) === 'all-sites' && reaches(m));
     const reached = own.length > 0 || (sitesOn.includes(parent) && (parentMods.some(on) || allSites.some(on)));
     if (reached || force) out.ask.push({ host, parent, why: sensitiveHit(host, list)?.why || '', mods: parentMods.map((m) => m.id), allSites: allSites.filter(on).map((m) => m.id) });
@@ -1687,6 +1746,83 @@ export function nextBackoff(prev) {
   return prev ? Math.min(prev * 2, 30000) : 1000;
 }
 
+// ---- which browser this is ------------------------------------------------------------------------
+
+
+/**
+ * The browser's name from what's known about it (each optional):
+ *   family: 'chromium' | 'firefox' | 'safari' (FAMILY);
+ *   brands: navigator.userAgentData.brands ([{brand, version}]);
+ *   userAgent: navigator.userAgent, only read when there are no brands (a Chromium too old for them);
+ *   brave: navigator.brave.isBrave() said yes; vivaldi: Vivaldi's own tab fields are there (vivaldiTabs);
+ *   panelInWindow: Chrome's side panel doesn't show here (background.js): a Chrome that has none is Arc;
+ *   firefoxName: runtime.getBrowserInfo().name (Firefox, LibreWolf, Waterfox, Floorp, Zen…).
+ */
+export function browserFromSignals({ family = FAMILY, brands, userAgent = '', brave = false, vivaldi = false, panelInWindow = false, firefoxName } = {}) {
+  if (family === 'safari') return 'Safari';
+  if (family === 'firefox') return typeof firefoxName === 'string' && BROWSER_NAME_RE.test(firefoxName.trim()) ? firefoxName.trim() : 'Firefox';
+  if (brave) return 'Brave';
+  if (vivaldi) return 'Vivaldi';
+  const names = Array.isArray(brands) ? brands.map((b) => (b && typeof b.brand === 'string' ? b.brand.trim() : '')).filter(Boolean) : [];
+  let name;
+  if (names.length) {
+    name = BRANDS.find(([brand]) => names.includes(brand))?.[1]
+      // (a brand TRIF doesn't know yet: its own name, as it gives it)
+      || names.find((b) => b !== 'Chromium' && !isGrease(b) && BROWSER_NAME_RE.test(b))
+      || (names.includes('Chromium') ? 'Chromium' : 'Chrome');
+  } else {
+    // No brands to go by: the user-agent string's own tokens, else Chrome as before.
+    const ua = String(userAgent || '');
+    name = /\bEdg\//.test(ua) ? 'Edge' : /\bOPR\//.test(ua) ? 'Opera' : /\bVivaldi\//.test(ua) ? 'Vivaldi' : /\bChromium\//.test(ua) ? 'Chromium' : 'Chrome';
+  }
+  return (name === 'Chrome' || name === 'Chromium') && panelInWindow ? 'Arc' : name;
+}
+
+/** The version of brand `name` in a fullVersionList (navigator.userAgentData's high-entropy values), or null. */
+export function brandVersion(fullVersionList, name) {
+  const brand = { Edge: 'Microsoft Edge', Chrome: 'Google Chrome', Arc: 'Google Chrome' }[name] || name;
+  const hit = Array.isArray(fullVersionList) ? fullVersionList.find((b) => b && b.brand === brand) : null;
+  return hit && typeof hit.version === 'string' && /^[\d.]{1,40}$/.test(hit.version) ? hit.version : null;
+}
+
+/** Whether Vivaldi's tab fields (`vivExtData`, or `extData` before) are on any tab: Vivaldi says it's Chrome otherwise. */
+export function vivaldiTabs(tabs) {
+  return Array.isArray(tabs) && tabs.some((t) => t && typeof t === 'object' && ('vivExtData' in t || 'extData' in t));
+}
+
+// A browser's answer that doesn't come within this long counts as none.
+const SIGNAL_MS = 1000;
+// `ask` is called here: one that throws at once counts as none too.
+const soon = (ask) => {
+  let timer;
+  const answer = new Promise((resolve) => resolve(ask())).catch(() => undefined);
+  return Promise.race([answer, new Promise((r) => { timer = setTimeout(r, SIGNAL_MS); })]).finally(() => clearTimeout(timer));
+};
+
+/**
+ * {name, version}: the browser's name (browserFromSignals) with the signals that take a moment, and its own
+ * version where it has one (Opera's or Edge's, not Chromium's; a Firefox fork's), else null. Each signal
+ * that fails or doesn't answer is left out. opts: { family, nav (navigator), api (chrome), ff (Firefox's
+ * `browser`), panelInWindow }.
+ */
+export async function detectBrowser({ family = FAMILY, nav = globalThis.navigator, api = globalThis.chrome, ff = globalThis.browser, panelInWindow = false } = {}) {
+  if (family === 'safari') return { name: 'Safari', version: null };
+  if (family === 'firefox') {
+    const runtime = ff?.runtime?.getBrowserInfo ? ff.runtime : api?.runtime;
+    const info = await soon(() => runtime?.getBrowserInfo?.());
+    const name = browserFromSignals({ family, firefoxName: info?.name });
+    return { name, version: name !== 'Firefox' && typeof info?.version === 'string' && /^[\w.-]{1,40}$/.test(info.version) ? info.version : null };
+  }
+  const uaData = nav?.userAgentData;
+  const [brave, tabs, high] = await Promise.all([
+    soon(() => (typeof nav?.brave?.isBrave === 'function' ? nav.brave.isBrave() : false)),
+    soon(() => api?.tabs?.query?.({})),
+    soon(() => uaData?.getHighEntropyValues?.(['fullVersionList'])),
+  ]);
+  const name = browserFromSignals({ family, brands: uaData?.brands, userAgent: nav?.userAgent, brave: brave === true, vivaldi: vivaldiTabs(tabs), panelInWindow });
+  return { name, version: brandVersion(high?.fullVersionList, name) };
+}
+
 export function chromeVersion(userAgent) {
   const m = /(?:Chrom(?:e|ium)|Firefox)\/([\d.]+)/.exec(userAgent || '')
     || /Version\/([\d.]+)(?: Mobile\/\S+)? Safari\//.exec(userAgent || ''); // Safari's own version
@@ -1773,12 +1909,21 @@ export const GROUP_NAMES = { rules: 'Style mods', sandboxed: 'Boxed mods', page:
 export function groupWord(group) { return (GROUP_NAMES[group] || GROUP_NAMES.page).toLowerCase(); }
 export function modGroup(mod) { return mod && mod.rules ? 'rules' : inSandboxWorld(mod) ? 'sandboxed' : 'page'; }
 
+// The phone view's group switches are the site's phone twin's (phone~x.com, from its panel): they switch only the
+// site's phone mods, and the site's own (x.com) only its other mods (docs/MOBILE-EDIT.md "Phone mods").
+function groupSiteName(site) {
+  const s = String(site ?? '').trim().toLowerCase();
+  if (!isPhoneSite(s)) return offSiteName(s);
+  const base = offSiteName(phoneBase(s));
+  return base ? PHONE_PREFIX + base : null;
+}
+
 /** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
 export function normalizeGroupsOff(value) {
   const out = {};
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const [site, list] of Object.entries(value)) {
-      const s = offSiteName(site);
+      const s = groupSiteName(site);
       if (!s || !Array.isArray(list)) continue;
       const groups = [...new Set(list.filter((g) => GROUPS.includes(g)))];
       if (groups.length) out[s] = [...new Set([...(out[s] || []), ...groups])];
@@ -1789,13 +1934,13 @@ export function normalizeGroupsOff(value) {
 
 /** Whether `group` is switched off on `site` (an entry for it or a parent domain). */
 export function groupOffOn(groupsOff, group, site) {
-  const s = offSiteName(site);
-  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && hostInScope(s, o));
+  const s = groupSiteName(site);
+  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && isPhoneSite(o) === isPhoneSite(s) && hostInScope(phoneBase(s), o));
 }
 
 /** `groupsOff` after switching `group` on or off on `site` (a new object). */
 export function switchGroup(groupsOff, site, group, enabled) {
-  const s = offSiteName(site);
+  const s = groupSiteName(site);
   if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
   if (!GROUPS.includes(group)) throw new Error(`"${group}" isn't a group (${GROUPS.join(' or ')})`);
   const out = normalizeGroupsOff(groupsOff);
@@ -1809,7 +1954,9 @@ export function switchGroup(groupsOff, site, group, enabled) {
 export function offSitesFor(mod, offSites, groupsOff) {
   const own = (offSites && offSites[mod.id]) || [];
   const g = modGroup(mod);
-  const group = Object.entries(groupsOff || {}).filter(([, list]) => list.includes(g)).map(([s]) => s);
+  // (a phone mod: its site's phone twin's switches, as their site; any other mod: the sites' own)
+  const phone = isPhoneMod(mod);
+  const group = Object.entries(groupsOff || {}).filter(([s, list]) => list.includes(g) && isPhoneSite(s) === phone).map(([s]) => phoneBase(s));
   return group.length ? [...new Set([...own, ...group])] : own;
 }
 

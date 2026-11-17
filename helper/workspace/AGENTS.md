@@ -135,7 +135,10 @@ style mod's old name, `@rules`, still works):
 ```
 
 - `css`: any CSS that changes how things look. Nothing that loads from an address: `url()` only with
-  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings.
+  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings. To recolour,
+  set `background-color`, not the `background` shorthand: the shorthand also sets `background-image` to
+  none, which wipes out every picture the page draws as a background (thumbnails, avatars, icons), and a
+  mod can't put them back.
 - `hide`: selectors to hide (`display: none !important`, including elements that appear later).
 - `replace`: `{ in?, find, with, regex?, caseless? }`: text to replace inside the elements `in` matches
   (default the whole page). `with` is plain text. Patterns are capped and can't nest repeats.
@@ -145,6 +148,22 @@ style mod's old name, `@rules`, still works):
 
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
+
+**Scrolling feeds: start simple; filter the data only when hiding breaks the feed.** `hide` and `filter`
+(and a boxed mod's `post.hide()`) act on what the site has already drawn: it builds each item, then TRIF
+hides it. Start there, hiding the row's contents rather than the row so the list closes up, and check it
+by scrolling (`trif sweep --scroll`). That's enough for most requests: a box, a sidebar, an ad every
+tenth post, a shelf that turns up now and then. Go deeper only when you see the cost in this feed (X,
+Instagram, Threads, Facebook, Reddit, YouTube, TikTok: lists that load as you scroll and keep only the
+visible rows on the page): scrolling stutters, hidden rows leave blank stretches, or the list stops
+loading more because most of what it drew is hidden. Then remove the items from the response the feed
+is built from, so the site never draws them: a boxed mod with the `site-data` power
+(`trif.filterResponse`; BOXED.md, "Powers"), or a free mod that patches `fetch` and XHR (TECHNIQUES.md,
+"Filtering data before the app sees it"). That costs more code, depends on the response's shape, and must
+keep the pagination cursors. Don't fight the feed's scrolling itself (faking scroll positions,
+overriding `scrollY` or the list's measurements): it's slow to get right and breaks with each site
+change; if hiding and data filtering both fail, say so and ask. Tell the user which way you went and
+why, in a sentence.
 
 ### A style section in boxed and free mods
 
@@ -218,6 +237,21 @@ where the user finds it on the TRIF setup page).
   (`@risk 0`) unless they asked for more, cheap on pages it doesn't apply to, and quick to bail out
   (check `location.hostname` or for the elements it needs, and return).
 
+### Phone mods
+
+The panel's "Edit for mobile" opens TRIF's phone view: the user's tab in a window as wide as a phone, where the
+site sees an iPhone (Safari's user agent, touch, no hover) and shows its mobile layout. It's a TRIF of its own:
+
+- Phone mods live in the site's phone twin, `sites/phone~<site>/` (`trif new phone~x.com <name>`): a chat in
+  the phone view can write there and nowhere else. Only phone mods run in the phone view, and they never run in
+  a desktop tab. Their `@match` is the site's own (`*://x.com/*`).
+- The site's desktop mods (`sites/<site>/`) are there to read, never to change, from the phone view. Asked to
+  bring one to the phone ("the hide-reposts filter from the desktop"), read it for the idea, then build it again
+  for the mobile page: look at the phone tab (`trif tabs` marks it `phone`; `--tab`), and assume nothing about
+  its selectors, elements, routes or data: the mobile layout is a different page.
+- Style sheets in the phone view still see a mouse (`@media (hover: hover)` matches there and not on the phone):
+  don't key a mod on hover or pointer media queries.
+
 ## The CLI
 
 `TAB` below is `--tab <id>` or `--url <substring|/regex/>`. Without one, commands use the active tab of
@@ -267,7 +301,10 @@ It runs in one of two places:
   the page's own data behind an element (`el.pageData('props.post')`). It can read the page and change
   what it shows; it can't send, click, type or navigate, so nothing is paused and the user isn't asked.
   There's no `document` or `window` there (they read as undefined). **Use this for looking around: almost
-  everything you run is that.**
+  everything you run is that.** While a run lasts, the page's boxed mods can't do what its reads would make
+  risky beside them (load other picture sizes, play sound, …): their logs say so with a warning naming your
+  run, and it's not a bug in the mod. So don't wait inside a run (`await new Promise(r => setTimeout(r, 4000))`):
+  `trif reload`, then run again.
 - **The page's own world** (`--page`; what you get from a terminal without a flag): `document`, `window`,
   the site's own code and state, its mods' hooks. In a side-panel chat this locks the whole site, in every
   tab (no posting, no other sites), until the tab reloads, and may ask the user first ("Side-panel runs", below): keep it for

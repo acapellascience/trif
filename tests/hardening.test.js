@@ -63,7 +63,7 @@ test('names: an id goes into a script\'s name (sourceURL) only as plain characte
   }
   // a style mod's id sits in a comment too
   const code = rules.rulesCode(rules.checkRules({ hide: ['.ad'] }), `x.com/a${LS}globalThis.__ran = 1;`);
-  const g = { document: { createElement: () => ({}), head: { append() {} }, documentElement: {} } };
+  const g = { document: { createElement: () => ({ setAttribute() {} }), head: { append() {} }, documentElement: {} } };
   vm.runInNewContext(code, g);
   assert.equal(g.__ran, undefined);
 });

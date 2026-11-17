@@ -118,4 +118,111 @@ function selectBrowsers(choice, homedir, platform) {
   return out;
 }
 
-module.exports = { browserTable, selectBrowsers, manifestFiles, browsersSetUp, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded };
+// ---------------------------------------------------------------- which browser this is
+
+// The browser that started a helper is its parent process (the wrapper execs node, so nothing sits in
+// between): Chrome, Firefox and the others start their native hosts themselves. Its executable names it,
+// which tells apart the Chromium browsers the extension can't always tell from inside (Arc says it's Chrome,
+// Vivaldi hides itself): on a Mac the outermost .app in its path ("/Applications/Brave Browser.app/Contents/
+// MacOS/Brave Browser"), elsewhere the last folders of its path ("/opt/brave.com/brave/brave"). Order
+// matters: "chromium" before "chrome" (Snap's Chromium runs .../chromium-browser/chrome).
+const LAUNCHERS = [
+  [/^(microsoft edge|microsoft-edge|msedge)\b/i, 'Edge', 'chromium'],
+  [/^brave\b/i, 'Brave', 'chromium'],
+  [/^opera gx\b/i, 'Opera GX', 'chromium'],
+  [/^opera air\b/i, 'Opera Air', 'chromium'],
+  [/^opera\b/i, 'Opera', 'chromium'],
+  [/^vivaldi\b/i, 'Vivaldi', 'chromium'],
+  [/^arc$/i, 'Arc', 'chromium'],
+  [/^chromium\b/i, 'Chromium', 'chromium'],
+  [/^(google chrome|google-chrome|chrome)\b/i, 'Chrome', 'chromium'], // (and Chrome for Testing, Beta, Canary)
+  [/^librewolf\b/i, 'LibreWolf', 'firefox'],
+  [/^waterfox\b/i, 'Waterfox', 'firefox'],
+  [/^floorp\b/i, 'Floorp', 'firefox'],
+  [/^zen\b/i, 'Zen', 'firefox'],
+  [/^mullvad ?browser\b/i, 'Mullvad Browser', 'firefox'],
+  [/^tor ?browser\b/i, 'Tor Browser', 'firefox'],
+  [/^firefox\b/i, 'Firefox', 'firefox'], // (and Developer Edition, Nightly)
+];
+// The names a browser of each kind has when nothing more particular is known.
+const PLAIN_NAMES = new Set(['Chrome', 'Chromium', 'Firefox']);
+
+/** {name, family} for the browser whose executable is at `exe`, or null when it isn't one TRIF knows. */
+function browserFromExecutable(exe, platform = process.platform) {
+  if (typeof exe !== 'string' || !exe) return null;
+  const parts = exe.split('/').filter(Boolean);
+  let names;
+  if (platform === 'darwin') {
+    const app = parts.find((p) => /\.app$/i.test(p));
+    if (!app) return null;
+    names = [app.replace(/\.app$/i, '')];
+  } else names = parts.slice(-3);
+  for (const [re, name, family] of LAUNCHERS) if (names.some((n) => re.test(n))) return { name, family };
+  return null;
+}
+
+/**
+ * The executable of process `pid` (the helper's parent: the browser that started it), or null. `run`
+ * (tests) stands in for `ps`.
+ */
+async function executableOf(pid, { platform = process.platform, run } = {}) {
+  if (!Number.isInteger(pid) || pid <= 1) return null;
+  try {
+    if (platform === 'linux') return await fs.promises.readlink(`/proc/${pid}/exe`);
+    run = run || ((args) => new Promise((resolve) => {
+      require('child_process').execFile('ps', args, { timeout: 3000 }, (e, out) => resolve(e ? '' : String(out)));
+    }));
+    const out = String(await run(['-o', 'comm=', '-p', String(pid)])).trim();
+    return out || null;
+  } catch { return null; }
+}
+
+/**
+ * The browser that started this helper: {name, family, exe}, or null (a terminal, the Safari bridge, a
+ * test). TRIF_LAUNCHER, an executable's path, stands in for the parent's (tests).
+ */
+async function launchingBrowser({ pid = process.ppid, env = process.env, platform = process.platform, run } = {}) {
+  const { envVar } = require('./env');
+  const exe = envVar('LAUNCHER', env) || await executableOf(pid, { platform, run });
+  const b = browserFromExecutable(exe, platform);
+  return b ? { ...b, exe } : null;
+}
+
+/** 'chromium' | 'firefox' | 'safari' for an extension's hello (`family` since 0.3.1; before, the name told). */
+function browserFamily(hello) {
+  if (!hello || typeof hello !== 'object') return 'chromium';
+  if (['chromium', 'firefox', 'safari'].includes(hello.family)) return hello.family;
+  return hello.browser === 'Firefox' ? 'firefox' : hello.browser === 'Safari' ? 'safari' : 'chromium';
+}
+
+/**
+ * The browser's name, from what its extension said (`hello`: {browser, family}) and what started the
+ * helper (`launcher`: launchingBrowser's). The launcher's name wins over a plain one (Chrome, Chromium,
+ * Firefox) and over Arc (the extension takes a browser without Chrome's side panel for Arc); a particular
+ * name the extension found itself (Brave, Edge, Opera, Vivaldi, a Firefox fork) stays when the launcher
+ * only knows the plain one. A launcher of another kind than the extension says is ignored.
+ */
+function reconcileBrowser(hello, launcher) {
+  const said = hello && typeof hello.browser === 'string' && hello.browser ? hello.browser : 'Chrome';
+  if (!launcher || launcher.family !== browserFamily(hello)) return said;
+  if (PLAIN_NAMES.has(launcher.name) && !PLAIN_NAMES.has(said) && said !== 'Arc') return said;
+  return launcher.name;
+}
+
+/**
+ * A stable key for one browser's records (sitecombos' switches): its kind's old name (Chrome, Firefox,
+ * Safari), so a browser TRIF names better than before (Brave, once "Chrome") keeps its entry.
+ */
+function browserKey(hello) {
+  return { firefox: 'Firefox', safari: 'Safari' }[browserFamily(hello)] || 'Chrome';
+}
+
+/** "<name> <version>" for an extension's hello: its own version where it sent one (Opera's, not Chromium's). */
+function browserLabel(hello, fallback = 'Chrome') {
+  if (!hello) return fallback;
+  const version = hello.browserVersion || hello.chrome || '';
+  return `${hello.browser || fallback}${version ? ` ${version}` : ''}`;
+}
+
+module.exports = { browserFromExecutable, executableOf, launchingBrowser, browserFamily, reconcileBrowser, browserKey, browserLabel,
+  browserTable, selectBrowsers, manifestFiles, browsersSetUp, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded };

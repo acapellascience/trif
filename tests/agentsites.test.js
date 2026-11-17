@@ -51,7 +51,7 @@ test('the panel: "Agent on this site" on the line over the message box, a menu o
   assert.deepEqual(items, [
     ['off', 'Off', 'it can’t see or touch this site.'],
     ['look', 'Look', 'it can read the page and take screenshots.'],
-    ['ask', 'Ask first', 'it can look, and asks you before running code here.'],
+    ['ask', 'Ask first', 'it can look, and asks you before running code on the site.'],
     ['run', 'Run code', 'it can change the page live; posting is paused until the page reloads.'],
   ]);
   assert.match(line, /Whatever you pick, a mod that can do more than change this page waits for your OK\./);

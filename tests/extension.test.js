@@ -87,9 +87,9 @@ test('first sync registers the runtime first, then each mod, wrapped and in the 
   assert.strictEqual(a.runAt, 'document_idle');
   assert.deepStrictEqual(a.excludeMatches, ['*://x.com/settings*']);
   assert.strictEqual(b.runAt, 'document_end');
-  assert.strictEqual(a.js[0].code, lib.wrapModCode('x.com/a', '/* x.com/a */'));
+  assert.strictEqual(a.js[0].code, lib.phoneGate(false, lib.wrapModCode('x.com/a', '/* x.com/a */')), 'wrapped, behind the phone view gate');
   assert.ok(!lib.RUNTIME_ID.startsWith('_'));
-  assert.strictEqual(res.applied['x.com/a'], 'h1');
+  assert.strictEqual(res.applied['x.com/a'], 'h1:gate');
 });
 
 test('the runtime follows the mods and recorded sites; with neither, nothing is registered', async () => {
@@ -126,7 +126,7 @@ test('unchanged mods are skipped by hash; changed are updated; missing unregiste
   assert.deepStrictEqual(us.calls, [['unregister', ['x.com/b']], ['update', ['x.com/a']], ['register', ['x.com/c']]]);
   assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
   assert.match(us.scripts[1].js[0].code, /changed\(\)/);
-  assert.deepStrictEqual(r.applied, { [lib.RUNTIME_ID]: lib.quickHash(runtimeCode + '\n' + JSON.stringify(['*://x.com/*'])), 'x.com/a': 'h2', 'x.com/c': 'h1' });
+  assert.deepStrictEqual(r.applied, { [lib.RUNTIME_ID]: lib.quickHash(runtimeCode + '\n' + JSON.stringify(['*://x.com/*'])), 'x.com/a': 'h2:gate', 'x.com/c': 'h1:gate' });
 });
 
 test('a lost hash map updates existing scripts instead of re-registering', async () => {
@@ -2506,7 +2506,9 @@ test('background: TRIF on for timsrobot.com registers its mods, and nothing that
     await settle(30);
     assert.ok(scriptIds(bg).includes('timsrobot.com/fireworks'));
     assert.ok(!scriptIds(bg).includes('trif-home'));
-    assert.ok(!bg.chrome.userScripts.scripts.some((x) => x.js.some((j) => String(j.code).includes('data-trif'))));
+    // (the old marker, <html data-trif="on">; TRIF's own style elements carry data-trif-style for the clickjacking
+    // guard, on pages a mod already styles, which is no mark of the page)
+    assert.ok(!bg.chrome.userScripts.scripts.some((x) => x.js.some((j) => /data-trif(?![\w-])|dataset\.trif\b/.test(String(j.code)))));
   } finally { bg.restore(); }
 });
 
@@ -3204,19 +3206,19 @@ test('background: a new user\'s sensitive sites start blocked, each a site of it
     const panel = bg.connectPanel();
     let st = (await panel.ask({ type: 'status' })).result;
     // (its own mods: a question, as it has some)
-    assert.deepStrictEqual(st.sensitive.pending.map((p) => [p.host, p.parent, p.why, p.mods, p.allSites]), [['mail.google.com', 'google.com', 'email', ['google.com/dark'], ['all-sites/big']]]);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com').map((p) => [p.host, p.parent, p.why, p.mods, p.allSites]), [['mail.google.com', 'google.com', 'email', ['google.com/dark'], ['all-sites/big']]]);
     // Until answered, as before: google.com's mods still reach it
     assert.ok(!bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark').excludeMatches.length);
     // Block it
     let r = await panel.ask({ type: 'sensitive.answer', host: 'mail.google.com', choice: 'block' });
     assert.strictEqual(r.ok, true, r.error);
     st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual(st.sensitive.pending, []);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com'), []); // (Docs and Drive are asked about too: their own question)
     assert.ok(st.blockedSites.includes('mail.google.com'));
     assert.ok(st.sensitive.splits.includes('mail.google.com'));
     const dark = bg.chrome.userScripts.scripts.find((x) => x.id === 'google.com/dark');
-    assert.deepStrictEqual(dark.excludeMatches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'google.com\'s mod skips mail.google.com');
-    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((x) => x.id === lib.RUNTIME_ID).excludeMatches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'and so does TRIF\'s runtime');
+    assert.ok(['*://*.mail.google.com/*', '*://mail.google.com/*'].every((x) => dark.excludeMatches.includes(x)), 'google.com\'s mod skips mail.google.com');
+    assert.ok(['*://*.mail.google.com/*', '*://mail.google.com/*'].every((x) => bg.chrome.userScripts.scripts.find((y) => y.id === lib.RUNTIME_ID).excludeMatches.includes(x)), 'and so does TRIF\'s runtime');
     assert.ok(!scriptIds(bg).includes('mail.google.com/calm'));
     assert.strictEqual((await bg.native.call('text', { tab: 7 })).error, lib.siteRefusal('mail.google.com', 'blocked'));
     assert.ok((await bg.native.call('text', { tab: 5 })).ok !== false || true);
@@ -3241,7 +3243,7 @@ test('background: on upgrade a sensitive host the user\'s mods reach is asked ab
     await settle(40);
     const panel = bg.connectPanel();
     let st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual(st.sensitive.pending.map((p) => [p.host, p.mods]), [['mail.google.com', ['google.com/dark', 'google.com/quiet']]]);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com').map((p) => [p.host, p.mods]), [['mail.google.com', ['google.com/dark', 'google.com/quiet']]]);
     assert.ok(!st.blockedSites.includes('mail.google.com'));
     // (seen before: the copies would be new mods, which start off)
     bg.native.emit({ type: 'mods', mods });
@@ -3258,7 +3260,7 @@ test('background: on upgrade a sensitive host the user\'s mods reach is asked ab
     assert.strictEqual(r.ok, true, r.error);
     await settle(30);
     st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual(st.sensitive.pending, []);
+    assert.deepStrictEqual(st.sensitive.pending.filter((p) => p.host === 'mail.google.com'), []); // (Docs and Drive are asked about too: their own question)
     assert.ok(st.sitesOn.includes('mail.google.com') && st.sitesOn.includes('google.com'), 'both on');
     assert.ok(!bg.store.disabled['mail.google.com/dark'], 'the copy of a mod that was on is on');
     assert.strictEqual(bg.store.disabled['mail.google.com/quiet'], true, 'the copy of one that was off is off');
@@ -3597,10 +3599,10 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   assert.ok(!s.worldId);
   assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
   // (the mod's code first on the script's first line, so its errors keep their line numbers; then TRIF's API)
-  assert.ok(s.js[0].code.startsWith('(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
+  assert.ok(s.js[0].code.startsWith(lib.phoneGate(false, '') + '(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
   assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod, {\"powers\":[],\"args\":{}}, {\"actPartners\":{"));
   new Function(s.js[0].code);
-  assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
+  assert.strictEqual(r.applied['y.com/boxed'], 'H:page:gate', 'registered differently from the sandboxed form');
   // a new version waits again
   const [again] = lib.sandboxFallback([{ ...boxed, hash: 'H2' }], { canSandbox: false, allowed: { 'y.com/boxed': 'H' } });
   assert.strictEqual(again.held.by, 'sandbox');
@@ -3724,6 +3726,38 @@ test('background: mods that break: a new error gets a card in the site\'s chat o
     st = (await panel.ask({ type: 'status' })).result;
     assert.strictEqual(st.onBreak, 'flag');
     assert.ok(st.mods.find((m) => m.id === 'example.com/hider').broken.some((b) => b.message === 'another failure'));
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});
+
+test('background: a click the clickjacking guard stopped: a card of its own in the chat (never a fix run, even with Fix it automatically), and the mod\'s badge', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/cover', { name: 'Cover', matches: ['*://example.com/*'], hash: 'c1' })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods, onBreak: 'auto' }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const msgs = () => bg.store['chat:example.com']?.messages || [];
+  const stopped = (n) => ({ mod: 'example.com/cover', kind: 'clickjack', why: 'faded', stack: '', time: Date.now() + n, message: `TRIF stopped a click on the page's "<button> Delete ${n}": this mod's style made it nearly transparent, and without the mod it shows, so the click would have landed on it unseen.` });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.errors = [stopped(1)];
+    await load();
+    const cards = msgs().filter((m) => m.kind === 'clickjack');
+    assert.deepStrictEqual(cards.map((c) => [c.mod, c.text]), [['example.com/cover', 'TRIF stopped a click: Cover had hidden what you clicked, so you couldn\'t see what it was. The page didn\'t get the click. If you didn\'t expect this, turn Cover off.']]);
+    assert.ok(!msgs().some((m) => m.kind === 'modError'), 'not a mod error\'s card');
+    assert.ok(!msgs().some((m) => /asked your agent to fix/.test(m.text || '')), 'no fix run');
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/cover').broken.map((b) => [b.clickjack, b.count]), [[true, 1]]);
+    // (another stop on another control: the same fingerprint, no second card)
+    page.errors = [stopped(2)];
+    await load();
+    assert.strictEqual(msgs().filter((m) => m.kind === 'clickjack').length, 1);
   } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
 });
 

@@ -18,7 +18,9 @@ it can't change TRIF's own files (PROTOCOL.md "Run scope", "Agent sandboxes").
 
 ## Sensitive sites (0.3)
 
-Email, banking and payments, password managers, chats with people and with other AIs (the sensitive list,
+Email, banking and payments, crypto exchanges, password managers, chats with people and with other AIs,
+files in the cloud (Google Docs and Drive, Dropbox, Box, OneDrive, SharePoint) and government accounts: tax
+notices and assessments, benefits, the sign-in services in front of them. These sites (the sensitive list,
 extension/agentsites.js, which the user can edit in Settings) get three more walls:
 
 - **The agent never sees the page.** "Agent on this site" starts at Off there: no reading, screenshots or
@@ -49,7 +51,7 @@ run in, a compartment with their API and two reads (the page's data behind an el
 fields; never a password or card field), for as long as the run lasts. There the code can't send, click,
 type or navigate, so nothing is locked, the site keeps working in every tab, and the user isn't asked first.
 What it can do is what a boxed mod with no powers can: read what the page shows and change what it shows
-(so the clickjacking gap of the safe tiers applies to it too). The page's own world is still there, for
+(so what's left of the safe tiers' clickjacking gap applies to it too: disguise; RT-3). The page's own world is still there, for
 what needs the site's own code, with everything below.
 
 `trif run --page` runs the agent's JavaScript in the page, logged in. Before a side-panel run's code runs in a
@@ -156,10 +158,69 @@ TL-6 above leaves open; the contents of IndexedDB. A page restored from the back
 for a few milliseconds before it's locked again. The terminal's `trif run` (the user's own agent, which
 already has their shell) doesn't lock. docs/TABLOCK-AUDIT.md has each item and what the tests showed.
 
+## Mods: three tiers (0.3)
+
+A mod runs on every page load, unattended, logged in: what a hijacked agent would leave behind. So the
+first wall is what kind of mod it is, which its header says. The agent is told to write the lowest kind
+that does the job (AGENTS.md "Write the lowest kind of mod"). Whatever the tier, a side-panel run's mod
+also waits if it matches beyond the run's site. docs/SECURITY-TIERS.md is the reviewer's brief on all three.
+
+| tier | header | runs as | can't | rests on | waits for the user |
+|---|---|---|---|---|---|
+| Style mod | `// @style` | data TRIF's own code applies: CSS, hide, restyle, replace text, filter items | run code, send, click, type, navigate; its CSS loads nothing | there's no code; the CSS check | no: there's no power to approve |
+| Boxed mod | `// @boxed` | JavaScript in an SES Compartment, in a user-script world of its own, with stand-ins for elements | send, click, type, navigate, read typed text, change a form, unless a power its header names allows that one thing | the world's CSP, SES, an allowlist on stand-ins, one design rule | for its powers, as a set, and once per site for what the site's boxed mods can do together |
+| Free mod | none | JavaScript in the page's own world, with everything the page has | nothing, at run time | a reading of its code, and the hold (below) | when the reading finds it can act, and on each change that adds a way to |
+
+**Style mods.** The CSS may load nothing: no `url()` but `data:`, no `@import` or `image-set()`, no escapes
+that could spell one, no selector on a field's `value` or `:autofill` (with a loading background, those
+would leak what's typed). The check reads CSS the way a browser does (`cssScan`, shared with the boxed
+tier's `trif.css`; "CSS read the browser's way" below), and tests/css-browser.test.js runs every allowed case
+in a real browser. Text replacement never reaches inside an editor. Code: helper/lib/rules.js, extension/lib.js.
+
+**Boxed mods.** Chrome 138+ and Firefox 153+ `userScripts` world `trif-sandbox`, CSP `connect-src 'none'`,
+SES `lockdown()`; each mod its own Compartment, with no `window`, `document`, storage, `postMessage`,
+network or event constructors, `eval` or `Function`. Elements are frozen stand-ins whose methods do only
+allowlisted things: no `click`, `dispatchEvent`, `submit`, `innerHTML`, `on*`, `javascript:`, no `script`,
+`iframe` or `form`. The rule each guard and power is argued against: *a boxed mod may only name things that
+are its own, or copy addresses the page already has* (its ids and classes start `trif-box-`, so the page's
+frameworks find nothing to act on). Typed text, keys pressed in fields and the page's canvases aren't
+read. The 21 powers are narrowed exceptions (`click` only the header's selectors, `write-drafts` refusing
+text that adds an address, `site-data` only removing or reordering what the site sent…); every pair and
+triple has a warning or a reason it adds nothing (helper/lib/combinations.js), and the sandbox refuses an
+act while another boxed mod's power on the page would make a warned pair the user didn't approve
+(`partnersOk`, `soundOk`): two mods can't split a dangerous pair between them. The agent's own `trif run`
+code goes into this box by default ("Agent code in a tab", above). Safari has no such world: there a boxed
+mod waits for the user's OK and then runs as a free mod, never silently. Code: extension/sandbox.js,
+helper/lib/boxpowers.js, helper/lib/sandboxlint.js; tests: the e2e's hostile fixture (188 escapes, each
+refused, the test server seeing no leak) and tests/sandbox*.test.js.
+
+**Free mods.** First-class on purpose: the user may run any code they choose. Nothing limits them at run
+time; what TRIF has is the checkpoint below, which reads their code and holds what can act until the user
+allows it. A checkpoint, not a wall.
+
+**Where the tiers meet.** On a sensitive site at Off, a side-panel run may make only style and boxed mods;
+a free mod it writes there waits ("Sensitive sites", above). A boxed or free mod's style section is judged
+as a style mod (below). A mod moving to a higher tier is a change like any other, held for what it adds.
+
+**Clickjacking, for every tier that restyles (RT-3, docs/SANDBOX-TIER-NOTES.md): guarded at the press,
+partly.** CSS alone can make a page's real control invisible and float it over a decoy, so the user's own
+click lands on it; no power check sees that. Since 0.3.1 TRIF's page runtime (extension/runtime.js
+`clickGuard`) gets every trusted press before the page: if the control pressed is unseen and shows without
+the mods' styles (looked at again with TRIF's sheets disabled and boxed mods' inline styles undone for that
+moment), the press is stopped and the mod named in its errors and a card in the chat. The page's own
+invisible controls work as before. Covered: style mods, style sections, boxed mods' CSS, `style()`,
+animations and moves, a boxed mod's own opaque element over a control that lets clicks through, frames the
+mods hid. **Not covered:** disguise (a control that's visible but made to read or look like something else),
+decoys from pseudo-elements, the ways to be unseen the guard doesn't test (listed there), and free mods'
+code. Also open in the box: `sound` beside a read across mods is refused only
+when the two share a `mods` channel; the timing of media requests and which pictures load are warned side
+channels; a field in a *closed* shadow root on a plain element can't be seen from TRIF's world.
+
 ## Mods: held by what their code does (0.3)
 
-A mod runs on every page load, unattended, logged in: what a hijacked agent would leave behind. TRIF
-reads every mod's code (helper/lib/powers.js) for what it can do:
+The free tier's checkpoint, and how every tier's approvals are kept (a boxed mod is held by the powers its
+header names, not by a reading of its code). TRIF reads every mod's code (helper/lib/powers.js) for what it
+can do:
 
 | key | what it means | found by |
 |---|---|---|
@@ -225,7 +286,7 @@ from a style element's text, and, above all, the page's own functions: a mod can
 to post or fetch without writing either word). An agent writing to get past it can. So "TRIF finds
 nothing" means "nothing TRIF knows how to spot", not "safe": the holds are a checkpoint for honest code
 and lazy attacks, and the walls are elsewhere: the tab lock for an agent's live code, the run scope and
-sandbox, and (planned) mods that run where they can't act at all (docs/SAFE-MODS.md).
+sandbox, and the two safe tiers, which can't act at all without a power (above).
 
 Not covered: a mod reusing an allowed function of its own (an approved `send(x)` called with new data
 from a new line). A terminal agent (which has the user's shell) could run `trif approve` or edit
@@ -313,11 +374,6 @@ Still open, known, and why:
   version's lines isn't held. Closing it would ask the user each time their agent customises one of Tim's mods,
   which is what TRIF is for. This is the free tier's terms: adding Tim's mods is the first OK for what they
   can do. The panel now says "changed" beside "Tim's mod" when the file isn't a version TRIF shipped.
-- **Other tabs of a locked site** still load from other sites and follow links out (TL-4's cost was the
-  user's own posting; this one would be their own links). Agent code reaches such a tab only through a window
-  reference: the opener is now locked in full; a window found by name isn't.
-- **Same-site GETs.** A request with no body to the site itself passes the lock, so a site that changes
-  something on a GET is not covered. "Can't post or send as you" means the methods above.
 - **Replays inside the 8 weeks.** An old feed younger than 8 weeks still passes (nothing remembers the newest
   feed seen, since GitHub's cache can briefly serve the one before, and that would read as an attack). Not
   covered at all: `updates/firefox.json`, Firefox's update manifest, which Firefox reads unsigned (the add-on
@@ -347,8 +403,8 @@ Still open, known, and why:
   header would narrow it further if a mod ever needs one.
 - **A sensitive host the upgrade is still asking about** is part of its parent until the user answers, as
   before: the parent's mods and all-sites mods that reach it run there meanwhile (what the user had).
-- **The update feed has no expiry**, and the release key is written to the keychain through an argument
-  (scripts/release.js keygen). Both are the releasing Mac's to change.
+- **The release key is written to the keychain through an argument** (scripts/release.js keygen): the
+  releasing Mac's to change.
 - **A run without TRIF's sandbox** (an organization's settings, with the user's consent) works in its own
   folder like any other, but nothing stops it writing the mods folder itself; such a write is judged as an
   outside change.
@@ -363,6 +419,82 @@ each in a session of its own). Now each run works in a copy of the workspace of 
 the mods folder: it copies the run's changes over as they're saved (and the mods folder's into the copy), and
 a mod is the run's when it's what the helper copied for it. When the run ends, the copy is synced once more
 and removed; what a leftover process writes there goes nowhere. docs/STAGING.md has the design.
+
+## What a run may ask the helper (November 2026)
+
+A run's `trif` talks to the helper, which no sandbox limits, through the run's mailbox; and a run can write
+any request there itself, without `trif`. The helper forced the run's site onto each one, but three of its
+own answers took no notice of it (found by the Windows red-team, tests/redteam/mailbox-attacks.js on branch
+windows-redteam; the code is shared, so every platform, 0.3.0 included): `mods` listed every site's mods (a
+style mod's whole text among them), `mod.code` and `mod.diff` (the side panel's code card) answered for any
+mod by its id, and a command the helper didn't know went on to the extension to be refused there, so that
+any command the extension learnt later would have been a run's too. `ping` also told a run of every site's
+holds and updates, and of the other runs and their sites.
+
+Now what a run may send is a list (host.js `RUN_COMMANDS`: `ping`, `mods`, the four mod-file commands, and
+the page commands its `trif` sends), and anything else is refused by the helper, never sent on. `mod.code`
+and `mod.diff` from a run answer only for a mod of its own site, by the rule its delete goes by (trash.js
+`siteInScope`: a phone view's run its phone twin's, a sensitive site of its own and its parent each their
+own), and say no before looking the mod up; delete and restore now say no first too. `mods` lists a run's
+own site's mods alone, and `ping` tells it of its own mods and of itself. The side panel and the user's
+terminal are as before. tests/run-scope-reads.test.js.
+
+**What this doesn't change.** A run can still read the other sites' mod files: its working copy holds them
+(every file but their `files/`, read-only: docs/STAGING.md), `trif mods` lists them from there, and the
+extension's `status` (`trif status`) lists every mod's id, whether it's on, and the sites TRIF is on for.
+That's how runs were designed (an agent looks at the mods its change will meet), not something the mailbox
+let through; whether a run should see other sites' mods at all, a sensitive site's above all, is a decision
+of its own.
+
+## The mods feed (0.3.1)
+
+Tim's mods (the mods TRIF ships) can get a new version between releases, from a second signed feed beside
+the TRIF one: `updates/mods.json` + `.sig` on main, signed with the same release key (helper/lib/modsfeed.js;
+`node scripts/release.js mods-feed` writes it, every release empties it, `refresh-feed` signs it again).
+
+What it can do: replace the code of a mod TRIF ships with a newer version of it, for users who have that mod.
+That's code running on that mod's site, so it gets the TRIF feed's protections and some of its own:
+
+- **Signed, and only as itself.** Not signed by the release key: refused. It says `"kind": "trif-mods"`, so
+  latest.json and its signature can't pass as it (or the other way round). Expires 8 weeks after it was
+  signed, as latest.json does and for the same reason: a fix (a mod that breaks a site, or sends what it
+  shouldn't) can't be hidden by an old feed for longer.
+- **Each file checked.** Fetched from the repo at the feed's signed commit, a URL TRIF makes itself (the feed
+  names no address), and refused unless its size and sha256 are the signed ones and it's a shipped mod
+  (`@source webmods`) at the feed's `@version`. Checked again from the copy kept, each time it's used.
+- **Only mods this TRIF ships, only newer.** An id this TRIF doesn't ship (or retired) is ignored, so the
+  feed never adds a mod: new mods come with a release, where the user chooses the sites Tim's mods are added
+  for. A version is used only when it's newer than this TRIF's own and than the one the user has (an older
+  feed served again never takes anyone back), and when this TRIF is at least the entry's `minTrif`.
+- **The user's copy, the user's choice.** It goes through the same path as a release's mod updates
+  (preinstalled.js): a copy the user changed is never replaced, they get "Use the new version / Keep mine /
+  Merge". An unchanged one is replaced only with automatic updates on (as for TRIF's own updates), and then
+  starts off, "updated", like any mod from outside the chat; with them off, it's offered.
+- **Held for more powers.** A release's version of a mod is what held.js judges edits of it against. A
+  version only the feed brought isn't: the mod is judged against the version this TRIF's release shipped,
+  plus what the user allowed, so a feed version that can send, act, load or run on a site its release didn't
+  waits for the user's OK (a release's own update doesn't ask).
+
+- **Not silent when it fails.** A feed that can't be fetched, isn't signed, isn't a mods feed or is too old,
+  and a file that isn't the signed one, change nothing (what was kept stays), and the reason is kept: Settings
+  shows it quietly under TRIF's own update status, and `trif doctor` warns. So a feed that's blocked or
+  tampered with in transit doesn't quietly keep users on a broken version without anyone seeing why.
+- **The update settings.** Checked with TRIF's own update check (at most every 20 hours), never with
+  config.json `"checkForUpdates": false`.
+
+What it can't do: update TRIF itself, change settings, holds or allowed powers, touch a mod the user wrote or
+changed, or put a mod on a site. Its threat model is the TRIF feed's (same key, same host, same expiry; the
+key never leaves the maintainer's keychain).
+
+**A stolen release key.** Whoever has it can do through the mods feed only what they could already do through
+latest.json, and less: latest.json can ship a whole TRIF, while the mods feed can only put a new version of one
+of Tim's mods on the sites the user already has it for. And the holds still apply to it: a version that can
+send, act, load, or run on a site the released one doesn't, waits for the user's OK, and a copy the user
+changed is only offered. (Through latest.json, a new TRIF could change the holds themselves; that's the key's
+real risk, and why it stays in the keychain.) What the mods feed adds is a smaller step for the maintainer, so
+a mod's fix doesn't wait for a release; the holds keep that step from widening what a mod does without the
+user's OK. As with the TRIF feed, a replay inside the 8 weeks still passes, but it can only offer a version
+the user already passed.
 
 ## The prompt
 

@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        0 render-only: recolours X's page with its own stylesheet (dark for X-Flyer, light for Tweeter); sends nothing
 // @source      trif
-// @version     2
+// @version     3
 // ==/WebMod==
 
 // Ported from timsrobot.com/shooter.js. Everything from the original is kept, including what only
@@ -1338,7 +1338,9 @@
     return true;
   };
   // Rainbow Rave: timsrobot.com's (its gradient is in the robot svg), or X's (X: its play/zoom buttons)
-  const raveOn = () => !!document.getElementById('trif-rave-robot') || !!document.querySelector('.wm-rainbow-music');
+  // (Rainbow Rave's music buttons: .wm-rainbow-music when it's a free mod, .trif-box-wm-rainbow-music when it's boxed; only
+  // looked for, to take its look: nothing here acts on them)
+  const raveOn = () => !!document.getElementById('trif-rave-robot') || !!document.querySelector('.wm-rainbow-music, .trif-box-wm-rainbow-music');
   function explodeRobot(x, y, size) { // the big one
     try {
       const COLORS = ['#ffffff', '#fff6c2', '#ffd36b', '#ff9a3c', '#ff4f4f', '#e02626', '#ff6bf0'];

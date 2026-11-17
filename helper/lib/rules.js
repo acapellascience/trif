@@ -190,10 +190,12 @@ function checkRegex(src) {
  * only ever puts its strings into a style element (the CSS, and the hide selectors as CSS), into
  * querySelectorAll / matches, into regular expressions, and into text nodes' text.
  */
-function rulesRuntime(spec) {
+function rulesRuntime(spec, id) {
   const css = spec.css + (spec.hide.length ? `\n${spec.hide.join(',\n')} { display: none !important; }` : '');
   if (css.trim()) {
     const style = document.createElement('style');
+    // (whose it is, for TRIF's clickjacking guard: extension/runtime.js clickGuard)
+    if (id) style.setAttribute('data-trif-style', String(id));
     style.textContent = css;
     const put = () => (document.head || document.documentElement).append(style);
     if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
@@ -268,7 +270,7 @@ function rulesRuntime(spec) {
 function rulesCode(spec, id) {
   // (the id in a comment: only its plain characters, as a line break in it would end the comment)
   return `// TRIF rules mod ${JSON.stringify(String(id || '').replace(/[^\x20-\x7e]/g, '?'))}: TRIF's own code, the mod's rules as data (helper/lib/rules.js)\n` +
-    `(${rulesRuntime.toString()})(${JSON.stringify(spec)});\n`;
+    `(${rulesRuntime.toString()})(${JSON.stringify(spec)}, ${JSON.stringify(String(id || ''))});\n`;
 }
 
 /**

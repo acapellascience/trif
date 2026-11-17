@@ -18,12 +18,20 @@ const SHARED_SUFFIXES = new Set([
   'substack.com', 'tumblr.com', 'wordpress.com', 'neocities.org', 'fly.dev', 'onrender.com',
 ]);
 
+// Phone mods (the phone view, extension/phone.js; docs/MOBILE-EDIT.md "Phone mods, a sandbox of their own") live in
+// a site's phone twin, the folder sites/phone~<site>/: a site of its own for runs, holds and lists (a desktop run
+// on x.com can't write sites/phone~x.com/, nor a phone run sites/x.com/, which it reads), for the same pages.
+const PHONE_PREFIX = 'phone~';
+const isPhoneSite = (s) => String(s || '').startsWith(PHONE_PREFIX);
+const phoneBase = (s) => (isPhoneSite(s) ? String(s).slice(PHONE_PREFIX.length) : String(s || ''));
+
 function cleanHost(host) {
   return String(host || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '');
 }
 
 /** The scope for a host or site name: "www.news.bbc.co.uk" -> "bbc.co.uk", "x.com" -> "x.com". */
 function scopeFor(host) {
+  if (isPhoneSite(cleanHost(host))) return PHONE_PREFIX + scopeFor(phoneBase(cleanHost(host)));
   const h = cleanHost(host).replace(/^www\./, '');
   if (!h || !h.includes('.') || /^[\d.]+$/.test(h) || h.includes(':') || h.startsWith('[')) return h;
   const labels = h.split('.');
@@ -33,6 +41,7 @@ function scopeFor(host) {
 }
 
 function hostInScope(host, scope) {
+  scope = phoneBase(scope); // (a phone twin's pages are its site's)
   const h = cleanHost(host);
   return !!scope && (h === scope || h.endsWith('.' + scope));
 }
@@ -62,6 +71,7 @@ function cleanSplits(list) {
 
 /** The site `host` is in: the longest of `splits` it's in, else its registrable domain. */
 function scopeOf(host, splits = []) {
+  if (isPhoneSite(cleanSite(host))) return PHONE_PREFIX + scopeOf(phoneBase(cleanSite(host)), splits);
   const h = cleanSite(host);
   let best = null;
   for (const s of splits || []) if (hostInScope(h, s) && (!best || s.length > best.length)) best = s;
@@ -73,6 +83,8 @@ function scopeOf(host, splits = []) {
  * registrable domain (mail.google.com for inbox.mail.google.com), else the site's registrable domain.
  */
 function runScope(site, asked) {
+  // (a run from the phone view: the phone twin of the scope it would have)
+  if (isPhoneSite(cleanSite(asked))) return PHONE_PREFIX + runScope(phoneBase(cleanSite(site)), phoneBase(cleanSite(asked)));
   const s = cleanSite(site);
   const a = cleanSite(asked);
   if (a && SITE_RE.test(a) && hostInScope(s, a) && scopeFor(a) === scopeFor(s) && (a === scopeFor(s) || a.endsWith(`.${scopeFor(s)}`))) return a;
@@ -85,4 +97,4 @@ function outOfScope(mod, scope) {
   return matches.filter((p) => !patternInScope(p, scope));
 }
 
-module.exports = { scopeFor, hostInScope, patternInScope, outOfScope, scopeOf, runScope, cleanSplits };
+module.exports = { scopeFor, hostInScope, patternInScope, outOfScope, scopeOf, runScope, cleanSplits, PHONE_PREFIX, isPhoneSite, phoneBase };

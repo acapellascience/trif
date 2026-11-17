@@ -179,6 +179,10 @@ function blanked(tokens) {
   const out = [];
   for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k], prev = tokens[k - 1], next = tokens[k + 1];
+    // (A line break between tokens from different lines, as the code had: JavaScript written without
+    // semicolons relies on them, and joined onto one line it didn't compile, so every such mod read as
+    // code TRIF can't check.)
+    if (k) out.push(prev && t.line > prev.line ? '\n' : ' ');
     if (t.t === 'str' || (t.t === 'tpl' && !t.interp)) {
       const key = next && next.t === 'p' && next.v === ':' && prev && prev.t === 'p' && (prev.v === '{' || prev.v === ',');
       out.push(key ? '[\n0\n]' : '(\n0\n)');
@@ -189,7 +193,7 @@ function blanked(tokens) {
     else if (t.t === 'p' && t.v === '`end') out.push(']\n)');
     else out.push(t.v);
   }
-  return out.join(' ');
+  return out.join('');
 }
 
 function compiles(code) {

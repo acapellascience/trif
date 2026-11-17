@@ -177,7 +177,7 @@ class Scenario {
       const d = document.getElementById('approval');
       if (!d || !d.open) return null;
       const q = (s) => d.querySelector(s);
-      return { mod: d.dataset.mod, count: q('.ap-count').textContent, name: q('.ap-name').textContent, chip: q('.ap-chip').textContent, where: q('.ap-where').textContent,
+      return { mod: d.dataset.mod, group: d.dataset.group, count: q('.ap-count').textContent, name: q('.ap-name').textContent, chip: q('.ap-chip').hidden ? '' : q('.ap-chip').textContent, where: q('.ap-where').textContent,
         lead: q('.ap-lead').textContent, items: [...d.querySelectorAll('.ap-facts li')].map((x) => (x.querySelector('.ap-line') || x.lastChild).textContent),
         together: q('.ap-together').hidden ? [] : [...d.querySelectorAll('.ap-together p')].map((x) => (x.querySelector('.ap-line') || x).textContent),
         note: q('.ap-note').textContent, claim: q('.ap-claim').hidden ? '' : q('.ap-claim').textContent, show: q('.ap-show').textContent,
@@ -298,6 +298,7 @@ class Scenario {
         site: q('#site')?.textContent || '',
         gate: !q('#gate').hidden,
         gateTitle: q('#gate-title')?.textContent || '',
+        gateWhy: q('#gate-why')?.hidden === false ? q('#gate-why').textContent : '',
         gateText: q('#gate-btn')?.textContent || '',
         links: q('#gate-links')?.hidden === false
           ? [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent + ' (' + a.title + ')') : [],
@@ -392,6 +393,68 @@ class Scenario {
   }
 
   /**
+   * The mods feed (helper/lib/modsfeed.js) failing: a local "GitHub" serves an updates/mods.json signed with a
+   * key that isn't this build's release key (no latest.json: no TRIF update, not an error). Check now in
+   * Settings: the quiet line under the update status says why, trif doctor warns, Tim's mods are as they
+   * were. Then the feed gone (404, none published) and checks off again, as the harness has them: Check now
+   * clears the line. Hermetic: the update feed points at the local server throughout.
+   */
+  async modsFeedCheck() {
+    const http = require('http');
+    const { modsFeedBytes, signBytes } = require('../../scripts/release');
+    const { privateKey } = crypto.generateKeyPairSync('ed25519');
+    const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const files = {};
+    const feed = modsFeedBytes({ signed: new Date().toISOString(), release: '0.3.0', commit: 'a'.repeat(40), mods: {} });
+    files['/updates/mods.json'] = feed;
+    files['/updates/mods.json.sig'] = signBytes(feed, priv);
+    const server = http.createServer((req, res) => {
+      const body = files[req.url];
+      if (body === undefined) { res.writeHead(404); return res.end(); }
+      res.writeHead(200);
+      res.end(body);
+    });
+    await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const cfgFile = path.join(this.priv, 'config.json');
+    const before = fs.readFileSync(cfgFile, 'utf8');
+    const shippedBefore = SHIPPED_IDS.map((id) => { try { return fs.readFileSync(path.join(this.trif, 'sites', `${id}.js`), 'utf8'); } catch { return null; } });
+    const note = () => this.panel(`async () => { const n = document.querySelector('#mods-feed-note'); return { shown: !!n && !n.hidden && n.getClientRects().length > 0, text: n ? n.textContent : '', update: document.querySelector('#update-note').textContent, check: !!document.querySelector('#update-note a') }; }`);
+    let last = null;
+    const until = (what, ok) => waitFor(what, async () => { last = await note(); return ok(last) ? last : null; }, { timeoutMs: 20000 })
+      .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    try {
+      this.modsFeedChecked = true; // (helperLogCheck: its warning is expected)
+      fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(before), checkForUpdates: true, updateFeed: `${base}/updates/latest.json` }, null, 2) + '\n');
+      await this.panelClick('#settings-btn');
+      await until('Check now in Settings', (x) => x.check);
+      await this.panelClick('#update-note a');
+      const bad = await until('the mods feed\'s problem under the update status', (x) => x.shown && /not signed by the TRIF release key/.test(x.text));
+      if (!/^Couldn’t get updates to Tim’s mods: the mods feed is not signed by the TRIF release key/.test(bad.text)) throw new Error(`the line: ${bad.text}`);
+      if (/Couldn’t check/.test(bad.update)) throw new Error(`TRIF's own update status shows an error: ${bad.update}`);
+      await sleep(300);
+      await this.shot(this.panelCtx, 'settings-mods-feed-problem');
+      const doc = await this.cli(['doctor'], { json: true, timeoutMs: 60000 });
+      const warn = doc.json && doc.json.checks.find((c) => c.status === 'warn' && /^Tim's mods: the last check for their new versions/.test(c.title));
+      if (!warn || !/not signed by the TRIF release key/.test(warn.title)) throw new Error(`trif doctor: ${JSON.stringify(doc.json?.checks?.filter((c) => c.status !== 'ok'))}`);
+      const shippedNow = SHIPPED_IDS.map((id) => { try { return fs.readFileSync(path.join(this.trif, 'sites', `${id}.js`), 'utf8'); } catch { return null; } });
+      if (JSON.stringify(shippedNow) !== JSON.stringify(shippedBefore)) throw new Error("Tim's mods changed");
+      // gone (none published), and checks off again: Check now clears the line
+      delete files['/updates/mods.json'];
+      delete files['/updates/mods.json.sig'];
+      fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(before), updateFeed: `${base}/updates/latest.json` }, null, 2) + '\n');
+      await until('Check now again', (x) => x.check);
+      await this.panelClick('#update-note a');
+      await until('the line gone', (x) => !x.shown && !x.text);
+      await this.panelClick('#settings-btn');
+      return `"${bad.text}" under "${bad.update}"; trif doctor: "${warn.title}"; then cleared`;
+    } finally {
+      fs.writeFileSync(cfgFile, before);
+      await new Promise((ok) => server.close(ok));
+    }
+  }
+
+  /**
    * Settings → Open model → OpenRouter: a key saved (in the fake keychain) shows as "✓ Saved" with Replace
    * and Remove instead of the field; Replace brings the field back with Cancel; Remove empties the
    * keychain. The agent and provider are put back afterwards.
@@ -439,6 +502,16 @@ class Scenario {
 
   // ---- Tim's mods, site by site (helper/lib/preinstalled.js)
 
+  /** Upgrading: the sites the old setup added (SITES_ON, and timsrobot.com where the old release shipped its mods). */
+  upgradeAdded() {
+    return starterSites().filter((s) => SITES_ON.includes(s) || (this.oldShipped && this.oldShipped.has(s)));
+  }
+
+  /** The setup page's words for upgradeAdded(). */
+  upgradeAddedText() {
+    return this.upgradeAdded().includes('timsrobot.com') ? 'Google, X, Amazon, Instagram and timsrobot.com' : 'Google, X, Amazon and Instagram';
+  }
+
   /** The sites preinstalled.json says were added. */
   addedSites() {
     const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
@@ -472,8 +545,8 @@ class Scenario {
         const x = await this.waitSetup('Tim\'s mods ticked', (st) => st.steps[3] === 'done');
         const st = await this.starterStepState();
         const added = this.addedSites();
-        if (added.join() !== SITES_ON.join()) throw new Error(`added: ${added.join(', ')}`);
-        if (st.state !== 'Google, X, Amazon and Instagram') throw new Error(`the step says: ${st.state}`);
+        if (added.join() !== this.upgradeAdded().join()) throw new Error(`added: ${added.join(', ')}`);
+        if (st.state !== this.upgradeAddedText()) throw new Error(`the step says: ${st.state}`);
         return `ticked already: ${st.state} (${x.steps.join(',')})`;
       }
       await this.waitSetup('Tim\'s mods open', (st) => st.steps[3] === 'now');
@@ -636,6 +709,11 @@ class Scenario {
   async starterLinkCheck(win) {
     const r = this.r;
     const L = LINK_SITE[this.o.kind];
+    if (this.oldShipped && this.oldShipped.has(L.site)) {
+      // (the old release shipped them and its setup added them: there's nothing to offer)
+      this.r.note(`${L.name}: the old release's setup already added Tim's mods there, so no "Add Tim's mods" link to test`);
+      return;
+    }
     await r.check(`a site's panel: "Add Tim's mods for ${L.name}" adds them`, async () => {
       const url = `https://${L.host}:${this.o.servers.tlsPort}/`;
       const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
@@ -715,22 +793,33 @@ class Scenario {
       if (s.status !== 0) throw new Error(`setup exited ${s.status}:\n${s.out.split('\n').slice(-15).join('\n')}`);
     } else {
       const oldPkg = I.unpack(o.oldTgz, path.join(this.work, 'oldpkg'));
-      const s0 = I.runSetup(oldPkg, this.home, ['--browser', I.oldBrowserArg(oldPkg, browserArg)]);
+      // (the sites the old release shipped Tim's mods for: 0.2.5 to 0.2.7 had timsrobot.com's too, so its setup added them)
+      const oldSites = path.join(oldPkg, 'examples', 'sites');
+      this.oldShipped = new Set(fs.existsSync(oldSites) ? fs.readdirSync(oldSites).map((d) => siteOf(`${d}/x`)) : []);
+      // (a 0.2.x setup adds Tim's mods only when asked, the setup page asking site by site: --examples, as a
+      // user who added them all; earlier setups added them anyway)
+      const asksExamples = /OPTIONAL_VALUE_FLAGS[^\n]*--examples/.test(fs.readFileSync(path.join(oldPkg, 'helper', 'cli.js'), 'utf8'));
+      const s0 = I.runSetup(oldPkg, this.home, ['--browser', I.oldBrowserArg(oldPkg, browserArg), ...(asksExamples ? ['--examples'] : [])]);
       this.r.log(s0.out);
       if (s0.status !== 0) throw new Error(`the old release's setup exited ${s0.status}:\n${s0.out.split('\n').slice(-15).join('\n')}`);
-      const legacy = path.join(this.home, '.webmods');
-      if (!fs.existsSync(path.join(legacy, 'sites'))) throw new Error(`the old setup made no ${legacy}/sites`);
+      // (0.1.x kept everything in ~/.webmods, and its updater ran the new setup with --home ~/.webmods; 0.2.x
+      // already has ~/.trif, and its updater runs the new package's `setup --copy --no-link --home ~/.trif`:
+      // helper/lib/update.js install. Both are tested, 0.2.x being where most users come from.)
+      const oldVersion = (I.readJson(path.join(oldPkg, 'package.json')) || {}).version || '0.0.0';
+      const from02 = !/^0\.[01]\./.test(oldVersion);
+      const legacy = from02 ? this.trif : path.join(this.home, '.webmods');
+      if (!fs.existsSync(path.join(legacy, 'sites'))) throw new Error(`the old setup (${oldVersion}) made no ${legacy}/sites`);
       // The user's own mod, and an edit to a shipped one, before upgrading.
       fs.mkdirSync(path.join(legacy, 'sites', '127.0.0.1'), { recursive: true });
       fs.writeFileSync(path.join(legacy, 'sites', '127.0.0.1', 'e2e-user.js'), USER_MOD);
       const shipped = path.join(legacy, 'sites', 'x.com', 'rainbow-rave.js');
       fs.appendFileSync(shipped, '\n// e2e: the user changed this shipped mod\n');
       this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/rainbow-rave'));
-      // The way a 0.1.x helper's updater runs the new version's setup (--home ~/.webmods).
-      const s = I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
+      // The way the old helper's updater runs the new version's setup.
+      const s = from02 ? I.runSetup(pkg, this.home, ['--home', legacy]) : I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
       this.r.log(s.out);
       if (s.status !== 0) throw new Error(`setup exited ${s.status}:\n${s.out.split('\n').slice(-15).join('\n')}`);
-      await this.r.check('upgrade: ~/.webmods moved to ~/.trif, link left behind', () => {
+      if (!from02) await this.r.check('upgrade: ~/.webmods moved to ~/.trif, link left behind', () => {
         const st = fs.lstatSync(legacy);
         if (!st.isSymbolicLink()) throw new Error('~/.webmods is not a link');
         if (fs.realpathSync(legacy) !== fs.realpathSync(this.trif)) throw new Error(`~/.webmods points at ${fs.readlinkSync(legacy)}`);
@@ -753,6 +842,20 @@ class Scenario {
         if (!rec || !rec.pending) throw new Error(`no pending update recorded: ${JSON.stringify(rec)}`);
         if (!/new version waiting/.test(s.out)) throw new Error('setup didn\'t say a new version is waiting');
         return `pending version ${rec.pending.version}`;
+      });
+      // 0.3.0 ships most of Tim's mods as style or boxed mods: a copy the user never changed comes back as the
+      // new one (setup's updateShippedMods), in its new tier.
+      if (from02) await this.r.check('upgrade: Tim\'s unchanged mods come back in their new tier', () => {
+        const moved = [];
+        for (const id of ['www.google.com/dvd-logo', 'www.google.com/hide-extra-sections', 'amazon.com/simple-shopping', 'x.com/follow-status']) {
+          const mine = path.join(this.trif, 'sites', `${id}.js`), next = path.join(pkg, 'examples', 'sites', `${id}.js`), old = path.join(oldPkg, 'examples', 'sites', `${id}.js`);
+          if (!fs.existsSync(mine) || !fs.existsSync(old) || !fs.existsSync(next)) continue;
+          const t = fs.readFileSync(mine, 'utf8');
+          if (!/^\/\/\s*@(boxed|style|rules)\b/m.test(fs.readFileSync(next, 'utf8'))) continue; // (still free in this package)
+          if (t !== fs.readFileSync(next, 'utf8')) throw new Error(`${id} isn't the new version`);
+          moved.push(id);
+        }
+        return moved.length ? moved.join(', ') : 'none of them installed by the old setup';
       });
       // The shipped mods 0.2.0 folded into others (preinstalled.js RETIRED), unchanged here: in the trash.
       const retired = RETIRED.filter((x) => fs.existsSync(path.join(oldPkg, 'examples', 'sites', `${x.id}.js`)));
@@ -866,7 +969,7 @@ class Scenario {
       // (Upgrading, Tim's mods are there already and TRIF has every site: those steps are ticked.)
       const later = this.o.kind === 'upgrade' ? 'done' : 'later';
       const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${later},later,later`);
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,Google, X, Amazon and Instagram' : 'connected,done')) throw new Error(JSON.stringify(x));
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? `connected,done,${this.upgradeAddedText()}` : 'connected,done')) throw new Error(JSON.stringify(x));
       // (no Site permissions step any more: TRIF asks for each site's permission when it's turned on there)
       if (await this.ext(`async () => !!document.querySelector('#step-sites, #mode-permissive, #mode-restrictive')`)) throw new Error('the setup page still has a site-permissions step');
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
@@ -1142,11 +1245,12 @@ class Scenario {
       await d.click(this.panelCtx, '#gate-block');
       const p = await this.waitPanel('the red panel', (x) => x.gate && x.gateTitle === 'The robot is blocked on 127.0.0.1');
       const wantLinks = ['Disconnect from 127.0.0.1 (Disable browser permissions)']; // (blocked keeps Disconnect, not Block)
-      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks)) throw new Error(`the gate: ${JSON.stringify(p)}`);
+      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks) || p.gateWhy) throw new Error(`the gate: ${JSON.stringify(p)}`);
       // (blocked: no power button in the bar; Unblock is the way back)
       await this.waitBar('the blocked gate\'s bar', GATE_BAR_SHUT);
       // blocked: red with a red cross, in the toolbar for this tab, in the bar and on the gate
       const faces = await this.waitFace('the blocked faces', this.win.tabId, { toolbar: 'robot-16.png', bar: 'blocked', gate: 'robot-shaded-blocked.svg' });
+      Scenario.mono(await this.looks()); // (all red, its links too)
       await this.shot(this.panelCtx, 'panel-blocked');
       for (const args of [['text', '--url', '127.0.0.1'], ['screenshot', '--url', '127.0.0.1', '-o', path.join(this.work, 'blocked.png')], ['run', '--url', '127.0.0.1', '1']]) {
         const x = await this.cli(args);
@@ -1285,10 +1389,14 @@ class Scenario {
     await this.narrowShots();
     await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
+    await r.check('the mods feed (new versions of Tim\'s mods): one that fails its signature changes nothing, and Settings says why under the update status, as trif doctor does; a check that works clears it', () => this.modsFeedCheck());
     await this.sweepAndScreenshotChecks(base, win);
     if (this.o.browser === 'chrome') await this.panelWindowChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
+    await r.check('DVD Logo, a boxed mod TRIF ships: switched on, it runs in the sandbox without a hold, and its copy of the logo bounces', () => this.dvdCheck(win));
+    // (Chrome: Firefox's test profile resolves every host here, and runs no boxed mods)
+    if (this.o.browser === 'chrome') await r.check('X\'s real profile pictures: Profile Styler, Post Styler and Tune Composer, boxed and allowed, read their pixels from X\'s image server (shown at 200×200 and already at 400×400), under X\'s CSP', () => this.xPicturesCheck(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
@@ -1304,8 +1412,10 @@ class Scenario {
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty; the boxed mods of a site of its own are approved as that site ("Your inbox.x.com mods can:" on its card), apart from x.com\'s', () => this.sensitiveCheck(win));
-      await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
+      await r.check('sharing: a mod pasted in the panel is imported, switched off; a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
+      await r.check('downloads: off until switched on in Settings; then a new mod file in Downloads (not one there before) gets an "Add this mod?" card naming where it came from (the file\'s where-from record); Try it here runs it in this tab with TRIF\'s runtime (style from the card, boxed from the paste card; a free mod refused) and Undo reloads it away; Add imports it switched off, the file left in Downloads; Not now, and Ignore files from <site>', () => this.downloadsCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
+      await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
       await r.check('mod rows: the light, the name, one chip by its level (hover says what, a click opens the code card), one line of description, the controls', () => this.modRowsCheck(win));
       await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
@@ -1324,6 +1434,7 @@ class Scenario {
       await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
+      await r.check('the clickjacking guard (RT-3): a style mod\'s and a boxed mod\'s real buttons made invisible over a decoy, and one under the boxed mod\'s own opaque element, are stopped (mouse and Enter) and named in trif errors and a card in the chat; the page\'s own invisible file input over its label, a label\'s hidden checkbox, and honest restyles still work; Tim\'s shipped mods trip nothing on the X and Google stand-ins (Chrome)', () => this.clickjackCheck(win));
       await r.check('an organization\'s Codex settings replace TRIF\'s sandbox (a stand-in Codex): the card; Stop stores nothing; Use Codex anyway sends it again, the chip, Settings\' line and Stop allowing', () => this.orgSettingsCheck(win));
       await r.check('not logged in (a stand-in Claude Code logged out, a stand-in Codex logged in): the notice and the gate\'s line offer Switch to Codex and Use robotless; Switch to makes Codex this site\'s agent; robotless is green with the off face (bar and toolbar) and its line in the message box\'s place; Settings\' "None (robotless)" round-trips', () => this.robotlessCheck(win));
     }
@@ -1405,6 +1516,133 @@ class Scenario {
     const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
     if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
     return out.join('; ');
+  }
+
+  // DVD Logo, one of Tim's mods that ships boxed (0.3.0): switched on, it runs in TRIF's sandbox, unheld (its
+  // shipped version is what's allowed), and its copy of the logo bounces on the Google home stand-in.
+  /**
+   * Tim, 11-14: the converted Profile Styler and Tune Composer couldn't read his X profile picture. Here the
+   * shipped mods, switched on and allowed in the panel's card, on a stand-in profile page whose pictures are X's
+   * own logo from X's real image server, under X's CSP: each reads the 400×400 copy's pixels (no "could not
+   * read" in trif logs; Tune Composer's From picture says the picture has no tune, not that it couldn't read
+   * it). Decoding a code from a picture is the conversion cases' (fixtures); this is the real server's part.
+   * Needs the internet: without it, skipped.
+   */
+  async xPicturesCheck(win) {
+    const ids = ['x.com/profile-styler', 'x.com/post-styler', 'x.com/tune-composer'];
+    const PIC = 'https://pbs.twimg.com/profile_images/1683899100922511378/5lY42eHs_400x400.jpg';
+    try {
+      const r = await fetch(PIC, { method: 'HEAD', signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return { status: 'skip', detail: `X's image server answered ${r.status} for the test picture` };
+    } catch (e) { return { status: 'skip', detail: `X's image server can't be reached from here (${e.message})` }; }
+    const d = this.d;
+    const base = `https://x.com:${this.o.servers.tlsPort}/e2e_pics`;
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const done = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, base]);
+      await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000);
+      for (const id of ids) {
+        const on = await this.cli(['enable', id]);
+        if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+        done.push(id);
+      }
+      // (each asks for its powers: allowed in the panel's card, as a user would; one card may hold several)
+      const registered = (st) => ids.every((id) => new RegExp(`${id.replace('.', '\\.')}\\s+registered \\(boxed`).test(st));
+      await waitFor('the three allowed and registered', async () => {
+        const st = await status();
+        if (registered(st)) return true;
+        if (await this.approvalState()) await this.d.click(this.panelCtx, '#approval .ap-allow').catch(() => {});
+        else {
+          const held = ids.find((id) => new RegExp(`${id.replace('.', '\\.')}\\s+HELD`).test(st));
+          if (held) await this.panel(`async () => { document.querySelector('li[data-mod="${held}"] .tag.on-hold')?.click(); return true; }`).catch(() => {});
+        }
+        return null;
+      }, { timeoutMs: 45000, intervalMs: 1000 }).catch(async (e) => {
+        throw new Error(`${e.message}: ${(await status()).split('\n').filter((l) => ids.some((id) => l.includes(id))).map((l) => l.trim()).join(' | ')}`);
+      });
+      const out = [];
+      for (const size of ['200x200', '400x400']) {
+        const url = size === '400x400' ? `${base}?s=400` : base;
+        await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+        const ctx = await d.findPage((u) => u === url);
+        // the stylers: the 400×400 copy loaded (theirs, with CORS) and read without a word in trif logs
+        const loaded = await waitFor(`the 400×400 copy loaded (${size})`, () => d.eval(ctx, `async () => performance.getEntriesByType('resource').filter((r) => /5lY42eHs_400x400/.test(r.name)).length || null`), { timeoutMs: 15000 })
+          .catch(() => 0);
+        await sleep(1500);
+        // Tune Composer: the corner ♪, then From picture
+        await d.eval(ctx, `async () => { document.querySelector('[aria-label="Tune Composer"]').click(); return true; }`);
+        const said = await waitFor(`Tune Composer's From picture (${size})`, () => d.eval(ctx, `async () => {
+          const b = document.querySelector('[title^="Load the tune from the profile picture"]');
+          if (!b) return null;
+          if (!window.__e2eFromPic) { window.__e2eFromPic = 1; b.click(); return null; }
+          const s = document.querySelector('[class~=trif-box-tcp-status]');
+          return s && /picture/.test(s.textContent) ? s.textContent : null;
+        }`), { timeoutMs: 15000 }).catch((e) => `(${e.message})`);
+        const logs = (await this.cli(['logs', '--tab', String(win.tabId)], { timeoutMs: 20000 })).stdout;
+        const bad = logs.split('\n').filter((l) => /could not read|no 400×400 copy|can't be read|SecurityError|tainted/i.test(l));
+        const errs = await this.cli(['errors', '--tab', String(win.tabId)], { json: true });
+        await this.shot(ctx, `x-pictures-${size}`);
+        if (!loaded) throw new Error(`${size}: the 400×400 copy was never loaded`);
+        if (bad.length) throw new Error(`${size}: trif logs: ${bad.join(' | ')}`);
+        if (!/has no tune in it/.test(said)) throw new Error(`${size}: Tune Composer said: ${said}`);
+        if (errs.json && errs.json.length) throw new Error(`${size}: mod errors: ${JSON.stringify(errs.json).slice(0, 400)}`);
+        out.push(`${size}: copy loaded, read; Tune Composer: "${said}"`);
+      }
+      // Post Styler remembers what it read (no code in X's logo: 0), and only what it read (11-14: .seen3 kept a
+      // picture it couldn't read as one without a code, for good)
+      const seen = await waitFor('Post Styler\'s memory of the picture', async () => {
+        const all = await this.ext(`async () => (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}`);
+        const v = all['x.com/post-styler'] && all['x.com/post-styler']['x.com'] && all['x.com/post-styler']['x.com']['trifPostStyler.seen4'];
+        return v ? JSON.parse(v) : null;
+      }, { timeoutMs: 8000 }).catch(() => null);
+      if (!seen || seen[PIC] !== 0) throw new Error(`Post Styler's memory: ${JSON.stringify(seen)}`);
+      return `${out.join('; ')}; Post Styler remembers it as read, no code`;
+    } finally {
+      for (const id of done) await this.cli(['disable', id]).catch(() => {});
+      // (their settings gone again: the boxed mods check counts every mod's)
+      await this.ext(`async (ids) => { const s = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}; for (const id of ids) delete s[id]; await chrome.storage.local.set({ sandboxSettings: s }); }`, [ids]).catch(() => {});
+    }
+  }
+
+  async dvdCheck(win) {
+    const d = this.d;
+    const id = 'www.google.com/dvd-logo';
+    const on = await this.cli(['enable', id]);
+    if (on.status !== 0) throw new Error(`trif enable ${id}: ${on.stderr || on.stdout}`);
+    const url = `https://www.google.com:${this.o.servers.tlsPort}/`;
+    // (in front: a background tab gets no animation frames)
+    const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
+    try {
+      const ctx = await d.findPage((u) => u === url);
+      const look = `async () => {
+        const box = [...document.querySelectorAll('body > div[aria-hidden="true"]')].find((e) => e.style.position === 'fixed' && /translate/.test(e.style.transform));
+        const logo = document.querySelector('img.lnXdpd');
+        return box ? { at: box.style.transform, logo: logo && logo.style.visibility, clicks: box.style.pointerEvents } : null;
+      }`;
+      let first;
+      try {
+        first = await waitFor('the bouncing logo', () => d.eval(ctx, look), { timeoutMs: 15000 });
+      } catch (e) {
+        await this.shot(ctx, 'google-dvd');
+        const st = await this.cli(['status']);
+        throw new Error(`${e.message}; trif status: ${(st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || 'no dvd-logo line').trim()}`);
+      }
+      let later;
+      try {
+        later = await waitFor('the logo to move', async () => { const s = await d.eval(ctx, look); return s && s.at !== first.at ? s : null; }, { timeoutMs: 8000 });
+      } finally { await this.shot(ctx, 'google-dvd'); }
+      if (first.logo !== 'hidden' || first.clicks !== 'none') throw new Error(`the logo ${first.logo}, the copy's pointer-events ${first.clicks}`);
+      const st = await this.cli(['status']);
+      const line = (st.stdout.split('\n').find((l) => l.includes('dvd-logo')) || '').trim();
+      if (!/registered \(boxed/.test(line)) throw new Error(`trif status: ${line || 'no dvd-logo line'}`);
+      const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
+      if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
+      return `${line}; ${first.at} -> ${later.at}, the logo hidden in place`;
+    } finally {
+      await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
+      await this.cli(['disable', id]).catch(() => {});
+    }
   }
 
   // ---- --guidance: the same requests with the AGENTS.md from main and the one in this checkout, with
@@ -2071,7 +2309,25 @@ class Scenario {
         classes: ['blocked', 'needs-login'].filter((c) => document.body.classList.contains(c)),
         problem: document.body.dataset.problem || '',
         dot: q('#dot').className, dotShown: shown('#dot'), dotLabel: q('#dot').getAttribute('aria-label'),
-        green: colour('var(--trif-green)'), bad: colour('var(--bad)'), warn: colour('var(--warn)'),
+        green: colour('var(--trif-green)'), bad: colour('var(--led-coral)'), warn: colour('var(--led-yellow)'),
+        // (a running mod's tier colour: its row's stripe; the list's opacity, dimmed while mods can't run; the X eyes)
+        // Monochrome (Tim, 11-13): on the robot-off screens (the gate, blocked included, and the landing page),
+        // in a state, what's coloured (links, buttons, the line, the title when blocked, the dot, the robot) is
+        // the state's colour, the robot's (--switch-on). The power button counts only when on: off, it's grey
+        // (--muted) in every state, and a gate the browser has access to shows it (an upgrade's, from all sites)
+        state: colour('var(--switch-on)'),
+        mono: (() => {
+          const out = [];
+          const vis = (e) => e.getClientRects().length > 0 && !!e.closest('.gate, .landing');
+          const name = (e) => \`\${e.tagName.toLowerCase()}\${e.id ? '#' + e.id : ''}.\${String(e.className).trim().replace(/\s+/g, '.')} "\${(e.textContent || '').trim().slice(0, 30)}"\`;
+          for (const e of document.querySelectorAll('a, .link-btn, .file-link, #notice .title, #paused .title, .problem-line, body.site-blocked .gate-title')) if (vis(e)) out.push([name(e), getComputedStyle(e).color]);
+          for (const e of document.querySelectorAll('.btn.primary, .btn.go')) if (vis(e)) out.push([name(e), getComputedStyle(e).backgroundColor]);
+          if (q('#dot').getClientRects().length) out.push(['the dot', getComputedStyle(q('#dot')).backgroundColor]);
+          for (const [n, e, prop] of [['the robot', q('#bar-robot .rim'), 'fill'], ['the power button', q('#site-switch[aria-checked="true"]'), 'color']]) if (e && (e.closest('button') || e).getClientRects().length) out.push([n, getComputedStyle(e)[prop]]);
+          return out;
+        })(),
+        stripe: (() => { const li = q('#mod-list li[data-mod][data-group]:not(.off)'); return li ? getComputedStyle(li, '::before').backgroundColor : null; })(),
+        listOpacity: style('#mod-list', 'opacity'), xeyes: style('#bar-robot .xeyes', 'display'),
         rim: style('#bar-robot .rim', 'fill'), gateIcon: (document.getElementById('gate-icon')?.getAttribute('src') || '').split('/').pop(), barFace: document.getElementById('bar-robot')?.dataset.face || '', power: style('#site-switch', 'color'),
         modSwitch: style('#mod-list button.switch[aria-checked="true"]', 'backgroundColor'), light: style('#mod-list .light.on', 'backgroundColor'),
         send: { disabled: q('#send').disabled, title: q('#send').title },
@@ -2094,6 +2350,38 @@ class Scenario {
   }
 
   /** Whether two computed rgb() colours are the same, give or take rounding (and a transition's last step). */
+  /**
+   * Settings' Log out, under the agent (Tim, 11-13): the line, and its card, on which only Cancel is clicked
+   * (the real Log out would run the agent's own logout). Settings must be open. Returns the problems found.
+   * `optional`: no line is only a note (the agent there isn't logged in with its own login).
+   */
+  async logoutLine(themes, { optional = false } = {}) {
+    const problems = [];
+    const out = await waitFor('the Log out line', () => this.panel(`async () => { const p = document.getElementById('agent-login'); if (!p || p.hidden) return null; p.scrollIntoView({ block: 'center' }); return { text: p.textContent }; }`), { timeoutMs: optional ? 1500 : 10000 }).catch(() => null);
+    if (!out) {
+      if (optional) this.r.note('Settings: no Log out line (the agent here isn\'t logged in with its own login)');
+      else problems.push('Settings: no Log out line');
+      return problems;
+    }
+    const m = /^(.+) is logged in\. Log out$/.exec(out.text);
+    if (!m) problems.push(`the Log out line: ${out.text}`);
+    await themes('agent-logout-line');
+    await this.panel(`async () => { document.querySelector('#agent-login .link-btn').click(); return true; }`);
+    const card = await waitFor('the Log out card', () => this.panel(`async () => { const d = document.getElementById('import-ask'); return d?.open ? { title: d.querySelector('.ap-name')?.textContent, text: d.querySelector('.ap-lead')?.textContent, buttons: [...d.querySelectorAll('.ap-actions .btn')].map((b) => b.textContent), head: d.querySelector('.ap-count')?.textContent } : null; }`), { timeoutMs: 5000 }).catch(() => null);
+    if (!card || card.title !== `Log out of ${m && m[1]}?` || card.text !== 'This logs you out everywhere on your computer, including the terminal.' || card.buttons.join() !== 'Log out,Cancel' || card.head) problems.push(`the Log out card: ${JSON.stringify(card)}`);
+    await themes('agent-logout-card');
+    await this.panel(`async () => { [...document.querySelectorAll('#import-ask .ap-actions .btn')].find((b) => b.textContent === 'Cancel').click(); return true; }`);
+    const after = await this.panel(`async () => ({ card: !!document.getElementById('import-ask'), line: !document.getElementById('agent-login').hidden })`);
+    if (after.card || !after.line) problems.push(`after Cancel: ${JSON.stringify(after)}`);
+    return problems;
+  }
+
+  /** Throws unless everything coloured on a robot-off screen is the state's colour (looks().mono). */
+  static mono(x) {
+    const off = x.mono.filter(([, c]) => !Scenario.same(c, x.state));
+    if (off.length) throw new Error(`not one colour (${x.state}): ${JSON.stringify(off)}`);
+  }
+
   static same(a, b) {
     const n = (c) => (String(c).match(/[\d.]+/g) || []).slice(0, 3).map(Number);
     const [x, y] = [n(a), n(b)];
@@ -2119,12 +2407,13 @@ class Scenario {
       const first = await this.waitLooks('the panel\'s status', (x) => !!x.dot && !/Checking/.test(x.dotLabel));
       const loggedOut = /isn’t logged in/.test(first.dotLabel);
       if (loggedOut) {
-        await r.check('agent not logged in, on the site\'s page: every green turns yellow, the robot\'s colour (mods\' switches and lights too), the login notice shows', async () => {
+        await r.check('agent not logged in, on the site\'s page: the robot (X eyes) and power button yellow, the mods in their tiers\' colours, the login notice shows', async () => {
           const x = await this.waitLooks('yellow', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn');
-          // One colour while logged out: the mods' switches and lights are yellow too (Tim, 2026-11-11).
-          const want = { rim: x.warn, power: x.warn, modSwitch: x.warn };
+          // The panel's state in yellow; the mods keep their tiers' colours (Tim, 11-13).
+          const want = { rim: x.warn, power: x.warn, modSwitch: x.stripe };
           for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
-          if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
+          if (x.light && !Scenario.same(x.light, x.stripe)) throw new Error(`the running light is ${x.light}`);
+          if (x.barFace !== 'login' || x.xeyes !== 'inline') throw new Error(`the robot's face: ${x.barFace}, X eyes ${x.xeyes}`);
           if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
           // F14: no sending into a run that can only fail with that; the button says why.
           if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);
@@ -2134,6 +2423,7 @@ class Scenario {
         await r.check('agent not logged in, on the gate: the small robot yellow, a line saying so, Fix still there', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('yellow gate', (l) => l.classes.join() === 'needs-login' && !!l.gateNote);
+          Scenario.mono(x);
           if (!['robot-shaded-off-yellow.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-yellow-gate');
@@ -2148,7 +2438,7 @@ class Scenario {
       } else r.note(`the agent is logged in here ("${first.dotLabel}"): no yellow checks`);
 
       // User scripts off: red, everything.
-      const off = await r.check('user scripts off, on the site\'s page: everything red, "Mods are paused" first', async () => {
+      const off = await r.check('user scripts off, on the site\'s page: the robot and power button coral, the mod list dimmed, "Mods are paused" first', async () => {
         this.scriptsRevoked = true; // the "user scripts were turned off" warnings are expected (consoleCheck, helperLogCheck)
         await this.d.revokeUserScripts(this.control);
         try {
@@ -2160,8 +2450,11 @@ class Scenario {
         }
         await this.goColour('site');
         const x = await this.waitLooks('red', (l) => l.problem === 'scripts' && l.classes.join() === 'blocked' && l.notices.length > 0);
-        for (const k of ['rim', 'power', 'modSwitch']) if (!Scenario.same(x[k], x.bad)) throw new Error(`${k} is ${x[k]}, not ${x.bad}: ${JSON.stringify(x)}`);
-        if (x.light && !Scenario.same(x.light, x.bad)) throw new Error(`the running light is ${x.light}`);
+        for (const k of ['rim', 'power']) if (!Scenario.same(x[k], x.bad)) throw new Error(`${k} is ${x[k]}, not ${x.bad}: ${JSON.stringify(x)}`);
+        // The mods can't run: the whole list dims, in its tiers' colours (Tim, 11-13).
+        if (x.modSwitch && !Scenario.same(x.modSwitch, x.stripe)) throw new Error(`the mod switch is ${x.modSwitch}, not its tier's ${x.stripe}`);
+        if (x.listOpacity !== '0.4') throw new Error(`the mod list's opacity: ${x.listOpacity}`);
+        if (x.barFace !== 'scripts') throw new Error(`the robot's face: ${x.barFace}, not the cross`);
         if (x.dot !== 'dot bad') throw new Error(`dot ${x.dot}`);
         if (x.notices[0] !== 'Mods are paused') throw new Error(`notices: ${JSON.stringify(x.notices)}`);
         // F3: not logged in as well, both notices show, the paused one first.
@@ -2175,7 +2468,8 @@ class Scenario {
         await r.check('user scripts off, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate', (l) => l.problem === 'scripts' && !!l.gateNote);
-          if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (!['robot-shaded-off-coral.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-scripts-off-gate');
           return `"${x.gateNote}"`;
@@ -2183,7 +2477,8 @@ class Scenario {
         await r.check('user scripts off, no website: the red robot, the line, the dot', async () => {
           await this.goColour('landing');
           const x = await this.waitLooks('red landing', (l) => l.problem === 'scripts' && !!l.landingNote);
-          if (x.landingIcon !== 'icons/robot-shaded-red.svg' || !x.landingIconLoaded || !x.dotShown || !/^Mods are paused/.test(x.landingNote)) throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (x.landingIcon !== 'icons/robot-shaded-scripts.svg' || !x.landingIconLoaded || !x.dotShown || !/^Mods are paused/.test(x.landingNote)) throw new Error(JSON.stringify(x));
           await this.shot(this.panelCtx, 'panel-scripts-off-landing');
           return `"${x.landingNote}"`;
         });
@@ -2202,11 +2497,12 @@ class Scenario {
       this.helperStopped = true; // its "helper disconnected" warnings are expected (consoleCheck)
       try {
         process.kill(this.helperPid, 'SIGTERM');
-        await r.check('helper not connected, on the site\'s page: the robot and power button red, the mods (still running) green', async () => {
+        await r.check('helper not connected, on the site\'s page: the robot and power button coral, the mods (still running) as usual', async () => {
           await this.goColour('site');
           const x = await this.waitLooks('red, helper', (l) => l.problem === 'helper' && l.classes.join() === 'blocked' && l.notices.length > 0);
           if (!Scenario.same(x.rim, x.bad) || !Scenario.same(x.power, x.bad) || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
-          if (!Scenario.same(x.modSwitch, x.green) || (x.light && !Scenario.same(x.light, x.green))) throw new Error(`the mods aren't green: ${JSON.stringify(x)}`);
+          if (!Scenario.same(x.modSwitch, x.stripe) || (x.light && !Scenario.same(x.light, x.stripe)) || x.listOpacity !== '1') throw new Error(`the mods aren't as usual: ${JSON.stringify(x)}`);
+          if (x.barFace !== 'helper' || x.xeyes !== 'inline') throw new Error(`the robot's face: ${x.barFace}, X eyes ${x.xeyes}`);
           if (!x.notices.includes('The TRIF helper isn’t connected')) throw new Error(`notices: ${JSON.stringify(x.notices)}`);
           await this.shot(this.panelCtx, 'panel-helper-site');
           return `rim ${x.rim}, mods ${x.modSwitch}`;
@@ -2214,7 +2510,8 @@ class Scenario {
         await r.check('helper not connected, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
-          if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (!['robot-shaded-off-coral.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;
@@ -2222,7 +2519,8 @@ class Scenario {
         await r.check('helper not connected, no website: the red robot, the line, the dot', async () => {
           await this.goColour('landing');
           const x = await this.waitLooks('red landing, helper', (l) => l.problem === 'helper' && !!l.landingNote);
-          if (x.landingIcon !== 'icons/robot-shaded-red.svg' || !x.landingIconLoaded || !x.dotShown || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
+          Scenario.mono(x);
+          if (x.landingIcon !== 'icons/robot-shaded-helper.svg' || !x.landingIconLoaded || !x.dotShown || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
           await this.waitBar('the landing page\'s bar', ['#dot', '#settings-btn']);
           await this.shot(this.panelCtx, 'panel-helper-landing');
           return `"${x.landingNote}"`;
@@ -2257,6 +2555,9 @@ class Scenario {
   async mergeChecks() {
     const r = this.r;
     const d = this.d;
+    // (the panel back on x.com: the checks before may have left it elsewhere, Chrome's panel window ones)
+    await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]).catch(() => {});
+    await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000).catch(() => {});
     const chatKey = 'chat:x.com';
     const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [chatKey]);
     const file = path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js');
@@ -2381,7 +2682,7 @@ process.exitCode = 1;
       if (!shown.msgs.some(([cls, text]) => cls === 'msg login' && text === 'Claude Code needs you to log in again.')) throw new Error(`no login line: ${JSON.stringify(shown.msgs)}`);
       // Its own check still says logged in, so after logging in from a terminal, sending is how to tell.
       if (x.send.disabled) throw new Error(`Send is off: ${JSON.stringify(x.send)}`);
-      // logged out: hollow yellow eyes, in the bar and (every tab's) in the toolbar
+      // logged out: yellow X eyes in the bar; the toolbar keeps the usual robot
       await this.waitFace('the logged-out faces', win.tabId, { toolbar: 'robot-16.png', bar: 'login' });
       await this.shot(this.panelCtx, 'panel-login-expired');
       // From a terminal: the plain message, and how to log in.
@@ -2615,6 +2916,12 @@ process.exitCode = 1;
       if (s1.sitePicks?.[site]?.agent !== 'codex') throw new Error(`this site's pick: ${JSON.stringify(s1)}`);
       if (!Scenario.same(sw.rim, sw.green)) throw new Error(`not green: ${JSON.stringify(sw)}`);
       out.push('Switch to Codex: this site\'s pick, green');
+      // Codex logged in (the stand-in): Settings offers Log out
+      await this.panelClick('#settings-btn');
+      const lo = await this.logoutLine(themes);
+      await this.panelClick('#settings-btn');
+      if (lo.length) throw new Error(lo.join('\n'));
+      out.push('Settings: "Codex is logged in. Log out", its card, Cancel');
 
       // Back to Claude Code; Use robotless.
       await useClaude();
@@ -2624,8 +2931,10 @@ process.exitCode = 1;
       const x = await this.waitLooks('robotless: green, the off face', (l) => !l.classes.length && l.dot === 'dot ok' && l.barFace === 'robotless', 20000);
       const s2 = await stored();
       if (s2.settings?.agent !== 'none' || s2.sitePicks?.[site]?.agent !== 'claude') throw new Error(`stored: ${JSON.stringify(s2)}`);
-      for (const k of ['rim', 'power', 'modSwitch']) if (x[k] && !Scenario.same(x[k], x.green)) throw new Error(`${k} is ${x[k]}, not green: ${JSON.stringify(x)}`);
-      if (x.light && !Scenario.same(x.light, x.green)) throw new Error(`the running light is ${x.light}`);
+      for (const k of ['rim', 'power']) if (x[k] && !Scenario.same(x[k], x.green)) throw new Error(`${k} is ${x[k]}, not green: ${JSON.stringify(x)}`);
+      // (the mods in their tiers' colours, as always)
+      if (x.modSwitch && !Scenario.same(x.modSwitch, x.stripe)) throw new Error(`the mod switch is ${x.modSwitch}, not its tier's ${x.stripe}`);
+      if (x.light && !Scenario.same(x.light, x.stripe)) throw new Error(`the running light is ${x.light}`);
       if (x.dotLabel !== 'Ready · robotless' || x.notices.length) throw new Error(JSON.stringify(x));
       const r1 = await notice();
       if (r1.line !== 'Robotless: your mods run, no agent. Pick one in Settings to chat.' || r1.composer || r1.using || r1.empty || r1.shown) throw new Error(`robotless: ${JSON.stringify(r1)}`);
@@ -2991,7 +3300,7 @@ process.exitCode = 1;
       return li && li.classList.contains('held') ? { group: li.dataset.group } : null;
     }`), { timeoutMs: 15000 });
     const card = await this.approvalFor('127.0.0.1/e2e-sbx-good');
-    if (row.group !== 'page' || !card.items.some((f) => /can't run boxed mods, so here it would run as a free mod/.test(f)) || card.chip !== 'Boxed mod'
+    if (row.group !== 'page' || !card.items.some((f) => /can't run boxed mods, so here it would run as a free mod/.test(f)) || card.group !== 'sandboxed' || card.chip
       || card.note !== 'Allow runs this version as a free mod, in this browser only.') throw new Error(`the panel: ${JSON.stringify({ row, card })}`);
     await this.shot(this.panelCtx, 'panel-sandbox-fallback-held');
     await this.d.click(this.panelCtx, '#approval .ap-allow');
@@ -3079,13 +3388,13 @@ process.exitCode = 1;
       else if (!opened.focusIn) problems.push(`the focus isn't in the approval dialog: ${JSON.stringify(opened)}`);
       const row = await this.approvalFor('127.0.0.1/e2e-pw-all');
       const want = {
-        name: 'E2E Boxed mod with powers', chip: 'Boxed mod', where: '127.0.0.1 · e2e-pw-all.js', lead: 'It asks for these powers. TRIF holds it to them:',
+        name: 'E2E Boxed mod with powers', group: 'sandboxed', chip: '', where: '127.0.0.1 · e2e-pw-all.js', lead: 'It asks for these powers. TRIF holds it to them:',
         items: ['It can read what you type on this site, but can\'t send it anywhere.', 'It can play sounds.', 'It can add its own controls (sliders, pickers).'],
         together: ['Together, it could turn what it reads into sounds that a device nearby could pick up.'],
         note: 'It\'s new or changed since TRIF last let it run. Updates that ask for the same powers won\'t ask again.', show: 'Show code',
       };
       for (const [k, v] of Object.entries(want)) if (JSON.stringify(row[k]) !== JSON.stringify(v)) problems.push(`the approval dialog's ${k}: ${JSON.stringify(row[k])}`);
-      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'read-drafts sound controls' || !/^It can read what you type/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
+      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'read-drafts sound controls' || !/^Reads what you type\nPlays sounds\nAdds its own controls$/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
       // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
@@ -3096,19 +3405,19 @@ process.exitCode = 1;
       const moreState = () => this.panel(`async () => [...document.querySelectorAll('#approval .more-btn')].map((b) => {
         const box = document.getElementById(b.getAttribute('aria-controls'));
         const d = document.getElementById('approval');
-        return { btn: b.textContent, expanded: b.getAttribute('aria-expanded'), shown: !!box && !box.hidden && box.getClientRects().length > 0, text: box ? box.textContent : '',
+        return { btn: b.title, expanded: b.getAttribute('aria-expanded'), shown: !!box && !box.hidden && box.getClientRects().length > 0, text: box ? box.textContent : '',
           inWarnings: !!b.closest('.ap-together'), wide: d.scrollWidth > d.clientWidth + 1, overflowX: getComputedStyle(d).overflowX };
       })`);
       const before = await moreState();
-      if (before.length !== 4 || before.some((x) => x.btn !== 'more' || x.shown || x.expanded !== 'false')) problems.push(`"more" before a click: ${JSON.stringify(before)}`);
+      if (before.length !== 4 || before.some((x) => x.btn !== 'More' || x.shown || x.expanded !== 'false')) problems.push(`"more" before a click: ${JSON.stringify(before)}`);
       await this.d.click(this.panelCtx, '#approval .ap-facts li:first-child .more-btn');
       await this.d.click(this.panelCtx, '#approval .ap-together .more-btn');
       const opened2 = await waitFor('"more" open', async () => { const s = await moreState(); return s.filter((x) => x.shown).length === 2 ? s : null; }, { timeoutMs: 5000 }).catch(() => null);
       if (!opened2) problems.push(`"more" didn't reveal the explanations: ${JSON.stringify(await moreState())}`);
       else {
         const power = opened2[0], warn = opened2.find((x) => x.inWarnings) || {};
-        if (!power.shown || power.btn !== 'less' || power.expanded !== 'true' || !power.text || !explanation('powers', 'read-drafts').endsWith(power.text)) problems.push(`read-drafts' "more": ${JSON.stringify(power)}`);
-        if (!warn.shown || warn.btn !== 'less' || !warn.text || !explanation('warnings', 'read-into-sound').endsWith(warn.text)) problems.push(`the warning's "more": ${JSON.stringify(warn)}`);
+        if (!power.shown || power.btn !== 'Less' || power.expanded !== 'true' || !power.text || !explanation('powers', 'read-drafts').endsWith(power.text)) problems.push(`read-drafts' "more": ${JSON.stringify(power)}`);
+        if (!warn.shown || warn.btn !== 'Less' || !warn.text || !explanation('warnings', 'read-into-sound').endsWith(warn.text)) problems.push(`the warning's "more": ${JSON.stringify(warn)}`);
         if (opened2.some((x) => x.wide || x.overflowX !== 'hidden')) problems.push(`the card scrolls sideways with "more" open: ${JSON.stringify(opened2[0])}`);
         if ((await this.approvalState()).items[0] !== want.items[0]) problems.push('the line changed when its "more" opened');
       }
@@ -3116,7 +3425,7 @@ process.exitCode = 1;
       await this.d.colorScheme(this.panelCtx, '');
       await this.d.click(this.panelCtx, '#approval .ap-facts li:first-child .more-btn');
       const folded = await moreState();
-      if (folded[0].shown || folded[0].btn !== 'more') problems.push(`"less" didn't fold it: ${JSON.stringify(folded[0])}`);
+      if (folded[0].shown || folded[0].btn !== 'More') problems.push(`"less" didn't fold it: ${JSON.stringify(folded[0])}`);
       // the file name in the card opens the code card over it; Esc closes that one only
       await this.d.click(this.panelCtx, '#approval .ap-where .file-link');
       const over = await waitFor('the code card over the approval', () => this.panel(`async () => { const c = document.getElementById('code-view'); return c && c.open ? { mod: c.dataset.mod, approval: document.getElementById('approval').open } : null; }`), { timeoutMs: 8000 }).catch(() => null);
@@ -3168,7 +3477,7 @@ process.exitCode = 1;
       // a new power (keys): waits for that one only
       fs.writeFileSync(allFile, all.replace('// @powers      sound, controls, read-drafts', '// @powers      sound, controls, read-drafts, keys'));
       const held2 = await waitFor('held for the new power', async () => { const st = await status(); return /e2e-pw-all\s+CHANGE WAITING/.test(st) ? st : null; }, { timeoutMs: 20000, intervalMs: 500 });
-      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts; Mods with many powers can act in unspecific or powerful ways\. Treat this with caution\. \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
+      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts; Mods with many powers could act in surprising ways\. Treat them with caution\. \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
       await this.cli(['approve', '127.0.0.1/e2e-pw-all'], { timeoutMs: 20000 });
       await waitFor('keys allowed', async () => /e2e-pw-all\s+registered \(boxed, powers: read-drafts, keys, sound, controls\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
@@ -3333,7 +3642,7 @@ process.exitCode = 1;
         'can read and change what this site keeps under: e2e-wide-key, e2e-wide-s, e2e_c (a cookie: only read)', `changes what ${site} receives from this page: flag set to false, mode set to quiet in place of loud, added set to true (in E2eOp requests)`,
         'can load other sizes of pictures this page shows (from 127.0.0.1)', 'can play videos this page links to, inside the page (from youtube.com)', 'can see which fonts are installed on this computer',
         'can change pictures you attach on this site before you post them', 'can reload this page', 'brings over its old settings from what this site keeps under: e2e-old-setting (once)',
-        'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.']) if (!hl.includes(want)) problems.push(`the hold doesn't say "${want}": ${hl.slice(0, 1500)}`);
+        'Mods with many powers could act in surprising ways. Treat them with caution.']) if (!hl.includes(want)) problems.push(`the hold doesn't say "${want}": ${hl.slice(0, 1500)}`);
       await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
       await waitFor('registered with its powers', async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/wideb.html`]);
@@ -3356,7 +3665,7 @@ process.exitCode = 1;
       for (const [k, v] of Object.entries(N || {})) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
       if (!N || Object.keys(N).length < 14) problems.push(`the undeclared mod's results: ${JSON.stringify(N)}`);
       const exact = { 'B3 the site\'s key, read and changed': 'ok: v1 v2 s1 c1', 'B3 the keys it may see': 'ok: e2e-wide-key', 'B3 its old settings, brought over once': 'ok: {"zoom":3}',
-        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
+        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B10 a picture already the size asked for, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
         'B6 a link the page shows, with a parameter taken out': 'ok: /wideb.html?a=1' };
       for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]} (wanted ${v})`);
       const reqs = this.o.servers.requests.map((q) => q.url);
@@ -3534,6 +3843,145 @@ process.exitCode = 1;
       return `${Object.keys(R).length + Object.keys(RB || {}).length} outcomes as each fix says (${Object.keys(R).filter((k) => /\(refused\)$/.test(k)).length} refused); ${Object.keys(want).length} effects seen from the page`;
     } finally {
       for (const id of ids) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
+    }
+  }
+
+  // ---- the clickjacking guard (extension/runtime.js clickGuard; docs/SANDBOX-TIER-NOTES.md RT-3)
+
+  async clickjackCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const head = (name, tier) => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/clickjack.html*\n// ${tier}\n// ==/WebMod==\n`;
+    const files = {
+      // the style mod: #real1 invisible, over its decoy; and a rule on the page's own label beside its file input
+      'e2e-cj-style': head('E2E clickjack style', '@style') + JSON.stringify({ css: '#real1 { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; opacity: 0; } .pretty { border-radius: 8px; }' }) + '\n',
+      // the boxed mod: #real2 hidden by style(), #real3 under its own opaque element that lets clicks through; and
+      // two honest restyles: its words over #ok1 (Oppish's way), #ok2's icon hidden and its own drawn (Rainbow Rave's)
+      'e2e-cj-box': head('E2E clickjack box', '@boxed') + `await trif.ready;
+const r2 = page.find('#real2');
+for (const [k, v] of [['position', 'absolute'], ['inset', '0'], ['width', '100%'], ['height', '100%'], ['z-index', '5'], ['opacity', '0.02']]) r2.style(k, v);
+const cover = page.create('div');
+cover.setText('Win a prize');
+for (const [k, v] of [['position', 'absolute'], ['inset', '0'], ['background', 'rgb(34, 170, 34)'], ['color', '#fff'], ['pointer-events', 'none'], ['z-index', '9']]) cover.style(k, v);
+page.find('#s3').append(cover);
+const ok1 = page.find('#ok1');
+ok1.style('color', 'transparent');
+const words = page.create('span');
+words.setText('Sepearch');
+for (const [k, v] of [['position', 'absolute'], ['left', '0'], ['top', '0'], ['width', '100px'], ['height', '40px'], ['pointer-events', 'none'], ['color', '#fff']]) words.style(k, v);
+ok1.after(words);
+trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(45deg, red, blue); }');
+`,
+    };
+    const ids = Object.keys(files).map((n) => `${site}/${n}`);
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const main = (fn) => this.ext(`async (tabId) => { const r = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: ${fn} }); return r[0].result; }`, [win.tabId]);
+    const out = [];
+    try {
+      for (const [n, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${n}.js`), text);
+      const enabled = new Set();
+      await waitFor('both registered', async () => {
+        const st = await status();
+        // (switched on once TRIF lists them: mods from outside the chat may start off)
+        for (const id of ids) if (!enabled.has(id) && st.includes(id)) { enabled.add(id); await this.cli(['enable', id]); }
+        return new RegExp(`${site}/e2e-cj-style\\s+registered`).test(st) && new RegExp(`${site}/e2e-cj-box\\s+registered \\(boxed`).test(st) ? st : null;
+      }, { timeoutMs: 25000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/clickjack.html`]);
+      const ctx = await this.d.findPage((u) => u.includes('/clickjack.html'), { timeoutMs: 10000 });
+      await waitFor('the mods applied', () => main(`() => getComputedStyle(document.getElementById('real1')).opacity === '0' && document.getElementById('real2').style.opacity === '0.02' && document.querySelectorAll('#s3 div').length === 1 && !!window.__webmods && !!window.__webmods.guard`), { timeoutMs: 15000, intervalMs: 300 });
+      await sleep(300);
+      for (const sel of ['#real1', '#real2', '#real3', '#file', '#swtext', '#ok1']) await this.d.click(ctx, sel);
+      // (#ok2: on its hidden icon, where the press lands)
+      const at = await main(`() => { const b = document.querySelector('#ok2 svg').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; }`);
+      await this.d.click(ctx, '#ok2 .ic');
+      // the keyboard: Enter on the hidden #real2, focused
+      await main(`() => { document.getElementById('real2').focus(); return true; }`);
+      await this.d.key(ctx, 'Enter');
+      await sleep(400);
+      const hits = JSON.parse(await main(`() => document.documentElement.dataset.hits`));
+      const checked = await main(`() => document.getElementById('cb').checked`);
+      const guard = await main(`() => ({ stats: window.__webmods.guard.stats, stopped: window.__webmods.guard.stopped })`);
+      fs.writeFileSync(this.r.file(`clickjack-${this.o.browser}.json`), JSON.stringify({ hits, checked, guard, at }, null, 2));
+      const problems = [];
+      for (const id of ['real1', 'real2', 'real3', 'decoy1', 'decoy2']) if (hits[id]) problems.push(`${id} got ${hits[id]} click(s)`);
+      for (const id of ['file', 'cb', 'ok1', 'ok2']) if (hits[id] !== 1) problems.push(`${id} got ${hits[id] || 0} clicks, want 1`);
+      if (!checked) problems.push('the checkbox didn\'t check');
+      const errs = await this.cli(['errors', '--url', site], { json: true });
+      const cj = (errs.json || []).filter((e) => e.kind === 'clickjack').map((e) => `${e.mod} ${e.why}`).sort();
+      const wantCj = [`${site}/e2e-cj-box covered`, `${site}/e2e-cj-box faded`, `${site}/e2e-cj-style faded`];
+      if (JSON.stringify(cj) !== JSON.stringify(wantCj)) problems.push(`trif errors: ${JSON.stringify(cj)}, want ${JSON.stringify(wantCj)}`);
+      // the panel says so: the card (the boxed mod's world tells the background at once)
+      const card = await waitFor('the clickjack card in the chat', () => this.panel(`async () => { const li = [...document.querySelectorAll('#messages li.msg')].filter((l) => /^TRIF stopped a click/.test(l.textContent)); return li.length ? li.map((l) => l.textContent.slice(0, 160)) : null; }`), { timeoutMs: 20000, intervalMs: 500 }).catch((e) => { problems.push(`no card: ${e.message}`); return []; });
+      await this.shot(this.panelCtx, 'clickjack-card');
+      if (problems.length) throw new Error(problems.join('; '));
+      const s = guard.stats;
+      out.push(`stopped ${s.stopped} presses (${cj.join(', ')}), ${card.length} card(s); allowed the file input, label, honest restyles; a press ${(s.ms / Math.max(1, s.checked)).toFixed(2)} ms on average (max ${s.maxMs.toFixed(1)}), the second look ${s.deep ? (s.deepMs / s.deep).toFixed(1) : 0} ms (max ${s.maxDeepMs.toFixed(1)})`);
+    } finally {
+      for (const n of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${n}.js`)); } catch { /* gone */ } }
+    }
+    // Tim's shipped mods (Chrome: they run boxed there), switched on and allowed, on the X and Google stand-ins:
+    // a press (the right button: no click's action) on every control there trips nothing
+    if (this.o.browser === 'chrome') out.push(await this.clickjackShipped(win));
+    return out.join('; ');
+  }
+
+  async clickjackShipped(win) {
+    const ids = ['x.com/rainbow-rave', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/follow-status', 'www.google.com/oppish', 'www.google.com/dvd-logo', 'www.google.com/hide-extra-sections', 'www.google.com/hide-ai-in-results'];
+    const { tlsPort } = this.o.servers;
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => (st.split('\n').find((l) => l.includes(id)) || '').trim();
+    const turned = [];
+    const seen = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `https://x.com:${tlsPort}/home`]);
+      await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com', 15000).catch(() => {});
+      for (const id of ids) {
+        const st = await status();
+        if (/registered/.test(line(st, id)) && !/\boff\b/i.test(line(st, id))) continue;
+        const on = await this.cli(['enable', id]);
+        if (on.status === 0) turned.push(id);
+      }
+      await waitFor('the shipped mods allowed and registered', async () => {
+        const st = await status();
+        if (ids.every((id) => /registered/.test(line(st, id)))) return true;
+        if (await this.approvalState()) await this.d.click(this.panelCtx, '#approval .ap-allow').catch(() => {});
+        else {
+          const held = ids.find((id) => /HELD/.test(line(st, id)));
+          if (held) await this.panel(`async () => { document.querySelector('li[data-mod="${held}"] .tag.on-hold')?.click(); return true; }`).catch(() => {});
+        }
+        return null;
+      }, { timeoutMs: 45000, intervalMs: 1000 }).catch(async (e) => { throw new Error(`${e.message}: ${(await status()).split('\n').filter((l) => ids.some((id) => l.includes(id))).map((l) => l.trim()).join(' | ')}`); });
+      const pages = [`https://x.com:${tlsPort}/home`, `https://x.com:${tlsPort}/e2e_pics`, `https://www.google.com:${tlsPort}/search?q=trif`, `https://www.google.com:${tlsPort}/`];
+      for (const url of pages) {
+        await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+        const ctx = await this.d.findPage((u) => u === url, { timeoutMs: 10000 });
+        await sleep(2500);
+        // (every control in view, its centre where nothing else is on top: at most 60)
+        const points = await this.d.eval(ctx, `async () => {
+          const out = [];
+          for (const el of document.querySelectorAll('a[href], button, input:not([type=hidden]), [role=button], [role=link], [role=tab], label, summary, [tabindex]')) {
+            const b = el.getBoundingClientRect();
+            if (b.width < 2 || b.height < 2 || b.bottom < 0 || b.top > innerHeight || b.right < 0 || b.left > innerWidth) continue;
+            const x = b.x + b.width / 2, y = b.y + b.height / 2;
+            const hit = document.elementFromPoint(x, y);
+            if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) continue;
+            out.push([x, y]);
+            if (out.length >= 60) break;
+          }
+          return out;
+        }`);
+        for (const [x, y] of points) await this.d.rightPress(ctx, x, y);
+        await sleep(300);
+        const g = await this.d.eval(ctx, `async () => window.__webmods && window.__webmods.guard ? { stats: window.__webmods.guard.stats, stopped: window.__webmods.guard.stopped } : null`);
+        if (!g) throw new Error(`${url}: no guard there`);
+        seen.push(`${new URL(url).host}${new URL(url).pathname}: ${points.length} pressed, ${g.stats.checked} looked at, ${g.stats.deep} twice (max ${g.stats.maxMs.toFixed(1)} ms)`);
+        if (g.stats.stopped) throw new Error(`${url}: the guard stopped ${g.stats.stopped}: ${JSON.stringify(g.stopped)}`);
+      }
+      return `shipped mods: ${seen.join('; ')}`;
+    } finally {
+      for (const id of turned) await this.cli(['disable', id]).catch(() => {});
+      await this.ext(`async (ids) => { const s = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}; for (const id of ids) delete s[id]; await chrome.storage.local.set({ sandboxSettings: s }); }`, [ids]).catch(() => {});
     }
   }
 
@@ -3769,7 +4217,7 @@ process.exitCode = 1;
       for (const want of ['it can read what you type on this site, but can\'t send it anywhere', 'it can talk to your other boxed mods on this page', 'it can play and pause video and audio on this page',
         `it can take you to these pages on ${site}: /e2e-goto-ok, or to a link the page shows`,
         'it can click these for you: the counter (#pclick), a link on this page (#plink), the form\'s buttons (#fb3, #fr3, #lb3), a link to another site (#ext3)',
-        'it can change what you type and paste on this site before you post it', 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.']) {
+        'it can change what you type and paste on this site before you post it', 'Mods with many powers could act in surprising ways. Treat them with caution.']) {
         if (!hl.includes(want)) problems.push(`trif status doesn't say "${want}": ${hl}`);
       }
       await this.cli(['approve', `${site}/e2e-pw3`], { timeoutMs: 20000 });
@@ -3930,6 +4378,7 @@ process.exitCode = 1;
       }`), { timeoutMs: 8000 });
       if (settings.level !== 'look' || settings.sensitive < 30) problems.push(`Settings: ${JSON.stringify(settings)}`);
       await themes('agent-settings');
+      problems.push(...await this.logoutLine(themes, { optional: true }));
       if (problems.length) throw new Error(problems.join('\n'));
       return `the line over the box ("${atAsk.words}"; the menu opened from the keyboard, Esc closed it); Ask: the dialog ("${asked.ask}"), Just this once ran the code (42) and left the site at Ask; Look from the menu refused trif run and allowed trif text; Off refused trif text; a sensitive site off with the chat's first line; Settings listed the choice and ${settings.sensitive} sensitive patterns`;
     } finally {
@@ -3956,7 +4405,7 @@ process.exitCode = 1;
     const view = () => this.panel(`async () => {
       const q = (s) => document.querySelector(s);
       const list = q('#mod-list');
-      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent,
+      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent, gateWhy: q('#gate-why').hidden ? '' : q('#gate-why').textContent,
         red: document.body.classList.contains('site-blocked'), links: q('#gate-links').hidden ? [] : [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent),
         note: q('#agent-site-note').hidden ? '' : q('#agent-site-note').textContent, level: q('#agent-level').dataset.level || '',
         words: q('#agent-level .agent-level-text').textContent, wordsShown: getComputedStyle(q('#agent-level .agent-level-text')).display !== 'none',
@@ -3986,6 +4435,7 @@ process.exitCode = 1;
       await go(at('mail.x.com', '/inbox'));
       const blocked = await waitFor('the blocked screen', async () => { const v = await view(); return v.site === 'mail.x.com' && v.gate && v.red ? v : null; }, { timeoutMs: 15000 });
       if (blocked.gateTitle !== 'The robot is blocked on mail.x.com' || blocked.gateBtn !== 'Unblock') problems.push(`the blocked screen: ${JSON.stringify(blocked)}`);
+      if (blocked.gateWhy !== 'TRIF blocks itself from running on sensitive sites by default.') problems.push(`the sensitive site's line: "${blocked.gateWhy}"`);
       if (blocked.links.some((l) => /Disconnect/.test(l))) problems.push(`Disconnect offered, though its access is x.com's: ${blocked.links}`);
       await themes('sensitive-blocked');
       const refused = await this.cli(['text', '--url', 'mail.x.com']);
@@ -4233,7 +4683,23 @@ process.exitCode = 1;
       // (Import and Export all in the Mods header's ⋯; held rows say "on hold" once)
       const tidy = await this.panel(`async () => ({ menu: [...document.querySelectorAll('#mods-menu .menu-item')].map((b) => b.textContent), files: document.getElementById('site-files-summary').textContent,
         twice: [...document.querySelectorAll('#mod-list li.held')].filter((li) => [...li.querySelectorAll('.tag')].filter((t) => !t.hidden && t.textContent === 'on hold').length > 1).length })`);
-      if (tidy.menu[0] !== 'Import mod…' || tidy.files !== 'Files (1)' || tidy.twice) problems.push(`the mods box: ${JSON.stringify(tidy)}`);
+      if (tidy.menu[0] !== 'Import mod…' || tidy.menu[1] !== 'Paste a mod…' || tidy.files !== 'Files (1)' || tidy.twice) problems.push(`the mods box: ${JSON.stringify(tidy)}`);
+      // Paste a mod… (the ⋯ menu): the text imported as a file of it would be: named from its @name, filed by its
+      // @match, switched off (a style mod: nothing to hold)
+      const pasted = path.join(dir, 'e2e-pasted-calm.js');
+      made.push(pasted);
+      const pasteText = '// ==WebMod==\n// @name E2E Pasted Calm\n// @description Hides the e2e page\'s banner\n// @match *://127.0.0.1/*\n// @style\n// @risk 0 render-only\n// ==/WebMod==\n{ "hide": ["#e2e-nothing"] }\n';
+      await this.panelClick('#mods-more');
+      await this.panelClick('#paste-mod');
+      const pasteCard = await waitFor('the paste card', () => this.panel(`async () => { const d = document.getElementById('paste-ask'); return d && d.open ? { title: d.querySelector('.ap-name').textContent, add: d.querySelector('.ap-actions .btn').disabled } : null; }`), { timeoutMs: 5000 }).catch(() => null);
+      if (!pasteCard || pasteCard.title !== 'Paste a mod' || pasteCard.add !== true) problems.push(`the paste card: ${JSON.stringify(pasteCard)}`);
+      await this.panel(`async (t) => { const a = document.querySelector('#paste-ask textarea'); a.value = t; a.dispatchEvent(new Event('input')); return true; }`, [pasteText]);
+      await themes('share-paste');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(1)');
+      await waitFor('the pasted mod', () => (fs.existsSync(pasted) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Paste a mod wrote nothing'));
+      if (fs.existsSync(pasted) && fs.readFileSync(pasted, 'utf8') !== pasteText) problems.push('the pasted mod isn\'t the text pasted');
+      const pastedStatus = await waitFor('the pasted mod off', async () => { const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout; const line = out.split('\n').find((l) => l.includes(`${site}/e2e-pasted-calm`)); return line && /off/.test(line) ? line.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
+      if (!pastedStatus) problems.push('the pasted mod isn\'t listed as off');
       await themes('share-files');
       // a file bigger than a slice (a few MB: the panel sends 4 MB at a time, the helper appends them)
       await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(5 * 1024 * 1024).fill(97)], 'e2e-big.bin', { type: 'application/octet-stream' })); document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true })); return true; }`);
@@ -4248,10 +4714,132 @@ process.exitCode = 1;
       await themes('share-drop-overlay');
       await this.panel(`async () => { document.body.dispatchEvent(new DragEvent('dragleave', { bubbles: true })); return true; }`);
       if (problems.length) throw new Error(problems.join('\n'));
-      return `a dropped .js imported (no shipped markers) and held, "imported from a file"; Add as a copy and Replace; History "${hist[0]}", its diff, Restore; Export to the run's Downloads, shown; a dropped .txt in the site's files, noted, listed, not a mod`;
+      return `a pasted mod imported, named from its @name, off; a dropped .js imported (no shipped markers) and held, "imported from a file"; Add as a copy and Replace; History "${hist[0]}", its diff, Restore; Export to the run's Downloads, shown; a dropped .txt in the site's files, noted, listed, not a mod`;
     } finally {
       for (const f of made) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.panel(`async () => { for (const id of ['code-view', 'import-ask']) { const d = document.getElementById(id); if (d && d.open) d.close(); } document.getElementById('drop-overlay').hidden = true; return true; }`).catch(() => {});
+    }
+  }
+
+  // Mod files in the user's downloads (helper/lib/downloads.js) and Try it here (background.js tryMod): the run's
+  // downloads folder (TRIF_DOWNLOADS), files written there as a browser would leave them, with a where-from record
+  // on macOS as browsers set it.
+  async downloadsCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dl = path.join(this.work, 'downloads');
+    const dir = path.join(this.trif, 'sites', site);
+    const problems = [];
+    const made = [];
+    const mod = (name, body, extra = '') => `// ==WebMod==\n// @name ${name}\n// @description An e2e mod from the downloads folder\n// @match *://127.0.0.1/*\n${extra}// ==/WebMod==\n${body}\n`;
+    const download = (file, text, from) => {
+      fs.mkdirSync(dl, { recursive: true });
+      const f = path.join(dl, file);
+      fs.writeFileSync(f, text);
+      made.push(f);
+      if (from && process.platform === 'darwin') {
+        const { execFileSync } = require('child_process');
+        const plist = execFileSync('/usr/bin/plutil', ['-convert', 'binary1', '-o', '-', '-'], { input: JSON.stringify([`blob:https://${from}/1234`, `https://${from}/chat/1`]) });
+        execFileSync('/usr/bin/xattr', ['-wx', 'com.apple.metadata:kMDItemWhereFroms', plist.toString('hex'), f]);
+      }
+      return f;
+    };
+    const offer = () => this.panel(`async () => { const n = document.getElementById('download-offer'); return n && !n.hidden ? { title: n.querySelector('.title')?.textContent || '', text: n.textContent, buttons: [...n.querySelectorAll('.actions button')].map((b) => b.textContent) } : null; }`);
+    const press = (label) => this.panel(`async (label) => { const b = [...document.querySelectorAll('#download-offer .actions button')].find((x) => x.textContent === label); if (!b) return false; b.click(); return true; }`, [label]);
+    const outline = () => this.page(`async () => getComputedStyle(document.body).outlineColor`).catch(() => null);
+    const toggle = async () => {
+      await this.panelClick('#settings-btn');
+      await waitFor('settings', () => this.panel(`async () => document.querySelector('#settings').getClientRects().length > 0 || null`), { timeoutMs: 8000 });
+      await this.d.click(this.panelCtx, '#watch-downloads');
+    };
+    const note = () => this.panel(`async () => ({ on: document.getElementById('watch-downloads').checked, note: document.getElementById('downloads-note').textContent })`);
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
+      await this.dismissApproval();
+      download('e2e-before.js', mod('E2E Before', '{ "hide": ["#nothing"] }', '// @style\n'), 'claude.ai');
+      await toggle();
+      const on = await waitFor('watching', async () => { const n = await note(); return n.on && /TRIF offers each new mod file/.test(n.note) ? n : null; }, { timeoutMs: 15000 }).catch(() => null);
+      if (!on) problems.push(`the switch: ${JSON.stringify(await note())}`);
+      await this.shot(this.panelCtx, 'downloads-setting');
+      await this.panelClick('#settings-btn');
+      // a style mod downloaded "from claude.ai"
+      const styleText = '// ==WebMod==\n// @name E2E Downloaded\n// @description Outlines the page in an odd colour\n// @match *://127.0.0.1/*\n// @style\n// ==/WebMod==\n{ "css": "body { outline: 7px solid rgb(1, 2, 3) }" }\n';
+      const f = download('e2e-downloaded.js', styleText, 'claude.ai');
+      const card = await waitFor('the offer', () => offer(), { timeoutMs: 20000 }).catch(() => null);
+      const fromLine = process.platform === 'darwin' ? 'e2e-downloaded.js was downloaded from claude.ai.' : 'e2e-downloaded.js is in your Downloads.';
+      if (!card || card.title !== 'Add this mod? E2E Downloaded' || !card.text.includes(fromLine) || !card.text.includes('From your Downloads')
+        || JSON.stringify(card.buttons) !== JSON.stringify(['Add', 'Try it here', 'Not now', ...(process.platform === 'darwin' ? ['Ignore files from claude.ai'] : [])])) problems.push(`the card: ${JSON.stringify(card)}`);
+      if (card && /E2E Before/.test(card.text)) problems.push('a file there before it was switched on was offered');
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `downloads-offer-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
+      // Try it here: in this tab, TRIF's runtime; Undo reloads it away
+      await press('Try it here');
+      const tried = await waitFor('the trial on the page', async () => ((await outline()) === 'rgb(1, 2, 3)' ? true : null), { timeoutMs: 10000 }).catch(() => null);
+      if (!tried) problems.push(`Try it here: the page's outline is ${await outline()} (${JSON.stringify(await offer())})`);
+      const tryingCard = await offer();
+      if (!tryingCard || !/Trying it on this tab/.test(tryingCard.text) || !tryingCard.buttons.includes('Undo')) problems.push(`the card while trying: ${JSON.stringify(tryingCard)}`);
+      await this.shot(this.panelCtx, 'downloads-trying');
+      await press('Undo');
+      const undone = await waitFor('undone', async () => { const o = await outline(); return o && o !== 'rgb(1, 2, 3)' ? o : null; }, { timeoutMs: 15000 }).catch(() => null);
+      if (!undone) problems.push('Undo left the trial on the page');
+      if (fs.existsSync(path.join(dir, 'e2e-downloaded.js'))) problems.push('trying it added it');
+      // Add: imported, switched off; the download left where it was
+      await waitFor('the card again', async () => { const o = await offer(); return o && o.buttons.includes('Try it here') ? o : null; }, { timeoutMs: 8000 }).catch(() => null);
+      await press('Add');
+      const added = path.join(dir, 'e2e-downloaded.js');
+      made.push(added);
+      await waitFor('the added mod', () => (fs.existsSync(added) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Add wrote nothing'));
+      if (fs.existsSync(added) && fs.readFileSync(added, 'utf8') !== styleText) problems.push('the added mod isn\'t the file');
+      if (!fs.existsSync(f) || fs.readFileSync(f, 'utf8') !== styleText) problems.push('the download was moved or changed');
+      const off = await waitFor('it\'s off', async () => { const l = (await this.cli(['status'], { timeoutMs: 20000 })).stdout.split('\n').find((x) => x.includes(`${site}/e2e-downloaded`)); return l && /off/.test(l) ? l.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
+      if (!off) problems.push('the added mod isn\'t off');
+      await waitFor('the card gone', async () => ((await offer()) ? null : true), { timeoutMs: 8000 }).catch(() => problems.push('the card stayed after Add'));
+      // the paste card's Try it here: a boxed mod (no powers, whatever it asks), and a free mod refused
+      const pasteTry = async (text) => {
+        await this.panelClick('#mods-more');
+        await this.panelClick('#paste-mod');
+        await waitFor('the paste card', () => this.panel(`async () => document.getElementById('paste-ask')?.open || null`), { timeoutMs: 5000 });
+        await this.panel(`async (t) => { const a = document.querySelector('#paste-ask textarea'); a.value = t; a.dispatchEvent(new Event('input')); return true; }`, [text]);
+        await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(2)');
+        return waitFor('its line', () => this.panel(`async () => { const p = document.querySelector('#paste-ask .paste-tried'); return p && !p.hidden ? p.textContent : null; }`), { timeoutMs: 10000 }).catch(() => null);
+      };
+      const boxedLine = await pasteTry(mod('E2E Boxed Try', "trif.css('body { outline: 5px solid rgb(4, 5, 6) }');\npage.on('input', (e) => trif.log(typeof e.data));", '// @boxed\n// @powers read-drafts\n'));
+      const boxedOn = await waitFor('the boxed trial', async () => ((await outline()) === 'rgb(4, 5, 6)' ? true : null), { timeoutMs: 10000 }).catch(() => null);
+      if (!boxedOn || !/Trying it on this tab/.test(boxedLine || '')) problems.push(`the paste card's Try it here: ${boxedLine}, outline ${await outline()}`);
+      await this.shot(this.panelCtx, 'paste-trying');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(2)'); // (Undo)
+      if (!(await waitFor('the boxed trial undone', async () => { const o = await outline(); return o && o !== 'rgb(4, 5, 6)' ? true : null; }, { timeoutMs: 15000 }).catch(() => null))) problems.push('the paste card\'s Undo left the trial');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(3)'); // (Cancel)
+      const freeLine = await pasteTry(mod('E2E Free Try', "(() => { document.body.style.outline = '3px solid rgb(7, 8, 9)'; })();"));
+      if (!/Only style and boxed mods can be tried here/.test(freeLine || '')) problems.push(`a free mod's trial: ${freeLine}`);
+      if ((await outline()) === 'rgb(7, 8, 9)') problems.push('a free mod ran on Try');
+      await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(3)');
+      // Not now; Ignore files from <site>
+      download('e2e-later.js', mod('E2E Later', '{ "hide": ["#nothing"] }', '// @style\n'), 'evil.example');
+      const later = await waitFor('the next offer', async () => { const o = await offer(); return o && /E2E Later/.test(o.title) ? o : null; }, { timeoutMs: 20000 }).catch(() => null);
+      if (!later) problems.push('a second file wasn\'t offered');
+      await press('Not now');
+      await waitFor('gone', async () => ((await offer()) ? null : true), { timeoutMs: 8000 }).catch(() => problems.push('Not now left the card'));
+      if (process.platform === 'darwin') {
+        download('e2e-evil.js', mod('E2E Evil', '{ "hide": ["#nothing"] }', '// @style\n'), 'evil.example');
+        const evil = await waitFor('the evil offer', async () => { const o = await offer(); return o && /E2E Evil/.test(o.title) ? o : null; }, { timeoutMs: 20000 }).catch(() => null);
+        if (!evil || !evil.buttons.includes('Ignore files from evil.example')) problems.push(`the third card: ${JSON.stringify(evil)}`);
+        await press('Ignore files from evil.example');
+        await waitFor('gone', async () => ((await offer()) ? null : true), { timeoutMs: 8000 }).catch(() => problems.push('Ignore left the card'));
+        download('e2e-evil-2.js', mod('E2E Evil Two', '{ "hide": ["#nothing"] }', '// @style\n'), 'evil.example');
+        await sleep(8000);
+        if (await offer()) problems.push('a file from an ignored site was offered');
+      }
+      // switched off: no card, the note says what it does
+      await toggle();
+      const offNow = await waitFor('off', async () => { const n = await note(); return !n.on && /When a mod file appears in your Downloads/.test(n.note) ? n : null; }, { timeoutMs: 10000 }).catch(async () => note());
+      if (!offNow || offNow.on || !/When a mod file appears in your Downloads/.test(offNow.note)) problems.push(`switched off: ${JSON.stringify(offNow)}`);
+      await this.panelClick('#settings-btn');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `switched on: a file there before isn't offered; "${card.title}", ${process.platform === 'darwin' ? 'from claude.ai (its where-from record)' : 'from Downloads'}; Try it here outlined the page and Undo reloaded it away; Add imported it, off, the download untouched; the paste card tried a boxed mod and refused a free one; Not now${process.platform === 'darwin' ? ', Ignore files from evil.example (its next file not offered)' : ''}; switched off`;
+    } finally {
+      for (const x of made) { try { fs.unlinkSync(x); } catch { /* gone */ } }
+      await this.panel(`async () => { const d = document.getElementById('paste-ask'); if (d && d.open) d.close(); return true; }`).catch(() => {});
     }
   }
 
@@ -4268,7 +4856,7 @@ process.exitCode = 1;
       const d = document.getElementById('code-view');
       if (!d || !d.open) return null;
       const lines = [...d.querySelectorAll('.cv-code .l')];
-      return { mod: d.dataset.mod, name: d.querySelector('.ap-name').textContent, chip: d.querySelector('.ap-chip').textContent, where: d.querySelector('.ap-where').textContent,
+      return { mod: d.dataset.mod, group: d.dataset.group, name: d.querySelector('.ap-name').textContent, chip: d.querySelector('.ap-chip').hidden ? '' : d.querySelector('.ap-chip').textContent, where: d.querySelector('.ap-where').textContent,
         code: lines.map((l) => l.textContent).join(String.fromCharCode(10)), lines: lines.length, coloured: d.querySelectorAll('.cv-code .tk, .cv-code .ts, .cv-code .tc').length,
         copied: d.querySelector('.cv-copy').dataset.copied || '', reveal: d.querySelector('.cv-reveal').textContent, err: d.querySelector('.ap-err').hidden ? '' : d.querySelector('.ap-err').textContent };
     }`);
@@ -4288,8 +4876,14 @@ process.exitCode = 1;
       await this.panelClick(`li[data-mod="${site}/e2e-banner"] .mod-code`);
       const free = await waitFor('the code card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
       const want = fs.readFileSync(path.join(dir, 'e2e-banner.js'), 'utf8');
-      if (free.mod !== `${site}/e2e-banner` || free.chip !== 'Free mod' || free.where !== `${site} · e2e-banner.js` || free.code !== want || free.lines !== want.split('\n').length) problems.push(`the free mod's card: ${JSON.stringify({ ...free, code: free.code.slice(0, 200) })}`);
+      if (free.mod !== `${site}/e2e-banner` || free.group !== 'page' || free.chip || free.where !== `${site} · e2e-banner.js` || free.code !== want || free.lines !== want.split('\n').length) problems.push(`the free mod's card: ${JSON.stringify({ ...free, code: free.code.slice(0, 200) })}`);
       if (!free.coloured) problems.push('no colouring in the code');
+      // its Details: the tier's line in coral, and the coral warning (the tier's explanation) (Tim, 11-13)
+      await this.panel(`async () => { document.querySelector('#code-view .cv-tab-details').click(); return true; }`);
+      const fd = await waitFor('the free mod\'s Details', () => this.panel(`async () => { const x = document.querySelector('#code-view .cv-details'); return x && !x.hidden ? { tier: x.querySelector('.cv-d-tier')?.textContent, warn: x.querySelector('.cv-d-free')?.textContent || '' } : null; }`), { timeoutMs: 5000 }).catch(() => null);
+      if (!fd || fd.tier !== 'Free mod: can do anything code can do.' || !/Only enable free mods that you trust\.$/.test(fd.warn)) problems.push(`the free mod's Details: ${JSON.stringify(fd)}`);
+      await themes('code-free-details');
+      await this.panel(`async () => { document.querySelector('#code-view .cv-tab-code').click(); return true; }`);
       // its robot: the code card's own face (</>), and nothing of the bar robot's other faces on any card's
       const robots = await this.panel(`async () => ({ code: !!document.querySelector('#code-view .ap-robot svg .code'), eyes: document.querySelectorAll('#code-view .ap-robot .eye').length,
         stray: document.querySelectorAll('.ap-robot :is(.pause, .cross, .link)').length })`);
@@ -4321,7 +4915,7 @@ process.exitCode = 1;
       // a style mod, from its file name on the row: its rules, as in the file
       await this.panelClick(`li[data-mod="${site}/e2e-cv-style"] .mod-code`);
       const style = await waitFor('the style mod\'s card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
-      if (style.chip !== 'Style mod' || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
+      if (style.group !== 'rules' || style.chip || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
       // its long line wrapped (on by default): one numbered line, several rows tall, continuations indented
       const wrapped = await this.panel(`async () => {
         const box = document.querySelector('#code-view .cv-code');
@@ -4366,6 +4960,136 @@ process.exitCode = 1;
       try { fs.unlinkSync(styleFile); } catch { /* gone */ }
       try { fs.unlinkSync(longFile); } catch { /* gone */ }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+    }
+  }
+
+  // ---- the code card's Edit (sidepanel.js "Editing a mod's code", helper/lib/edit.js): edit, Save, Undo, held, broken
+  async codeEditCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const id = `${site}/e2e-edit`;
+    const file = path.join(this.trif, 'sites', site, 'e2e-edit.js');
+    const v1 = "// ==WebMod==\n// @name E2E edit\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eEdit = 'v1';\n";
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const ed = () => this.panel(`async () => {
+      const d = document.getElementById('code-view');
+      if (!d || !d.open) return null;
+      const a = d.querySelector('.cv-e-text'), shown = (s) => { const b = d.querySelector(s); return !!b && !b.hidden && b.getClientRects().length > 0; };
+      return { editing: shown('.cv-e-box'), value: a.value, start: a.selectionStart, end: a.selectionEnd, numbers: d.querySelector('.cv-e-gutter').textContent.trim().split(String.fromCharCode(10)).length,
+        undo: shown('.cv-e-undo') && !d.querySelector('.cv-e-undo').disabled, redo: shown('.cv-e-redo') && !d.querySelector('.cv-e-redo').disabled, save: shown('.cv-e-save'), cancel: shown('.cv-e-cancel'), edit: shown('.cv-edit'), copy: shown('.cv-copy'),
+        border: getComputedStyle(d.querySelector('.cv-e-box')).borderTopColor, tier: getComputedStyle(d).getPropertyValue('--tier').trim(), font: getComputedStyle(a).fontFamily,
+        problems: shown('.cv-e-problems') ? d.querySelector('.cv-e-problems').textContent : '', lines: [...d.querySelectorAll('.cv-e-line')].map((b) => b.textContent),
+        saved: shown('.cv-e-saved') ? d.querySelector('.cv-e-saved').textContent : '', code: shown('.cv-code') ? [...d.querySelectorAll('.cv-code .l')].map((l) => l.textContent).join(String.fromCharCode(10)) : null,
+        err: d.querySelector('.ap-err').hidden ? '' : d.querySelector('.ap-err').textContent, versions: shown('.cv-versions'), scrolls: d.scrollHeight > d.clientHeight + 1 };
+    }`);
+    // (a change as an input event, where typing it out would be long)
+    const put = (from, to) => this.panel(`async (from, to) => { const a = document.querySelector('#code-view .cv-e-text'); const i = a.value.indexOf(from); a.focus(); a.setRangeText(to, i, i + from.length, 'end'); a.dispatchEvent(new InputEvent('input', { inputType: 'insertReplacementText', bubbles: true })); return a.value; }`, [from, to]);
+    const look = async () => (await this.cli(['run', '--tab', String(win.tabId), 'document.documentElement.dataset.e2eEdit || null'], { timeoutMs: 20000 })).stdout.trim().replace(/^"|"$/g, '');
+    let n = 0;
+    const runs = (want) => waitFor(`the page running ${want}`, async () => { await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=edit-${++n}`]); await sleep(1200); return (await look()) === want || null; }, { timeoutMs: 25000, intervalMs: 300 });
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const problems = [];
+    const done = [];
+    const open = async () => {
+      for (let i = 0; i < 4; i++) {
+        await this.dismissApproval();
+        await this.panelClick(`li[data-mod="${id}"] .mod-code`);
+        if (await waitFor('the code card', async () => { const c = await ed(); return c && c.code !== null && c.code.length ? c : null; }, { timeoutMs: 4000 }).catch(() => null)) return;
+      }
+      throw new Error('the code card didn\'t open');
+    };
+    const editOn = async () => {
+      await waitFor('Edit enabled', () => this.panel(`async () => { const b = document.querySelector('#code-view .cv-edit'); return b && !b.hidden && !b.disabled || null; }`), { timeoutMs: 8000 });
+      await this.d.click(this.panelCtx, '#code-view .cv-edit');
+      return waitFor('the editor', async () => { const c = await ed(); return c && c.editing ? c : null; }, { timeoutMs: 8000 });
+    };
+    const save = async (what) => { await this.d.click(this.panelCtx, '#code-view .cv-e-save'); return waitFor(what, async () => { const c = await ed(); return c && (c.saved || c.problems) ? c : null; }, { timeoutMs: 15000 }); };
+    try {
+      fs.writeFileSync(file, v1);
+      await waitFor('the mod registered', async () => /e2e-edit\s+registered/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await runs('v1');
+      await waitFor('its row', () => this.panel(`async () => !!document.querySelector('li[data-mod="${id}"] .mod-code') || null`), { timeoutMs: 15000 });
+      // 1. Edit: the code in an editor (monospace, numbered, in the free tier's colour), Undo/Redo/Cancel/Save
+      await open();
+      let c = await editOn();
+      if (c.value !== v1 || c.numbers !== v1.split('\n').length || c.undo || c.redo || !c.save || !c.cancel || c.edit || c.copy || !/mono|Menlo|Consolas/i.test(c.font) || c.scrolls) problems.push(`the editor: ${JSON.stringify({ ...c, value: c.value.slice(0, 80) })}`);
+      // typed, with real keys: 'v2' for 'v1' (select the 1, type 2), Tab indents; Undo and Redo step through it
+      await this.panel(`async () => { const a = document.querySelector('#code-view .cv-e-text'); const i = a.value.indexOf("'v1'") + 2; a.focus(); a.setSelectionRange(i, i + 1); return true; }`);
+      await this.d.key(this.panelCtx, '2');
+      await this.panel(`async () => { const a = document.querySelector('#code-view .cv-e-text'); const i = a.value.lastIndexOf('document.'); a.focus(); a.setSelectionRange(i, i); return true; }`);
+      await this.d.key(this.panelCtx, 'Tab');
+      c = await ed();
+      const typed = v1.replace("'v1'", "'v2'").replace('\ndocument.', '\n  document.');
+      if (c.value !== typed || !c.undo) problems.push(`typed: ${JSON.stringify(c.value)} (undo ${c.undo})`);
+      await this.d.click(this.panelCtx, '#code-view .cv-e-undo');
+      const undone = (await ed()).value;
+      await this.d.click(this.panelCtx, '#code-view .cv-e-redo');
+      c = await ed();
+      if (undone !== v1.replace("'v1'", "'v2'") || c.value !== typed) problems.push(`Undo/Redo: ${JSON.stringify([undone, c.value])}`);
+      await themes('edit-editor');
+      // 2. Save: runs from the next page load, the version before in History; Undo puts it back
+      c = await save('saved');
+      if (c.saved !== 'Saved. It runs from the next page load. Undo' || c.editing || c.code !== typed) problems.push(`saved: ${JSON.stringify(c)}`);
+      if (fs.readFileSync(file, 'utf8') !== typed) problems.push('the file isn\'t the edit');
+      await themes('edit-saved');
+      await runs('v2');
+      done.push('typed, Tab, Undo and Redo; saved, it ran');
+      await this.d.click(this.panelCtx, '#code-view .cv-e-undo-save');
+      c = await waitFor('undone', async () => { const x = await ed(); return x && /^Put back/.test(x.saved) ? x : null; }, { timeoutMs: 10000 }).catch(() => ed());
+      if (c.saved !== 'Put back the version from before your edit. Your edit is in History.' || fs.readFileSync(file, 'utf8') !== v1) problems.push(`Undo after Save: ${JSON.stringify(c.saved)}, the file ${JSON.stringify(fs.readFileSync(file, 'utf8'))}`);
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-history');
+      const hist = await waitFor('History', () => this.panel(`async () => { const l = [...document.querySelectorAll('#code-view .cv-history-list li[data-stamp]')]; return l.length >= 2 ? l.map((x) => x.querySelector('.cv-h-from').textContent) : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!hist || hist[0] !== 'before an undo' || hist[1] !== 'before you edited it') problems.push(`History: ${JSON.stringify(hist)}`);
+      await runs('v1');
+      done.push(`Undo put it back (History: ${hist && hist.slice(0, 2).join(', ')})`);
+      // 3. broken: not saved, each problem on its line (a click selects it), the file as it was
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-code');
+      await editOn();
+      await put("= 'v1';", '= ;');
+      c = await save('the problems');
+      if (!/^Not saved: TRIF found a problem in it\./.test(c.problems) || JSON.stringify(c.lines) !== '["Line 5"]' || !c.editing) problems.push(`broken: ${JSON.stringify(c)}`);
+      await this.d.click(this.panelCtx, '#code-view .cv-e-line');
+      c = await ed();
+      const line5 = c.value.split('\n').slice(0, 4).join('\n').length + 1;
+      if (c.start !== line5 || c.value.slice(c.start, c.end) !== 'document.documentElement.dataset.e2eEdit = ;') problems.push(`Line 5 selected: ${JSON.stringify(c.value.slice(c.start, c.end))}`);
+      if (fs.readFileSync(file, 'utf8') !== v1) problems.push('the broken edit was written');
+      await themes('edit-not-saved');
+      done.push('broken: not saved, Line 5 selected it');
+      // 4. a line that sends: saved, it waits for the user's OK, the version before running; the card: "You edited it."
+      await put('= ;', "= 'v3';\nfetch('/e2e-edit-v3', { method: 'POST' });");
+      c = await save('saved, waiting');
+      if (c.saved !== 'Saved. It waits for your OK: the version before keeps running until you decide. Undo' || !c.versions) problems.push(`held: ${JSON.stringify({ saved: c.saved, versions: c.versions, problems: c.problems })}`);
+      const st = await waitFor('the change waiting', async () => { const x = await status(); return /e2e-edit\s+CHANGE WAITING/.test(x) ? x : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => '');
+      if (!st) problems.push('trif status doesn\'t say the change waits');
+      await themes('edit-waits');
+      await runs('v1');
+      if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-edit-v3'))) problems.push('the waiting edit ran');
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`);
+      const card = await this.approvalFor(id).catch((e) => { problems.push(`its card: ${e.message}`); return null; });
+      if (card && (!/^You edited it\. The version before keeps running until you decide\./.test(card.note) || !card.items.some((x) => /send/.test(x)))) problems.push(`the approval card: ${JSON.stringify(card)}`);
+      if (card) {
+        await themes('edit-approval');
+        await this.d.click(this.panelCtx, '#approval .ap-allow');
+        await runs('v3');
+        await waitFor('its POST', () => this.o.servers.requests.some((q) => q.url.startsWith('/e2e-edit-v3')) || null, { timeoutMs: 8000 }).catch(() => problems.push('the allowed edit didn\'t send'));
+      }
+      done.push(`a line that sends waited ("${card ? card.note.split('.')[0] : '?'}"), Allow ran it`);
+      // 5. changed meanwhile (another editor, an agent): not saved, the other change kept
+      await open();
+      await editOn();
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8') + '// from elsewhere\n');
+      await put("'v3'", "'v4'");
+      c = await save('the conflict');
+      if (!/^Not saved: the mod’s file changed since you started editing\./.test(c.problems) || !/from elsewhere/.test(fs.readFileSync(file, 'utf8')) || /'v4'/.test(fs.readFileSync(file, 'utf8'))) problems.push(`changed meanwhile: ${JSON.stringify(c.problems)}`);
+      await this.d.click(this.panelCtx, '#code-view .cv-e-cancel');
+      c = await waitFor('the code again', async () => { const x = await ed(); return x && !x.editing && x.code && /from elsewhere/.test(x.code) ? x : null; }, { timeoutMs: 8000 }).catch(() => null);
+      if (!c) problems.push('Cancel didn\'t show the new version');
+      done.push('changed meanwhile: not saved; Cancel showed the new version');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return done.join('; ');
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
+      await this.panel(`async () => { for (const id of ['code-view', 'approval']) { const d = document.getElementById(id); if (d && d.open) d.close(); } return true; }`).catch(() => {});
     }
   }
 
@@ -4455,31 +5179,42 @@ process.exitCode = 1;
       const rowsOf = () => this.panel(`async () => Object.fromEntries([...document.querySelectorAll('#mod-list li[data-mod*="e2e-row-"]')].map((li) => {
         const icons = [...li.querySelectorAll('.mod-icons .mod-ic')], desc = li.querySelector('.mod-desc'), sw = li.querySelector('button.switch, .tag.on-hold'), code = li.querySelector('.mod-code'), bin = li.querySelector('.mod-delete');
         const r = (e) => e.getBoundingClientRect();
-        return [li.dataset.mod.split('/')[1], { chip: icons.map((i) => i.dataset.icon).join(' ') || null, tone: icons.length ? [...new Set(icons.map((i) => [...i.classList].filter((c) => c !== 'mod-ic').join()))].join('/') : null, hover: icons.map((i) => i.title).join('\\n'), drawn: icons.every((i) => i.querySelector('svg path')),
-          old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
-          gapSwitch: Math.round(r(code).left - r(sw).right), gapBin: Math.round(r(bin).left - r(code).right) }];
+        return [li.dataset.mod.split('/')[1], { chip: icons.map((i) => i.dataset.icon).join(' ') || null, sep: li.querySelectorAll('.mod-icons .mod-ic-sep').length, tone: icons.length ? [...new Set(icons.map((i) => [...i.classList].filter((c) => c !== 'mod-ic').join()))].join('/') : null, hover: icons.map((i) => i.title).join('\\n'), drawn: icons.every((i) => i.querySelector('svg path')),
+          old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, emptyTag: [...li.querySelectorAll('.tag')].some((t) => !t.textContent.trim() && t.getClientRects().length > 0), oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
+          // (two lines: the switch at the right of the first, </> and the bin under it at the right of the second)
+          // (the drawings' own edges, not their buttons': </> starts where the switch starts, the bin ends where it ends)
+          gapSwitch: sw.classList.contains('switch') ? Math.max(Math.abs(r(sw).left - r(code.querySelector('path')).left), Math.abs(r(sw).right - r(bin.querySelector('path')).right)) : Math.abs(r(sw).right - r(bin.querySelector('path')).right), /* (an "on hold" tag is wider than a switch: only the right edges meet) */ gapBin: Math.round(r(bin.querySelector('path')).left - r(code.querySelector('path')).right), /* (between the drawings) */ below: r(code).top >= r(sw).bottom - 4 && r(bin).top >= r(sw).bottom - 4,
+          sameLine: Math.abs((r(li.querySelector('.mod-name')).top + r(li.querySelector('.mod-name')).bottom) / 2 - (r(sw).top + r(sw).bottom) / 2) < 6 }];
       }))`);
       const rows = await waitFor('the rows', async () => { const x = await rowsOf(); return Object.keys(x).length === 5 && x['e2e-row-together'].chip ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
       await this.dismissApproval();
       // (the icons, by name, and their tones: modlevel.js modIcons)
-      const want = { 'e2e-row-plain': [null, null], 'e2e-row-noticeable': ['noticeable', 'muted'], 'e2e-row-requests': ['changes-requests', 'amber'], 'e2e-row-power': ['site-data noticeable', 'muted'], 'e2e-row-together': ['read-drafts sound', 'amber'] };
-      for (const [id, [chip, tone]] of Object.entries(want)) {
+      // (a free mod: the chip and infinity always, Tim 11-13; then, past the little line, how noticeable it is)
+      const want = { 'e2e-row-plain': ['free', 'muted', 0], 'e2e-row-noticeable': ['free noticeable', 'muted', 1], 'e2e-row-requests': ['free changes-requests', 'muted', 1], 'e2e-row-power': ['site-data noticeable', 'muted', 1], 'e2e-row-together': ['read-drafts sound', 'muted', 0] };
+      for (const [id, [chip, tone, sep]] of Object.entries(want)) {
         const x = rows[id];
-        if (x.chip !== chip || x.tone !== tone || (chip && !x.drawn)) problems.push(`${id}'s icons: ${JSON.stringify(x)}`);
+        if (x.chip !== chip || x.tone !== tone || (chip && !x.drawn) || x.sep !== sep) problems.push(`${id}'s icons: ${JSON.stringify(x)}`);
         if (x.old) problems.push(`${id} still shows ${x.old} of the old row's parts`);
+        if (x.emptyTag) problems.push(`${id} shows an empty tag (a line beside its name)`);
         if (!x.oneLine) problems.push(`${id}'s description isn't one line with an ellipsis: ${JSON.stringify(x)}`);
-        if (Math.abs(x.gapSwitch - 10) > 1 || Math.abs(x.gapBin - 2) > 1) problems.push(`${id}'s controls: ${x.gapSwitch}px, then ${x.gapBin}px`);
+        if (x.gapSwitch > 1.5 || x.gapBin < 2 || x.gapBin > 9 || !x.below || !x.sameLine) problems.push(`${id}'s controls: ${JSON.stringify({ switchVsBin: x.gapSwitch, codeToBin: x.gapBin, below: x.below, sameLine: x.sameLine })}`);
       }
-      if (!/^It can see and filter/.test(rows['e2e-row-power'].hover) || !/Noticeable: 127\.0\.0\.1 could tell/.test(rows['e2e-row-power'].hover)) problems.push(`the icons' hover: ${rows['e2e-row-power'].hover}`);
+      if (rows['e2e-row-power'].hover !== 'Filters what the site sends\nNoticeable to the site' || rows['e2e-row-together'].hover !== 'Reads what you type\nPlays sounds') problems.push(`the icons' hover: ${rows['e2e-row-power'].hover} | ${rows['e2e-row-together'].hover}`);
       await themes('mod-rows');
       // a click on the chip: the code card, with what the row left out
       await this.dismissApproval();
       await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-icons').click(); return true; }`);
-      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open ? { mod: d.dataset.mod, about: d.querySelector('.cv-about').textContent, more: d.querySelectorAll('.cv-about .more-btn').length, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
-      if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.more < 2 || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
+      // (the icons open the card on Details: the hold's presentation, with each "more")
+      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && x && !x.hidden ? { mod: d.dataset.mod, tab: d.querySelector('.cv-tab-details')?.getAttribute('aria-selected'), about: x.textContent, icons: [...x.querySelectorAll('.cv-d-facts svg')].filter((v) => !v.closest('.more-btn')).length, more: x.querySelectorAll('.more-btn').length, codeShown: !d.querySelector('.cv-code').hidden, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
+      if (about.mod !== `${site}/e2e-row-power` || about.tab !== 'true' || about.codeShown || !/Noticeable/.test(about.about) || !/It can see and filter/.test(about.about) || !/^Boxed mod: can do what you've allowed\./.test(about.about) || about.icons !== 1 || about.more < 3 || about.file !== 'e2e-row-power.js') problems.push(`the card's Details: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
+      // (the warning about two powers together: in Details, as the hold put it, not on the icons)
+      await this.panel(`async () => { document.getElementById('code-view').close(); document.querySelector('li[data-mod="${site}/e2e-row-together"] .mod-icons').click(); return true; }`);
+      const together = await waitFor('the together card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && d.dataset.mod.endsWith('e2e-row-together') && x && !x.hidden ? (x.querySelector('.ap-together')?.textContent || '') : null; }`), { timeoutMs: 8000 });
+      if (!/^Together, it /.test(together)) problems.push(`the together warning in Details: ${JSON.stringify(together)}`);
+      await themes('mod-rows-details-together');
       if (problems.length) throw new Error(problems.join('\n'));
-      return `icons: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; controls ${rows['e2e-row-plain'].gapSwitch}px then ${rows['e2e-row-plain'].gapBin}px; the icons open the card`;
+      return `icons: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; the switch on the name's line, </> and the bin ${rows['e2e-row-plain'].gapBin}px apart under it; the icons open the card`;
     } finally {
       for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
@@ -4590,7 +5325,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
         } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
-      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
+      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Do what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');
       await clickGroup();
@@ -5096,7 +5831,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         const b = document.body.classList;
         const colour = (v) => { const s = document.createElement('span'); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
         const fills = () => ({ rim: getComputedStyle(document.querySelector('#bar-robot .rim')).fill, bars: getComputedStyle(document.querySelector('#bar-robot .pause')).fill });
-        const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--bad)' : b.contains('needs-login') ? 'var(--warn)' : 'var(--paused)') };
+        const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--led-coral)' : b.contains('needs-login') ? 'var(--led-yellow)' : 'var(--paused)') };
         const had = ['blocked', 'needs-login'].filter((c) => b.contains(c));
         b.remove(...had);
         const paused = { ...fills(), want: colour('var(--paused)'), white: colour('#fff') };
@@ -5115,7 +5850,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // The mod: held for what its code does, its header's claim shown apart
       const card = await this.approvalFor(`${site}/e2e-poster`);
       const held = { facts: card.items, claim: card.claim };
-      if (card.chip !== 'Free mod' || card.lead !== 'TRIF found that this mod:' || !/A free mod can do anything the page can, so look at the code if you're not sure\.$/.test(card.note)) throw new Error(`the approval dialog: ${JSON.stringify(card)}`);
+      // (no chip: the card in coral, a free mod's tier colour; its warning, the free tier's explanation, in the box)
+      if (card.group !== 'page' || card.chip || card.lead !== 'TRIF found that this mod:' || !/in your chat on 127\.0\.0\.1\.$/.test(card.note) || card.together.join() !== 'A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.') throw new Error(`the approval dialog: ${JSON.stringify(card)}`);
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-free-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
       if (!held.facts.some((f) => /send requests or messages from the page as you \(it uses fetch\)/.test(f))) throw new Error(`the held facts: ${JSON.stringify(held)}`);
@@ -5733,6 +6469,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l) // bigModsCheck's, over the cap on purpose
       || /WARN stdout error \(EPIPE\); \w+ went away/.test(l) // (the harness quit the browser while the helper was writing to it)
       || /mod 127\.0\.0\.1\/e2e-rules-bad: .*only data:/.test(l) // rulesModCheck's, refused on purpose
+      || (this.modsFeedChecked && /WARN mods feed: the mods feed is not signed by the TRIF release key/.test(l)) // modsFeedCheck's, refused on purpose
       // orgSettingsCheck's: runs stopped for an organization's settings, the consent, a run going on without the sandbox
       || (this.orgChecked && /Codex's organization settings replace TRIF's sandbox: stopped|codex may now run under an organization's settings|Codex runs under the organization's settings, not TRIF's sandbox/.test(l));
     const skipped = lines.filter(expected).length;

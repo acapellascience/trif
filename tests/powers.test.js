@@ -175,3 +175,13 @@ test('other ways to set an address: Object.assign, setAttributeNS, a property\'s
   none('Object.assign(keys, { ArrowLeft: false, space: false }); el.style.background = "url(data:image/png;base64,AAA)"');
   none('a.setAttributeNS(null, "fill", "#fff")');
 });
+
+test('code written without semicolons reads as itself, not as code TRIF can\'t check', () => {
+  // (blanked kept every token on one line, so code relying on line breaks didn't compile: half of a sample
+  // of popular userscripts read as hidden for this alone)
+  const keys = (code) => powersOf(code).map((p) => p.key);
+  assert.deepStrictEqual(keys('const a = 1\nconst b = 2\nconsole.log(a + b)'), []);
+  assert.deepStrictEqual(keys('let x = 0\n;[1, 2].forEach((n) => { x += n })\ndocument.title = `${x}`'), []);
+  assert.deepStrictEqual(keys('const t = `a\n${1}\nb`\nconst u = "c"\nconst r = /d/g'), []);
+  assert.deepStrictEqual(keys('const go = () => fetch("/x")\ngo()'), ['sends']);
+});

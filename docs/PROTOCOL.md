@@ -126,6 +126,10 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.), unless its header says 
   the groups `rules`, `sandboxed`, `page`): only what people see says style, boxed and free mods. A mod's
   hash is taken with its header's `@style`/`@boxed` lines spelled `@rules`/`@sandboxed`, so switching
   spelling alone keeps its hash (what was allowed for it, holds, the extension's `unsandboxedOk`).
+- `@device phone` (or `desktop`): informational, parsed into `device`. What makes a phone mod is its folder: a
+  site's phone twin, `sites/phone~<site>/` (docs/MOBILE-EDIT.md "Phone mods, a sandbox of their own"): its own
+  site for scope, runs, holds and lists, on the site's pages (default `@match` the site's), sent as `phone: true`,
+  run only in the phone view (and every other mod only outside it: extension/lib.js `phoneGate`).
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/detox-timeline`). The helper parses headers; the extension never parses.
@@ -153,7 +157,9 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder, starter}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"), and Tim's mods by site (`starter`, see "Preinstalled mods"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
 | `{type:"modsPart", set, i, n, data}` | Part `i` of `n` (0-based, in order) of a `mods` message too big for one native message: `data` is a slice of its JSON text, each part under 1 MB as sent. `set` (`"<pid>-<k>"`) names the set. The extension joins the parts and applies the set only when the last is in, all at once, as if it had come whole (`ModsParts` in lib.js). A new set's first part, or a whole `mods` message, drops an unfinished one. A part missing, out of order or malformed, or joined text that doesn't parse, drops that set (the rest of its parts are ignored), logs an error and sends `modsResend`; the last whole set stays applied. |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
+| `{type:"browser", name}` | The browser's name as the helper knows it from the executable that started it (its parent process: `lib/browsers.js` `launchingBrowser`, `reconcileBrowser`), sent after each hello when it knows one. The extension uses it from then on (over its own guess: Arc and Vivaldi say they're Chrome) and its pages take it from `status`. Since 0.3.1; older extensions ignore it. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
+| `{type:"downloads", downloads:{on, state, folder?, offer, waiting?}}` | Mod files in the user's downloads (helper/lib/downloads.js), after the hello and whenever it changes: `state` `off`, `starting`, `watching`, `no-access` (the system refused the folder) or `missing`; `offer` the one to show, or null: `{id, file, from (the site the system recorded it came from, or null), app, name, description, kind, site, can (what TRIF finds it can do, as a hold says it), asks (its powers)}`. The panel's card and Settings switch; a badge on the toolbar button while an offer waits. |
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
@@ -213,7 +219,7 @@ memory is the footprint of all the browser's processes; Firefox's baseline is ab
 
 | message | meaning |
 |---|---|
-| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code), `boxRun` (`run` takes `world: "box"`). No `features` means 0.2.4 or older. |
+| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, family, browserVersion, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `browser`: the browser's name (since 0.3.1 its own: Brave, Edge, Opera, Vivaldi, Arc, Chromium, Chrome; Firefox or a fork's name; Safari: `lib.js` `detectBrowser`; before, every Chromium browser said Chrome); `family`: `chromium`, `firefox` or `safari`, what the code goes by (missing before 0.3.1: the name tells); `browserVersion`: the browser's own version where it has one (Opera's, not Chromium's; `chrome` stays the engine's), else null. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code), `boxRun` (`run` takes `world: "box"`). No `features` means 0.2.4 or older. |
 | `{type:"modsResend", reason}` | A set in parts didn't arrive whole, or a mod sent as `same` wasn't there (`reason` says how). The helper logs it and sends the set again, every mod whole, once per set; if that fails too, the next change or reconnect sends it again (whole). |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}], splits:[hosts]}` | After applying a `mods` message. `splits`: the sensitive sites of their own it knows of (mail.google.com), each a site apart in a site's boxed mods together (helper/lib/sitecombos.js). |
@@ -397,6 +403,16 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   windowId}`) instead of `openPanelOnActionClick`, because only then does the click give TRIF `activeTab`
   on that tab (also where the panel opens in a window instead: see "The panel in a window"). Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
   that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).
+
+### The phone view (`phone.open`, `phone.close`, `phone.state`)
+
+From the panel only (docs/MOBILE-EDIT.md, extension/phone.js): `{type: "phone.open", tabId, screen}` moves the
+tab into a phone-sized popup window with Safari-on-iPhone rules for that tab (session rules from id 1,000,000,
+which tab locks leave alone) and the page script (phone-page.js), and opens the panel window beside it;
+`{type: "phone.close", tabId}` puts it back; `{type: "phone.state", tabId}` says whether a tab is one. Page
+commands find the phone's tab (resolveTab's extra windows), `tabs` marks it `phone: "iPhone"`, and `agent.start`
+from it carries `phone: {device, width}` to the helper, which tells the agent. `mod.toPhone {id}` (helper,
+lib/tophone.js): a copy of the mod's file to AirDrop, or shown in Finder: `{id, file, how: "airdrop"|"folder"}`.
 
 ### Mod switches (`mod.enable`)
 
@@ -621,7 +637,7 @@ the raw result as JSON.
 
 Newline-delimited JSON on `~/.trif/helper.sock` (mode 0600). Request `{id, cmd, args, token?}` →
 response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are answered by the helper;
-everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
+everything else is forwarded to the extension (from a run: only the commands a run may send, and `mods` and `ping` for its own site, see "Run scope"). Requests time out after `args.timeout + 5000` ms (default 35 s).
 Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
 `token` is the run token (see "Run scope"): the CLI sends `$TRIF_RUN_TOKEN` when it's set.
 If the socket file exists but nothing listens, the next host to start removes it.
@@ -632,8 +648,9 @@ whose pid is dead). The first host also serves `helper.sock`; later ones log tha
 take over `helper.sock` when the first exits. Mod files are shared: every host watches the same folder.
 Which socket the CLI uses:
 - `--browser <name|pid>`: the host whose extension said hello with that browser name (`Chrome`,
-  `Firefox`, case-insensitive) or that pid (`lib/helpers.js` pings each `helper-*.sock`). Two hosts for
-  the same browser (two Chrome profiles) need the pid. Refused inside an agent run.
+  `Brave`, `Firefox`, case-insensitive) or that pid (`lib/helpers.js` pings each `helper-*.sock`). With no
+  browser of that name, `chrome` stands for any Chromium browser and `firefox` for any Firefox one. Two
+  hosts for the same browser (two Chrome profiles) need the pid. Refused inside an agent run.
 - Inside a side-panel agent run: no socket. The CLI writes to the run's mailbox (`$TRIF_RUN_BOX`, see
   "Run scope"), which the host that started the run serves, so a run started from Firefox's sidebar works
   on Firefox's tabs even while Chrome's host owns `helper.sock`.
@@ -779,6 +796,19 @@ on the main branch; both are read from raw.githubusercontent.com for the repo in
   neither is refused too): an old signed feed served again could otherwise hold users on its version. Between
   releases, `node scripts/release.js refresh-feed` signs the same feed again with a new `signed`; the
   release prints the day its feed stops being accepted. Helpers before 0.3.0 ignore `signed`.
+- `updates/mods.json` (+ `mods.json.sig`), the mods feed (`helper/lib/modsfeed.js`): new versions of the
+  mods TRIF ships, between releases. `{kind: "trif-mods", signed, release, commit, mods: {id: {version,
+  sha256, size, minTrif}}}`, signed like latest.json and refused like it (wrong or no signature, older than 8
+  weeks), and refused when `kind` isn't `trif-mods`. Each file is fetched from the repo at `commit`
+  (`raw.githubusercontent.com/<repo>/<commit>/examples/sites/<id>.js`) and checked against its sha256, size
+  and `@version`. Only ids this TRIF ships, newer than its own and needing at most this TRIF (`minTrif`); the
+  user's copies get them as they get a release's (preinstalled.js updateShippedMods), an unchanged one only
+  with `autoUpdate`. Checked with latest.json, on its schedule (and by `trif update`), never with
+  `checkForUpdates: false`; config.json `modsFeed` overrides where. A check that fails (not fetched, not
+  signed, not a mods feed, too old, or a file that isn't the signed one) changes nothing and keeps its
+  reason in `<home>/.mods-feed/state.json`: the Summary's `modsFeed.problem` (Settings shows it under the
+  update status) and `trif doctor` (a warning). None published (HTTP 404) isn't a problem.
+  Written by `node scripts/release.js mods-feed`, empty at each release, signed again by `refresh-feed`.
 - `updates/firefox.json` for Firefox: its update manifest (`addons[id].updates[{version, update_link,
   update_hash}]`). The Firefox build's `browser_specific_settings.gecko.update_url` points at it, so
   Firefox updates the signed add-on itself.
@@ -798,7 +828,9 @@ running from `<home>/app` update themselves; a git checkout says to use git. con
 `checkForUpdates: false` stops the checks.
 
 `Summary = {current, latest, available, notes, published, checkedAt, error, auto, checks, source,
-canInstall, why, lastInstalled, installing}`.
+canInstall, why, lastInstalled, installing, modsFeed}`; `modsFeed` (0.3.1) is `{checkedAt, problem}` for the
+mods feed's last check (`problem` a sentence, or null), or null when it isn't checked. The helper sends the
+Summary again once the mods feed's check is done.
 
 Helper commands (from the extension, or the CLI over the socket; never from inside an agent run):
 `update.check {force}` → Summary; `update.install` → `{from, to, notes}`; `update.setAuto {on}` → Summary;
@@ -913,7 +945,7 @@ docs/        PROTOCOL.md (this file), TESTING.md
 scripts/     build-extension.js (Chrome/Firefox/Safari builds), build-safari.js (the Safari Mac app),
              release.js (releases, see "Updates"), shipped-history.js, render-icon.js
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
-updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
+updates/     the update feeds, written by release.js (latest.json + .sig, mods.json + .sig, firefox.json)
 CHANGELOG.md what's new per version (the panel's "What's new")
 site/        timsrobot.com, the report form (a Cloudflare Worker; site/README.md)
 ```
@@ -1006,7 +1038,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel"}`, `{type: "agent.openModel.set", provider, model, baseUrl}`,
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
-  `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}` and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
+  `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}`, `{type: "downloads.setWatch", on}`, `{type: "downloads.take" | "downloads.done" | "downloads.ignore", id, how?}`, `{type: "mod.preview", text, name}`, `{type: "mod.try", text, name?, tabId}` and `{type: "mod.untry", tabId}` (the panel page only: "Try it here" runs a style mod's rules in the page's world, or a boxed mod in TRIF's sandbox with no powers, once, in that tab, if TRIF is on there and the mod's @match covers it; never a free mod; `mod.untry` reloads the tab; background.js tryMod) and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
   `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
@@ -1028,14 +1060,18 @@ New native request commands (answered with a normal `response`):
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
 | `mod.approve` | `id` | `{id, approved: true}`: releases a held mod, allowing what was found in it (see "Run scope"); also on the socket, not from a run |
 | `mod.review` | `id` | `{id, allowed: [key]}`: "Looks right" on a mod to review: what TRIF found in it is allowed; not from a run |
-| `mod.code` | `id, version?` | `{id, code, truncated, file}`: the mod's file as the helper read it (the panel's code card and Show code; a style mod's rules, not the code TRIF makes of them), capped at 200 000 characters; `file` its file name. `version: "ran"`: a mod with a change waiting, the version running meanwhile (held.js `lastRun`) |
+| `mod.code` | `id, version?` | `{id, code, truncated, file}`: the mod's file as the helper read it (the panel's code card and Show code; a style mod's rules, not the code TRIF makes of them), capped at 200 000 characters; `file` its file name. `version: "ran"`: a mod with a change waiting, the version running meanwhile (held.js `lastRun`). Without it, also `base`: the file's version (sha1 of its text), which `mod.save` takes back |
+| `mod.save` | `id, text, base` | The code card's Save (helper/lib/edit.js). `{ok: false, check: {errors: [{line, message}], lint: [{what, why, lines}], tier}}` when the text doesn't pass what `trif check` checks (the header, a style mod's rules and CSS, a style section, the syntax, and for a boxed mod what the sandbox would refuse): nothing is written. `{ok: false, conflict: true}` when the file isn't the version `base` says any more (another editor, an agent or another panel changed it meanwhile). `{ok: true, saved: false}` for no change. Else `{ok: true, saved: true, id, stamp, hash, held, pending}`: the version before kept in its history (source `edit`; `stamp` its entry), the edit marked as the user's in `edits.json` and written, the mods synced: the edit is judged as any change (held.js), and also waits for a @match for a site the version before didn't run on (while the mod can do something) and for becoming a free mod (`match:<pattern>`, `tier:free`; the hold's `by` is `edit`). The mod's id stays its file's. From the side panel only (the background refuses it from anywhere else), not from a run |
+| `mod.undoEdit` | `id, stamp, hash` | `{id, restored}`: Undo right after Save: the version kept at `stamp` back (the edit kept, source `undo`), if the file is still the saved edit (`hash`). From the side panel only, not from a run |
 | `mod.reveal` | `id, how?: "folder"\|"editor"` | `{id, how, file}`: shows the mod's file in Finder (`open -R`; Linux: `xdg-open` on its folder; Windows: Explorer), or with `editor` opens it in the system's app for it (`open` / `xdg-open`). The path is never taken from the message: it's the mod's own file from the helper's scan, by its id, and must be `sites/<site>/<mod>.js` in the sites folder, or it's refused (helper/lib/reveal.js). `file` is relative to the sites folder. Also on the socket (`trif reveal <site>/<mod> [--editor]`, which works without the browser), not from a run. In Safari the same: the helper (behind `helper/safari-bridge.js`) runs outside Safari's sandbox, as the user. `TRIF_REVEAL_CMD` (tests) runs a stand-in with what would have run as its arguments |
-| `mod.history` | `id` | `{id, entries: [{at, stamp, kind, source}]}`: the versions kept of a mod, newest first; `source`, what replaced it: `chat`, `fix`, `restore`, `import`, `undo` or null (helper/lib/history.js). Also on the socket (`trif history`) |
+| `mod.history` | `id` | `{id, entries: [{at, stamp, kind, source}]}`: the versions kept of a mod, newest first; `source`, what replaced it: `chat`, `fix`, `restore`, `import`, `undo`, `edit` or null (helper/lib/history.js). Also on the socket (`trif history`) |
 | `mod.historyCode` / `mod.historyDiff` | `id, stamp` | a kept version's text `{id, stamp, code, truncated}`, or its line diff with the current one `{id, lines}` |
 | `mod.historyRestore` | `id, stamp` | `{id, restored, at}`: puts that version back, keeping the current one (source `restore`); the next sync judges it like any change from outside. Not from a run |
 | `mod.export` | `id` | `{id, file, dir}`: the mod's file copied to the downloads folder as `<site>-<mod>.js` (a number added if taken) and shown in Finder; found by its id, as `mod.reveal` does (helper/lib/share.js; `TRIF_DOWNLOADS` for tests). Not from a run |
 | `mod.exportSite` | `site` | `{site, dir, ids}`: all of a site's mods into a folder `<site> mods` there, shown. Not from a run |
 | `mod.import` | `text, name, site?, choice?` | a mod's text (from a file the user chose or dropped): `{needsSite: [sites]}` when its @match doesn't name one site, `{exists, site, name}` when a mod of that name is there (`choice`: `copy` or `replace`, which keeps the old one in history), else `{id, file, replaced?}`. The header must parse; `@source`/`@version` are taken out; recorded in `imported.json` (the mod is sent with `imported: true`), and held like any mod from outside. Not from a run |
+| `mod.preview` | `text, name?, site?, forTry?` | a mod's text read as TRIF reads it, nothing written (helper/lib/preview.js): `{kind, name, file, description, site, matches, excludes, can, asks}`, and with `forTry`, for a style or boxed mod, `run: {id, kind, code, matches, excludes, style?}`: what "Try it here" runs, built under a name of its own (`<site>/~try-<name>`), with no powers. Throws when TRIF couldn't import it. Not from a run |
+| `downloads.status`, `downloads.setWatch`, `downloads.take`, `downloads.done`, `downloads.ignore` | `on` / `id` / `id, how` / `id` | Mod files in the user's downloads: the state above; the Settings switch (config.json `watchDownloads`, off by default); the offer's file read again, `{text, name}`, only if it's what was offered; Add (`how: added`) or Not now (each file offered once, kept in the private folder's `downloads.json`, which every browser's helper reads); Ignore files from its site. From the extension's connection only (the side panel's clicks), as `agent.withoutSandbox`: refused on the socket |
 | `files.add` | `site, name, data` | `{site, name, rel, size}`: `data` (base64) saved as `sites/<site>/files/<name>`: the name's last part, cleaned; never over another file. Nothing in `files/` is scanned as a mod. Not from a run |
 | `files.begin` | `site, name, size` | `{id}`: starts a file of any size, in slices; refused if the disk hasn't room for it. Not from a run |
 | `files.slice` | `id, offset, data` | `{written}`: appends `data` (base64, up to 8 MB), which must start at `offset` |
@@ -1177,7 +1213,19 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
   the socket without a token (the user's terminal, the user's own agent outside the panel) are not
   scoped: runs can't reach the socket. The helper answers `mod.delete` and `mod.restore` from a run
-  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
+  itself, only for mods whose every `@match` is in scope. **What a run may send** is a list (`host.js`
+  `RUN_COMMANDS`): the helper's own `ping` and `mods`, the mod-file commands `mod.delete`, `mod.restore`,
+  `mod.code` and `mod.diff`, and the page commands its `trif` sends (`status`, `tabs`, `run`, `reload`,
+  `navigate`, `open`, `close`, `text`, `sweep`, `screenshot`, `record`, `requests`, `request`, `errors`, `logs`,
+  `mod.enable`). Anything else from a run, a command nobody knows included, is refused by the helper and never
+  sent on to the extension. What the helper itself answers a run is its own site's: `mod.code` and `mod.diff`
+  only for a mod in the run's site's folders (the rule its delete goes by, `trash.js` siteInScope: a phone view's
+  run its phone twin's mods only, a sensitive site of its own and its parent each their own), refused before the
+  mod is looked up; `mods` lists only those, with their errors and warnings; and `ping` tells a run of its own
+  mods alone (those, all-sites/ and what it made for another site, which it may change: their holds, waiting
+  changes, updates and errors), of itself among the runs, and of no login. (The files are another matter: a
+  run's working copy has the other sites' mod files to read, docs/STAGING.md, and the extension's `status`
+  lists every mod.) The CLI itself refuses `setup`, `agent`,
   `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
   (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default;

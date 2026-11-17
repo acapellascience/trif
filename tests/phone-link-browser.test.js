@@ -167,7 +167,9 @@ test('Connect a phone in a real browser: each state, the code read back and pair
     assert.ok(code.qr.w === code.qr.h && code.qr.w >= 180 && code.qr.w <= 220, `the code is a square of 180 to 220 px (${code.qr.w}x${code.qr.h})`);
     const texts = code.files.map(read);
     assert.ok(texts[0] === texts[1], 'the same code, light and dark');
-    assert.ok(/^trif:\/\/pair\?v=1&k=[\w-]{43}&s=[\w-]+&n=/.test(texts[0]), 'the code is a trif://pair link with the key, the secret and the name');
+    // (in a message, the text's shape alone: every letter and digit as an x)
+    const shape = (t) => `${t.length} characters, ${JSON.stringify(t.replace(/[A-Za-z0-9]/g, 'x').slice(0, 160))}`;
+    assert.ok(/^trif:\/\/pair\?v=1&k=[\w-]{43}&s=[\w-]+&n=/.test(texts[0]), `the code is a trif://pair link with the key, the secret and the name (it read: ${shape(texts[0])})`);
     const announced = await waitFor(() => standIn.calls()[0], { message: 'the announcement (to the stand-in)' });
     const port = Number(announced.argv[4]);
     assert.equal(await listening(port), true);

@@ -67,7 +67,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   tests/uninstall.test.js (4 pass: real setup then uninstall in a temp HOME, another workspace's manifest
   kept, setup again restores, --all needs --yes off a TTY, fake-keychain key removed, outside modsDir kept,
   running helper stopped, non-workspace refused). Locally cli/install/setup-runtime/runtime/explain/
-  extension/sweep 256/256 pass. CI: https://github.com/acapellascience/trif/actions/runs/44182632765 (attempt 1: 892 pass, only the known clickjack-browser flake failed; rerun started, result not yet seen: check it first next round)
+  extension/sweep 256/256 pass. CI: https://github.com/acapellascience/trif/actions/runs/44182632765 (attempt 1: 892 pass, only the known clickjack-browser flake failed; rerun: the same, 892 pass, only clickjack-browser failed again; the known flake, moved on per the rules)
 
 ## Next step
 

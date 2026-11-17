@@ -1407,6 +1407,11 @@ those). Claude Code has no command that lists an account's models, so: its alias
 `sonnet`, `haiku` (each the newest of its family), `custom: true` (the panel's "Other…" takes an exact
 name), with a `note` saying so. The panel keeps the chosen model per agent (`models`, `{agentId: model}`;
 an older single `settings.model` becomes Claude Code's) and passes it as `agent.start`'s `model`.
+With no model chosen (the picker's "Default", `/model default`, `trif agent run` without `--model`),
+Claude Code runs with `--model opus` (the alias: the newest Opus), not its own built-in default: runs
+read project settings only (`--setting-sources project`), so a `model` in the user's
+`~/.claude/settings.json` doesn't reach them, and Claude Code's default can be a slower, costlier model.
+Codex and the open model keep their own defaults (no `-m`; the open model's stored or provider default).
 
 **Agent and model per site chat** (`extension/lib.js`). Each site's chat has its own agent and model, so
 one panel can run Claude Code with Opus on one site while another runs Codex on another.
@@ -1444,7 +1449,7 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   --strict-mcp-config --settings <run settings file> --tools Read,Edit,Write,Glob,Grep,Bash
   --disable-slash-commands --allowedTools Read(./**) "Edit(./sites/**)"
   Bash(trif:*) Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch
-  --append-system-prompt-file <context file> [--resume <sessionId>] [--model <model>]`, with the message
+  --append-system-prompt-file <context file> [--resume <sessionId>] --model <model, or opus>`, with the message
   on stdin (the rules are made absolute to the workspace, `//<path>`). In -p anything that would need approval is denied, so edits happen only under
   `sites/`, and Grep and Glob, which follow the Read rules, only search the workspace (no bare `Grep`/`Glob`
   rules: they'd search anywhere, outside the sandbox); the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored

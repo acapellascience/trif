@@ -59,7 +59,8 @@ function guideRefs() {
   return [
     ref('mod-format.md', 'The mod file', 'One file per customization: a header, then the mod.', ['AGENTS.md'], [
       between('AGENTS.md', '## Mod files', '### Style mods: start here'),
-      between('AGENTS.md', '### Mods for several sites', '## The CLI'),
+      // (not "### Phone runs": those are the helper's own runs for a paired phone, docs/PHONE-LINK.md; the skill has none)
+      between('AGENTS.md', '### Mods for several sites', '### Phone runs'),
       between('AGENTS.md', '### Sensitive sites', '## Agent on this site'),
     ]),
     ref('style-mods.md', 'Style mods, and a style section in other mods', 'The tier to try first.', ['AGENTS.md'], [

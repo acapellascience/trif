@@ -17,7 +17,7 @@ import Network
 //   from the last event its chat already shows (`shown`, kept across launches in `defaults`).
 // Callbacks come on `queue` (main by default).
 
-final class PhoneLinkRemote {
+final class PhoneLinkRemote: PhoneSyncLink {
     enum Failure: String, Error {
         /// No computer is paired.
         case notPaired
@@ -68,6 +68,9 @@ final class PhoneLinkRemote {
     /// A followed run the computer doesn't have any more (`no-run`), or given up after the drop (`away`), or the
     /// phone removed there (`removed`).
     var onLost: ((String, RunError) -> Void)?
+
+    /// The computer's `sync.changed`: a phone twin changed there (PhoneSync.swift: the phone syncs when ready).
+    var onSyncChanged: (() -> Void)?
 
     /// The runs followed: runId → the newest event number handed on.
     private(set) var following: [String: Int] = [:]
@@ -157,6 +160,18 @@ final class PhoneLinkRemote {
 
     /// No longer followed (its chat cleared): the computer still keeps it until acked.
     func unfollow(_ runId: String) { following[runId] = nil }
+
+    /// A phone sync's request (PhoneSync.swift), connecting first when needed; a failure to connect is an `error`
+    /// with Failure's code.
+    func syncRequest(_ m: [String: Any], _ done: @escaping ([String: Any]) -> Void) {
+        connect { [weak self] r in
+            guard let self else { return }
+            switch r {
+            case .success: self.request(m, done)
+            case .failure(let f): done(["t": "error", "code": f.rawValue, "message": "not connected"])
+            }
+        }
+    }
 
     /// The app is in front again: reconnect at once if the link dropped.
     func wake() {
@@ -363,7 +378,11 @@ final class PhoneLinkRemote {
 
     // MARK: messages
 
+    /// When the last request went (the phone sync closes a link of its own once nothing has used it for 30 s).
+    private(set) var lastUse = Date.distantPast
+
     private func request(_ m: [String: Any], _ done: @escaping ([String: Any]) -> Void) {
+        lastUse = Date()
         guard let s = session else { return done(["t": "error", "code": "away", "message": "no link"]) }
         let id = nextId
         nextId += 1
@@ -406,6 +425,8 @@ final class PhoneLinkRemote {
             }
         case "pong":
             return
+        case "sync.changed":
+            onSyncChanged?()
         default:
             guard let id = m["id"] as? Int, let f = answers.removeValue(forKey: id) else { return }
             f(m)

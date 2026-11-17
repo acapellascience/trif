@@ -41,6 +41,7 @@
 		A1C10B0E5EB1C11B0000002C /* PhoneLinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000002D /* PhoneLinkView.swift */; };
 		A1C10B0E5EB1C11B0000002A /* PhoneLinkPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000002B /* PhoneLinkPair.swift */; };
 		A1C10B0E5EB1C11B0000002E /* PhoneLinkRemote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000002F /* PhoneLinkRemote.swift */; };
+		A1C10B0E5EB1C11B00000030 /* PhoneSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000031 /* PhoneSync.swift */; };
 		A1C10B0E5EB1C11B00000023 /* local-guide.txt in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000024 /* local-guide.txt */; };
 		A1C10B0E5EB1C11B00000011 /* panel-adapter.js in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000012 /* panel-adapter.js */; };
 		A1C10B0E5EB1C11B00000013 /* panel-phone.css in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000014 /* panel-phone.css */; };
@@ -95,6 +96,7 @@
 		A1C10B0E5EB1C11B0000002D /* PhoneLinkView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PhoneLinkView.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000002B /* PhoneLinkPair.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PhoneLinkPair.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000002F /* PhoneLinkRemote.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PhoneLinkRemote.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000031 /* PhoneSync.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PhoneSync.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000024 /* local-guide.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "local-guide.txt"; path = "../local-model/local-guide.txt"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000012 /* panel-adapter.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = "panel-adapter.js"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000014 /* panel-phone.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; path = "panel-phone.css"; sourceTree = "<group>"; };
@@ -226,6 +228,7 @@
 				A1C10B0E5EB1C11B0000002D /* PhoneLinkView.swift */,
 				A1C10B0E5EB1C11B0000002B /* PhoneLinkPair.swift */,
 				A1C10B0E5EB1C11B0000002F /* PhoneLinkRemote.swift */,
+				A1C10B0E5EB1C11B00000031 /* PhoneSync.swift */,
 				50952D10E0015A131982D938 /* Tabs.swift */,
 				C92814A95137C3CC4B0A8C2F /* Browser.swift */,
 				A67596316AFDF35B8CF90704 /* Checks.swift */,
@@ -347,6 +350,7 @@
 				A1C10B0E5EB1C11B0000002C /* PhoneLinkView.swift in Sources */,
 				A1C10B0E5EB1C11B0000002A /* PhoneLinkPair.swift in Sources */,
 				A1C10B0E5EB1C11B0000002E /* PhoneLinkRemote.swift in Sources */,
+				A1C10B0E5EB1C11B00000030 /* PhoneSync.swift in Sources */,
 				1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */,
 				066931474CC5139D68D2F470 /* Browser.swift in Sources */,
 				17237858CB0A046A273784DC /* Checks.swift in Sources */,

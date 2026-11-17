@@ -135,9 +135,18 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   The computer's `error` events with `reason` sandbox/login are said in the app's words (`linkWords`). The Simulator
   asks no Local Network question (Bonjour browses with no prompt; a missing computer is `notFound`): `denied` is a
   device-only check.
-  Test on the Mac: `node --test mobile/test/phonelink.test.js` (swiftc builds the three files with
+  PhoneSync.swift (no UI; built for the Mac too): phone sync (docs/PHONE-SYNC.md and PHONE-SYNC-PROGRESS.md on
+  phone-link): `PhoneSync.run` (begin with {id, rev} → puts → gets taken by the store → removes → end with `have`),
+  `Summary`, `Scheduler` (one at a time, coalesced; a change syncs 3 s later only if a file's rev differs from the
+  last good sync). The store is ModStore (`syncFiles`, `syncTake`: new as an import (off, newOff "computer"),
+  changed as saveEdit judges, history source computer; `syncRemove` → `trash`, Recently deleted, 30 days,
+  Application Support/mods-deleted.json, `restoreDeleted`; every delete goes there now). PhoneSyncModel
+  (PhoneLinkView.swift) owns the app's ONE PhoneLinkRemote (PanelChat's `link` is it: one session per phone) and
+  syncs on didBecomeActive, `$mods` changes, `sync.changed` (onSyncChanged), syncNow; closes a sync-only link after
+  30 s unused (`lastUse`). Dev steps `sync`, `syncstate`. No UI yet (S7).
+  Test on the Mac: `node --test mobile/test/phonelink.test.js` (swiftc builds the four files with
   mobile/test/phonelink-check/main.swift; a stand-in computer from the phone-link worktree's helper/lib/phonelink
-  and tests/, or TRIF_PHONE_LINK_LIB; 6 tests, under a minute). The last one runs the real Store, Server, Runs and Remote with
+  and tests/, or TRIF_PHONE_LINK_LIB; 7 tests, under a minute; `check syncunit`: PhoneSync against a scripted computer). The last one runs the real Store, Server, Runs and Remote with
   the stand-in agent (phone-link's `tests/phone-link-computer.js`, which is also the Simulator's computer: `node
   tests/phone-link-computer.js --seconds 600`, its first line `{port, qr}`, then stdin `go <word>`, `kept`, `remove`,
   `pair`, `quit`; launch the app with `-linkhost 127.0.0.1:<port>`).

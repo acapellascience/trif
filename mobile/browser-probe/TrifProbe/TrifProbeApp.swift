@@ -75,6 +75,7 @@ final class Model: ObservableObject {
         Model.pane = self.pane
         Model.barsRef = self.bars
         Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
+        PhoneSyncModel.shared.start(store: browser.mods)
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
                                         "com.trif.probe.step" as CFString, nil, .deliverImmediately)
         // (development) `-go address`: the shown tab goes there at start.
@@ -212,6 +213,12 @@ extension Model {
         }
         // ({"phonedrop": 1}: More's link to the computer lost as a suspended app loses it; it reconnects after its waits,
         // or at once when the app comes back to the front)
+        // ({"sync": 1}: Sync now; {"syncstate": 1}: what the last sync did, and the mods' ids and Recently deleted)
+        if step["sync"] != nil { PhoneSyncModel.shared.syncNow(); out = "sync asked" }
+        if step["syncstate"] != nil {
+            let m = browser.mods
+            out = "sync: \(PhoneSyncModel.shared.syncing ? "running" : "idle"); last: \(PhoneSyncModel.shared.describe)\nmods: \(m.mods.map { "\($0.id)\($0.on ? "" : " off")\($0.held ? " held" : "")" }.sorted())\ndeleted: \(m.trash.map { "\($0.mod.id) by \($0.by)" })"
+        }
         if step["phonedrop"] != nil, let l = Model.pane?.panel.link { l.drop(); out = "phone link: \(l.state), following \(l.following.count)" }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }

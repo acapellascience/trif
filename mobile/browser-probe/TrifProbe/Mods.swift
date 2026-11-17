@@ -175,6 +175,8 @@ final class ModStore: ObservableObject {
     @Published private(set) var groupsOff: [String: [String]] = [:]
     /// The last mod deleted, for Undo (this launch only).
     @Published private(set) var lastDeleted: InstalledMod?
+    /// Recently deleted (phone sync, D7): every mod deleted here, by the user or by a sync, for 30 days, newest first.
+    @Published private(set) var trash: [DeletedMod] = []
     private let key = "installedMods"
     private let groupsKey = "groupsOff"
     private let readerKey = "modReader"
@@ -194,6 +196,7 @@ final class ModStore: ObservableObject {
 
     init() {
         mods = ModFilesStore.load()
+        trash = ModFilesStore.loadTrash().filter { $0.at > Date().addingTimeInterval(-ModStore.trashDays * 86400) }
         // (once: the mods the app kept in its settings, moved to their own files)
         if !UserDefaults.standard.bool(forKey: "modsInFiles"), let data = UserDefaults.standard.data(forKey: key), let list = try? JSONDecoder().decode([InstalledMod].self, from: data) {
             if mods.isEmpty { mods = list }
@@ -210,6 +213,7 @@ final class ModStore: ObservableObject {
     /// settings (small).
     private func save() {
         ModFilesStore.write(mods)
+        ModFilesStore.writeTrash(trash)
         UserDefaults.standard.set(groupsOff, forKey: groupsKey)
     }
 
@@ -387,34 +391,54 @@ final class ModStore: ObservableObject {
         if let i = mods.firstIndex(where: { $0.id == m.id }) {
             let old = mods[i]
             m.history = old.history
-            if old.code != m.code { m.history.insert(ModVersion(stamp: stamp(), at: Date(), code: old.code, source: ["import", "edit"].contains(source) ? source : "chat"), at: 0) }
+            if old.code != m.code { m.history.insert(ModVersion(stamp: stamp(), at: Date(), code: old.code, source: ["import", "edit", "computer"].contains(source) ? source : "chat"), at: 0) }
             m.history = Array(m.history.filter { $0.at > Date().addingTimeInterval(-30 * 86400) }.prefix(30))
             m.allowed = old.allowed
             m.offSites = old.offSites
             m.added = old.added
-            if source == "import" { m.on = false; m.newOff = "update" } else if source == "edit" { m.on = old.on; m.newOff = old.newOff } else { m.on = true; m.newOff = nil }
+            // (from the computer, phone sync: judged as an edit, its switch kept)
+            if source == "import" { m.on = false; m.newOff = "update" } else if source == "edit" || source == "computer" { m.on = old.on; m.newOff = old.newOff } else { m.on = true; m.newOff = nil }
             // (the version before ran, and this one waits: it keeps running meanwhile)
             if m.held, !old.held || old.ran != nil { m.ran = old.ran ?? .init(code: old.code, script: old.script, world: old.world, at: old.at) }
             mods[i] = m
         } else {
-            if source == "import" { m.on = false; m.newOff = "import" }
+            // (new from the computer, phone sync D8: as an import, off and marked new)
+            if source == "import" { m.on = false; m.newOff = "import" } else if source == "computer" { m.on = false; m.newOff = "computer" }
             mods.append(m)
         }
         save()
         return m
     }
 
-    func remove(_ id: String) {
+    static let trashDays = 30.0
+
+    /// Deletes a mod: to Recently deleted (30 days). `by`: you (the Mods tab: Undo too) or computer (a sync).
+    func remove(_ id: String, by: String = "you") {
         guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
-        lastDeleted = mods.remove(at: i)
+        let m = mods.remove(at: i)
+        if by == "you" { lastDeleted = m }
+        trash.insert(DeletedMod(mod: m, at: Date(), by: by), at: 0)
+        trash = Array(trash.filter { $0.at > Date().addingTimeInterval(-ModStore.trashDays * 86400) }.prefix(200))
         save()
     }
 
     func undoDelete() {
         guard let m = lastDeleted else { return }
         if !mods.contains(where: { $0.id == m.id }) { mods.append(m) }
+        if let i = trash.firstIndex(where: { $0.mod.id == m.id }) { trash.remove(at: i) }
         lastDeleted = nil
         save()
+    }
+
+    /// Puts a mod from Recently deleted back (a change like any other: it syncs again). False: one with its id is
+    /// here now.
+    @discardableResult
+    func restoreDeleted(_ entry: String) -> Bool {
+        guard let i = trash.firstIndex(where: { $0.id == entry }), !mods.contains(where: { $0.id == trash[i].mod.id }) else { return false }
+        mods.append(trash.remove(at: i).mod)
+        if lastDeleted.map({ m in mods.contains { $0.id == m.id } }) == true { lastDeleted = nil }
+        save()
+        return true
     }
 
     /// A mod's switch: the whole mod, or (a mod for several sites) its switch on one site.
@@ -694,6 +718,51 @@ enum MatchPattern {
     }
 }
 
+/// A mod in Recently deleted.
+struct DeletedMod: Codable, Identifiable, Equatable {
+    var mod: InstalledMod
+    var at: Date
+    /// you, or computer (deleted there, phone sync)
+    var by: String
+    var id: String { "\(mod.id)@\(Int(at.timeIntervalSince1970 * 1000))" }
+}
+
+/// Phone sync (PhoneSync.swift): the mods as the sync sees them, and its changes judged as the app's own are
+/// (docs/PHONE-SYNC.md section 6 on branch phone-link).
+extension ModStore: @preconcurrency PhoneSyncStore {
+    /// Every mod kept under a site (not the proof of concept's, whose ids have none): id → its file.
+    func syncFiles() -> [String: String] {
+        Dictionary(mods.filter { $0.id.contains("/") }.map { ($0.id, $0.code) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// New: as an import (off, marked new, waiting if its code needs an OK). Changed: as an edit (saveEdit's rules:
+    /// what the version before was allowed, a new site or becoming free asks; the version before keeps running
+    /// meanwhile; its history keeps it, source computer; its switch stays). Not a mod the reader takes: refused.
+    func syncTake(_ id: String, code: String, isNew: Bool) -> PhoneSync.Taken {
+        guard let cut = id.firstIndex(of: "/") else { return .refused("not a mod id") }
+        let site = String(id[..<cut]), name = String(id[id.index(after: cut)...])
+        let r = read(code, file: "\(name).js", site: site)
+        guard var m = r.mod else { return .refused(r.error ?? "the reader didn't take it") }
+        guard m.id == id else { return .refused("its id came out as \(m.id)") }
+        if let old = mods.first(where: { $0.id == id }) {
+            guard m.code != old.code else { return .taken(held: old.held) }
+            m.allowed = ModStore.seeded(old)
+            m.extraNeeds = ModStore.changeNeeds(m, was: old)
+            var kept = old
+            kept.allowed = m.allowed
+            if let i = mods.firstIndex(where: { $0.id == id }) { mods[i] = kept }
+        }
+        let saved = add(m, source: "computer")
+        Diagnostics.shared.log("sync", "\(isNew ? "new" : "changed") from the computer: \(id)\(saved.held ? ", waiting for an OK" : "")")
+        return .taken(held: saved.held)
+    }
+
+    func syncRemove(_ id: String) {
+        remove(id, by: "computer")
+        Diagnostics.shared.log("sync", "deleted on the computer: \(id) (in Recently deleted)")
+    }
+}
+
 /// Mods in files: Application Support/mods/<id>.json and an order file, written atomically on a queue of their own
 /// (the latest list wins; a write in progress finishes first).
 enum ModFilesStore {
@@ -708,6 +777,15 @@ enum ModFilesStore {
     static func load() -> [InstalledMod] {
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("order.json")), let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
         return ids.compactMap { id in (try? Data(contentsOf: file(id))).flatMap { try? JSONDecoder().decode(InstalledMod.self, from: $0) } }
+    }
+
+    /// Recently deleted, one file beside the mods' folder.
+    private static var trashFile: URL { dir.deletingLastPathComponent().appendingPathComponent("mods-deleted.json") }
+    static func loadTrash() -> [DeletedMod] {
+        (try? Data(contentsOf: trashFile)).flatMap { try? JSONDecoder().decode([DeletedMod].self, from: $0) } ?? []
+    }
+    static func writeTrash(_ list: [DeletedMod]) {
+        queue.async { if let d = try? JSONEncoder().encode(list) { try? d.write(to: trashFile, options: .atomic) } }
     }
 
     static func write(_ mods: [InstalledMod]) {

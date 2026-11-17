@@ -23,6 +23,111 @@ if args.count > 1, args[1] == "selftest" {
     say(PhoneLink.selfTest() ?? "ok")
     exit(0)
 }
+// check syncunit: PhoneSync.swift against a scripted computer and a store in memory; "FAIL …" lines, then
+// "sync unit: ok" or "sync unit: <n> failed"
+if args.count > 1, args[1] == "syncunit" {
+    var fails = 0
+    func expect(_ ok: Bool, _ what: String) { if !ok { fails += 1; say("FAIL \(what)") } }
+    final class Store: PhoneSyncStore {
+        var files: [String: String] = [:], trash: [String: String] = [:], takes: [String] = []
+        func syncFiles() -> [String: String] { files }
+        func syncTake(_ id: String, code: String, isNew: Bool) -> PhoneSync.Taken {
+            takes.append("\(id) \(isNew ? "new" : "changed")")
+            if code.contains("BROKEN") { return .refused("not a mod") }
+            files[id] = code
+            return .taken(held: code.contains("fetch("))
+        }
+        func syncRemove(_ id: String) { trash[id] = files.removeValue(forKey: id) }
+    }
+    final class Computer: PhoneSyncLink {
+        var sent: [[String: Any]] = [], plan: [String: Any] = [:], code: [String: String] = [:], putErrors: [String: String] = [:]
+        var beginError: String?
+        func syncRequest(_ m: [String: Any], _ done: @escaping ([String: Any]) -> Void) {
+            sent.append(m)
+            let t = m["t"] as! String
+            DispatchQueue.main.async { [self] in
+                if t == "sync.begin" { return done(beginError.map { ["t": "error", "code": $0] } ?? plan) }
+                if t == "sync.get" { return done(["t": "sync.mod", "mod": m["mod"]!, "name": "x", "code": code[m["mod"] as! String] ?? ""]) }
+                if t == "sync.put" { return done(putErrors[m["mod"] as! String].map { ["t": "error", "code": $0] } ?? ["t": "ok", "mod": m["mod"]!, "rev": PhoneSync.rev(m["code"] as! String), "held": false]) }
+                if t == "sync.end" { return done(["t": "sync.done", "synced": 1, "waiting": [["id": "a.com/up", "name": "Up"]], "conflicts": []]) }
+            }
+        }
+    }
+    func wait(_ f: () -> Bool) { let end = Date().addingTimeInterval(5); while !f() && Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) } }
+    expect(PhoneSync.rev("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "rev is SHA-256 of UTF-8, hex")
+
+    let st = Store(), pc = Computer()
+    st.files = ["a.com/up": "// up v2", "a.com/same": "// same", "a.com/gone": "// gone here", "a.com/edit": "// edit v1",
+                "a.com/held": "// held v1", "a.com/both": "// both phone", "a.com/bad": "// bad v1"]
+    let giveN = "// new from computer", giveE = "// edit v2", giveH = "// held v2 fetch(1)", giveS = "// sibling", giveB = "// back", giveX = "BROKEN"
+    pc.code = ["a.com/new": giveN, "a.com/edit": giveE, "a.com/held": giveH, "a.com/both-from-computer": giveS, "a.com/back": giveB, "a.com/bad": giveX, "a.com/stale": "// newer"]
+    pc.plan = ["t": "sync.plan", "syncId": "s1",
+               "want": [["id": "a.com/up"], ["id": "a.com/both", "conflict": true], ["id": "a.com/missing"]],
+               "give": [["id": "a.com/new", "rev": PhoneSync.rev(giveN)], ["id": "a.com/edit", "rev": PhoneSync.rev(giveE)],
+                        ["id": "a.com/held", "rev": PhoneSync.rev(giveH)], ["id": "a.com/both-from-computer", "rev": PhoneSync.rev(giveS), "conflict": "a.com/both"],
+                        ["id": "a.com/back", "rev": PhoneSync.rev(giveB), "back": true], ["id": "a.com/bad", "rev": PhoneSync.rev(giveX)],
+                        ["id": "a.com/stale", "rev": PhoneSync.rev("// older")]],
+               "remove": ["a.com/gone", "a.com/never"], "later": ["b.com/busy"], "skipped": [["id": "all-sites/x", "why": "every-site mods stay on the phone for now"]]]
+    pc.putErrors = ["a.com/both": "changed"]
+    let original = st.files
+    var got: Result<PhoneSync.Summary, PhoneSync.Failure>?
+    PhoneSync(store: st, link: pc).run { got = $0 }
+    wait { got != nil }
+    guard case .success(let s)? = got else { say("FAIL no summary: \(String(describing: got))"); exit(1) }
+    let begin = pc.sent.first!
+    let man = begin["mods"] as! [[String: String]]
+    expect(begin["t"] as? String == "sync.begin" && man.map { $0["id"]! } == original.keys.sorted() && man.allSatisfy { $0["rev"] == PhoneSync.rev(original[$0["id"]!]!) }, "begin: every mod with its rev, sorted")
+    expect(pc.sent.map { $0["t"] as! String } == ["sync.begin", "sync.put", "sync.put", "sync.get", "sync.get", "sync.get", "sync.get", "sync.get", "sync.get", "sync.get", "sync.end"], "order: begin, puts, gets, end: \(pc.sent.map { $0["t"]! })")
+    expect(pc.sent.filter { $0["t"] as? String != "sync.begin" }.allSatisfy { $0["syncId"] as? String == "s1" }, "every request carries the syncId")
+    expect(pc.sent[1]["mod"] as? String == "a.com/up" && pc.sent[1]["code"] as? String == "// up v2", "put sends the file as it is")
+    expect(s.sent == ["a.com/up"] && s.refused.contains { $0.id == "a.com/both" && $0.why == "computer: changed" }, "put ok / refused: \(s.sent) \(s.refused)")
+    expect(st.files["a.com/new"] == giveN && st.takes.contains("a.com/new new"), "a new mod taken as new")
+    expect(st.files["a.com/edit"] == giveE && st.takes.contains("a.com/edit changed"), "a changed mod taken as an edit")
+    expect(s.waitingHere == ["a.com/held"] && s.taken.contains("a.com/held"), "held here: \(s.waitingHere)")
+    expect(st.files["a.com/bad"] == "// bad v1" && s.refused.contains { $0.id == "a.com/bad" && $0.why == "not a mod" }, "a file the reader refuses is not taken")
+    expect(st.files["a.com/stale"] == nil && !st.takes.contains { $0.hasPrefix("a.com/stale") }, "a give whose code isn't its rev is not taken")
+    expect(st.files["a.com/gone"] == nil && st.trash["a.com/gone"] == "// gone here" && s.removed == ["a.com/gone"], "remove goes to the trash")
+    expect(s.conflicts.count == 1 && s.conflicts[0].id == "a.com/both" && s.conflicts[0].sibling == "a.com/both-from-computer" && st.files["a.com/both-from-computer"] == giveS, "conflict: the sibling taken")
+    expect(s.cameBack == ["a.com/back"] && st.files["a.com/back"] == giveB, "came back")
+    expect(s.later == ["b.com/busy"] && s.skipped.first?.id == "all-sites/x", "later and skipped")
+    expect(s.waitingThere.first?.name == "Up", "waiting there")
+    let have = (pc.sent.last!["have"] as! [[String: String]])
+    let haveIds = have.map { $0["id"]! }
+    expect(!haveIds.contains("a.com/missing") && !haveIds.contains("a.com/gone") && !haveIds.contains("a.com/stale") && !haveIds.contains("a.com/never"), "have: only what the phone has: \(haveIds)")
+    expect(have.allSatisfy { $0["rev"] == PhoneSync.rev(st.files[$0["id"]!]!) } && haveIds.contains("a.com/bad") && haveIds.contains("a.com/up"), "have: the revisions now (a refused one its old)")
+
+    // the computer says off: a failure, nothing changed
+    let pc2 = Computer(); pc2.beginError = "off"
+    let before = st.files
+    var got2: Result<PhoneSync.Summary, PhoneSync.Failure>?
+    PhoneSync(store: st, link: pc2).run { got2 = $0 }
+    wait { got2 != nil }
+    if case .failure(let f)? = got2 { expect(f.code == "off", "off's code") } else { expect(false, "off is a failure") }
+    expect(st.files == before && pc2.sent.count == 1, "off: nothing more sent or changed")
+
+    // the scheduler: one at a time, the change rule
+    var runs = 0, finish: ((Result<PhoneSync.Summary, PhoneSync.Failure>) -> Void)?
+    let sch = PhoneSync.Scheduler(changeDelay: 0.05, files: { st.files }, sync: { runs += 1; finish = $0 })
+    var reasons: [String] = []
+    sch.finished = { _, why in reasons.append(why) }
+    sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+    expect(runs == 0, "no sync yet this launch: a change waits for the first")
+    sch.now("front"); sch.now("nudge"); sch.now("now")
+    expect(runs == 1 && sch.running, "one at a time")
+    finish?(.success(.init())); wait { runs == 2 }
+    expect(runs == 2 && reasons == ["front"], "what came during one runs once after it: \(runs) \(reasons)")
+    finish?(.success(.init())); RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    expect(reasons == ["front", "nudge"] && !sch.running, "then idle: \(reasons)")
+    sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+    expect(runs == 2, "a change that leaves every file as the last sync did (a switch) is no sync")
+    st.files["a.com/up"] = "// up v3"; sch.changed(); sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+    expect(runs == 3, "a file changed: one sync after the delay: \(runs)")
+    finish?(.failure(.init(code: "notFound", message: ""))); RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    st.files["a.com/up"] = "// up v4"; sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+    expect(runs == 4, "after a failed sync the change rule still compares with the last good one")
+    say(fails == 0 ? "sync unit: ok" : "sync unit: \(fails) failed")
+    exit(fails == 0 ? 0 : 1)
+}
 // check parse <text>…: PairCode.parse of each: "code <id> <secret> <name>" or "none"
 if args.count > 1, args[1] == "parse" {
     for t in args.dropFirst(2) { say(PairCode.parse(t).map { "code \($0.computerId) \($0.secret) \($0.name)" } ?? "none") }

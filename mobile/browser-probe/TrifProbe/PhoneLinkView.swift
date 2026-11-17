@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Network
 import SwiftUI
 import UIKit
@@ -10,6 +11,78 @@ import UIKit
 //
 // Development: `-linkhost 127.0.0.1:<port>` pairs with that address instead of looking on the Wi-Fi (a loopback
 // address only), for the Simulator against a helper in a temp HOME.
+
+/// The phone sync in the app (PhoneSync.swift; docs/PHONE-SYNC.md section 8 on branch phone-link): the app's one
+/// link to the paired computer (More's engine uses it too), and when the phone syncs: the app in front, 3 s after a
+/// mod's file changed, the computer's nudge, Sync now. Only with a paired computer; quiet when it isn't there. A link
+/// opened for a sync alone is closed after 30 s of nothing. The Mods tab's line and Sync now: S7.
+@MainActor
+final class PhoneSyncModel: ObservableObject {
+    static let shared = PhoneSyncModel()
+    @Published private(set) var last: PhoneSync.Summary?
+    @Published private(set) var lastProblem: String?
+    @Published private(set) var syncing = false
+    private var scheduler: PhoneSync.Scheduler?
+    private var watch: AnyCancellable?
+    private var idle: DispatchWorkItem?
+
+    private(set) lazy var link: PhoneLinkRemote = {
+        let screen = UIScreen.main.bounds.size
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        return PhoneLinkRemote(phoneName: PhoneLinkModel.shared.sentName, device: ["name": UIDevice.current.model, "width": Int(screen.width), "height": Int(screen.height)],
+                               app: version, endpoints: PhoneLinkModel.devEndpoints)
+    }()
+
+    /// Once, at launch (the app's ModStore).
+    func start(store: ModStore) {
+        guard scheduler == nil else { return }
+        let sync = PhoneSync(store: store, link: link)
+        let s = PhoneSync.Scheduler(files: { store.syncFiles() }) { [weak self] done in
+            guard PhoneLinkKeys.shared.computer != nil else { return done(.failure(.init(code: "notPaired", message: ""))) }
+            self?.syncing = true
+            sync.run(done)
+        }
+        s.finished = { [weak self] r, why in MainActor.assumeIsolated { self?.finished(r, why) } }
+        scheduler = s
+        link.onSyncChanged = { [weak self] in MainActor.assumeIsolated { self?.scheduler?.now("nudge") } }
+        watch = store.$mods.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.scheduler?.changed() } }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduler?.now("front") }
+        }
+    }
+
+    /// Sync now (the Mods tab's button, S7; the dev step `sync`).
+    func syncNow() { scheduler?.now("now") }
+
+    private func finished(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) {
+        syncing = false
+        switch r {
+        case .success(let s):
+            last = s; lastProblem = nil
+            if s.changedAnything || !s.skipped.isEmpty {
+                Diagnostics.shared.log("sync", "synced (\(why)): \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
+            }
+        case .failure(let f):
+            guard f.code != "notPaired" else { return }
+            lastProblem = f.code
+            Diagnostics.shared.log("sync", "not synced (\(why)): \(f.code) \(f.message)")
+        }
+        // (a link nobody else uses: closed after 30 s of nothing)
+        idle?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, !self.syncing, self.link.following.isEmpty, Date().timeIntervalSince(self.link.lastUse) >= 29 else { return }
+            if self.link.state == .open { self.link.close() }
+        }
+        idle = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: w)
+    }
+
+    /// (development) the last sync, as the dev step `syncstate` says it.
+    var describe: String {
+        guard let s = last else { return "no sync yet\(lastProblem.map { " (\($0))" } ?? "")" }
+        return "taken \(s.taken.sorted()) waitingHere \(s.waitingHere.sorted()) removed \(s.removed.sorted()) sent \(s.sent.sorted()) waitingThere \(s.waitingThere.map(\.id).sorted()) conflicts \(s.conflicts.map { "\($0.id)>\($0.sibling)" }) cameBack \(s.cameBack) refused \(s.refused.map(\.id)) skipped \(s.skipped.map(\.id)) later \(s.later)\(lastProblem.map { " problem \($0)" } ?? "")"
+    }
+}
 
 @MainActor
 final class PhoneLinkModel: ObservableObject {

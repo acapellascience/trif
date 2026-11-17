@@ -16,7 +16,7 @@ const { execFileSync, spawn } = require('child_process');
 
 const HERE = __dirname;
 const SWIFT = [path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLink.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkPair.swift'),
-  path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkRemote.swift'),
+  path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkRemote.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneSync.swift'),
   path.join(HERE, 'phonelink-check', 'main.swift')];
 const mac = process.platform === 'darwin';
 const lib = [process.env.TRIF_PHONE_LINK_LIB, path.join(os.homedir(), 'WebMods-worktrees', 'phone-link', 'helper', 'lib', 'phonelink'),
@@ -46,6 +46,12 @@ test('PhoneLink.swift: the published Noise IK vector and the frames vector, in C
   const { lines, code } = await run(['selftest']);
   assert.equal(code, 0);
   assert.deepEqual(lines, ['ok']);
+});
+
+test('PhoneSync.swift: a scripted computer and a store in memory (the plan applied: puts, gets new and changed, held here, refused, stale, removed to the trash, a conflict, came back; have; off; the scheduler)', { skip: !mac && 'macOS only', timeout: 180000 }, async () => {
+  const { lines, code } = await run(['syncunit']);
+  assert.equal(code, 0, lines.join('\n'));
+  assert.deepEqual(lines, ['sync unit: ok']);
 });
 
 const noLib = !mac ? 'macOS only' : !lib && 'the helper\'s phonelink folder (branch phone-link) isn\'t here';

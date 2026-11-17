@@ -481,12 +481,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     static let pairLink = "https://pair.trif.invalid/"
 
-    /// The link to the paired computer, made once (PhoneLinkRemote.swift).
+    /// The link to the paired computer (PhoneLinkRemote.swift): the app's one, shared with the phone sync
+    /// (PhoneSyncModel), since the computer keeps one session per phone.
     private(set) lazy var link: PhoneLinkRemote = {
-        let screen = UIScreen.main.bounds.size
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-        let l = PhoneLinkRemote(phoneName: PhoneLinkModel.shared.sentName, device: ["name": UIDevice.current.model, "width": Int(screen.width), "height": Int(screen.height)],
-                                app: version, endpoints: PhoneLinkModel.devEndpoints)
+        let l = PhoneSyncModel.shared.link
         l.onEvent = { [weak self] rid, _, ev in MainActor.assumeIsolated { self?.computerEvent(rid, ev) } }
         l.onResult = { [weak self] rid, m in MainActor.assumeIsolated { self?.computerResult(rid, m) } }
         l.onTool = { [weak self] rid, tool, input, answer in MainActor.assumeIsolated { self?.computerTool(rid, tool, input, answer) } }
@@ -517,7 +515,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                 let kept = hello.pending.filter { !$0.chat.isEmpty && self.link.following[$0.runId] == nil && self.computerRun($0.runId) == nil }
                 if kept.isEmpty {
                     // (nothing to follow: the link isn't kept open for nothing)
-                    if self.runs.values.allSatisfy({ $0.remoteId == nil }) { self.link.close() }
+                    if self.runs.values.allSatisfy({ $0.remoteId == nil }), !PhoneSyncModel.shared.syncing { self.link.close() }
                     return
                 }
                 for p in kept { Task { @MainActor in await self.adopt(p) } }

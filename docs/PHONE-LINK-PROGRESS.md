@@ -37,36 +37,35 @@ iPhone side (needs ios-poc free):
 - [ ] 15. The result to Add this mod? / the approval card; the states of PHONE-LINK.md section 8
 - [ ] 16. Simulator proof against the helper in a temp HOME
 
-## Done this round (round 12, 2026-11-16)
+## Done this round (round 13, 2026-11-17)
 
-The brief: ios-poc isn't free; the look at Settings' Connect a phone in a real browser (Tim's OK).
+The brief: ios-poc was free, then taken back mid-round for an urgent iOS batch before anything was written
+there (its tree is as it was, 6dc5fa0). So: main merged into this branch, nothing else.
 
-- **`tests/phone-link-browser.test.js`** (macOS; with `TRIF_BROWSER_TESTS=1` locally, and on CI, whose runner is macOS): TRIF's
-  own extension in headless Chrome for Testing (`tests/cdp-page.js`: muted, the lock, the memory guard), the
-  side panel's page in a tab 380 px wide, and the real `helper/host.js` started by the browser itself over
-  native messaging in a temp workspace (fake keychain, stand-in dns-sd, the listener on 127.0.0.1). Each
-  state, light and dark: off, the "i" open, the code, on with no phones, a phone listed, two (one with a
-  long name), one removed, off with the phone kept; Settings closed while a code shows. The code is read
-  back from each screenshot's pixels by macOS's own reader (Vision) and a stand-in phone pairs with what it
-  read; a cancelled code pairs nothing. 27 s.
-- **Found and fixed: no camera could read the code.** The panel's icon rule (`sidepanel.css` `svg {
-  fill: none; stroke: currentColor; stroke-width: 1.6 }`) outlined every module of the QR, so they ran
-  together into a blot (grey on white in the dark theme). The unit tests could not see it (the matrix was
-  right; the drawing was not). Now `stroke="none"` on the path (phonelink.js) and `stroke: none` on `.pl-qr`;
-  one line more in `tests/phone-link-panel.test.js`.
-- **Found and fixed: a short window cut the code.** Settings shows `max(55vh, 220px)` at once and the code
-  was 220 px, so in a window under about 420 px high it was never whole in view. `.pl-qr` is now at most
-  `max(55vh - 40px, 150px)` wide (220 px as before in a window of 480 px or more); Vision reads it at 420
-  and 320 px high and at 300 px wide.
-- Nothing in the section is wider than the panel at 380 or 300 px; a long phone name wraps and Remove stays
-  whole; the section scrolls with Settings; no error in the panel's page.
-- `tests/cdp-page.js` `launch` takes `prepare(profile, extensionId)` (called before Chrome starts: the
-  native messaging manifest goes into `<profile>/NativeMessagingHosts`).
-- Screenshots (22, not committed: 1.9 MB, and each code in them is a scratch helper's) are in
-  `docs/phone-link-shots/`. CI: see the CI section.
+- **main (18019be: phone-view-scope, downloads, the skill, the clip page) is merged here**, 88c0640. One
+  conflict, helper/host.js, both sides kept: `PANEL_COMMANDS` has main's five `downloads.*` and this branch's
+  `phone.*`; the socket's refusal of a panel command has a line for each (`phone.`, `downloads.`, the rest).
+  runs.js, stage.js, trash.js, background.js, sidepanel.* merged by themselves; read, nothing to change
+  (`Stage.checkPath` asks `twinOnly` before main's new phone-view line, so a phone's run is refused as before).
+- **Found after the merge and fixed: the skill's build cut this branch's "Phone runs" into the skill**
+  (`skill/build.js` cuts AGENTS.md from "Mods for several sites" to "The CLI", and "Phone runs" sits there):
+  two skill tests failed. The cut now stops at "### Phone runs" (6bc818b), so `skill/trif/` is byte for byte
+  main's; the skill has no helper and no `trif phone`.
+- Tests after the merge: the 12 phone-link files with phone-scope, stage, phone, run-folders and downloads:
+  153 tests, 152 passed, 1 skipped; the whole local suite without update.test.js: 951 tests, 936 passed, 13
+  skipped, 2 failed (the two skill tests above, fixed; tests/skill.test.js 8 of 8 afterwards). No browser run.
+- Not done: step 12, and `DELETE` in the end-to-end test (now possible: see the next step).
 
 ## Earlier rounds
 
+- Round 12: the look at Settings' Connect a phone in a real browser, `tests/phone-link-browser.test.js`
+  (macOS; headless Chrome for Testing with TRIF's own extension, the real host.js by native messaging in a
+  temp workspace; each state light and dark, the code read back from the screenshot by macOS's reader and
+  paired with; 27 s). Found and fixed: the panel's icon rule outlined the QR's modules into a blot no camera
+  could read (`stroke: none` now); a window under about 420 px high cut the code (`.pl-qr` is at most
+  `max(55vh - 40px, 150px)` wide). `tests/cdp-page.js` `launch` takes `prepare(profile, extensionId)`. The
+  22 screenshots are in `docs/phone-link-shots/`, not committed. CI: every phone-link test passed, the phone
+  view's window-size flake failed in each of 4 runs.
 - Round 11: a phone's run in the real sandbox (`tests/run-sandbox.test.js`, its third test: the real Claude
   Code, the stand-in model, the stand-in phone; `trif phone` works inside, the link's files and key, this
   computer's tabs and the site's desktop mods are refused); not with Codex (three tries, see the notes); a
@@ -192,10 +191,13 @@ The brief: ios-poc isn't free; the look at Settings' Connect a phone in a real b
 ## Next step
 
 **Step 12** (`PhoneLink.swift` on ios-poc: Noise IK in CryptoKit with the published vector as a self-test,
-frames, NWBrowser), **only when the round's brief says ios-poc is free**. If it isn't, the computer-side work
-that is left (each small; none is a checklist item):
-1. After `phone-view-scope` is merged (main, then here; not this loop's to merge): `DELETE` in the end-to-end
-   test, `run.result`'s `removed` with real entries.
+frames, NWBrowser), **only when the round's brief says ios-poc is free**; follow ios-poc's own notes too
+(`mobile/IOS-AGENT-NOTES.md`: build, test, its rules). Step 12 alone has nothing for Tim to try on a phone
+(no screen uses it before steps 13 and 14): say so instead of building an .ipa, unless the brief asks.
+If ios-poc isn't free, the computer-side work that is left (each small; none is a checklist item):
+1. `DELETE` in the end-to-end test, `run.result`'s `removed` with real entries: main's phone-view-scope fix
+   is merged here now (round 13), so `trif delete` and a file the run deletes in its own twin should work.
+   Not tried yet: the first thing to do is run the stand-in agent's `DELETE` and see.
 2. A phone's name is cut at 60 characters in the middle of a word, with no "…" (`server.js` `text(d.name,
    60)`; seen in the browser look). The computer's name in the code is cut at whole characters with "…"
    (`store.js` `qrName`): the same for a phone's name, and a test.
@@ -203,6 +205,18 @@ that is left (each small; none is a checklist item):
 
 ## Notes for next round
 
+- **After merging main again**: run `node --test tests/skill.test.js` too. The skill (`skill/trif/`, main's)
+  is cut from helper/workspace/AGENTS.md by `skill/build.js` at headings; anything this branch adds to
+  AGENTS.md inside a cut lands in the skill unless the cut is moved. "Phone runs" is kept out (the cut for
+  mod-format.md ends at "### Phone runs"); when this branch is merged for a release, main decides whether
+  the skill should say anything about phones (it shouldn't need to).
+- host.js's `PANEL_COMMANDS` is now main's list plus `...PHONE_COMMANDS`; `panelCommand` handles `phone.*`
+  first, then main's `downloads.*` and the agent ones. A new panel command on main will conflict on that
+  one line again: keep both.
+- main's phone-view-scope is here now: `stage.js` `ownFolder` gives a phone scope its twin alone,
+  `trash.js` `siteInScope` the same for delete and restore. The two notes further down that say a phone run
+  can't delete a phone mod yet are from before the merge (kept for their detail); whether it works for a
+  phone's run is the next step's first check.
 - The browser look: `TRIF_E2E_CHROME="$(ls -d ~/WebMods/tests/e2e/.browsers/chrome/*/chrome-mac-*/Google\ Chrome\ for\ Testing.app/Contents/MacOS/Google\ Chrome\ for\ Testing | tail -1)"
   TRIF_BROWSER_TESTS=1 PHONE_LINK_SHOTS=docs/phone-link-shots node --test tests/phone-link-browser.test.js`
   (27 s; this worktree has no Chrome for Testing of its own, the main checkout's is used). It needs Tim's OK
@@ -474,9 +488,9 @@ small, also a default unless Tim objects:
    new Mac restored without it), turning the link on makes a new key, and the phones listed before are removed
    from the list, since they can't reach the new key and must scan a new code anyway.
 
-Item 6 stands as the default (the main session's brief, round 6). Item 7 is fixed on branch
-`phone-view-scope` (a3c92f1, 39c219c), not on main yet, waiting for Tim: until it is merged here a phone run
-can't delete a phone mod (the notes above), which fails closed and needs no decision.
+Item 6 stands as the default (the main session's brief, round 6). Item 7 is fixed on main
+(`phone-view-scope`, merged) and merged here in round 13; a phone run's delete is still to be proven end to
+end (the next step's list, 1).
 
 New in round 6, small, defaults unless Tim objects:
 

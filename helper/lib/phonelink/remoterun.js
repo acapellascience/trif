@@ -220,9 +220,11 @@ function toolRequest(run, cmd, args = {}) {
  * `tool`: (run, cmd, args) → that promise, remote.js `Remote.tool`, in the helper that owns the phone link.
  * Outside a remote run, and in a helper without the link, it is refused in words the agent can act on.
  */
+// (what anything but a phone's run is told of `trif phone`)
+const NOT_REMOTE = '`trif phone` reaches the page on the user\'s phone, in a run they started from the phone: this isn\'t one. Here the page is in a tab on this computer (trif text, trif screenshot, trif verify)';
 function remoteCommand(run, cmd, args, tool) {
   if (typeof cmd !== 'string' || !REMOTE_TOOLS.has(cmd)) return null;
-  if (!run || !run.remote) return Promise.reject(fail('not-remote', '`trif phone` reaches the page on the user\'s phone, in a run they started from the phone: this isn\'t one. Here the page is in a tab on this computer (trif text, trif screenshot, trif verify)'));
+  if (!run || !run.remote) return Promise.reject(fail('not-remote', NOT_REMOTE));
   if (typeof tool !== 'function') return Promise.reject(fail('away', AWAY));
   return new Promise((resolve) => { resolve(tool(run, cmd, args && typeof args === 'object' ? args : {})); });
 }
@@ -252,5 +254,5 @@ function remoteRefusal(run, cmd, args = {}) {
 
 module.exports = {
   remoteStart, remoteAddress, remoteScope, writeRemoteFiles, removeRemoteFiles, remoteContext, remoteRefusal, remoteCommand, toolRequest, readDraft,
-  writeToolShot, imageKind, REMOTE_COMMANDS, REMOTE_TOOLS, AWAY, PAGE_MAX, SHOT_MAX, PROMPT_MAX, DRAFT_MAX, TOOL_SHOTS,
+  writeToolShot, imageKind, REMOTE_COMMANDS, REMOTE_TOOLS, NOT_REMOTE, AWAY, PAGE_MAX, SHOT_MAX, PROMPT_MAX, DRAFT_MAX, TOOL_SHOTS,
 };

@@ -23,6 +23,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const crypto = require('crypto');
 const { FakeExtension, tempDir, waitFor } = require('./fake-extension');
 const { standInAgent } = require('./phone-link-agent');
 const { makeFakeKeychain } = require('./fake-keychain');
@@ -96,6 +97,16 @@ async function upTo(phone, runId, fits = (e) => e.kind === 'done', got = []) {
 async function printed(from, n) {
   await waitFor(() => phoneCalls().length >= from + n, { timeout: 30000, message: `${n} trif command(s) of the agent's` });
   return phoneCalls().slice(from);
+}
+// A request written straight into a run's mailbox, as client.js boxRequest writes one, and the helper's answer.
+async function forge(box, cmd, args = {}) {
+  const id = `atk-${crypto.randomBytes(5).toString('hex')}`;
+  fs.writeFileSync(path.join(box, `${id}.tmp`), `${JSON.stringify({ id, cmd, args })}\n`);
+  fs.renameSync(path.join(box, `${id}.tmp`), path.join(box, `${id}.req`));
+  const res = path.join(box, `${id}.res`);
+  const text = await waitFor(() => { try { return fs.readFileSync(res, 'utf8'); } catch { return null; } }, { timeout: 8000, message: `the helper's answer to a forged ${cmd}` });
+  try { fs.unlinkSync(res); } catch { /* ignore */ }
+  return JSON.parse(text);
 }
 const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(sites, rel)), { recursive: true }); fs.writeFileSync(path.join(sites, rel), text); };
 
@@ -231,6 +242,34 @@ test('the phone link end to end: pair, a run with a try on the phone, its result
   assert.equal(started2.t, 'run.started', JSON.stringify(started2));
   const run2 = started2.runId;
   const seen = await upTo(A, run2, (e) => /Working/.test(JSON.stringify(e)));
+  // While it works: what this phone run may ask the helper, attacked as a run gone wrong would, with requests
+  // written straight into its mailbox (run-scope-reads.test.js, a desktop run's side). Its own twin's mods
+  // alone; no page command (its page is on the phone); nothing that isn't a run's command; none sent on.
+  {
+    const runEnv = (await waitFor(() => calls().find((c) => c.prompt.includes('PAUSE:two')), { message: 'the second run\'s call' })).env;
+    const box = runEnv.TRIF_RUN_BOX;
+    const sentBefore = ext.messages.length;
+    const others = ['x.com/mine', 'phone~x.com/bottom-bar', 'phone~other.example/theirs', 'all-sites/dark'];
+    for (const cmd of ['mod.code', 'mod.diff']) {
+      for (const id of others) {
+        const r = await forge(box, cmd, { id, scope: 'x.com' });
+        assert.equal(r.ok, false, `${cmd} ${id}`);
+        assert.match(r.error, /another site's/, `${cmd} ${id}`);
+      }
+    }
+    const mods = await forge(box, 'mods');
+    assert.equal(mods.ok, true, mods.error);
+    assert.deepEqual(mods.result.mods.filter((m) => !/^phone~(m\.)?example\.org\//.test(m.id)), [], 'another site\'s mod in `mods`');
+    const ping = await forge(box, 'ping');
+    assert.equal(ping.ok, true, ping.error);
+    for (const id of others) assert.equal(JSON.stringify(ping.result.mods).includes(id), false, `${id} in ping`);
+    assert.deepEqual(ping.result.runs.map((r) => r.runId), [run2]);
+    for (const cmd of ['tabs', 'text', 'navigate', 'mod.enable']) {
+      assert.match((await forge(box, cmd, { url: 'https://victim.com/' })).error, /this run is for the user's phone: the page is open there/, cmd);
+    }
+    for (const cmd of ['totally.made.up', 'phone.remove', 'agent.start']) assert.equal((await forge(box, cmd, {})).ok, false, cmd);
+    assert.deepEqual(ext.messages.slice(sentBefore).filter((m) => m.type === 'request'), [], 'nothing of the forged requests reached the extension');
+  }
   const last = seen[seen.length - 1].n;
   await A.close();
   go('two');

@@ -1,6 +1,5 @@
 {
   "reasons": {
-    "runs": "a side-panel run's test still written for macOS and Linux: a folder locked with chmod, which locks nothing on Windows (docs/WINDOWS-PROGRESS.md)",
     "mac-command": "about the command and the sandbox settings for macOS and Linux, which Windows never builds (Windows' own: tests/windows-runs.test.js, \"Claude Code on Windows: …\")",
     "open-model": "chats with an open model are off there: no run of one has been fenced or attacked (docs/WINDOWS-PROGRESS.md)",
     "login": "logging an agent in from the panel is off there, with runs",
@@ -22,7 +21,6 @@
     },
     "agents.test.js": {
       "CLI: agent login prints the URL, reads the code from stdin, reports the result": "login",
-      "a run never starts with private files in the workspace: they're moved first, or the run is refused": "runs",
       "agent.login without the agent installed fails right away": "login",
       "agent.login: URL event, code, done ok; agent.list then says loggedIn (cached); nothing secret in helper.log": "login",
       "agent.login: bad code fails (redacted), cancel, one login at a time, bad requests, codex unsupported, time limit": "login",

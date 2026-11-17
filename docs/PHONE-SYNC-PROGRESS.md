@@ -12,7 +12,7 @@ Computer side:
 - [x] S1. `helper/lib/phonelink/sync.js` core, no I/O beyond the base file: ids ↔ twin paths and their refusals,
       revisions, the three-way plan (every row of section 4, first sync), sibling names and the @name line, the
       base file (mode 600). Unit tests `tests/phone-sync.test.js`
-- [ ] S2. The session side: `sync.begin/get/put/end` handlers and `sync.changed` (a `PhoneSync` class beside
+- [x] S2. The session side: `sync.begin/get/put/end` handlers and `sync.changed` (a `PhoneSync` class beside
       `Remote`): the import check, writes (temp + rename, no links), history before replace, trash for deletes,
       `synced.json` and held.js `by: 'phone'`, `later` for twins with a run, limits; D10 checked (phone view and
       `phone~all-sites`). Unit tests with a fake session
@@ -32,48 +32,48 @@ iPhone side (ios-poc):
 - [ ] S8. Simulator pass: a mod made on the phone, edited by a desktop phone-view chat (stand-in agent), back on the
       phone; a conflict; a delete
 
-## Done this round (round 1, 2026-11-17)
+## Done this round (round 2, 2026-11-17)
 
-- S0: docs/PHONE-SYNC.md (decisions, ids, base, the three-way rule, conflicts and deletes, approval on each side,
-  the wire, when, what must hold, what people see, later, proof); strings drafts; this file.
-- S1: `helper/lib/phonelink/sync.js` (parseId/idOf, rev, readManifest, plan, siblingId, renameHeader, the base
-  file) and `tests/phone-sync.test.js` (8 tests, pass locally and on CI). Not wired to anything yet. CI 8627a42:
-  https://github.com/acapellascience/trif/actions/runs/44049845082: 983 pass, 1 fail, the known clickjack flake
-  (test 144), twice (rerun once, as the rule says; the 8 new tests pass both times).
+- S2: `helper/lib/phonelink/syncsession.js` (`PhoneSync`: begin/get/put/end, `changed()` nudge, `status(phoneId)`,
+  base deleted on unpair), held.js `synced.json` (`recordSynced`/`loadSynced`; the hold stays `by: 'outside'` and
+  gets `phone: <name>`), history source `phone`. D10 checked: every-site phone mods stay on the phone in v1.
+- `tests/phone-sync-session.test.js` (7 tests, fake session/server, real held/history/trash; the capitals one runs on
+  APFS, skipped on CI's Linux). Locally also 140 related tests pass. CI efebdc6, all green:
+  https://github.com/acapellascience/trif/actions/runs/44052653702
 
 ## Next step
 
-S2: the session side (`PhoneSync` beside `Remote`, using sync.js's `plan`).
+S3: wire `PhoneSync` in host.js (owner helper only, beside `Remote`; `afterWrite: () => { syncMods('phone sync');
+return state.held; }`; `enabled` from a setting, default on; `changed()` from syncMods when a twin's file changed and
+it wasn't the sync's own write), the Settings phone row line from `status()`, "From {phone}" on a hold card
+(`info.phone`), the history label for source `phone` (sidepanel.js `HISTORY_SOURCE`), the panel strings test.
 
 ## Notes for next round
 
-- The computer alone keeps the base (`<private>/phone-link/sync/<phone id>.json`); the phone sends `{id, rev}` and
-  applies the plan. Equal revisions are in sync whatever the base says, so a lost answer is harmless.
-- held.js already holds a file changed from outside (`by: 'outside'`) and lets style-only changes run: the sync
-  only adds the `synced.json` mark for `by: 'phone'`. history.js `writeEntry(ws, site, mod, content, at, source)`
-  before replacing; trash.js `deleteMod(ws, id, {scope})` for deletes (scope = the twin).
-- On the phone: `ModStore.add(m, source:)` (import rules when source is "import": reuse for "sync"), `saveEdit`'s
-  `seeded`/`changeNeeds` for changed mods, `remove` keeps only `lastDeleted` (Recently deleted is new, S6).
-- remote.js's `resultOf` is how a run's twin files are read safely (O_NOFOLLOW, lstat on the twin): reuse it.
-- Phone ids are `<site>/<name>`; the twin is `phone~<site>`; HOST_RE is copied from remoterun.js (it lets an
-  IPv4-looking host like 127.0.0.1 through, as remoterun.js does: harmless, a folder name).
-- sync.js `plan` gives a conflict's sibling as `{id: sibling, conflict: id}` with no `rev`: S2 writes the sibling
-  (the computer's text through `renameHeader`) first, then puts its `rev` in the `sync.plan` it sends.
-- `plan`'s `leave` (Map id -> 'later' | why) is how S2 keeps busy twins (Runs.bySite) and mods over 1 MB
-  (`MOD_MAX`) out: without it a too-big computer mod would look deleted there and the phone would trash its copy.
-- APFS ignores case: readManifest drops a second phone id that differs only in capitals; S2 must also check the
-  computer side's ids with `ignoresCase` before writing.
-- `want` entries carry `back` (edit beat a delete) and `conflict` for the lines of section 10.
+- Round 1's notes still hold (ids, base, resultOf, ignoresCase); what S2 settled:
+- The computer does its part in `sync.begin`: trash (its own move into trash.js's layout, since trash.js `parseId`
+  refuses names with spaces, which phone ids allow) and the conflict sibling (written, its `rev` in `give`). The base
+  moves at begin for `agreed`/`gone`, at end for every planned id whose `have` matches the file now.
+- `skipped` also carries the computer side's left-alone ids (big, link, not UTF-8, linked twin, capitals,
+  every-site), so the phone's line can name them; a phone id whose twin is a link is skipped, not wanted.
+- `put` re-checks: the plan's rev against the file now (`changed`), a run started since (`changed`), 16 MB of twins.
+- `held` in put's answer: `afterWrite`'s map (host's `state.held`), or held.updateHeld here when none (tests).
+- The nudge skips a phone with a sync going on; S3 should not nudge for the sync's own writes (or accept one extra
+  no-op sync: harmless, everything agrees).
+- The switch to turn it off if Tim says no to the rule 3/5 wording: `new PhoneSync(..., {enabled: () => false})`,
+  or just don't start it in host.js: no other code path writes twins from the link.
+- `sync.done`'s `waiting` lists this phone's synced mods held now (synced.json phone id + held `phone`).
 
 ## For Tim (decisions)
 
 1. D1–D10 in docs/PHONE-SYNC.md section 1 are defaults: the goal's choices plus D5 (in a conflict the phone's
    version keeps the name, the computer's is kept beside it as "(from your computer)"), D6 (an edit beats a
    delete), D8 (a mod new to the phone arrives off, as an import does) and D10 (every-site phone mods).
-2. The goal widens two of the phone link's rules' wording (PHONE-SYNC.md section 9): the link can now put phone mod
+2. (Sent to Tim for confirmation, 11-17; S2 built as designed and easy to switch off: see notes.) The goal widens two of the phone link's rules' wording (PHONE-SYNC.md section 9): the link can now put phone mod
    files in the computer's phone twins, where held.js judges them as any mod from outside. Written down there;
    no step goes beyond it.
 
 ## CI
 
 - Round 1: 0bf7006 + 8627a42, run 44049845082: the clickjack flake alone, on the run and its one rerun.
+- Round 2: efebdc6, run 44052653702: green.

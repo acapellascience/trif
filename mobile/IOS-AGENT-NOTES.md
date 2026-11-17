@@ -37,7 +37,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   playcheck ("http://…": a page with a <video>/<audio>; ~75 s of PASS/FAIL: a playing background tab is kept past
   20 s and a memory warning, let go once paused; a same-page quiet tab is let go), iconprofile ({"outline", "swatch" 0-5, "badge", "name", "noise"}: the shown
   page's Home Screen icon and profile to Documents/icon-test.png and .mobileconfig; "noise" = a worst-case photo),
-  iconqueue (the same options: the shown page's icon onto the list waiting), iconbatch (the list's profile to
+  iconqueue (the same options: the shown page's icon onto the list waiting), phonelink (PhoneLink.swift's self-test in iOS's CryptoKit: "phone link self-test: ok"), iconbatch (the list's profile to
   Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds),
   exitbutton (where full screen's exit button and its taps are),
   playing (each tab: WebKit's state,
@@ -106,6 +106,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Safety.swift: safe mode, AppDelegate (shortcut, notifications, background downloads' events). Diagnostics.swift:
   diagnostics log, hang watchdog (`Diagnostics.hangs`), cookie keeper. Report.swift: report.json. Pages.swift: test pages
   scheme. Checks.swift, OnDevice.swift: the probe's old checks.
+- PhoneLink.swift: the phone link's wire (More's "My computer" engine; design: docs/PHONE-LINK.md and the progress file on
+  branch phone-link, whose loop owns this file): Noise IK in CryptoKit (`NoiseInitiator`, `NoiseCipher`, `selfTest()`
+  with the published vector), frames (`PacketReader`, `Assembler`, `PhoneLink.seal`), `PhoneLinkBrowser` (NWBrowser on
+  `_trif._tcp`, TXT `id`), `PhoneLinkSession` (one connection; `End`: unreachable, refused, dropped, broken, closed).
+  Nothing uses it yet (pairing, Info.plist and the engine are the loop's next steps). Test on the Mac:
+  `node --test mobile/test/phonelink.test.js` (swiftc builds it with mobile/test/phonelink-check/main.swift; a stand-in
+  computer from the phone-link worktree's helper/lib/phonelink, or TRIF_PHONE_LINK_LIB; 5 s).
 - make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).

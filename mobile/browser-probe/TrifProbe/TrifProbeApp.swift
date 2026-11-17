@@ -201,6 +201,8 @@ extension Model {
             let all = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
             out += "\nwindows: " + all.map { "\(type(of: $0)) level \($0.windowLevel.rawValue) hidden \($0.isHidden) \(Int($0.frame.minY))..\(Int($0.frame.maxY)) hit \($0.hitTest($0.convert(CGPoint(x: p[0], y: p[1]), from: nil), with: nil).map { "\(type(of: $0))" } ?? "nil")" }.joined(separator: "; ")
         }
+        // ({"phonelink": 1}: the phone link's self-test, PhoneLink.swift: the published Noise vector and the frames vector)
+        if step["phonelink"] != nil { out = "phone link self-test: " + (PhoneLink.selfTest() ?? "ok") }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }

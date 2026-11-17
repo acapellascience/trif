@@ -137,6 +137,9 @@ agent (a new word, `TRY`, that runs `trif phone try` through its mailbox: see ho
 - The remote test's helpers to copy for step 10: `connect(keys, name)` (pairs a new phone when a name is given,
   else comes back with the keys; sends `hello`), `toDone(phone, runId)`, `ended(runId)`. Test: `node --test
   tests/phone-link-remote.test.js` (1.4 s).
+- The stand-in agent names every new conversation `sess-remote-1`, and a run that was stopped after its agent
+  started ends with that id too: a test of "this conversation isn't this site's" must use a site no run has
+  been on (round 6's first CI run failed on exactly this, on timing that differs from the local one).
 - A missing agent program and a logged-out agent come as run events (`error`; `done` with `error.kind:
   'login'`), not as `run.start` errors: for step 14, map them from the events.
 - Step 6a's API: `runs.startRemote(own, msg)` → `{runId, site, scope}`, throws with `e.code` `bad-url`,

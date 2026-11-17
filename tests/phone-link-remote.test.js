@@ -303,8 +303,10 @@ test('a conversation goes on only if a run of the same phone, in the same phone 
   assert.equal(await resumes(A, { session: 'sess-made-up' }, 'gamma'), null);
   assert.equal(await resumes(A, { session: '--dangerously-skip-permissions' }, 'delta'), null);
   assert.equal(await resumes(A, { session: { id: 'sess-remote-1' } }, 'epsilon'), null);
-  assert.equal(await resumes(A, { session: 'sess-remote-1', url: 'https://two.example/' }, 'zeta'), null, 'not on another site');
-  assert.equal(await resumes(B, { session: 'sess-remote-1', url: 'https://three.example/' }, 'eta'), null, 'not for another phone (which never had a run there)');
+  // (sites no run of either phone has been on: the stand-in agent names every new conversation the same, so a
+  // stopped run on another site may have ended with this very id, and then it is that site's too)
+  assert.equal(await resumes(A, { session: 'sess-remote-1', url: 'https://never.example/' }, 'zeta'), null, 'not on another site');
+  assert.equal(await resumes(B, { session: 'sess-remote-1', url: 'https://x.com/home' }, 'eta'), null, 'not for another phone, on the very site');
   const sessions = JSON.parse(fs.readFileSync(path.join(kept, A.id, 'sessions.json'), 'utf8'));
   assert.deepEqual(sessions['phone~x.com'], ['sess-remote-1']);
   assert.equal(fs.statSync(path.join(kept, A.id, 'sessions.json')).mode & 0o777, 0o600);

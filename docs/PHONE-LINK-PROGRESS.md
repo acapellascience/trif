@@ -77,6 +77,11 @@ iPhone side (needs ios-poc free):
   failed (run 43993766535: 901 passed, 3 failed): the clickjacking guard's timing check and the phone view's
   "the site sees an iPhone in that tab only" (both browser tests this branch doesn't touch, both passed in the
   next run), and this round's own conversation test, on timing (fixed in 71fe8e8: see the notes).
+- Round 6's docs-only commit a2df505 (the same code as 71fe8e8): failed twice on browser tests alone, run
+  43995033266: attempt 1 on the phone view's "a site whose service worker serves its pages", attempt 2 (`gh run
+  rerun --failed`, once, as the brief says) on the clickjacking guard and the phone view's "the site sees an
+  iPhone in that tab only". Every phone-link test passed in both. Not looked into (not this branch's code);
+  three different browser tests have now flaked in one evening: for the main session.
 - Round 5, a6878b0: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43971467309
   (903 tests, 896 passed, 7 skipped, 0 failed; all 10 remote-run tests ran there)
 - Round 4, 0bd5bdc: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43967487962

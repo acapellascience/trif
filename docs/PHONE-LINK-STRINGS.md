@@ -36,15 +36,35 @@ approved, then can move into extension/explain.json so that `trif explain` knows
 | Connect a phone fails: no port could be opened | This computer couldn't open a port for the phone to reach. | round 8 (draft; the helper's words, as a sentence) |
 | Connect a phone fails: the computer's name makes the code's text longer than the code holds (about 270 bytes; a name of some 30 emoji) | This computer's name is too long for the code. Shorten it in System Settings, then try again. | new in round 9 (draft); the pairing window is closed again. Since round 11 the helper cuts a long name in the code (whole characters, then "…"), so this line is a backstop the user shouldn't meet: Tim may drop it |
 
-## iPhone: More (not built; needs branch ios-poc)
+## iPhone: More and My computer (pairing built in round 15 on ios-poc, 85166ad; the engine in More is step 14)
+
+The pairing screen, PhoneLinkView.swift on ios-poc: for now from the app's ⋯ menu and from a `trif://pair` link
+(iOS's Camera app scanning the code); step 14 opens it from More. The same lines are in ios-poc's
+docs/IOS-APP-STRINGS.md ("My computer").
 
 | Where | String | Notes |
 |---|---|---|
-| The engine's name | My computer | beside the API engines and On this iPhone |
-| Before pairing | Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code. | |
-| The button | Scan the code | |
-| Local Network permission (Info.plist) | TRIF looks for your computer on your Wi-Fi when you choose My computer. | |
-| Camera permission (Info.plist) | TRIF uses the camera to scan the code your computer shows. | |
+| The engine's name | My computer | beside the API engines and On this iPhone; also the pairing screen's title and, for now, the ⋯ menu's "My computer…" |
+| Before pairing | Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code. | built round 15 |
+| The button | Scan the code | built round 15; once paired: "Scan a new code" |
+| Local Network permission (Info.plist) | TRIF looks for your computer on your Wi-Fi when you choose My computer. | built round 15 |
+| Camera permission (Info.plist) | To scan the code TRIF shows on your computer. Websites you visit can also ask to use the camera, for a photo or a video call. | built round 15. One key serves both uses: the app already asked with "Websites you visit can ask to use the camera, for a photo or a video call." (11-16); round 1's draft here was "TRIF uses the camera to scan the code your computer shows." |
+| Under the camera | Scan the code in TRIF's Settings on your computer: Connect a phone. | new round 15 (draft) |
+| The camera, for a screen reader | The camera, to scan the code | new round 15 (draft) |
+| A code that isn't TRIF's | That isn't a code from TRIF on your computer. | new round 15 (draft) |
+| No camera | This iPhone has no camera to scan with. | new round 15 (draft) |
+| Camera access off | TRIF can't use the camera. Turn it on in Settings, then TRIF Probe, then Camera. · Open Settings | new round 15 (draft); "TRIF Probe" is the app's name for now |
+| Looking | Looking for {computer} on your Wi-Fi… | new round 15 (draft) |
+| Connecting | Connecting to {computer}… | new round 15 (draft) |
+| Paired | Connected to {computer}. | new round 15 (draft) |
+| Paired, later | Connected to {computer} since {date}. | new round 15 (draft) |
+| The code was used, cancelled or is over 5 minutes old (closed with no answer while pairing) | That code didn't work: it may have been used already or be more than 5 minutes old. Show a new one on {computer} and scan it again. | new round 15 (draft) |
+| Local Network access off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF Probe, then Local Network. · Open Settings | new round 15 (draft) |
+| An answer that doesn't decrypt | Something on your Wi-Fi answered as {computer} but isn't it. TRIF didn't connect. | new round 15 (draft) |
+| The Keychain refused | This iPhone couldn't keep the connection's key. Try again. | new round 15 (draft) |
+| The encryption's self-test failed | TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect. | new round 15 (draft) |
+| Forgetting on the phone | Forget {computer} | new round 15 (draft) |
+| Under it | Your computer still lists this iPhone until you remove it there. | new round 15 (draft) |
 | Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. | one state for both causes: see "For Tim" in the progress file |
 | Removed | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there. | |
 | The link drops in a run | Still working on {computer}. | |

@@ -65,7 +65,10 @@ site the page hadn't already loaded from when the lock started (TL-1: `new Image
 starts using after the lock (a lazy-loaded image from a new CDN) is blocked until the reload. Page code
 can't get around a rule the browser applies; the agent's code, and anything it leaves behind (timers,
 wrapped functions), lives only as long as the page does. The lock lasts until the tab shows a new
-document: a reload or a real navigation.
+document: a reload or a real navigation. It lifts once that document has loaded, not as it starts (what's left
+of the old one, its unload handlers and ending workers, could still send then), so the new page's own
+first requests are blocked too; `trif reload` of a locked tab waits for the lock to lift and loads the
+page once more.
 - It's the document that counts, not the URL (a single-page site changes the URL without a new
   document, and so could the agent's code): a marker in the extension's isolated world, which page code
   can't see or set, is set in the document when the lock starts, and the lock lifts when the tab's

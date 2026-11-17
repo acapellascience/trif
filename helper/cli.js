@@ -222,6 +222,11 @@ function makeCtx(opts) {
   return { ws, opts, call, sock, json: !!opts['--json'] };
 }
 
+// A reload of a tab locked for an agent's code loads the page twice (background.js reload): room for both.
+const RELOAD_TIMEOUT_MS = 75000;
+const reloadedLines = (r) => `reloaded ${r && r.url ? r.url : ''}`.trim() + (r && r.locked
+  ? "\nthe tab is still locked (its posting paused): another tab of the site still has your agent's code, or TRIF can't check this page" : '');
+
 function printJson(v) { out(JSON.stringify(v === undefined ? null : v, null, 2)); }
 
 // What the side panel calls each group of mods (extension/lib.js modGroup), in a sentence.
@@ -592,8 +597,8 @@ const handlers = {
     }
     const err = ((info.modsApplied && info.modsApplied.errors) || []).find((e) => e.id === id);
     if (err) { process.exitCode = 1; return out(`NOT REGISTERED: ${err.error}`); }
-    const r = await ctx.call('reload', { ...tabArgs(ctx.opts) });
-    out(`reloaded ${r && r.url ? r.url : ''}`.trim());
+    const r = await ctx.call('reload', { ...tabArgs(ctx.opts), timeout: RELOAD_TIMEOUT_MS });
+    out(reloadedLines(r));
     await new Promise((res) => setTimeout(res, 1200));
     let st = null;
     try { st = await ctx.call('status', { timeout: 5000, ...tabArgs(ctx.opts) }); } catch (e) { if (e.kind === 'no-helper') throw e; }
@@ -784,9 +789,9 @@ const handlers = {
   },
 
   async reload(ctx) {
-    const r = await ctx.call('reload', { hard: !!ctx.opts['--hard'], ...tabArgs(ctx.opts) });
+    const r = await ctx.call('reload', { hard: !!ctx.opts['--hard'], ...tabArgs(ctx.opts), timeout: RELOAD_TIMEOUT_MS });
     if (ctx.json) return printJson(r);
-    out(`reloaded ${r && r.url ? r.url : ''}`.trim());
+    out(reloadedLines(r));
   },
 
   async open(ctx, pos) {

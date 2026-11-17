@@ -578,3 +578,67 @@ test('the tab that opened a locked one, on the same site, is locked as a tab wit
   await l2.lock(6, 'x.com');
   assert.deepEqual(l2.list().map((l) => [l.tabId, l.kind]).sort(), [[5, 'code'], [6, 'code']]);
 });
+
+test('whenUnlocked (trif reload): a new page unlocks once its storage is compared; one check at a time in a tab', async () => {
+  const { createTabLocks } = await load();
+  let chrome = fakeChrome();
+  let notes = [];
+  let locks = createTabLocks({ chrome, noted: (...a) => notes.push(a) });
+  await locks.lock(1, 'x.com');
+  chrome.data.localStorage = 'changed';
+  chrome.newDocument(1); // (the reload's new document: no marker)
+  assert.strictEqual(await locks.whenUnlocked(1), true);
+  assert.ok(!locks.isLocked(1));
+  assert.equal(chrome.rules.size, 0);
+  assert.deepEqual(notes, [[1, 'x.com', ['localStorage']]], 'the storage check ran before the unlock');
+  assert.strictEqual(await locks.whenUnlocked(1), true, 'not locked: nothing to wait for');
+  // Cache Storage changed: cleared and reloaded once, though the tab's own check and whenUnlocked ask at
+  // the same time; whenUnlocked waits for the cleared page's check, which unlocks it
+  chrome = fakeChrome();
+  locks = createTabLocks({ chrome });
+  await locks.lock(1, 'x.com');
+  chrome.data.caches = 'poisoned';
+  chrome.newDocument(1);
+  chrome.tabs.reload = async (id, o) => { chrome.reloads.push([id, o]); }; // (its new page comes later)
+  let settled = null;
+  const both = [locks.check(1), locks.whenUnlocked(1).then((v) => { settled = v; return v; })];
+  assert.strictEqual(await both[0], 'reloading');
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(chrome.cleared, ['caches']);
+  assert.deepEqual(chrome.reloads, [[1, { bypassCache: true }]]);
+  assert.strictEqual(settled, null, 'still waiting: the cleared page hasn\'t loaded');
+  assert.ok(locks.isLocked(1));
+  assert.strictEqual(await locks.check(1), 'reloading', 'the cleared page, marked, until the reload replaces it');
+  chrome.newDocument(1);
+  assert.strictEqual(await locks.check(1), 'unlocked'); // (that page loaded: background.js onUpdated)
+  assert.strictEqual(await both[1], true);
+  assert.equal(chrome.rules.size, 0);
+  // the cleared page never checks (it didn't load): false after the wait, still locked
+  chrome = fakeChrome();
+  locks = createTabLocks({ chrome });
+  await locks.lock(1, 'x.com');
+  chrome.data.serviceWorkers = 'poisoned';
+  chrome.newDocument(1);
+  assert.strictEqual(await locks.whenUnlocked(1, 20), false);
+  assert.ok(locks.isLocked(1));
+});
+
+test('whenUnlocked: the document the code ran in stays locked: the same page, one back from the back/forward cache, another tab of the site', async () => {
+  const { createTabLocks } = await load();
+  const chrome = fakeChrome({ tabs: [{ id: 3, url: 'https://x.com/a' }, { id: 4, url: 'https://x.com/b' }, { id: 5, url: 'https://x.com/c' }] });
+  const locks = createTabLocks({ chrome });
+  await locks.lock(3, 'x.com');
+  // a same-document navigation (pushState, a hash), or a reload that didn't replace the document: the marker's there
+  assert.strictEqual(await locks.whenUnlocked(3, 20), false);
+  assert.ok(locks.isLocked(3));
+  // the site's other tab: locked while tab 3 is, whatever page it's on
+  chrome.newDocument(4);
+  assert.strictEqual(await locks.whenUnlocked(4, 20), false);
+  assert.ok(locks.isLocked(4));
+  // a page back from the back/forward cache, with its marker (and its agent code): locked again, and stays
+  await locks.unlock(3, 'test');
+  await locks.restored(5, 'tok', 'x.com', 'https://x.com/c');
+  chrome.docs.set(5, { __trifTabLock: 'tok' });
+  assert.strictEqual(await locks.whenUnlocked(5, 20), false);
+  assert.ok(locks.isLocked(5));
+});

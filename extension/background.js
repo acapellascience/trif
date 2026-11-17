@@ -1177,7 +1177,14 @@ const commands = {
 
   async reload(args) {
     const tab = await scopedTab(args);
-    return loadAndReport(tab.id, () => chrome.tabs.reload(tab.id, { bypassCache: !!args.hard }));
+    const load = () => loadAndReport(tab.id, () => chrome.tabs.reload(tab.id, { bypassCache: !!args.hard }));
+    await tabLocks.ready;
+    if (!tabLocks.isLocked(tab.id)) return load();
+    // A tab locked for an agent's code (tablock.js): its lock goes once the new page has loaded, so that
+    // page's own first requests were blocked. Once the lock is gone, the page once more, as it really loads.
+    const r = await load();
+    if (!(await tabLocks.whenUnlocked(tab.id))) return { ...r, locked: true };
+    return load();
   },
 
   // A side-panel run's navigate and open: the address is on the run's site, but the site can send the tab on

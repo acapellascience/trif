@@ -37,6 +37,10 @@
 // brought back from the back/forward cache brings its code back too: its marker sees that (pageshow),
 // locks the tab again and reloads the page. Tabs a locked tab opens are locked too, and stay locked while
 // it is (the code could reach into them).
+// The lock goes when the new document has loaded ('complete'), not as it starts: until then, what's left
+// of the old one (its unload handlers, which can run after the new document commits; its workers, ending)
+// could still send. So the new page's own first requests are blocked too, and `trif reload` of a locked tab
+// (background.js reload) waits for the lock to go (whenUnlocked) and loads the page once more, unlocked.
 //
 // What the code leaves in the site's storage outlives the page (TL-3). First, the agent's code can't save:
 // leakGuard (below) refuses saves while its code is on the call stack (a speed bump). Then at lock time
@@ -578,10 +582,14 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     } catch (e) { log(`the tab that opened tab ${tabId} wasn't locked: ${e?.message ?? e}`); }
   }
 
+  // whenUnlocked's waiters: tab id -> functions to call when its lock goes
+  const waiters = new Map();
   async function unlock(tabId, why) {
     const l = locks.get(tabId);
     if (!l) return;
     locks.delete(tabId);
+    for (const f of waiters.get(tabId) || []) f();
+    waiters.delete(tabId);
     if (l.ids.length) try { await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: l.ids }); } catch (e) { log(`unlocking tab ${tabId}: ${e?.message ?? e}`); }
     log(`unlocked tab ${tabId}: ${why}`);
     await save();
@@ -612,37 +620,70 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     await mark(tabId, l.token).catch(() => {}); // (this page is the lock's too, until it's cleared)
     const done = await inIsolated(tabId, clearData, [clear]).catch(() => []);
     l.cleared = [...new Set([...(l.cleared || []), ...clear])];
+    l.reloading = true; // (until the next page: this one, marked, is still the lock's)
     log(`tab ${tabId}: ${clear.join(' and ')} changed; cleared ${(done || []).join(' and ') || 'nothing'}`);
     await save();
     await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
     return true;
   }
 
-  // The tab's document changed (or may have): unlock if it's a new one without the agent's code.
-  async function check(tabId) {
+  // The tab's document changed (or may have): unlock if it's a new one without the agent's code. One check
+  // at a time in a tab (two at once could both clear its storage and reload it). Returns 'unlocked',
+  // 'locked', or 'reloading' (its storage cleared, and the tab reloading past the cache: still locked).
+  const checking = new Map(); // tab id -> the check in progress
+  function check(tabId) {
+    const p = (checking.get(tabId) || Promise.resolve()).catch(() => {}).then(() => checkNow(tabId));
+    checking.set(tabId, p);
+    p.catch(() => {}).finally(() => { if (checking.get(tabId) === p) checking.delete(tabId); });
+    return p;
+  }
+  async function checkNow(tabId) {
     await ready;
     const l = locks.get(tabId);
-    if (!l) return;
+    if (!l) return 'unlocked';
     if (l.kind === 'site') {
       // another tab of a locked site: locked while it's on the site (or on no page yet: a tab one of the
       // site's tabs opened, still blank)
       const t = await chrome.tabs.get(tabId).catch(() => null);
       const u = t ? String(t.url || t.pendingUrl || '') : '';
-      if (t && u && u !== 'about:blank' && !inScope(hostOf(u), l.site)) await unlock(tabId, 'left the site');
-      else if (t) await showIcon(tabId, true);
-      return;
+      if (t && u && u !== 'about:blank' && !inScope(hostOf(u), l.site)) { await unlock(tabId, 'left the site'); return 'unlocked'; }
+      if (t) await showIcon(tabId, true);
+      return 'locked';
     }
-    if (l.parent != null && locks.has(l.parent)) { await mark(tabId, l.token).catch(() => {}); await showIcon(tabId, true); return; } // (still within reach of locked code)
+    if (l.parent != null && locks.has(l.parent)) { await mark(tabId, l.token).catch(() => {}); await showIcon(tabId, true); return 'locked'; } // (still within reach of locked code)
     let marked;
     try { marked = await inIsolated(tabId, hasMarker, [l.token]) === true; } catch { marked = null; } // (a page the extension can't script: nothing of the agent's there; stay locked until a page it can check)
     if (marked === false) {
-      if (l.kind === 'code' && l.fp && await settleStorage(tabId, l)) return;
+      if (l.kind === 'code' && l.fp && await settleStorage(tabId, l)) return 'reloading';
       await unlock(tabId, 'a new page');
-    } else await showIcon(tabId, true); // (still locked: the icon again, in case a new page in the tab reset it)
+      return 'unlocked';
+    }
+    await showIcon(tabId, true); // (still locked: the icon again, in case a new page in the tab reset it)
+    return marked && l.reloading ? 'reloading' : 'locked';
+  }
+
+  /**
+   * After a new page has loaded in a locked tab: true once its lock is gone (checked now; or, when its
+   * storage was cleared and it's reloading, when that page has loaded and unlocked it, within `ms`), false
+   * while it stays locked (the agent's code still there, another tab of the site, a page TRIF can't check).
+   */
+  async function whenUnlocked(tabId, ms = 15000) {
+    await ready;
+    if (!locks.has(tabId)) return true;
+    const s = await check(tabId);
+    if (s === 'unlocked' || !locks.has(tabId)) return true;
+    if (s !== 'reloading') return false;
+    return new Promise((res) => {
+      const done = (v) => { clearTimeout(timer); waiters.get(tabId)?.delete(f); res(v); };
+      const f = () => done(true);
+      const timer = setTimeout(() => done(!locks.has(tabId)), ms);
+      if (!waiters.has(tabId)) waiters.set(tabId, new Set());
+      waiters.get(tabId).add(f);
+    });
   }
 
   return {
-    ready, lock, unlock, check,
+    ready, lock, unlock, check, whenUnlocked,
     isLocked: (tabId) => locks.has(tabId),
     // (url: the page it was locked on, for the panel's button: a tab sent to another site shows the
     // browser's "blocked" page, and reloading that only asks for the blocked address again)

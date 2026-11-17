@@ -75,7 +75,7 @@ function chooseNode(home, { mode, want, env = process.env, ensure = R.ensureRunt
   if (!R.platformKey(process.platform, process.arch, setting.pins)) return system(`no runtime for ${process.platform}-${process.arch}`);
   const have = R.installedNode(home, { pins: setting.pins });
   if (have) return { node: have, how: 'runtime', version: setting.pins.version, fetched: false, pins: setting.pins };
-  if (process.stderr.isTTY) process.stderr.write(`Downloading Node ${setting.pins.version} for TRIF…\n`);
+  if (process.stderr.isTTY && !env.TRIF_RUNTIME_ARCHIVE) process.stderr.write(`Downloading Node ${setting.pins.version} for TRIF…\n`);
   try {
     const r = ensure(home, { pinsFile: setting.file, timeoutMs: downloadBudget(env), env });
     return { node: r.node, how: 'runtime', version: r.version, fetched: !!r.fetched, pins: setting.pins };

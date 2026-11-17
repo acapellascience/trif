@@ -74,14 +74,17 @@ function run(file, args, opts = {}) {
  * fetched } (fetched: whether it was downloaded now); throws RuntimeError, leaving nothing behind, when this
  * platform has no runtime, the download fails, or its checksum isn't the pinned one.
  */
-async function ensureRuntime(home, { fetch = null, platform = process.platform, arch = process.arch, xz = null, pins = PINS, tar = 'tar' } = {}) {
+async function ensureRuntime(home, { fetch = null, platform = process.platform, arch = process.arch, xz = null, pins = PINS, tar = 'tar', archiveFile = null } = {}) {
   const key = platformKey(platform, arch, pins);
   if (!key) throw new RuntimeError(`there's no TRIF runtime for ${platform}-${arch}`);
   const have = installedNode(home, { platform, arch, pins });
   if (have) return { node: have, version: pins.version, fetched: false };
-  const archive = pickArchive(key, { platform, xz, pins });
+  // An archive already downloaded (install.sh's, TRIF_RUNTIME_ARCHIVE): used when it's one of the pinned
+  // files, still checked against its pin below; otherwise ignored and downloaded as usual.
+  const local = archiveFile && (pins.archives[key] || []).find((a) => a.file === path.basename(archiveFile));
+  const archive = local || pickArchive(key, { platform, xz, pins });
   if (!archive) throw new RuntimeError(`no archive of Node ${pins.version} that this computer can unpack`);
-  fetch = fetch || require('./update').fetchUrl;
+  fetch = local ? async () => fs.readFileSync(archiveFile) : fetch || require('./update').fetchUrl;
 
   const root = runtimeRoot(home);
   fs.mkdirSync(root, { recursive: true });
@@ -89,7 +92,7 @@ async function ensureRuntime(home, { fetch = null, platform = process.platform, 
   try {
     let data;
     try { data = await fetch(pins.base + archive.file, { maxBytes: ARCHIVE_MAX, timeoutMs: 300000 }); } catch (e) {
-      throw new RuntimeError(`couldn't download Node ${pins.version}: ${e.message}`);
+      throw new RuntimeError(local ? `couldn't read ${archiveFile}: ${e.message}` : `couldn't download Node ${pins.version}: ${e.message}`);
     }
     const sha = crypto.createHash('sha256').update(data).digest('hex');
     if (sha !== archive.sha256) throw new RuntimeError(`the download of ${archive.file} doesn't match its pinned checksum; not using it`);
@@ -186,7 +189,7 @@ if (require.main === module && process.argv[2] === 'ensure') {
   const [home, pinsFile] = process.argv.slice(3);
   let pins = PINS;
   try { if (pinsFile) pins = JSON.parse(fs.readFileSync(pinsFile, 'utf8')); } catch (e) { pins = null; process.stdout.write(JSON.stringify({ error: `can't read ${pinsFile}: ${e.message}` }) + '\n'); process.exitCode = 1; }
-  if (pins) ensureRuntime(home, { pins }).then(
+  if (pins) ensureRuntime(home, { pins, archiveFile: envVar('RUNTIME_ARCHIVE') || null }).then(
     (r) => process.stdout.write(JSON.stringify(r) + '\n'),
     (e) => { process.stdout.write(JSON.stringify({ error: e.message }) + '\n'); process.exitCode = 1; },
   );

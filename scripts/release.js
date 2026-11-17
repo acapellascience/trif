@@ -23,11 +23,19 @@
 //                                             the files at (helper/lib/modsfeed.js). Then asks before
 //                                             committing and pushing it on main. An empty feed (nothing
 //                                             changed, or --only of none) withdraws what an earlier one had.
+//   node scripts/release.js refresh-runtime [<node version>] [--dry-run]
+//                                             TRIF's own Node (helper/runtime.json, docs/NO-NODE.md): pins
+//                                             that version (default: the newest of the pinned major line)
+//                                             from nodejs.org's SHASUMS256.txt, every platform's archive and
+//                                             SHA-256. Then commit helper/runtime.json; the next release
+//                                             ships it (setup downloads the new Node beside the old one).
+//                                             --dry-run writes dist/release/runtime/runtime.json instead.
 //
 // A release: checks everything first (clean main branch, a CHANGELOG.md section for the version and no
 // "## Unreleased" one, keys, GitHub login, package.json's repository matching the git remote), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
 // Chrome and Firefox extensions and the npm package, has Mozilla sign the Firefox add-on (unlisted),
-// makes the two beta zips, and writes the update feeds: updates/latest.json (+ .sig, signed with the
+// makes the two beta zips and install.sh (scripts/install.sh filled in with the package's URL and SHA-256
+// and the runtime pins: `curl -fsSL …/install.sh | sh` installs with no Node), and writes the update feeds: updates/latest.json (+ .sig, signed with the
 // release key) for the helper, updates/firefox.json for Firefox, and updates/mods.json (+ .sig), the mods
 // feed, empty: the release ships every mod as it is. Then it asks before publishing
 // anything: a commit and tag, a GitHub release with the files, and the feeds (pushed last, once the files
@@ -449,6 +457,96 @@ function webExtEnv(env = process.env) {
   return out;
 }
 
+// TRIF's own Node (helper/runtime.json, helper/lib/runtime.js).
+const RUNTIME_FILE = path.join(ROOT, 'helper', 'runtime.json');
+const NODE_DIST = 'https://nodejs.org/dist/';
+// nodejs.org's names for the platforms TRIF runs on, and the archives kept for each (first = preferred).
+const RUNTIME_PLATFORMS = {
+  'darwin-arm64': ['tar.xz', 'tar.gz'], 'darwin-x64': ['tar.xz', 'tar.gz'],
+  'linux-x64': ['tar.xz', 'tar.gz'], 'linux-arm64': ['tar.xz', 'tar.gz'],
+  'win-x64': ['zip'], 'win-arm64': ['zip'],
+};
+
+/** runtime.json for Node `version` (24.22.3) from that release's SHASUMS256.txt. Throws when a platform's archive is missing. */
+function runtimePins(version, shasums, { dist = NODE_DIST } = {}) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`"${version}" isn't a Node version like 24.22.3`);
+  const sums = new Map();
+  for (const line of String(shasums).split('\n')) {
+    const m = line.trim().match(/^([0-9a-f]{64})\s+\*?(\S+)$/);
+    if (m) sums.set(m[2], m[1]);
+  }
+  const base = `${dist}v${version}/`;
+  const archives = {};
+  for (const [key, exts] of Object.entries(RUNTIME_PLATFORMS)) {
+    archives[key] = exts.map((ext) => {
+      const file = `node-v${version}-${key}.${ext}`;
+      if (!sums.has(file)) throw new Error(`SHASUMS256.txt for Node ${version} has no ${file}`);
+      return { file, sha256: sums.get(file) };
+    });
+  }
+  return {
+    _: `TRIF's own Node (lib/runtime.js). Pins from ${base}SHASUMS256.txt; refreshed by release.js, never by hand.`,
+    version, base, archives,
+  };
+}
+
+/** What's wrong with runtime pins for a release (a platform or checksum missing), or null. */
+function runtimePinsProblem(pins) {
+  if (!pins || !/^\d+\.\d+\.\d+$/.test(pins.version || '') || !/^https:\/\//.test(pins.base || '')) return 'helper/runtime.json has no version or https base';
+  for (const key of Object.keys(RUNTIME_PLATFORMS)) {
+    const list = pins.archives && pins.archives[key];
+    if (!Array.isArray(list) || !list.length) return `helper/runtime.json has no archive for ${key}`;
+    for (const a of list) if (!/^[0-9a-f]{64}$/.test(a.sha256 || '') || !/^node-v[\w.-]+$/.test(a.file || '')) return `helper/runtime.json's ${key} entry ${a.file || '?'} isn't a file and SHA-256`;
+  }
+  return null;
+}
+
+/**
+ * install.sh for a release: the template (scripts/install.sh) with the package's URL and SHA-256 and the
+ * runtime pins (its unix platforms) written in. Throws on a value that can't go in the script as is.
+ */
+function installScript(template, { version, packageUrl, packageSha256, pins }) {
+  const problem = runtimePinsProblem(pins);
+  if (problem) throw new Error(problem);
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`bad version ${version}`);
+  if (!/^https:\/\/[\w.-]+\/[\w./%+-]+$/.test(packageUrl)) throw new Error(`install.sh: the package URL ${packageUrl} isn't a plain https URL`);
+  if (!/^[0-9a-f]{64}$/.test(packageSha256)) throw new Error('install.sh: the package SHA-256 is not 64 hex digits');
+  const rows = Object.entries(pins.archives).filter(([key]) => !key.startsWith('win-'))
+    .flatMap(([key, list]) => list.filter((a) => /\.tar\.(xz|gz)$/.test(a.file)).map((a) => `${key} ${a.file} ${a.sha256}`));
+  const values = { VERSION: version, PACKAGE_URL: packageUrl, PACKAGE_SHA256: packageSha256, NODE_VERSION: pins.version, NODE_BASE: pins.base, NODE_ARCHIVES: rows.join('\n') };
+  const out = template.replace(/@@([A-Z0-9_]+)@@/g, (m, name) => {
+    if (!(name in values)) throw new Error(`install.sh template: unknown ${m}`);
+    return values[name];
+  });
+  return out;
+}
+
+/** The newest Node release of `major` in nodejs.org's index.json. */
+function newestNode(index, major) {
+  const vs = (Array.isArray(index) ? index : []).map((r) => String(r.version || '').replace(/^v/, ''))
+    .filter((v) => /^\d+\.\d+\.\d+$/.test(v) && v.split('.')[0] === String(major));
+  return vs.sort((a, b) => compareVersions(b, a))[0] || null;
+}
+
+async function refreshRuntimeCommand({ dryRun, version = null, dist = process.env.TRIF_NODE_DIST || NODE_DIST, fetch = require('../helper/lib/update').fetchUrl, runtimeFile = RUNTIME_FILE, outDir = path.join(DIST, 'release', 'runtime') }) {
+  const current = readJson(runtimeFile);
+  if (!version) {
+    const major = current.version.split('.')[0];
+    version = newestNode(JSON.parse(String(await fetch(`${dist}index.json`, { maxBytes: 8 * 1024 * 1024, timeoutMs: 60000 }))), major);
+    if (!version) fail(`${dist}index.json lists no Node ${major} release`);
+  }
+  const shasums = await fetch(`${dist}v${version}/SHASUMS256.txt`, { maxBytes: 1024 * 1024, timeoutMs: 60000 });
+  // (SHASUMS256.txt.sig, beside it, is GPG-signed by Node's releasers; not checked here: HTTPS to nodejs.org.)
+  const pins = runtimePins(version, shasums, { dist });
+  const text = JSON.stringify(pins, null, 2) + '\n';
+  const file = dryRun ? path.join(outDir, 'runtime.json') : runtimeFile;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+  console.log(current.version === version ? `Node ${version} is already the pinned one; pins rewritten from its SHASUMS256.txt` : `Node ${current.version} → ${version}`);
+  console.log(dryRun ? `Dry run: wrote ${path.relative(ROOT, file)}; helper/runtime.json unchanged.` : 'Wrote helper/runtime.json: run the tests, then commit it.');
+  return { file, pins };
+}
+
 function ask(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a.trim()); }));
@@ -492,6 +590,8 @@ function preflight(version, { dryRun }) {
   const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
   if (branch !== 'main' && branch !== `release-${version}`) problems.push(`not on the main branch (or release-${version})`);
   if (spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' }).status !== 0) problems.push("gh isn't logged in (gh auth login)");
+  const pinsProblem = runtimePinsProblem(readJson(RUNTIME_FILE));
+  if (pinsProblem) problems.push(`${pinsProblem} (node scripts/release.js refresh-runtime)`);
   for (const s of [AMO_ISSUER, AMO_SECRET]) if (!keychain(s)) problems.push(`the keychain has no ${s} (or ${LEGACY_SERVICES[s]})`);
   if (problems.length && !dryRun) fail(`not ready:\n  - ${problems.join('\n  - ')}`);
   for (const p of problems) console.warn(`release (dry run, would stop a real release): ${p}`);
@@ -504,12 +604,13 @@ function preflight(version, { dryRun }) {
 /**
  * The files to attach to the GitHub release. With a signed add-on (`xpi`), that's it and a copy named
  * FIREFOX_XPI, made here in `out`: every release has one by that name, so
- * releases/latest/download/trif-firefox.xpi is a link to the newest add-on that never changes.
+ * releases/latest/download/trif-firefox.xpi is a link to the newest add-on that never changes. install.sh
+ * likewise: releases/latest/download/install.sh is always the newest release's.
  */
-function releaseAssets(out, { tgz, chromeZip, xpi, zips }) {
+function releaseAssets(out, { tgz, chromeZip, xpi, zips, installSh = null }) {
   const latestXpi = xpi && path.join(out, FIREFOX_XPI);
   if (latestXpi) fs.copyFileSync(xpi, latestXpi);
-  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips];
+  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips, ...(installSh ? [installSh] : [])];
 }
 
 function bump(version, dir = ROOT) {
@@ -663,7 +764,13 @@ async function release(version, { dryRun, skipTests }) {
     writeJson(ffPath, firefoxFeed(existing, { id: require('../helper/lib/paths').FIREFOX_EXTENSION_ID, version, url: `${base}/trif-firefox-${version}.xpi`, sha256: sha256(xpi) }));
   }
 
-  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips });
+  // install.sh: installs this release with no Node (TRIF's own, pinned in helper/runtime.json).
+  const installSh = path.join(out, 'install.sh');
+  fs.writeFileSync(installSh, installScript(fs.readFileSync(path.join(src, 'scripts', 'install.sh'), 'utf8'), {
+    version, packageUrl: `${base}/${tgzName}`, packageSha256: sha256(tgz), pins: readJson(path.join(src, 'helper', 'runtime.json')),
+  }), { mode: 0o755 });
+
+  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips, installSh });
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
   console.log(`\nWhat's new in ${version} (the side panel's summary):\n${panelNotes(notes, { repo, version })}\n`);
@@ -711,10 +818,14 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const [cmd] = args.filter((a) => !a.startsWith('--'));
-  if (!cmd) fail('usage: node scripts/release.js keygen | refresh-feed [--dry-run] | mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>] | <version> [--dry-run] [--skip-tests]');
+  if (!cmd) fail('usage: node scripts/release.js keygen | refresh-feed [--dry-run] | refresh-runtime [<node version>] [--dry-run] | mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>] | <version> [--dry-run] [--skip-tests]');
   const value = (flag) => { const i = args.indexOf(flag); return i === -1 ? null : args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : fail(`${flag} needs a value`); };
   if (cmd === 'keygen') keygen(flags.has('--force'));
   else if (cmd === 'refresh-feed') refreshFeedCommand({ dryRun: flags.has('--dry-run') });
+  else if (cmd === 'refresh-runtime') {
+    const version = args.filter((a) => !a.startsWith('--'))[1] || null;
+    refreshRuntimeCommand({ dryRun: flags.has('--dry-run'), version }).catch((e) => fail(e.stack || e.message));
+  }
   else if (cmd === 'mods-feed') {
     const only = value('--only');
     modsFeedCommand({ dryRun: flags.has('--dry-run'), only: only ? only.split(',').map((x) => x.trim()).filter(Boolean) : null, minTrif: value('--min-trif') }).catch((e) => fail(e.stack || e.message));
@@ -722,4 +833,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { runtimePins, runtimePinsProblem, installScript, newestNode, refreshRuntimeCommand, RUNTIME_PLATFORMS, modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

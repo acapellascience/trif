@@ -128,3 +128,25 @@ test('installedNode ignores a folder without its marker (half-made); pruneRuntim
   assert.deepStrictEqual(R.pruneRuntimes(home, o).sort(), ['.fetch-abc', `node-v22.1.0-${KEY}`]);
   assert.deepStrictEqual(fs.readdirSync(root).sort(), [`node-v${VERSION}-${KEY}`, 'notes']);
 });
+
+test('ensureRuntime with archiveFile (install.sh\'s download): used when it\'s a pinned file, still checked; otherwise downloaded', async () => {
+  const { data, sha256 } = fakeArchive();
+  const pins = linuxPins(sha256);
+  pins.archives['linux-arm64'] = [{ file: `node-v${VERSION}-${KEY}.tar.gz`, sha256 }];
+  const dir = tempDir('runtime-local-');
+  const local = path.join(dir, `node-v${VERSION}-${KEY}.tar.gz`);
+  fs.writeFileSync(local, data);
+  const never = async () => { throw new Error('should not download'); };
+  const r = await R.ensureRuntime(tempDir('runtime-home-'), { ...opts(pins, never), archiveFile: local });
+  assert.strictEqual(r.fetched, true);
+  assert.strictEqual(execFileSync(r.node, ['--version'], { encoding: 'utf8' }).trim(), `v${VERSION}`);
+
+  const other = path.join(dir, 'node-v1.0.0-other.tar.gz');
+  fs.writeFileSync(other, 'x');
+  const urls = [];
+  await R.ensureRuntime(tempDir('runtime-home-'), { ...opts(pins, async (u) => { urls.push(u); return data; }), archiveFile: other });
+  assert.strictEqual(urls.length, 1);
+
+  fs.writeFileSync(local, Buffer.concat([data, Buffer.from('x')]));
+  await assert.rejects(R.ensureRuntime(tempDir('runtime-home-'), { ...opts(pins, never), archiveFile: local }), /pinned checksum/);
+});

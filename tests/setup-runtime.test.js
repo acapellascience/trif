@@ -234,3 +234,19 @@ test('trif doctor after setup --copy on the runtime reports it; a damaged one fa
     assert.match(r.stdout, /FAIL\s+TRIF's own Node in .* is damaged: its node has changed/, r.stdout + r.stderr);
   } finally { server.stop(); }
 });
+
+test('trif setup --copy with TRIF_RUNTIME_ARCHIVE (install.sh\'s download): keeps that archive, downloads nothing', { skip: !KEY || process.platform === 'win32' }, async () => {
+  const dir = tempDir('rt-local-');
+  const home = path.join(dir, 'ws');
+  const files = path.join(dir, 'files');
+  fs.mkdirSync(files);
+  const a = fakeArchive(files, '24.0.3');
+  // (a base nothing answers on: a download would fail)
+  const pins = pinsFile(dir, '24.0.3', 'http://127.0.0.1:9/', a);
+  const r = await runCli(['setup', '--copy', '--no-link', '--no-examples', '--native-dir', path.join(dir, 'native')],
+    { home, env: { TRIF_RUNTIME: pins, TRIF_RUNTIME_ARCHIVE: path.join(files, a.file) }, timeout: 90000 });
+  assert.strictEqual(r.code, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /✓ Downloaded Node 24\.0\.3 for TRIF/);
+  assert.strictEqual(wrapperNode(home), path.join(home, 'runtime', `node-v24.0.3-${KEY}`, 'bin', 'node'));
+  assert.strictEqual(R.runtimeInfo(home, { pins: JSON.parse(fs.readFileSync(pins, 'utf8')) }).archiveSha256, a.sha256);
+});

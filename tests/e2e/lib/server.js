@@ -422,6 +422,278 @@ addEventListener('scroll', async () => {
 });
 </script>`);
 
+// ---- the study's deep tasks (--study-tasks autoplay,follow,jump; 2026-11-17): pages where the best fix needs
+// the app's own code or data, and a fix on what's on screen is worse or impossible. Each app's code is a
+// script of its own (/<app>/app.js), as on a real site, so reading it takes the page's own world (or a GET).
+
+// Streamly (task autoplay, "stop it from playing the next episode by itself"): a player resuming 6 s before the
+// end of episode 1; at the end, an "up next" card counts down 5 s and starts episode 2 (a POST, as a real
+// player's is). The app reads window.__APP_CONFIG__.features.autoplayNext (and a pref in localStorage) at that
+// moment; the settings box on the page has no switch for it. Hiding the card doesn't stop the countdown.
+const STREAMLY_EPS = ['The Pilot', 'Graveyard Shift', 'Overtime', 'Call Back', 'Double Shift', 'Last Call'];
+const STREAMLY_PAGE = () => PAGE('Night Shift · Streamly', `
+<style>
+  body { margin: 0; max-width: none; background: #141414; color: #e5e5e5; font: 15px/1.4 system-ui, sans-serif; }
+  .q1top { height: 56px; display: flex; align-items: center; padding: 0 24px; gap: 24px; background: #000; }
+  .q1top b { color: #e50914; font-size: 24px; letter-spacing: 1px; } .q1top a { color: #ccc; text-decoration: none; }
+  .q1wrap { display: flex; gap: 24px; padding: 24px; align-items: flex-start; }
+  .q2ply { position: relative; flex: 1 1 auto; aspect-ratio: 16 / 9; max-width: 900px; background: linear-gradient(135deg, #243b55, #141e30); border-radius: 6px; overflow: hidden; }
+  .q2scr { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+  .q2ctl { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 16px; background: linear-gradient(transparent, #000c); }
+  .q2bar { height: 4px; background: #555; border-radius: 2px; } .q2bar > div { height: 100%; background: #e50914; width: 0; }
+  .q2row { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+  .q2row button, .q3end button { background: none; border: 1px solid #fff6; border-radius: 4px; color: #fff; font: inherit; cursor: pointer; padding: 4px 10px; }
+  .q7un { position: absolute; right: 24px; bottom: 72px; width: 300px; background: #181818ee; border-radius: 6px; padding: 16px; box-shadow: 0 4px 16px #0008; }
+  .q7un .q7th { height: 110px; border-radius: 4px; background: linear-gradient(135deg, #614385, #516395); margin-bottom: 10px; }
+  .q7un button { background: #fff; color: #000; border: 0; border-radius: 4px; padding: 6px 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  .q3end, .q3err { position: absolute; inset: 0 0 64px; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; background: #000a; }
+  .q3err { color: #ff8a80; }
+  .q4side { width: 300px; flex: 0 0 300px; }
+  .q4side a { display: block; padding: 10px; border-radius: 4px; color: inherit; text-decoration: none; background: #222; margin-bottom: 8px; }
+  .q4side a.on { outline: 2px solid #e50914; }
+  .q4set { margin-top: 16px; background: #222; padding: 12px; border-radius: 4px; display: grid; gap: 8px; }
+</style>
+<div class="q1top" role="banner"><b>STREAMLY</b><a href="#">Home</a><a href="#">Series</a><a href="#">Films</a><a href="#">My List</a></div>
+<div class="q1wrap">
+  <div class="q2ply" id="q2ply">
+    <div class="q2scr"><div id="q2title"></div></div>
+    <div class="q7un" id="q7un" hidden><div class="q7th"></div><div>Next episode in <span id="q7n">5</span></div><div id="q7t"></div><button type="button" id="q7go">Play now</button></div>
+    <div class="q3end" id="q3end" hidden><div id="q3txt"></div><div><button type="button" id="q3re">Replay</button> <button type="button" id="q3next">Next episode</button></div></div>
+    <div class="q3err" id="q3err" hidden></div>
+    <div class="q2ctl"><div class="q2bar"><div id="q2fill"></div></div><div class="q2row"><button type="button" id="q2pp">Pause</button><span id="q2time"></span><span style="margin-left:auto">Night Shift · Season 1</span></div></div>
+  </div>
+  <div class="q4side" role="complementary">
+    <h3>Episodes</h3><div id="q4eps">${STREAMLY_EPS.map((t, i) => `<a href="#" data-ep="${i + 1}">${i + 1}. ${t}<br><small>42 min</small></a>`).join('')}</div>
+    <div class="q4set"><b>Playback settings</b>
+      <label>Quality <select><option>Auto</option><option>1080p</option><option>720p</option></select></label>
+      <label>Subtitles <select><option>Off</option><option>English</option><option>Français</option></select></label>
+      <label>Audio <select><option>English</option><option>English (Audio Description)</option></select></label>
+    </div>
+  </div>
+</div>
+<script>window.__APP_CONFIG__ = {"build":"2026.11.3-web","locale":"en-US","apiBase":"/api/streamly","features":{"previews":true,"skipIntro":true,"autoplayNext":true,"upNextSeconds":5,"postPlayCredits":false,"ratingsPrompt":true},"experiments":{"rowArt":"b","heroTrailer":"off"}};</script>
+<script src="/streamly/app.js"></script>`);
+function streamlyApp(EPS) {
+  const LEN = 42 * 60;
+  const $ = (id) => document.getElementById(id);
+  const cfg = () => window.__APP_CONFIG__ || {};
+  let prefs = {};
+  try { prefs = JSON.parse(localStorage.getItem('sx:prefs') || '{}') || {}; } catch (e) { prefs = {}; }
+  const opt = (k) => (Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : (cfg().features || {})[k]);
+  const st = { ep: 1, pos: LEN - 6, playing: true, count: null };
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  function render() {
+    $('q2title').textContent = `Episode ${st.ep}: ${EPS[st.ep - 1]}`;
+    $('q2time').textContent = `${fmt(st.pos)} / ${fmt(LEN)}`;
+    $('q2fill').style.width = `${(100 * st.pos) / LEN}%`;
+    $('q2pp').textContent = st.playing ? 'Pause' : 'Play';
+    for (const a of document.querySelectorAll('#q4eps a')) a.classList.toggle('on', Number(a.dataset.ep) === st.ep);
+  }
+  function tick() {
+    if (!st.playing) return;
+    st.pos = Math.min(LEN, st.pos + 1);
+    render();
+    if (st.pos >= LEN) ended();
+  }
+  function ended() {
+    st.playing = false;
+    render();
+    if (st.ep < EPS.length && opt('autoplayNext')) return upNext();
+    $('q3txt').textContent = `You finished Episode ${st.ep}.`;
+    $('q3end').hidden = false;
+  }
+  function upNext() {
+    let n = Number(opt('upNextSeconds')) || 5;
+    $('q7t').textContent = `Episode ${st.ep + 1}: ${EPS[st.ep]}`;
+    $('q7n').textContent = String(n);
+    $('q7un').hidden = false;
+    st.count = setInterval(() => {
+      n--;
+      $('q7n').textContent = String(n);
+      if (n <= 0) play(st.ep + 1);
+    }, 1000);
+  }
+  async function play(ep) {
+    clearInterval(st.count);
+    $('q7un').hidden = true; $('q3end').hidden = true; $('q3err').hidden = true;
+    try {
+      const r = await fetch(`${cfg().apiBase || '/api/streamly'}/play`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ep }) });
+      if (!r.ok) throw new Error(String(r.status));
+      const j = await r.json();
+      st.ep = j.ep; st.pos = j.resumeAt; st.playing = true;
+      render();
+    } catch (e) {
+      $('q3err').textContent = `Couldn't start Episode ${ep}. Try again.`;
+      $('q3err').hidden = false;
+    }
+  }
+  $('q7go').addEventListener('click', () => play(st.ep + 1));
+  $('q3next').addEventListener('click', () => play(Math.min(EPS.length, st.ep + 1)));
+  $('q3re').addEventListener('click', () => play(st.ep));
+  $('q2pp').addEventListener('click', () => { st.playing = !st.playing; render(); });
+  for (const a of document.querySelectorAll('#q4eps a')) a.addEventListener('click', (e) => { e.preventDefault(); play(Number(a.dataset.ep)); });
+  render();
+  setInterval(tick, 1000);
+}
+
+// Murmur (task follow, "hide posts from accounts I don't follow"): an X-like home timeline. Whether you follow
+// a post's author is only in the data: the timeline's JSON (a POST, more as you scroll) and the React-like
+// fiber behind each post (article.__reactFiber$….return.memoizedProps.post.author.following); nothing on
+// screen says it. Each post sits in a cell with its own padding and border, as on X.
+const MURMUR_AUTHORS = [
+  ['Ada Moss', 'adamoss', true], ['Peak Outdoor Co.', 'peakoutdoor', false], ['Jonah Reyes', 'jreyes', true],
+  ['Lena Fischer', 'lenafischer', false], ['City Transit', 'citytransit', true], ['Sam Okafor', 'samokafor', true],
+  ['Ravi Menon', 'ravimenon', false], ['Night Owl Books', 'nightowlbooks', true], ['Maya Lindqvist', 'mayal', false],
+  ['Theo Grant', 'theogrant', true], ['Daily Crunch', 'dailycrunch', false], ['Priya Shah', 'priyashah', true],
+];
+const MURMUR_TEXTS = ['Finally finished the shelf. Only one screw left over.', 'Rain all week, apparently. Good time for soup.',
+  'Anyone else think the new bridge lights are a bit much?', 'Thread on what I learned running a tiny bakery for a year 🧵',
+  'Morning run done. 5k, no stops, a personal best.', 'Hot take: the second album is better than the first.',
+  'Spotted a heron on the canal today.', 'Reminder: the library extends hours this weekend.',
+  'Tried the new ramen place on 4th. Worth the queue.', 'Our garden finally has tomatoes.', 'Big news coming Friday. Stay tuned.',
+  'Does anyone have a spare bike pump I could borrow?', 'This week\'s reading list, short version.', 'Train delays again on the north line.'];
+const MURMUR_PER_PAGE = (cursor) => (cursor === 0 ? 10 : 6);
+const murmurPage = (cursor) => {
+  const start = cursor === 0 ? 0 : 10 + 6 * (cursor - 1);
+  return Array.from({ length: MURMUR_PER_PAGE(cursor) }, (_, j) => {
+    const i = start + j;
+    const [name, handle, following] = MURMUR_AUTHORS[(i * 5) % MURMUR_AUTHORS.length];
+    return { id: String(7000 + i), text: MURMUR_TEXTS[i % MURMUR_TEXTS.length], created: `${1 + (i % 23)}h`,
+      author: { id: String(300 + MURMUR_AUTHORS.findIndex((a) => a[1] === handle)), name, handle, following, followed_by: (i % 3) === 0, verified: handle === 'citytransit' || handle === 'dailycrunch' },
+      counts: { replies: (i * 7) % 40, reposts: (i * 3) % 25, likes: (i * 13) % 300 } };
+  });
+};
+const murmurFollowing = (id) => { const i = Number(id) - 7000; return MURMUR_AUTHORS[(i * 5) % MURMUR_AUTHORS.length][2]; };
+const MURMUR_PAGE = () => PAGE('Home / Murmur', `
+<style>
+  body { margin: 0; max-width: none; background: #fff; color: #0f1419; font: 15px/1.35 system-ui, sans-serif; }
+  .n1sh { display: flex; justify-content: center; }
+  .n1nv { width: 220px; padding: 12px; box-sizing: border-box; } .n1nv a { display: block; padding: 12px; font-size: 19px; color: inherit; text-decoration: none; }
+  .n2mn { width: 600px; border-left: 1px solid #eff3f4; border-right: 1px solid #eff3f4; }
+  .n2hd { position: sticky; top: 0; background: #fffd; backdrop-filter: blur(8px); padding: 16px; font-size: 20px; font-weight: 700; border-bottom: 1px solid #eff3f4; z-index: 2; }
+  .r-cell { border-bottom: 1px solid #eff3f4; padding: 12px 16px; }
+  .r-1lq { display: flex; gap: 12px; }
+  .r-av { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; background: #cfd9de; }
+  .r-mt { color: #536471; } .r-mt b { color: #0f1419; } .r-mt a { color: inherit; text-decoration: none; }
+  .r-tx { margin: 4px 0 10px; }
+  .r-ac { display: flex; gap: 48px; color: #536471; font-size: 13px; }
+  .n3sd { width: 320px; padding: 12px 24px; box-sizing: border-box; }
+  .n3bx { background: #f7f9f9; border-radius: 16px; padding: 12px 16px; margin-bottom: 16px; } .n3bx div { padding: 8px 0; }
+  .n4er { padding: 16px; color: #b00; }
+</style>
+<div class="n1sh">
+  <nav class="n1nv" role="navigation"><a href="#"><b>murmur</b></a><a href="#">Home</a><a href="#">Explore</a><a href="#">Notifications</a><a href="#">Messages</a><a href="#">Profile</a></nav>
+  <main class="n2mn" role="main"><div class="n2hd">Home</div><div id="n2tl" aria-label="Timeline: Your Home Timeline"></div><div id="n2more" style="height: 60px"></div></main>
+  <aside class="n3sd" role="complementary"><div class="n3bx"><b>What's happening</b><div>#RainyWeek · 12.1K posts</div><div>Bridge lights · 3,402 posts</div><div>#BakeryThread · 1,877 posts</div></div></aside>
+</div>
+<script src="/murmur/app.js"></script>`);
+function murmurApp() {
+  const KEY = Math.random().toString(36).slice(2, 11);
+  const tl = document.getElementById('n2tl');
+  const more = document.getElementById('n2more');
+  let cursor = 0, busy = false, done = false;
+  function Timeline() {}
+  function PostCell() {}
+  const timelineFiber = { tag: 0, type: Timeline, memoizedProps: { timelineId: 'home', kind: 'HomeTimeline' }, return: null };
+  function cell(post) {
+    const c = document.createElement('div');
+    c.className = 'r-cell';
+    c.setAttribute('data-testid', 'cellInnerDiv');
+    const a = document.createElement('article');
+    a.className = 'r-1lq';
+    a.setAttribute('role', 'article');
+    a.tabIndex = 0;
+    a.innerHTML = '<div class="r-av"></div><div><div class="r-mt"><b></b> <span></span> · <a></a></div><div class="r-tx"></div><div class="r-ac"><span></span><span></span><span></span></div></div>';
+    const mt = a.querySelector('.r-mt');
+    mt.children[0].textContent = post.author.name + (post.author.verified ? ' ✓' : '');
+    mt.children[1].textContent = '@' + post.author.handle;
+    mt.children[2].textContent = post.created;
+    mt.children[2].href = `/murmur/status/${post.id}`;
+    a.querySelector('.r-tx').textContent = post.text;
+    const ac = a.querySelectorAll('.r-ac span');
+    ac[0].textContent = `💬 ${post.counts.replies}`; ac[1].textContent = `🔁 ${post.counts.reposts}`; ac[2].textContent = `♥ ${post.counts.likes}`;
+    const parent = { tag: 0, type: PostCell, key: post.id, memoizedProps: { post, onLike() {}, onReply() {}, showActions: true }, return: timelineFiber };
+    a[`__reactFiber$${KEY}`] = { tag: 5, type: 'article', key: null, memoizedProps: { role: 'article', className: a.className, tabIndex: 0 }, return: parent };
+    a[`__reactProps$${KEY}`] = { role: 'article', className: a.className, tabIndex: 0, onClick() {} };
+    c.append(a);
+    return c;
+  }
+  async function load() {
+    if (busy || done) return;
+    busy = true;
+    try {
+      const r = await fetch('/api/murmur/timeline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ timeline: 'home', cursor }) });
+      if (!r.ok) throw new Error(String(r.status));
+      const j = await r.json();
+      for (const p of j.posts || []) tl.append(cell(p));
+      cursor = j.next;
+      if (j.next === null) done = true;
+    } catch (e) {
+      if (!document.querySelector('.n4er')) { const d = document.createElement('div'); d.className = 'n4er'; d.textContent = 'Something went wrong. Try reloading.'; tl.after(d); }
+      done = true;
+    } finally { busy = false; }
+    // (still at the bottom, a short timeline: the next page)
+    if (!done && more.getBoundingClientRect().top < innerHeight + 200) setTimeout(load, 50);
+  }
+  addEventListener('scroll', () => { if (more.getBoundingClientRect().top < innerHeight + 400) load(); });
+  load();
+}
+
+// Pebble (task jump, "stop the feed jumping to the top when new posts come in"): a live feed that asks for new
+// posts every 4 s (a GET) and, when there are some, puts them at the top and scrolls the page there
+// (window.Pebble.applyNew calls Pebble.scrollToTop, which the logo uses too). CSS can't stop it, and a mod
+// that blocks every scrollTo breaks the logo's "back to the top".
+const PEBBLE_POST = (p) => `<div class="p3ps" data-id="${p.id}"><div class="p3hd"><i></i><b>${p.who}</b><span>${p.when}</span></div><div class="p3tx">${p.text}</div><div class="p3im"></div></div>`;
+const pebblePost = (id) => ({ id, who: ['Ines', 'Marco', 'Yuki', 'Femi', 'Clara', 'Owen', 'Zara'][id % 7], when: `${(id % 50) + 1}m`, text: `Update #${id}: ${['the market on Elm St is open late tonight.', 'roadworks on the bypass are finally done.', 'the choir concert moved to Sunday.', 'free museum entry this Thursday.', 'new bike lanes along the river.'][id % 5]}` });
+const PEBBLE_PAGE = () => PAGE('Pebble · Live', `
+<style>
+  body { margin: 0; max-width: none; background: #f4f1ec; color: #222; font: 15px/1.4 system-ui, sans-serif; }
+  .p1tp { position: sticky; top: 0; z-index: 3; height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: #2d6a4f; color: #fff; }
+  .p1tp a { color: #fff; text-decoration: none; } #p1logo { font-weight: 800; font-size: 20px; }
+  .p2fd { width: 560px; margin: 16px auto; }
+  .p3ps { background: #fff; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; box-shadow: 0 1px 2px #0002; }
+  .p3hd { display: flex; gap: 8px; align-items: center; } .p3hd i { width: 32px; height: 32px; border-radius: 50%; background: #b7c9bd; } .p3hd span { color: #777; font-size: 13px; margin-left: auto; }
+  .p3tx { margin: 8px 0; } .p3im { height: 120px; border-radius: 8px; background: linear-gradient(135deg, #d8e2dc, #ffe5d9); }
+  .p4ts { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: #2d6a4f; color: #fff; padding: 6px 14px; border-radius: 16px; z-index: 4; }
+</style>
+<div class="p1tp" role="banner"><a href="#" id="p1logo">pebble</a><a href="#">Live</a><a href="#">Local</a><a href="#">Saved</a></div>
+<main class="p2fd" role="main"><div id="p2feed" role="feed" data-newest="1030">${Array.from({ length: 30 }, (_, i) => PEBBLE_POST(pebblePost(1030 - i))).join('')}</div></main>
+<script src="/pebble/app.js"></script>`);
+function pebbleApp() {
+  const P = (window.Pebble = window.Pebble || {});
+  const feed = document.getElementById('p2feed');
+  let newest = Number(feed.dataset.newest);
+  P.scrollToTop = () => window.scrollTo({ top: 0, behavior: 'instant' });
+  P.render = (p) => {
+    const d = document.createElement('div');
+    d.className = 'p3ps'; d.dataset.id = String(p.id);
+    d.innerHTML = '<div class="p3hd"><i></i><b></b><span></span></div><div class="p3tx"></div><div class="p3im"></div>';
+    d.querySelector('b').textContent = p.who; d.querySelector('.p3hd span').textContent = p.when; d.querySelector('.p3tx').textContent = p.text;
+    return d;
+  };
+  P.toast = (text) => {
+    const t = document.createElement('div');
+    t.className = 'p4ts'; t.textContent = text;
+    document.body.append(t);
+    setTimeout(() => t.remove(), 2500);
+  };
+  P.applyNew = (items) => {
+    for (const it of items) feed.prepend(P.render(it));
+    newest = Math.max(newest, ...items.map((x) => x.id));
+    P.toast(`${items.length} new post${items.length > 1 ? 's' : ''}`);
+    P.scrollToTop();
+  };
+  P.poll = async () => {
+    try {
+      const r = await fetch(`/api/pebble/new?after=${newest}`);
+      const j = await r.json();
+      if (j.items && j.items.length) P.applyNew(j.items);
+    } catch (e) { /* next time */ }
+  };
+  document.getElementById('p1logo').addEventListener('click', (e) => { e.preventDefault(); P.scrollToTop(); });
+  setInterval(() => P.poll(), 4000);
+}
+
 // ---- the X stand-in
 
 // The authenticated user (document.cookie twid) and authors.
@@ -600,6 +872,24 @@ async function startServers(dir) {
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/hearth.html') return send(200, 'text/html; charset=utf-8', HEARTH_PAGE());
     if (u.pathname === '/hearth-feed.html') return send(200, 'text/html; charset=utf-8', HEARTH_PAGE({ feed: true }));
+    // (the study's deep tasks: the pages, their apps' scripts, and their APIs)
+    if (u.pathname === '/streamly.html') return send(200, 'text/html; charset=utf-8', STREAMLY_PAGE());
+    if (u.pathname === '/streamly/app.js') return send(200, 'text/javascript', `(${streamlyApp})(${JSON.stringify(STREAMLY_EPS)});`);
+    if (u.pathname === '/api/streamly/play' && req.method === 'POST') {
+      let body = ''; req.on('data', (c) => { body += c; });
+      req.on('end', () => { let ep = 1; try { ep = Math.max(1, Math.min(STREAMLY_EPS.length, Number(JSON.parse(body).ep) || 1)); } catch { /* 1 */ } send(200, 'application/json', JSON.stringify({ ep, resumeAt: 0, title: STREAMLY_EPS[ep - 1] })); });
+      return undefined;
+    }
+    if (u.pathname === '/murmur.html') return send(200, 'text/html; charset=utf-8', MURMUR_PAGE());
+    if (u.pathname === '/murmur/app.js') return send(200, 'text/javascript', `(${murmurApp})();`);
+    if (u.pathname === '/api/murmur/timeline' && req.method === 'POST') {
+      let body = ''; req.on('data', (c) => { body += c; });
+      req.on('end', () => { let cursor = 0; try { cursor = Math.max(0, Math.min(20, Number(JSON.parse(body).cursor) || 0)); } catch { /* 0 */ } send(200, 'application/json', JSON.stringify({ posts: murmurPage(cursor), next: cursor < 20 ? cursor + 1 : null })); });
+      return undefined;
+    }
+    if (u.pathname === '/pebble.html') return send(200, 'text/html; charset=utf-8', PEBBLE_PAGE());
+    if (u.pathname === '/pebble/app.js') return send(200, 'text/javascript', `(${pebbleApp})();`);
+    if (u.pathname === '/api/pebble/new') { const after = Number(u.searchParams.get('after')) || 1030; return send(200, 'application/json', JSON.stringify({ items: [pebblePost(after + 1)] })); }
     // (the scrolling-feed task's next posts: two friends', a Sponsored one, and a friend's that says "sponsored" every other page)
     if (u.pathname === '/api/hearth-more' && u.search === '?ads=1' && req.method === 'POST') {
       const n = requests.filter((x) => x.url === '/api/hearth-more?ads=1').length;
@@ -680,4 +970,4 @@ document.addEventListener('cm-ping', (e) => d.setAttribute('data-pings', JSON.st
   };
 }
 
-module.exports = { startServers, timeline, SWEEP_EXPECT };
+module.exports = { startServers, timeline, SWEEP_EXPECT, murmurPage, murmurFollowing, MURMUR_PER_PAGE };

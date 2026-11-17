@@ -12,7 +12,7 @@ const { FirefoxDriver } = require('./lib/firefox');
 const { ChromeDriver } = require('./lib/chrome');
 // The sites setup turns TRIF on for (helper/lib/preinstalled.js SITES_ON).
 const SITES_START = ['amazon.com', 'google.com', 'instagram.com', 'x.com'];
-const { SWEEP_EXPECT } = require('./lib/server');
+const { SWEEP_EXPECT, murmurPage } = require('./lib/server');
 const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
@@ -1738,6 +1738,14 @@ class Scenario {
     const DOCS = ['AGENTS.md', 'TECHNIQUES.md', 'BOXED.md'];
     const show = (ref, f) => { const x = run('git', ['show', `${ref}:helper/workspace/${f}`], { cwd: I.REPO }); return x.status === 0 ? x.stdout : null; };
     const here = (f) => (fs.existsSync(path.join(I.REPO, 'helper', 'workspace', f)) ? fs.readFileSync(path.join(I.REPO, 'helper', 'workspace', f), 'utf8') : null);
+    // (the "dig" arm's passage, and the passage it replaces: null when this AGENTS.md doesn't have it as expected)
+    const DIG = `It runs in one of two places:
+
+- **TRIF's box** (\`--box\`; the default in a side-panel chat): the API a boxed mod has (BOXED.md): \`page.find\`, \`page.findAll\`, an element's \`.text\`, \`.attr()\`, \`.style(prop)\`, \`.rect()\`, \`.matches()\`, \`.children\` (a list); plus, in a run, what's typed in fields (\`el.value\`) and the data behind an element (\`el.pageData('props.post')\`). Use it to look at what's on screen: what's there, how many, where, how it's styled.
+- **The page's own world** (\`--page\`; the default from a terminal): \`document\`, \`window\`, the site's code, its globals, its framework's state, its network calls. **Use it to understand how the site works**: where the data comes from, what flags or settings the app reads, what its components hold, how a feature decides what to show. The best fixes often come from there (a setting the app already has, a field in its data, a function to wrap), so dig when the request is about behaviour or data rather than looks. In a side-panel chat it locks the site until the tab reloads: reading is unaffected, only sending is paused, so \`trif reload\` before you test anything that needs the site to send.
+`;
+    const boxPassage = (t) => { const m = t && /It runs in one of two places:\n[\s\S]*?\n(?=\n```sh\n)/.exec(t); return m ? m[0] : null; };
+    const digGuide = (t) => { const old = boxPassage(t); return old ? t.replace(old, DIG) : null; };
     const allGuides = {
       // 0.2 as released (2026-11-05): one AGENTS.md
       v02: { 'AGENTS.md': show('v0.2.4', 'AGENTS.md') },
@@ -1749,13 +1757,20 @@ class Scenario {
       // the 2026-11-17 head-to-head: main's guides (67c16d5) against the condensed ones on lean-guides (8334aa2)
       current: Object.fromEntries(DOCS.map((f) => [f, show('67c16d5', f)])),
       lean: Object.fromEntries(DOCS.map((f) => [f, show('8334aa2', f)])),
+      // the 2026-11-17 depth study: this checkout's guides (main's, eb92635 or later) as they are ("box"), and with
+      // the `trif run` passage of AGENTS.md's "The CLI" (from "It runs in one of two places:" to the end of that
+      // list) replaced by one that says what the page's own world is for ("dig"); both texts are in study.json
+      box: { 'AGENTS.md': here('AGENTS.md'), 'TECHNIQUES.md': here('TECHNIQUES.md'), 'BOXED.md': here('BOXED.md') },
+      dig: { 'AGENTS.md': digGuide(here('AGENTS.md')), 'TECHNIQUES.md': here('TECHNIQUES.md'), 'BOXED.md': here('BOXED.md') },
       // next to nothing: where mods go, and that trif --help exists
       none: { 'AGENTS.md': '# TRIF workspace\n\nMods are files in `sites/<site>/<mod>.js`. `trif --help` lists the commands for looking at and testing the user\'s page.\n' },
     };
     const names = (this.o.studyGuides || ['v02', 'pre', 'now', 'none']).filter((g) => allGuides[g]);
-    for (const g of names) if (!allGuides[g]['AGENTS.md']) { r.note(`--study: no AGENTS.md for ${g}`); return; }
+    for (const g of names) if (!allGuides[g]['AGENTS.md']) { r.note(`--study: no AGENTS.md for ${g}${g === 'dig' ? ' (the box passage isn\'t where it was)' : ''}`); return; }
     const sizes = Object.fromEntries(names.map((g) => [g, Object.values(allGuides[g]).reduce((n, t) => n + (t ? t.length : 0), 0)]));
     r.log(`--study guides (characters): ${JSON.stringify(sizes)}; model ${model}; ${repeats} round(s)`);
+    const commit = run('git', ['rev-parse', 'HEAD'], { cwd: I.REPO }).stdout.trim();
+    const arms = names.includes('dig') ? { commit, box: boxPassage(here('AGENTS.md')), dig: DIG } : { commit };
     const saved = Object.fromEntries(DOCS.map((f) => [f, fs.existsSync(path.join(this.trif, f)) ? fs.readFileSync(path.join(this.trif, f), 'utf8') : null]));
     const useGuide = (g) => {
       for (const f of DOCS) {
@@ -1851,6 +1866,91 @@ class Scenario {
           rightSponsored: right ? vis(right.querySelector('h3')) || [...right.querySelectorAll('a.x2ad')].some(vis) : null };
       }`);
       return { ...m, before, loadsMore: m.items >= before + 9 && !m.error, shot: shot && path.basename(shot) };
+    };
+
+    // ---- the deep tasks (server.js: Streamly, Murmur, Pebble)
+    const vis0 = `const vis = (e) => !!e && e.isConnected && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).opacity !== '0';`;
+    // autoplay: after a reload, episode 1 ends 6 s in; 15 s later is it still episode 1 (no up-next card shown, no
+    // error), and does picking episode 4 from the list still play it (a fix that blocks playing fails)
+    const measureAutoplay = async (label) => {
+      await this.cli(['reload', '--url', 'streamly.html']);
+      const ctx = await pageCtx('streamly.html');
+      const m = await this.d.eval(ctx, `async () => {
+        ${vis0}
+        const title = () => (document.getElementById('q2title') || {}).textContent || '';
+        const start = title(); let upSeen = false, endSeen = false; const t0 = Date.now();
+        while (Date.now() - t0 < 15000) {
+          if (vis(document.getElementById('q7un'))) upSeen = true;
+          if (vis(document.getElementById('q3end'))) endSeen = true;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        const after = title(); const err = document.getElementById('q3err');
+        const errShown = vis(err) ? err.textContent : null;
+        const four = document.querySelector('#q4eps a[data-ep="4"]');
+        if (four) four.click();
+        await new Promise((r) => setTimeout(r, 2500));
+        return { start, after, upSeen, endSeen, errShown, manual: title(), cfg: JSON.stringify((window.__APP_CONFIG__ || {}).features || null), pref: localStorage.getItem('sx:prefs') };
+      }`, [], { timeoutMs: 40000 });
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      return { ...m, stayed: /^Episode 1:/.test(m.after), manualWorks: /^Episode 4:/.test(m.manual), shot: shot && path.basename(shot) };
+    };
+    // follow: after a reload and two scrolls to the end, the posts the timeline loaded (the server's pages since
+    // the reload): every followed author's post shown, none of the others', no empty cells left, more loaded
+    const measureFollow = async (label) => {
+      const t0 = Date.now();
+      await this.cli(['reload', '--url', 'murmur.html']);
+      await sleep(2000);
+      const ctx = await pageCtx('murmur.html');
+      const pages = () => this.o.servers.requests.filter((q) => q.url === '/api/murmur/timeline' && q.method === 'POST' && q.time >= t0).length;
+      const before = pages();
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      for (let i = 0; i < 2; i++) {
+        await this.d.eval(ctx, `async () => { document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight; }`);
+        await sleep(1800);
+      }
+      const m = await this.d.eval(ctx, `async () => {
+        ${vis0}
+        const cells = [...document.querySelectorAll('#n2tl > *')];
+        return { error: !!document.querySelector('.n4er'), cells: cells.map((c) => {
+          const a = c.querySelector('a[href*="/murmur/status/"]'); const art = c.querySelector('article') || c;
+          const shown = vis(art) && art.getBoundingClientRect().height > 30 && vis(c.querySelector('.r-tx'));
+          return { id: a ? a.getAttribute('href').split('/').pop() : null, shown, h: vis(c) ? Math.round(c.getBoundingClientRect().height) : 0 };
+        }) };
+      }`);
+      const n = pages();
+      const loaded = []; for (let c = 0; c < n; c++) loaded.push(...murmurPage(c));
+      const shownIds = new Set(m.cells.filter((x) => x.shown).map((x) => x.id));
+      const fol = loaded.filter((p) => p.author.following), not = loaded.filter((p) => !p.author.following);
+      return { pagesBefore: before, pages: n, error: m.error, followed: fol.length, followedLeft: fol.filter((p) => shownIds.has(p.id)).length,
+        others: not.length, othersLeft: not.filter((p) => shownIds.has(p.id)).length, blank: m.cells.filter((x) => !x.shown && x.h > 4).length,
+        loadsMore: n > before && !m.error, shot: shot && path.basename(shot) };
+    };
+    // jump: after a reload, the page scrolled down to the 12th post; over 9 s (two new posts arrive) does that post
+    // stay where it was on screen, without the page going to the top even for a moment; then does the logo still
+    // take the page to the top (a fix that blocks every scrollTo fails)
+    const measureJump = async (label) => {
+      await this.cli(['reload', '--url', 'pebble.html']);
+      await sleep(1000);
+      const ctx = await pageCtx('pebble.html');
+      const m = await this.d.eval(ctx, `async () => {
+        const se = document.scrollingElement;
+        const posts = () => [...document.querySelectorAll('#p2feed [data-id]')];
+        const before = posts().length;
+        const anchor = posts()[12]; se.scrollTop = anchor ? anchor.offsetTop - 100 : 2400;
+        await new Promise((r) => setTimeout(r, 300));
+        const top0 = anchor ? Math.round(anchor.getBoundingClientRect().top) : null, y0 = Math.round(scrollY);
+        let minY = y0; const onScroll = () => { minY = Math.min(minY, scrollY); }; addEventListener('scroll', onScroll);
+        const t0 = Date.now();
+        while (Date.now() - t0 < 9000) { minY = Math.min(minY, scrollY); await new Promise((r) => setTimeout(r, 50)); }
+        removeEventListener('scroll', onScroll);
+        const top1 = anchor && anchor.isConnected ? Math.round(anchor.getBoundingClientRect().top) : null, y1 = Math.round(scrollY);
+        const newIn = posts().filter((p) => Number(p.dataset.id) > 1030).length;
+        const logo = document.getElementById('p1logo'); if (logo) logo.click();
+        await new Promise((r) => setTimeout(r, 600));
+        return { before, y0, y1, minY: Math.round(minY), top0, top1, shift: top0 !== null && top1 !== null ? top1 - top0 : null, newIn, yAfterLogo: Math.round(scrollY) };
+      }`, [], { timeoutMs: 40000 });
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      return { ...m, stayed: m.shift !== null && Math.abs(m.shift) < 80, neverJumped: m.minY > 500, topWorks: m.yAfterLogo < 5, shot: shot && path.basename(shot) };
     };
 
     // ---- how a run worked, from its log in the scratch home (the newest one)
@@ -1955,17 +2055,22 @@ class Scenario {
         'make the right column much thinner and let the posts use the space it frees up',
       ], measure: measureHearth },
       { key: 'feed', file: 'hearth-feed.html', turns: ['hide the sponsored posts in my feed'], measure: measureFeed },
+      { key: 'autoplay', file: 'streamly.html', turns: ['stop it from playing the next episode by itself'], measure: measureAutoplay },
+      { key: 'follow', file: 'murmur.html', turns: ["hide posts from accounts I don't follow"], measure: measureFollow },
+      { key: 'jump', file: 'pebble.html', turns: ['stop the feed jumping back to the top when new posts come in'], measure: measureJump },
     ].filter((t) => !this.o.studyTasks || this.o.studyTasks.includes(t.key));
 
     const baselines = {};
-    for (const file of ['promos.html', 'hearth.html', 'hearth-feed.html']) {
-      if (!tasks.some((t) => t.file === file)) continue;
+    for (const file of ['promos.html', 'hearth.html', 'hearth-feed.html', 'streamly.html', 'murmur.html', 'pebble.html']) {
+      const task = tasks.find((t) => t.file === file);
+      if (!task) continue;
       await openPage(file);
-      baselines[file] = file === 'hearth.html' ? await measureHearth('baseline') : file === 'hearth-feed.html' ? await measureFeed('feed-baseline') : await measurePromos();
+      baselines[file] = file === 'hearth.html' ? await measureHearth('baseline') : file === 'hearth-feed.html' ? await measureFeed('feed-baseline')
+        : file === 'promos.html' ? await measurePromos() : await task.measure(`${task.key}-baseline`);
     }
     r.log(`--study baselines: ${JSON.stringify(baselines)}`);
     const rows = [];
-    const writeOut = () => fs.writeFileSync(this.r.file('study.json'), JSON.stringify({ model, sizes, baselines, rows }, null, 2));
+    const writeOut = () => fs.writeFileSync(this.r.file('study.json'), JSON.stringify({ model, sizes, arms, baselines, rows }, null, 2));
     let seed = 7;
     const shuffle = (a) => { const x = [...a]; for (let i = x.length - 1; i > 0; i--) { seed = (seed * 16807) % 2147483647; const j = seed % (i + 1); [x[i], x[j]] = [x[j], x[i]]; } return x; };
     for (let rep = 0; rep < repeats; rep++) {

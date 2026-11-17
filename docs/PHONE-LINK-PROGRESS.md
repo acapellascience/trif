@@ -51,7 +51,7 @@ iPhone side (needs ios-poc free):
 - `tests/phone-link-remote.test.js`: 8 tests, the real Store, Server, Runs and Remote in-process on 127.0.0.1
   with the stand-in phone and agent. The stand-in agent moved to `tests/phone-link-agent.js` (shared with the
   run test). All phone-link tests plus stage, phone, run-folders, codex-sandbox and agents: 175 pass locally
-  (43 s). CI: see below.
+  (43 s). CI green for 71fe8e8 on the first attempt (the commit before it failed: see CI below).
 
 ## Earlier rounds
 
@@ -72,7 +72,11 @@ iPhone side (needs ios-poc free):
 
 ## CI
 
-- Round 6: CI_PLACEHOLDER
+- Round 6, 71fe8e8: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43994465011
+  (911 tests, 904 passed, 7 skipped, 0 failed; all 8 remote tests ran there). The commit before it, 766ae0d,
+  failed (run 43993766535: 901 passed, 3 failed): the clickjacking guard's timing check and the phone view's
+  "the site sees an iPhone in that tab only" (both browser tests this branch doesn't touch, both passed in the
+  next run), and this round's own conversation test, on timing (fixed in 71fe8e8: see the notes).
 - Round 5, a6878b0: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43971467309
   (903 tests, 896 passed, 7 skipped, 0 failed; all 10 remote-run tests ran there)
 - Round 4, 0bd5bdc: success on the first attempt, https://github.com/acapellascience/trif/actions/runs/43967487962

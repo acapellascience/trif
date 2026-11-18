@@ -682,3 +682,23 @@ said only by its light's description (read by VoiceOver; no hover on a phone). D
 | Under a free mod's row, right after its switch went on (or its tier's On), before the page had loaded with it | **Can't run here on iPhone: this page didn't let it start.** flashed for a moment | nothing; the error shows only once the page has loaded with the mod on and its start hasn't come within 2 s of the page finishing |
 | A mod's light, switched on since the page loaded (the page loads again at once, unless it's playing) | Not running on this page | **Starts when this page loads again** |
 | A mod's light, the page loaded with it, its start not in yet | Not running on this page | **Starting on this page** |
+
+## Unread counts instead of notifications (added 11-18, Tim: "show the sites' own unread counts")
+
+Drafts for Tim. The counts are the sites' own, read from their page titles ("(3) Home / X", "Inbox (5) - … - Gmail");
+on a card the count is taken out of the title, so it isn't said twice.
+
+| Where | Old | New (draft for Tim) |
+|---|---|---|
+| A tab card's top left, beside the robot's badge, when its site's title has a count | — | a small grey pill with the number: **3**, **20+** (past 999: **999+**) |
+| That pill, for VoiceOver | — | **{n} unread** |
+| A tab card's title when its site's title has a count | (3) Home / X | Home / X (the count is in the pill) |
+| The ⋯ menu, a switch under "Hide the full screen button" (on at first) | — | **Show unread counts** |
+| TRIF's own icon on the Home Screen | — | iOS's red badge with the total of the Home Screen icon tabs' counts (only with iOS's permission) |
+| Before iOS's question, once, the first time a Home Screen icon tab has a count: title | — | **Unread counts on TRIF’s icon** |
+| … its words | — | **Your Home Screen sites have unread messages. TRIF can show how many on its own icon. iOS will ask about notifications next: TRIF uses only the number on the icon, never alerts or sounds.** |
+| … its buttons | — | **Not now** · **Continue** (Continue → iOS's own "“TRIF” Would Like to Send You Notifications" question, asked for the badge only) |
+
+Not new words, but changed behind them: the chat's and the model download's existing notification questions now ask
+for the badge too (iOS asks only once, and its question already says "alerts, sounds, and icon badges"). Badge
+refused or switched off in iOS's Settings: TRIF says nothing; the cards still show the counts.

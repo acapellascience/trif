@@ -356,6 +356,10 @@ extension Model {
             if let b = step["banner"] as? String, let first = p.banners.first {
                 switch b { case "add": p.addFromBanner(first); case "go": p.goToSite(first.link); case "open": p.openChat(first.link); default: p.dismissBanner(first) }
             }
+            // ({"unread": 1}: each tab's unread count from its title, the icon tabs, TRIF's icon badge and the permission;
+            // {"unreadanswer": true|false}: TRIF's words before iOS's question answered Continue / Not now)
+            if step["unread"] != nil { out = await UnreadCounts.shared.describe() }
+            if let a = step["unreadanswer"] as? Bool { UnreadCounts.shared.answer(allow: a); out = "answered \(a ? "Continue" : "Not now")" }
             if step["tabbadges"] != nil { out = browser.tabs.enumerated().map { "\($0.offset) \($0.element.host.nonEmpty ?? "-"): \(p.badge(for: $0.element.id).map(\.rawValue) ?? "none")" }.joined(separator: "\n") }
         }
         if step["memwarn"] != nil { NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: UIApplication.shared) }
@@ -423,6 +427,9 @@ struct ContentView: View {
     @State private var askingProject = false
     /// ⋯'s Hide the full screen button (off at first): the two-finger hold is then the only way out.
     @AppStorage("fullScreenButtonHidden") private var hideExitButton = false
+    /// ⋯'s Show unread counts (on at first): the sites' own counts on the tab cards and TRIF's icon (UnreadCounts).
+    @AppStorage(UnreadCounts.settingKey) private var showUnread = true
+    @ObservedObject private var unread = UnreadCounts.shared
     @ObservedObject private var folder = FolderWatch.shared
     @State private var importing = false
 
@@ -461,6 +468,15 @@ struct ContentView: View {
                          message: Text(o.why == "ended" ? "Its page stopped twice in three minutes while mods ran on it. Switch them off?" : "Its page has been busy most of the time for 40 seconds while mods ran on it. Switch them off?\(name.map { " \($0) changed most recently." } ?? "")"),
                          primaryButton: .destructive(Text("Switch off its mods")) { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged(why: "a runaway page's mods switched off") },
                          secondaryButton: .cancel(Text("Not now")) { browser.safety.offer = nil })
+        }
+        .onChange(of: showUnread) { _, on in unread.settingChanged(on) }
+        // (before iOS's question, once, at the first count on a Home Screen icon tab: what the badge is and that
+        // nothing else comes of it; Continue asks iOS for the badge only. UnreadCounts)
+        .alert("Unread counts on TRIF’s icon", isPresented: $unread.asking) {
+            Button("Not now", role: .cancel) { unread.answer(allow: false) }
+            Button("Continue") { unread.answer(allow: true) }
+        } message: {
+            Text("Your Home Screen sites have unread messages. TRIF can show how many on its own icon. iOS will ask about notifications next: TRIF uses only the number on the icon, never alerts or sounds.")
         }
     }
 
@@ -835,6 +851,8 @@ struct ContentView: View {
                 Text("Or hold two fingers on the page")
             }
             Toggle(isOn: $hideExitButton) { Label("Hide the full screen button", systemImage: "eye.slash") }
+            // (the sites' own unread counts, from their titles: the tab cards' badges and TRIF's icon's, Tim 11-18)
+            Toggle(isOn: $showUnread) { Label("Show unread counts", systemImage: "number.circle") }
             // (the Home Screen icons put aside with Add to Home Screen later, all added in one install)
             if !iconQueue.items.isEmpty {
                 Button { onTab { showIconQueue = true } } label: { Label("Home Screen icons to add (\(iconQueue.items.count))…", systemImage: "square.grid.2x2") }

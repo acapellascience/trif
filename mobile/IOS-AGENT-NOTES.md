@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (449 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (456 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -65,7 +65,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   tab loaded again by the app, logged with that cause), videos (each tab's video state as kept, and the note shown),
   rebuild ({"n": 5, "on": true}: every mod on first, then n real changes (one mod switched off/on) in a row: each call's
   main-thread ms, when all were in, the last rebuild's parts and the hangs meanwhile; an odd n leaves the first mod off), hashtest ("/path", "old": the
-  reading before 11-18: LocalModels.sha256 at .utility with the app's footprint sampled every 0.1 s)…
+  reading before 11-18: LocalModels.sha256 at .utility with the app's footprint sampled every 0.1 s), unread (each
+  tab's count from its title, icon tab or not, the card's title, the icon total, the badge set, the permission),
+  unreadanswer (true/false: TRIF's words before iOS's question answered Continue / Not now)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -127,6 +129,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mobile/test/speechtext-check/main.swift; ~3 s).
 - Video resume's rules (VideoResume.swift) on the Mac: `node --test mobile/test/videoresume.test.js` (swiftc with
   mobile/test/videoresume-check/main.swift; the page's JS videoId compared with the Swift one in node; ~2 s).
+- Unread counts' title rule on the Mac: `node --test mobile/test/unreadcount.test.js` (mobile/shared/unread-count.js
+  against mobile/shared/unread-cases.json, then UnreadTitle.swift built by swiftc with mobile/test/unreadcount-check
+  giving the same answers on the cases and 3000 random titles; ~2 s). Stand-in page: mobile/shared/pages/unread.html
+  (`?n=4`, `window.__count(n | "whole title")`, `?cycle=s`); serve.js on 8377 and 8378 (127.0.0.1:8378 = another tab
+  on the same host). An icon tab: `simctl openurl 'trif://open?url=http%3A%2F%2Flocalhost%3A8377%2Funread.html%3Fn%3D1&app=1'`.
+  Notification permission: `simctl privacy` has no notifications; uninstall resets it, the question is tapped.
 - What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
   mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
@@ -345,6 +353,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`make-icon.js --cover`: robot-shaded.svg drawn from the vector at 256 / 384 px, a 128 pt picture cropped to the
   robot with 2 pt round it, the robot itself 124 pt) on LaunchBlack.colorset, also Info.plist's UILaunchScreen
   (INFOPLIST_KEY_UILaunchScreen_Generation = NO in the pbxproj and make-project.rb).
+- Unread counts (Tim, 11-18): UnreadTitle.swift (no UI; built for the Mac too) = mobile/shared/unread-count.js, the
+  shared rule (Android's to use; there's no mobile/shared/core or docs/MOBILE-BEHAVIOUR.md yet: put it there once there
+  is). `Tab.unread` (read in title's didSet; `cardLabel(counts:)` the title without the count). UnreadCounts.swift:
+  `UnreadCounts.shared` (browser; `changed()` coalesces 0.3 s → `update()`: the sum over `iconTabs(b)` (iconTabs map,
+  on its site) → getNotificationSettings → `apply`: not asked → `asking` (ContentView's alert, once: UserDefaults
+  unreadBadgeAsked, cleared when the setting is switched on again) → `answer(allow:)` → requestAuthorization([.badge]);
+  allowed with Badges on → `setBadgeCount` (only on change); refused / Badges off → nothing). Called from Tab.title/url
+  didSet, Browser.init (after restoreTabs), close, openFullScreen. `UnreadBadge` (TabCard's top left, in an HStack after
+  ChatGlyph). Setting: ⋯ → Show unread counts (`showUnreadCounts`, default on; TabCard reads it by @AppStorage).
+  Diagnostics kind "unread" (numbers only, never titles: Gmail's has the address).
 - make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).
@@ -676,7 +694,32 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   the checked file in place), by mmap (LLAMA_LOAD_MODE_MMAP). A download answered ≥ 300 fails at once (didWriteData:
   cancelled, "the download failed: the server answered N"), never logged as progress.
 
+- Unread counts instead of notifications (Tim, 11-18; words drafts): the sites' own counts from their page titles (a
+  count at the very start "(3) …" / "(20+) …", "Inbox (N)" anywhere, "(N unread)" anywhere; a bracketed number elsewhere
+  or a year at the start "(2024) …" is the real title's). A grey pill beside the robot's badge on each card (never red),
+  the count taken out of the card's title. TRIF's icon badge = the sum over Home Screen icon tabs (on their sites), with
+  `.badge` permission only, asked once at the first count, after TRIF's own alert; refused → no icon badge. Web Clip
+  icons can't carry a badge of their own (iOS badges apps only): the icon tabs' cards and TRIF's icon carry it. The
+  existing chat-reply and model-download questions ask for `.badge` too now (my call: iOS asks only once, so whichever
+  asks first must include it, or a person who allowed chat notifications could never get the icon badge without going
+  to Settings; the iOS question's words are the same either way). No background refresh (my call, per Tim's "only if
+  cheap"): BGAppRefreshTask would have to load each icon site's whole page signed in (X, Facebook, Gmail write the count
+  with their own scripts, not in the HTML). Counts are kept as the app leaves (the badge stays, titles saved in
+  tabs.json); tabs behind are let go after 20 s, so their counts stand still until shown again.
+
 ## Open and unverified
+
+- Unread counts (11-18): Simulator only (shots 450-456): stand-in unread.html as an icon tab: TRIF's alert at the first
+  count (450), Continue → iOS's question (451) → Allow: badges on, alerts "not supported" (badge only), icon badge 1 → 4
+  (452, the Home Screen) → none (0); the cards with the robot's badge and the pill (453), titles without the count
+  (454: "Stand-in", "Inbox - tim@example.com - Gmail"); ⋯ → Show unread counts off (455; a real tap) → badge 0, cards
+  with the whole titles and no pills (456); relaunch: every tab's count back from tabs.json before any page loaded, badge
+  kept; a fresh install, Continue → Don't Allow: no badge, nothing asked again, cards still counted. Not tried: real
+  sites (X's "(3) Home / X", Facebook, Gmail, LinkedIn on a phone, signed in), Gmail in other languages (only English
+  "Inbox" is read), a page's title changing while the app is in the background (WebKit suspends it; the badge keeps
+  the last), the Not now button (not tried at all), a phone where chats' notifications were allowed
+  before this build (Badges is then whatever iOS gave for [.alert, .sound]: likely off; turn it on in Settings ›
+  Notifications › TRIF; the "unread" step / Diagnostics say "badges off for TRIF in Settings").
 
 - Links to other apps (11-18): Simulator only (shots 389-400, 413). Checked: tapped tel:/mailto: (no app in the
   Simulator: the note), sms: (Messages opened), maps: target=_blank (Maps, no new tab), fb-messenger: (the note), a

@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stand-in</title>
+<style>body { font: 17px -apple-system, sans-serif; margin: 24px; } #now { font-size: 28px; margin: 16px 0; }</style>
+<!-- A site with an unread count in its title, as X's "(3) Home / X" (both phone apps' unread counts, 11-18).
+     ?n=4: "(4) Stand-in" from the start. window.__count(n): the title now "(n) Stand-in", or "Stand-in" for 0/null;
+     a string sets the whole title. ?cycle=s: (1), (4), none, in turn every s seconds. -->
+<h1>Stand-in</h1>
+<p>The page's title holds its unread count.</p>
+<div id="now"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  window.__count = (n) => {
+    document.title = typeof n === 'string' ? n : n ? `(${n}) Stand-in` : 'Stand-in';
+    document.getElementById('now').textContent = document.title;
+    return document.title;
+  };
+  window.__count(q.has('n') ? Number(q.get('n')) : 0);
+  if (q.has('cycle')) {
+    const steps = [1, 4, 0];
+    let i = 0;
+    setInterval(() => window.__count(steps[i++ % steps.length]), Number(q.get('cycle')) * 1000);
+  }
+</script>

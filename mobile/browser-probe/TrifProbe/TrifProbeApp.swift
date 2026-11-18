@@ -1,6 +1,7 @@
 // TRIF Probe (browser): a test app that asks what a TRIF made as its own iPhone browser could do.
 // Not TRIF. See mobile/README.md for what each part is for and what to send back.
 
+import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
@@ -74,6 +75,8 @@ final class Model: ObservableObject {
         Model.barsRef = self.bars
         Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
         PhoneSyncModel.shared.applied = { ids in browser.syncApplied(ids) }
+        SpeechInput.pauseMedia = { BackgroundPlay.pauseForTalk(browser) }
+        SpeechInput.resumeMedia = { BackgroundPlay.resumeAfterTalk(browser) }
         PhoneSyncModel.shared.start(store: browser.mods)
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
                                         "com.trif.probe.step" as CFString, nil, .deliverImmediately)
@@ -117,6 +120,8 @@ final class Model: ObservableObject {
 extension Model {
     static var stepRunner: (() -> Void)?
     static weak var pane: ClaudePane?
+    /// (development: the robotHold step, as ContentView's gesture on the robot)
+    static let robotHoldStep = Notification.Name("trif.robotHoldStep")
     static weak var barsRef: BarState?
 
     static func runStep(browser: Browser, panel: ModsPanel) async {
@@ -234,8 +239,40 @@ extension Model {
         // recorded file; {"micpress": 1} / {"micrelease": 1} the box's microphone pressed and let go)
         if step["speech"] != nil { SpeechInput.shared.check(); out = SpeechInput.shared.describe }
         if let f = step["speechfile"] as? String { out = await SpeechInput.shared.recognize(file: URL(fileURLWithPath: f)) }
-        if step["micpress"] != nil { SpeechInput.shared.press { words in Model.pane?.quickAsk(words) }; try? await Task.sleep(nanoseconds: 300_000_000); out = SpeechInput.shared.describe }
-        if step["micrelease"] != nil { SpeechInput.shared.release(); out = SpeechInput.shared.describe }
+        // ({"mictap": 1} pressed and lifted at once: tap-listening; {"micstop": 1} the stop tap (= micrelease);
+        // {"micx": 1} the ✕; {"miccancel": 1} a slide away; {"micinterrupt": 1} an audio interruption beginning, as a
+        // call's; {"micstate": 1} the phase, the words, the box, what was asked; {"micdraft": "words"} the box's words;
+        // {"robothold": 1 | 0 | "away"} the robot held / let go / let go after sliding away, as ContentView's gesture)
+        let speech = SpeechInput.shared
+        if step["micpress"] != nil || step["mictap"] != nil {
+            speech.press { words in Model.pane?.quickAsk(words) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if step["mictap"] != nil { speech.keepListening() }
+            out = speech.state
+        }
+        if let d = step["micdraft"] as? String { speech.draft = d; out = speech.state }
+        if step["micrelease"] != nil || step["micstop"] != nil { speech.release(); try? await Task.sleep(nanoseconds: 3_000_000_000); out = speech.state }
+        if step["micx"] != nil { speech.keep(); out = speech.state }
+        if step["miccancel"] != nil { speech.cancel(); out = speech.state }
+        if step["micinterrupt"] != nil {
+            NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(),
+                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            out = speech.state
+        }
+        if let h = step["robothold"] {
+            NotificationCenter.default.post(name: Model.robotHoldStep, object: nil, userInfo: ["hold": "\(h)"])
+            try? await Task.sleep(nanoseconds: (("\(h)" == "1") ? 900 : 3_000) * 1_000_000)
+            out = speech.state
+        }
+        if step["micstate"] != nil { out = speech.state }
+        // ({"modsstale": 1} each tab: its page, shown or not, and whether the mods running there changed since it loaded)
+        if step["modsstale"] != nil {
+            out = browser.tabs.enumerated().map { i, t in
+                let stale = t.modsLoaded.map { browser.mods.signature($0.url) != $0.signature }
+                return "\(i) \(t === browser.current ? "shown" : "behind") \(t.webView.url?.absoluteString ?? "-") \(stale == nil ? "not loaded" : stale! ? "stale (loads again when shown)" : "up to date")"
+            }.joined(separator: "\n")
+        }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
         // ({"iconqueue": {…the same as iconprofile}}: the shown page's icon put on the list of icons waiting;
@@ -479,6 +516,8 @@ struct ContentView: View {
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
                     if holdTalk { HoldTalkPill(away: holdAway).padding(.bottom, 10).transition(.opacity.combined(with: .move(edge: .bottom))) }
+                    // (a hold stopped by a call, the app left, an error: nothing asked, the words kept; a tap shows them)
+                    if !holdTalk { KeptTalkSlot { closeCovers(); showChatList = true } }
                     if pane.shown && !browser.status.isEmpty && !browser.fullScreen {
                         Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
                             .modifier(NoteStyle(seconds: 2, key: browser.status) { browser.status = "" })
@@ -597,6 +636,14 @@ struct ContentView: View {
         }
         .onChange(of: modsPanel.wantsImport) { _, want in if want { showMods = false; importing = true; modsPanel.wantsImport = false } }
         .onOpenURL { url in openLink(url) }
+        // (development: the robotHold step holds and lets go of the robot as the finger would)
+        .onReceive(NotificationCenter.default.publisher(for: Model.robotHoldStep)) { n in
+            switch n.userInfo?["hold"] as? String {
+            case "1": robotHold()
+            case "away": holdAway = true; robotLift()
+            default: robotLift()
+            }
+        }
         // (the icon check's way in, Model.iconCheck: UIApplication.open of the app's own scheme asks "Open in …?" first)
         .onAppear { ContentView.openForCheck = { url in openLink(url) } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in
@@ -832,6 +879,11 @@ struct ContentView: View {
             if let m = ModLinkInURL.read(url) { closeCovers(); Task { await browser.offerFiles([(m.name, m.text)], from: "a code") } }
             else { browser.status = "That code's mod couldn't be read: it may be cut short or damaged." }
         }
+        else if url.host?.lowercased() == "settings", url.scheme?.lowercased() == "trif" {
+            // (Tim, 11-18: the clip page's Open Settings, after Safari downloaded the profile: TRIF's own page in
+            // Settings by iOS's public way, as the steps' button; the tab, the covers and the leaving cover untouched)
+            ContentView.openSettings("trif://settings")
+        }
         else if let site = TrifLink.target(url) {
             // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it;
             // likewise the list of icons waiting, if they came from its profile, which also clears the list)
@@ -844,6 +896,18 @@ struct ContentView: View {
             if TrifLink.wantsFullScreen(url) { browser.openFullScreen(site) } else { browser.openFromIcon(site) }
         }
         else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
+    }
+    /// TRIF's page in Settings (UIApplication.openSettingsURLString, public; never prefs: links). At a cold launch the
+    /// scene may not take it yet: tried again once after 0.6 s.
+    static func openSettings(_ why: String) {
+        guard let u = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(u) { ok in
+            Diagnostics.shared.log("link", "\(why): TRIF's page in Settings \(ok ? "opened" : "not opened, trying again")")
+            guard !ok else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                UIApplication.shared.open(u) { ok in Diagnostics.shared.log("link", "\(why): TRIF's page in Settings \(ok ? "opened" : "not opened")") }
+            }
+        }
     }
     static var openForCheck: ((URL) -> Void)?
     /// What covers the page, by name ("none"), for the dev step {"view": 1} and the icon check (Model.iconCheck).
@@ -903,7 +967,8 @@ struct ContentView: View {
             showChatList = true
             return
         }
-        speech.press { words in closeCovers(); pane.quickAsk(words) }
+        speech.choose()
+        speech.press(robot: true) { words in closeCovers(); pane.quickAsk(words) }
         guard speech.phase == .listening else { showChatList = true; return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         holdAway = false

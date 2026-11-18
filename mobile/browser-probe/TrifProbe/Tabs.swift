@@ -32,6 +32,10 @@ final class Tab: ObservableObject, Identifiable {
     /// What to restore when the tab is first shown: its back/forward list, else its address.
     var savedState: Data?
     var savedURL: URL?
+    /// The page's address when it committed and what ran on it then (ModStore.signature): a change to the mods
+    /// that alters what runs there reloads it only once it's the tab shown (Tim, 11-18: a mod added for another site
+    /// reloaded the YouTube video being watched).
+    var modsLoaded: (url: String, signature: String)?
     var started = false
     /// Its page was last loaded as a computer's (Request Desktop Website, Browser.desktopHosts).
     var desktop = false

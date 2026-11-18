@@ -68,6 +68,7 @@ enum PendingLink {
         if link.isFileURL { return "a file (\(link.pathExtension))" }
         guard link.scheme?.lowercased() == "trif" else { return "a \(link.scheme ?? "?"): link" }
         if link.host?.lowercased() == "add" { return "a mod's trif://add link" }
+        if link.host?.lowercased() == "settings" { return "trif://settings (TRIF's page in Settings)" }
         guard let site = TrifLink.target(link) else { return "a trif:// link that isn't an http(s) site" }
         let set = TrifLink.set(link)
         return "a Home Screen icon's link to \(Diagnostics.place(site))\(TrifLink.wantsFullScreen(link) ? "" : " (an older icon, not full screen)")\(set.map { ", from the profile of several icons \($0)" } ?? "")"
@@ -942,7 +943,7 @@ struct IconHandoffSteps: View {
         switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return false }
     }
     private var settingsSteps: [String] {
-        ["Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management).",
+        ["Tap Open Settings, then Profile Downloaded near the top (if TRIF Probe's own page opens, go back to the main Settings page first).",
          "Tap Install, enter your passcode, then Install again.",
          one ? "The icon appears on your Home Screen." : "The icons appear on your Home Screen."]
     }
@@ -959,6 +960,12 @@ struct IconHandoffSteps: View {
         case .fetched, .pageBack: return 1
         default: return 0
         }
+    }
+    /// Next is Settings (Safari has the profile, or it's saved to Files): the Open Settings button.
+    private var atSettings: Bool {
+        if handoff.installed { return false }
+        if filesRoute { return handoff.savedToFiles }
+        return handoff.state == .fetched || handoff.state == .pageBack
     }
     private var didntGet: String { one ? "Safari didn't get the icon. Save it to Files instead." : "Safari didn't get the icons. Save them to Files instead." }
     private func wrong(_ b: String) -> String { "\(b) opened instead of Safari, and only Safari can add \(one ? "the icon" : "icons"). Save \(one ? "it" : "them") to Files instead." }
@@ -1031,6 +1038,14 @@ struct IconHandoffSteps: View {
     }
 
     @ViewBuilder private var buttons: some View {
+        if atSettings {
+            // (Tim, 11-18: iOS's public way only, UIApplication.openSettingsURLString: TRIF's own page in Settings, from
+            // which the main page with Profile Downloaded is a back tap or two; never the private prefs: links)
+            Button {
+                ContentView.openSettings("the icon steps' Open Settings")
+            } label: { Text("Open Settings").bold().frame(maxWidth: 240) }
+            .buttonStyle(.borderedProminent)
+        }
         if !handoff.installed {
             Button {
                 guard let job = make() else { failed = true; return }
@@ -1042,7 +1057,7 @@ struct IconHandoffSteps: View {
                 Text(filesRoute ? (handoff.savedToFiles ? "Save it again" : "Save to Files") : (handoff.state == .idle ? addTitle : "Download it again"))
                     .bold().frame(maxWidth: 240)
             }
-            .buttonStyle(.borderedProminent)
+            .modifier(ProminentUnless(plain: atSettings))
             .disabled(!ready || handoff.state == .starting)
             if !filesRoute && (safariFailed || started) {
                 Button {
@@ -1300,5 +1315,13 @@ struct WebClipSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
         .padding(.horizontal, 16)
+    }
+}
+
+/// The steps' first button: the prominent one, unless Open Settings is (then plain bordered).
+private struct ProminentUnless: ViewModifier {
+    let plain: Bool
+    func body(content: Content) -> some View {
+        if plain { content.buttonStyle(.bordered) } else { content.buttonStyle(.borderedProminent) }
     }
 }

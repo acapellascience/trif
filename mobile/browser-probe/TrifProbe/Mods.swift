@@ -349,6 +349,20 @@ final class ModStore: ObservableObject {
         }
     }
 
+    /// What runs on a page at `url`, as one string (each mod running there and the version of it that runs): a page
+    /// loaded under another signature loads again to run the change, once it's the tab shown (Browser.refreshIfStale).
+    func signature(_ url: String) -> String {
+        running(on: url).map { m -> String in
+            var h = Hasher()
+            if m.held, let r = m.ran { h.combine(r.script); h.combine(r.world); h.combine(r.at); h.combine(r.style ?? "") }
+            else { h.combine(m.script); h.combine(m.world); h.combine(m.at); h.combine(m.styleScript) }
+            // (what it's been allowed, in case the runtime reads it rather than the script)
+            for (k, v) in m.allowed.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+            for (k, v) in m.powerArgs.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+            return "\(m.id):\(h.finalize())"
+        }.sorted().joined(separator: ",")
+    }
+
     /// The scripts every page gets for the mods: SES and TRIF's sandbox runtime first in the box world when a boxed
     /// mod may run, then each mod that's on and not held (a change on hold: the version before), behind a check of
     /// the sites it's switched off on, and the sites whose tier is off.

@@ -323,7 +323,7 @@ sha256>]` (a QR code's link): unpacked (256 KB at most), checked, offered the sa
 
 Full screen (Browser.setFullScreen, TrifProbeApp.swift FullScreenNote and FullScreenExit): a tab's page with no browser
 chrome (no bars, no pull-down, no pointing at parts of the page), each tab's own (`fullScreenTabs`, by tab id). Two
-fingers held still on the page for 0.6 s switch it either way, on any tab (a two-finger tap is too short; a pinch is
+fingers held still on the page for 0.3 s (0.6 before 11-18) switch it either way, on any tab (a two-finger tap is too short; a pinch is
 refused, as each finger must stay within 24 points of where it came down: the long press alone measures only their
 centre; a tap the lifting fingers make is let go for 0.8 s); the ⋯ menu's Full screen does too. A note says which, at the
 top in full screen; the first time, how to switch back. A small exit button beside the clock at the foot of the status

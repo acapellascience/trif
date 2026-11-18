@@ -422,7 +422,7 @@ final class SpeechInput: ObservableObject {
     /// The language's name, for "not on this iPhone".
     static var language: String { Locale.current.localizedString(forIdentifier: (recognizer()?.locale ?? Locale.current).identifier) ?? "this language" }
     static let notOnDevice = "This iPhone can't recognise speech in \(language) by itself, so TRIF doesn't listen. Type instead, or use the keyboard's dictation."
-    static let refusedWords = "TRIF can't hear you: allow the Microphone and Speech Recognition for TRIF Probe in Settings. You can still type."
+    static let refusedWords = "TRIF can't hear you: allow the Microphone and Speech Recognition for TRIF in Settings. You can still type."
 
     /// iOS 26's analyzer, when its model is on this iPhone (found by `choose`).
     private var analyzerChoice: (kind: String, locale: Locale, format: AVAudioFormat)?

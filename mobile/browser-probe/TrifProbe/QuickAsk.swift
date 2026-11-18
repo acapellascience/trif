@@ -183,12 +183,41 @@ struct QuickAskBox: View {
     }
 
     private func send() {
-        let t = speech.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
-        speech.draft = ""
-        speech.stoppedNote = nil
         focused = false
+        QuickSend.send(ask)
+    }
+}
+
+/// Sending what's in the box: its arrow, and the list's Send at the top right (Tim, 11-18: "Done" read as cancelling;
+/// Send does exactly what the arrow does). While listening by a tap, Send is the stop that asks what was heard.
+@MainActor enum QuickSend {
+    static func canSend(_ s: SpeechInput) -> Bool {
+        switch s.phase {
+        case .listening: return s.tapMode && !s.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .finishing: return false
+        default: return !s.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+    static func send(_ ask: (String) -> Void) {
+        let s = SpeechInput.shared
+        if s.phase == .listening { if s.tapMode { s.release() }; return }
+        let t = s.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        s.draft = ""
+        s.stoppedNote = nil
         ask(t)
+    }
+}
+
+/// The list's Send (top right): enabled when there's something to send.
+struct QuickSendButton: View {
+    let ask: (String) -> Void
+    @ObservedObject private var speech = SpeechInput.shared
+    var body: some View {
+        Button("Send") { QuickSend.send(ask) }
+            .bold()
+            .disabled(!QuickSend.canSend(speech))
+            .accessibilityHint("Sends what's in the box")
     }
 }
 
@@ -299,6 +328,8 @@ struct KeptTalkPill: View {
 /// "Working: <request>…", then "Done · Undo" (or "Replied"); a tap opens the chat.
 struct QuickPill: View {
     let quick: QuickAsk
+    /// The strip's chat being filled behind the tab (waitingSend, the strip not in yet).
+    var preparing = false
     let open: () -> Void
     let undo: () -> Void
     let dismiss: () -> Void
@@ -323,6 +354,9 @@ struct QuickPill: View {
             case .failed(let why):
                 Image(systemName: "exclamationmark.circle").foregroundStyle(Color.trifCoral)
                 Text(why).lineLimit(2)
+            case .waitingSend where preparing:
+                ProgressView().controlSize(.mini)
+                Text("Putting it in \(quick.service)…").lineLimit(1)
             case .waitingSend, .card:
                 EmptyView()
             }
@@ -362,9 +396,9 @@ struct QuickStripHeader: View {
             ChatGlyph(activity: .idle).frame(width: 18, height: 18).foregroundStyle(Color.trifGreen)
             Text("Check it, then tap Send in \(service)").font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
             Spacer(minLength: 4)
-            Button(action: expand) { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.footnote.weight(.semibold)).frame(width: 30, height: 30) }
+            Button(action: expand) { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.footnote.weight(.semibold)).frame(width: 30, height: QuickStrip.header) }
                 .accessibilityLabel("Open the whole chat")
-            Button(action: cancel) { Image(systemName: "xmark").font(.footnote.weight(.bold)).foregroundStyle(.secondary).frame(width: 30, height: 30) }
+            Button(action: cancel) { Image(systemName: "xmark").font(.footnote.weight(.bold)).foregroundStyle(.secondary).frame(width: 30, height: QuickStrip.header) }
                 .accessibilityLabel("Cancel")
         }
         .padding(.leading, 14).padding(.trailing, 6)
@@ -375,11 +409,22 @@ struct QuickStripHeader: View {
 }
 
 enum QuickStrip {
-    /// The strip's height (the header and the bottom of the chat's page: its message box and Send). `-stripheight N`.
-    static let height: CGFloat = {
+    /// The header's height (slim: Tim, 11-18).
+    static let header: CGFloat = 34
+    /// Room above and below the page's part (the box's text and Send).
+    static let pad: CGFloat = 6
+    /// The most of their box's text the strip shows (about three or four lines; a longer text scrolls in their box,
+    /// its last lines and Send in view). `-stripmax N`.
+    static let maxPart: CGFloat = {
         let a = ProcessInfo.processInfo.arguments
-        if let i = a.firstIndex(of: "-stripheight"), i + 1 < a.count, let n = Double(a[i + 1]) { return CGFloat(n) }
-        return 270
+        if let i = a.firstIndex(of: "-stripmax"), i + 1 < a.count, let n = Double(a[i + 1]) { return CGFloat(n) }
+        return 112
     }()
-    static let header: CGFloat = 40
+    static let minBody: CGFloat = 44
+    /// No message box found in the page: its foot, this tall, as before 11-18 (`-stripheight N`: the whole strip).
+    static let noBoxBody: CGFloat = {
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-stripheight"), i + 1 < a.count, let n = Double(a[i + 1]) { return CGFloat(n) - header }
+        return 230
+    }()
 }

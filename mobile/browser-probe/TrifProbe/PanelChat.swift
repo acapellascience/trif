@@ -703,7 +703,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "login": return "\(name)'s coding agent isn't logged in. Log in to it in TRIF on \(name), then ask again."
         case "away", "timeout": return "Lost touch with \(name). It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there."
         case "removed": return "This iPhone isn't connected to \(name) any more. Connect it again from TRIF's Settings there: \(pair)."
-        case "denied": return "TRIF needs Local Network access to find \(name). Turn it on in Settings, then TRIF Probe, then Local Network."
+        case "denied": return "TRIF needs Local Network access to find \(name). Turn it on in Settings, then TRIF, then Local Network."
         case "broken": return "Something on your Wi-Fi answered as \(name) but isn't it. TRIF didn't connect."
         case "keychain": return "This iPhone couldn't keep the connection's key. Try again."
         case "selfTest": return "TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect."

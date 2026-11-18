@@ -358,7 +358,7 @@ Documents/icon-test.png and .mobileconfig. The sheet makes a configuration profi
 its icon) and hands it to Safari: first at timsrobot.com/clip, the profile in the address's # part (x-safari-https, so Safari
 whatever the default browser is; the main repo's clip-page branch, `-clipbase https://localhost:8443` for a local copy),
 used once that page answers; else from a server on 127.0.0.1 that stops once Safari has it; Files as the last way. Full screen on purpose: a
-clip that isn't opens Safari and asks "Open in TRIF Probe?" every time; a full-screen one shows a blank screen for a
+clip that isn't opens Safari and asks "Open in TRIF?" (TRIF Probe before 11-18) every time; a full-screen one shows a blank screen for a
 moment and opens the app with no question (Simulator, iOS 26.3). `TargetApplicationBundleIdentifier` is ignored in a
 profile installed by hand. A `trif://open?url=` link goes to a tab already on that site, else a new tab; only http(s).
 

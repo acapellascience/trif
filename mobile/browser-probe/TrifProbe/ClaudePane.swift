@@ -129,13 +129,14 @@ final class ChatView: Identifiable {
     }
 }
 
-/// A chat's web view. While the quick ask's strip shows only its foot, touches above the strip's top (`stripTop`, in
+/// A chat's web view. While the quick ask's strip shows only a band of it, touches outside the band (`stripBand`, in
 /// the window) aren't its: they go to the tab under it (SwiftUI's clipping hides the rest of the chat but doesn't
 /// keep touches from it: checked with the hit step, 11-18).
 final class ChatWebView: WKWebView {
-    static var stripTop: CGFloat?
+    /// The strip's band in the window (below its header); nil when the chat isn't a strip.
+    static var stripBand: ClosedRange<CGFloat>?
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if let top = ChatWebView.stripTop, let w = window, convert(point, to: w).y < top { return nil }
+        if let band = ChatWebView.stripBand, let w = window, !band.contains(convert(point, to: w).y) { return nil }
         return super.hitTest(point, with: event)
     }
 }
@@ -789,6 +790,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard let d = message.body as? [String: Any], let type = d["type"] as? String, let wv = message.webView, let v = view(of: wv) else { return }
         let name = v.service.rawValue
         switch type {
+        case "stripbox":
+            if strip, cur === v { stripMeasured(v, d["box"] as? [String: Any]) }
         case "mod":
             guard let text = d["text"] as? String else { return }
             report.log("claude", "\(name): Add to TRIF tapped (\(text.count) characters)")
@@ -1072,8 +1075,111 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// The quick ask under way (the pill above the toolbar), or nil.
     @Published var quick: QuickAsk?
-    /// Claude's or ChatGPT's real page in a slim strip over the tab: its message box, filled, and its own Send.
-    @Published private(set) var strip = false
+    /// Claude's or ChatGPT's real page in a slim strip over the tab: its message box, filled, and its own Send. While
+    /// this is on and `stripIn` isn't yet, the chat is being filled behind the tab.
+    @Published private(set) var strip = false {
+        didSet { if oldValue && !strip { stripEnded() } }
+    }
+    /// The strip slid in (Tim, 11-18: it went "up and down and up and down" as Claude's page loaded): only once the box
+    /// is filled and the page has settled (its box's text, attachments and place unchanged for 0.3 s), at its final
+    /// size; it never moves after that but with the keyboard the person brings up. Until then the pill says it's
+    /// getting ready (QuickPill).
+    @Published private(set) var stripIn = false
+    /// How much of the chat's page the strip shows under its header (Tim, 11-18: "a very little panel that shows the
+    /// text"): what shows of the box's text and the site's own Send, no attachments or anything else. Fixed once in.
+    @Published private(set) var stripBody: CGFloat = 0
+    /// How far the chat's page is moved down inside the strip, so that part's foot sits at the strip's foot. It follows
+    /// the page from then on, with no animation, so a page changing under it doesn't move what shows.
+    @Published private(set) var stripShift: CGFloat = 0
+    /// Where the strip's part of the page is in the chat's web view (points), and what tells it changed.
+    private struct StripPlace { var top: CGFloat; var bottom: CGFloat; var height: CGFloat; var sig: String; var ready: Bool }
+    private var stripTask: Task<Void, Never>?
+    private var stripPlace: StripPlace?
+    private var stripSig = ""
+    private var stripChanged = Date()
+    private var stripStarted = Date()
+
+    /// The keyboard coming up now isn't the person's: the strip's chat is being filled behind the tab (its fill
+    /// focuses the box for each paste and blurs it at once; on a phone that can still start the keyboard), nothing of
+    /// it shows, and no finger is on a page.
+    var keyboardNotTheirs: Bool { strip && !stripIn && !shown && TouchClock.down == 0 && (TouchClock.lastLift.map { Date().timeIntervalSince($0) > 1.5 } ?? true) }
+
+    /// The shown chat's page has the keyboard's focus (a view of its web view is the first responder).
+    var chatHasFocus: Bool {
+        func has(_ v: UIView) -> Bool { v.isFirstResponder || v.subviews.contains(where: has) }
+        return cur.map { has($0.webView) } ?? false
+    }
+
+    /// The strip's part of the page from chat.js's stripBox (document coordinates), in the web view's points.
+    private func place(_ v: ChatView, _ box: [String: Any]?) -> StripPlace? {
+        guard let box, let top = (box["top"] as? NSNumber)?.doubleValue, let bottom = (box["bottom"] as? NSNumber)?.doubleValue else { return nil }
+        let sv = v.webView.scrollView
+        let z = sv.zoomScale
+        let t = sv.convert(CGPoint(x: 0, y: top * z), to: v.webView).y
+        let b = sv.convert(CGPoint(x: 0, y: bottom * z), to: v.webView).y
+        let h = v.webView.bounds.height
+        let sig = "\(Int(t.rounded())) \(Int(b.rounded())) \(Int(h)) \(box["chars"] ?? "") \(box["tiles"] ?? "") \(box["box"] ?? "") \(box["send"] ?? "")"
+        return StripPlace(top: t, bottom: b, height: h, sig: sig, ready: box["ready"] as? Bool ?? false)
+    }
+    /// A measure of the strip's part of the page (chat.js tells each change while the strip is on; the settling asks too).
+    private func stripMeasured(_ v: ChatView, _ box: [String: Any]?) {
+        let p = place(v, box)
+        stripPlace = p
+        let sig = p?.sig ?? "none"
+        if sig != stripSig { stripSig = sig; stripChanged = Date() }
+        if stripIn, let p { pin(p) }
+    }
+    /// The strip's part of the page kept where it shows, at once (no animation): what moved in the page doesn't move there.
+    private func pin(_ p: StripPlace) {
+        let shift = p.height - p.bottom - QuickStrip.pad
+        guard abs(shift - stripShift) > 0.5 else { return }
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { stripShift = shift }
+    }
+    /// After the fill: the page watched until it settles, then the strip slides in, once.
+    private func settleStrip(_ v: ChatView, _ id: UUID) async {
+        stripTask?.cancel()
+        stripStarted = Date()
+        stripChanged = Date()
+        stripSig = ""
+        stripPlace = nil
+        _ = await chatCall(v, "stripWatch(true)", [:])
+        stripTask = Task { @MainActor [weak self, weak v] in
+            while !Task.isCancelled, let self, let v, self.strip, !self.stripIn, self.cur === v, self.quick?.id == id {
+                let box = try? await v.webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.stripBox() : null;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) as? [String: Any]
+                guard !Task.isCancelled, self.strip, !self.stripIn else { return }
+                self.stripMeasured(v, box)
+                let quiet = Date().timeIntervalSince(self.stripChanged)
+                let waited = Date().timeIntervalSince(self.stripStarted)
+                // (settled: unchanged 0.3 s, the page loaded (or 3 s waited for a page that goes on loading); never
+                // more than 8 s: then as it is)
+                let settled = self.stripPlace != nil && quiet >= 0.3 && ((self.stripPlace?.ready ?? false) || waited > 3)
+                if settled || waited > 8 { self.slideIn(v, waited: waited, settled: settled); return }
+                try? await Task.sleep(nanoseconds: 60_000_000)
+            }
+        }
+    }
+    private func slideIn(_ v: ChatView, waited: TimeInterval, settled: Bool) {
+        if let p = stripPlace {
+            let part = min(max(p.bottom - p.top, 0), QuickStrip.maxPart)
+            stripBody = max(QuickStrip.minBody, part + 2 * QuickStrip.pad)
+            stripShift = p.height - p.bottom - QuickStrip.pad
+        } else {
+            // (no box found: the page's foot, as before)
+            stripBody = QuickStrip.noBoxBody
+            stripShift = 0
+        }
+        stripIn = true
+        Diagnostics.shared.log("quick ask", "the strip in after \(String(format: "%.1f", waited)) s of filling and settling\(settled ? "" : " (not settled: shown as it is)"), \(Int(stripBody)) pt of the page\(stripPlace == nil ? " (no message box found: the page's foot)" : "")")
+    }
+    /// The strip gone (sent, cancelled, the whole chat opened, a new ask): its watching stopped.
+    private func stripEnded() {
+        stripTask?.cancel()
+        stripTask = nil
+        stripIn = false
+        if let v = cur { Task { _ = await chatCall(v, "stripWatch(false)", [:]) } }
+    }
 
     /// A request from the box: to the tab's site's chat (its conversation if it has one, else a new one), with the
     /// page as the robot's tap puts it. Claude / ChatGPT: the strip, for the person's own Send (TRIF never sends
@@ -1096,6 +1202,9 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         seen(v)
         let key = ClaudePane.linkKey(v.service.rawValue, v.site)
         quick = QuickAsk(request: text, service: v.service.rawValue, site: v.site, key: key, state: .waitingSend)
+        let id = quick!.id
+        // (a strip still up from an ask not sent: it goes, and comes in again once this one has settled)
+        if strip { strip = false }
         strip = true
         Diagnostics.shared.log("quick ask", "\(v.service.rawValue) for \(v.site): \(text.count) characters; the strip up for the person's own Send\(was == .working ? " (a reply still being written there)" : "")")
         let ready = was != .working && v.site == tabSite ? prepare(v) : nil
@@ -1107,6 +1216,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             // (the person's message appearing is the send, however they sent it)
             let armed = await self.chatCall(v, "armSend()", [:]) ?? "?"
             Diagnostics.shared.log("quick ask", "the request into \(v.service.rawValue)'s box: \(said); watching for the send: \(armed)")
+            // (the strip slides in once the page has settled with all of it)
+            if self.strip, self.quick?.id == id { await self.settleStrip(v, id) }
         }
     }
 
@@ -1214,7 +1325,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// (development: the quick ask's state, for the dev steps)
     var quickDescribe: String {
         guard let q = quick else { return "quick: none, strip \(strip)" }
-        return "quick: \(q.service) for \(q.site.isEmpty ? "no site" : q.site), \(q.state), applied \(q.applied.map(\.id)), strip \(strip), shown \(shown)"
+        return "quick: \(q.service) for \(q.site.isEmpty ? "no site" : q.site), \(q.state), applied \(q.applied.map(\.id)), strip \(strip)\(strip ? " (in \(stripIn), body \(Int(stripBody)), shift \(Int(stripShift)), page part \(stripPlace.map { "\(Int($0.top))-\(Int($0.bottom)) of \(Int($0.height))" } ?? "none"))" : ""), shown \(shown)"
     }
 
     // MARK: a reply in the background (Tim, 11-15: "a notification when a new mod is ready")
@@ -1855,7 +1966,14 @@ struct ChatListView: View {
             }
             .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: close) } }
+            // (Tim, 11-18: "Done" read as cancelling the request. Send = the box's arrow; Cancel closes, the words kept
+            // in the box as a draft, as a tap on the dimmed page or a swipe down does)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: close).accessibilityHint("Closes without sending. Your words stay in the box")
+                }
+                ToolbarItem(placement: .confirmationAction) { QuickSendButton(ask: ask) }
+            }
         }
         // (the list closed mid-listen (a tap on the microphone): stopped, nothing asked, the words kept in the box)
         .onDisappear { SpeechInput.shared.interrupt(why: "the list closed") }

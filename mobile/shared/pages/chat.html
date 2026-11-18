@@ -40,6 +40,10 @@
   /new serves this page too (a new chat there gets /chat/<id> at its first send).
   `?greet`: an empty conversation's greeting heading ("How can I help you today?", as both chats have one) and an
   Upgrade plan button in the header, for TRIF's greeting and upsell hiding (chat.js look).
+  `?late` (Tim, 11-18: the quick ask's strip bounced while claude.ai loaded): the page settles in pieces, as claude.ai's
+  does on a phone: the box's tool row (+, the model, Manual) comes 1 s after load, the "… can make mistakes." line above
+  the box 1.6 s after, the page's own box grows a little at 2.2 s, and each attachment's tile shows 0.5 s after it's
+  taken (a tile placeholder first).
 -->
 <style>
   :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
@@ -75,6 +79,8 @@
   .pasted pre, .pasted-card pre { max-height: 3.6em; overflow: hidden; margin: 2px 0 0; padding: 4px 6px; font-size: 9px; }
   .pasted-card { display: inline-flex; flex-direction: column; max-width: 220px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; margin: 0 0 6px; cursor: pointer; white-space: normal; }
   .ProseMirror pre { white-space: pre; margin: 4px 0; }
+  .tools { display: flex; gap: 14px; align-items: center; padding: 8px 4px 0; font-size: 13px; opacity: 0.75; }
+  .disclaimer { text-align: center; font-size: 12px; opacity: 0.6; padding: 6px 0 2px; }
   .viewer .linenumber { display: inline-block; width: 2.2em; opacity: 0.45; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
@@ -115,6 +121,22 @@
     new MutationObserver(() => { if (log.querySelector('[data-testid="user-message"]')) h.remove(); }).observe(log, { childList: true });
   }
 
+  const late = location.search.includes('late');
+  if (late) {
+    setTimeout(() => {
+      const t = document.createElement('div');
+      t.className = 'tools';
+      t.innerHTML = '<span>+</span><span>⚙︎</span><span style="flex:1"></span><span>Stand-in 5.5 High</span><span>Manual</span>';
+      document.querySelector('.composer').append(t);
+    }, 1000);
+    setTimeout(() => {
+      const d = document.createElement('div');
+      d.className = 'disclaimer';
+      d.textContent = 'The stand-in is AI and can make mistakes.';
+      document.querySelector('.composer').prepend(d);
+    }, 1600);
+    setTimeout(() => { document.querySelector('.composer').style.paddingBottom = '22px'; }, 2200);
+  }
   const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length || pastes.length); };
   ed.addEventListener('input', refresh);
   // (?draft: the box's attachments and text kept across a reload and put back a moment after the page loads, as
@@ -134,7 +156,14 @@
     x.textContent = '×';
     x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); saveDraft(); });
     tile.append(label, x);
-    tiles.append(tile);
+    if (late) {
+      // (a placeholder first, the real tile 0.5 s later, as claude.ai's upload card does)
+      const ph = document.createElement('div');
+      ph.className = 'tile-ph';
+      ph.style.cssText = 'width: 120px; height: 64px; border-radius: 8px; background: var(--tile);';
+      tiles.append(ph);
+      setTimeout(() => { ph.replaceWith(tile); }, 500);
+    } else tiles.append(tile);
     return entry;
   }
   const takeFile = (f) => { const entry = addFile(f.name, '', f.type); if (f.type.startsWith('text/')) f.text().then((t) => { entry.text = t; saveDraft(); }); };

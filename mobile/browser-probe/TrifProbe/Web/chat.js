@@ -801,6 +801,75 @@
     return 'not there';
   }
 
+  // ---- the quick ask's strip (Tim, 11-18: "a very little panel that shows the text"): where the box's text and the
+  // site's own Send are, so the app shows only them, cropped by its own view (nothing on their page restyled) -------
+  /** The part of the page the strip shows: what shows of the message box (inside its own scrolling) and the site's
+   *  Send, in the document's coordinates (CSS pixels), plus what tells a settled box from one still changing. */
+  function stripBox() {
+    const ed = editor();
+    if (!ed || !shown(ed)) return null;
+    const er = ed.getBoundingClientRect();
+    let top = er.top, bottom = er.bottom;
+    // (a long text scrolls inside their box: only what shows of it)
+    for (let p = ed; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      const oy = getComputedStyle(p).overflowY;
+      if (oy !== 'visible') { const q = p.getBoundingClientRect(); top = Math.max(top, q.top); bottom = Math.min(bottom, q.bottom); }
+    }
+    if (bottom <= top) { top = er.top; bottom = er.bottom; }
+    const textTop = top, textBottom = bottom;
+    const box = composerBox();
+    const sends = [...((box && box.querySelector(SEND) ? box : document).querySelectorAll(SEND))].filter(shown);
+    const send = sends[sends.length - 1];
+    if (send) { const r = send.getBoundingClientRect(); top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom); }
+    const y = window.scrollY;
+    const c = composer();
+    return {
+      top: top + y, bottom: bottom + y, textTop: textTop + y, textBottom: textBottom + y, send: !!send,
+      chars: c.text.length, tiles: c.names.length, ready: document.readyState === 'complete',
+      // (the page's own layout: the box's surroundings change size as their pieces arrive)
+      box: box ? Math.round(box.getBoundingClientRect().height) : 0, height: innerHeight,
+    };
+  }
+  /** While the strip is up: the box's place told to the app whenever it may have moved (a mutation, a resize, a scroll;
+   *  at most once a frame, and only when it changed), and every 250 ms in case a transition moved it. */
+  let stripOn = null;
+  function stripWatch(on) {
+    if (stripOn) { stripOn.stop(); stripOn = null; }
+    if (!on) return 'off';
+    let lastSaid = '';
+    let frame = 0;
+    const tell = () => {
+      frame = 0;
+      const b = stripBox();
+      const key = JSON.stringify(b);
+      if (key === lastSaid) return;
+      lastSaid = key;
+      post({ type: 'stripbox', box: b });
+    };
+    const soon = () => { if (!frame) frame = requestAnimationFrame(tell); };
+    const mo = new MutationObserver(soon);
+    mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+    const ro = new ResizeObserver(soon);
+    ro.observe(document.documentElement);
+    const ed = editor();
+    if (ed) ro.observe(ed);
+    const box = composerBox();
+    if (box) ro.observe(box);
+    addEventListener('scroll', soon, true);
+    addEventListener('resize', soon);
+    if (window.visualViewport) { visualViewport.addEventListener('resize', soon); visualViewport.addEventListener('scroll', soon); }
+    const timer = setInterval(tell, 250);
+    stripOn = {
+      stop() {
+        mo.disconnect(); ro.disconnect(); clearInterval(timer); if (frame) cancelAnimationFrame(frame);
+        removeEventListener('scroll', soon, true); removeEventListener('resize', soon);
+        if (window.visualViewport) { visualViewport.removeEventListener('resize', soon); visualViewport.removeEventListener('scroll', soon); }
+      },
+    };
+    tell();
+    return 'on';
+  }
+
   /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
   function resume() {
     const users = document.querySelectorAll(USER);
@@ -1101,5 +1170,5 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, viewer: () => { const v = viewer(); return v ? v.why : null; } };
+  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, viewer: () => { const v = viewer(); return v ? v.why : null; } };
 })();

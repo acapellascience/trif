@@ -16,6 +16,9 @@ const fs = require('fs');
 const path = require('path');
 const { handler } = require('../serve');
 const { browserTestsSkip, launch } = require('../../tests/cdp-page');
+// (each test's time limit also covers cdp-page's wait for the test browsers' lock: files run side by side, and on CI
+// a test here can wait behind another file's browser (smoke.js's probes, about 100 s there) before its own starts)
+const LOCK_WAIT = 300000;
 
 const CHAT = fs.readFileSync(path.join(__dirname, '..', 'browser-probe', 'TrifProbe', 'Web', 'chat.js'), 'utf8');
 // (the app's message handler, as the page sees it in the app: what chat.js posts, kept in order)
@@ -24,7 +27,7 @@ const STUB = 'window.__posts = []; window.webkit = { messageHandlers: { trif: { 
 const posts = (pg) => pg.evaluate(() => window.__posts);
 const waitPost = (pg, type, n = 1) => pg.waitForFunction((a) => { const l = window.__posts.filter((m) => m.type === a.type); return l.length >= a.n ? [l] : null; }, { type, n }, { timeoutMs: 20000 }).then(([l]) => l);
 
-test('the chat script: fill, the send, the reply watched until done, its mods handed over', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script: fill, the send, the reply watched until done, its mods handed over', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -91,7 +94,7 @@ test('the chat script: fill, the send, the reply watched until done, its mods ha
   }
 });
 
-test('the chat script: a chat with no stop button to see, done once the reply has been still for a few seconds', { skip: browserTestsSkip(), timeout: 60000 }, async () => {
+test('the chat script: a chat with no stop button to see, done once the reply has been still for a few seconds', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 60000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -118,7 +121,7 @@ test('the chat script: a chat with no stop button to see, done once the reply ha
   }
 });
 
-test('the chat script: a file a reply attaches is never read (no request at all)', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script: a file a reply attaches is never read (no request at all)', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
   // (Tim, 11-16: nothing against Claude's or ChatGPT's terms: no internal routes, no session token, no reading a
   // reply's files; a file comes only when the person taps it, as a download the app catches)
   const h = handler(() => {});
@@ -155,7 +158,7 @@ test('the chat script: a file a reply attaches is never read (no request at all)
   }
 });
 
-test('the chat script: TRIF\'s file attached through the page\'s file input when a paste goes in as text (chatgpt.com, 11-16); what TRIF put in, seen and taken out', { skip: browserTestsSkip(), timeout: 60000 }, async () => {
+test('the chat script: TRIF\'s file attached through the page\'s file input when a paste goes in as text (chatgpt.com, 11-16); what TRIF put in, seen and taken out', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 60000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -189,7 +192,7 @@ test('the chat script: TRIF\'s file attached through the page\'s file input when
   }
 });
 
-test('the chat script: a file opened in the chat\'s viewer (Claude\'s, 11-16): its code read off the screen for Add this mod?, and no fill while the viewer covers the message box', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script: a file opened in the chat\'s viewer (Claude\'s, 11-16): its code read off the screen for Add this mod?, and no fill while the viewer covers the message box', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -243,7 +246,7 @@ test('the chat script: a file opened in the chat\'s viewer (Claude\'s, 11-16): i
   }
 });
 
-test('the chat script on chatgpt.com\'s newer mobile page (11-16): pictures-only file inputs, li[data-message-role] messages, a pause mid-reply, code as editor lines', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script on chatgpt.com\'s newer mobile page (11-16): pictures-only file inputs, li[data-message-role] messages, a pause mid-reply, code as editor lines', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -281,7 +284,7 @@ test('the chat script on chatgpt.com\'s newer mobile page (11-16): pictures-only
   }
 });
 
-test('the chat script: a long conversation\'s older messages that render late (Tim, 11-17: "spurious asks to add old code"): their old mods never offered, by the reply or late; a viewer the chat reopens with no tap isn\'t either', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script: a long conversation\'s older messages that render late (Tim, 11-17: "spurious asks to add old code"): their old mods never offered, by the reply or late; a viewer the chat reopens with no tap isn\'t either', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -341,7 +344,7 @@ const pasteInto = (pg, text) => pg.evaluate((t) => {
 }, text);
 const ownMod = (name, lines) => `// ==WebMod==\n// @name        ${name}\n// @match       http://localhost/*\n// @style\n// ==/WebMod==\n${JSON.stringify({ css: '.x { color: red }', hide: Array.from({ length: lines }, (_, i) => `.ad-${i}`) }, null, 2)}`;
 
-test('the chat script: the person\'s own code (Tim, 11-18: "When I paste code into Claude in the app, the app reads it as a mod"): pasted in the message box, sent as a code block or a pasted-text card, never offered nor given Add to TRIF; the assistant\'s mod still is', { skip: browserTestsSkip(), timeout: 120000 }, async () => {
+test('the chat script: the person\'s own code (Tim, 11-18: "When I paste code into Claude in the app, the app reads it as a mod"): pasted in the message box, sent as a code block or a pasted-text card, never offered nor given Add to TRIF; the assistant\'s mod still is', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -390,7 +393,7 @@ test('the chat script: the person\'s own code (Tim, 11-18: "When I paste code in
   }
 });
 
-test('the chat script: an old conversation (Tim, 11-18: "opening an old chat gets spurious pickups of old code"): loading in pieces, its messages late, drawn again on scroll-up, a reload watched again, the chat switched to it mid-reply: none of its mods offered; a new live reply still is, and /new → /chat/<id> keeps the watch', { skip: browserTestsSkip(), timeout: 150000 }, async () => {
+test('the chat script: an old conversation (Tim, 11-18: "opening an old chat gets spurious pickups of old code"): loading in pieces, its messages late, drawn again on scroll-up, a reload watched again, the chat switched to it mid-reply: none of its mods offered; a new live reply still is, and /new → /chat/<id> keeps the watch', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 150000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -464,7 +467,7 @@ test('the chat script: an old conversation (Tim, 11-18: "opening an old chat get
   }
 });
 
-test('the chat script: a quick ask (Tim, 11-18): the request goes in the box and TRIF never sends (no scripted click, Enter or submit); the person\'s own Send is told once; their message appearing counts as the send; the request taken out again', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+test('the chat script: a quick ask (Tim, 11-18): the request goes in the box and TRIF never sends (no scripted click, Enter or submit); the person\'s own Send is told once; their message appearing counts as the send; the request taken out again', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -506,6 +509,48 @@ test('the chat script: a quick ask (Tim, 11-18): the request goes in the box and
     const two = await waitPost(page, 'sent', 2);
     assert.equal(two[1].how, 'message seen');
     assert.equal(await page.evaluate(() => window.__standinUntrusted()), 0);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+test('the chat script: the quick ask\'s strip (Tim, 11-18: "a very little panel that shows the text"): stripBox is the box\'s text and the site\'s Send, never the attachments; stripWatch tells each change as the page settles, then nothing while it\'s still', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 60000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    // (?late: the box's tool row, a line above it and more room under it arrive after load; tiles show late)
+    await page.goto(`${base}/chat.html?late`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.stripWatch(true)), 'on');
+    await page.evaluate(() => globalThis.__trifChat.fill('the page now', null, 'TRIF follow-up.txt', null, null));
+    await page.evaluate(() => globalThis.__trifChat.fill('make the headings thinner', null, null, null, null));
+    await page.waitForTimeout(2600); // (past the stand-in's last late piece)
+    const b = await page.evaluate(() => globalThis.__trifChat.stripBox());
+    const r = await page.evaluate(() => {
+      const box = (el) => { const q = el.getBoundingClientRect(); return { top: q.top + scrollY, bottom: q.bottom + scrollY }; };
+      return { ed: box(document.querySelector('.ProseMirror')), send: box(document.querySelector('button[aria-label="Send message"]')), tile: box(document.querySelector('[data-testid="file-thumbnail"]')) };
+    });
+    assert.ok(b && b.send, 'the Send button found');
+    assert.equal(b.tiles, 1, 'the attachment is there');
+    assert.equal(b.top, Math.min(r.ed.top, r.send.top));
+    assert.equal(b.bottom, Math.max(r.ed.bottom, r.send.bottom));
+    assert.ok(r.tile.bottom <= b.top, 'the attachment is above the strip\'s part');
+    assert.ok(b.chars > 0 && b.ready);
+    // (told as the page changed; once still, nothing more)
+    const told = (await posts(page)).filter((m) => m.type === 'stripbox');
+    assert.ok(told.length >= 3, `told ${told.length} times`);
+    assert.deepEqual(told[told.length - 1].box, b);
+    await page.waitForTimeout(800);
+    assert.equal((await posts(page)).filter((m) => m.type === 'stripbox').length, told.length, 'nothing told while still');
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.stripWatch(false)), 'off');
+    // (and nothing sent, ever)
+    assert.equal(await page.evaluate(() => window.__standinSends.length), 0);
   } finally {
     if (browser) await browser.close();
     server.close();

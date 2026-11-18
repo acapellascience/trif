@@ -37,7 +37,12 @@ globalThis.__trifStartSandbox = function () {
     const sd = Object.getOwnPropertyDescriptor(Error.prototype, 'stack');
     if (sd && typeof sd.get === 'function') nativeStack = sd.get;
     const tl = now();
-    G.lockdown({ errorTaming: 'safe', consoleTaming: 'unsafe', overrideTaming: 'severe', stackFiltering: 'concise', reporting: 'none' });
+    // (errorTrapping / unhandledRejectionTrapping 'none': SES's defaults add its own window 'error' listener,
+    // which in this world also hears the page's own errors, logs each as "SES_UNCAUGHT_EXCEPTION: null" on
+    // chrome://extensions (a page's error reaches another world as null) and preventDefault()s it, hiding it
+    // from the page's console. TRIF reports mods' errors itself: its unhandledrejection listener below, and
+    // each mod's own error wrapping.)
+    G.lockdown({ errorTaming: 'safe', consoleTaming: 'unsafe', overrideTaming: 'severe', stackFiltering: 'concise', reporting: 'none', errorTrapping: 'none', unhandledRejectionTrapping: 'none' });
     stats.lockdownMs = now() - tl;
   }
   // What a boxed mod has besides TRIF's API and what SES gives every compartment: the language's floating-point

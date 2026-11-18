@@ -597,3 +597,22 @@ All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names the
 
 No new words for mods that can click, send or load: they get Add this mod? or the approval card, as ever (through
 the done banner when the person is on another tab).
+
+## The robot's tap, hold to talk, the microphone's tap, links to other apps (added 11-18, Tim)
+
+All drafts for Tim. Tim, 11-18: "Let's make that the default tap experience", "long-press on the robot = hold to talk",
+the microphone "tap to start, tap again to stop", and links that aren't web pages go to iOS.
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| The toolbar robot, tapped | opened the tab's chat | opens the quick ask's list (the box, **Go to chat**, the chats); in the chat, goes back to the tab, as before |
+| The list, first row under the box | — | **Go to chat**, under it **{Service} · {site}**; a reply waiting there: **Reply waiting · {Service} · {site}** (green, a green dot); writing: **Working… · {Service} · {site}**. VoiceOver **Go to chat** / **Go to chat, reply waiting**, hint **Opens the whole chat for this page** |
+| A chat's row with a reply waiting | **{Service} · Reply waiting** (green) | the same, bold, with a green dot at its right |
+| The list, empty | No chats yet. Tap the robot on a page to start one. | **No chats yet.** |
+| The toolbar robot (VoiceOver) | label Chat…; action **Chats** | label unchanged; hint **Opens What should change? and the chats**; action **Go to chat** |
+| The robot held: the glowing pill over the toolbar | — | **Listening…**, then the words as heard; under them **Slide away to cancel**; slid away (coral) **Let go to cancel** |
+| The box's microphone (VoiceOver) | **Hold to talk**, hint Hold, say what should change, then let go | **Talk**, hint **Tap, say what should change, then tap again. Or hold, and let go**; while listening by a tap: **Stop listening**, hint **Asks what was heard** |
+| The box's pill, under the words | — | held: **Slide away to cancel** (slid away: **Let go to cancel**); tapped: **Listening, tap to stop** |
+| Beside the microphone while listening by a tap | — | an ✕ (VoiceOver **Cancel**); the microphone shows a stop square |
+| A page (or a mod) opening another app by itself: the question (Safari's own words) | — (nothing happened) | **Open this page in "{App}"?** where the app is certain (Phone, Messages, FaceTime, Maps, App Store, Music, Shortcuts, Reminders, Calendar, Photos, Safari), else **Open this page in another app?**; buttons **Cancel** · **Open** |
+| A link to another app that no app on the phone takes | — (nothing happened) | the note **No app on this iPhone can open this link.** |

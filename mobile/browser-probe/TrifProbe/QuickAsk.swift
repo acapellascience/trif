@@ -71,12 +71,95 @@ final class SpeechInput: ObservableObject {
     private var finished: ((String) -> Void)?
     private var finishing: Task<Void, Never>?
 
+    /// Tapped, not held (Tim, 11-18: "tap to start listening, tap again to stop"): listening goes on after the finger
+    /// lifts, until the microphone's next tap, its ✕, a long silence (`silence`; longer before anything is heard) or
+    /// `limit`. Leaving the app stops it, nothing asked.
+    @Published private(set) var tapMode = false
+    private var watcher: Task<Void, Never>?
+    /// (`-talksilence N`: a longer wait, for trying the taps in the Simulator, where the stand-in recording is all heard at once)
+    static let silence: TimeInterval = {
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-talksilence"), i + 1 < a.count, let n = Double(a[i + 1]) { return n }
+        return 4
+    }()
+    static let firstSilence: TimeInterval = 8
+    static let limit: TimeInterval = 60
+
+    private init() {
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                let s = SpeechInput.shared
+                if s.phase == .listening || s.phase == .finishing { s.cancel(why: "the app left the front") }
+            }
+        }
+    }
+
+    /// The press was a tap: keep listening (the watcher stops it on a long silence or at the limit, sending what was heard).
+    func keepListening() {
+        guard phase == .listening else { return }
+        tapMode = true
+        watcher?.cancel()
+        Diagnostics.shared.log("quick ask", "talking: tapped, listening until the next tap")
+        watcher = Task { @MainActor [weak self] in
+            var last = ""
+            var changed = Date()
+            let began = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self, self.phase == .listening, self.tapMode else { return }
+                if self.transcript != last { last = self.transcript; changed = Date() }
+                let quiet = Date().timeIntervalSince(changed), long = Date().timeIntervalSince(began)
+                if quiet > (last.isEmpty ? SpeechInput.firstSilence : SpeechInput.silence) || long > SpeechInput.limit {
+                    Diagnostics.shared.log("quick ask", "talking: stopped by itself (\(long > SpeechInput.limit ? "the time limit" : "\(Int(quiet)) s of silence"))")
+                    self.release()
+                    return
+                }
+            }
+        }
+    }
+
     /// The phone's language's recognizer (English if it has none).
     static func recognizer() -> SFSpeechRecognizer? { SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US")) }
     /// The language's name, for "not on this iPhone".
     static var language: String { Locale.current.localizedString(forIdentifier: (recognizer()?.locale ?? Locale.current).identifier) ?? "this language" }
     static let notOnDevice = "This iPhone can't recognise speech in \(language) by itself, so TRIF doesn't listen. Type instead, or use the keyboard's dictation."
     static let refusedWords = "TRIF can't hear you: allow the Microphone and Speech Recognition for TRIF Probe in Settings. You can still type."
+
+    /// Talking can start at once: both permissions given, recognition on this iPhone and available now (the robot's
+    /// hold talks straight away only then; otherwise it opens the chats' list, whose box says why or asks).
+    var ready: Bool {
+        guard phase == .idle, SFSpeechRecognizer.authorizationStatus() == .authorized,
+              SpeechInput.standInFile != nil || AVAudioApplication.shared.recordPermission == .granted,
+              let r = SpeechInput.recognizer(), r.supportsOnDeviceRecognition, r.isAvailable else { return false }
+        return true
+    }
+
+    /// (development, `-speechfile <path>`: a recording stands in for the microphone, fed to the same live request, so
+    /// a hold can be tried in the Simulator without recording the Mac's room)
+    static let standInFile: URL? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-speechfile"), i + 1 < a.count else { return nil }
+        return URL(fileURLWithPath: a[i + 1])
+    }()
+    private var tapOn = false
+
+    /// Let go after sliding away, the ✕, leaving the list or the app: nothing is asked, what was heard is dropped.
+    func cancel(why: String = "slid away") {
+        guard phase == .listening || phase == .finishing else { return }
+        finished = nil
+        tapMode = false
+        watcher?.cancel()
+        if engine.isRunning { engine.stop() }
+        if tapOn { engine.inputNode.removeTap(onBus: 0); tapOn = false }
+        finishing?.cancel()
+        task?.cancel()
+        task = nil
+        request = nil
+        if SpeechInput.standInFile == nil { restoreSession() }
+        phase = .idle
+        transcript = ""
+        Diagnostics.shared.log("quick ask", "talking: cancelled (\(why))")
+    }
 
     /// Whether talking can work here at all, as far as is known without asking: refused, not on this iPhone, or fine.
     func check() {
@@ -91,7 +174,7 @@ final class SpeechInput: ObservableObject {
     func press(_ done: @escaping (String) -> Void) {
         guard phase == .idle else { return }
         let speech = SFSpeechRecognizer.authorizationStatus()
-        let mic = AVAudioApplication.shared.recordPermission
+        let mic = SpeechInput.standInFile != nil ? .granted : AVAudioApplication.shared.recordPermission
         if speech == .denied || speech == .restricted || mic == .denied { phase = .refused; Diagnostics.shared.log("quick ask", "talking: refused (speech \(speech.rawValue), microphone \(mic.rawValue))"); return }
         guard let r = SpeechInput.recognizer() else { phase = .unavailable(SpeechInput.notOnDevice); return }
         // (never to a server: only where this iPhone recognises speech itself)
@@ -114,6 +197,7 @@ final class SpeechInput: ObservableObject {
     }
 
     private func start(_ r: SFSpeechRecognizer, _ done: @escaping (String) -> Void) {
+        if let f = SpeechInput.standInFile { startFromFile(r, f, done); return }
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
@@ -134,6 +218,7 @@ final class SpeechInput: ObservableObject {
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { phase = .unavailable("This iPhone has no microphone to use. Type instead."); restoreSession(); return }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in req.append(buffer) }
+        tapOn = true
         task = r.recognitionTask(with: req) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let final = result?.isFinal ?? false
@@ -146,6 +231,7 @@ final class SpeechInput: ObservableObject {
         engine.prepare()
         do { try engine.start() } catch {
             input.removeTap(onBus: 0)
+            tapOn = false
             task?.cancel()
             phase = .unavailable("The microphone can't be used right now. Type instead.")
             restoreSession()
@@ -155,12 +241,41 @@ final class SpeechInput: ObservableObject {
         Diagnostics.shared.log("quick ask", "talking: listening (on this iPhone, \(r.locale.identifier))")
     }
 
+    /// (development) The recording as the microphone: its audio appended to the live request at once, partial
+    /// results coming as they would; the recording's end isn't the end, letting go is.
+    private func startFromFile(_ r: SFSpeechRecognizer, _ f: URL, _ done: @escaping (String) -> Void) {
+        guard let file = try? AVAudioFile(forReading: f),
+              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: buf)) != nil else { phase = .unavailable("The stand-in recording can't be read."); return }
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        req.requiresOnDeviceRecognition = true
+        req.addsPunctuation = true
+        request = req
+        transcript = ""
+        finished = done
+        task = r.recognitionTask(with: req) { [weak self] result, error in
+            let text = result?.bestTranscription.formattedString
+            let final = result?.isFinal ?? false
+            Task { @MainActor in
+                guard let self else { return }
+                if let text { self.transcript = text }
+                if final || error != nil { self.end() }
+            }
+        }
+        req.append(buf)
+        phase = .listening
+        Diagnostics.shared.log("quick ask", "talking: listening (a stand-in recording, \(r.locale.identifier))")
+    }
+
     /// Let go: the words so far are the request (the last of them given a moment to come in).
     func release() {
         guard phase == .listening else { return }
+        tapMode = false
+        watcher?.cancel()
         phase = .finishing
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        if engine.isRunning { engine.stop() }
+        if tapOn { engine.inputNode.removeTap(onBus: 0); tapOn = false }
         request?.endAudio()
         finishing = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -170,12 +285,15 @@ final class SpeechInput: ObservableObject {
 
     private func end() {
         guard phase == .listening || phase == .finishing else { return }
-        if engine.isRunning { engine.stop(); engine.inputNode.removeTap(onBus: 0) }
+        if engine.isRunning { engine.stop() }
+        if tapOn { engine.inputNode.removeTap(onBus: 0); tapOn = false }
         finishing?.cancel()
+        tapMode = false
+        watcher?.cancel()
         task?.cancel()
         task = nil
         request = nil
-        restoreSession()
+        if SpeechInput.standInFile == nil { restoreSession() }
         phase = .idle
         let words = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         transcript = ""
@@ -235,6 +353,9 @@ struct QuickAskBox: View {
     @State private var text = ""
     @FocusState private var focused: Bool
     @State private var pressing = false
+    @State private var pressedAt: Date?
+    @State private var stopPress = false
+    @State private var micAway = false
 
     private var note: String? {
         switch speech.phase {
@@ -251,8 +372,14 @@ struct QuickAskBox: View {
             if speech.phase == .listening || speech.phase == .finishing {
                 HStack(spacing: 8) {
                     Image(systemName: "waveform").foregroundStyle(Color.trifGreen).symbolEffect(.variableColor.iterative, isActive: speech.phase == .listening)
-                    Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript)
-                        .font(.footnote).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript)
+                            .font(.footnote).lineLimit(3)
+                        // (how it ends: the next tap, or a slide away while held)
+                        Text(speech.tapMode ? "Listening, tap to stop" : micAway ? "Let go to cancel" : "Slide away to cancel")
+                            .font(.caption2).foregroundStyle(micAway && !speech.tapMode ? Color.trifCoral : .secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Capsule().fill(Color(.secondarySystemBackground)))
@@ -277,6 +404,7 @@ struct QuickAskBox: View {
                     Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title) }
                         .accessibilityLabel("Ask")
                 }
+                if speech.tapMode { stopX }
                 mic
             }
             if let note { Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
@@ -285,11 +413,13 @@ struct QuickAskBox: View {
         .onAppear { speech.check() }
     }
 
-    /// Hold to talk: pressed, it listens; let go, what was heard is asked.
+    /// Hold to talk: pressed, it listens; let go, what was heard is asked; slid well away first, nothing is.
+    /// Tapped (under 0.3 s, Tim 11-18): it listens until the next tap (asked), the ✕ (nothing), a long silence or the
+    /// time limit (asked), or the list or the app left (nothing).
     private var mic: some View {
         let live = speech.phase == .listening || speech.phase == .finishing
         let off = speech.phase == .refused || speech.phase.isUnavailable
-        return Image(systemName: live ? "mic.fill" : off ? "mic.slash" : "mic")
+        return Image(systemName: speech.tapMode ? "stop.fill" : live ? "mic.fill" : off ? "mic.slash" : "mic")
             .font(.title3)
             .foregroundStyle(live ? Color.white : off ? Color.secondary : Color.trifGreen)
             .frame(width: 40, height: 40)
@@ -300,16 +430,35 @@ struct QuickAskBox: View {
                 if down {
                     guard !pressing else { return }
                     pressing = true
+                    micAway = false
+                    // (listening by a tap: this press is the tap that stops it)
+                    if speech.tapMode { stopPress = true; return }
+                    pressedAt = Date()
                     focused = false
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     speech.press { words in ask(words) }
                 } else {
                     pressing = false
-                    speech.release()
+                    if stopPress { stopPress = false; speech.release(); return }
+                    if speech.phase == .listening, let at = pressedAt, Date().timeIntervalSince(at) < 0.3 { speech.keepListening() }
+                    else if micAway { speech.cancel() }
+                    else { speech.release() }
+                    pressedAt = nil
                 }
             })
-            .accessibilityLabel("Hold to talk")
-            .accessibilityHint("Hold, say what should change, then let go")
+            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { g in micAway = hypot(g.translation.width, g.translation.height) > 90 })
+            .accessibilityLabel(speech.tapMode ? "Stop listening" : "Talk")
+            .accessibilityHint(speech.tapMode ? "Asks what was heard" : "Tap, say what should change, then tap again. Or hold, and let go")
+    }
+
+    /// (tap-listening: its way out, nothing asked)
+    private var stopX: some View {
+        Button { speech.cancel(why: "the ✕") } label: {
+            Image(systemName: "xmark").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
+                .frame(width: 32, height: 32).background(Circle().fill(Color(.tertiarySystemFill)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Cancel")
     }
 
     private func send() {
@@ -318,6 +467,36 @@ struct QuickAskBox: View {
         text = ""
         focused = false
         ask(t)
+    }
+}
+
+// MARK: the robot held (Tim, 11-18: "long-press on the robot = hold to talk")
+
+/// Over the toolbar while the robot is held: the glowing pill with the words as they're heard, as the box's
+/// microphone shows them, and how to cancel; slid away, how letting go cancels.
+struct HoldTalkPill: View {
+    @ObservedObject private var speech = SpeechInput.shared
+    let away: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Image(systemName: away ? "xmark.circle" : "waveform")
+                    .foregroundStyle(away ? Color.trifCoral : Color.trifGreen)
+                    .symbolEffect(.variableColor.iterative, isActive: speech.phase == .listening && !away)
+                Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript)
+                    .font(.footnote).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Text(away ? "Let go to cancel" : "Slide away to cancel").font(.caption2)
+                .foregroundStyle(away ? Color.trifCoral : .secondary)
+                .padding(.leading, 26)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.regularMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder((away ? Color.trifCoral : Color.trifGreen).opacity(0.7), lineWidth: 1))
+        .shadow(color: (away ? Color.trifCoral : Color.trifGreen).opacity(0.55), radius: 10)
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(speech.transcript.isEmpty ? "Listening" : "Heard: \(speech.transcript)")
     }
 }
 

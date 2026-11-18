@@ -143,6 +143,16 @@
   }
 
   /** One paste into the message box: true if the page took it (its paste handler cancelled the event). */
+  /** Runs `put` with the message box focused, as a paste needs, and blurs it again in the same turn, before iOS
+   *  brings the keyboard up (Tim, 11-18: opening the chat, "the keyboard flies up and it's disorienting"): the page
+   *  stays where it was, the box filled, for the person to tap into. A box the person was already typing in keeps
+   *  their focus. */
+  function inBox(ed, put) {
+    const had = document.activeElement === ed || (ed.contains && ed.contains(document.activeElement));
+    if (!had) { try { ed.focus({ preventScroll: true }); } catch (e) { ed.focus(); } }
+    try { return put(); } finally { if (!had) ed.blur(); }
+  }
+
   function paste(ed, dt) {
     let ev;
     try { ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }); } catch (e) { return false; }
@@ -201,14 +211,14 @@
     if (!ed) return viewer() ? 'something over the message box' : 'no message box';
     if (document.readyState !== 'complete' && !settled) await Promise.race([new Promise((r) => addEventListener('load', r, { once: true })), wait(600)]);
     settled = true;
-    ed.focus();
+    // (no focus held here: each paste focuses the box and blurs it again at once, inBox)
     const said = [];
     if (png) {
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
       const pic = new File([bytes], picture || 'TRIF screenshot.png', { type: /\.jpe?g$/i.test(picture || '') ? 'image/jpeg' : 'image/png' });
       dt.items.add(pic);
-      if (paste(ed, dt)) said.push('picture pasted');
+      if (inBox(ed, () => paste(ed, dt))) said.push('picture pasted');
       else {
         // (not taken as a paste: given to the page's own picture input, as its picker would)
         const input = fileInput(pic);
@@ -225,7 +235,8 @@
       const bytes = Uint8Array.from(atob(pdf), (c) => c.charCodeAt(0));
       dt.items.add(new File([bytes], 'TRIF full page.pdf', { type: 'application/pdf' }));
       pdfPastedAt = Date.now();
-      said.push(paste(editor() || ed, dt) ? 'PDF pasted' : 'PDF not taken');
+      const box = editor() || ed;
+      said.push(inBox(box, () => paste(box, dt)) ? 'PDF pasted' : 'PDF not taken');
       await wait(300);
     }
     if (text && name && picturesOnly()) said.push('this chat takes pictures only as files: the text typed in');
@@ -242,7 +253,7 @@
         const dt = new DataTransfer();
         dt.items.add(new File([text], name, { type: 'text/plain' }));
         let took = false;
-        if (how === 'paste') took = paste(editor() || ed, dt);
+        if (how === 'paste') { const box = editor() || ed; took = inBox(box, () => paste(box, dt)); }
         else if (how === 'drop') {
           // (as a file dragged onto the message box: dragenter, dragover, then drop, each carrying the file)
           const target = composerBox() || editor() || ed;
@@ -272,12 +283,15 @@
     if (text) {
       const dt = new DataTransfer();
       dt.setData('text/plain', text);
-      if (paste(ed, dt)) said.push('text pasted');
-      else {
-        if (ed.localName === 'textarea') { ed.value += text; ed.dispatchEvent(new Event('input', { bubbles: true })); }
-        else document.execCommand('insertText', false, text);
-        said.push('text typed');
-      }
+      const box = editor() || ed;
+      inBox(box, () => {
+        if (paste(box, dt)) said.push('text pasted');
+        else {
+          if (box.localName === 'textarea') { box.value += text; box.dispatchEvent(new Event('input', { bubbles: true })); }
+          else document.execCommand('insertText', false, text);
+          said.push('text typed');
+        }
+      });
     }
     return said.join(', ') || 'nothing';
   }
@@ -718,9 +732,10 @@
     if (OUR_TEXT.test(c.text) && !c.names.some((n) => !OUR_FILE.test(n))) {
       const ed = editor();
       if (ed) {
-        ed.focus();
-        if (ed.localName === 'textarea') { ed.value = ''; ed.dispatchEvent(new Event('input', { bubbles: true })); }
-        else { document.execCommand('selectAll'); document.execCommand('delete'); }
+        inBox(ed, () => {
+          if (ed.localName === 'textarea') { ed.value = ''; ed.dispatchEvent(new Event('input', { bubbles: true })); }
+          else { document.execCommand('selectAll'); document.execCommand('delete'); }
+        });
       }
     }
     return trifInBox().count;
@@ -770,16 +785,17 @@
     for (let n = w.nextNode(); n; n = w.nextNode()) {
       const i = n.data.lastIndexOf(t);
       if (i < 0) continue;
-      ed.focus();
-      const r = document.createRange();
-      r.setStart(n, i);
-      r.setEnd(n, i + t.length);
-      const sel = getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
-      document.execCommand('delete');
       // (no keyboard left up over the tab: the box isn't shown)
-      ed.blur();
+      inBox(ed, () => {
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + t.length);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        document.execCommand('delete');
+      });
+      if (document.activeElement === ed) ed.blur();
       return 'taken out';
     }
     return 'not there';

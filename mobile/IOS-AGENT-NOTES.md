@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (388 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (413 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -50,7 +50,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   file, size, sensitive or not, drawn; the folder's files and orphans; pictures read from disk since launch),
   privatepage (["https://…"]: pictured or why not), cover (the leaving cover's rule now, up or down, its last steps
   with ms since the app came to the front; "show": up for 6 s, for a screenshot),
-  quick ("words": a quick ask as the box sends it), quickstate, quickundo, quickopen (the pill tapped), quickcancel
+  applink (the other-app question up now, and the note), quick ("words": a quick ask as the box sends it), quickstate, quickundo, quickopen (the pill tapped), quickcancel
   (the strip's ✕), quickexpand; speech (permissions, on-device or not), speechfile ("/path.wav": the recognizer on a
   recorded file, SFSpeechURLRecognitionRequest on device), micpress / micrelease; tabsfocus (the card the tab list last
   opened at, and the shown tab),
@@ -105,6 +105,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (10 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
   code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply; the quick ask: never a
   scripted send, the person's Send told once, their message appearing as the send, takeText). One browser suite at a time; small payloads.
+- Links to other apps (AppLinks.swift's decisions) on the Mac: `node --test mobile/test/applinks.test.js` (swiftc with
+  mobile/test/applinks-check/main.swift). Simulator pages for it: any small node server with tel:/mailto:/sms:/maps:/
+  fb-messenger: links, a target=_blank one, a trif: one, `location = 'mailto:…'` on load and every 1.5 s, an
+  `a.click()` on load, an iframe to fb:// (the batch's own lived in the scratchpad).
 - What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
   mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
@@ -113,7 +117,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   JS counts as a gesture). App to the background: `simctl launch <dev> com.apple.Preferences`; back: `simctl launch`
   the app; lock: the iOS Simulator tool's LOCK button (HOME wakes / unlocks). Steps still answer in the background
   while something plays.
-- Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
+- Dev launch flags: `-speechfile <wav>` (a recording stands in for the microphone in every hold or tap of it: fed to the
+  same live request at once; `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"`), `-talksilence <s>` (the tapped
+  microphone's silence stop, 4 s; longer to try its taps), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
   `-nobarshift`, `-stripheight <pt>` (the quick ask's strip, 270), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
@@ -140,7 +146,18 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   one goes after 8 s, one with mods stays: they're its offer, ✕ = dismissed). `goToSite(key)`: its tab if open and on
   its site, else a new tab at the page it was on (else https://site/); then the banner's held mods come up.
   `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badge(for: tab)` (TabCard). The
-  robot's long press (simultaneousGesture + `robotHeld`, so the release isn't also a tap) → ChatListView.
+  robot's tap → ChatListView (Go to chat first; `site` the shown tab's); its hold → hold to talk (ContentView
+  robotPress/robotHold/robotLift, HoldTalkPill in QuickAsk.swift) or ChatListView when talking isn't ready.
+- AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
+  data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other), `decide` (tapped →
+  open; else ask once a load, one at a time, main frame, shown, app in front; else drop), `isTap`, `appName` (Apple's
+  apps only), the words. `TouchClock` + `TouchWatch` (a do-nothing recognizer on every tab's, chat's and More's web
+  view: when the finger was last on a page) and the long-press menu's open/close. Browser: `appLink(...)` (open /
+  question by UIAlertController on the top controller / Diagnostics "app link" lines with the scheme only, a drop's line
+  once a load), `askedLoads` cleared by each commit (`appLinkNewLoad`, the pane's didCommit too), `handToIOS`
+  (UIApplication.open; false → the note). Called from decidePolicy (after mod links and the two-finger guard),
+  createWebViewWith (no tab), Open in New Tab, the preview's commit, ClaudePane's decidePolicy/createWebViewWith,
+  PanelChat's (taps only, never asks). The note shows over the chat too (ContentView.page's bottom overlay).
 - QuickAsk.swift (Tim, 11-18): `QuickAsk` (request, service, site, key, state waitingSend/working/done/replied/card/
   undone/failed, `applied` for Undo; `lookOnly`), `SpeechInput.shared` (hold-to-talk: SFSpeechRecognizer,
   requiresOnDeviceRecognition, AVAudioEngine tap; the session .record/.measurement while held, then back to
@@ -450,9 +467,57 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   shown tab's site). That card is centred (`scrollPosition(id:)` from the first frame, plus `scrollTo` without
   animation on appear) and drawn as the current one (green), even when it isn't the tab shown under the list.
   Recorded frame by frame (11-18): no scroll from the top, the card pictures fade in where they are.
+- Links that aren't web pages go to iOS (Tim, 11-18; built 11-18, words drafts): tel:, mailto:, sms:, maps:, an app's
+  scheme (fb-messenger:…) are handed to iOS (UIApplication.open) and the navigation cancelled. At once only when the
+  person tapped: a link or form AND their finger on that web view in the last 1.5 s (WebKit calls a script's
+  `a.click()` a link too: checked, it asks), or a long-press menu item (WebKit's Open, Open in New Tab, the preview).
+  A page or mod doing it by itself (script, redirect, refresh, `a.click()`) gets Safari's question "Open this page in
+  “App”?" / "Open this page in another app?" (Cancel / Open): only for the shown tab's or shown chat's main frame, one
+  at a time, once a page load (reset at the next commit); frames inside the page, tabs behind, the app in the
+  background: nothing. No app: "No app on this iPhone can open this link." (the app's note; full screen's note in full
+  screen; over the chat too). target=_blank / window.open of such a link: to iOS, no empty tab. trif: (mod links: not
+  followed, as before), TRIF's own schemes, javascript:, file: never leave; about/blob/data stay; http/https unchanged
+  (default-browser rules). More's panel: taps only, never a question. Diagnostics "app link": the scheme only.
+- The robot's tap = the quick ask (Tim, 11-18: "make that the default tap experience"; built 11-18): a tap on 🤖 opens
+  the list (the box, the microphone, then **Go to chat**, then the chats). Go to chat = the old tap (the tab's site's
+  chat, the page filled, or the reply waiting shown); it names the service and site and says Reply waiting / Working…
+  for this tab's chat (a green dot); waiting chats in the list are bold with a dot. The chat open: the robot goes back
+  to the tab; the strip up: the robot opens the whole chat. The compact address bar's robot (a reply writing or
+  waiting) still opens the chat at once. VoiceOver: hint "Opens What should change? and the chats", action Go to chat.
+- The robot held = hold to talk (Tim approved 11-18; built): held still 0.45 s with talking ready (speech allowed,
+  microphone allowed, on-device recognition available) it listens at once (a light tap of feel), the glowing pill over
+  the toolbar with the words and "Slide away to cancel"; let go → the quick ask (the strip and the person's own Send for
+  Claude/ChatGPT, More direct; then the pill, Done · Undo). Slid 90 pt away → "Let go to cancel", nothing asked. Not
+  ready (first time, refused, no on-device speech): the list opens instead, its box saying why or asking. A finger
+  moving 20 pt before the 0.45 s is a slide, not a hold. One DragGesture(minimumDistance 0) beside the Button (ContentView
+  robotPress/robotHold/robotLift); `robotHeld` stops the tap that ends a hold.
+- The box's microphone: tap or hold (Tim, 11-18; built): a press under 0.3 s is a tap: listening goes on (a stop square,
+  an ✕ beside it, "Listening, tap to stop") until the next tap (asked), the ✕ (nothing), 4 s with no new words (8 s
+  before any; asked), 60 s (asked), the list closed or the app sent to the background (nothing). Longer is a hold, as
+  before; slid 90 pt away and let go: nothing. SpeechInput: `tapMode`, `keepListening`, `cancel(why:)`, `ready`.
+- The full chat opens with no keyboard (Tim, 11-18: "the keyboard flies up and it's disorienting"): chat.js fill never
+  leaves the box focused: each paste/insert is `inBox` (focus with preventScroll, put, blur in the same turn; a box the
+  person was already in keeps its focus). The strip too. Checked: Go to chat on the Claude and ChatGPT (`?octane`)
+  stand-ins, the strip, a reply waiting: activeElement body, scrollY 0, a recording's frames show no keyboard bar
+  (before: the Simulator's keyboard bar came up, shot 402).
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
+
+- Links to other apps (11-18): Simulator only (shots 389-400, 413). Checked: tapped tel:/mailto: (no app in the
+  Simulator: the note), sms: (Messages opened), maps: target=_blank (Maps, no new tab), fb-messenger: (the note), a
+  trif: link (not followed, a report line), `location = 'mailto:…'` on load and every 1.5 s (one question; Cancel →
+  never again on that load), `a.click()` on load (asked, Open → the note), an iframe to fb:// (nothing), WebKit's menu
+  Open and Open in New Tab (the note, no tab), the chat pane: a tapped link (the note over the chat) and a script's
+  maps: (“Maps” question), full screen (the note). Not tried: a phone with real apps (Facebook's m. site bouncing to
+  fb://, Messenger installed), VoiceOver or a keyboard activating a link (no finger: they get the question, not an
+  open), a form a script submits to another app's scheme (counts as tapped only with a finger down recently), iPad.
+- The robot's tap / hold to talk / the microphone's tap (11-18): Simulator only, with `-speechfile` (shots 401-411):
+  tap → list; Go to chat filled; hold → pill → strip → Send → Done · Undo; slide-away cancel; not ready → list; the
+  microphone's tap (stop square, ✕, the silence stop, the list closed, the app left), its hold and slide-away; a reply
+  waiting (409). Never with a live microphone or on a phone: live speech may end itself (isFinal) during a long tap;
+  the 0.45 s hold vs the toolbar sliding away with the page. The first tap on the microphone right as the list opened
+  was missed once (the sheet still moving).
 
 - Leaving cover (11-18): Simulator only (shots 383-386). Checked: icon tab B in full screen, left, the icon link for A
   (`simctl openurl`): every frame of the return (recordVideo) is the robot, then fading to A, no frame of B; with
@@ -562,6 +627,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- Other-app links in the Simulator (26.3): tel: and mailto: have no app (UIApplication.open says false), sms: opens
+  Messages, maps: Maps (both leave a "◀ TRIF Probe" back link). WebKit asks the policy for target=_blank BEFORE
+  createWebViewWith (targetFrame nil): cancelled there, no window is asked for. A script's `a.click()` arrives as
+  .linkActivated, hence the finger check (TouchClock).
+- chat.js: a focus() from the app's JS brought the Simulator's keyboard bar up (shot 402) even with no tap; blur in the
+  same turn shows none.
 
 - iOS's pictures of the app (11-18): `<data container>/Library/SplashBoard/Snapshots/sceneID:…/*.ktx` (the newest is
   the app switcher's), the launch screen's under `… - {DEFAULT GROUP}/`; `sips -s format png x.ktx --out x.png` reads

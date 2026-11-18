@@ -95,6 +95,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         webView.uiDelegate = self
         webView.isInspectable = true
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        TouchClock.watch(webView)
     }
 
     /// The models' downloads changed (progress, an end): the page told, at most once a second, to look again (its
@@ -994,11 +995,18 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         if caught(url) { return .cancel }
         // (a link in a reply: in a new tab of TRIF's, never in here)
         if ["http", "https"].contains(url.scheme ?? ""), action.navigationType == .linkActivated { browser?.newTab(url.absoluteString) }
+        // (another app's link in a reply, tapped: to iOS; the panel's own page never asks)
+        if AppLinks.kind(url) == .other {
+            browser?.appLink(url, tapped: TouchClock.tapped(linkOrForm: action.navigationType == .linkActivated), mainFrame: true, from: webView, source: "More's panel", shown: true, mayAsk: false)
+        }
         return .cancel
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = action.request.url, caught(url) { return nil }
         if let url = action.request.url, ["http", "https"].contains(url.scheme ?? "") { browser?.newTab(url.absoluteString) }
+        if let url = action.request.url, AppLinks.kind(url) == .other {
+            browser?.appLink(url, tapped: TouchClock.tapped(linkOrForm: true), mainFrame: true, from: webView, source: "More's panel", shown: true, mayAsk: false)
+        }
         return nil
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {

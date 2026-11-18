@@ -283,6 +283,8 @@ extension Model {
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
+        // (another app's link: the question up now, if any, and the note)
+        if step["applink"] != nil { out = "question: \(browser.appLinkAsking ?? "none"); note: \(browser.status)" }
         if step["copydiag"] != nil { browser.copyDiagnostics() }
         if step["resethint"] != nil { UserDefaults.standard.removeObject(forKey: "fullScreenHinted") }
         if step["fullscreen"] != nil { browser.toggleFullScreen(); out = "full screen: \(browser.fullScreen), note: \(browser.status)" }
@@ -352,8 +354,13 @@ struct ContentView: View {
     @State private var stripUp = false
     /// The card the tab list opens at (nil: the shown tab's).
     @State private var tabsFocus: UUID?
-    /// (the robot's long press just opened the list: the tap that ends it doesn't also open the chat)
+    /// (the robot's long press just opened the list or talked: the tap that ends it doesn't also open the list)
     @State private var robotHeld = false
+    /// The robot held (Tim, 11-18: hold to talk): the finger came down at; listening; slid far enough to cancel.
+    @State private var robotDown: Date?
+    @State private var robotHoldWait: Task<Void, Never>?
+    @State private var holdTalk = false
+    @State private var holdAway = false
     @State private var showMods = false
     @State private var addingIcon = false
     @ObservedObject private var phoneLink = PhoneLinkModel.shared
@@ -467,6 +474,19 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(duration: 0.35), value: pane.banners.first?.id)
+            // (a note while the chat is shown, as "No app on this iPhone can open this link.": the page's notes are under it)
+            // (and the robot held: what's heard, over whatever is shown, just above the toolbar)
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    if holdTalk { HoldTalkPill(away: holdAway).padding(.bottom, 10).transition(.opacity.combined(with: .move(edge: .bottom))) }
+                    if pane.shown && !browser.status.isEmpty && !browser.fullScreen {
+                        Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+                            .modifier(NoteStyle(seconds: 2, key: browser.status) { browser.status = "" })
+                    }
+                }
+                .modifier(ToolbarRoom(insets: bars.insets))
+                .animation(.easeOut(duration: 0.2), value: holdTalk)
+            }
             // (the full screen exit button: over everything, outside the clip, as it sits in the status bar's row)
             .overlay {
                 if browser.fullScreen && !hideExitButton && !covered {
@@ -601,8 +621,9 @@ struct ContentView: View {
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
         .sheet(isPresented: $showChatList) {
-            ChatListView(pane: pane,
+            ChatListView(pane: pane, site: browser.site,
                          ask: { text in showChatList = false; closeCovers(); pane.quickAsk(text) },
+                         goToChat: { showChatList = false; closeCovers(); pane.open() },
                          open: { key in showChatList = false; closeCovers(); pane.openChat(key) },
                          go: { key in showChatList = false; closeCovers(); pane.goToSite(key) },
                          close: { showChatList = false })
@@ -858,6 +879,50 @@ struct ContentView: View {
         job()
     }
 
+    /// The finger on the robot: held still 0.45 s, it talks (or opens the list); moved first, it was a slide, not a
+    /// hold. While talking, slid well away (90 pt) means letting go cancels.
+    private func robotPress(_ moved: CGSize) {
+        let far = hypot(moved.width, moved.height)
+        if robotDown == nil {
+            robotDown = Date()
+            robotHoldWait = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                if !Task.isCancelled, robotDown != nil { robotHold() }
+            }
+        }
+        if holdTalk { holdAway = far > 90 } else if far > 20 { robotHoldWait?.cancel() }
+    }
+
+    private func robotHold() {
+        robotHeld = true
+        let speech = SpeechInput.shared
+        guard speech.ready else {
+            // (no permission yet, refused, or no speech on this iPhone: the list, whose box says why or asks)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Diagnostics.shared.log("quick ask", "robot held: the list (talking not ready: \(speech.describe))")
+            showChatList = true
+            return
+        }
+        speech.press { words in closeCovers(); pane.quickAsk(words) }
+        guard speech.phase == .listening else { showChatList = true; return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        holdAway = false
+        holdTalk = true
+        Diagnostics.shared.log("quick ask", "robot held: talking")
+    }
+
+    private func robotLift() {
+        robotHoldWait?.cancel()
+        robotDown = nil
+        if holdTalk {
+            holdTalk = false
+            if holdAway { SpeechInput.shared.cancel() } else { SpeechInput.shared.release() }
+        }
+        holdAway = false
+        // (a hold that ends off the button sends no tap: not kept for the next one)
+        if robotHeld { Task { @MainActor in try? await Task.sleep(nanoseconds: 400_000_000); robotHeld = false } }
+    }
+
     private var toolbar: some View {
         // (the page button at the screen's exact centre, a little bigger; the three on each side evenly in their half,
         // mirrored: each side cell the same width. Tim, 11-15: evenly spaced, the bigger middle one sat 11 pt left)
@@ -873,27 +938,25 @@ struct ContentView: View {
                 .disabled(pane.shown ? !pane.canGoForward : !covered && !browser.canGoForward)
                 .accessibilityLabel(covered && !pane.shown ? backToTab : "Forward")
                 .frame(maxWidth: .infinity)
-            // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
-            // (held: the chats' list, Tim 11-18; the tap that ends the hold does nothing more)
+            // (Tim, 11-18: a tap opens the quick ask, "What should change?", with Go to chat and the chats below
+            // (ChatListView); while the chat is open (shown selected) it goes back to the tab; with the quick ask's strip
+            // up, the whole chat, as before. Held: talk at once (hold to talk), or the same list when talking can't start)
             Button {
                 if robotHeld { robotHeld = false; return }
-                if pane.shown { pane.close() } else { closeCovers(); pane.open() }
+                if pane.shown { pane.close() } else if pane.strip { pane.open() } else { showChatList = true }
             } label: {
                 ChatGlyph(activity: pane.activity).frame(width: 24, height: 24)
                     .padding(5)
                     .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.trifGreen.opacity(pane.shown ? 0.2 : 0)))
                     .padding(-5)
             }
-            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                robotHeld = true
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                showChatList = true
-                // (a hold that ends off the button sends no tap: not kept for the next one)
-                Task { @MainActor in try? await Task.sleep(nanoseconds: 1_500_000_000); robotHeld = false }
-            })
+            .simultaneousGesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { g in robotPress(g.translation) }
+                .onEnded { _ in robotLift() })
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
+            .accessibilityHint("Opens What should change? and the chats")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
-            .accessibilityAction(named: "Chats") { showChatList = true }
+            .accessibilityAction(named: "Go to chat") { closeCovers(); pane.open() }
                 .frame(maxWidth: .infinity)
             // (the page: back to it from whatever covers it; on the page, a + for a new tab; in the middle, a little bigger)
             pageButton

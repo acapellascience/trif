@@ -312,6 +312,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
         wv.isInspectable = true
+        // (a tapped link to another app opens at once, the page's own try asks: AppLinks)
+        TouchClock.watch(wv)
         // (the chat page stays put in its frame: claude.ai and chatgpt.com scroll their conversation inside
         // themselves, so the web view's own scrolling only ever hid the top of the chat, after the keyboard
         // or a send moved it: Tim, 11-14)
@@ -1397,9 +1399,15 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             browser?.stopModLink(url, from: "Claude's pane")
             return .cancel
         }
-        let scheme = url.scheme ?? ""
+        let scheme = url.scheme?.lowercased() ?? ""
         if !["http", "https", "about", "blob", "data"].contains(scheme) {
-            note("an address for another app, not followed", url, view(of: webView))
+            // (another app's link: as in a tab, to iOS when tapped, else Safari's question on the chat shown; TRIF's own
+            // schemes, javascript: and file: never)
+            if AppLinks.kind(url) == .other {
+                browser?.appLink(url, action: navigationAction, from: webView, source: "a chat", shown: shown || strip || webView === popup)
+            } else {
+                report.log("claude", "\((view(of: webView)?.service ?? service).rawValue), not followed: \(AppLinks.logged(url))")
+            }
             return .cancel
         }
         if ModDownloads.wanted(navigationAction) { return .download }
@@ -1420,6 +1428,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { view(of: webView)?.loading = true }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        browser?.appLinkNewLoad(webView)
         guard let v = view(of: webView) else { return }
         v.navigating = false
         v.projectPage = v.service.isProjectPage(webView.url) && webView.url?.absoluteString != v.service.project?.absoluteString
@@ -1495,8 +1504,16 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             browser?.stopModLink(url, from: "Claude's pane (a link that opens a new window)")
             return nil
         }
+        // (a window for another app's link: to iOS when tapped, no window)
+        if let url = navigationAction.request.url, !["http", "https", "about", "blob", "data"].contains(url.scheme?.lowercased() ?? "") {
+            if AppLinks.kind(url) == .other {
+                browser?.appLink(url, tapped: TouchClock.tapped(linkOrForm: true), mainFrame: true, from: webView, source: "a chat's new window", shown: shown || strip)
+            }
+            return nil
+        }
         note("opened a window for", navigationAction.request.url, view(of: webView))
         let child = WKWebView(frame: .zero, configuration: configuration)
+        TouchClock.watch(child)
         child.navigationDelegate = self
         child.uiDelegate = self
         child.isInspectable = true
@@ -1750,10 +1767,26 @@ struct ChatBannerView: View {
 /// state. A row opens its chat; its arrow goes to its site's tab.
 struct ChatListView: View {
     @ObservedObject var pane: ClaudePane
+    /// the shown tab's site (Go to chat's chat)
+    let site: String
     let ask: (String) -> Void
+    /// the full chat for the shown tab, as the robot's tap was until 11-18: the page's details filled in
+    let goToChat: () -> Void
     let open: (String) -> Void
     let go: (String) -> Void
     let close: () -> Void
+
+    /// (this tab's site's chat, if it has one: its state on Go to chat)
+    private var mine: ChatLink? { site.isEmpty ? nil : pane.links.first { $0.site == site } }
+    private var goWords: (title: String, line: String) {
+        let service = pane.more ? "More" : pane.service.rawValue
+        let place = site.isEmpty ? service : "\(service) · \(site)"
+        switch mine?.state {
+        case .waiting?: return ("Go to chat", "Reply waiting · \(place)")
+        case .working?: return ("Go to chat", "Working… · \(place)")
+        default: return ("Go to chat", place)
+        }
+    }
 
     private func state(_ l: ChatLink) -> String {
         switch l.state {
@@ -1767,10 +1800,31 @@ struct ChatListView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section { QuickAskBox(ask: ask).listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 12)) }
+                Section {
+                    QuickAskBox(ask: ask).listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 12))
+                    // (Tim, 11-18: the robot's tap opens this list now; the full chat is one tap further, here, first)
+                    Button(action: goToChat) {
+                        HStack(spacing: 12) {
+                            ChatGlyph(activity: mine?.activity ?? .idle).frame(width: 22, height: 22).foregroundStyle(Color.trifGreen)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(goWords.title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.trifGreen)
+                                Text(goWords.line).font(.caption).lineLimit(1)
+                                    .foregroundStyle(mine?.state == .waiting ? Color.trifGreen : .secondary)
+                                    .fontWeight(mine?.state == .waiting ? .semibold : .regular)
+                            }
+                            Spacer(minLength: 0)
+                            if mine?.state == .waiting { Circle().fill(Color.trifGreen).frame(width: 9, height: 9) }
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(mine?.state == .waiting ? "Go to chat, reply waiting" : "Go to chat")
+                    .accessibilityHint("Opens the whole chat for this page")
+                }
                 Section {
                 if pane.links.isEmpty {
-                    Text("No chats yet. Tap the robot on a page to start one.").font(.footnote).foregroundStyle(.secondary)
+                    Text("No chats yet.").font(.footnote).foregroundStyle(.secondary)
                 }
                 ForEach(pane.links) { l in
                     HStack(spacing: 12) {
@@ -1781,8 +1835,11 @@ struct ChatListView: View {
                                     Text(l.site).font(.subheadline.weight(.semibold)).lineLimit(1)
                                     if !l.tabTitle.isEmpty { Text(l.tabTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                                     Text("\(l.service) · \(state(l))").font(.caption2).foregroundStyle(l.state == .waiting ? Color.trifGreen : .secondary)
+                                        .fontWeight(l.state == .waiting ? .semibold : .regular)
                                 }
                                 Spacer(minLength: 0)
+                                // (a reply waiting: a green dot, easy to see down the list)
+                                if l.state == .waiting { Circle().fill(Color.trifGreen).frame(width: 9, height: 9).accessibilityHidden(true) }
                             }
                             .contentShape(Rectangle())
                         }
@@ -1800,5 +1857,7 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: close) } }
         }
+        // (the list closed mid-listen (a tap on the microphone): stopped, nothing asked)
+        .onDisappear { if SpeechInput.shared.phase == .listening { SpeechInput.shared.cancel(why: "the list closed") } }
     }
 }

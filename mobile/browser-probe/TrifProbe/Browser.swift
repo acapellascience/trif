@@ -157,6 +157,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         two.allowableMovement = 24
         two.delegate = self
         wv.addGestureRecognizer(two)
+        // (where the finger was last: a tapped link to another app opens at once, a page's own try asks: AppLinks)
+        TouchClock.watch(wv)
         // (an address or title that changes without a page load, as a single-page site's do: the tab and History follow)
         tab.watches = [
             wv.observe(\.url, options: [.new]) { [weak self, weak tab] w, _ in Task { @MainActor in
@@ -1159,6 +1161,82 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
     }
 
+    // MARK: links for other apps (Tim, 11-18: tel:, mailto:, sms:, maps:, fb-messenger:… did nothing)
+
+    /// (the web views whose current load has had its question, answered or not: one a load. Cleared as each commits)
+    private var askedLoads = Set<ObjectIdentifier>()
+    private weak var appLinkAlert: UIAlertController?
+    private var droppedLines: [ObjectIdentifier: String] = [:]
+
+    func appLinkNewLoad(_ webView: WKWebView) { askedLoads.remove(ObjectIdentifier(webView)); droppedLines[ObjectIdentifier(webView)] = nil }
+
+    /// A navigation to another app's link, from a tab's page or a chat's: tapped (a link or form, the finger on the
+    /// page just now, or a menu) opens it at once.
+    func appLink(_ url: URL, action: WKNavigationAction, from webView: WKWebView, source: String, shown: Bool? = nil) {
+        let tapped = TouchClock.tapped(linkOrForm: [.linkActivated, .formSubmitted].contains(action.navigationType))
+        appLink(url, tapped: tapped, mainFrame: action.targetFrame?.isMainFrame ?? true, from: webView, source: source, shown: shown)
+    }
+
+    /// Another app's link: to iOS at once when the person tapped it; a page doing it by itself (a script, a redirect,
+    /// a refresh) gets Safari's question, if it's the page on the screen, one question at a time and one a load; a
+    /// frame inside the page, a tab behind, More's panel (`mayAsk` false): nothing unless tapped.
+    func appLink(_ url: URL, tapped: Bool, mainFrame: Bool, from webView: WKWebView?, source: String, shown: Bool? = nil, mayAsk: Bool = true) {
+        let key = webView.map { ObjectIdentifier($0) }
+        let onScreen = shown ?? (webView === self.webView)
+        let active = UIApplication.shared.applicationState == .active
+        let d = AppLinks.decide(tapped: tapped, mainFrame: mainFrame, askedThisLoad: key.map { askedLoads.contains($0) } ?? false,
+                                asking: appLinkAlert != nil, mayAsk: mayAsk && onScreen && active)
+        switch d {
+        case .open:
+            handToIOS(url, source: source, how: "tapped")
+        case .drop(let why):
+            let reason = !onScreen && !tapped ? "not tapped, not on the screen" : !active && !tapped ? "not tapped, the app not in front" : why
+            let line = "\(AppLinks.logged(url)) from \(source), not opened: \(reason)"
+            // (a page trying again and again: its line once a load)
+            if let key { if droppedLines[key] == line { return }; droppedLines[key] = line }
+            Diagnostics.shared.log("app link", line)
+        case .ask:
+            if let key { askedLoads.insert(key) }
+            askToOpen(url, source: source)
+        }
+    }
+
+    /// Safari's question, over whatever is up (a sheet too).
+    private func askToOpen(_ url: URL, source: String) {
+        guard let top = Browser.topController() else {
+            Diagnostics.shared.log("app link", "\(AppLinks.logged(url)) from \(source), not opened: nowhere to ask")
+            return
+        }
+        let a = UIAlertController(title: AppLinks.question(url), message: nil, preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: AppLinks.cancelWord, style: .cancel) { _ in
+            Diagnostics.shared.log("app link", "\(AppLinks.logged(url)) from \(source): asked, Cancel")
+        })
+        a.addAction(UIAlertAction(title: AppLinks.openWord, style: .default) { [weak self] _ in
+            self?.handToIOS(url, source: source, how: "asked, Open")
+        })
+        appLinkAlert = a
+        top.present(a, animated: true)
+        Diagnostics.shared.log("app link", "\(AppLinks.logged(url)) from \(source): asked")
+    }
+
+    private func handToIOS(_ url: URL, source: String, how: String) {
+        UIApplication.shared.open(url, options: [:]) { [weak self] ok in
+            Diagnostics.shared.log("app link", "\(AppLinks.logged(url)) from \(source), \(how): \(ok ? "handed to iOS" : "no app for it")")
+            if !ok { self?.status = AppLinks.noApp }
+        }
+    }
+
+    /// The controller on top (a sheet's, an alert's), to put a question over.
+    static func topController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard var c = (scenes.compactMap { $0.keyWindow }.first ?? scenes.flatMap(\.windows).first { $0.isKeyWindow })?.rootViewController else { return nil }
+        while let p = c.presentedViewController, !p.isBeingDismissed { c = p }
+        return c
+    }
+
+    /// (dev step: the question shown, if any)
+    var appLinkAsking: String? { appLinkAlert?.title }
+
     // MARK: navigation
 
     /// (with the page's preferences: Request Desktop Website's sites load in WebKit's desktop mode, below)
@@ -1187,6 +1265,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         let scheme = url.scheme ?? ""
         if navigationAction.navigationType == .linkActivated, Date() < ignoreLinksUntil, webView === self.webView { return .cancel }
+        // (another app's link, tel:, mailto:, maps:, fb-messenger:…: to iOS, as Safari; javascript:, file: and TRIF's
+        // own schemes never. http/https stay in TRIF, below)
+        switch AppLinks.kind(url) {
+        case .never, .own:
+            if navigationAction.targetFrame?.isMainFrame ?? true, scheme != "javascript" { report.log("link", "not followed: \(AppLinks.logged(url))") }
+            return .cancel
+        case .other:
+            appLink(url, action: navigationAction, from: webView, source: "a page")
+            return .cancel
+        case .web, .stay: break
+        }
         // (in full screen, a link the person taps to another site opens in TRIF's own view, in a new tab; the full-screen
         // tab stays on its site. Redirects and sign-in hops are left alone: only a tapped link)
         let here = Site.of(webView.url?.host ?? "")
@@ -1244,6 +1333,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         tab(of: webView)?.url = webView.url
+        appLinkNewLoad(webView)
         // (a new page: not drawn until it has finished, or a while has passed; its tab keeps the picture it had)
         if let t = tab(of: webView) { t.committedAt = Date(); t.finishedAt = nil }
         if let t = tab(of: webView) { checkAgent(t, webView) }
@@ -1296,6 +1386,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// so the page that opened it can still talk to it, as a sign-in window needs).
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url, Browser.isModLink(url) { stopModLink(url, from: "the page"); return nil }
+        // (a window for another app's link, target=_blank or window.open: to iOS, no empty tab. WebKit lets a page open a
+        // window only from a tap, but the finger is checked too)
+        if let url = navigationAction.request.url, AppLinks.kind(url) != .web, AppLinks.kind(url) != .stay {
+            if AppLinks.kind(url) == .other { appLink(url, tapped: TouchClock.tapped(linkOrForm: true), mainFrame: true, from: webView, source: "a page's new window") }
+            return nil
+        }
         let t = makeTab(configuration: configuration)
         t.started = true
         // (a window the page opens: a new tab, in TRIF view)
@@ -1351,8 +1447,16 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         animator.addCompletion { [weak self, weak webView] in
             guard let self, let webView else { return }
             if Browser.isModLink(url) { self.stopModLink(url, from: "a link's preview"); return }
+            if AppLinks.kind(url) == .other { self.appLink(url, tapped: true, mainFrame: true, from: webView, source: "a link's preview"); return }
             webView.load(URLRequest(url: url))
         }
+    }
+
+    // (the menu's own Open is WebKit's, a link activated with no finger on the page: chosen from the menu, so a tap)
+    func webView(_ webView: WKWebView, contextMenuWillPresentForElement elementInfo: WKContextMenuElementInfo) { TouchClock.menuOpen = true }
+    func webView(_ webView: WKWebView, contextMenuDidEndForElement elementInfo: WKContextMenuElementInfo) {
+        TouchClock.menuOpen = false
+        TouchClock.menuUntil = Date().addingTimeInterval(1)
     }
 
     /// Links a new tab can open (not javascript:, which runs in the page it's on).
@@ -1361,6 +1465,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// Open in New Tab: a tab right after the one the link was on, shown, as a page's own new window opens.
     func openInNewTab(_ url: URL, after webView: WKWebView?) {
         if Browser.isModLink(url) { stopModLink(url, from: "Open in New Tab"); return }
+        // (another app's link: to iOS, the person chose it; no empty tab)
+        switch AppLinks.kind(url) {
+        case .other: appLink(url, tapped: true, mainFrame: true, from: webView, source: "Open in New Tab"); return
+        case .never, .own: return
+        case .web, .stay: break
+        }
         let t = makeTab()
         t.started = true
         let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.firstIndex { $0 === current } ?? tabs.count - 1) + 1

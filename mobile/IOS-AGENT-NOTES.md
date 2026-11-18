@@ -1148,6 +1148,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Gotchas
 
+- The worktree is shared with the phone-sync loop: its uncommitted edits (11-18: Diagnostics.swift mid-change) can
+  break a build. Build the .ipa from what's committed: `git archive HEAD mobile extension | tar -x -C <dir>`, copy
+  mobile/browser-probe/Vendor in (gitignored), build there.
+
 - Browser tests here: nvm's node 20 (first on PATH) has no global WebSocket, which tests/cdp-page needs ("WebSocket is
   not defined"): run them with `/usr/local/bin/node` (22), as CI's node 22. node --test runs EVERY .js under a test/
   folder as a test file (style-demo.js failed CI for a day: it's style-demo.mod now). CI's per-file limit

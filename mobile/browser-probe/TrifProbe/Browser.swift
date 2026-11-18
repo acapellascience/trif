@@ -815,11 +815,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // the page that happens to be shown (Tim, 11-18: FeedBook from a Facebook chat said "runs on google.com", the
         // tab he was on when it finished). The page shown only when the chat has no site. A computer's phone twin
         // (phone~<site>) is its site.)
-        var chatSite = chatSite
-        if chatSite.hasPrefix("phone~") { chatSite.removeFirst("phone~".count) }
-        let here = chatSite.isEmpty ? host : chatSite
-        // (where it came from: the chat's site, else the page shown; Add this mod? warns when it runs elsewhere)
-        let came = chatSite.isEmpty ? Site.of(here) : Site.of(chatSite)
+        // (where it came from: the chat's site, else the page shown; Add this mod? warns when it runs elsewhere. The
+        // shared rule: ModOfferRules.from, TrifCore.modOffer.from)
+        let (here, came) = ModOfferRules.from(chatSite: chatSite, shown: host)
         var found: [InstalledMod] = []
         var why: String?
         var skipped: [String] = []

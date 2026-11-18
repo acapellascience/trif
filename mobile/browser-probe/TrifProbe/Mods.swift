@@ -661,14 +661,12 @@ struct ModOfferView: View {
     }
     /// It runs on a site other than the one it came from (or on every site): the warning's words.
     private var elsewhere: (title: String, text: String)? {
-        guard let from = mod.cameFrom, !from.isEmpty else { return nil }
-        if mod.everywhere || mod.sites.contains("all-sites") {
+        // (the decision is the shared rule's: ModOfferRules.elsewhere, TrifCore.modOffer.elsewhere; the words are these)
+        guard let from = mod.cameFrom, let away = ModOfferRules.elsewhere(cameFrom: from, folder: mod.site, sites: mod.sites) else { return nil }
+        guard case let .others(others, also) = away else {
             return ("It runs on every site", "It came from \(from), but it runs on every site you visit, not just \(from). Add it only if you meant it to.")
         }
-        let others = Array(Set(mod.sites.map(Site.of).filter { !$0.isEmpty && $0 != from })).sorted()
-        guard !others.isEmpty else { return nil }
         let list = others.joined(separator: ", ")
-        let also = mod.sites.map(Site.of).contains(from)
         return ("It runs on \(others.count == 1 ? "another site" : "other sites")",
                 "It came from \(from), but it \(also ? "also " : "")runs on \(list). Add it only if you meant it to change \(others.count == 1 ? "that site" : "those sites").")
     }

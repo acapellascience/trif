@@ -154,6 +154,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mod-runs-cases.json, gen/core.js; prints running for 40 mods by the twin ~125 µs and the shared rule ~450 µs
   unoptimised, a switch's call ~30 µs) and `mobile/test/core-modruns.test.js` (the JS alone, and ModStoreTest.kt's
   matchPatterns and switchesTiersAndPause).
+- A chat's offered mod (ModOfferRules.swift → core/mod-offer.js) on the Mac: `node --test mobile/test/modoffer.test.js`
+  (swiftc with mobile/test/modoffer-check/main.swift, Site.swift, ModOfferRules.swift, Core.swift; argv
+  mod-offer-cases.json, gen/core.js; an offer's two calls ~50 µs unoptimised) and `mobile/test/core-modoffer.test.js`.
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -198,7 +201,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -278,6 +281,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   answers: `ModChanges.pick` (indices, -1 the new entry) and `InstalledMod.take` (the field names in `keep`). The code
   compare (`changed`) stays Swift: Swift's String == is canonical, JS's literal. No answer: nothing is lost (History and
   Recently deleted kept whole), a new add is off and marked, Undo / Restore / Don't allow do nothing.
+- ModOfferRules.swift (round 7 of the shared core): `from(chatSite:shown:)` (Browser.offerFromChat: the host the mod
+  reader takes and the site it came from; no answer: the shown page's) and `elsewhere(cameFrom:folder:sites:)`
+  (ModOfferView's coral box: every / others sorted + also; no answer: the every-site box) through TrifCore.modOffer. The
+  words stay in ModOfferView. Browser.offer(text:site:) (the Add to TRIF tap) still does its own: `here` = the chat's
+  site as given (a phone~ twin not removed), came = Site.of(here).
 - ModRuns.swift (round 6 of the shared core): what runs. setOn / setGroup through TrifCore.modStore (a tap; no answer:
   the switch doesn't move); running, isOn, off (the sites a mod's script checks it's off on) and MatchPattern (moved
   from Mods.swift; `parts` is the platform's URL parsing the shared rule reads: lower-case scheme and host,

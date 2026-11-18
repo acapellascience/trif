@@ -52,8 +52,12 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
         setOn, setGroup → core/mod-store.js; @match → core/match.js (one, any, applies; an address as its parts).
         Swift: ModRuns.swift (setOn / setGroup call through; running, isOn, off, MatchPattern are twins: every page
         load). signature's hashing stays Swift (Hasher, per launch); what it hashes follows running's `kept`.
-- [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision
-      (core/site.js exists now: TrifCore.site.of / hostIsIn / chat).
+- [x] Which site a chat's mod runs on and the cross-site warning's decision → core/mod-offer.js (round 7): from (the
+      host the mod reader takes, the site it came from: the chat's, phone~ removed, else the shown page's), elsewhere
+      (the coral box: every / other sites sorted, also). Swift: ModOfferRules.swift (Browser.offerFromChat,
+      ModOfferView.elsewhere; words stay Swift). @match itself was round 6 (core/match.js); trying a mod in More's chat
+      (PanelChat.tryMod) uses ModStore.applies, the round-6 twin. Left: the Add to TRIF tap (Browser.offer(text:site:))
+      keeps the phone~ prefix (see For Tim).
 - [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
       / select).
 - [ ] Leaving cover's "icon use" decision (LeavingCover.reason: icon tab on its site in full screen, or arrived by an
@@ -137,14 +141,31 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   → on again → the style tier off on localhost → gone there, still on 127.0.0.1 → tier on → the whole switch off → gone
   on both → on → back; no "core" line in diagnostics. .ipa built (dSYM 7241AF10-D0E0-383F-A9B5-14B63BE9CCEE).
 
+- Round 7 (11-18): a chat's offered mod moved: core/mod-offer.js (from, elsewhere) and ModOfferRules.swift
+  (Browser.offerFromChat's here / came; ModOfferView's coral box decides through it, its words unchanged). Cases
+  recorded from the old Swift (scratchpad r7/rec: the verbatim code + Site.swift): 133 from (19 chat sites incl. "",
+  phone~, phone~phone~, Phone~ and PHONE~ (not twins), ports, spaces × 7 shown hosts) and 161 elsewhere (7 came-froms
+  incl. nil/"" × 23 site sets: duplicates, case, www., all-sites in the list or the folder, IPs, punycode, two-part
+  suffixes, x.com.evil.org); the JS passed them at once, then the Swift through JSC. Sorting is code point order, as
+  Swift's sorted() (checked: an astral character after U+FFFD). Cost (Mac, unoptimised): an offer's two calls ~50 µs.
+  Tests: all of mobile/test (39 pass, 13 skipped as before), prepare --check, smoke. Simulator (SE, headless,
+  offerchat on a localhost page): phone~m.example.com, no @match → runs on m.example.com, came from example.com, no
+  box; phone~example.com + other.org → other.org, "another site"; example.com + b.org + a.net → "other sites ... also
+  runs on a.net, b.org"; *://*/* → "every site"; no chat site → localhost, no box; no "shared rule" line in
+  diagnostics (shots 459-463). .ipa built (dSYM D5039D09-0258-34D7-86C5-D8184EE6301B).
+
 ## Next step
 
-Round 7: which site a chat's mod runs on and the cross-site warning's decision (chat's site, phone~ twins, @match:
-now TrifCore.site and TrifCore.match exist), or which tabs reload when mods change (Browser.refreshIfStale / select:
-signature compare, playing, shown vs behind, Pause all). Read the Swift first (PanelChat.swift ~873 uses applies;
-the coral "runs on another site" box in ModOfferView / the offer path).
+Round 8: which tabs reload when mods change (Browser.modsChanged / refreshIfStale / select: the signature compare
+stays Swift (Hasher per launch), the decision moves: started, a page, not already reloading, signature differs, playing
+and evenPlaying, shown vs behind, scriptsPending). Or the leaving cover's "icon use" (LeavingCover.reason), small.
 
 ## Notes for next round
+
+- Round 7: ModOfferView is SwiftUI, so its decision moved into ModOfferRules.swift (no UI) first; the recorder ran the
+  verbatim code. The offerFromChat Diagnostics line now names the chat's site as given (phone~x.com, not x.com):
+  agent-only text. Simulator driver: scratchpad r7/drive.py (offerchat with a site, then `{"links":1}`'s offer line
+  "runs on … came from …", and `simctl io screenshot` for the box).
 
 - Round 6: an address crosses into JS as its parts (MatchPattern.parts: lower-case scheme and host, percent-encoded
   path or "/", ?query), since a bare JSContext has no URL parser; Android passes its own Uri's. signature stays Swift
@@ -188,6 +209,13 @@ the coral "runs on another site" box in ModOfferView / the offer path).
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 7: where a chat's mod is read and the coral "runs on another site / every site" box now decide through the
+  shared rules; they behave as before. A new TRIF.ipa is in iCloud Drive/TRIF.
+- One to decide: the Add to TRIF button under a code block in a chat that belongs to your computer's phone view
+  (phone~<site>) treats "phone~<site>" as the site (the mod could be read for that, and the box could say it came from
+  "phone~<site>"), while a reply's mods handed over automatically use <site>. The spec says phone~<site> is <site>
+  everywhere; say if the button should follow it (a one-line change: the same shared rule).
 
 - Nothing to decide, no new words. Since round 6 the mod switches (a mod's, its per-site switch, a tier's per site)
   and which mods run on a page (Pause all, @match) also follow the shared rules; they behave as before. What a mod waits for, what Allow allows, and what an edit or a restore asks about now

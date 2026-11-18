@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (339 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (355 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -44,6 +44,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds),
   exitbutton (where full screen's exit button and its taps are), desktop (true/false: ⋯ → Request Desktop / Mobile
   Website on the shown page), desktopstate (the sites kept, each tab's mode, "(Mac agent)" where the web view has it),
+  links (the chat links, newest first, the banners, the shown tab and offer: "runs on … came from …"), gosite n /
+  openlink n (link n's Go to <site> / its chat), banner ("add", "go", "open", "dismiss": the banner shown's button),
+  tabbadges (each tab's robot badge), sheet "chatlist" (the robot's long-press list),
   playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
@@ -53,7 +56,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `-chathome http://localhost:8377/chat.html` (`?greet`: an empty-state heading and an Upgrade plan button, for TRIF's
   greeting and upsell hiding). A saved project (`chatProject.Claude` in the app's prefs plist) sends the chat to
   /project/… instead and drops the query: delete it with PlistBuddy (`Delete :chatProject.Claude`) while the app is stopped. Message words steer it: "two", "no mod", "file", "file and block",
-  "viewer", "wait N". Query flags: `?history` (a long conversation's older messages rendering late: an older
+  "viewer", "wait N", "no match" (the mod has no @match line, as desktop's folder mods: FeedBook). The mod's
+  @match is the first http(s) origin in the attached files + the text: TRIF's own fill names the tab's page first, so a
+  URL typed in the message doesn't win (use the `offerchat` step for a mod matching another site). Query flags: `?history` (a long conversation's older messages rendering late: an older
   exchange with an earlier Calmer feed put at the top 1.5 s after load and 2 s after each reply), `?reopen` (the
   chat reopens a viewer on an old file by itself, no tap), `?gpt` (/c/ addresses), `?slow`, `?nostop`, `?draft`, `?gptpaste`, `?viewerroute`,
   `?octane` (ChatGPT's newer mobile page: li[data-message-role], data-message-complete, a 3 s pause, picture-only
@@ -116,6 +121,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   desktop websites (`desktopHosts`, `requestDesktop`, `decidePolicyFor … preferences:` sets `.desktop` and the web
   view's `customUserAgent` = `desktopAgent` per main-frame load, `Tab.desktop` = the mode it loaded in, `checkAgent`
   after each commit).
+- Chat links (ClaudePane.swift, Tim 11-18: from a chat back to its tab): `ChatLink` (service, site, the tab sent from
+  by Tab.id + its title and address, the conversation, state working/waiting/read/added; UserDefaults `chatLinks`,
+  newest first, 20; working → read at launch). `sentLink` at each send (a chat shown for another site than the tab's
+  keeps its tab), `remember` follows the conversation, `seen` (shown → read), `modAdded` (Browser.addMod →
+  modAddedFrom). `banners` ([ChatBanner], the first shown; ChatBannerView over everything in ContentView.page; a plain
+  one goes after 8 s, one with mods stays: they're its offer, ✕ = dismissed). `goToSite(key)`: its tab if open and on
+  its site, else a new tab at the page it was on (else https://site/); then the banner's held mods come up.
+  `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badge(for: tab)` (TabCard). The
+  robot's long press (simultaneousGesture + `robotHeld`, so the release isn't also a tap) → ChatListView.
 - ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
   normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
   (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
@@ -309,6 +323,21 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   address/search field or a usable start page; http/https links open where they point, in a new tab, with no
   redirecting or rewriting the destination; WebKit only; no crash-prone launch paths. Tim has no entitlement yet
   (needs the paid account + Apple's request); the Info.plist http/https declaration comes with that step.
+- Chats and tabs both ways (Tim, 11-18, all four approved; words drafts): (1) a done banner when a chat not being
+  looked at finishes a reply: "{Service} made a mod for {site}" · Add · Go to {site}, or "{Service} replied about
+  {site}" · Open chat. Its mods are HELD (`offerFromChat(hold: true)`, noted offered once; Add or Go to hands them to
+  Add this mod?; never a second offer: the judge's `queued` includes them). Exception (my call, for Tim): on the
+  chat's own site's tab with nothing over it, Add this mod? comes up at once, as before (no banner). (2) the chat's
+  top bar's "← {site}" row and the added note's "Go to {site}". Go to: the tab sent from while open AND on that site;
+  else a new tab at its page (never a tab navigated elsewhere, nothing rewritten). (3) tab list robot badges.
+  (4) long press on the toolbar's 🤖 → the chats' list (nothing else used a long press there; the tap is unchanged).
+- A chat's mods belong to the chat's site (Tim's bug 11-18: FeedBook, no @match, from a Facebook chat said "runs on
+  google.com", the tab shown when it finished): `offerFromChat` reads with `here` = the chat's site (phone~<site> →
+  <site>), the page shown only when the chat has none; Add to TRIF taps pass the chat's site (`offer(text:site:)`);
+  More's panel runs pass `run.site`. A mod whose own @match names another site still warns.
+- Desktop Website / Mobile Website (Tim approved 11-18, "Request" dropped). The address screen's Cancel closes an
+  empty new tab and goes back to the tab it came from (Browser.newTabFrom / leaveEmptyNewTab, as the + again; any
+  way the new tab was made); never the last tab.
 - "Open in New Tab" (link long-press menu, and History's long-press item, was "Open in a new tab"): approved by Tim 11-18.
 - Request Desktop Website (Tim, 11-18, "a desktop mode like safari has"; built 11-18, words Safari's, drafts): in
   the ⋯ menu before Full screen, websites only; "Request Mobile Website" on a desktop site (the label follows the
@@ -347,8 +376,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mods (PhoneSync / the twin). Now the phone's mods run unchanged in desktop mode (checked with a test mod: it ran
   in both modes).
 - [+] on a phone: the address screen focuses its field, and the keyboard covers the toolbar, so the second tap needs
-  the keyboard down first (the Simulator had no software keyboard). The address screen's own Cancel still leaves the
-  new empty tab (with its start page); Safari's Cancel closes it. Tim's call whether Cancel should too.
+  the keyboard down first (the Simulator had no software keyboard); Cancel is the way then.
+- Chats and tabs (11-18): checked in the Simulator only (shots 340-355, stand-in chat, localhost = tab A, 127.0.0.1 =
+  tab B). Never on a phone or with real Claude/ChatGPT. Not tried: the done banner while a sheet is up (it waits under
+  the sheet), two chats finishing at once (banners queue), More's panel runs (no banner: its own activity), a
+  notification tap with a held mod (arrived() releases it on the tab; code path only), iPad. The badge lives on the
+  tab sent from only while that tab is on the chat's site.
 
 - Free mods' style section: checked in the Simulator 11-17 (iOS 26.3.1, shots 293-296) with a FeedBook-like test mod
   (title colour and size, page background, a loading cover the code lifts after 5 s) on feed.html and strict.html

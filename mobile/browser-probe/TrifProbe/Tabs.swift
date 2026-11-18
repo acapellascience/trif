@@ -136,6 +136,8 @@ struct SavedTabs: Codable {
 /// The tab switcher: every tab as a card (its picture and title), tap to switch, × to close, + for a new one.
 struct TabsView: View {
     @EnvironmentObject var browser: Browser
+    /// (the tabs' chats: each card's robot badge, Tim 11-18)
+    @ObservedObject var pane: ClaudePane
     /// Closes it (it lies over the page, the toolbar under it).
     var close: () -> Void = {}
     private func dismiss() { close() }
@@ -146,7 +148,7 @@ struct TabsView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(browser.tabs) { tab in
-                        TabCard(tab: tab, current: tab.id == browser.current.id,
+                        TabCard(tab: tab, current: tab.id == browser.current.id, chat: pane.badge(for: tab.id),
                                 select: { browser.select(tab); dismiss() },
                                 close: { withAnimation { browser.close(tab) } })
                     }
@@ -172,6 +174,9 @@ struct TabCard: View {
     static let shape: CGFloat = 0.7
     @ObservedObject var tab: Tab
     let current: Bool
+    /// Its chat's state, if it has one: a small robot at the card's top left, its eyes moving while Claude works, a
+    /// dot while a reply waits unread, plain once read.
+    var chat: ChatActivity? = nil
     let select: () -> Void
     let close: () -> Void
 
@@ -207,6 +212,17 @@ struct TabCard: View {
                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .overlay(alignment: .topLeading) {
+                    if let chat {
+                        ChatGlyph(activity: chat).frame(width: 16, height: 16)
+                            .foregroundStyle(Color.trifGreen)
+                            .padding(5)
+                            .background(Circle().fill(.regularMaterial))
+                            .padding(6)
+                            .allowsHitTesting(false)
+                            .accessibilityLabel(chat == .working ? "Chat, working" : chat == .replied ? "Chat, reply waiting" : "Chat")
+                    }
+                }
                 Button(action: close) {
                     Image(systemName: "xmark").font(.caption.bold()).foregroundStyle(.white)
                         .frame(width: 24, height: 24).background(Circle().fill(Color.black.opacity(0.55)))

@@ -225,10 +225,10 @@
   ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
   row.addEventListener('click', (e) => { if (e.target.closest('button[aria-label="Send message"]')) go(); });
 
+  // (origin null: no @match line, as desktop's mods in a site's folder (FeedBook): the site comes from the chat's)
   const modFor = (origin, name, body) => `// ==WebMod==
 // @name        ${name}
-// @description Made by the stand-in chat
-// @match       ${origin}/*
+// @description Made by the stand-in chat${origin ? `\n// @match       ${origin}/*` : ''}
 // @style
 // ==/WebMod==
 ${JSON.stringify(body, null, 2)}`;
@@ -251,7 +251,8 @@ ${JSON.stringify(body, null, 2)}`;
     tiles.textContent = '';
     if (draft) sessionStorage.removeItem('draft');
     if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}${location.search}`);
-    const origin = (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
+    // ("no match": the mod has no @match line)
+    const origin = /no match/i.test(text) ? null : (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
     let parts;
     if (/no mod/i.test(text)) parts = [['p', 'Which part of the page do you mean? Point TRIF at it and send me that.']];
     // ("file": the mod as an attached file, a card with a download link, as Claude's file cards, for a tap; "file

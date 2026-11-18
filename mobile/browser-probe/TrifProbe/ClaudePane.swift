@@ -129,6 +129,38 @@ final class ChatView: Identifiable {
     }
 }
 
+/// A chat the person sent a message in, and the way back from it to the tab it started from (Tim, 11-18: "the site is
+/// lost in the tabs"; chats linked tab → chat only, now both ways). One per service and site (each site has one
+/// conversation at a time: ClaudePane's lastChat), newest first, kept across launches (UserDefaults `chatLinks`, 20).
+struct ChatLink: Codable, Identifiable, Equatable {
+    /// working: a reply being written; waiting: a reply done, not yet read; read; added: a mod from it was added.
+    enum State: String, Codable { case working, waiting, read, added }
+    var service: String
+    var site: String
+    /// The tab the person sent from (Tab.id, kept across launches with the tabs), its title and address then.
+    var tab: UUID?
+    var tabTitle: String
+    var tabURL: String?
+    /// The conversation (kept as ClaudePane.remember keeps it), nil for a new chat with no address yet.
+    var conv: String?
+    var state: State
+    var at: Date
+    var id: String { ClaudePane.linkKey(service, site) }
+    /// The tab list's badge and the chat list's picture: working, a reply waiting, or plain.
+    var activity: ChatActivity { state == .working ? .working : state == .waiting ? .replied : .idle }
+}
+
+/// A reply done in a chat the person isn't looking at (Tim, 11-18): the banner that slides down over whatever is
+/// shown. With mods: they wait here (the same offer: Browser.offerFromChat(hold:)) for its Add or Go to <site>.
+struct ChatBanner: Identifiable, Equatable {
+    let id = UUID()
+    let link: String
+    let service: String
+    let site: String
+    var mods: [InstalledMod]
+    static func == (a: ChatBanner, b: ChatBanner) -> Bool { a.id == b.id && a.mods.map(\.id) == b.mods.map(\.id) }
+}
+
 @MainActor
 final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     static var home: String { ChatService.claude.home }
@@ -215,6 +247,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let first = makeView(service)
         views = [first]
         cur = first
+        loadLinks()
+        browser.offersHeld = { [weak self] in self?.banners.flatMap(\.mods) ?? [] }
+        browser.chatTabFor = { [weak self] site in self?.links.contains { $0.site == site } ?? false }
+        browser.modAddedFrom = { [weak self] site in self?.modAdded(site) }
         // (development) `xcrun simctl spawn <device> notifyutil -p com.trif.probe.dumpchat`: the chat's layout and
         // scroll positions to Documents/chat-dom.html, without a relaunch (dumpComposer)
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
@@ -337,6 +373,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         v.lastUsed = Date()
         if v.activity == .replied { v.activity = .idle; Task { _ = await chatJS(v, "showReply()") } }
         if !v.started { start(v) }
+        seen(v)
         report.log("claude", "\(v.service.rawValue): the chat for \(v.site.isEmpty ? "no site" : v.site) shown")
     }
     /// The chats in progress, for the list: those that have loaded something.
@@ -410,6 +447,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if ClaudePane.owner(of: s) == v.site { UserDefaults.standard.set(s, forKey: lastKey(v.service, v.site)) }
             else { report.log("claude", "\(v.service.rawValue): the chat for \(v.site.isEmpty ? "no site" : v.site) is on \(ClaudePane.owner(of: s) ?? "?")'s conversation: not kept as this site's") }
             if v.contextNext { v.contextNext = false; noteContext(s) }
+            // (the chat's link follows its conversation: a new chat's first address, or another one the person went to)
+            if ClaudePane.owner(of: s) == v.site { updateLink(v) { if $0.conv != s, $0.state != .working || $0.conv == nil { $0.conv = s } } }
         }
     }
 
@@ -501,6 +540,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let was = v.activity
         if was == .replied { v.activity = .idle }
         shown = true
+        seen(v)
         report.log("claude", "\(v.service.rawValue): opened\(was == .idle ? "" : " (\(was.rawValue))")")
         // (the tab's data starts being gathered now, while the chat's page gets ready: 11-15)
         Diagnostics.shared.mark("opening the chat: gathering the page")
@@ -734,7 +774,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "mod":
             guard let text = d["text"] as? String else { return }
             report.log("claude", "\(name): Add to TRIF tapped (\(text.count) characters)")
-            browser?.offer(text: text)
+            browser?.offer(text: text, site: v.site)
         case "sent":
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
             report.log("claude", "\(name): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
@@ -745,15 +785,17 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             v.workingSince = Date()
             v.workingConversation = v.conversation
             v.lastUsed = Date()
-            v.sentTab = browser?.current.id
+            sentLink(v)
+            v.sentTab = link(v)?.tab
             askToNotify()
             if shown && cur === v { close() } else { blur(v) }
             let since = v.workingSince
             // (a reply that never says it's done, a page that went away: the dots stop after 16 minutes)
-            Task { @MainActor [weak v] in
+            Task { @MainActor [weak self, weak v] in
                 try? await Task.sleep(nanoseconds: 16 * 60 * 1_000_000_000)
                 guard let v, v.activity == .working, v.workingSince == since else { return }
                 v.activity = .idle
+                self?.updateLink(v) { if $0.state == .working { $0.state = .read } }
             }
         case "done":
             // (the mods: the reply's new code blocks with a whole mod file in each)
@@ -804,17 +846,180 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         report.log("claude", "\(v.service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")) for \(v.site.isEmpty ? "no site" : v.site), \(texts.count) mod file(s) in it")
         let late = d["why"] as? String == "late"
         // (the person went to another conversation before the reply was done: its watch ended, nothing offered)
-        if d["why"] as? String == "left" { if v.activity == .working { v.activity = .idle }; endBackgroundIfIdle(); return }
+        if d["why"] as? String == "left" {
+            if v.activity == .working { v.activity = .idle }
+            updateLink(v) { if $0.state == .working { $0.state = .read } }
+            endBackgroundIfIdle(); return
+        }
         guard v.activity == .working || late else { return }
         guard let browser else { v.activity = .idle; endBackgroundIfIdle(); return }
+        // (looking at this chat: as ever. Else the done banner (Tim, 11-18), its mods held for its Add or Go to
+        // <site>; but on the chat's own site's tab, nothing over it, Add this mod? comes up at once, as before)
+        let looking = shown && cur === v
+        let onItsTab = !shown && !v.site.isEmpty && browser.site == v.site && ContentView.coversNow == "none"
+        let hold = !looking && !onItsTab
         Task { @MainActor in
-            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto")
+            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto", hold: hold)
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
             if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) } // (not inactive: an alert of the system's over the app)
-            if late { if !offered.isEmpty, v.activity == .replied { v.activity = .idle }; self.endBackgroundIfIdle(); return }
-            v.activity = !offered.isEmpty || (self.shown && self.cur === v) ? .idle : .replied
+            if late {
+                if !offered.isEmpty, v.activity == .replied { v.activity = .idle }
+                if hold, !offered.isEmpty { self.banner(v, offered) }
+                self.endBackgroundIfIdle(); return
+            }
+            v.activity = !offered.isEmpty || looking ? .idle : .replied
+            self.updateLink(v) { $0.state = looking ? .read : .waiting }
+            if !looking && (hold || offered.isEmpty) { self.banner(v, hold ? offered : []) }
             self.endBackgroundIfIdle()
+        }
+    }
+
+    // MARK: chat links (Tim, 11-18): from a chat back to its tab, the done banner, the tabs' badges, the chats' list
+
+    nonisolated static func linkKey(_ service: String, _ site: String) -> String { "\(service)|\(site)" }
+    /// The chats sent from, newest first (ChatLink).
+    @Published private(set) var links: [ChatLink] = []
+    /// Replies done in chats not being looked at, oldest first: the first is the banner shown.
+    @Published private(set) var banners: [ChatBanner] = []
+    private static let linksKey = "chatLinks"
+
+    private func loadLinks() {
+        guard let data = UserDefaults.standard.data(forKey: ClaudePane.linksKey),
+              var list = try? JSONDecoder().decode([ChatLink].self, from: data) else { return }
+        // (a reply being written when the app last ran isn't watched any more: no chat page is loaded yet, and when
+        // one is, it watches only a send of its own. Plain, so nothing spins for ever)
+        let stale = list.filter { $0.state == .working }.count
+        for i in list.indices where list[i].state == .working { list[i].state = .read }
+        links = list
+        if stale > 0 { Diagnostics.shared.log("chats", "\(stale) chat(s) were writing a reply when TRIF last ran: shown as plain") }
+    }
+    private func saveLinks() {
+        links.sort { $0.at > $1.at }
+        if links.count > 20 { links.removeLast(links.count - 20) }
+        if let data = try? JSONEncoder().encode(links) { UserDefaults.standard.set(data, forKey: ClaudePane.linksKey) }
+    }
+    func link(_ v: ChatView) -> ChatLink? { links.first { $0.id == ClaudePane.linkKey(v.service.rawValue, v.site) } }
+    private func updateLink(_ v: ChatView, _ change: (inout ChatLink) -> Void) {
+        guard let i = links.firstIndex(where: { $0.id == ClaudePane.linkKey(v.service.rawValue, v.site) }) else { return }
+        var l = links[i]
+        change(&l)
+        guard l != links[i] else { return }
+        links[i] = l
+        saveLinks()
+    }
+    /// A send: the chat's link, with the tab it was sent from. A chat shown for another site than the tab's (the
+    /// chats' list, all three busy) keeps the tab it had: the shown tab isn't its.
+    private func sentLink(_ v: ChatView) {
+        guard let browser, !v.site.isEmpty else { return }
+        let here = browser.current!
+        var l = link(v) ?? ChatLink(service: v.service.rawValue, site: v.site, tab: nil, tabTitle: "", tabURL: nil, conv: nil, state: .working, at: Date())
+        if browser.site == v.site { l.tab = here.id; l.tabTitle = here.title; l.tabURL = (here.webView.url ?? here.savedURL)?.absoluteString }
+        l.conv = v.conversation ?? l.conv
+        l.state = .working
+        l.at = Date()
+        links.removeAll { $0.id == l.id }
+        links.insert(l, at: 0)
+        saveLinks()
+    }
+    /// A chat shown: its reply read (a mod added stays so), its plain banner gone.
+    private func seen(_ v: ChatView) {
+        updateLink(v) { if $0.state == .waiting { $0.state = .read } }
+        let key = ClaudePane.linkKey(v.service.rawValue, v.site)
+        banners.removeAll { $0.link == key && $0.mods.isEmpty }
+    }
+    /// A mod from a site's chat added: its newest link says so.
+    private func modAdded(_ site: String) {
+        guard let i = links.firstIndex(where: { $0.site == site }), links[i].state != .working else { return }
+        links[i].state = .added
+        saveLinks()
+    }
+    private func banner(_ v: ChatView, _ mods: [InstalledMod]) {
+        let key = ClaudePane.linkKey(v.service.rawValue, v.site)
+        // (one per chat: a later reply's joins it, mods and all)
+        if let i = banners.firstIndex(where: { $0.link == key }) { banners[i].mods += mods; return }
+        banners.append(ChatBanner(link: key, service: v.service.rawValue, site: v.site, mods: mods))
+        Diagnostics.shared.log("chats", "done banner for \(v.site.isEmpty ? "no site" : v.site): \(mods.isEmpty ? "a reply" : "\(mods.count) mod(s) held for it")")
+    }
+    /// The banner's ✕ (or swiped up): its mods dismissed, as a sheet swiped away is.
+    func dismissBanner(_ b: ChatBanner) {
+        banners.removeAll { $0.id == b.id }
+        browser?.dismissHeld(b.mods)
+    }
+    /// The banner's Add: its mods to Add this mod?, over what's shown.
+    func addFromBanner(_ b: ChatBanner) {
+        banners.removeAll { $0.id == b.id }
+        browser?.offerHeld(b.mods)
+    }
+    /// The tab a chat link goes back to now: the one it was sent from while it's still open and on the chat's site.
+    func tabFor(_ l: ChatLink) -> Tab? {
+        guard let browser, let id = l.tab, let t = browser.tabs.first(where: { $0.id == id }), Site.of(t.host) == l.site else { return nil }
+        return t
+    }
+    /// Go to <site>: the chat closed and its tab shown; that tab closed (or gone to another site): a new tab at the
+    /// page it was on, else the site's home (a new tab, as a link opens one: nothing rewritten). Its held mods, if
+    /// it has a banner with any, then come up there. Returns false for a chat with no site.
+    @discardableResult
+    func goToSite(_ key: String) -> Bool {
+        guard let browser, let l = links.first(where: { $0.id == key }) ?? fallbackLink(key), !l.site.isEmpty else { return false }
+        if shown { close() }
+        if let t = tabFor(l) {
+            if t !== browser.current { browser.select(t) }
+            Diagnostics.shared.log("chats", "go to \(l.site): its tab")
+        } else {
+            let page = l.tabURL.flatMap(URL.init(string:)).flatMap { Site.of($0.host ?? "") == l.site ? $0.absoluteString : nil }
+            browser.newTab(page ?? "https://\(l.site)/")
+            Diagnostics.shared.log("chats", "go to \(l.site): its tab is closed or on another site, a new tab at \(page == nil ? "the site" : "its page")")
+            if let i = links.firstIndex(where: { $0.id == l.id }) { links[i].tab = browser.current.id; links[i].tabURL = browser.current.webView.url?.absoluteString ?? page; saveLinks() }
+        }
+        follow(site: browser.site)
+        if let i = banners.firstIndex(where: { $0.link == l.id }) {
+            let b = banners.remove(at: i)
+            browser.offerHeld(b.mods)
+        }
+        return true
+    }
+    /// A chat the person hasn't sent from (its top bar's ← site): a link made from the chat itself, no tab.
+    private func fallbackLink(_ key: String) -> ChatLink? {
+        guard let v = views.first(where: { ClaudePane.linkKey($0.service.rawValue, $0.site) == key }) else { return nil }
+        // (the shown tab is on its site: that one)
+        var t: Tab?
+        if let b = browser { t = b.site == v.site ? b.current : b.tabs.last { Site.of($0.host) == v.site } }
+        return ChatLink(service: v.service.rawValue, site: v.site, tab: t?.id, tabTitle: t?.title ?? "", tabURL: nil, conv: v.conversation, state: .read, at: Date())
+    }
+    /// The shown chat's way back (its top bar's ← site).
+    var curKey: String { ClaudePane.linkKey(cur.service.rawValue, cur.site) }
+    /// A tab's robot badge in the tab list: its chats' (sent from it, while it's on their site): working, a reply
+    /// waiting, or plain (nil: no chat).
+    func badge(for tab: UUID) -> ChatActivity? {
+        let mine = links.filter { $0.tab == tab && tabFor($0) != nil }.map(\.activity)
+        if mine.isEmpty { return nil }
+        return mine.contains(.working) ? .working : mine.contains(.replied) ? .replied : .idle
+    }
+    /// A chat from the chats' list (or a banner's Open chat): shown, at its conversation, nothing put in its box.
+    func openChat(_ key: String) {
+        guard let l = links.first(where: { $0.id == key }) ?? fallbackLink(key), let s = ChatService(rawValue: l.service) else { return }
+        if more { more = false; UserDefaults.standard.set(false, forKey: "chatMore") }
+        if s != service { service = s; UserDefaults.standard.set(s.rawValue, forKey: "chatService") }
+        let v = viewFor(l.site)
+        cur = v
+        v.lastUsed = Date()
+        if !v.started {
+            if let c = l.conv, ClaudePane.owner(of: c) == l.site, let u = URL(string: c) { v.started = true; go(v, u) } else { start(v) }
+        } else if v.activity != .working, let c = l.conv, v.conversation != c, ClaudePane.owner(of: c) == l.site, let u = URL(string: c) {
+            go(v, u)
+        }
+        shown = true
+        if v.activity == .replied { v.activity = .idle; queue(v) { [weak self] in _ = await self?.chatJS(v, "showReply()") } }
+        seen(v)
+        report.log("claude", "\(s.rawValue): the chat for \(l.site) opened from its link")
+    }
+    /// A notification's tap, or the person at the chat's tab: a banner's held mods come up there.
+    private func arrived(_ v: ChatView) {
+        let key = ClaudePane.linkKey(v.service.rawValue, v.site)
+        if let i = banners.firstIndex(where: { $0.link == key }) {
+            let b = banners.remove(at: i)
+            if !b.mods.isEmpty { browser?.offerHeld(b.mods) }
         }
     }
 
@@ -936,11 +1141,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             browser.select(tab)
             follow(site: browser.site)
         }
+        // (the mods its done banner held, if it has one: they come up here, on the tab)
+        for v in views where !v.site.isEmpty && v.site == browser.site { arrived(v) }
         switch info["kind"] as? String {
         case "replied": open()
         case "mod":
             // (the app was ended meanwhile, so the mod isn't waiting any more: the chat, whose reply has its Add to TRIF)
-            if browser.modOffer == nil { open() }
+            if browser.modOffer == nil && browser.offerQueue.isEmpty { open() }
         default: break
         }
     }
@@ -1185,6 +1392,22 @@ struct ChatScreen: View {
             .zIndex(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            // (the way back to the tab the chat is for, Tim 11-18: "← facebook.com"; its tab, or a new one at its page
+            // if that tab has closed)
+            if !pane.more, !pane.site.isEmpty {
+                Button { pane.goToSite(pane.curKey) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.left").font(.caption.weight(.semibold))
+                        Text(pane.site).font(.footnote.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+                .padding(.top, -2)
+                .accessibilityLabel("Go to \(pane.site)")
+            }
             Divider()
             if pane.more {
                 WebViewHost(webView: pane.panel.webView)
@@ -1268,6 +1491,104 @@ struct ProjectOffer: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("New TRIF chats start in this project. If you pasted TRIF's instructions into it, each chat gets just the page.")
+        }
+    }
+}
+
+/// The done banner (Tim, 11-18): slides down over whatever is shown when a chat the person isn't looking at finishes
+/// a reply. With mods: "Claude made a mod for {site}" · Add · Go to {site}; without: "Claude replied about {site}" ·
+/// Open chat. As the app's other banner (SafetyBanner): footnote words, the main button bold. ✕ or a swipe up
+/// closes it (its mods dismissed, as a sheet swiped away).
+struct ChatBannerView: View {
+    let banner: ChatBanner
+    /// Go to {site} is left out when that site's tab is already the one shown, uncovered.
+    let showGo: Bool
+    let add: () -> Void
+    let go: () -> Void
+    let openChat: () -> Void
+    let dismiss: () -> Void
+
+    private var text: String {
+        let s = banner.site.isEmpty ? "" : " for \(banner.site)"
+        if banner.mods.count == 1 { return "\(banner.service) made a mod\(s)" }
+        if banner.mods.count > 1 { return "\(banner.service) made \(banner.mods.count) mods\(s)" }
+        return banner.site.isEmpty ? "\(banner.service) replied" : "\(banner.service) replied about \(banner.site)"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ChatGlyph(activity: .idle).frame(width: 20, height: 20).foregroundStyle(Color.trifGreen).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(text).font(.footnote.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 16) {
+                    if banner.mods.isEmpty { Button("Open chat", action: openChat).font(.footnote.bold()) }
+                    else { Button("Add", action: add).font(.footnote.bold()) }
+                    if showGo && !banner.site.isEmpty { Button("Go to \(banner.site)", action: go).font(.footnote).lineLimit(1) }
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: dismiss) { Image(systemName: "xmark").font(.caption.bold()).foregroundStyle(.secondary).frame(width: 28, height: 28) }
+                .accessibilityLabel("Close")
+        }
+        .padding(.leading, 12).padding(.vertical, 10).padding(.trailing, 4)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .padding(.horizontal, 10)
+        .gesture(DragGesture(minimumDistance: 12).onEnded { g in if g.translation.height < -20 { dismiss() } })
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The toolbar robot's long press (Tim, 11-18): the chats sent from, newest first, each with its site, its tab's
+/// title and its state. A row opens its chat; its arrow goes to its site's tab.
+struct ChatListView: View {
+    @ObservedObject var pane: ClaudePane
+    let open: (String) -> Void
+    let go: (String) -> Void
+    let close: () -> Void
+
+    private func state(_ l: ChatLink) -> String {
+        switch l.state {
+        case .working: return "Working…"
+        case .waiting: return "Reply waiting"
+        case .added: return "Mod added"
+        case .read: return "Read"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if pane.links.isEmpty {
+                    Text("No chats yet. Tap the robot on a page to start one.").font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(pane.links) { l in
+                    HStack(spacing: 12) {
+                        Button { open(l.id) } label: {
+                            HStack(spacing: 12) {
+                                ChatGlyph(activity: l.activity).frame(width: 22, height: 22).foregroundStyle(Color.trifGreen)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(l.site).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    if !l.tabTitle.isEmpty { Text(l.tabTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                    Text("\(l.service) · \(state(l))").font(.caption2).foregroundStyle(l.state == .waiting ? Color.trifGreen : .secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(l.site), \(l.tabTitle), \(state(l))")
+                        .accessibilityHint("Opens the chat")
+                        Button { go(l.id) } label: { Image(systemName: "arrow.up.forward.square").font(.title3) }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Go to \(l.site)")
+                    }
+                }
+            }
+            .navigationTitle("Chats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: close) } }
         }
     }
 }

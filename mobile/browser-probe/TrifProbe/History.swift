@@ -191,6 +191,8 @@ struct AddressScreen: View {
     @EnvironmentObject var browser: Browser
     @ObservedObject var history: HistoryStore
     let close: () -> Void
+    /// Cancel: closed, and a new tab with nothing opened in it closes too, back to the tab it came from (Safari's).
+    var cancel: (() -> Void)? = nil
     @State private var text = ""
     @State private var editTick = 0
     @State private var copied = false
@@ -223,7 +225,7 @@ struct AddressScreen: View {
                     .frame(height: 38)
                     .padding(.horizontal, 10)
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemBackground)))
-                Button("Cancel", action: close)
+                Button("Cancel") { (cancel ?? close)() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

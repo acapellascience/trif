@@ -542,7 +542,7 @@ can't be picked, and hiding one element is fragile). What it hid stays hidden; e
 
 | Where | Old | New (drafts for Tim: Safari's own words) |
 |---|---|---|
-| The ⋯ menu at the address bar's left, after Keep TRIF chats in a project…, before Full screen (a website's page only) | — | **Request Desktop Website** (a computer screen glyph); on a site asked for as a computer's: **Request Mobile Website** (a phone glyph) |
+| The ⋯ menu at the address bar's left, after Keep TRIF chats in a project…, before Full screen (a website's page only) | — | **Desktop Website** (a computer screen glyph); on a site asked for as a computer's: **Mobile Website** (a phone glyph). APPROVED by Tim 11-18 (was the draft "Request Desktop Website" / "Request Mobile Website") |
 
 No note after it: the page loads again in the other mode, as in Safari. The choice is the site's, in every tab, kept
 across launches (Safari's per-website setting).
@@ -551,4 +551,24 @@ across launches (Safari's per-website setting).
 
 No new words. The tabs button and the Mods switch, tapped again while their screen is open, close it: back to the
 page as it was. The [+], tapped again on the new tab's address screen before anything was opened there, closes that
-empty tab and goes back to the tab it came from.
+empty tab and goes back to the tab it came from. Since 11-18 (Tim, "like Safari") the address screen's **Cancel**
+does the same for any empty new tab (the toolbar's +, ⋯ → New tab, the tabs' +, a pull); never the last tab (it
+stays, with its start page).
+
+## Chats and their tabs, both ways (added 11-18, Tim: "the site is lost in the tabs")
+
+All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names them; {site} the chat's site
+(facebook.com).
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| The done banner (slides down over the tab, the tab list, Mods or another chat when a chat not being looked at finishes a reply), with one mod | — | **{Service} made a mod for {site}** · **Add** · **Go to {site}** |
+| The same, with several mods | — | **{Service} made {n} mods for {site}** · **Add** · **Go to {site}** |
+| The same, a reply with no mod | — | **{Service} replied about {site}** (no site: **{Service} replied**) · **Open chat** · **Go to {site}** |
+| The banner's ✕ (VoiceOver) | — | **Close** |
+| The chat's top bar, under the Claude · ChatGPT · More switch | — | **← {site}** (VoiceOver: **Go to {site}**) |
+| The note after a mod is added on another tab than its chat's site | Added {name}. It runs on {sites}. | Added {name}. It runs on {sites}. **Go to {site}** |
+| The tab list: a tab's robot badge (VoiceOver) | — | **Chat, working** · **Chat, reply waiting** · **Chat** |
+| The robot's long press: the chats' list | — | title **Chats**, **Done**; each row: {site}, the tab's title, **{Service} · Working…** / **Reply waiting** / **Mod added** / **Read**; its arrow (VoiceOver **Go to {site}**); VoiceOver hint on a row **Opens the chat** |
+| The same, empty | — | **No chats yet. Tap the robot on a page to start one.** |
+| The toolbar robot's VoiceOver action | — | **Chats** |

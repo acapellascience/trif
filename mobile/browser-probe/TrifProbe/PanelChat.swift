@@ -466,7 +466,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             var offered = 0
             if let browser = self.browser {
                 let mods = texts.flatMap(PanelChat.modFiles)
-                if !mods.isEmpty { offered = await browser.offerFromChat(mods, path: "panel").count }
+                if !mods.isEmpty { offered = await browser.offerFromChat(mods, from: run.site, path: "panel").count }
             }
             self.emit(run, ["kind": "done", "ok": ok, "sessionId": run.sessionId, "contextTokens": lastTokens])
             self.runs[run.id] = nil

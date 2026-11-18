@@ -261,6 +261,21 @@ extension Model {
         if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
         if step["chats"] != nil, let p = Model.pane { out = p.views.map { "\($0 === p.cur ? "*" : " ") \($0.site.isEmpty ? "-" : $0.site) \($0.activity.rawValue) \($0.webView.url?.path ?? "nothing")" }.joined(separator: "\n") }
         if let i = step["showchat"] as? Int, let p = Model.pane, i < p.views.count { p.show(p.views[i]) }
+        // ({"links": 1}: the chat links, newest first, and the banners; {"gosite": n} / {"openlink": n}: link n's Go to
+        // <site> / its chat; {"banner": "add|go|open|dismiss"}: the banner shown's button; {"tabbadges": 1})
+        if let p = Model.pane {
+            if step["links"] != nil {
+                out = p.links.map { l in "\(l.service) \(l.site) \(l.state.rawValue) tab \(browser.tabs.firstIndex { t in t.id == l.tab }.map(String.init) ?? "closed") \(l.conv?.suffix(12) ?? "-") \(l.tabTitle)" }.joined(separator: "\n")
+                out += "\nbanners: " + p.banners.map { "\($0.site) \($0.mods.map(\.id))" }.joined(separator: "; ")
+                out += "\nshown tab \(browser.tabs.firstIndex { $0 === browser.current } ?? -1) \(browser.site), covers \(ContentView.coversNow), offer \(browser.modOffer.map { "\($0.id) runs on \($0.sites) came from \($0.cameFrom ?? "-")" } ?? "none")"
+            }
+            if let n = step["gosite"] as? Int, n < p.links.count { p.goToSite(p.links[n].id) }
+            if let n = step["openlink"] as? Int, n < p.links.count { p.openChat(p.links[n].id) }
+            if let b = step["banner"] as? String, let first = p.banners.first {
+                switch b { case "add": p.addFromBanner(first); case "go": p.goToSite(first.link); case "open": p.openChat(first.link); default: p.dismissBanner(first) }
+            }
+            if step["tabbadges"] != nil { out = browser.tabs.enumerated().map { "\($0.offset) \($0.element.host.nonEmpty ?? "-"): \(p.badge(for: $0.element.id).map(\.rawValue) ?? "none")" }.joined(separator: "\n") }
+        }
         if step["memwarn"] != nil { NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: UIApplication.shared) }
         if step["closechat"] != nil { Model.pane?.close() }
         if step["newchat"] != nil { Model.pane?.home() }
@@ -301,11 +316,11 @@ struct ContentView: View {
     @State private var showChecks = false
     @State private var showReport = false
     @State private var showTabs = false
-    /// The page button's new tab and the tab it was opened from (showPage: tapped again, back to that one). Weak: a
-    /// closed tab's web view isn't kept alive by them.
-    @State private var newTabFrom = NewTabFrom()
-    struct NewTabFrom { weak var from: Tab?; weak var made: Tab? }
     @State private var showHistory = false
+    /// The robot's long press: the chats' list (ChatListView).
+    @State private var showChatList = false
+    /// (the robot's long press just opened the list: the tap that ends it doesn't also open the chat)
+    @State private var robotHeld = false
     @State private var showMods = false
     @State private var addingIcon = false
     @ObservedObject private var phoneLink = PhoneLinkModel.shared
@@ -377,7 +392,7 @@ struct ContentView: View {
                 // (what else covers the page lies over it the same way, the toolbar showing under it, so the toolbar's
                 // page button (and the others) can always take you back: Tim, 11-15)
                 if showTabs {
-                    TabsView(close: { showTabs = false }).environmentObject(browser)
+                    TabsView(pane: pane, close: { showTabs = false }).environmentObject(browser)
                         .modifier(ToolbarRoom(insets: bars.insets)).zIndex(3)
                 }
                 if showMods {
@@ -385,12 +400,32 @@ struct ContentView: View {
                         .modifier(ToolbarRoom(insets: bars.insets)).zIndex(3)
                 }
                 if showAddress {
-                    AddressScreen(history: browser.history, close: { showAddress = false }).environmentObject(browser)
+                    AddressScreen(history: browser.history, close: { showAddress = false }, cancel: { showAddress = false; browser.leaveEmptyNewTab() }).environmentObject(browser)
                         .modifier(ToolbarRoom(insets: bars.insets)).zIndex(4)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             .clipped()
+            // (a reply done in a chat not looked at (Tim, 11-18): over everything, the tab, the tabs, Mods, the chat)
+            .overlay(alignment: .top) {
+                if let b = pane.banners.first {
+                    ChatBannerView(banner: b, showGo: !(browser.site == b.site && !covered),
+                                   add: { withAnimation { pane.addFromBanner(b) } },
+                                   go: { withAnimation { closeCovers(); pane.goToSite(b.link) } },
+                                   openChat: { withAnimation { closeCovers(); pane.openChat(b.link) } },
+                                   dismiss: { withAnimation { pane.dismissBanner(b) } })
+                        .id(b.id)
+                        .padding(.top, 4)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .task(id: b.id) {
+                            // (a plain reply's banner goes by itself after 8 s; one with mods stays: it is their offer)
+                            guard b.mods.isEmpty else { return }
+                            try? await Task.sleep(nanoseconds: 8_000_000_000)
+                            if !Task.isCancelled, pane.banners.first?.id == b.id { withAnimation { pane.dismissBanner(b) } }
+                        }
+                }
+            }
+            .animation(.spring(duration: 0.35), value: pane.banners.first?.id)
             // (the full screen exit button: over everything, outside the clip, as it sits in the status bar's row)
             .overlay {
                 if browser.fullScreen && !hideExitButton && !covered {
@@ -484,7 +519,8 @@ struct ContentView: View {
             case "address": showAddress = true
             case "icon": addingIcon = true
             case "iconqueue": showIconQueue = true
-            case "none": addingIcon = false; showIconQueue = false; showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
+            case "chatlist": showChatList = true
+            case "none": showChatList = false; addingIcon = false; showIconQueue = false; showMods = false; showTabs = false; showHistory = false; showAddress = false; pane.close(); showChecks = false; showReport = false
             default: break
             }
             browser.wantsSheet = ""
@@ -514,6 +550,13 @@ struct ContentView: View {
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
+        .sheet(isPresented: $showChatList) {
+            ChatListView(pane: pane,
+                         open: { key in showChatList = false; closeCovers(); pane.openChat(key) },
+                         go: { key in showChatList = false; closeCovers(); pane.goToSite(key) },
+                         close: { showChatList = false })
+                .presentationDetents([.medium, .large])
+        }
         .sheet(item: $browser.modOffer, onDismiss: nextOfferSoon) { mod in ModOfferView(mod: mod).environmentObject(browser) }
     }
 
@@ -523,8 +566,18 @@ struct ContentView: View {
     private var notes: some View {
         VStack(spacing: 0) {
             if !browser.status.isEmpty {
+                // (a mod from a chat added on another tab: the way to its site, Tim 11-18)
+                if let g = browser.statusGo, g.text == browser.status {
+                    HStack(spacing: 12) {
+                        Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Go to \(g.site)") { browser.status = ""; closeCovers(); pane.goToSite(pane.links.first { $0.site == g.site }?.id ?? "") }
+                            .font(.footnote.bold()).lineLimit(1)
+                    }
+                    .modifier(NoteStyle(seconds: 5, key: browser.status) { browser.status = "" })
+                } else {
                 Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
                     .modifier(NoteStyle(seconds: 2, key: browser.status) { browser.status = "" })
+                }
             }
         }
     }
@@ -621,7 +674,7 @@ struct ContentView: View {
             // (as Safari's page menu, Tim 11-18: the site as a computer's, remembered for the site; the other way back)
             if browser.canRequestDesktop {
                 Button { onTab { browser.requestDesktop(!browser.desktopShown) } } label: {
-                    Label(browser.desktopShown ? "Request Mobile Website" : "Request Desktop Website", systemImage: browser.desktopShown ? "iphone" : "desktopcomputer")
+                    Label(browser.desktopShown ? "Mobile Website" : "Desktop Website", systemImage: browser.desktopShown ? "iphone" : "desktopcomputer")
                 }
             }
             // (full screen for this tab; the line under it names the shortcut, which also switches back)
@@ -715,7 +768,7 @@ struct ContentView: View {
     private var coverNames: String {
         let all: [(Bool, String)] = [(pane.shown, "chat"), (showTabs, "tabs"), (showMods, "mods"), (showAddress, "address"),
                                      (showHistory, "history"), (showChecks, "checks"), (showReport, "report"), (addingIcon, "icon"), (showIconQueue, "iconqueue"),
-                                     (askingProject, "project"), (importing, "import"), (pickingFolder, "folder")]
+                                     (askingProject, "project"), (importing, "import"), (pickingFolder, "folder"), (showChatList, "chatlist")]
         return all.filter(\.0).map(\.1).joined(separator: ",").nonEmpty ?? "none"
     }
     static var coversNow = "none"
@@ -726,15 +779,12 @@ struct ContentView: View {
     private func showPage() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if covered {
-            if showAddress, let from = newTabFrom.from, let made = newTabFrom.made, made === browser.current, made !== from,
-               made.webView.url == nil, !made.webView.isLoading, browser.tabs.contains(where: { $0 === from }) {
-                closeCovers(); browser.select(from); browser.close(made)
-            } else { closeCovers() }
-            newTabFrom = NewTabFrom()
+            // (Browser.newTabFrom: the empty new tab goes, back to the tab it came from)
+            let leaving = showAddress
+            closeCovers()
+            if leaving { browser.leaveEmptyNewTab() }
         } else {
-            let from = browser.current
             browser.newTab()
-            newTabFrom = NewTabFrom(from: from, made: browser.current)
         }
     }
 
@@ -763,14 +813,26 @@ struct ContentView: View {
                 .accessibilityLabel(covered && !pane.shown ? backToTab : "Forward")
                 .frame(maxWidth: .infinity)
             // (the same button opens the chat and, while it's open (shown selected), goes back to the tab)
-            Button { if pane.shown { pane.close() } else { closeCovers(); pane.open() } } label: {
+            // (held: the chats' list, Tim 11-18; the tap that ends the hold does nothing more)
+            Button {
+                if robotHeld { robotHeld = false; return }
+                if pane.shown { pane.close() } else { closeCovers(); pane.open() }
+            } label: {
                 ChatGlyph(activity: pane.activity).frame(width: 24, height: 24)
                     .padding(5)
                     .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.trifGreen.opacity(pane.shown ? 0.2 : 0)))
                     .padding(-5)
             }
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                robotHeld = true
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                showChatList = true
+                // (a hold that ends off the button sends no tap: not kept for the next one)
+                Task { @MainActor in try? await Task.sleep(nanoseconds: 1_500_000_000); robotHeld = false }
+            })
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
+            .accessibilityAction(named: "Chats") { showChatList = true }
                 .frame(maxWidth: .infinity)
             // (the page: back to it from whatever covers it; on the page, a + for a new tab; in the middle, a little bigger)
             pageButton

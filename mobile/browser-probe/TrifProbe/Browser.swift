@@ -38,6 +38,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
     @Published var wantsMods = false
     @Published var status = ""
+    /// The note's Go to <site> (a mod from a chat added on another tab): shown while the note says `text`.
+    @Published var statusGo: (text: String, site: String)?
+    /// Whether a chat for a site knows its way back there (ClaudePane's chat links), and a mod from that site's chat
+    /// was added (its link says "mod added"). Set by the pane.
+    var chatTabFor: (String) -> Bool = { _ in false }
+    var modAddedFrom: (String) -> Void = { _ in }
     /// Full screen (Tim, 11-16): a tab's page with no browser around it (no address bar, toolbar or tabs), as an app.
     /// Each tab's own: two fingers held on the page switch it, either way, any time; the ⋯ menu's Full screen too; a
     /// Home Screen icon's tab starts in it. Remembered by tab (its id), across launches.
@@ -329,12 +335,31 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// A new tab after the one shown: empty (the address bar's), or at an address.
     func newTab(_ address: String? = nil) {
+        let from = current
         let t = makeTab()
         t.started = true
         let at = (tabs.firstIndex { $0 === current } ?? tabs.count - 1) + 1
         tabs.insert(t, at: at)
         select(t)
-        if let address { go(address) } else { wantsAddress = true }
+        if let address { go(address); newTabFrom = NewTabFrom() } else { newTabFrom = NewTabFrom(from: from, made: t); wantsAddress = true }
+    }
+    /// An empty new tab's address screen and the tab it was opened from (from the toolbar's +, the ⋯ menu, the tabs'
+    /// +, a pull): its Cancel, or the + tapped again, closes it and goes back there, as Safari's (Tim, 11-18). Weak: a
+    /// closed tab's web view isn't kept alive by it.
+    struct NewTabFrom { weak var from: Tab?; weak var made: Tab? }
+    var newTabFrom = NewTabFrom()
+    /// The address screen left without opening anything (Cancel, the + again): the empty new tab it was for closes
+    /// and the tab it came from is back, as it was. Only while nothing was opened in it and the tab it came from is
+    /// still open (so another tab, with its page, is always left: never no tab, never no start page). True if it did.
+    @discardableResult
+    func leaveEmptyNewTab() -> Bool {
+        defer { newTabFrom = NewTabFrom() }
+        guard let from = newTabFrom.from, let made = newTabFrom.made, made === current, made !== from,
+              made.webView.url == nil, !made.webView.isLoading, made.savedURL == nil,
+              tabs.contains(where: { $0 === from }), tabs.count > 1 else { return false }
+        select(from)
+        close(made)
+        return true
     }
 
     func close(_ tab: Tab) {
@@ -426,7 +451,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             Task { @MainActor in try? await Task.sleep(nanoseconds: 700_000_000); self.wantsMods = true }
         } else if source != "import" {
             status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
+            // (added away from the site its chat was for (the done banner's Add, Tim 11-18): the note offers the way there)
+            if let from = m.cameFrom, !from.isEmpty, from != site, chatTabFor(from) { statusGo = (status, from) }
         }
+        if let from = m.cameFrom, !from.isEmpty { modAddedFrom(from) }
         if source == "chat" { lastAdded = (added.id, added.name) }
     }
 
@@ -622,9 +650,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// `path`: how the chat handed it over (auto: a reply done; late: one that turned up after it; viewer; panel;
     /// computer), for the Diagnostics line. Never offered (ChatOffers.swift): code a chat offered before, an installed
     /// mod's current or earlier version, a mod's in Recently deleted.
+    /// `hold`: read and judged as ever, but not shown: the caller holds them (the chat's done banner, Tim 11-18: its
+    /// Add, or Go to <site>, hands them to `offerHeld`); the same offer, never a second one.
     @discardableResult
-    func offerFromChat(_ texts: [String], from chatSite: String = "", path: String) async -> [InstalledMod] {
-        let here = host
+    func offerFromChat(_ texts: [String], from chatSite: String = "", path: String, hold: Bool = false) async -> [InstalledMod] {
+        // (the chat's site: a mod with no @match of its own is that site's, as desktop takes it from its folder, never
+        // the page that happens to be shown (Tim, 11-18: FeedBook from a Facebook chat said "runs on google.com", the
+        // tab he was on when it finished). The page shown only when the chat has no site. A computer's phone twin
+        // (phone~<site>) is its site.)
+        var chatSite = chatSite
+        if chatSite.hasPrefix("phone~") { chatSite.removeFirst("phone~".count) }
+        let here = chatSite.isEmpty ? host : chatSite
         // (where it came from: the chat's site, else the page shown; Add this mod? warns when it runs elsewhere)
         let came = chatSite.isEmpty ? Site.of(here) : Site.of(chatSite)
         var found: [InstalledMod] = []
@@ -635,7 +671,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             let r = await mods.readNamedInBackground(t, here: here)
             guard var m = r.mod else { why = why ?? r.error ?? "no reason given"; continue }
             if let no = ChatOfferJudge.skip(id: m.id, code: m.code, installed: mods.mods.map(known), deleted: mods.trash.map { known($0.mod) },
-                                            queued: (offerQueue + found + [modOffer].compactMap { $0 }).map(known), memory: chatOffers) {
+                                            queued: (offerQueue + found + [modOffer].compactMap { $0 } + offersHeld()).map(known), memory: chatOffers) {
                 skipped.append("\(m.id) (\(no))")
                 continue
             }
@@ -654,11 +690,22 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if found.isEmpty, skipped.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
         guard !found.isEmpty else { return [] }
         for m in found { chatOffers.note(m.code, .offered) }
+        if !hold { offerHeld(found) }
+        return found
+    }
+    /// Mods a chat handed over that wait elsewhere (the done banner's), for the judge's "queued": never offered twice.
+    var offersHeld: () -> [InstalledMod] = { [] }
+    /// Mods judged and noted as offered, into Add this mod? one after another (now, or once no sheet is up).
+    func offerHeld(_ found: [InstalledMod]) {
+        guard !found.isEmpty else { return }
         if offerQueue.isEmpty && modOffer == nil { offerBatch = 0; offerShown = 0 }
         offerQueue += found
         offerBatch += found.count
         nextOffer()
-        return found
+    }
+    /// A held offer let go without Add (the done banner closed): dismissed, as a sheet swiped away is.
+    func dismissHeld(_ mods: [InstalledMod]) {
+        for m in mods { chatOffers.note(m.code, .dismissed); Diagnostics.shared.log("chat offers", "\(m.id) dismissed (the done banner closed)") }
     }
 
     /// The next of a reply's mods, once no other sheet is up (the app calls it again as each one closes).
@@ -683,14 +730,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     /// What was pasted (iOS's own Paste button hands it over without asking), or an Add to TRIF tap: a whole mod.
-    func offer(text pasted: String?) {
+    func offer(text pasted: String?, site chatSite: String = "") {
         guard let text = pasted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             status = "Nothing on the clipboard."
             return
         }
         // (a whole mod: a chat's reply with a ==WebMod== file in it, or the file)
         if text.contains("==WebMod==") {
-            let here = host
+            // (an Add to TRIF tap in a chat: that chat's site, whichever tab is shown, as offerFromChat)
+            let here = chatSite.isEmpty ? host : chatSite
             Task { @MainActor in
                 let r = await mods.readNamedInBackground(text, here: here)
                 if var m = r.mod { m.cameFrom = Site.of(here); modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }

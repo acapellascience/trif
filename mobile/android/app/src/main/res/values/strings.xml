@@ -15,6 +15,12 @@
     <string name="cancel">Cancel</string>
     <string name="open">Open</string>
     <string name="app_link_no_app">No app on this phone can open this link.</string>
+    <string name="webview_old_title">TRIF needs a newer Android System WebView</string>
+    <string name="webview_old_body">This phone\'s WebView is version %1$d. TRIF needs version %2$d or newer to run mods. Update it in the Play Store, then open TRIF again.</string>
+    <string name="webview_old_body_unknown">TRIF needs WebView version %d or newer to run mods. Update it in the Play Store, then open TRIF again.</string>
+    <string name="webview_missing_title">TRIF needs Android System WebView</string>
+    <string name="webview_missing_body">It\'s switched off or not installed on this phone. Turn it on in Settings, under Apps, or install it from the Play Store, then open TRIF again.</string>
+    <string name="webview_update">Open the Play Store</string>
     <plurals name="tabs_title">
         <item quantity="one">%d tab</item>
         <item quantity="other">%d tabs</item>

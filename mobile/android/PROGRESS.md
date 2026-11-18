@@ -38,8 +38,10 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
      window.close goes back to the opener; only from a tap)
    - [x] links to other apps (round 4: tapped → to Android; by itself → the question, one a load; frames never;
      intent: read as Chrome does, BROWSABLE only, its fallback page when no app takes it)
-   - [ ] minimum WebView version check (149+, `JS_INJECTION_IN_FRAME_AND_WORLD`; clear message otherwise)
-   - [ ] default-browser role: http/https VIEW intent filters, a usable start page
+   - [x] minimum WebView version check (round 5: `WebViewCheck` before any WebView; too old / none → a screen with
+     the Play Store button instead of the browser)
+   - [x] default-browser role (round 5: http/https VIEW filter with no host + APP_BROWSER; can hold
+     android.app.role.BROWSER; links open in it; the start page = address bar + start words)
 3. [ ] Script worlds: TRIF's world + the box (SES + sandbox-runtime.js) at document start, all frames; page world
    for free mods; the iPhone's injected scripts (page-bridge.js, style-mirror.js, …) through an adapter
 4. The mod engine
@@ -57,20 +59,22 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
      mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 4, 2026-11-18)
-- Links to other apps, as iPhone's AppLinks: `AppLinks.kt` (kinds, decide, tap test, intent fallback; pure, 6 unit
-  tests) + `TouchClock` (finger on the page, 1.5 s) and `Browser.takeLink/appLink/handOut`. Tapped = the WebView's
-  `hasGesture()` and the finger just now. intent:/android-app: parsed with `Intent.parseUri`, CATEGORY_BROWSABLE,
-  no component/selector component, no URI grants; a web intent with no package stays in TRIF; no app → its
-  `S.browser_fallback_url` page, else a toast. A window opened for an app link: handed out, its empty tab closes.
-- New shared stand-in page mobile/shared/pages/applinks.html. `test/applinks.sh` PASSES (tel: → the dialer; no app;
-  intent fallback; target=_blank tel:; 7 s later → question, Cancel; on load: frame dropped, asked once, 2nd dropped);
-  `popups.sh` and `tabs.sh` still PASS; 14 unit tests pass.
+## Done this round (round 5, 2026-11-18)
+- WebView check: `WebViewCheck.kt` (pure; 2 unit tests) decides from `getCurrentWebViewPackage` +
+  `isFeatureSupported(JS_INJECTION_IN_FRAME_AND_WORLD)` (the feature decides, 149 is for the words). Too old / none
+  → a plain screen (draft words in STRINGS.md) with "Open the Play Store" (`market://details?id=<webview pkg>`).
+  A debug build can pretend: extra `trif.pretendWebView` = a version or "none".
+- Default browser: VIEW + DEFAULT + BROWSABLE for http/https (no host), APP_BROWSER on the launcher filter.
+  `open()` takes http/https only (the activity is exported: javascript:/file: sent to it are ignored).
+- `test/startup.sh` PASSES (pretend 145/unreadable/none/149, real check, start page, holds the browser role, links
+  open with no -n, 2nd link in a new tab, javascript:/file: ignored; the role is put back). tabs/popups/applinks
+  still PASS; 16 unit tests pass. Tests' flake fixed: see notes (Android 17 relaunches an app updated in front).
 
 ## Next step
-Item 2, next part: the minimum WebView version check (149+, `WebViewFeature.isFeatureSupported(
-JS_INJECTION_IN_FRAME_AND_WORLD)` / `WebViewCompat.getCurrentWebViewPackage`; a clear message otherwise, wording a
-draft in STRINGS.md). Then the default-browser role (http/https VIEW filters, start page).
+Item 3, the script worlds: TRIF's world + the box (SES + sandbox-runtime.js) at document start in all frames,
+page world for free mods, the iPhone's injected scripts through an adapter (see "Where the iPhone puts its scripts").
+Start in `Browser.makeWebView` with `WebViewCompat.getExecutionWorld` + `addDocumentStartJavaScript` (the probe's
+ProbeActivity.kt shows the calls).
 
 ## Notes for next round
 - Env: `export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`, SDK `~/Library/Android/sdk`
@@ -102,9 +106,15 @@ draft in STRINGS.md). Then the default-browser role (http/https VIEW filters, st
 - App links log to logcat tag `TRIF` ("app link: tel: from a page, tapped: handed to Android": scheme only); tests
   grep `adb logcat -d -s TRIF`. uiautomator shows dialog buttons upper-case (CANCEL/OPEN) and `see` patterns are
   regexes (escape `?` as `[?]`). Text behind a dialog isn't in the dump. popups.sh needs both servers (8477, 8478).
+- Test flake (round 5): `adb install -r` while TRIF is in front makes Android 17's systemui (PackageUpdateActivity)
+  relaunch it with its last intent, racing the test's own `am start` (a stale tab, a missed extra). Every test now
+  force-stops TRIF and goes Home before installing; first launches use `am start -S`. Keep that in new tests.
+- Android answers an https `query-activities` with the default browser alone: ask it after taking the role.
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- WebView check (round 5): new screen, draft words in STRINGS.md ("TRIF needs a newer Android System WebView" …
+  "Open the Play Store"). Shown only on phones whose WebView is older than 149 (or switched off).
 - App links (round 4): the question is always the generic "Open this page in another app?" (Android can't name the
   app for certain, so never "in “Phone”"); the no-app note is a draft: "No app on this phone can open this link."
 - Nothing needs you yet. One small difference from iPhone: when a page closes its own window (a sign-in window

@@ -1,7 +1,10 @@
 package com.timsrobot.trif
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.net.Uri
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +19,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 
@@ -37,6 +43,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
+        val check = checkWebView()
+        if (check != WebViewCheck.Result.Ok) return showWebViewProblem(check)
         field = EditText(this).apply {
             hint = getString(R.string.address_hint)
             setSingleLine()
@@ -77,14 +85,77 @@ class MainActivity : Activity() {
         open(intent)
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        open(intent)
+    /**
+     * The WebView check, before any WebView is made. A debug build can pretend (tests): the extra
+     * `trif.pretendWebView` = a version ("145.0.1" → too old, "149…" → fine) or "none" (no WebView).
+     */
+    private fun checkWebView(): WebViewCheck.Result {
+        val pretend = intent?.getStringExtra("trif.pretendWebView")
+            ?.takeIf { applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0 }
+        if (pretend != null) {
+            val major = WebViewCheck.major(pretend)
+            return WebViewCheck.decide(if (pretend == "none") null else "com.google.android.webview", pretend,
+                major != null && major >= WebViewCheck.MINIMUM)
+        }
+        val pkg = runCatching { WebViewCompat.getCurrentWebViewPackage(this) }.getOrNull()
+        val worlds = pkg != null &&
+            runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.JS_INJECTION_IN_FRAME_AND_WORLD) }
+                .getOrDefault(false)
+        val result = WebViewCheck.decide(pkg?.packageName, pkg?.versionName, worlds)
+        if (result != WebViewCheck.Result.Ok) android.util.Log.i("TRIF", "webview: $result")
+        return result
     }
 
-    /** A link opened with the app: in the shown tab if it's empty, else in a new tab. */
+    /** No usable WebView: what's wrong and a way to the Play Store, instead of the browser. */
+    private fun showWebViewProblem(problem: WebViewCheck.Result) {
+        val (title, body, pkg) = when (problem) {
+            is WebViewCheck.Result.TooOld -> Triple(getString(R.string.webview_old_title),
+                problem.major?.let { getString(R.string.webview_old_body, it, WebViewCheck.MINIMUM) }
+                    ?: getString(R.string.webview_old_body_unknown, WebViewCheck.MINIMUM), problem.pkg)
+            else -> Triple(getString(R.string.webview_missing_title), getString(R.string.webview_missing_body),
+                "com.google.android.webview")
+        }
+        val pad = (24 * resources.displayMetrics.density).toInt()
+        // (padding on an inner layout: fitsSystemWindows replaces a view's own padding with the system bars')
+        val words = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(pad, pad, pad, pad)
+            addView(TextView(context).apply { text = title; textSize = 22f; setTextColor(Color.BLACK) })
+            addView(TextView(context).apply {
+                text = body; textSize = 16f; setTextColor(Color.DKGRAY); setPadding(0, pad / 2, 0, pad)
+            })
+            addView(Button(context).apply {
+                text = getString(R.string.webview_update)
+                setOnClickListener {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
+                    } catch (_: ActivityNotFoundException) {
+                        Toast.makeText(context, R.string.app_link_no_app, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        setContentView(FrameLayout(this).apply {
+            fitsSystemWindows = true
+            setBackgroundColor(Color.WHITE)
+            addView(words, -1, -1)
+        })
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (::browser.isInitialized) open(intent)
+    }
+
+    /**
+     * A link opened with the app (TRIF as the default browser, or chosen for a link): in the shown tab if it's
+     * empty, else in a new tab, the address exactly as given. Only http/https: the activity is exported, so any
+     * other scheme (javascript:, file:, intent:…) sent to it is ignored.
+     */
     private fun open(intent: Intent?) {
-        val url = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
+        val url = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data
+            ?.takeIf { it.scheme == "http" || it.scheme == "https" }?.toString() ?: return
         intent.data = null
         showList(false)
         if (browser.current?.url == null) browser.go(url) else browser.newTab(url)
@@ -176,11 +247,12 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        browser.inFront = true
+        if (::browser.isInitialized) browser.inFront = true
     }
 
     override fun onPause() {
         super.onPause()
+        if (!::browser.isInitialized) return
         browser.inFront = false
         browser.save()
     }
@@ -189,6 +261,7 @@ class MainActivity : Activity() {
     // back stays on: the callback is registered only while there's somewhere to go back to).
     private fun backInApp(): Boolean {
         if (listShown) { showList(false); return true }
+        if (!::browser.isInitialized) return false
         val wv = browser.current?.web ?: return false
         if (!wv.canGoBack()) return false
         wv.goBack(); return true

@@ -15,3 +15,6 @@ app/src/main/res/values/strings.xml.
 | The tab list, × (accessibility) | Close {tab's title} | iPhone |
 | A page (or a mod) opening another app by itself: the question | Open this page in another app? · Cancel · Open | iPhone (its generic form: Android can't name the app for certain, so never "in “{App}”") |
 | A link to another app that no app on the phone takes (a toast) | No app on this phone can open this link. | **New** (draft; iPhone's says "this iPhone") |
+| No WebView with script worlds (older than 149): the screen instead of the browser | TRIF needs a newer Android System WebView · This phone's WebView is version {n}. TRIF needs version 149 or newer to run mods. Update it in the Play Store, then open TRIF again. (version unreadable: TRIF needs WebView version 149 or newer to run mods. Update it in the Play Store, then open TRIF again.) · Open the Play Store | **New** (draft; iPhone has no such screen) |
+| No WebView at all (switched off or missing) | TRIF needs Android System WebView · It's switched off or not installed on this phone. Turn it on in Settings, under Apps, or install it from the Play Store, then open TRIF again. · Open the Play Store | **New** (draft) |
+| Open the Play Store, with no Play Store on the phone (a toast) | No app on this phone can open this link. | reuses the app-link toast above |

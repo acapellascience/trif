@@ -27,6 +27,8 @@ front() { "$ADB" shell dumpsys activity activities | grep -m1 -E 'topResumedActi
 back_to_app() { "$ADB" shell am start -W -n $APP/.MainActivity >/dev/null; i=0; until [ "$(front)" = "$APP" ]; do i=$((i+1)); [ $i -gt 10 ] && fail "the app didn't come back"; sleep 1; done; sleep 1; }
 
 "$ADB" reverse tcp:8477 tcp:8477 >/dev/null
+# (not in front while updating: Android 17 relaunches an app updated in front with its last link, racing the test)
+"$ADB" shell am force-stop $APP; "$ADB" shell input keyevent KEYCODE_HOME
 "$ADB" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null || fail "install"
 "$ADB" shell pm clear $APP >/dev/null
 "$ADB" logcat -c

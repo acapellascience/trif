@@ -24,9 +24,11 @@ count() { see "Tabs, $1 open" "$2"; }
 
 "$ADB" reverse tcp:8477 tcp:8477 >/dev/null
 "$ADB" reverse tcp:8478 tcp:8478 >/dev/null
+# (not in front while updating: Android 17 relaunches an app updated in front with its last link, racing the test)
+"$ADB" shell am force-stop $APP; "$ADB" shell input keyevent KEYCODE_HOME
 "$ADB" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null || fail "install"
 "$ADB" shell pm clear $APP >/dev/null
-"$ADB" shell am start -W -a android.intent.action.VIEW -d "$P/signin.html" -n $APP/.MainActivity >/dev/null
+"$ADB" shell am start -S -W -a android.intent.action.VIEW -d "$P/signin.html" -n $APP/.MainActivity >/dev/null
 expect "$P/signin.html" "the sign-in page"
 see "Signed out" "the sign-in page's state"
 # 0. the page's window.open as it loads, with no tap behind it: blocked

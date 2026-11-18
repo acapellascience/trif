@@ -24,9 +24,11 @@ saved() { "$ADB" shell run-as $APP cat no_backup/tabs.json 2>/dev/null; }
 view() { "$ADB" shell am start -W -a android.intent.action.VIEW -d "$1" -n $APP/.MainActivity >/dev/null; sleep 2; }
 
 "$ADB" reverse tcp:8477 tcp:8477 >/dev/null
+# (not in front while updating: Android 17 relaunches an app updated in front with its last link, racing the test)
+"$ADB" shell am force-stop $APP; "$ADB" shell input keyevent KEYCODE_HOME
 "$ADB" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null || fail "install"
 "$ADB" shell pm clear $APP >/dev/null
-"$ADB" shell am start -W -n $APP/.MainActivity >/dev/null; sleep 2
+"$ADB" shell am start -S -W -n $APP/.MainActivity >/dev/null; sleep 2
 shot tabs-1-start
 
 # 1. a link opened with the app goes into the empty first tab; a second page in that tab

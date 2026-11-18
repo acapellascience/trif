@@ -32,8 +32,8 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
 
 1. [x] The project: Gradle wrapper, app module, debug build installs and opens on the emulator; unit tests run.
 2. The browser
-   - [ ] tabs with their own back/forward, kept across launches
-   - [ ] address/search bar (`Address.resolve` done in round 1, with tests; the bar itself not yet)
+   - [x] tabs with their own back/forward, kept across launches (round 2; the tab list is plain rows, the cards are UI layer)
+   - [x] address/search bar (a plain field wired to `Address.resolve`; its compact/centred look is UI layer)
    - [ ] real popup windows (onCreateWindow)
    - [ ] links to other apps (tapped → open; by itself → ask first, as iOS AppLinks)
    - [ ] minimum WebView version check (149+, `JS_INJECTION_IN_FRAME_AND_WORLD`; clear message otherwise)
@@ -55,17 +55,19 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
      mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 1, 2026-11-18)
-- Worktree + branch `android` from origin/ios-poc; this file.
-- Project mobile/android: wrapper, app module (`MainActivity` = one WebView on a start page), shared-assets copy
-  task, debug-only cleartext for local pages, `Address.resolve` (port of Browser.address(for:)) + JUnit tests,
-  predictive back (OnBackInvokedCallback while the page can go back).
-- Tests: 3 unit tests pass; on the emulator the APK (4.3 MB) installs, opens on the start words, and typing
-  `localhost:8477/plain.html` loads the shared page (shots/004-local.png).
+## Done this round (round 2, 2026-11-18)
+- Merged origin/ios-poc. Tabs: `Browser.kt` (Tab + the tab list: new tab after the shown one, close, select, each tab
+  its own WebView made when first shown), `SavedTabs.kt` (noBackupFilesDir/tabs.json + `TabOrder`), `BundleJson.kt`
+  (WebView.saveState's bundle as plain JSON, never a marshalled Parcel; restore falls back to the address).
+- Plain toolbar (‹ › + and the tab count) and a plain tab list; links opened with the app go into an empty tab, else a
+  new one (onNewIntent). Words reuse iPhone's (STRINGS.md).
+- Tests: 7 unit tests pass (Address + SavedTabs/TabOrder); `test/tabs.sh` on the emulator PASSES (link into empty tab,
+  typed address, second link = new tab, tabs.json with the back/forward list, restart restores both, back/forward in
+  the restored tab, close, +).
 
 ## Next step
-Item 2, first part: tabs (a Tab model with its own WebView and back/forward, saved state across launches via
-`WebView.saveState` bundles + a small JSON list) and the address bar wired to `Address.resolve`.
+Item 2, next part: real popup windows (onCreateWindow + `setSupportMultipleWindows`, the popup as its own WebView
+over the tab, window.close closes it; a local sign-in-style stand-in page for the test), then links to other apps.
 
 ## Notes for next round
 - Env: `export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`, SDK `~/Library/Android/sdk`
@@ -85,7 +87,12 @@ Item 2, first part: tabs (a Tab model with its own WebView and back/forward, sav
   Compare with `gh run list --branch ios-poc` before chasing a failure.
 - `shots/` is gitignored. Gradle's SharedAssets task lists each source as its own input (a repo-root input overlaps
   the build folder and Gradle refuses it).
-- Take the device lock before the emulator or a long Gradle build (the loop prompt has the script).
+- Take the device lock before the emulator or a long Gradle build (the loop prompt has the script). Round 2 waited
+  ~20 min for the iOS batch: start the build in the background and wait with a Monitor.
+- Emulator tests: `mobile/android/test/*.sh` (uiautomator dump + adb; `tabs.sh` is the pattern: `expect` polls the
+  address field, `tap` finds nodes by text/content-desc). Run with the emulator booted and `node mobile/serve.js 8477`.
+- Every WebView is made in `Browser.makeWebView(tab)`: worlds, popups and mods hook in there.
+- A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
 - Nothing needs you yet. One choice made for now: plain Android Views rather than Jetpack Compose for the

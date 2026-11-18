@@ -5,4 +5,14 @@
     <string name="app_name">TRIF</string>
     <string name="address_hint">Search or type URL</string>
     <string name="start_empty">Type an address or a search above.</string>
+    <string name="back">Back</string>
+    <string name="forward">Forward</string>
+    <string name="new_tab_button">New Tab</string>
+    <string name="tabs_button">Tabs, %d open</string>
+    <string name="new_tab">New tab</string>
+    <string name="close_tab">Close %s</string>
+    <plurals name="tabs_title">
+        <item quantity="one">%d tab</item>
+        <item quantity="other">%d tabs</item>
+    </plurals>
 </resources>

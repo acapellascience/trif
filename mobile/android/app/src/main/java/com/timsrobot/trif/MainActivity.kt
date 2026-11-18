@@ -1,21 +1,39 @@
 package com.timsrobot.trif
 
 import android.app.Activity
+import android.content.Intent
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.window.OnBackInvokedCallback
-import android.window.OnBackInvokedDispatcher
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 
-/** Round 1's shell: an address field over one WebView. Tabs, worlds and mods come in the next items. */
+/**
+ * The browser's screen: the address bar, the shown tab's page, and a plain toolbar (back, forward, new tab, tabs).
+ * The toolbar's look and the tab list's cards are the UI layer, held until the iPhone app's settles (Tim, 11-18):
+ * this is only enough to use and test the tabs.
+ */
 class MainActivity : Activity() {
-    private lateinit var web: WebView
+    private lateinit var browser: Browser
     private lateinit var field: EditText
+    private lateinit var page: FrameLayout
+    private lateinit var start: TextView
+    private lateinit var list: ScrollView
+    private lateinit var back: Button
+    private lateinit var forward: Button
+    private lateinit var tabsButton: Button
+    private var listShown = false
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
@@ -27,53 +45,155 @@ class MainActivity : Activity() {
                 if (action == EditorInfo.IME_ACTION_GO) { go(v.text.toString()); true } else false
             }
         }
-        web = WebView(this).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            webViewClient = object : WebViewClient() {
-                override fun doUpdateVisitedHistory(view: WebView, url: String?, reload: Boolean) = backChanged()
-                override fun onPageFinished(view: WebView, url: String) {
-                    if (!field.hasFocus() && url.startsWith("http")) field.setText(url)
-                }
-            }
+        start = TextView(this).apply {
+            text = getString(R.string.start_empty)
+            setTextColor(Color.GRAY)
+            textSize = 16f
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, resources.displayMetrics.heightPixels / 4, 0, 0)
+            setBackgroundColor(Color.WHITE)
+        }
+        list = ScrollView(this).apply { setBackgroundColor(Color.rgb(242, 242, 247)); visibility = View.GONE }
+        page = FrameLayout(this)
+        back = toolButton("‹", getString(R.string.back)) { browser.current?.web?.goBack() }
+        forward = toolButton("›", getString(R.string.forward)) { browser.current?.web?.goForward() }
+        val plus = toolButton("+", getString(R.string.new_tab_button)) { showList(false); newTab() }
+        tabsButton = toolButton("1", "") { showList(!listShown) }
+        val bar = LinearLayout(this).apply {
+            listOf(back, forward, plus, tabsButton).forEach { addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+        }
+        val middle = FrameLayout(this).apply {
+            addView(page, -1, -1); addView(start, -1, -1); addView(list, -1, -1)
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
             addView(field, LinearLayout.LayoutParams(-1, -2))
-            addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(middle, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(bar, LinearLayout.LayoutParams(-1, -2))
         })
-        if (saved != null) web.restoreState(saved) else showStart()
-        intent?.dataString?.let { go(it) }
+        browser = Browser(this) { refresh() }
+        browser.restore()
+        open(intent)
     }
 
-    private fun showStart() {
-        val words = getString(R.string.start_empty)
-        web.loadDataWithBaseURL(null, "<meta name=viewport content='width=device-width'>" +
-            "<p style='font:16px sans-serif;color:#666;text-align:center;margin-top:30vh'>$words</p>", "text/html", "utf-8", null)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        open(intent)
     }
 
-    fun go(text: String) {
-        val url = Address.resolve(text) ?: return
+    /** A link opened with the app: in the shown tab if it's empty, else in a new tab. */
+    private fun open(intent: Intent?) {
+        val url = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
+        intent.data = null
+        showList(false)
+        if (browser.current?.url == null) browser.go(url) else browser.newTab(url)
+    }
+
+    private fun toolButton(glyph: String, label: String, tap: () -> Unit) =
+        Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = glyph; textSize = 22f; contentDescription = label; setOnClickListener { tap() }
+        }
+
+    private fun newTab() {
+        browser.newTab()
+        field.requestFocus()
+        getSystemService(InputMethodManager::class.java).showSoftInput(field, 0)
+    }
+
+    private fun go(text: String) {
+        if (browser.current?.web == null) return
+        if (!browser.go(text)) return
         getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(field.windowToken, 0)
         field.clearFocus()
-        web.requestFocus()
-        web.loadUrl(url)
+        browser.current?.web?.requestFocus()
     }
 
-    override fun onSaveInstanceState(out: Bundle) {
-        super.onSaveInstanceState(out)
-        web.saveState(out)
+    /** Shows what the browser holds now: the shown tab's page, its address, the buttons, the tab list. */
+    private fun refresh() {
+        val tab = browser.current ?: return
+        val wv = tab.web
+        if (wv != null && wv.parent !== page) {
+            page.removeAllViews()
+            (wv.parent as? ViewGroup)?.removeView(wv)
+            page.addView(wv, -1, -1)
+            // (the field would take the focus as the old page goes: the new tab's + asks for it again itself)
+            field.clearFocus()
+            wv.requestFocus()
+        }
+        start.visibility = if (tab.url == null && wv?.url == null) View.VISIBLE else View.GONE
+        if (!field.hasFocus()) field.setText(tab.url ?: "")
+        back.isEnabled = wv?.canGoBack() == true
+        forward.isEnabled = wv?.canGoForward() == true
+        val n = browser.tabs.size
+        tabsButton.text = "$n"
+        tabsButton.contentDescription = getString(R.string.tabs_button, n)
+        if (listShown) fillList()
+        backChanged()
     }
 
-    // Back goes back in the page while it can, else the system's own back (predictive back stays on: the
-    // callback is registered only while the page has somewhere to go back to).
-    private val backCallback: Any? = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { web.goBack() } else null
+    private fun showList(show: Boolean) {
+        listShown = show
+        list.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) {
+            browser.save()
+            fillList()
+        }
+        backChanged()
+    }
+
+    /** The tab list: each tab's title and site, a tap to show it, × to close it. */
+    private fun fillList() {
+        val newTab = getString(R.string.new_tab)
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 16, 24, 16) }
+        rows.addView(TextView(this).apply {
+            text = resources.getQuantityString(R.plurals.tabs_title, browser.tabs.size, browser.tabs.size)
+            textSize = 17f; setPadding(16, 8, 16, 16); gravity = Gravity.CENTER_HORIZONTAL
+        })
+        for (t in browser.tabs) {
+            val row = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(if (t === browser.current) Color.rgb(220, 235, 220) else Color.WHITE)
+                setPadding(32, 20, 8, 20)
+                setOnClickListener { browser.select(t); showList(false) }
+            }
+            val words = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            words.addView(TextView(this).apply { text = t.label(newTab); textSize = 16f; setSingleLine() })
+            if (t.host.isNotEmpty()) words.addView(TextView(this).apply {
+                text = t.host; textSize = 13f; setTextColor(Color.GRAY); setSingleLine()
+            })
+            row.addView(words, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+                text = "×"; textSize = 20f
+                contentDescription = getString(R.string.close_tab, t.label(newTab))
+                setOnClickListener { browser.close(t) }
+            }, LinearLayout.LayoutParams(-2, -2))
+            rows.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
+        }
+        list.removeAllViews()
+        list.addView(rows)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        browser.save()
+    }
+
+    // Back: closes the tab list, else goes back in the page while it can, else the system's own back (predictive
+    // back stays on: the callback is registered only while there's somewhere to go back to).
+    private fun backInApp(): Boolean {
+        if (listShown) { showList(false); return true }
+        val wv = browser.current?.web ?: return false
+        if (!wv.canGoBack()) return false
+        wv.goBack(); return true
+    }
+
+    private val backCallback: Any? = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { backInApp() } else null
     private var backRegistered = false
 
     private fun backChanged() {
         if (Build.VERSION.SDK_INT < 33) return
-        val want = web.canGoBack()
+        val want = listShown || browser.current?.web?.canGoBack() == true
         if (want == backRegistered) return
         val cb = backCallback as OnBackInvokedCallback
         if (want) onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)
@@ -83,6 +203,6 @@ class MainActivity : Activity() {
 
     @Deprecated("Android 10-12 only; 13+ uses the OnBackInvokedCallback above")
     override fun onBackPressed() {
-        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+        if (!backInApp()) super.onBackPressed()
     }
 }

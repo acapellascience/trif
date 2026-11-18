@@ -9,3 +9,7 @@ app/src/main/res/values/strings.xml.
 | The app's name (launcher, recents) | TRIF | **New** (draft; the iPhone build is still "TRIF Probe") |
 | The address bar, empty | Search or type URL | iPhone (address screen's placeholder, 11-15) |
 | A new tab's page, nothing visited yet | Type an address or a search above. | iPhone |
+| Toolbar, accessibility labels | Back · Forward · New Tab · Tabs, {n} open | iPhone (the toolbar's labels; the toolbar's look is held, UI layer) |
+| The tab list's title | 1 tab · {n} tabs | iPhone (tab switcher's title) |
+| The tab list, a tab with no page | New tab | iPhone |
+| The tab list, × (accessibility) | Close {tab's title} | iPhone |

@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (413 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (427 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -51,9 +51,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   privatepage (["https://…"]: pictured or why not), cover (the leaving cover's rule now, up or down, its last steps
   with ms since the app came to the front; "show": up for 6 s, for a screenshot),
   applink (the other-app question up now, and the note), quick ("words": a quick ask as the box sends it), quickstate, quickundo, quickopen (the pill tapped), quickcancel
-  (the strip's ✕), quickexpand; speech (permissions, on-device or not), speechfile ("/path.wav": the recognizer on a
-  recorded file, SFSpeechURLRecognitionRequest on device), micpress / micrelease; tabsfocus (the card the tab list last
-  opened at, and the shown tab),
+  (the strip's ✕), quickexpand; speech (permissions, on-device or not, which recognizers this device has), speechfile
+  ("/path.wav": SFSpeechURLRecognitionRequest on a recorded file), micpress / micrelease (the box's hold), mictap /
+  micstop (its tap and the stop tap), micx (the ✕), miccancel (a slide away), micinterrupt (an audio interruption
+  beginning, as a call's), micdraft ("words": the box's words), micstate (phase, listener, recognizer events, the
+  transcript, the box, how many times words were asked and the last), robothold (1 / 0 / "away": the robot held, let
+  go, let go slid away, through ContentView's own robotHold/robotLift); modsstale (each tab: whether the mods running
+  on its page changed since it loaded); tabsfocus (the card the tab list last opened at, and the shown tab),
   playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
@@ -109,6 +113,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mobile/test/applinks-check/main.swift). Simulator pages for it: any small node server with tel:/mailto:/sms:/maps:/
   fb-messenger: links, a target=_blank one, a trif: one, `location = 'mailto:…'` on load and every 1.5 s, an
   `a.click()` on load, an iframe to fb:// (the batch's own lived in the scratchpad).
+- The microphone's words (SpeechText.swift: segments, restarts, revised partials; committed words never shrink, a
+  random walk of 2000 × 40 events) on the Mac: `node --test mobile/test/speechtext.test.js` (swiftc with
+  mobile/test/speechtext-check/main.swift; ~3 s).
 - What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
   mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
@@ -117,9 +124,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   JS counts as a gesture). App to the background: `simctl launch <dev> com.apple.Preferences`; back: `simctl launch`
   the app; lock: the iOS Simulator tool's LOCK button (HOME wakes / unlocks). Steps still answer in the background
   while something plays.
-- Dev launch flags: `-speechfile <wav>` (a recording stands in for the microphone in every hold or tap of it: fed to the
-  same live request at once; `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"`), `-talksilence <s>` (the tapped
-  microphone's silence stop, 4 s; longer to try its taps), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
+- Dev launch flags: `-speechfile <wav>` (a recording stands in for the microphone in every hold or tap of it: played in
+  0.1 s pieces at the pace of speech, then silence for as long as listening goes on; `-speechrate N` N times as fast;
+  make them with `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"` and ffmpeg's anullsrc for silences, never the
+  live microphone), `-oldspeech` (SFSpeechRecognizer even where iOS 26's SpeechAnalyzer is there), `-speechsession` (the real audio session switch with `-speechfile`), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
   `-nobarshift`, `-stripheight <pt>` (the quick ask's strip, 270), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
@@ -159,10 +167,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   createWebViewWith (no tab), Open in New Tab, the preview's commit, ClaudePane's decidePolicy/createWebViewWith,
   PanelChat's (taps only, never asks). The note shows over the chat too (ContentView.page's bottom overlay).
 - QuickAsk.swift (Tim, 11-18): `QuickAsk` (request, service, site, key, state waitingSend/working/done/replied/card/
-  undone/failed, `applied` for Undo; `lookOnly`), `SpeechInput.shared` (hold-to-talk: SFSpeechRecognizer,
-  requiresOnDeviceRecognition, AVAudioEngine tap; the session .record/.measurement while held, then back to
-  .playback/.moviePlayback), `QuickAskBox` (the box at the top of ChatListView), `QuickPill` (above the toolbar, in
-  ContentView.notes), `QuickStripHeader`, `QuickStrip.height`. ClaudePane: `quick`, `strip`, `quickAsk` (Claude/
+  undone/failed, `applied` for Undo; `lookOnly`), `QuickAskBox` (the box at the top of ChatListView; its text is
+  `SpeechInput.draft`, so it outlives the sheet), `HeardText` (every word heard, scrolling past a height, the newest
+  in view), `HoldTalkPill`, `KeptTalkSlot`/`KeptTalkPill` (a robot hold stopped by something else: the words, a tap
+  opens the list), `QuickPill` (above the toolbar, in ContentView.notes), `QuickStripHeader`, `QuickStrip.height`. ClaudePane: `quick`, `strip`, `quickAsk` (Claude/
   ChatGPT: showFor + prepare/fillContext + the request as text + chat.js `armSend`; More: `quickMore` →
   PanelChat.quickSend), `quickDeliver` (offerFromChat(hold: true), look-only → Browser.addMod(quiet:), the rest
   offerHeld or the done banner), `quickUndo` (ModStore.undoAdd: the version before, or removed; not to Recently
@@ -171,6 +179,20 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   sliding: `stripLayer`/`stripUp`), `ChatWebView.stripTop` (touches above the strip go to the tab). PanelChat:
   `quickSend` (TRIF's own panel: #input, #composer.requestSubmit(); waits for #site.title == the tab's address;
   `quickPending` marks the next run; refused if startRun never takes it), `Run.quick`, `offerRun` → `quickDone`.
+- SpeechInput.swift (Tim, 11-18, "Don't have the microphone stop listening at any point"): `SpeechInput.shared`
+  (phase, `transcript` = the box's words it started from + SpeechText, `draft` the box's text, `stoppedNote`,
+  `keptFromHold`, `tapMode`, `fromRobot`, `getting` (a model download)); `press(robot:)`, `keepListening` (tap mode),
+  `release` (the person's stop: endAudio, `.ended` or 2.5 s, then asked), `cancel` (slide away: this listen's words
+  dropped), `keep` (the ✕: kept, not asked), `interrupt(why:)` (willResignActive, didEnterBackground, AVAudioSession
+  interruption / media reset, the list's onDisappear, a lost microphone, a broken recognizer: kept, not asked, the
+  note). `choose(download:)`: iOS 26 SpeechAnalyzer with SpeechTranscriber (`isAvailable`) else DictationTranscriber
+  (`.progressiveLongDictation`), each only when AssetInventory says installed; a missing model is fetched at the first
+  press (`assetInstallationRequest`, the box's note with %) and SFSpeechRecognizer used meanwhile. Listeners:
+  `AnalyzerListener` (an AsyncStream of AnalyzerInput, AVAudioConverter to bestAvailableAudioFormat; results ending by
+  themselves → a new analyzer), `RecognizerListener` (requiresOnDeviceRecognition; metadata → segment; a task ending
+  by itself (final, an error, no speech) → a new task at once on the same audio; only 10 tasks in a row ending within
+  0.5 s of starting stop it). Sources: `MicSource` (AVAudioEngine tap, re-tapped on a configuration change),
+  `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator.
 - ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
   normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
   (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
@@ -276,7 +298,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   icon's address. Icon links log Diagnostics lines `link` (as UIKit hands them over: AppDelegate
   configurationForConnecting at launch, SceneDelegate openURLContexts later, which comes just AFTER onOpenURL) and
   `icon` (taken, the tab and why); PendingLink opens one onOpenURL never brought, 2 s after coming to the front.
-- Full screen: per tab, remembered; the two-finger hold (0.6 s, each finger still) toggles it either way at once, with
+- Full screen: per tab, remembered; the two-finger hold (0.3 s since 11-18, Tim: "half as long"; was 0.6; each finger still) toggles it either way at once, with
   a fading note; ⋯ → Full screen names the hold; a faint exit button at the top right 60 pt down (bright 3 s on entry and
   on scroll-up), hideable in ⋯. A Home Screen icon (`app=1`) ALWAYS lands on its site's own tab in full screen (Tim
   11-16: "no matter what it was in before"), closing covers (Add this mod? stays); TRIF's own icon opens as it was left.
@@ -492,9 +514,43 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   moving 20 pt before the 0.45 s is a slide, not a hold. One DragGesture(minimumDistance 0) beside the Button (ContentView
   robotPress/robotHold/robotLift); `robotHeld` stops the tap that ends a hold.
 - The box's microphone: tap or hold (Tim, 11-18; built): a press under 0.3 s is a tap: listening goes on (a stop square,
-  an ✕ beside it, "Listening, tap to stop") until the next tap (asked), the ✕ (nothing), 4 s with no new words (8 s
-  before any; asked), 60 s (asked), the list closed or the app sent to the background (nothing). Longer is a hold, as
-  before; slid 90 pt away and let go: nothing. SpeechInput: `tapMode`, `keepListening`, `cancel(why:)`, `ready`.
+  an ✕ beside it, "Listening, tap to stop") until the next tap (asked) or the ✕ (kept in the box, not asked). Longer
+  is a hold, as before; slid 90 pt away and let go: this listen's words dropped, nothing asked.
+- The microphone never stops by itself (Tim, 11-18: "If you pause, it deletes the things you've said so far … Let it
+  keep going and have long stretches of silence … The user will know when to stop it"; built 11-18): no silence stop,
+  no time limit, in tap and hold (box and robot). Only the person's stop tap or letting go asks; a call, Siri, the app
+  leaving the front (even resign-active), the list closed, an error stop it with every word kept in the box
+  (`draft`) and the note "Listening stopped. Nothing was sent: your words are kept here." (draft); a robot hold
+  stopped that way puts KeptTalkPill over the toolbar (15 s; a tap opens the list with the words). The words only
+  grow: what was said before a pause stays (SpeechText). A new listen goes on after the box's words (typed or kept),
+  and the stop asks all of it. The whole text shows growing in the box's pill / the robot's pill, scrolling. On
+  device only, always (SpeechAnalyzer runs on device; SFSpeech with requiresOnDeviceRecognition; neither → the
+  not-on-this-iPhone note, nothing recorded). The ✕ now keeps the words (my call: never lose words; slide-away still
+  drops them, it says "Let go to cancel" first).
+- A mod for another site never reloads the tab shown (Tim, 11-18: "you're watching a YouTube video, when you
+  successfully add the mod to the other tab, your tab reloads"; built 11-18). Cause: `Browser.modsChanged` reloaded the
+  shown tab after EVERY mod change. Now each tab keeps `modsLoaded` (its committed address + `ModStore.signature`:
+  every mod running there and the version of it); after a change the shown tab loads again only if that signature
+  changed (`refreshIfStale`), and never while it plays (`Browser.playing`); tabs behind load again when next shown
+  (`select`), unless playing then. Every path goes through it: Add this mod? / the banner's Add, Go to then Add, quick
+  ask Done and Undo, Allow, the Mods tab's switches and edits, safe mode, phone sync (`syncApplied`), imports (no
+  reload, as before). Pause all mods: the shown tab loads again even if playing (the person's own act); tabs behind
+  only when shown (before 11-18 every tab reloaded at once).
+- Sound and video around talking (Tim, 11-18, his phone: the video "doesn't start again … it's hung … spinning its
+  loading thing forever"; built 11-18): as listening starts, TRIF pauses every tab's playing <video>/<audio> itself
+  (BackgroundPlay.talkPause in TRIF's world, its time kept) before the session goes to .record; however listening ends
+  (asked, cancelled, ✕, the list closed, the app left, an error) the engine stops, the session is let go
+  (notifyOthersOnDeactivation), its category/mode/options put back exactly as they were (playback, moviePlayback),
+  and what TRIF paused (or iOS paused within 2 s of the start) and is still paused plays on from its time
+  (talkResume: the session activated first; play() refused → left paused there; playing but no time going by in
+  1.2 s → one nudge, a seek to its own time and play; never a reload). After a call/Siri interruption it stays
+  paused, as iOS leaves it. Diagnostics "audio": "talking: paused …", "after talking, <page>: …". Media inside
+  iframes isn't reached (main frame only).
+- Open Settings (Tim, 11-18): the Home Screen icon steps show **Open Settings** once Safari has the profile
+  (`.fetched`, `.pageBack`) or it's saved to Files: `UIApplication.openSettingsURLString` only (public; never
+  App-prefs:/prefs:, App Review). `trif://settings` (the clip page's own button, Tim edits site/) does the same
+  (ContentView.openSettings, tried again once after 0.6 s; Diagnostics "link"); the tab, covers and leaving cover
+  untouched; other trif:// hosts still ignored.
 - The full chat opens with no keyboard (Tim, 11-18: "the keyboard flies up and it's disorienting"): chat.js fill never
   leaves the box focused: each paste/insert is `inBox` (focus with preventScroll, put, blur in the same turn; a box the
   person was already in keeps its focus). The strip too. Checked: Go to chat on the Claude and ChatGPT (`?octane`)
@@ -513,11 +569,23 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   fb://, Messenger installed), VoiceOver or a keyboard activating a link (no finger: they get the question, not an
   open), a form a script submits to another app's scheme (counts as tapped only with a finger down recently), iPad.
 - The robot's tap / hold to talk / the microphone's tap (11-18): Simulator only, with `-speechfile` (shots 401-411):
-  tap → list; Go to chat filled; hold → pill → strip → Send → Done · Undo; slide-away cancel; not ready → list; the
-  microphone's tap (stop square, ✕, the silence stop, the list closed, the app left), its hold and slide-away; a reply
-  waiting (409). Never with a live microphone or on a phone: live speech may end itself (isFinal) during a long tap;
-  the 0.45 s hold vs the toolbar sliding away with the page. The first tap on the microphone right as the list opened
-  was missed once (the sheet still moving).
+  tap → list; Go to chat filled; hold → pill → strip → Send → Done · Undo; slide-away cancel; not ready → list; a
+  reply waiting (409). Not tried on a phone: the 0.45 s hold vs the toolbar sliding away with the page. The first tap
+  on the microphone right as the list opened was missed once (the sheet still moving).
+- Open Settings (11-18): in the Simulator (26.3) openSettingsURLString opens Settings' MAIN page (Profile Downloaded
+  right there: 1 tap; shots 424-425), warm and cold by `simctl openurl trif://settings` (422-423). On a phone it may
+  open Apps → TRIF Probe (then 2 back taps): the step's words cover both; Tim to say which his SE does.
+- Talking and sound (11-18): Simulator only, `-speechsession` (the stand-in recording with the real session switch),
+  a silent clip on 127.0.0.1 (media.sh in the batch's scratchpad): plays on after tap+stop, hold+cancel, hold+let go,
+  the ✕ with the video in a tab behind, the app leaving mid-listen; left paused after a call-like interruption.
+  The stall Tim saw wasn't reproduced in the Simulator (not tried with the old build); never on a phone, nor with
+  AirPods, nor YouTube's own player (main-frame <video>, should work; iframes not reached).
+- The never-stopping microphone (11-18): Simulator only, recordings, never a live microphone (see Gotchas for what the
+  Simulator has). NOT known: whether Tim's iPhone SE (A15) has SpeechTranscriber (`isAvailable`) or only
+  DictationTranscriber; the first Diagnostics "quick ask" line "talking: recognizers on this iPhone: …" says, and
+  "talking: listening (<listener>)" names the one used. The model download on a phone (size, time, the note's %), a
+  real call/Siri interrupting, AirPods connecting mid-listen (MicSource re-taps; untested), the record session's
+  effect on a page playing sound (ducked as before), battery over a long ramble.
 
 - Leaving cover (11-18): Simulator only (shots 383-386). Checked: icon tab B in full screen, left, the icon link for A
   (`simctl openurl`): every frame of the return (recordVideo) is the robot, then fading to A, no frame of B; with
@@ -627,6 +695,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- `-speechsession` (dev): with `-speechfile`, the real audio session switch too (to try what it does to pages'
+  sound). In the Simulator the session's .record activation needed no microphone question.
+- Speech in the Simulator (26.3.1, iPhone SE, en_CA, 11-18): `SpeechTranscriber.isAvailable` is false;
+  DictationTranscriber's model said `supported`, then installed in 0.3 s on the first press. SFSpeechRecognizer on
+  device, a buffer request with pauses of 15–20 s: no isFinal and no new task, but a result with
+  `speechRecognitionMetadata` after each pause, its later results starting over with only the newest words (hence
+  SpeechText.segmentEnded); no punctuation in those. DictationTranscriber: one growing volatile result through the
+  pauses (finals now and then on long speech), one final at the stop.
 
 - Other-app links in the Simulator (26.3): tel: and mailto: have no app (UIApplication.open says false), sms: opens
   Messages, maps: Maps (both leave a "◀ TRIF Probe" back link). WebKit asks the policy for target=_blank BEFORE

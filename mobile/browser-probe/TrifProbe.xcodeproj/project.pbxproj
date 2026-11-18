@@ -46,6 +46,8 @@
 		A1C10B0E5EB1C11B00000034 /* QuickAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000035 /* QuickAsk.swift */; };
 		A1C10B0E5EB1C11B00000036 /* LeavingCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */; };
 		A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000039 /* AppLinks.swift */; };
+		A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003B /* SpeechText.swift */; };
+		A1C10B0E5EB1C11B0000003C /* SpeechInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */; };
 		A1C10B0E5EB1C11B00000023 /* local-guide.txt in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000024 /* local-guide.txt */; };
 		A1C10B0E5EB1C11B00000011 /* panel-adapter.js in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000012 /* panel-adapter.js */; };
 		A1C10B0E5EB1C11B00000013 /* panel-phone.css in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000014 /* panel-phone.css */; };
@@ -105,6 +107,8 @@
 		A1C10B0E5EB1C11B00000035 /* QuickAsk.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "QuickAsk.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LeavingCover.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000039 /* AppLinks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AppLinks.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B0000003B /* SpeechText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SpeechText.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SpeechInput.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000024 /* local-guide.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "local-guide.txt"; path = "../local-model/local-guide.txt"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000012 /* panel-adapter.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = "panel-adapter.js"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000014 /* panel-phone.css */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.css; path = "panel-phone.css"; sourceTree = "<group>"; };
@@ -241,6 +245,8 @@
 				A1C10B0E5EB1C11B00000035 /* QuickAsk.swift */,
 				A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */,
 				A1C10B0E5EB1C11B00000039 /* AppLinks.swift */,
+				A1C10B0E5EB1C11B0000003B /* SpeechText.swift */,
+				A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */,
 				50952D10E0015A131982D938 /* Tabs.swift */,
 				C92814A95137C3CC4B0A8C2F /* Browser.swift */,
 				A67596316AFDF35B8CF90704 /* Checks.swift */,
@@ -367,6 +373,8 @@
 				A1C10B0E5EB1C11B00000034 /* QuickAsk.swift in Sources */,
 				A1C10B0E5EB1C11B00000036 /* LeavingCover.swift in Sources */,
 				A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */,
+				A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */,
+				A1C10B0E5EB1C11B0000003C /* SpeechInput.swift in Sources */,
 				1A4E63C41BCCB67E203CF5A6 /* Tabs.swift in Sources */,
 				066931474CC5139D68D2F470 /* Browser.swift in Sources */,
 				17237858CB0A046A273784DC /* Checks.swift in Sources */,

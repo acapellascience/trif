@@ -1857,7 +1857,7 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: close) } }
         }
-        // (the list closed mid-listen (a tap on the microphone): stopped, nothing asked)
-        .onDisappear { if SpeechInput.shared.phase == .listening { SpeechInput.shared.cancel(why: "the list closed") } }
+        // (the list closed mid-listen (a tap on the microphone): stopped, nothing asked, the words kept in the box)
+        .onDisappear { SpeechInput.shared.interrupt(why: "the list closed") }
     }
 }

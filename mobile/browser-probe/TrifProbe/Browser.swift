@@ -153,7 +153,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // pinch moves too far, a two-finger tap is too short)
         let two = UILongPressGestureRecognizer(target: self, action: #selector(twoFingerPress(_:)))
         two.numberOfTouchesRequired = 2
-        two.minimumPressDuration = 0.6
+        two.minimumPressDuration = 0.3  // (Tim, 11-18: half as long; was 0.6)
         two.allowableMovement = 24
         two.delegate = self
         wv.addGestureRecognizer(two)
@@ -320,7 +320,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let was = current, was !== tab, tabs.contains(where: { $0 === was }) { TabShots.shared.take(was, "left"); letGoLater(was) }
         current = tab
         status = ""
-        if !tab.started && !waitingForFront { start(tab) }
+        if !tab.started && !waitingForFront { start(tab) } else { refreshIfStale(tab, "shown again") }
         address = tab.webView.url?.absoluteString ?? tab.savedURL?.absoluteString ?? ""
         title = tab.webView.title ?? tab.title
         loading = tab.webView.isLoading
@@ -465,28 +465,48 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if source == "chat" { lastAdded = (added.id, added.name) }
     }
 
-    /// After any change to the mods: the scripts every page gets are made again, and the page reloads to run them.
-    func modsChanged(reload again: Bool = true) {
+    /// After any change to the mods: the scripts every page gets are made again. The shown page loads again to run
+    /// them only if what runs on it changed (a mod for its site: added, updated, undone, switched, synced), and never
+    /// while it plays sound or video; tabs behind load again when they're next shown (Tim, 11-18: "when you
+    /// successfully add the mod to the other tab, your tab reloads. That's quite annoying for watching videos").
+    /// `playing`: the shown page loads again even if it plays (Pause all mods: the person's own act on it).
+    func modsChanged(reload again: Bool = true, playing: Bool = false) {
         Diagnostics.shared.mark("making the pages' scripts again after a change to the mods")
         installScripts()
-        if again { keepStatus = true; reload() }
+        if again, let t = current { refreshIfStale(t, "the mods changed", evenPlaying: playing) }
         noteRunning()
+    }
+
+    /// `tab` shown: loaded again if the mods running on its page are no longer the ones it loaded with, unless it's
+    /// playing (then it keeps going as it is, and loads again the next time it's shown not playing).
+    func refreshIfStale(_ tab: Tab, _ why: String, evenPlaying: Bool = false) {
+        guard tab.started, tab.webView.url != nil, let seen = tab.modsLoaded, mods.signature(seen.url) != seen.signature else { return }
+        Task { @MainActor [weak self, weak tab] in
+            guard let self, let tab else { return }
+            if !evenPlaying, await Browser.playing(tab) {
+                Diagnostics.shared.log("mods", "\(Diagnostics.place(tab.webView.url)): its mods changed (\(why)) but it's playing, so not loaded again now")
+                return
+            }
+            guard tab === self.current, let seen = tab.modsLoaded, self.mods.signature(seen.url) != seen.signature else { return }
+            Diagnostics.shared.log("mods", "\(Diagnostics.place(tab.webView.url)) loaded again: its mods changed (\(why))")
+            self.keepStatus = true
+            tab.webView.reload()
+        }
     }
 
     /// After a sync changed mods here (phone sync: taken, deleted, back, a conflict's sibling): the pages' scripts
     /// made again, so the change runs; the shown page reloads only when one of those mods is for it.
     func syncApplied(_ ids: [String]) {
-        let url = webView.url?.absoluteString ?? ""
-        let shown = !url.isEmpty && ids.contains { id in mods.mods.first(where: { $0.id == id }).map { mods.applies($0, to: url) } ?? true }
-        modsChanged(reload: shown)
+        // (the shown page reloads only if what runs on it changed: refreshIfStale)
+        Diagnostics.shared.mark("synced: \(ids.count) mod(s) changed")
+        modsChanged()
     }
 
     /// Pause all mods, or resume them: every page loads again without (or with) them.
     func pauseAll(_ p: Bool) {
         if mods.paused != p { mods.setPaused(p) }
-        installScripts()
-        for t in tabs where t.started && t.webView.url != nil { t.webView.reload() }
-        noteRunning()
+        // (the shown page loads again without (or with) them; tabs behind when they're next shown, unless playing then)
+        modsChanged(playing: true)
     }
 
     /// Which mods are running in the tabs, by site, for safe mode (Safety.running).
@@ -807,6 +827,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         toggleFullScreen()
     }
     private var ignoreLinksUntil = Date.distantPast
+    /// When listening last started (ms since 1970), for what it paused (BackgroundPlay.resumeAfterTalk).
+    var talkStarted: Double?
     static let clickGuard = """
     if (!window.__trifClickGuard) {
       window.__trifClickGuard = true;
@@ -1337,6 +1359,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // (a new page: not drawn until it has finished, or a while has passed; its tab keeps the picture it had)
         if let t = tab(of: webView) { t.committedAt = Date(); t.finishedAt = nil }
         if let t = tab(of: webView) { checkAgent(t, webView) }
+        if let t = tab(of: webView), let u = webView.url?.absoluteString { t.modsLoaded = (u, mods.signature(u)) }
         guard webView === self.webView else { return }
         address = webView.url?.absoluteString ?? ""
         canGoBack = webView.canGoBack
@@ -1582,6 +1605,91 @@ enum BackgroundPlay {
                     }
                     if !r.isEmpty, told.insert(r).inserted { Diagnostics.shared.log("audio", "the app went to the background, \(Diagnostics.place(wv.url))\(shown ? "" : " (a background tab)"): \(r)") }
                 }
+            }
+        }
+    }
+
+    // MARK: talking (SpeechInput: the quick ask's microphone, the robot held)
+
+    /// (TRIF's world) What plays is paused by TRIF as listening starts, its time kept, so the session's switch to
+    /// recording doesn't yank it (Tim, 11-18: the video didn't start again, and hung loading).
+    static let talkPause = """
+        const out = [];
+        for (const m of document.querySelectorAll('video, audio')) {
+          if (m.paused || m.ended) continue;
+          m.__trifTalk = { at: t0, time: m.currentTime };
+          m.pause();
+          out.push(m.localName + ' at ' + m.currentTime.toFixed(1) + ' s');
+        }
+        return out.join(', ');
+        """
+    /// (TRIF's world) After: what TRIF paused, or what iOS paused as listening started (within 2 s of it), still
+    /// paused and not ended (the person or the page didn't play or pause it since), plays on from where it was. Refused
+    /// (autoplay rules): left paused there. Playing but stuck (no time going by in 1.2 s): nudged once, a seek to its
+    /// own time and play. Never reloaded. `count`: only how many there are.
+    static let talkResume = """
+        const due = [...document.querySelectorAll('video, audio')].filter((m) => {
+          const p = m.__trifPause, mine = m.__trifTalk && m.__trifTalk.at === t0;
+          const near = p && p.at >= t0 - 300 && p.at <= t0 + 2000;
+          return (mine || near) && m.paused && !m.ended;
+        });
+        if (count) return String(due.length);
+        const out = [], wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (const m of due) {
+          delete m.__trifTalk;
+          const at = m.currentTime;
+          try { await m.play(); } catch (e) { out.push(m.localName + ' left paused at ' + at.toFixed(1) + ' s (' + e.name + ')'); continue; }
+          await wait(1200);
+          if (!m.paused && m.currentTime - at < 0.3) {
+            m.currentTime = m.currentTime;
+            try { await m.play(); } catch (e) {}
+            await wait(1200);
+            out.push(m.localName + ' stuck, nudged: ' + (!m.paused && m.currentTime - at >= 0.3 ? 'playing' : 'still stuck') + ' (' + at.toFixed(1) + ' → ' + m.currentTime.toFixed(1) + ' s)');
+          } else out.push(m.localName + ' played on from ' + at.toFixed(1) + ' s' + (m.paused ? ', then paused by the page' : ''));
+        }
+        return out.join('; ');
+        """
+
+    /// Listening starts: every tab's playing media paused (each page in TRIF's world), the moment kept.
+    @MainActor static func pauseForTalk(_ browser: Browser) {
+        let t0 = Date().timeIntervalSince1970 * 1000
+        browser.talkStarted = t0
+        for t in browser.tabs where t.started && t.webView.url != nil {
+            let wv = t.webView, shown = t === browser.current
+            Task { @MainActor in
+                let r = await Browser.within(1, "no answer") { () -> String in
+                    let v = try? await wv.callAsyncJavaScript(talkPause, arguments: ["t0": t0], in: nil, contentWorld: Browser.trifWorld)
+                    return v.map { "\($0)" } ?? "no answer"
+                }
+                if !r.isEmpty, r != "no answer" { Diagnostics.shared.log("audio", "talking: paused \(r) in \(Diagnostics.place(wv.url))\(shown ? "" : " (a tab behind)")") }
+            }
+        }
+    }
+
+    /// Listening ended (the session already given back): what was paused plays on, the session active again first.
+    @MainActor static func resumeAfterTalk(_ browser: Browser) {
+        guard let t0 = browser.talkStarted else { return }
+        browser.talkStarted = nil
+        let views = browser.tabs.filter { $0.started && $0.webView.url != nil }.map { ($0.webView, $0 === browser.current) }
+        Task { @MainActor in
+            var due: [(WKWebView, Bool)] = []
+            for (wv, shown) in views {
+                let n = await Browser.within(1, "0") { () -> String in
+                    let v = try? await wv.callAsyncJavaScript(talkResume, arguments: ["t0": t0, "count": true], in: nil, contentWorld: Browser.trifWorld)
+                    return v.map { "\($0)" } ?? "0"
+                }
+                if (Int(n) ?? 0) > 0 { due.append((wv, shown)) }
+            }
+            guard !due.isEmpty else { return }
+            do { try AVAudioSession.sharedInstance().setActive(true) } catch {
+                Diagnostics.shared.log("audio", "after talking: the session wouldn't start again (\(error.localizedDescription))")
+            }
+            for (wv, shown) in due {
+                let r = await Browser.within(5, "no answer") { () -> String in
+                    let v = try? await wv.callAsyncJavaScript(talkResume, arguments: ["t0": t0, "count": false], in: nil, contentWorld: Browser.trifWorld)
+                    return v.map { "\($0)" } ?? "no answer"
+                }
+                Diagnostics.shared.log("audio", "after talking, \(Diagnostics.place(wv.url))\(shown ? "" : " (a tab behind)"): \(r)")
             }
         }
     }

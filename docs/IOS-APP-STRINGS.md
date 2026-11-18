@@ -616,3 +616,31 @@ the microphone "tap to start, tap again to stop", and links that aren't web page
 | Beside the microphone while listening by a tap | — | an ✕ (VoiceOver **Cancel**); the microphone shows a stop square |
 | A page (or a mod) opening another app by itself: the question (Safari's own words) | — (nothing happened) | **Open this page in "{App}"?** where the app is certain (Phone, Messages, FaceTime, Maps, App Store, Music, Shortcuts, Reminders, Calendar, Photos, Safari), else **Open this page in another app?**; buttons **Cancel** · **Open** |
 | A link to another app that no app on the phone takes | — (nothing happened) | the note **No app on this iPhone can open this link.** |
+
+## The microphone never stops by itself (added 11-18, Tim: "Don't have the microphone stop listening at any point")
+
+All drafts for Tim. Listening ends only by the person (the stop tap, letting go, the ✕, a slide away); only their
+stop or letting go asks. Anything else that ends it (a call, Siri, the app left, the list closed, an error) asks
+nothing and keeps the words in the box.
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| Under the box, after listening stopped by something else (the words are in the box, not sent) | — | **Listening stopped. Nothing was sent: your words are kept here.** |
+| Over the toolbar, after the robot's hold stopped that way (a tap opens the box with the words; an ✕, VoiceOver **Close**) | — | the end of the words, then **Listening stopped. Nothing was sent. Tap to see your words.** (VoiceOver: **Listening stopped. Nothing was sent. {words}**, hint **Opens your words in What should change?**) |
+| Under the box while iOS 26's newer speech recognition downloads to the iPhone (the first use; listening works meanwhile) | — | **Getting this iPhone's newer speech recognition ready ({n}%). Talking works meanwhile.** |
+| Beside the microphone while listening by a tap: the ✕ (VoiceOver) | **Cancel** (dropped the words) | **Stop without asking**, hint **Keeps the words in the box** (the words stay in the box, not sent) |
+| The box and its pill while listening | the pill above the box, 3 lines | the pill in the box's place with every word heard, growing; past about 6 lines it scrolls, the newest words in view (the robot's pill the same, about 8 lines) |
+| Removed | the tapped microphone's silence stop (4 s; 8 s before any words) and its 60 s limit | — |
+
+## Open Settings in the Home Screen icon steps, and trif://settings (added 11-18, Tim)
+
+Drafts for Tim. iOS's public way only (UIApplication.openSettingsURLString: TRIF's own page in Settings; never the
+private prefs: links). In the Simulator (iOS 26.3) it opened Settings' main page, Profile Downloaded right there (one
+tap); on a phone it may open Apps → TRIF Probe instead (then two back taps first), hence the words in brackets.
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| Steps, the Safari and Files routes, the Settings step | Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management). | **Tap Open Settings, then Profile Downloaded near the top (if TRIF Probe's own page opens, go back to the main Settings page first).** |
+| The steps' button once Safari has the profile (or it's saved to Files) | — | **Open Settings** (the prominent button; Download it again / Save it again below it, plain) |
+| The clip page's own Open Settings (the site's words, Tim's) links to trif://settings | — | the app opens TRIF's page in Settings the same way; no words of its own |
+

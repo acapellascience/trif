@@ -11,6 +11,10 @@
     <string name="tabs_button">Tabs, %d open</string>
     <string name="new_tab">New tab</string>
     <string name="close_tab">Close %s</string>
+    <string name="app_link_question">Open this page in another app?</string>
+    <string name="cancel">Cancel</string>
+    <string name="open">Open</string>
+    <string name="app_link_no_app">No app on this phone can open this link.</string>
     <plurals name="tabs_title">
         <item quantity="one">%d tab</item>
         <item quantity="other">%d tabs</item>

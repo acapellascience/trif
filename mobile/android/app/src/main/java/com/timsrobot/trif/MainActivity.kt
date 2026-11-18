@@ -174,8 +174,14 @@ class MainActivity : Activity() {
         list.addView(rows)
     }
 
+    override fun onResume() {
+        super.onResume()
+        browser.inFront = true
+    }
+
     override fun onPause() {
         super.onPause()
+        browser.inFront = false
         browser.save()
     }
 

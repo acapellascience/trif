@@ -36,7 +36,8 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    - [x] address/search bar (a plain field wired to `Address.resolve`; its compact/centred look is UI layer)
    - [x] real popup windows (round 3: onCreateWindow → a new tab after the opener's, a real window with an opener;
      window.close goes back to the opener; only from a tap)
-   - [ ] links to other apps (tapped → open; by itself → ask first, as iOS AppLinks)
+   - [x] links to other apps (round 4: tapped → to Android; by itself → the question, one a load; frames never;
+     intent: read as Chrome does, BROWSABLE only, its fallback page when no app takes it)
    - [ ] minimum WebView version check (149+, `JS_INJECTION_IN_FRAME_AND_WORLD`; clear message otherwise)
    - [ ] default-browser role: http/https VIEW intent filters, a usable start page
 3. [ ] Script worlds: TRIF's world + the box (SES + sandbox-runtime.js) at document start, all frames; page world
@@ -56,19 +57,20 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
      mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 3, 2026-11-18)
-- Merged origin/ios-poc. Popups: `setSupportMultipleWindows(true)`, `onCreateWindow` makes a tab (as iPhone's
-  createWebViewWith: a new tab after the opener's, shown) and hands its WebView over through `WebViewTransport`;
-  `onCloseWindow` closes it and shows the opener (`TabOrder.afterClose(…, opener)`). Untapped window.open is blocked.
-- Stand-in pages (new, shared): mobile/shared/pages/signin.html + signin-popup.html (the window on the next port,
-  another origin, posts to window.opener and closes itself, as gsi/transform).
-- Tests: 8 unit tests pass; `test/popups.sh` PASSES (load-time window.open blocked, sign-in window opens with an
-  opener, hands back "Signed in as Test Person", closes to the opener; target=_blank opens a tab); `tabs.sh` still PASSES.
+## Done this round (round 4, 2026-11-18)
+- Links to other apps, as iPhone's AppLinks: `AppLinks.kt` (kinds, decide, tap test, intent fallback; pure, 6 unit
+  tests) + `TouchClock` (finger on the page, 1.5 s) and `Browser.takeLink/appLink/handOut`. Tapped = the WebView's
+  `hasGesture()` and the finger just now. intent:/android-app: parsed with `Intent.parseUri`, CATEGORY_BROWSABLE,
+  no component/selector component, no URI grants; a web intent with no package stays in TRIF; no app → its
+  `S.browser_fallback_url` page, else a toast. A window opened for an app link: handed out, its empty tab closes.
+- New shared stand-in page mobile/shared/pages/applinks.html. `test/applinks.sh` PASSES (tel: → the dialer; no app;
+  intent fallback; target=_blank tel:; 7 s later → question, Cancel; on load: frame dropped, asked once, 2nd dropped);
+  `popups.sh` and `tabs.sh` still PASS; 14 unit tests pass.
 
 ## Next step
-Item 2, next part: links to other apps (intent:, tel:, mailto:, market:… open only when tapped; a page doing it by
-itself asks first, as iOS's AppLinks: read AppLinks.swift and Browser.swift `appLink`). Note a window opened for an
-app link: the URL is only known in the new tab's `shouldOverrideUrlLoading`, so close that empty tab there.
+Item 2, next part: the minimum WebView version check (149+, `WebViewFeature.isFeatureSupported(
+JS_INJECTION_IN_FRAME_AND_WORLD)` / `WebViewCompat.getCurrentWebViewPackage`; a clear message otherwise, wording a
+draft in STRINGS.md). Then the default-browser role (http/https VIEW filters, start page).
 
 ## Notes for next round
 - Env: `export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`, SDK `~/Library/Android/sdk`
@@ -97,9 +99,14 @@ app link: the URL is only known in the new tab's `shouldOverrideUrlLoading`, so 
   127.0.0.1:<port+1>/signin-popup.html. A tap gives a page ~5 s to open a window (Chromium's transient activation),
   so "untapped" is tested with a window.open as the page loads. Third-party cookies are on for every WebView (the
   probe's passing Google sign-ins had them on). The opener link (`Tab.opener`) isn't kept across launches.
+- App links log to logcat tag `TRIF` ("app link: tel: from a page, tapped: handed to Android": scheme only); tests
+  grep `adb logcat -d -s TRIF`. uiautomator shows dialog buttons upper-case (CANCEL/OPEN) and `see` patterns are
+  regexes (escape `?` as `[?]`). Text behind a dialog isn't in the dump. popups.sh needs both servers (8477, 8478).
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- App links (round 4): the question is always the generic "Open this page in another app?" (Android can't name the
+  app for certain, so never "in “Phone”"); the no-app note is a draft: "No app on this phone can open this link."
 - Nothing needs you yet. One small difference from iPhone: when a page closes its own window (a sign-in window
   finishing), Android goes back to the tab that opened it; iPhone shows the tab in its place (often the same tab). One choice made for now: plain Android Views rather than Jetpack Compose for the
   foundation (smaller and faster to build); Compose can come in with the UI layer if you want it.

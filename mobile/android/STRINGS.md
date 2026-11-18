@@ -13,3 +13,5 @@ app/src/main/res/values/strings.xml.
 | The tab list's title | 1 tab · {n} tabs | iPhone (tab switcher's title) |
 | The tab list, a tab with no page | New tab | iPhone |
 | The tab list, × (accessibility) | Close {tab's title} | iPhone |
+| A page (or a mod) opening another app by itself: the question | Open this page in another app? · Cancel · Open | iPhone (its generic form: Android can't name the app for certain, so never "in “{App}”") |
+| A link to another app that no app on the phone takes (a toast) | No app on this phone can open this link. | **New** (draft; iPhone's says "this iPhone") |

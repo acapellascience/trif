@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App links stand-in</title>
+<body style="font: 18px sans-serif; margin: 16px">
+<!-- Links to other apps (tel:, mailto:, intent:, an app's own scheme). A browser opens them at once only when
+     tapped; a page trying by itself gets a question, at most one a load; a frame inside the page trying by itself
+     gets nothing. ?auto: the page tries a tel: link as it loads, then again (the second is dropped: one a load),
+     and its frame tries too (dropped). The "by itself" button waits 7 s (past Chromium's 5 s after a tap, and the
+     browser's own touch window) before it tries. -->
+<p><a href="tel:+15555550100" style="font-size: 20px">Call the stand-in</a></p>
+<p><a href="nosuchapp-trif-test://x" style="font-size: 20px">An app nobody has</a></p>
+<p><a href="intent://plain#Intent;scheme=nosuchapp-trif-test;package=com.example.nosuchapp;S.browser_fallback_url=http%3A%2F%2Flocalhost%3A8477%2Fplain.html;end" style="font-size: 20px">Intent with a fallback</a></p>
+<p><a href="tel:+15555550101" target="_blank" style="font-size: 20px">Call in a new window</a></p>
+<p><button id="later" style="font-size: 20px; padding: 12px">By itself in 7 s</button></p>
+<p id="note"></p>
+<script>
+  document.getElementById('later').onclick = () => {
+    document.getElementById('note').textContent = 'waiting';
+    setTimeout(() => { document.getElementById('note').textContent = 'tried'; location.href = 'sms:+15555550102'; }, 7000);
+  };
+  if (location.search.includes('auto')) {
+    const f = document.createElement('iframe');
+    f.srcdoc = '<script>setTimeout(() => location.href = "tel:+15555550103", 300)<\/script>';
+    document.body.appendChild(f);
+    setTimeout(() => { location.href = 'tel:+15555550104'; }, 1000);
+    setTimeout(() => { location.href = 'tel:+15555550105'; document.getElementById('note').textContent = 'tried twice'; }, 2500);
+  }
+</script>

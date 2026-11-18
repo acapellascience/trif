@@ -30,6 +30,29 @@ export const PHONE = Object.freeze({
   minHeight: 480,
 });
 
+/** Where the phone view's search field searches when what's typed isn't an address: Safari's default on an iPhone. */
+export const SEARCH = 'https://www.google.com/search?q=';
+
+/**
+ * Where the phone view's address field goes (the panel's navigation bar: the phone window has no address bar
+ * of its own): an http(s) address as typed; a bare host ("x.com", "localhost:3000", "x.com/home"), https (http
+ * for localhost and an IP address); anything else, a search. Never another scheme (javascript:, file:,
+ * chrome:…): that's searched for, as text. null for nothing.
+ */
+export function navTarget(text) {
+  const t = String(text ?? '').trim().slice(0, 2048);
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) {
+    try { const u = new URL(t); if (u.protocol === 'http:' || u.protocol === 'https:') return u.href; } catch { /* searched for */ }
+  }
+  const m = /^(localhost|\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3}|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9])(:\d{1,5})?([/?#]\S*)?$/i.exec(t);
+  if (m) {
+    const local = /^(localhost|\[|\d)/i.test(m[1]);
+    try { return new URL(`${local ? 'http' : 'https'}://${t}`).href; } catch { /* searched for */ }
+  }
+  return SEARCH + encodeURIComponent(t);
+}
+
 // Rule ids from here up are the phone view's; tablock.js leaves them alone (createTabLocks `foreign`).
 export const RULE_BASE = 1_000_000;
 export const isPhoneRule = (id) => Number(id) >= RULE_BASE;

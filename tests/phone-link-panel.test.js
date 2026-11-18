@@ -298,6 +298,56 @@ test('connect a phone: syncing phone mods (D11): its own switch while the link i
   assert.match(root.text(), /Keep phone mods the same here and on connected phones.*Tim’s iPhone · connected .*Synced .*: 1 from this phone, 1 waiting for your OK\..*Dark mode changed on both: both are kept\..*Remove/s);
 });
 
+test('the phone line: Connect a phone with none paired; Syncing with {phone} and Sync now; what that sync did; off; another browser named', async () => {
+  const mod = await load();
+  const { phoneSyncView, TEXT } = mod;
+  assert.equal(phoneSyncView({ status: null }), null, 'nothing before the helper says');
+  assert.equal(phoneSyncView({ status: status({ here: false }) }), null, 'another browser has it, unreachable: Settings say so');
+  assert.deepStrictEqual(phoneSyncView({ status: status() }), { text: null, actions: ['connect'], busy: false });
+  const on = status({ on: true, sync: true, phones: [PHONE] });
+  assert.deepStrictEqual(phoneSyncView({ status: on }), { text: 'Syncing with Tim’s iPhone.', actions: ['syncNow'], busy: false });
+  assert.equal(phoneSyncView({ status: { ...on, phones: [PHONE, { ...PHONE, id: 'b', name: 'iPad' }] } }).text, 'Syncing with Tim’s iPhone and iPad.');
+  assert.equal(phoneSyncView({ status: { ...on, phones: [PHONE, { ...PHONE, id: 'b' }, { ...PHONE, id: 'c' }] } }).text, 'Syncing with Tim’s iPhone and 2 more.');
+  assert.deepStrictEqual(phoneSyncView({ status: { ...on, sync: false } }), { text: 'Syncing with Tim’s iPhone is off.', actions: ['settings'], busy: false });
+
+  // Sync now: asking, then that sync's result (only a sync that ended after the ask), or "not connected"
+  const synced = (at, over = {}) => ({ ...on, phones: [{ ...PHONE, synced: { at, fromPhone: 2, toPhone: 1, waiting: 0, conflicts: [], ...over } }] });
+  const s = setup(mod, { 'phoneLink.status': on, 'phoneLink.syncNow': { told: [PHONE.id], ...synced(500) } });
+  await s.link.peek(true);
+  assert.deepStrictEqual(s.types(), ['phoneLink.status']);
+  assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone.');
+  const asking = s.link.syncNow();
+  assert.deepStrictEqual(s.link.syncView(), { text: 'Asking Tim’s iPhone to sync…', actions: [], busy: true });
+  await asking;
+  assert.deepStrictEqual(s.link.syncView(), { text: 'Asking Tim’s iPhone to sync…', actions: [], busy: true }, 'an older sync isn\'t this one');
+  s.link.onMessage(synced(1500));
+  assert.deepStrictEqual(s.link.syncView(), { text: 'Synced with Tim’s iPhone: 2 from the phone, 1 to it.', actions: ['settings'], busy: false });
+  s.link.onMessage(synced(1600, { waiting: 1 }));
+  assert.equal(s.link.syncView().text, 'Synced with Tim’s iPhone: 2 from the phone, 1 to it, 1 waiting for your OK.');
+  s.link.forgetAsked();
+  assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone.');
+  // (no phone connected just now: said at once; told, and no sync in 30 s: said then)
+  s.answers['phoneLink.syncNow'] = { told: [], ...on };
+  await s.link.syncNow();
+  assert.deepStrictEqual(s.link.syncView(), { text: 'Tim’s iPhone isn’t connected just now. It syncs when TRIF is open on it.', actions: ['syncNow', 'settings'], busy: false });
+  s.answers['phoneLink.syncNow'] = { told: [PHONE.id], ...on };
+  await s.link.syncNow();
+  assert.equal(s.link.syncView().text, 'Asking Tim’s iPhone to sync…');
+  await s.advance(mod.ASK_MS + 200);
+  assert.equal(s.link.syncView().text, 'Tim’s iPhone isn’t connected just now. It syncs when TRIF is open on it.');
+  // (the helper's refusal, as a sentence)
+  s.answers['phoneLink.syncNow'] = () => { throw new Error('another browser\'s TRIF has the phone link just now'); };
+  await s.link.syncNow();
+  assert.deepStrictEqual(s.link.syncView(), { text: 'Another browser\'s TRIF has the phone link just now.', actions: ['syncNow', 'settings'], busy: false, error: true });
+
+  // Settings: another browser's TRIF that can't relay (a helper from before it), named
+  const there = setup(mod, { 'phoneLink.status': status({ on: true, here: false, browser: 'Firefox' }) });
+  await there.link.open(true);
+  assert.equal(there.link.view().elsewhere, 'TRIF in Firefox is handling phones: connect from there, or quit Firefox.');
+  assert.equal(there.link.view().button, null);
+  assert.equal(TEXT.elsewhereNamed.includes('{browser}'), true);
+});
+
 test('connect a phone: every string the panel shows is in docs/PHONE-LINK-STRINGS.md, and none names another product', async () => {
   const { TEXT } = await load();
   const plain = (x) => x.replace(/’/g, '\'');

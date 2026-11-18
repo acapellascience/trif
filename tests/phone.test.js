@@ -323,3 +323,18 @@ test('Export and Send to iPhone take phone mods from the phone folder', async ()
     assert.equal(fs.readFileSync(r.file, 'utf8'), '// a phone mod');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
+
+test('navTarget: the phone view\'s address field: an address as typed, a bare host on https (http for localhost), anything else searched', async () => {
+  const { navTarget, SEARCH } = await load('phone.js');
+  for (const [typed, want] of [
+    ['', null], ['   ', null],
+    ['x.com', 'https://x.com/'], ['  x.com/home?f=live  ', 'https://x.com/home?f=live'], ['m.facebook.com', 'https://m.facebook.com/'],
+    ['https://x.com/i/flow', 'https://x.com/i/flow'], ['HTTP://Example.com', 'http://example.com/'],
+    ['localhost:3000', 'http://localhost:3000/'], ['127.0.0.1:8080/x', 'http://127.0.0.1:8080/x'], ['[::1]:3000', 'http://[::1]:3000/'],
+    ['dark mode for x', `${SEARCH}dark%20mode%20for%20x`], ['foo', `${SEARCH}foo`],
+    // (never another scheme: searched for, as text)
+    ['javascript:alert(1)', `${SEARCH}javascript%3Aalert(1)`], ['file:///etc/hosts', `${SEARCH}file%3A%2F%2F%2Fetc%2Fhosts`],
+    ['chrome://settings', `${SEARCH}chrome%3A%2F%2Fsettings`], ['data:text/html,hi', `${SEARCH}data%3Atext%2Fhtml%2Chi`],
+  ]) assert.equal(navTarget(typed), want, typed);
+  assert.ok(navTarget('a'.repeat(5000)).length < 2200, 'cut to 2 KB');
+});

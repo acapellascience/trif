@@ -16,7 +16,7 @@ import { iconSvg } from './icons.js';
 import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
-import { createPhoneLink, renderPhoneLink } from './phonelink.js';
+import { createPhoneLink, renderPhoneLink, TEXT as PHONE_TEXT } from './phonelink.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -32,6 +32,9 @@ const ui = {
   sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
   waitingBadge: document.getElementById('waiting-badge'),
   phoneBtn: $('#phone-btn'), phoneNote: $('#phone-note'), phoneNoteText: $('#phone-note-text'), phoneBack: $('#phone-back'),
+  phoneMenu: $('#phone-menu'), phoneMenuView: $('#phone-menu-view'), phoneMenuSync: $('#phone-menu-sync'),
+  phoneNav: $('#phone-nav'), phoneNavBack: $('#phone-nav-back'), phoneNavForward: $('#phone-nav-forward'), phoneNavReload: $('#phone-nav-reload'), phoneNavUrl: $('#phone-nav-url'),
+  phoneSync: $('#phone-sync'), phoneSyncText: $('#phone-sync-text'), phoneSyncActs: $('#phone-sync-acts'), phoneSyncClose: $('#phone-sync-close'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateFoot: $('#gate-foot'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
@@ -147,7 +150,8 @@ function openTab(props) {
 }
 
 // Settings' Connect a phone: its state, drawn into its own box whenever it changes.
-const phoneLink = createPhoneLink({ request, changed: () => renderPhoneLink($('#phone-link'), phoneLink, { addMore }) });
+// (and the phone line under the bar: renderPhoneSync)
+const phoneLink = createPhoneLink({ request, changed: () => { renderPhoneLink($('#phone-link'), phoneLink, { addMore }); renderPhoneSync(); } });
 
 function request(msg) {
   if (!port) connectPort();
@@ -203,8 +207,11 @@ async function refreshStatus() {
     // (the background's name for the browser, which it may have learned since this panel opened)
     if (view.status?.browser) setBrowser(view.status.browser);
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
-    // (Settings open while the helper comes or goes: Connect a phone follows it)
-    if (!ui.settings.hidden && view.status.helper.connected !== wasConnected) phoneLink.open(view.status.helper.connected);
+    // (Settings open while the helper comes or goes: Connect a phone follows it; closed, the phone line and menu)
+    if (view.status.helper.connected !== wasConnected) {
+      if (!ui.settings.hidden) phoneLink.open(view.status.helper.connected);
+      else if (!SAFARI) phoneLink.peek(view.status.helper.connected);
+    }
     // Storage stopped working: switches can't be read from it, so they come with the status.
     if (view.status.storageBroken) {
       view.disabled = view.status.disabled || {};
@@ -342,6 +349,7 @@ async function setTab(tab) {
     ui.input.value = drafts.get(tab.id) || '';
   }
   view.tab = { id: tab.id, url };
+  showPhoneUrl();
   if (view.phone?.tabId !== tab.id) refreshPhone().then(() => renderPhone()).catch(() => {});
   const site = siteForUrl(url);
   if (site !== view.site) {
@@ -377,6 +385,7 @@ function leaveSite(prev) {
   if (agentAsk.dialog?.open) closeAgentAsk();
   closeLevelMenu(false);
   if (ui.modsMenu && !ui.modsMenu.hidden) { ui.modsMenu.hidden = true; ui.modsMore?.setAttribute('aria-expanded', 'false'); }
+  closePhoneMenu(false);
   if (ui.siteFilesBox) ui.siteFilesBox.open = false;
   if (document.activeElement?.tagName === 'SELECT') document.activeElement.blur(); // (an open dropdown)
 }
@@ -3275,18 +3284,27 @@ async function refreshPhoneState() {
   } catch { view.phone = null; }
 }
 
+// The phone menu (the bar's phone button): Switch to phone view (Back to desktop in the phone view) and Sync with
+// phone. Its words are drafts for Tim (docs/PHONE-LINK-STRINGS.md "The phone menu").
+const PHONE_MENU = { label: 'Phone view and sync with phone', view: 'Switch to phone view', back: 'Back to desktop', sync: 'Sync with phone' };
 function renderPhone() {
   const site = view.site;
   const here = !!view.phone && view.phone.tabId === view.tab?.id;
   const on = here && !!view.phone.phone;
   // (where the site is on: the phone view needs TRIF's access to it, and it's for making mods there)
   ui.phoneBtn.hidden = SAFARI || !site || !view.status || (!on && currentState() !== 'on');
-  ui.phoneBtn.setAttribute('aria-pressed', String(on));
-  ui.phoneBtn.title = on ? 'Back to desktop' : 'Edit for mobile';
-  ui.phoneBtn.setAttribute('aria-label', ui.phoneBtn.title);
+  ui.phoneBtn.parentElement.hidden = ui.phoneBtn.hidden;
+  if (ui.phoneBtn.hidden) closePhoneMenu(false);
+  ui.phoneBtn.dataset.on = String(on); // (drawn as pressed in the phone view)
+  ui.phoneBtn.title = PHONE_MENU.label;
+  ui.phoneBtn.setAttribute('aria-label', PHONE_MENU.label);
+  ui.phoneMenuView.textContent = on ? PHONE_MENU.back : PHONE_MENU.view;
+  ui.phoneMenuSync.textContent = PHONE_MENU.sync;
   ui.phoneNote.hidden = !on;
   document.body.classList.toggle('phone-view', on);
   if (on) ui.phoneNoteText.textContent = `Phone view: ${site} sees an ${view.phone.device || 'iPhone'}. Only its phone mods run here, and the mods you make here are for TRIF on your phone.`;
+  showPhoneUrl();
+  renderPhoneSync();
 }
 
 async function togglePhone() {
@@ -3302,8 +3320,119 @@ async function togglePhone() {
     request({ type: 'chat.note', site: chatSite(), text: `${on ? 'Couldn’t go back to desktop' : 'Couldn’t open the phone view'}: ${e?.message ?? e}` }).catch(() => {});
   } finally { ui.phoneBtn.disabled = false; renderPhone(); }
 }
-ui.phoneBtn?.addEventListener('click', togglePhone);
 ui.phoneBack?.addEventListener('click', togglePhone);
+
+// ---- the phone menu: a button that opens a menu (arrow keys, Home, End, Escape, Tab; a click outside closes it)
+const phoneItems = () => [ui.phoneMenuView, ui.phoneMenuSync].filter((b) => !b.hidden && !b.disabled);
+function openPhoneMenu(focus = 0) {
+  ui.phoneMenu.hidden = false;
+  ui.phoneBtn.setAttribute('aria-expanded', 'true');
+  const items = phoneItems();
+  items.at(focus)?.focus();
+}
+function closePhoneMenu(refocus = true) {
+  if (ui.phoneMenu.hidden) return;
+  ui.phoneMenu.hidden = true;
+  ui.phoneBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) ui.phoneBtn.focus();
+}
+ui.phoneBtn?.addEventListener('click', () => { if (ui.phoneMenu.hidden) openPhoneMenu(); else closePhoneMenu(); });
+ui.phoneBtn?.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openPhoneMenu(e.key === 'ArrowDown' ? 0 : -1); }
+});
+ui.phoneMenu?.addEventListener('keydown', (e) => {
+  const items = phoneItems();
+  const at = items.indexOf(document.activeElement);
+  const go = (i) => { e.preventDefault(); items.at(((i % items.length) + items.length) % items.length)?.focus(); };
+  if (e.key === 'ArrowDown') go(at + 1);
+  else if (e.key === 'ArrowUp') go(at - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(items.length - 1);
+  else if (e.key === 'Escape') { e.preventDefault(); closePhoneMenu(); }
+  else if (e.key === 'Tab') closePhoneMenu(false);
+});
+document.addEventListener('click', (e) => { if (!e.target.closest?.('.phone-menu-wrap')) closePhoneMenu(false); });
+ui.phoneMenuView?.addEventListener('click', () => { closePhoneMenu(); togglePhone(); });
+ui.phoneMenuSync?.addEventListener('click', () => { closePhoneMenu(); syncWithPhone(); });
+
+// ---- Sync with phone and the phone line (phonelink.js phoneSyncView): Connect a phone, or Sync now and its result.
+// Through this browser's helper, which relays to the browser's whose helper has the phone link (helper relay.js).
+let phoneLineShown = false; // (outside the phone view: after Sync with phone, until closed)
+async function syncWithPhone() {
+  const connected = !!view.status?.helper?.connected;
+  if (!phoneLink.state.status) await phoneLink.peek(connected);
+  const st = phoneLink.state.status;
+  // (no helper with the link, or another browser has it and can't be reached: Settings say so)
+  if (!st || st.here === false) { openPhoneSettings(); return; }
+  if (!(st.phones || []).length) { await connectPhone(); return; }
+  phoneLineShown = true;
+  await phoneLink.syncNow();
+}
+/** Settings, at Connect a phone. */
+function openPhoneSettings() {
+  openSettings();
+  requestAnimationFrame(() => $('#phone-link')?.scrollIntoView({ block: 'nearest' }));
+}
+/** Connect a phone from anywhere: Settings open at it, and its code on screen (the link turned on if it was off). */
+async function connectPhone() {
+  openPhoneSettings();
+  await phoneLink.open(!!view.status?.helper?.connected);
+  await phoneLink.connect();
+  // (the code itself in view, with Cancel under it)
+  requestAnimationFrame(() => ($('#phone-link .pl-pair') || $('#phone-link'))?.scrollIntoView({ block: 'nearest' }));
+}
+function renderPhoneSync() {
+  if (!ui.phoneSync) return;
+  const v = SAFARI ? null : phoneLink.syncView();
+  const show = !!v && (inPhone() || (phoneLineShown && !!v.text));
+  ui.phoneSync.hidden = !show;
+  if (!show) return;
+  ui.phoneSyncText.textContent = v.text || '';
+  ui.phoneSyncText.hidden = !v.text;
+  ui.phoneSync.classList.toggle('error', !!v.error);
+  const acts = { connect: [PHONE_TEXT.connectLink, () => connectPhone()], syncNow: [PHONE_TEXT.syncNow, () => phoneLink.syncNow()], settings: [PHONE_TEXT.phoneSettings, () => openPhoneSettings()] };
+  ui.phoneSyncActs.replaceChildren(...v.actions.map((a) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `link-btn phone-sync-${a}`;
+    b.textContent = acts[a][0];
+    b.disabled = !!v.busy;
+    b.addEventListener('click', acts[a][1]);
+    return b;
+  }));
+  ui.phoneSyncClose.hidden = inPhone();
+}
+ui.phoneSyncClose?.addEventListener('click', () => { phoneLineShown = false; phoneLink.forgetAsked(); renderPhoneSync(); });
+
+// ---- the phone view's navigation (its window is a popup: no address bar of its own; background.js phone.nav)
+/** The address field shows the phone tab's address, unless it's being typed in. */
+function showPhoneUrl() {
+  if (!ui.phoneNavUrl || document.activeElement === ui.phoneNavUrl) return;
+  ui.phoneNavUrl.value = inPhone() ? (view.tab?.url || '') : '';
+}
+async function phoneNav(go, url) {
+  const tabId = view.tab?.id;
+  if (!inPhone() || !Number.isInteger(tabId)) return;
+  try {
+    await request({ type: 'phone.nav', tabId, go, ...(url !== undefined ? { url } : {}) });
+  } catch (e) {
+    // (back with no page before it, say: nothing to say, the page stays)
+    console.info(`[TRIF] phone view: ${go}: ${e?.message ?? e}`);
+  }
+}
+ui.phoneNavBack?.addEventListener('click', () => phoneNav('back'));
+ui.phoneNavForward?.addEventListener('click', () => phoneNav('forward'));
+ui.phoneNavReload?.addEventListener('click', () => phoneNav('reload'));
+ui.phoneNav?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = ui.phoneNavUrl.value.trim();
+  if (!text) return;
+  ui.phoneNavUrl.blur();
+  phoneNav('url', text);
+});
+ui.phoneNavUrl?.addEventListener('focus', () => ui.phoneNavUrl.select());
+ui.phoneNavUrl?.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); ui.phoneNavUrl.blur(); showPhoneUrl(); } });
+ui.phoneNavUrl?.addEventListener('blur', () => setTimeout(showPhoneUrl, 0));
 
 // ---- Import, export, a site's files, and dropping files on the panel (helper lib/share.js) -------------
 function renderSiteTools() {

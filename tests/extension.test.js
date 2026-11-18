@@ -2017,6 +2017,7 @@ test('background: phoneLink.* is the side panel\'s alone, the helper\'s phoneLin
       ['phoneLink.sync', { on: false, id: 'x' }, 'phone.sync', { on: false }, { ...st, sync: false }],
       ['phoneLink.sync', { on: 'yes' }, 'phone.sync', { on: true }, { ...st, sync: true }],
       ['phoneLink.off', {}, 'phone.off', {}, { ...st, on: false }],
+      ['phoneLink.syncNow', { id: 'x', more: 1 }, 'phone.syncNow', {}, { told: ['a1b2c3d4e5f60718'], ...st }],
     ]) {
       const replyP = panel.ask({ type, ...extra });
       const req = await answerNative(bg.native, cmd, result);
@@ -2036,9 +2037,9 @@ test('background: phoneLink.* is the side panel\'s alone, the helper\'s phoneLin
       { id: lib.EXTENSION_ID, url: 'https://evil.example/sidepanel.html' },
     ].map((sender) => bg.connectPanel(sender));
     for (const other of others) {
-      for (const type of ['phoneLink.status', 'phoneLink.on', 'phoneLink.off', 'phoneLink.pair.start', 'phoneLink.pair.stop', 'phoneLink.remove', 'phoneLink.sync']) {
+      for (const type of ['phoneLink.status', 'phoneLink.on', 'phoneLink.off', 'phoneLink.pair.start', 'phoneLink.pair.stop', 'phoneLink.remove', 'phoneLink.sync', 'phoneLink.syncNow', 'phone.nav']) {
         const r = await other.ask({ type, id: 'a1b2c3d4e5f60718' });
-        assert.deepStrictEqual([r.ok, r.error], [false, 'only the side panel can change this'], `${type} from ${other.sender.url}`);
+        assert.deepStrictEqual([r.ok, r.error], [false, type === 'phone.nav' ? 'only from TRIF\'s panel' : 'only the side panel can change this'], `${type} from ${other.sender.url}`);
       }
     }
     assert.strictEqual(requests().length, before, 'the helper was asked nothing');

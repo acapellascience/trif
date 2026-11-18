@@ -62,6 +62,20 @@ third by its window size.
   `--window-size`) and doesn't keep windows on the screen; `windows.update` works. The fit step makes headless
   right too. The real limits on Tim's screen need one look in a headed Chrome.
 
+### Navigating: the panel's bar, not the window's (11-18)
+
+A popup window has no toolbar: its address line can't be typed in, and there's no back or forward. A normal
+window can't be phone-sized instead: Chrome keeps a tabbed window wider than a phone (about 500 px on macOS, its
+toolbar's minimum), and Firefox's normal windows stop around 450 px; both over the 390 the page needs, so the
+page would be a small tablet's. (From the browsers' known limits, not measured here: headless browsers keep no
+minimum, and a headed test window would be on Tim's screen.) So
+the phone view's own panel has the bar, in its banner: back, forward, reload and "Address or search"
+(`background.js` `phone.nav`, the phone tab alone, from the panel alone: `tabs.goBack`/`goForward`/`reload`/
+`update`, all in Firefox too). What's typed is an address when it looks like one (https, or http for localhost
+and an IP address), else a Google search (Safari's default on an iPhone); never another scheme
+(`phone.js` `navTarget`). Nothing is added to the page, so it keeps the phone's size. A page on a site TRIF has
+no access to loads as a desktop page there (the rules can't change its headers), as a link to one does.
+
 ### Why the tab itself moves
 
 Chrome lets an extension capture a tab only with `<all_urls>` or `activeTab` (the toolbar click on that tab):

@@ -37,6 +37,20 @@ export const TEXT = {
   syncedWaiting: 'Synced {time}: {n} from this phone, {k} waiting for your OK.',
   notSynced: 'Not synced yet.',
   conflict: '{name} changed on both: both are kept.',
+  // (no relay to the browser that has the link: a helper from before it. Its name, when its helper says it)
+  elsewhereNamed: 'TRIF in {browser} is handling phones: connect from there, or quit {browser}.',
+  // The phone line (phoneSyncView): in the phone view's banner, and under the bar after the phone menu's Sync with phone
+  connectLink: 'Connect a phone',
+  syncing: 'Syncing with {phone}.',
+  syncingOff: 'Syncing with {phone} is off.',
+  syncNow: 'Sync now',
+  asking: 'Asking {phone} to sync…',
+  notOnline: '{phone} isn’t connected just now. It syncs when TRIF is open on it.',
+  syncResult: 'Synced with {phone}: {n} from the phone, {m} to it.',
+  syncResultWaiting: 'Synced with {phone}: {n} from the phone, {m} to it, {k} waiting for your OK.',
+  phoneSettings: 'Phone settings',
+  twoPhones: '{phone} and {other}',
+  morePhones: '{phone} and {n} more',
 };
 
 const fill = (s, values) => s.replace(/\{(\w+)\}/g, (m, k) => (k in values ? String(values[k]) : m));
@@ -95,10 +109,54 @@ export function phoneLinkView(state, now = Date.now(), date = shortDate, time = 
     syncToggle: st.on && typeof st.sync === 'boolean' ? { label: TEXT.syncToggle, on: st.sync, disabled: !!state.busy } : null,
     phones: phones.map((p) => ({ id: p.id, label: fill(TEXT.row, { phone: p.name, date: date(p.pairedAt) }), remove: TEXT.remove, ...syncOf(st, p, time) })),
     qr: pairing ? { text: pairing.qr, over: TEXT.over, under: TEXT.under, cancel: TEXT.cancel } : null,
-    elsewhere: !pairing && st.here === false ? TEXT.elsewhere : null,
+    elsewhere: !pairing && st.here === false ? (typeof st.browser === 'string' && st.browser ? fill(TEXT.elsewhereNamed, { browser: st.browser.slice(0, 40) }) : TEXT.elsewhere) : null,
     button: !pairing && st.here !== false ? { label: TEXT.button, disabled: !!state.busy } : null,
     notes,
   };
+}
+
+/** The paired phones as one name: "Tim’s iPhone", "Tim’s iPhone and iPad", "Tim’s iPhone and 2 more". */
+function phonesName(phones) {
+  const [first, second] = phones.map((p) => String(p.name || 'iPhone'));
+  if (phones.length === 1) return first;
+  return phones.length === 2 ? fill(TEXT.twoPhones, { phone: first, other: second }) : fill(TEXT.morePhones, { phone: first, n: phones.length - 1 });
+}
+
+/**
+ * The phone line (the phone view's banner, and under the bar after the phone menu's Sync with phone), from the
+ * section's state: null while the helper hasn't said how the link is (or another browser has it and can't be
+ * reached), else {text, actions: ['connect' | 'syncNow' | 'settings'], busy}.
+ *   no phone paired: no text, the Connect a phone link (it opens the pairing code);
+ *   paired: "Syncing with {phone}." and Sync now; after Sync now, "Asking {phone} to sync…", then what that sync
+ *   did ("Synced with {phone}: …"), or that the phone isn't connected just now; syncing off: says so, and the
+ *   phone settings.
+ */
+export const ASK_MS = 30000; // (a phone told to sync that hasn't in this long: as if it weren't connected)
+export function phoneSyncView(state, now = Date.now()) {
+  const st = state?.status;
+  if (!st || typeof st !== 'object' || st.here === false) return null;
+  const phones = Array.isArray(st.phones) ? st.phones : [];
+  // (none paired: Connect a phone; while its code is on screen, nothing: the code is the next step)
+  if (!phones.length) return state.pairing ? null : { text: null, actions: ['connect'], busy: !!state.busy };
+  const asked = state.asked && typeof state.asked === 'object' ? state.asked : null;
+  const told = asked ? phones.filter((p) => asked.told.includes(p.id)) : [];
+  const name = phonesName(told.length ? told : phones);
+  if (st.on === false || st.sync === false) return { text: fill(TEXT.syncingOff, { phone: name }), actions: ['settings'], busy: !!state.busy };
+  if (asked && asked.pending) return { text: fill(TEXT.asking, { phone: name }), actions: [], busy: true };
+  if (asked && asked.error) return { text: asked.error, actions: ['syncNow', 'settings'], busy: !!state.busy, error: true };
+  if (asked && !told.length) return { text: fill(TEXT.notOnline, { phone: name }), actions: ['syncNow', 'settings'], busy: !!state.busy };
+  if (asked) {
+    // (the sync each phone told has ended since: what it did, summed)
+    const done = told.map((p) => p.synced).filter((r) => r && typeof r === 'object' && r.at >= asked.at);
+    if (done.length < told.length) {
+      if (now - asked.at < ASK_MS) return { text: fill(TEXT.asking, { phone: name }), actions: [], busy: true };
+      if (!done.length) return { text: fill(TEXT.notOnline, { phone: name }), actions: ['syncNow', 'settings'], busy: !!state.busy };
+    }
+    const sum = (k) => done.reduce((n, r) => n + (Number.isInteger(r[k]) ? r[k] : 0), 0);
+    const k = sum('waiting');
+    return { text: fill(k > 0 ? TEXT.syncResultWaiting : TEXT.syncResult, { phone: name, n: sum('fromPhone'), m: sum('toPhone'), k }), actions: ['settings'], busy: false };
+  }
+  return { text: fill(TEXT.syncing, { phone: name }), actions: ['syncNow'], busy: !!state.busy };
 }
 
 /**
@@ -107,7 +165,8 @@ export function phoneLinkView(state, now = Date.now(), date = shortDate, time = 
  * `close()`; the background's `phoneLink` messages go to `onMessage(status)`.
  */
 export function createPhoneLink({ request, changed = () => {}, now = () => Date.now(), setTimer = (f, ms) => setTimeout(f, ms), clearTimer = (t) => clearTimeout(t) }) {
-  const state = { status: null, pairing: null, busy: false, error: '', removed: '', added: '' };
+  // (asked: the last Sync now, {at, told: [phone ids], error}, for the phone line: phoneSyncView)
+  const state = { status: null, pairing: null, busy: false, error: '', removed: '', added: '', asked: null };
   let opened = false;
   let timer = null;
   let asked = 0; // (an answer to an older question never replaces a newer one's)
@@ -150,6 +209,39 @@ export function createPhoneLink({ request, changed = () => {}, now = () => Date.
   return {
     state,
     view: (date, time) => phoneLinkView(state, now(), date, time),
+    syncView: () => phoneSyncView(state, now()),
+    /**
+     * How the link is, for the phone line and the phone menu, without opening Settings (its messages are taken
+     * from then on). A helper from before the link: nothing.
+     */
+    async peek(helper = true) {
+      if (!helper) { if (!opened) { state.status = null; changed(); } return; }
+      const mine = ++asked;
+      try {
+        const r = await request({ type: 'phoneLink.status' });
+        if (mine === asked) take(r);
+      } catch { /* (no phone line) */ }
+      changed();
+    },
+    /** Sync now: the phones are asked to sync; the phone line follows that sync (phoneSyncView). */
+    syncNow: async () => {
+      if (state.busy) return;
+      state.busy = true;
+      const at = now(); // (a sync that ends after this is the one asked for: the helper's clock is this computer's)
+      state.asked = { at, told: [], pending: true };
+      changed();
+      try {
+        const r = await request({ type: 'phoneLink.syncNow' });
+        const told = Array.isArray(r?.told) ? r.told.filter((x) => typeof x === 'string') : [];
+        state.asked = { at, told };
+        take(r);
+        if (told.length) setTimer(changed, ASK_MS + 100); // (no answer by then: said so)
+      } catch (e) { state.asked = { at, told: [], error: sentence(e) }; }
+      state.busy = false;
+      changed();
+    },
+    /** The phone line's result is read: back to its usual words. */
+    forgetAsked() { if (state.asked) { state.asked = null; changed(); } },
     /** Settings opened (or the helper came back while they are open): how the link is. */
     async open(helper = true) {
       opened = true;

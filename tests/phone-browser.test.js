@@ -382,3 +382,203 @@ test('the phone view\'s panel lists the phone twin\'s mods and files, the deskto
     fs.rmSync(ext, { recursive: true, force: true });
   }
 });
+
+// The phone view's panel (11-18): its navigation bar (the phone window is a popup with no address bar of its own:
+// back, forward, reload and an address, for the phone tab, while the page keeps the phone's size); the phone line
+// (Connect a phone with none paired; Syncing with {phone}, Sync now and what that sync did); the bar's phone menu
+// (Switch to phone view / Back to desktop, Sync with phone), by keyboard too; light and dark. The helper's
+// phoneLink.* answers are a stub's (the relay through another browser's helper is tests/phone-link-host.test.js').
+// PHONE_SHOTS=<dir> saves the screenshots.
+test('the phone view\'s panel: its navigation bar, the phone line and the phone menu', { skip, timeout: 900000 }, async () => {
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
+  const QR = 'trif://pair?v=1&k=q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA&s=Zm9vYmFyYmF6cXV1eHF1dXV4&n=Study%20Mac';
+  try {
+    const h = await harness(browser);
+    await h.allowUserScripts().catch(() => {}); // (no "Mods are paused" in the shots)
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    // (the helper as the panel sees it: connected; its phoneLink.* answers from window.__link)
+    const stub = `(() => {
+      window.__link = { status: { on: false, sync: true, id: null, name: 'Study Mac', port: 0, phones: [], pairing: null, listen: false, here: true, listening: false, announce: null }, told: [] };
+      window.__asked = [];
+      const rt = chrome.runtime;
+      const connect = rt.connect.bind(rt);
+      rt.connect = (...a) => {
+        const port = connect(...a);
+        const fns = [];
+        const status = new Set();
+        port.onMessage.addListener((m) => {
+          if (m && m.type === 'reply' && status.has(m.reqId) && m.ok && m.result && m.result.helper) m.result.helper.connected = true;
+          for (const fn of fns) fn(m);
+        });
+        port.onMessage.addListener = (fn) => { fns.push(fn); };
+        window.__news = (st) => { window.__link.status = st; for (const fn of fns) fn({ type: 'phoneLink', status: st }); };
+        const post = port.postMessage.bind(port);
+        port.postMessage = (msg) => {
+          const answer = (result) => { const r = { type: 'reply', reqId: msg.reqId, ok: true, result }; setTimeout(() => { for (const fn of fns) fn(r); }, 0); };
+          if (msg && typeof msg.type === 'string' && msg.type.startsWith('phoneLink.')) {
+            window.__asked.push(msg.type);
+            const L = window.__link;
+            if (msg.type === 'phoneLink.on') L.status = { ...L.status, on: true, id: 'c0ffee0123456789' };
+            if (msg.type === 'phoneLink.pair.start') return answer({ qr: ${JSON.stringify(QR)}, expires: Date.now() + 300000, ...L.status, pairing: { expires: Date.now() + 300000 } });
+            if (msg.type === 'phoneLink.syncNow') return answer({ told: L.told, ...L.status });
+            return answer(L.status);
+          }
+          if (msg && msg.type === 'status') status.add(msg.reqId);
+          post(msg);
+        };
+        return port;
+      };
+    })();`;
+    const panelOf = async (query) => {
+      const t = await waitFor(`the panel ${query}`, async () => (await browser.cdp.send('Target.getTargets')).targetInfos.find((x) => x.type === 'page' && x.url.includes(`/sidepanel.html${query}`)));
+      const sid = await browser._attach(t.targetId);
+      await browser.cdp.send('Page.enable', {}, sid);
+      await browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: stub }, sid);
+      await browser.cdp.send('Page.reload', {}, sid);
+      await sleep(800);
+      const ev = async (expr) => {
+        const r = await browser.cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sid);
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+        return r.result.value;
+      };
+      const key = async (k, code = k, keyCode = 0) => {
+        // (Enter with its text, as a real key press: the button's click comes from it)
+        for (const type of ['keyDown', 'keyUp']) await browser.cdp.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' && k === 'Enter' ? { text: '\r' } : {}) }, sid);
+      };
+      const shot = async (file, dark = false) => {
+        if (!process.env.PHONE_SHOTS) return;
+        await browser.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] }, sid);
+        await sleep(200);
+        const { data } = await browser.cdp.send('Page.captureScreenshot', { format: 'png' }, sid);
+        fs.mkdirSync(process.env.PHONE_SHOTS, { recursive: true });
+        fs.writeFileSync(require('path').join(process.env.PHONE_SHOTS, file), Buffer.from(data, 'base64'));
+        await browser.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, sid);
+      };
+      // (a panel's size, as a side panel or the phone's panel window: the shots' and the layout's)
+      await browser.cdp.send('Emulation.setDeviceMetricsOverride', { width: 400, height: 640, deviceScaleFactor: 2, mobile: false }, sid);
+      return { ev, key, shot, sid };
+    };
+    const { phoneTab, homeWin } = await h.E(async (url) => {
+      const w = await chrome.windows.create({ url, focused: true, width: 1200, height: 860 });
+      await chrome.tabs.create({ windowId: w.id, url: 'about:blank', active: false });
+      await new Promise((r) => setTimeout(r, 1500));
+      return { phoneTab: w.tabs[0].id, homeWin: w.id };
+    }, pages.url('/detect'));
+
+    // The desktop panel: the phone button opens the menu (Switch to phone view, Sync with phone)
+    await h.E((id) => chrome.windows.create({ url: chrome.runtime.getURL(`sidepanel.html?window=${id}&fallback=1`), focused: false }), homeWin);
+    const desk = await panelOf(`?window=${homeWin}&fallback=1`);
+    await waitFor('the phone button', () => desk.ev('!document.getElementById("phone-btn").hidden'));
+    assert.deepEqual(await desk.ev(`(() => { const b = document.getElementById('phone-btn'); return [b.title, b.getAttribute('aria-label'), b.getAttribute('aria-haspopup'), b.getAttribute('aria-expanded'), document.getElementById('phone-note').hidden, document.getElementById('phone-sync').hidden]; })()`),
+      ['Phone view and sync with phone', 'Phone view and sync with phone', 'menu', 'false', true, true]);
+    // (by keyboard: the button focused, Enter opens it on its first item, arrows move, Escape closes it back on the button)
+    await desk.ev('document.getElementById("phone-btn").focus()');
+    await desk.key('Enter', 'Enter', 13);
+    const MENU = `(() => ({ open: !document.getElementById('phone-menu').hidden, expanded: document.getElementById('phone-btn').getAttribute('aria-expanded'), items: [...document.querySelectorAll('#phone-menu [role=menuitem]')].map((b) => b.textContent), focus: document.activeElement.id }))()`;
+    assert.deepEqual(await desk.ev(MENU), { open: true, expanded: 'true', items: ['Switch to phone view', 'Sync with phone'], focus: 'phone-menu-view' });
+    await desk.key('ArrowDown', 'ArrowDown', 40);
+    assert.equal((await desk.ev(MENU)).focus, 'phone-menu-sync');
+    await desk.key('ArrowDown', 'ArrowDown', 40);
+    assert.equal((await desk.ev(MENU)).focus, 'phone-menu-view', 'around again');
+    await desk.shot('menu-desktop-light.png');
+    await desk.shot('menu-desktop-dark.png', true);
+    await desk.key('Escape', 'Escape', 27);
+    assert.deepEqual(await desk.ev(MENU), { open: false, expanded: 'false', items: ['Switch to phone view', 'Sync with phone'], focus: 'phone-btn' });
+    // (a click outside closes it too)
+    await desk.ev('document.getElementById("phone-btn").click()');
+    assert.equal((await desk.ev(MENU)).open, true);
+    await desk.ev('document.body.click()');
+    assert.equal((await desk.ev(MENU)).open, false);
+
+    // Sync with phone, no phone paired: Settings open at Connect a phone, with the code
+    await desk.ev('document.getElementById("phone-btn").click(); document.getElementById("phone-menu-sync").click()');
+    await waitFor('the code', () => desk.ev('!!document.querySelector("#phone-link .pl-qr") && !document.getElementById("settings").hidden'));
+    assert.deepEqual(await desk.ev('window.__asked.filter((t) => t !== "phoneLink.status")'), ['phoneLink.on', 'phoneLink.pair.start']);
+    await desk.shot('sync-with-phone-none-paired-light.png');
+    await desk.ev('[...document.querySelectorAll("#phone-link button")].find((b) => b.textContent === "Cancel").click(); document.getElementById("settings-btn").click()');
+    // Paired: Sync now, then what that sync did, under the bar with its ×
+    const PHONE = { id: 'a1b2c3d4e5f60718', name: 'Tim’s iPhone', pairedAt: Date.now(), lastSeen: Date.now(), online: true, synced: null };
+    const paired = { on: true, sync: true, id: 'c0ffee0123456789', name: 'Study Mac', port: 50123, phones: [PHONE], pairing: null, listen: true, here: true, listening: true, announce: null, browser: 'Firefox' };
+    await desk.ev(`window.__news(${JSON.stringify(paired)}); window.__link.told = ['${PHONE.id}']; 0`);
+    await desk.ev('document.getElementById("phone-btn").click(); document.getElementById("phone-menu-sync").click()');
+    const LINE = `(() => { const p = document.getElementById('phone-sync'); return { shown: !p.hidden, text: document.getElementById('phone-sync-text').textContent, acts: [...p.querySelectorAll('#phone-sync-acts button')].map((b) => b.textContent), close: !document.getElementById('phone-sync-close').hidden }; })()`;
+    await waitFor('asking', async () => (await desk.ev(LINE)).text === 'Asking Tim’s iPhone to sync…');
+    await desk.ev(`window.__news(${JSON.stringify({ ...paired, phones: [{ ...PHONE, synced: { at: Date.now() + 1000, fromPhone: 2, toPhone: 1, waiting: 1, conflicts: [], skipped: 0 } }] })}); 0`);
+    assert.deepEqual(await desk.ev(LINE), { shown: true, text: 'Synced with Tim’s iPhone: 2 from the phone, 1 to it, 1 waiting for your OK.', acts: ['Phone settings'], close: true });
+    await desk.shot('sync-result-desktop-light.png');
+    await desk.shot('sync-result-desktop-dark.png', true);
+    await desk.ev('document.getElementById("phone-sync-close").click()');
+    assert.equal((await desk.ev(LINE)).shown, false, 'closed');
+
+    // Switch to phone view, from the menu: the phone's own panel window
+    await desk.ev('document.getElementById("phone-btn").click(); document.getElementById("phone-menu-view").click()');
+    const opened = await waitFor('the phone window', () => h.ask({ type: 'phone.state', tabId: phoneTab }).then((s) => s.phone && s.page?.marked && s));
+    await waitFor('the phone page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
+    const phone = await panelOf(`?window=${opened.window}&fallback=1`);
+    await waitFor('the phone banner', () => phone.ev('!document.getElementById("phone-note").hidden'));
+    // (the phone line, none paired: Connect a phone, no text)
+    await waitFor('the phone line', async () => (await phone.ev(LINE)).shown);
+    assert.deepEqual(await phone.ev(LINE), { shown: true, text: '', acts: ['Connect a phone'], close: false });
+    // (the navigation bar: the phone tab's address)
+    const NAV = `(() => ({ url: document.getElementById('phone-nav-url').value, buttons: [...document.querySelectorAll('#phone-nav button')].map((b) => b.getAttribute('aria-label')) }))()`;
+    await waitFor('the address', async () => (await phone.ev(NAV)).url === pages.url('/detect'));
+    assert.deepEqual((await phone.ev(NAV)).buttons, ['Back', 'Forward', 'Reload']);
+    await phone.shot('phone-view-nav-none-paired-light.png');
+    await phone.shot('phone-view-nav-none-paired-dark.png', true);
+    // (Connect a phone from the banner: the code)
+    await phone.ev('document.querySelector("#phone-sync .phone-sync-connect").click()');
+    await waitFor('the code in the phone panel', () => phone.ev('!!document.querySelector("#phone-link .pl-qr")'));
+    await phone.shot('phone-view-connect-code-light.png');
+    await phone.ev('[...document.querySelectorAll("#phone-link button")].find((b) => b.textContent === "Cancel").click(); document.getElementById("settings-btn").click()');
+    // (paired: Syncing with {phone}, Sync now, and how it went)
+    await phone.ev(`window.__news(${JSON.stringify(paired)}); window.__link.told = ['${PHONE.id}']; 0`);
+    assert.deepEqual(await phone.ev(LINE), { shown: true, text: 'Syncing with Tim’s iPhone.', acts: ['Sync now'], close: false });
+    await phone.shot('phone-view-syncing-light.png');
+    await phone.shot('phone-view-syncing-dark.png', true);
+    await phone.ev('document.querySelector("#phone-sync .phone-sync-syncNow").click()');
+    await waitFor('asking', async () => (await phone.ev(LINE)).text === 'Asking Tim’s iPhone to sync…');
+    await phone.ev(`window.__news(${JSON.stringify({ ...paired, phones: [{ ...PHONE, synced: { at: Date.now() + 1000, fromPhone: 0, toPhone: 3, waiting: 0, conflicts: [], skipped: 0 } }] })}); 0`);
+    assert.deepEqual(await phone.ev(LINE), { shown: true, text: 'Synced with Tim’s iPhone: 0 from the phone, 3 to it.', acts: ['Phone settings'], close: false });
+    await phone.shot('phone-view-synced-light.png');
+    // (the menu in the phone view: Back to desktop first)
+    await phone.ev('document.getElementById("phone-btn").click()');
+    assert.deepEqual((await phone.ev(MENU)).items, ['Back to desktop', 'Sync with phone']);
+    await phone.shot('menu-phone-view-light.png');
+    await phone.shot('menu-phone-view-dark.png', true);
+    await phone.key('Escape', 'Escape', 27);
+
+    // The navigation bar drives the phone tab: an address, back, forward, reload; the page stays the phone's size
+    const at = () => h.E((id) => chrome.tabs.get(id).then((t) => t.status === 'complete' ? t.url : null), phoneTab);
+    // (a press on the page first, as a person's: Chrome's back skips a page nobody touched, "Cannot find a next page
+    // in history", as its own back button does)
+    await h.click(phoneTab, 'body');
+    await phone.ev(`(() => { const f = document.getElementById('phone-nav-url'); f.focus(); f.value = '127.0.0.1:${pages.port}/second'; document.getElementById('phone-nav').requestSubmit(); })()`);
+    await waitFor('the typed address', async () => (await at()) === pages.url('/second'));
+    await waitFor('the field follows', async () => (await phone.ev(NAV)).url === pages.url('/second'));
+    await waitFor('the second page', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
+    await h.click(phoneTab, 'body');
+    await phone.ev('document.getElementById("phone-nav-back").click()');
+    await waitFor('back', async () => (await at()) === pages.url('/detect'));
+    await phone.ev('document.getElementById("phone-nav-forward").click()');
+    await waitFor('forward', async () => (await at()) === pages.url('/second'));
+    const loads = () => pages.requests.filter((r) => r.path === '/second').length;
+    const before = loads();
+    await phone.ev('document.getElementById("phone-nav-reload").click()');
+    await waitFor('reload', async () => loads() > before && (await at()) === pages.url('/second'));
+    await waitFor('the phone page again', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
+    assert.equal(await h.page(phoneTab, 'innerWidth'), 390, 'the page keeps the phone\'s width: the bar is in the panel');
+    // (not a phone tab: refused)
+    const other = await h.E((id) => chrome.tabs.create({ windowId: id, url: 'about:blank', active: false }).then((t) => t.id), homeWin);
+    await assert.rejects(h.ask({ type: 'phone.nav', tabId: other, go: 'back' }), /isn't in the phone view/);
+    await assert.rejects(h.ask({ type: 'phone.nav', tabId: phoneTab, go: 'url', url: '   ' }), /nothing to go to/);
+    // (Back to desktop from the menu)
+    await phone.ev('document.getElementById("phone-btn").click(); document.getElementById("phone-menu-view").click()');
+    await waitFor('back to desktop', () => h.ask({ type: 'phone.state', tabId: phoneTab }).then((s) => !s.phone));
+  } finally {
+    await browser.close();
+    pages.server.close();
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
+});

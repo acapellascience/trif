@@ -49,6 +49,25 @@ const dropLock = () => { try { if (Number(fs.readFileSync(path.join(LOCK, 'pid')
     out.rules = await ff.eval(panel, `async () => (await chrome.declarativeNetRequest.getSessionRules()).map((r) => r.id)`);
     out.capture = await ff.eval(panel, `async (w) => { try { return (await chrome.tabs.captureVisibleTab(w, { format: 'png' })).length; } catch (e) { return 'ERR ' + e.message; } }`, [out.open.ok && out.open.ok.window]);
     if (process.argv[2]) await ff.screenshot(ctx, path.resolve(process.argv[2]));
+    // The navigation bar's phone.nav (11-18): an address, back, forward, reload, in the phone tab
+    const urlNow = () => ff.eval(panel, `async (id) => { const t = await chrome.tabs.get(id); return t.status === 'complete' ? t.url : null; }`, [tabId]);
+    const until = async (want) => { for (let i = 0; i < 40; i++) { const u = await urlNow(); if (u === want) return u; await sleep(250); } return `${await urlNow()} (wanted ${want})`; };
+    out.nav = {};
+    out.nav.url = [await ask({ type: 'phone.nav', tabId, go: 'url', url: `127.0.0.1:${pages.port}/second` }), await until(pages.url('/second'))];
+    out.nav.back = [await ask({ type: 'phone.nav', tabId, go: 'back' }), await until(pages.url('/detect'))];
+    out.nav.forward = [await ask({ type: 'phone.nav', tabId, go: 'forward' }), await until(pages.url('/second'))];
+    out.nav.reload = [await ask({ type: 'phone.nav', tabId, go: 'reload' }), await until(pages.url('/second'))];
+    await sleep(1000);
+    const navCtx = await ff.findPage((u) => u.startsWith(pages.url('/second')));
+    out.nav.stillPhone = await ff.eval(navCtx, `async () => ({ ua: window.__seen && window.__seen.uaPhone, w: innerWidth })`);
+    // (the phone's panel window: its banner with the bar; a screenshot of it as a second argument's sibling)
+    try {
+      const pctx = await ff.findPage((u) => u.includes('sidepanel.html?window='));
+      out.nav.panel = await ff.eval(pctx, `async () => { for (let i = 0; i < 40 && document.getElementById('phone-note').hidden; i++) await new Promise((r) => setTimeout(r, 250)); return { banner: !document.getElementById('phone-note').hidden, url: document.getElementById('phone-nav-url').value, menu: [...document.querySelectorAll('#phone-menu [role=menuitem]')].map((b) => b.textContent) }; }`);
+      if (process.argv[2]) await ff.screenshot(pctx, path.resolve(process.argv[2]).replace(/(\.png)?$/, '-panel.png'));
+    } catch (e) { out.nav.panel = `no panel window: ${e.message}`; }
+    await ask({ type: 'phone.nav', tabId, go: 'url', url: pages.url('/detect') });
+    await until(pages.url('/detect'));
     out.close = await ask({ type: 'phone.close', tabId });
     await sleep(2500);
     const ctx2 = await ff.findPage((u) => u.startsWith(pages.url('/detect')));

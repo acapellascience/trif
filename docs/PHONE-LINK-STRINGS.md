@@ -31,10 +31,32 @@ approved, then can move into extension/explain.json so that `trif explain` knows
 | Turning on fails: no keyring (Linux without one; not the Mac) | the phone link needs a system keyring to keep this computer's key in (the macOS Keychain, or a Secret Service on Linux) | built in round 2 (`store.js`). The panel shows the helper's words as a sentence (a capital, a full stop), in red under the section: so for the next two rows and the last |
 | Turning on fails: the keyring refused | couldn't keep this computer's phone link key: {what the keyring said} | the same; the second half is `keyring.js`'s existing text |
 | Turning on fails: the keyring can't be read just now (locked) | couldn't read this computer's phone link key: {what the keyring said} | the same; nothing changes (no new key, the phones stay) |
-| Instead of the button, in a browser whose TRIF doesn't have the link (`here: false`: another browser's does) | Another browser's TRIF is handling phones just now. Connect a phone from there. | round 8 (draft). The helper's own error for a `phone.pair.start` there is agent-style text, not shown |
+| Instead of the button, in a browser whose TRIF doesn't have the link (`here: false`: another browser's does) | Another browser's TRIF is handling phones just now. Connect a phone from there. | round 8 (draft). Since 11-18 every browser's panel reaches the link through the helper that has it (helper/lib/phonelink/relay.js), so this shows only when that helper can't relay (one from before the relay) and doesn't say its browser. The helper's own error for a `phone.pair.start` there is agent-style text, not shown |
+| The same, when that browser's name is known | TRIF in {browser} is handling phones: connect from there, or quit {browser}. | new 11-18 (draft, Tim's brief): {browser} as that browser's TRIF says it ("Firefox") |
 | Under the section, when the link is on and the phone can't find the computer (`announce`: `missing` or `failing`) | Your phone may not find this computer just now. | round 8 (draft); `unsupported` (not a Mac) shouldn't be reachable in version 1 |
 | Connect a phone fails: no port could be opened | This computer couldn't open a port for the phone to reach. | round 8 (draft; the helper's words, as a sentence) |
 | Connect a phone fails: the computer's name makes the code's text longer than the code holds (about 270 bytes; a name of some 30 emoji) | This computer's name is too long for the code. Shorten it in System Settings, then try again. | new in round 9 (draft); the pairing window is closed again. Since round 11 the helper cuts a long name in the code (whole characters, then "…"), so this line is a backstop the user shouldn't meet: Tim may drop it |
+
+## Desktop: the phone menu and the phone line (11-18, drafts: extension/sidepanel.js, phonelink.js `phoneSyncView`)
+
+The bar's phone button opens a small menu; the phone line is under the phone view's banner, and under the bar
+after the menu's Sync with phone (with a × to close it there). Its words are in phonelink.js `TEXT`, so the
+test above checks them here too; the menu's are in sidepanel.js `PHONE_MENU`.
+
+| Where | String | Notes |
+|---|---|---|
+| The phone button's tooltip and name for a screen reader | Phone view and sync with phone | it opens the menu |
+| The menu's first item | Switch to phone view | Tim's words. What the button did before (the old tooltip was "Edit for mobile") |
+| The same, in the phone view | Back to desktop | as the banner's link |
+| The menu's second item | Sync with phone | Tim's words. No phone paired: Settings open at Connect a phone, with the code on screen. Paired: Sync now, and the phone line shows how it went |
+| The phone line, no phone paired (phone view only) | Connect a phone | a link: Settings open with the code, as the menu's item |
+| The phone line, paired | Syncing with {phone}. · Sync now | {phone}: its name; two: "{phone} and {other}"; more: "{phone} and {n} more" |
+| Two phones, three or more | {phone} and {other} · {phone} and {n} more | |
+| After Sync now | Asking {phone} to sync… | until that sync ends (the phone starts every sync: it's told to, PHONE-SYNC.md section 8) |
+| What it did | Synced with {phone}: {n} from the phone, {m} to it. · Synced with {phone}: {n} from the phone, {m} to it, {k} waiting for your OK. · Phone settings | the link opens Settings at Connect a phone |
+| No phone connected just now (or no sync within 30 s) | {phone} isn't connected just now. It syncs when TRIF is open on it. · Sync now · Phone settings | |
+| Syncing turned off in Settings | Syncing with {phone} is off. · Phone settings | |
+| The phone view's navigation bar | Back · Forward · Reload · Address or search | the buttons' names and the field's placeholder. Not an address: searched on Google, Safari's default on an iPhone |
 
 ## iPhone: More and My computer (pairing built in round 15 on ios-poc, 85166ad; the engine in More in round 16, step 14)
 

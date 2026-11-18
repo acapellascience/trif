@@ -22,7 +22,7 @@ import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createTabLocks, leakGuard } from './tablock.js';
 import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS } from './agentsites.js';
-import { createPhones, isPhoneRule, PHONE } from './phone.js';
+import { createPhones, isPhoneRule, PHONE, navTarget } from './phone.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -2473,6 +2473,24 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
       if (!fromPanel) throw new Error('only from TRIF\'s panel');
       return phones.close(Number(msg.tabId));
     }
+    // The phone view's navigation bar (the panel's phone banner: its window is a popup, with no address bar of its
+    // own): back, forward, reload, an address or a search. The phone tab alone, from the panel alone.
+    case 'phone.nav': {
+      if (!fromPanel) throw new Error('only from TRIF\'s panel');
+      await phones.ready;
+      const tabId = Number(msg.tabId);
+      if (!phones.isPhone(tabId)) throw new Error('that tab isn\'t in the phone view');
+      if (msg.go === 'back') { await chrome.tabs.goBack(tabId); return { ok: true }; }
+      if (msg.go === 'forward') { await chrome.tabs.goForward(tabId); return { ok: true }; }
+      if (msg.go === 'reload') { await chrome.tabs.reload(tabId); return { ok: true }; }
+      if (msg.go === 'url') {
+        const url = navTarget(String(msg.url ?? ''));
+        if (!url) throw new Error('nothing to go to');
+        await chrome.tabs.update(tabId, { url });
+        return { ok: true, url };
+      }
+      throw new Error('back, forward, reload or url');
+    }
     case 'phone.state': {
       await phones.ready;
       const p = phones.get(Number(msg.tabId));
@@ -2533,7 +2551,8 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'phoneLink.pair.start':
     case 'phoneLink.pair.stop':
     case 'phoneLink.remove':
-    case 'phoneLink.sync': { // (syncing phone mods with connected phones: docs/PHONE-SYNC.md D11, on unless turned off)
+    case 'phoneLink.sync': // (syncing phone mods with connected phones: docs/PHONE-SYNC.md D11, on unless turned off)
+    case 'phoneLink.syncNow': { // (Sync now: the connected phones are asked to sync, PHONE-SYNC.md section 8)
       if (!fromPanel) throw new Error('only the side panel can change this');
       const cmd = `phone.${msg.type.slice('phoneLink.'.length)}`;
       const args = cmd === 'phone.remove' ? { id: String(msg.id ?? '') } : cmd === 'phone.sync' ? { on: msg.on !== false } : {};

@@ -161,8 +161,11 @@ change there is a change on both phones. Change this file whenever a rule change
   going and have long stretches of silence … The user will know when to stop it"): no silence stop, no time limit.
   Only the person's stop (tap) or letting go (hold) asks.
 - The words only grow: what was said before a pause stays; a restarted recognizer's words are added after; a revised
-  partial replaces only the words since the last committed ones. A new listen goes on after the box's words. [the
-  accumulator: to be shared]
+  partial replaces only the words since the last committed ones. A new listen goes on after the box's words. [shared:
+  core/speech-text.js]
+  - A partial much shorter than the live words, or starting with other words, is a fresh transcription: the live words
+    are committed first. A repeat of the segment just ended (the same words, or nearly: a word in five revised) is
+    not added twice. Words compare by their letters and numbers, case aside.
 - Anything else stopping it (a call, Siri, the app leaving the front, the list closed, an error) keeps every word in
   the box, asks nothing, and says so; a robot hold stopped that way leaves a pill with the words (15 s).
 - The box's microphone: a press under 0.3 s is a tap (listens until the next tap, which asks; ✕ keeps the words, not
@@ -296,3 +299,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Which tabs load again when mods change (started or looked at; stale; later, keep, ask whether playing; reload) | shared/core/tab-reload.js | TabReloadRules.swift → TrifCore.tabReload (Browser.select / refreshIfStale; `loaded` and `stale` twins, same cases: every commit; the signature, the playing check and the reload stay Browser's) | test/core-tabreload.test.js, test/tabreload.test.js |
 | A video picked up where it was: which load resumes (30 min, same page, live, ended, own time, first 5 s / last 10 s), the sites' video ids | shared/core/video-resume.js | VideoResume.swift → TrifCore.videoResume (an address as its parts: URLComponents; the page's script, the store and the play stay Swift) | test/core-videoresume.test.js, test/videoresume.test.js |
 | Desktop websites' per-site memory (the key, wants, the kept list, can) | shared/core/desktop.js | DesktopRules (TabReloadRules.swift) → TrifCore.desktop `set` (`key`, `wants`, `can` twins, same cases: every page load) | test/core-tabreload.test.js, test/tabreload.test.js |
+| The microphone's words only grow (segments, restarts after a pause, revised partials, a repeated segment) | shared/core/speech-text.js | SpeechText.swift → TrifCore.speechText.apply, every recognizer event (the committed words stay Swift and never cross: the answer says what to add; a Swift copy answers only if the shared rule can't) | test/core-speechtext.test.js, test/speechtext.test.js |

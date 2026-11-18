@@ -126,9 +126,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   of a call: ~13 µs on the Mac). Simulator pages for it: any small node server with tel:/mailto:/sms:/maps:/
   fb-messenger: links, a target=_blank one, a trif: one, `location = 'mailto:…'` on load and every 1.5 s, an
   `a.click()` on load, an iframe to fb:// (the batch's own lived in the scratchpad).
-- The microphone's words (SpeechText.swift: segments, restarts, revised partials; committed words never shrink, a
-  random walk of 2000 × 40 events) on the Mac: `node --test mobile/test/speechtext.test.js` (swiftc with
-  mobile/test/speechtext-check/main.swift; ~3 s).
+- The microphone's words (SpeechText.swift → the shared core/speech-text.js: segments, restarts, revised partials;
+  committed words never shrink) on the Mac: `node --test mobile/test/core-speechtext.test.js` (the JS against
+  speech-text-cases.json) and `mobile/test/speechtext.test.js` (swiftc with Core.swift and
+  mobile/test/speechtext-check/main.swift: the cases through the shared rule and through the Swift copy, a random walk,
+  a partial's cost; ~5 s).
 - Video resume's rules (VideoResume.swift) on the Mac: `node --test mobile/test/videoresume.test.js` (swiftc with
   mobile/test/videoresume-check/main.swift; the page's JS videoId compared with the Swift one in node; ~2 s).
 - Unread counts' title rule on the Mac: `node --test mobile/test/unreadcount.test.js` (mobile/shared/unread-count.js
@@ -204,7 +206,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift); which tabs load again when the mods change, and desktop websites' per-site memory (TabReloadRules.swift); which load picks a video up where it was, and the sites' video ids (VideoResume.swift: decide / videoID / samePage / asksForTime call TrifCore.videoResume with an address as its parts). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift); which tabs load again when the mods change, and desktop websites' per-site memory (TabReloadRules.swift); which load picks a video up where it was, and the sites' video ids (VideoResume.swift: decide / videoID / samePage / asksForTime call TrifCore.videoResume with an address as its parts); the microphone's words (SpeechText.swift: every recognizer event calls TrifCore.speechText.apply; the committed words stay Swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -254,7 +256,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   themselves → a new analyzer), `RecognizerListener` (requiresOnDeviceRecognition; metadata → segment; a task ending
   by itself (final, an error, no speech) → a new task at once on the same audio; only 10 tasks in a row ending within
   0.5 s of starting stop it). Sources: `MicSource` (AVAudioEngine tap, re-tapped on a configuration change),
-  `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator.
+  `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator, deciding through
+  core/speech-text.js (TrifCore.speechText.apply, once per recognizer event; `committed` stays Swift, the answer's `added`
+  is appended; its Swift copy answers only if the shared rule can't).
 - ChatOffers.swift (no UI; built for the Mac too): storage and the call-through. The rules are
   mobile/shared/core/chat-offers.js (TrifCore.chatOffers, round 2 of the shared core): normalise, key (FNV-1a 64 in
   16-bit limbs, no BigInt), outcome, note (entries in, the new list out; null = unchanged), skip (takes keys, not code).

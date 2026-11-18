@@ -537,3 +537,18 @@ can't be picked, and hiding one element is fragile). What it hid stays hidden; e
   (It reads #hide=selector.)". Such links are now just not followed (a line in the report).
 - The Probe menu's test page item **a mod link**.
 
+
+## Request Desktop Website (added 11-18, Tim: "a desktop mode like safari has")
+
+| Where | Old | New (drafts for Tim: Safari's own words) |
+|---|---|---|
+| The ⋯ menu at the address bar's left, after Keep TRIF chats in a project…, before Full screen (a website's page only) | — | **Request Desktop Website** (a computer screen glyph); on a site asked for as a computer's: **Request Mobile Website** (a phone glyph) |
+
+No note after it: the page loads again in the other mode, as in Safari. The choice is the site's, in every tab, kept
+across launches (Safari's per-website setting).
+
+## The toolbar's buttons tapped again (changed 11-18, Tim: "re-tapped on the tabs menu, it should bring you back")
+
+No new words. The tabs button and the Mods switch, tapped again while their screen is open, close it: back to the
+page as it was. The [+], tapped again on the new tab's address screen before anything was opened there, closes that
+empty tab and goes back to the tab it came from.

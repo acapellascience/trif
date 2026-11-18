@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (322 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (339 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -42,7 +42,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   phonepair (1: the pairing's state; "trif://pair?…": pair with that code; "forget"), phonedrop (More's link to the
   computer lost as a suspended app loses it: it reconnects after 2 s, or at once when the app is back in front), iconbatch (the list's profile to
   Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds),
-  exitbutton (where full screen's exit button and its taps are),
+  exitbutton (where full screen's exit button and its taps are), desktop (true/false: ⋯ → Request Desktop / Mobile
+  Website on the shown page), desktopstate (the sites kept, each tab's mode, "(Mac agent)" where the web view has it),
   playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
@@ -63,6 +64,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   draws an older exchange and redraws the rest). The header's "Older chat" button switches the page to such a
   conversation (pushState /chat/old-…, no load), mid-reply or not. `/project/<id>` serves it as a project page, `/new`
   as claude.ai's new-chat page.
+- What the browser says it is: serve.js's `/agent` (`?nometa`: no width=device-width viewport): the user agent sent,
+  navigator's, platform, width; `window.__agent` for pagejs. localhost vs 127.0.0.1 are two sites.
 - Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner) and is the best check of
   ChatGPT's markup; claude.ai needs a sign-in, so it's stand-in only.
 - Mock APIs (More's engines): `node mobile/mock-api.js 8379` (`MOCK_MODEL_MS=125` for 2 MB/s model downloads), launch with
@@ -109,7 +112,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   and memory), old hide rules (applied, Show again from the Mods tab), outline and chat context
   (pageForChat, feedbackForChat), screenshots, full screen state, ModDownloads (.js downloads to Add this mod?), the
   long-press menu (`contextMenuConfigurationFor`: the system's `suggested` items + Open in New Tab → `openInNewTab`;
-  `LinkPreview`, a link's page preview; `willCommitWithAnimator`: the preview tapped opens it in the tab).
+  `LinkPreview`, a link's page preview; `willCommitWithAnimator`: the preview tapped opens it in the tab),
+  desktop websites (`desktopHosts`, `requestDesktop`, `decidePolicyFor … preferences:` sets `.desktop` and the web
+  view's `customUserAgent` = `desktopAgent` per main-frame load, `Tab.desktop` = the mode it loaded in, `checkAgent`
+  after each commit).
 - ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
   normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
   (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
@@ -304,6 +310,20 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   redirecting or rewriting the destination; WebKit only; no crash-prone launch paths. Tim has no entitlement yet
   (needs the paid account + Apple's request); the Info.plist http/https declaration comes with that step.
 - "Open in New Tab" (link long-press menu, and History's long-press item, was "Open in a new tab"): approved by Tim 11-18.
+- Request Desktop Website (Tim, 11-18, "a desktop mode like safari has"; built 11-18, words Safari's, drafts): in
+  the ⋯ menu before Full screen, websites only; "Request Mobile Website" on a desktop site (the label follows the
+  shown tab's loaded mode, `Tab.desktop`). Kept by host without www. (UserDefaults `desktopHosts`, a sorted list, no
+  more), every tab, across launches; picking it reloads the shown tab only (other tabs change at their next load, as
+  Safari). WebKit's public desktop mode per main-frame load (MacIntel, desktop behaviours) plus the web view's
+  `customUserAgent` = Mac Safari's (`Browser.desktopAgent`; see Gotchas: WebKit's own desktop agent ends with our
+  "Mobile/… Safari/604.1"). Phone mods run unchanged in it. The chat pane has its own delegate and config: never
+  desktop (checked: a desktop localhost, the pane on localhost said iPhone). Not on iPad (WebKit's recommended mode
+  there is a computer's already; `checkAgent` is iPhone-only). Link previews of a desktop site load as one.
+- Toolbar buttons toggle (Tim, 11-18, "re-tapped on the tabs menu, it should bring you back to the page"): tabs and
+  Mods tapped again while open close them (the page under them is never touched: same scroll, no reload; checked
+  pixel-identical). [+] tapped again on its new tab's address screen, nothing opened there yet, closes that empty tab
+  and selects the tab it came from (`newTabFrom`, weak, in ContentView). The A opens a full-height sheet over
+  the toolbar (Cancel / swipe), so it has nothing to toggle.
 - Full screen's exit button (Tim, 11-17, "can we move it up?"; glyph kept): beside the clock at the foot of the status
   bar: SE right of the clock (circle centre 250, 18), Dynamic Island phones between the clock and the island (17 Pro:
   117, 52). Its taps go to a window-level recognizer (ExitTaps), 40 × 44 from the bar's foot down.
@@ -316,6 +336,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
+
+- Request Desktop Website: checked in the Simulator only (11-18, shots 323-331, Safari's own for comparison 324) on
+  stand-in pages. Never on real sites or a phone: Google sign-in on a desktop site (accounts.google.com isn't
+  desktop unless asked, so the hop goes back to the phone's agent; the Mac Safari agent is what Safari's own desktop
+  mode sends), a site that sends phones to m.<site> (its desktop choice is then m.<site>'s host: as in Safari, the
+  person may need to go to www. first). The agent's Version is 26.0 (as safariSuffix), Safari's says 26.3.
+- Open idea for Tim (11-18, not built): a desktop site could run that site's DESKTOP mods (as the computer does)
+  instead of the phone's. It needs the desktop mods synced to the phone, and today phone sync carries only phone
+  mods (PhoneSync / the twin). Now the phone's mods run unchanged in desktop mode (checked with a test mod: it ran
+  in both modes).
+- [+] on a phone: the address screen focuses its field, and the keyboard covers the toolbar, so the second tap needs
+  the keyboard down first (the Simulator had no software keyboard). The address screen's own Cancel still leaves the
+  new empty tab (with its start page); Safari's Cancel closes it. Tim's call whether Cancel should too.
 
 - Free mods' style section: checked in the Simulator 11-17 (iOS 26.3.1, shots 293-296) with a FeedBook-like test mod
   (title colour and size, page background, a loading cover the code lifts after 5 s) on feed.html and strict.html
@@ -377,6 +410,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- Desktop mode (WebKit, Simulator 26.3, 11-18): WebKit's desktop user agent is "Mozilla/5.0 (Macintosh; …) … (KHTML,
+  like Gecko) " + the configuration's applicationNameForUserAgent, i.e. ours, "Version/26.0 Mobile/15E148
+  Safari/604.1" (sites read Mobile as a phone); the public fix is the web view's customUserAgent, set inside the
+  navigation-action policy call (before its answer, so the main request already carries it). A page restored from
+  the back/forward cache lives in its old web content process, which keeps the agent it had (back from 127.0.0.1 to
+  a desktop localhost page said iPhone, in navigator and its fetches): `checkAgent` reads navigator.userAgent after
+  commit and, if it's the other mode's, sets the agent to the other value and back (WebKit skips an unchanged
+  value) and reloads, at most every 10 s a tab. A width=device-width page stays at the phone's width in desktop
+  mode, in Safari too (checked side by side); a page without that viewport is 980 wide either way. Pinch zoom works
+  on a desktop page (0.38 → 1.15).
 
 - WebKit (Mac, 11-17): a user script's stack says `user-script:N` (`//# sourceURL` ignored); its errors from later
   callbacks reach window's error event as "Script error." with no stack. At document start, user scripts in

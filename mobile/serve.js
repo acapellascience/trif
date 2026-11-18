@@ -29,6 +29,23 @@ function handler(log = console.log) {
       return res.end('canary');
     }
     if (name === 'trif-install') name = 'install.html';
+    // (what the browser says it is: the user agent it sent and its page's navigator, platform and width, for Request
+    // Desktop Website; `?nometa` drops the width=device-width viewport, as a desktop-only site has none)
+    if (name === 'agent') {
+      const sent = String(req.headers['user-agent'] || '').replace(/[<>&"]/g, '');
+      const meta = url.searchParams.has('nometa') ? '' : '<meta name="viewport" content="width=device-width, initial-scale=1">';
+      res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-store' });
+      return res.end(`<!doctype html><meta charset="utf-8">${meta}<title>Agent check</title><body style="font: 16px -apple-system, sans-serif; margin: 12px">
+<h2 id="mode"></h2><p>sent: <span id="sent">${sent}</span></p><p>navigator: <span id="nav"></span></p><p id="more"></p>
+<p style="width: 900px; background: #eee">A 900px wide bar.</p>
+<script>
+const mob = /Mobile|iPhone/.test(navigator.userAgent), w = document.documentElement.clientWidth;
+document.getElementById('mode').textContent = (mob ? 'MOBILE' : 'DESKTOP') + ' · ' + w + 'px';
+document.getElementById('nav').textContent = navigator.userAgent;
+document.getElementById('more').textContent = 'host ' + location.host + ' · platform ' + navigator.platform + ' · innerWidth ' + innerWidth;
+window.__agent = { host: location.host, sent: ${JSON.stringify(sent)}, nav: navigator.userAgent, platform: navigator.platform, width: w };
+</script>`);
+    }
     // (the stand-in chat's files: a mod file to download (stand-in-file/<name>.js), which comes to TRIF only when
     // the person taps its link)
     const fileMatch = /^stand-in-file\/([\w-]+)\.js$/.exec(name);

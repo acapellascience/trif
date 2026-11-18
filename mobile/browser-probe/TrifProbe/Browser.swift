@@ -18,6 +18,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     static let boxWorld = WKContentWorld.world(name: "trif-box")
     /// What Safari adds to its user agent, so sites treat this web view as the browser it is.
     static let safariSuffix = "Version/26.0 Mobile/15E148 Safari/604.1"
+    /// What Safari on a Mac says it is (and Safari on an iPhone asked for a site's desktop website): a desktop site's tab.
+    static let desktopAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
     @Published var address = ""
     @Published var title = ""
@@ -550,6 +552,37 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     func reload() { webView.reload() }
+
+    // MARK: desktop websites
+
+    /// Request Desktop Website (Tim, 11-18, "a desktop mode like safari has"): sites whose pages load as on a computer,
+    /// by WebKit's own desktop mode (WKWebpagePreferences.preferredContentMode, each page load): a Mac's user agent and
+    /// a computer's page width. As Safari's per-website setting: by host (without www.), in every tab, kept across
+    /// launches; Request Mobile Website takes the site off. Only the hosts are kept (UserDefaults `desktopHosts`).
+    /// The tabs' pages only: the chat's pages keep their own mode, and the mods that run are the same either way.
+    @Published private(set) var desktopHosts: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "desktopHosts") ?? [])
+    nonisolated static func desktopKey(_ host: String) -> String {
+        var h = host.lowercased()
+        if h.hasPrefix("www.") { h.removeFirst(4) }
+        return h
+    }
+    func wantsDesktop(_ url: URL?) -> Bool {
+        guard let h = url?.host, !h.isEmpty else { return false }
+        return desktopHosts.contains(Browser.desktopKey(h))
+    }
+    /// The shown page was loaded as a computer's (what ⋯'s Request Desktop / Mobile Website says it would change).
+    var desktopShown: Bool { current?.desktop ?? false }
+    /// The shown page is a website (http/https): only those can be asked for as a computer's or a phone's.
+    var canRequestDesktop: Bool { ["http", "https"].contains(webView.url?.scheme?.lowercased() ?? "") && !host.isEmpty }
+    /// ⋯ → Request Desktop / Mobile Website: the site remembered (or forgotten) and the page loaded again in that mode.
+    func requestDesktop(_ on: Bool) {
+        guard canRequestDesktop else { return }
+        let key = Browser.desktopKey(host)
+        if on { desktopHosts.insert(key) } else { desktopHosts.remove(key) }
+        UserDefaults.standard.set(desktopHosts.sorted(), forKey: "desktopHosts")
+        Diagnostics.shared.log("desktop", "\(on ? "desktop" : "mobile") website for \(key) (\(desktopHosts.count) desktop sites)")
+        webView.reload()
+    }
     func back() { webView.goBack() }
     func forward() { webView.goForward() }
 
@@ -1075,7 +1108,25 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     // MARK: navigation
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+    /// (with the page's preferences: Request Desktop Website's sites load in WebKit's desktop mode, below)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+        let policy = await decidePolicy(webView, navigationAction)
+        // (only the page itself: a frame inside it follows the page's mode. A new window's first load comes with no frame)
+        if policy == .allow, navigationAction.targetFrame?.isMainFrame ?? true, let url = navigationAction.request.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            let desktop = wantsDesktop(url)
+            if desktop { preferences.preferredContentMode = .desktop }
+            // (WebKit's desktop user agent ends with the configuration's application name, ours the phone's Safari
+            // words "Mobile/15E148 Safari/604.1", which sites read as a phone: a Mac Safari's whole user agent instead,
+            // set before this answer so this load already carries it. Back to the phone's on a site that isn't asked for)
+            let agent = desktop ? Browser.desktopAgent : nil
+            if (webView.customUserAgent ?? "") != (agent ?? "") { webView.customUserAgent = agent }
+            tab(of: webView)?.desktop = desktop
+        }
+        return (policy, preferences)
+    }
+
+    private func decidePolicy(_ webView: WKWebView, _ navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         if navigationAction.targetFrame?.isMainFrame ?? true, Browser.isModLink(url) {
             stopModLink(url, from: "the page")
@@ -1113,8 +1164,34 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
     private var keepStatus = false
 
+    /// The page that came in says what its tab's mode says (Request Desktop Website). A page WebKit brings back from
+    /// its back/forward memory comes in its own page process, which keeps the user agent it had: in the Simulator
+    /// (11-18) back from another site to a desktop site's page said "iPhone" in navigator and in its own requests.
+    /// Then the tab's agent is put to that process again (set to the other and back, so WebKit sends it) and the
+    /// page loaded again; at most once every 10 s a tab, so it can never loop.
+    private func checkAgent(_ tab: Tab, _ webView: WKWebView) {
+        // (an iPhone's: an iPad's own pages are a computer's already, WebKit's recommended mode there)
+        guard UIDevice.current.userInterfaceIdiom == .phone,
+              let url = webView.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        let want = tab.desktop
+        Task { @MainActor [weak self, weak webView, weak tab] in
+            guard let self, let webView, let tab,
+                  let agent = try? await webView.evaluateJavaScript("navigator.userAgent", in: nil, contentWorld: Browser.trifWorld) as? String,
+                  agent.contains("Macintosh") != want, tab.desktop == want, webView.url == url,
+                  Date().timeIntervalSince(tab.agentFixedAt ?? .distantPast) > 10 else { return }
+            tab.agentFixedAt = Date()
+            let set = webView.customUserAgent
+            webView.customUserAgent = want ? nil : Browser.desktopAgent
+            webView.customUserAgent = set
+            Diagnostics.shared.log("desktop", "\(Diagnostics.place(url)) came back as \(want ? "a phone's" : "a computer's") page: its agent put again, loaded again")
+            self.report.log("desktop", "agent fixed: \(Diagnostics.place(url))")
+            webView.reload()
+        }
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         tab(of: webView)?.url = webView.url
+        if let t = tab(of: webView) { checkAgent(t, webView) }
         guard webView === self.webView else { return }
         address = webView.url?.absoluteString ?? ""
         canGoBack = webView.canGoBack
@@ -1197,11 +1274,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
         let link = elementInfo.linkURL.flatMap { Browser.opensInNewTab($0) ? $0 : nil }
         let web = link.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        let store = config.websiteDataStore, agent = config.applicationNameForUserAgent
+        let store = config.websiteDataStore, agent = config.applicationNameForUserAgent, desktop = wantsDesktop(web)
         // (the preview the page's width and about half its height, so the whole menu fits under it on an SE: at full
         // height, Copy Link and Share… were off the screen's foot)
         let size = CGSize(width: webView.bounds.width, height: (webView.bounds.height * 0.5).rounded())
-        let preview: UIContextMenuContentPreviewProvider? = web.map { url in { LinkPreview(url: url, store: store, agent: agent, size: size) } }
+        let preview: UIContextMenuContentPreviewProvider? = web.map { url in { LinkPreview(url: url, store: store, agent: agent, desktop: desktop, size: size) } }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: preview) { [weak self, weak webView] suggested in
             guard let link else { return UIMenu(children: suggested) }
             let open = UIAction(title: "Open in New Tab", image: UIImage(systemName: "plus.square.on.square")) { _ in
@@ -1243,8 +1320,9 @@ final class LinkPreview: UIViewController {
     private let url: URL
     private let store: WKWebsiteDataStore
     private let agent: String?
-    init(url: URL, store: WKWebsiteDataStore, agent: String?, size: CGSize) {
-        self.url = url; self.store = store; self.agent = agent
+    private let desktop: Bool
+    init(url: URL, store: WKWebsiteDataStore, agent: String?, desktop: Bool, size: CGSize) {
+        self.url = url; self.store = store; self.agent = agent; self.desktop = desktop
         super.init(nibName: nil, bundle: nil)
         preferredContentSize = size
     }
@@ -1255,8 +1333,11 @@ final class LinkPreview: UIViewController {
         c.applicationNameForUserAgent = agent
         c.allowsInlineMediaPlayback = true
         c.mediaTypesRequiringUserActionForPlayback = .all
+        // (a site asked for as a computer's previews as one, as its tab would load it)
+        if desktop { c.defaultWebpagePreferences.preferredContentMode = .desktop }
         let wv = WKWebView(frame: .zero, configuration: c)
         wv.isUserInteractionEnabled = false
+        if desktop { wv.customUserAgent = Browser.desktopAgent }
         wv.load(URLRequest(url: url))
         view = wv
     }

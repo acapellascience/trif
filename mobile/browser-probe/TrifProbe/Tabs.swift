@@ -21,6 +21,10 @@ final class Tab: ObservableObject, Identifiable {
     var savedState: Data?
     var savedURL: URL?
     var started = false
+    /// Its page was last loaded as a computer's (Request Desktop Website, Browser.desktopHosts).
+    var desktop = false
+    /// When its page last came back in the other mode's agent and was loaded again (Browser.checkAgent).
+    var agentFixedAt: Date?
     var watches: [NSKeyValueObservation] = []
 
     init(id: UUID = UUID(), webView: WKWebView, title: String = "", url: URL? = nil) {

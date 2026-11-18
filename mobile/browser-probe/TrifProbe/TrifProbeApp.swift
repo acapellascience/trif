@@ -237,6 +237,10 @@ extension Model {
         if let js = step["tabjs"] as? String, let n = step["tab"] as? Int, n < browser.tabs.count {
             do { out = "\(try await browser.tabs[n].webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
         }
+        // ({"desktop": true|false}: ⋯ → Request Desktop / Mobile Website on the shown page; {"desktopstate": 1}: the
+        // sites kept and each tab's mode)
+        if let d = step["desktop"] as? Bool { browser.requestDesktop(d); out = "asked \(d ? "desktop" : "mobile")" }
+        if step["desktopstate"] != nil { out = "sites: \(browser.desktopHosts.sorted()); tabs: " + browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) + ($0.desktop ? " desktop" : " mobile") + (($0.webView.customUserAgent ?? "").isEmpty ? "" : " (Mac agent)") }.joined(separator: ", ") }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
@@ -297,6 +301,10 @@ struct ContentView: View {
     @State private var showChecks = false
     @State private var showReport = false
     @State private var showTabs = false
+    /// The page button's new tab and the tab it was opened from (showPage: tapped again, back to that one). Weak: a
+    /// closed tab's web view isn't kept alive by them.
+    @State private var newTabFrom = NewTabFrom()
+    struct NewTabFrom { weak var from: Tab?; weak var made: Tab? }
     @State private var showHistory = false
     @State private var showMods = false
     @State private var addingIcon = false
@@ -610,6 +618,12 @@ struct ContentView: View {
             Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
             if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
             Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
+            // (as Safari's page menu, Tim 11-18: the site as a computer's, remembered for the site; the other way back)
+            if browser.canRequestDesktop {
+                Button { onTab { browser.requestDesktop(!browser.desktopShown) } } label: {
+                    Label(browser.desktopShown ? "Request Mobile Website" : "Request Desktop Website", systemImage: browser.desktopShown ? "iphone" : "desktopcomputer")
+                }
+            }
             // (full screen for this tab; the line under it names the shortcut, which also switches back)
             Button { onTab { browser.setFullScreen(true) } } label: {
                 Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
@@ -707,9 +721,21 @@ struct ContentView: View {
     static var coversNow = "none"
     /// The toolbar's page button (Tim, 11-15): back to the page, from whatever covers it. On the page already (Tim,
     /// 11-16): a + that opens a new tab, onto the address screen.
+    /// Tapped again on the new tab's address screen, before anything was opened in it (Tim, 11-18: the toolbar's
+    /// buttons toggle, as Safari's): that empty tab goes and the tab it was opened from is back, as it was.
     private func showPage() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if covered { closeCovers() } else { browser.newTab() }
+        if covered {
+            if showAddress, let from = newTabFrom.from, let made = newTabFrom.made, made === browser.current, made !== from,
+               made.webView.url == nil, !made.webView.isLoading, browser.tabs.contains(where: { $0 === from }) {
+                closeCovers(); browser.select(from); browser.close(made)
+            } else { closeCovers() }
+            newTabFrom = NewTabFrom()
+        } else {
+            let from = browser.current
+            browser.newTab()
+            newTabFrom = NewTabFrom(from: from, made: browser.current)
+        }
     }
 
     /// Back and forward's accessibility label while the chat is open (as the chat's own ‹ {site}).
@@ -779,7 +805,8 @@ struct ContentView: View {
     /// The Mods tab: a switch, on or, with all paused, off (Tim, 11-15; the robot is the chat's now), with the count
     /// waiting for an OK.
     private var modsButton: some View {
-        Button { onTab { showMods = true } } label: {
+        // (tapped again while it's open: back to the page, as it was; Tim, 11-18)
+        Button { if showMods { showMods = false } else { onTab { showMods = true } } } label: {
             SwitchGlyph(on: !store.paused).frame(width: 30, height: 24)
                 .overlay(alignment: .topTrailing) {
                     if waitingHere > 0 {
@@ -798,7 +825,8 @@ struct ContentView: View {
     }
     /// The tabs, their count in a rounded square.
     private var tabsButton: some View {
-        Button { onTab { browser.snapshot(); showTabs = true } } label: {
+        // (tapped again with the tabs open and none picked: back to the page, as it was, as Safari's; Tim, 11-18)
+        Button { if showTabs { showTabs = false } else { onTab { browser.snapshot(); showTabs = true } } } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
                 Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))

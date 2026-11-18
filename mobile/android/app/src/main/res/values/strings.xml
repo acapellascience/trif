@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Words people see. iPhone wording (docs/IOS-APP-STRINGS.md) where the same thing exists; new words are drafts
+     for Tim, listed in mobile/android/STRINGS.md. -->
+<resources>
+    <string name="app_name">TRIF</string>
+    <string name="address_hint">Search or type URL</string>
+    <string name="start_empty">Type an address or a search above.</string>
+</resources>

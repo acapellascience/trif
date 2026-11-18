@@ -69,8 +69,12 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       ended, same page, own time, first 5 s / last 10 s). Swift: VideoResume.swift calls through (once a page load), an
       address as its parts (VideoResume.parts: URLComponents). The page's script (its own videoId, compared by
       videoresume.test.js), the store (VideoStore, its 30-minute drop), the play and the words stay Swift.
-- [ ] Dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking). Swift unit check exists
-      (test/speechtext.test.js, random walk). Hot path (every partial result): measure; maybe a twin like unread.
+- [x] Dictation accumulator → core/speech-text.js (round 11): apply (one recognizer event: volatile, final, partial,
+      segment, newTask) over {said, live, taskSaid, restarts} → {added, …, tail}; words, norm, clean, join, isFresh.
+      Swift: SpeechText.swift calls through on every event; `committed` stays Swift and never crosses (committed +=
+      added; text = committed + tail), so a call's cost doesn't grow with the talk. The old Swift stays as its copy,
+      answering only if the shared rule can't (held to the same cases). SpeechInput's base join is Swift's join (same
+      join cases).
 - [x] Desktop-mode per-site memory → core/desktop.js (round 9): key, wants, set, can. Swift: DesktopRules (in
       TabReloadRules.swift): set calls through (⋯'s Request Desktop / Mobile Website); key, wants, can are twins.
 - [ ] Which tab the tab list snaps to (ClaudePane.chatTabShown + the from-Mods/from-page cases).
@@ -200,13 +204,39 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   ("in its last 10 s"); another address → not ("another page or video"); back to ?v=a → resumed at 0:41; no "shared
   rule" line in diagnostics. .ipa built (dSYM E7C83E32-0828-3E27-A482-7CD200D9D51C).
 
+- Round 11 (11-18): the microphone's words moved (core/speech-text.js; SpeechText.swift calls apply once per recognizer
+  event). Cases recorded from the old Swift (scratchpad r11/m: verbatim, taskSaid readable; seeded): 167 event runs
+  (the check's stories; 120 recognizer-like: growing, revised, restarted fresh or with the same first words, segments
+  repeated as they were, with punctuation, a word or two changed, upper-cased, NFD; 40 random walks) with every
+  state, 381 cleans, 81 norms, 324 joins, 500 isFresh, over odd words (marks, NFD, Σ / ς, İ, ß, ﬁ, Ǆ, Han, Arabic
+  digits, emoji with modifiers, flags, ZWJ, ZWSP, BOM mid-word, Thai AM, a Prepend sign) and separators (tab, CR LF,
+  NBSP, ideographic space, LS, NEL, a space with a mark after it, U+180E). The old Swift passed all 4373 (unoptimised),
+  then the JS after two fixes (Foundation's trim also takes U+200B; a mark after a control is its own Character),
+  then the new Swift through JSC and its copy. Cost (Mac, -O, warm): a partial of 10 / 60 live words 40 / 123 µs
+  through the shared rule (Swift copy 22 / 116 µs), the same after 13 KB committed (sending `committed` cost +100 µs
+  there, so it no longer crosses); node --jitless's JS part 9 / 43 µs. Tests: all of mobile/test (52 pass, 12
+  skipped), prepare --check, smoke. Simulator (SE, headless, `-speechfile` r11/talk.wav: "Make the header blue." 4 s
+  of silence "And make it bigger please."; speech permission allowed by a headless tap on the alert):
+  SFSpeechRecognizer (-oldspeech): "Make the header blue" → after the pause "Make the header blue And make it bigger,
+  please" (partial 10, segment 2), kept on; ✕ → in the box; a second listen → after the box's words (95 characters);
+  SpeechAnalyzer + DictationTranscriber: the same words (volatile 10), ✕ keeps them; no "shared rule" line in
+  diagnostics. .ipa built (dSYM 53F68BF4-47EF-32DA-9D58-AE748B7226A8).
+
 ## Next step
 
-Round 11: the dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking; every partial
-result, so measure, maybe a twin; test/speechtext.test.js's random walk exists). Then the tab list's snap
-(ClaudePane.chatTabShown), then the optional unread-count move, then CORE COMPLETE if the spec is complete.
+Round 12: which tab the tab list snaps to (ClaudePane.chatTabShown + the from-Mods / from-page cases), then the optional
+unread-count move (shared/unread-count.js into shared/core, keep the twin), then CORE COMPLETE if the spec is complete.
 
 ## Notes for next round
+
+- Round 11: a rule over growing text can keep the growing part on the platform side: speechText.apply takes `said`
+  (anything committed) and answers `added` (append it) and `tail` (text = committed + tail); the JS test rebuilds
+  committed the same way. Foundation's trimmingCharacters(in: .whitespacesAndNewlines) is White_Space plus U+200B
+  (checked over every scalar); Swift's Characters: a mark after a control (tab, LF, NEL, ZWSP, BOM) is its own,
+  Thai / Lao AM join (SpacingMark), a Prepend sign joins what follows unless it's a control. Simulator speech:
+  `simctl privacy grant speech-recognition` fails and the grant attempt quits the app; tap the alert's Allow headless
+  (iOS Simulator tool, SE at (261, 506) points) after `{"mictap":1}`, then tap again. Steps: mictap, micstate, micx
+  (keeps in the box), micdraft "" (clears it).
 
 - Round 10: an address crosses as URLComponents' parts {host, path (decoded), query [[name, value|null]], fragment}
   (null: unparsable; Foundation now parses "not a url" as a path). The old Swift compared Characters and canonically:
@@ -273,6 +303,10 @@ result, so measure, maybe a twin; test/speechtext.test.js's random walk exists).
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 11: the microphone's words (what was said before a pause stays, a recognizer starting over or repeating
+  itself never loses or doubles words) now come from the shared rules Android will use; they behave as before. A new
+  TRIF.ipa is in iCloud Drive/TRIF.
 
 - Round 10: a video picking up where it was after its page loads again now decides through the shared rules (which
   load resumes, the YouTube / Vimeo video ids); it behaves as before. A new TRIF.ipa is in iCloud Drive/TRIF.

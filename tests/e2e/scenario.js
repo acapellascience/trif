@@ -2155,7 +2155,9 @@ class Scenario {
           if (task.bundle) { await fresh(task.file); await sleep(1500); } // (no setting left in the site's storage by the last run)
           let session = null;
           for (let turn = 0; turn < task.turns.length; turn++) {
-            const res = await agentRun(task.file, task.turns[turn], session);
+            // (--study-prompts: round N's request in the Nth wording, the task and its checks unchanged)
+            const prompt = this.o.studyPrompts && task.turns.length === 1 ? this.o.studyPrompts[rep % this.o.studyPrompts.length] : task.turns[turn];
+            const res = await agentRun(task.file, prompt, session);
             session = res.session || session;
             const work = workStats(res.log, task);
             const allowed = await letRun();
@@ -2165,7 +2167,7 @@ class Scenario {
             if (res.log) fs.copyFileSync(res.log, this.r.file(`study-${tag}-${turn}.jsonl`));
             for (const mod of mods) fs.copyFileSync(path.join(sitesDir, mod.file), this.r.file(`study-${tag}-${turn}-${mod.file}`));
             const { replyAll, ...w } = work;
-            const row = { task: task.key, guide: g, rep, turn, secs: res.secs, ...w, replyChars: work.reply.length, mods, allowed, ...m };
+            const row = { task: task.key, guide: g, rep, turn, prompt, secs: res.secs, ...w, replyChars: work.reply.length, mods, allowed, ...m };
             rows.push(row);
             writeOut();
             r.record(`--study ${task.key} turn ${turn + 1} with ${g} (${model})`, 'pass', JSON.stringify({ secs: row.secs, cost: row.cost, tools: row.tools, reloads: row.reloads, injects: row.injects, mods: mods.map((x) => `${x.file}:${x.tier}`) }));

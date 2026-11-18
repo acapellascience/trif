@@ -6,7 +6,9 @@ run (0/9): the corner mini-player kept polling out of sight. The guides 0.3.1 sh
 
 **Verdict, in one line.** Yes, on these stand-ins. `live` went from 0/9 deep to **5/5 deep**, and
 `newest` (3/3) and `suggest` (2/2) stayed deep. Every `live` run checked the network before it wrote
-anything, saw the frames, and dropped the player from the site's data instead of hiding it.
+anything, saw the frames, and dropped the player from the site's data instead of hiding it. With the
+request reworded to avoid the guide's own words ("live", "preview", "player", "video"), 3 more runs were
+also all deep: 8/8 in all.
 
 ## Setup
 
@@ -32,11 +34,12 @@ The model and harness match study 2:
 - The TRIF code is this branch's, as in study 2. Only the guides changed.
 - Chrome, headless and muted, under the shared browser lock with the 1.5 GB memory guard.
 
-Runs: live ×5, newest ×3, suggest ×2, 10 runs, **$3.84**. Results are in
-~/WebMods-worktrees/live-runs/out-deep3/:
+Runs: live ×5, newest ×3, suggest ×2, 10 runs, **$3.84**. Then live ×3 in different wording, $1.10
+("Different wording" below). **$4.94 in all.** Results are in ~/WebMods-worktrees/live-runs/out-deep3/:
 - 2026-11-18T23-01-20 (live);
 - 2026-11-18T23-10-22 (newest);
-- 2026-11-18T23-16-15 (suggest).
+- 2026-11-18T23-16-15 (suggest);
+- 2026-11-18T23-30-26 (live, different wording).
 
 Summarise each with `node tests/e2e/deep2-summary.js <dir> [--rows]`. The run script is
 ~/WebMods-worktrees/live-runs/run-deep3.sh. It needs Node 22 (global `WebSocket`) and Tim's Claude Code
@@ -142,6 +145,33 @@ data … instead of hiding rows". Run 1 hid the posts first, saw the gaps, and s
 fashion: "Hiding them on the page just left blank gaps, because the feed places each post at a fixed spot.
 So now the mod takes them out of the feed's data".
 
+## Different wording
+
+The guide line's examples include "a live preview", the live request's own words. To see whether the line
+works only when the user's words match it, 3 more live runs used the rel031 guides with the request
+reworded, one wording per run. None of the wordings contains "live", "preview", "player" or "video". The
+app and the checks were unchanged. The wording comes from a new harness option, `--study-prompts 'a|b|c'`
+(round N asks in the Nth wording); each row in study.json records its `prompt`.
+
+| run | request | outcome | fix | secs | cost | tools | network looks | read bundle |
+|---|---|---|---|---|---|---|---|---|
+| 0 | "the little thing that keeps popping up in the bottom corner is annoying, get rid of it" | deep | data (`feat` dropped), hide as fallback | 61 | $0.40 | 13 | 6 | yes (`--page`) |
+| 1 | "stop that box in the corner from showing up" | deep | data, hide as fallback | 46 | $0.36 | 9 | 6 | no |
+| 2 | "make the corner popup go away" | deep | data, hide as fallback | 49 | $0.34 | 9 | 4 | no |
+
+**3/3 deep, $1.10** (median 278k tokens, 9 tools, 49 s). Each run opened by planning a plain hide ("I'll
+hide the popup in the corner of the Glint page"). Then it worked out for itself that the box was a player,
+checked whether it was still downloading, and changed course:
+- "The mini-player fetches a new frame every 0.4s, so hiding it wouldn't stop it." (run 0, which also read
+  the bundle with `--page` to see how the page builds it)
+- "The corner box is a live mini-player that keeps downloading stream frames, so hiding it alone wouldn't
+  stop it. I'll drop it from the page's data instead." (run 1)
+- "Hiding the popup alone wasn't enough: even when you can't see it, the player keeps downloading stream
+  frames nonstop." (run 2, to the user)
+
+So in these runs the line didn't depend on the user's words matching it. Across both wordings, live is
+8/8 deep with rel031, against 0/9 in study 2.
+
 **Not exercised.** "Don't dig in silence" never came up. No run hit a failed idea followed by a long dig,
 so none stopped to offer the user choices. These tasks don't test it.
 
@@ -153,16 +183,15 @@ study-2 run did, and gave the guide line's reason. The BOXED.md line about empty
 prevented study 2's one newest miss the one time it came up. Nothing regressed: suggest and newest are
 all deep, at about lean2's cost.
 
-No stronger wording is needed for this failure, so the planned extra arm wasn't run.
+No stronger wording is needed for this failure, so the planned extra arm wasn't run. Rewording the
+request away from the guide's example didn't change the result (3/3 deep).
 
 ### Caveats
 
-1. **The guide's example matches the task's words.** The line's examples include "a live preview", the
-   very words of the live request ("get rid of the live preview that pops up in the corner"). So this
-   study shows the line works when the user's words match it. It doesn't show how well it carries over to
-   a hidden thing the user calls something else (an ad that refreshes, a countdown, a sound loop). A
-   follow-up could reword the request, or add a task with a hidden timer, to test that.
-2. **Small samples on stand-in apps.** One model, 10 runs. Every live lever used was on the network.
+1. **One kind of hidden cost.** The reworded requests rule out the user's words matching the guide's.
+   But the thing being hidden is still a player, which is in the line's list. A hidden timer, an ad that
+   refreshes, or a sound loop that doesn't show on the network is still untested.
+2. **Small samples on stand-in apps.** One model, 13 runs. Every live lever used was on the network.
    Whether agents read obfuscated code to stop a player with no network trace is still untested.
 3. **One day apart.** The arms ran a day apart rather than shuffled together. The model and Claude Code
    version were the same, but run-to-run variation over a day can't be ruled out (p ≈ 0.0005 makes chance

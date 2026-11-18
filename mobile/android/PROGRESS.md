@@ -80,6 +80,9 @@ Item 2, first part: tabs (a Tab model with its own WebView and back/forward, sav
   kit.js + start-own.js in TRIF's world, start-page.js in the page world) and Mods.swift `userScripts()` (~line 355:
   style-mirror.js first in each world with a mod, the free relay/page pair, SES + sandbox-runtime.js in the box,
   page-bridge.js with pairs, then each mod in its world). iPhone injects main frame only (`forMainFrameOnly: true`).
+- CI (`tests`, the repo's npm test; nothing Android in it yet) fails on `android` exactly as on `ios-poc`
+  (11-18: mobile/test/chat.test.js, smoke.js, webkit-check/style-demo.js, "the mobile probes"): inherited, not ours.
+  Compare with `gh run list --branch ios-poc` before chasing a failure.
 - `shots/` is gitignored. Gradle's SharedAssets task lists each source as its own input (a repo-root input overlaps
   the build folder and Gradle refuses it).
 - Take the device lock before the emulator or a long Gradle build (the loop prompt has the script).

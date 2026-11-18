@@ -42,6 +42,12 @@
                 <data android:mimeType="application/javascript" />
                 <data android:mimeType="application/x-javascript" />
             </intent-filter>
+            <!-- text shared to TRIF: a whole mod (Add this mod?), else a page as the address bar takes it -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

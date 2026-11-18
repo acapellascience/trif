@@ -179,6 +179,22 @@ class ModStoreTest {
         assertTrue(s.mods[0].held)
     }
 
+    /** No change rules (iPhone's ModChanges fallbacks): nothing is lost and nothing new runs. */
+    @Test fun noRulesNothingLost() {
+        val s = store(object : ModReader by FakeReader() { override fun core(name: String, args: String): String? = null })
+        val a = s.addText(mod("A"))
+        assertFalse(a.on); assertEquals("import", a.newOff)
+        clock += 1000
+        val a2 = s.addText(mod("A", "v" to 2))
+        assertFalse(a2.on); assertEquals("update", a2.newOff); assertEquals(listOf(mod("A")), a2.history.map { it.code })
+        assertFalse(s.restore("a.com/A", a2.history[0].stamp))
+        s.remove("a.com/A")
+        assertTrue(s.mods.isEmpty()); assertEquals(1, s.trash.size); assertEquals("a.com/A", s.lastDeleted?.id)
+        s.undoDelete()
+        assertTrue(s.mods.isEmpty()) // (no answer: nothing undone)
+        assertFalse(s.restoreDeleted(s.trash[0].id))
+    }
+
     @Test fun deletingAndRecentlyDeleted() {
         val s = store()
         s.addText(mod("A")); s.addText(mod("B"))

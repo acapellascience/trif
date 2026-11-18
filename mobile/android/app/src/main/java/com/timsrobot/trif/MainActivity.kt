@@ -151,6 +151,7 @@ class MainActivity : Activity() {
      * `trif.testMods` = a list of mods as JSON (Scripts.planOf), put in as the mod store's will be;
      * `trif.addMod` = a mod file, read by the reader and added as pasted ("add mod: <id> <tier> <world> runs|held");
      * `trif.call` = "world:code" (trif, box or page), run on the shown tab's page, its answer logged ("call: …");
+     * `trif.offer` = text with a mod, as shared to TRIF: Add this mod? ("offer: <id> <tier> from <site>");
      * `trif.allow` = a mod's id: Allow on its hold, as the Mods tab's button ("allow: <id> runs|held");
      * `trif.panel` = code run in the Mods tab's page (shown first), its answer logged ("panel: …").
      */
@@ -165,6 +166,7 @@ class MainActivity : Activity() {
                 android.util.Log.i("TRIF", "add mod: " + (m?.let { "${it.id} ${it.tier} ${it.world} ${if (it.held) "held" else "runs"}" } ?: "error ${r.error}"))
             }
         }
+        b64("trif.offer")?.let { offerText(it) }
         b64("trif.allow")?.let { id ->
             work.execute {
                 mods.approve(id)
@@ -188,6 +190,7 @@ class MainActivity : Activity() {
             }
         }
         intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call"); intent.removeExtra("trif.addMod"); intent.removeExtra("trif.allow")
+        intent.removeExtra("trif.offer")
         intent.removeExtra("trif.panel")
     }
 
@@ -261,6 +264,13 @@ class MainActivity : Activity() {
      */
     private fun open(intent: Intent?) {
         files(intent)?.let { uris -> intent?.data = null; intent?.removeExtra(Intent.EXTRA_STREAM); importFiles(uris); return }
+        intent?.takeIf { it.action == Intent.ACTION_SEND }?.getStringExtra(Intent.EXTRA_TEXT)?.let { text ->
+            intent.removeExtra(Intent.EXTRA_TEXT)
+            // (a whole mod: Add this mod?; any other text: a page, as the address bar takes it)
+            if (text.contains("==WebMod==")) offerText(text)
+            else Address.resolve(text.trim())?.let { url -> showList(false); if (browser.current?.url == null) browser.go(url) else browser.newTab(url) }
+            return
+        }
         val url = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data
             ?.takeIf { it.scheme == "http" || it.scheme == "https" }?.toString() ?: return
         intent.data = null
@@ -319,6 +329,43 @@ class MainActivity : Activity() {
                 if (added.isNotEmpty()) showMods(true)
             }
         }
+    }
+
+    /**
+     * Text shared to TRIF with a whole mod in it (iPhone's offer(text:), its Paste): read as the mod it names (one
+     * with its name here keeps its id), then Add this mod? It came from the shown tab's site.
+     */
+    private fun offerText(text: String) {
+        val here = browser.current?.host ?: ""
+        work.execute {
+            val r = mods.readNamed(text.trim(), here)
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                val m = r.mod?.copy(cameFrom = Site.of(here))
+                if (m == null) { say("That mod can't be added: ${r.error ?: "no reason given"}."); return@runOnUiThread }
+                android.util.Log.i("TRIF", "offer: ${m.id} ${m.tier} from ${m.cameFrom}${ModOffer.elsewhere(m)?.let { ", ${it.title}" } ?: ""}")
+                ModOffer.show(this, m, add = { addOffered(m) }, closed = { android.util.Log.i("TRIF", "offer: ${m.id} declined") })
+            }
+        }
+    }
+
+    /** Add it (iPhone's addMod): a held one says it waits and the Mods tab opens on it; else what it runs on. */
+    private fun addOffered(m: InstalledMod) {
+        work.execute {
+            val added = mods.add(m, "pasted")
+            android.util.Log.i("TRIF", "add mod: ${added.id} ${added.tier} ${added.world} ${if (added.held) "held" else "runs"}")
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (added.held) { say("${added.name} waits for your OK."); showMods(true) }
+                else say("Added ${added.name}. It runs on ${added.sites.joinToString(", ")}.")
+            }
+        }
+    }
+
+    /** iPhone's status strip (UI layer): a toast for now. */
+    private fun say(text: String) {
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+        android.util.Log.i("TRIF", "said: $text")
     }
 
     private fun toolButton(glyph: String, label: String, tap: () -> Unit) =

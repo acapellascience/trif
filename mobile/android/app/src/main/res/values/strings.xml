@@ -24,6 +24,8 @@
     <string name="mods">Mods</string>
     <string name="mods_on">Mods on %s</string>
     <string name="done">Done</string>
+    <string name="add_this_mod">Add this mod?</string>
+    <string name="add_it">Add it</string>
     <string name="more">More</string>
     <string name="pause_all_mods">Pause all mods</string>
     <string name="resume_mods">Resume mods</string>

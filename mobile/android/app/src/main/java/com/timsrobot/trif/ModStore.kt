@@ -1,5 +1,6 @@
 package com.timsrobot.trif
 
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -164,10 +165,33 @@ class ModStore(
         return Scripts.Plan(mods, reader?.free ?: freeKept, bridged)
     }
 
-    // MARK: changes
+    // MARK: changes: the phones' shared rules too (core mod-store.js part 2, iPhone's ModChanges.swift). They read times,
+    // ids and hold facts and answer with indices into the lists given (-1: the new entry) and the fields taken from the
+    // version before; the records and the code stay Kotlin's. No answer (no reader): iPhone's fallbacks, so nothing is
+    // lost and nothing new runs.
 
-    private fun stamp() = now().toString()
-    private fun recent(l: List<ModVersion>) = l.filter { it.at > now() - 30 * DAY }.take(30)
+    private fun ints(v: Any?) = (v as? JSONArray)?.let { a -> (0 until a.length()).map { a.optInt(it, Int.MIN_VALUE) }.takeIf { Int.MIN_VALUE !in it } }
+    private fun <T> pick(idx: List<Int>, list: List<T>, new: T?): List<T> = idx.mapNotNull { if (it < 0) new else list.getOrNull(it) }
+    private fun times(l: List<Long>) = JSONArray(l.map { JSONObject().put("at", it) })
+    private fun record(m: InstalledMod, on: Boolean, newOff: String?, history: List<ModVersion>? = null) = facts(m)
+        .put("on", on).put("newOff", newOff ?: JSONObject.NULL).apply { history?.let { put("history", times(it.map(ModVersion::at))) } }
+    /** A kept version from a rule's {stamp, source}: its time is the change's, its code the version before's. */
+    private fun kept(v: Any?, at: Long, code: String) = (v as? JSONObject)?.let { o ->
+        val s = o.str("stamp") ?: return@let null
+        ModVersion(s, at, code, o.str("source") ?: return@let null)
+    }
+    /** Takes `fields` (a rule's names) from `o`, as iPhone's InstalledMod.take. */
+    private fun InstalledMod.take(fields: Collection<String>, o: InstalledMod): InstalledMod = fields.fold(this) { m, f ->
+        when (f) {
+            "on" -> m.copy(on = o.on)
+            "newOff" -> m.copy(newOff = o.newOff)
+            "offSites" -> m.copy(offSites = o.offSites)
+            "allowed" -> m.copy(allowed = o.allowed)
+            "source" -> m.copy(source = o.source)
+            "added" -> m.copy(added = o.added)
+            else -> { Log.w("TRIF", "a change keeps $f, which the app doesn't know"); m }
+        }
+    }
 
     /**
      * Adds a mod, or a new version of the one with its id (the one before kept in its history). `source`: chat,
@@ -178,24 +202,29 @@ class ModStore(
         var m = new.copy(source = source, cameFrom = null)
         val i = mods.indexOfFirst { it.id == m.id }
         val list = mods.toMutableList()
+        val at = now()
         if (i >= 0) {
             val old = mods[i]
-            var history = old.history
-            if (old.code != m.code) history = listOf(ModVersion(stamp(), now(), old.code, if (source in listOf("import", "edit", "computer")) source else "chat")) + history
-            m = m.copy(history = recent(history), allowed = old.allowed, offSites = old.offSites, added = old.added)
-            m = when (source) {
-                "import" -> m.copy(on = false, newOff = "update")
-                "edit", "computer" -> m.copy(on = old.on, newOff = old.newOff)
-                else -> m.copy(on = true, newOff = null)
-            }
-            when (ranAfter(m.held, old, restore = false)) {
-                "ran" -> m = m.copy(ran = old.ran)
-                "current" -> m = m.copy(ran = RanVersion(old.code, old.script, old.world, old.at, old.styleScript))
+            val changed = old.code != m.code
+            val r = core("add", record(old, old.on, old.newOff, old.history), record(m.copy(allowed = old.allowed), m.on, m.newOff), source, at, changed) as? JSONObject
+            if (r != null && r.opt("on") is Boolean) {
+                m = m.copy(source = r.str("source") ?: source, on = r.getBoolean("on"), newOff = r.str("newOff"))
+                    .take(r.optJSONArray("keep").strings(), old)
+                m = m.copy(history = pick(ints(r.opt("history")) ?: emptyList(), old.history, kept(r.opt("version"), at, old.code)))
+                when (r.str("ran")) {
+                    "ran" -> m = m.copy(ran = old.ran)
+                    "current" -> m = m.copy(ran = RanVersion(old.code, old.script, old.world, old.at, old.styleScript))
+                }
+            } else {
+                // (no answer: off and marked updated, nothing dropped, nothing kept running)
+                m = m.copy(on = false, newOff = "update", allowed = old.allowed, offSites = old.offSites, added = old.added,
+                    history = (if (changed) listOf(ModVersion(at.toString(), at, old.code, source)) else emptyList()) + old.history)
             }
             list[i] = m
         } else {
-            if (source == "import") m = m.copy(on = false, newOff = "import")
-            else if (source == "computer") m = m.copy(on = false, newOff = "computer")
+            val r = core("add", JSONObject.NULL, record(m, m.on, m.newOff), source, at, true) as? JSONObject
+            m = if (r != null && r.opt("on") is Boolean) m.copy(source = r.str("source") ?: source, on = r.getBoolean("on"), newOff = r.str("newOff"))
+                else m.copy(on = false, newOff = if (source == "computer") "computer" else "import")
             list += m
         }
         mods = list
@@ -203,38 +232,46 @@ class ModStore(
         return m
     }
 
-    /** A quick ask's Undo: the mod as it was before (`before`), or gone if it was new; not to Recently deleted. */
+    /** A quick ask's Undo: the mod as it was before (`before`), or gone if it was new; not to Recently deleted. No
+     *  answer: as they are. */
     fun undoAdd(id: String, before: InstalledMod?) {
-        mods = if (before != null) {
-            if (mods.any { it.id == id }) mods.map { if (it.id == id) before else it } else mods + before
-        } else mods.filter { it.id != id }
+        val idx = ints(core("undoAdd", JSONArray(mods.map { it.id }), id, before != null)) ?: return
+        mods = pick(idx, mods, before)
         save()
     }
 
-    /** Deletes a mod: to Recently deleted (30 days). `by`: you (the Mods tab: Undo too) or computer (a sync). */
+    /** Deletes a mod: to Recently deleted (30 days, 200). `by`: you (the Mods tab: Undo too) or computer (a sync). */
     fun remove(id: String, by: String = "you") {
         val m = mods.firstOrNull { it.id == id } ?: return
+        val at = now()
+        val r = core("remove", times(trash.map { it.at }), by, at) as? JSONObject
+        val undo = (r?.opt("undo") as? Boolean) ?: (by == "you")
+        val keep = ints(r?.opt("keep")) ?: trash.indices.toList()
         mods = mods.filter { it.id != id }
-        if (by == "you") lastDeleted = m
-        trash = (listOf(DeletedMod(m, now(), by)) + trash).filter { it.at > now() - TRASH_DAYS * DAY }.take(200)
+        if (undo) lastDeleted = m
+        trash = listOf(DeletedMod(m, at, by)) + pick(keep, trash, null)
         save()
     }
 
+    /** Undo of a delete. No answer: nothing undone. */
     fun undoDelete() {
         val m = lastDeleted ?: return
-        if (mods.none { it.id == m.id }) mods = mods + m
-        trash.indexOfFirst { it.mod.id == m.id }.takeIf { it >= 0 }?.let { i -> trash = trash.filterIndexed { j, _ -> j != i } }
+        val r = core("undoDelete", m.id, JSONArray(mods.map { it.id }), JSONArray(trash.map { it.mod.id })) as? JSONObject ?: return
+        if (r.optBoolean("append")) mods = mods + m
+        val drop = r.optInt("drop", -1)
+        if (drop in trash.indices) trash = trash.filterIndexed { j, _ -> j != drop }
         lastDeleted = null
         save()
     }
 
-    /** Puts a mod from Recently deleted back. False: one with its id is here now (or the entry is gone). */
+    /** Puts a mod from Recently deleted back. False: one with its id is here now (or the entry is gone, or no answer). */
     fun restoreDeleted(entry: String): Boolean {
-        val d = trash.firstOrNull { it.id == entry } ?: return false
-        if (mods.any { it.id == d.mod.id }) return false
-        trash = trash.filter { it !== d }
-        mods = mods + d.mod
-        if (lastDeleted?.let { l -> mods.any { it.id == l.id } } == true) lastDeleted = null
+        val r = core("restoreDeleted", entry, JSONArray(trash.map { JSONObject().put("id", it.id).put("modId", it.mod.id) }),
+            JSONArray(mods.map { it.id }), lastDeleted?.id ?: JSONObject.NULL) as? JSONObject ?: return false
+        val i = r.optInt("index", -1).takeIf { it in trash.indices } ?: return false
+        mods = mods + trash[i].mod
+        trash = trash.filterIndexed { j, _ -> j != i }
+        if (r.optBoolean("clearLast")) lastDeleted = null
         save()
         return true
     }
@@ -260,14 +297,21 @@ class ModStore(
     /** Allow: what it waits for is allowed for it (a later version that needs nothing more runs without asking). */
     fun approve(id: String) = update(id) { it.copy(allowed = holdsApprove(it), ran = null) }
 
-    /** Don't allow a change on hold: the version before is back (this one kept in its history). A new mod: deleted. */
+    /** Don't allow a change on hold: the version before is back (this one kept in its history). A new mod: deleted.
+     *  No answer: nothing changes (it stays held). */
     fun reject(id: String) {
         val cur = mods.firstOrNull { it.id == id } ?: return
+        val at = now()
+        val r = answer("reject", JSONObject().put("ran", cur.ran != null).put("history", times(cur.history.map(ModVersion::at))), at)
+        if (r === NONE) return
+        val c = r as? JSONObject
         val ran = cur.ran
-        val back = ran?.let { read(it.code, cur.file, cur.site).mod }
-        if (back == null) { remove(id); return }
-        replace(id, back.copy(on = cur.on, offSites = cur.offSites, allowed = cur.allowed, source = cur.source, added = cur.added,
-            extraNeeds = emptyList(), history = listOf(ModVersion(stamp(), now(), cur.code, "undo")) + cur.history))
+        val back = if (c != null && ran != null) read(ran.code, cur.file, cur.site).mod else null
+        if (c == null || back == null) { remove(id); return }
+        var b = back.take(c.optJSONArray("keep").strings(), cur)
+        if (c.optJSONArray("extraNeeds") != null) b = b.copy(extraNeeds = c.optJSONArray("extraNeeds").objects().map(ModNeed::of))
+        b = b.copy(history = pick(ints(c.opt("history")) ?: emptyList(), cur.history, kept(c.opt("version"), at, cur.code)))
+        replace(id, b)
     }
 
     // MARK: editing (the code card's Edit)
@@ -299,8 +343,10 @@ class ModStore(
         val cur = mods.firstOrNull { it.id == id } ?: return false
         val v = cur.history.firstOrNull { it.stamp == version } ?: return false
         var back = read(v.code, cur.file, cur.site).mod ?: return false
-        back = back.copy(on = cur.on, offSites = cur.offSites, source = cur.source, added = cur.added, newOff = cur.newOff,
-            allowed = seeded(cur), history = listOf(ModVersion(stamp(), now(), cur.code, source)) + cur.history)
+        val at = now()
+        val c = core("restore", JSONObject().put("history", times(cur.history.map(ModVersion::at))), source, at) as? JSONObject ?: return false
+        back = back.take(c.optJSONArray("keep").strings(), cur).copy(allowed = seeded(cur),
+            history = pick(ints(c.opt("history")) ?: return false, cur.history, kept(c.opt("version"), at, cur.code)))
         back = back.copy(extraNeeds = changeNeeds(back, cur))
         back = back.copy(ran = if (ranAfter(back.held, cur, restore = true) == "current") RanVersion(cur.code, cur.script, cur.world, cur.at, cur.styleScript) else null)
         replace(id, back)
@@ -317,10 +363,13 @@ class ModStore(
         .put("needs", JSONArray(m.needs.map(ModNeed::json))).put("extraNeeds", JSONArray(m.extraNeeds.map(ModNeed::json)))
         .put("allowed", JSONObject().apply { m.allowed.forEach { (k, v) -> put(k, JSONArray(v)) } }).put("ran", m.ran != null)
 
-    private fun core(name: String, vararg args: Any): Any? {
-        val out = runCatching { reader?.core("modStore.$name", JSONArray(args.toList()).toString()) }.getOrNull() ?: return null
-        return runCatching { JSONTokener(out).nextValue() }.getOrNull()?.takeIf { it != JSONObject.NULL }
+    /** A rule's answer: NONE if there was none (no reader, a throw), JSONObject.NULL for the rule's own null. */
+    private fun answer(name: String, vararg args: Any): Any {
+        val out = runCatching { reader?.core("modStore.$name", JSONArray(args.toList()).toString()) }.getOrNull() ?: return NONE
+        return runCatching { JSONTokener(out).nextValue() }.getOrNull() ?: NONE
     }
+    private fun core(name: String, vararg args: Any): Any? = answer(name, *args).takeIf { it !== NONE && it != JSONObject.NULL }
+    private object NONE
     private fun allowedOf(v: Any?) = (v as? JSONObject)?.lists()
 
     /** Allow: what the mod waits for, allowed for it. No answer: allowed as it was (it stays held). */

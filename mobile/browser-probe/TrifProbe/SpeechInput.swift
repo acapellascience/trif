@@ -605,7 +605,14 @@ final class SpeechInput: ObservableObject {
         // model, is looked at again once it's done. Before 11-18 it was dropped, so a first press right after the list
         // opened never started the download)
         guard choosing == nil else { if download { downloadAfter = true }; return }
-        if looked && !(download && !downloadTried) { return }
+        // (looked already: a press's download wish is answered from that look, without looking again)
+        if looked {
+            if download, !downloadTried {
+                downloadTried = true
+                if #available(iOS 26.0, *), let m = lookedToGet as? any SpeechModule { fetch(m) }
+            }
+            return
+        }
         looked = true
         if download { downloadTried = true }
         if ProcessInfo.processInfo.arguments.contains("-oldspeech") { choiceWords = "SFSpeechRecognizer (-oldspeech)"; return }
@@ -613,8 +620,40 @@ final class SpeechInput: ObservableObject {
         choosing = Task { @MainActor in
             await self.chooseAnalyzer(download: download)
             self.choosing = nil
-            if self.downloadAfter { self.downloadAfter = false; self.choose(download: true) }
+            // (a press came during the look: its download wish is answered from this look, not a second one. Tim's
+            // phone, 11-18: the hold's look and the press's look both ran, "recognizers: …" logged twice)
+            if self.downloadAfter {
+                self.downloadAfter = false
+                self.downloadTried = true
+                if #available(iOS 26.0, *), let m = self.lookedToGet as? any SpeechModule { self.fetch(m) }
+            }
+            self.upgradeListening()
         }
+    }
+
+    /// What the last look said to fetch (an iOS 26 SpeechModule; nil: nothing, or the best is here).
+    private var lookedToGet: Any?
+
+    /// The look ended while a listen had already started on SFSpeechRecognizer (the robot held before the look was
+    /// done: Tim's phone, 11-18, "listening (SFSpeechRecognizer …)" 0.4 s before "→ SpeechTranscriber"): the analyzer it
+    /// found takes over, given all the audio from the start (kept until the first words), as long as no words came yet.
+    private func upgradeListening() {
+        guard phase == .listening, analyzerChoice != nil, !heardWords, !tried.contains("analyzer"), tried.last == "recognizer" else { return }
+        let old = listener
+        old?.cancel()
+        words = SpeechText()
+        transcript = base
+        let kept = feed?.keptAudio ?? 0
+        let l = begin("analyzer", replay: true)
+        count("upgraded")
+        Diagnostics.shared.log("quick ask", "talking: the look found \(l.name) after listening had started on \(old?.name ?? "-"); it takes over, given the \(String(format: "%.1f", kept)) s kept from the start")
+    }
+
+    /// Looks for the best recognizer now, off the main thread, if no look has been made yet (the robot's finger coming
+    /// down: the look takes ~0.4 s on an iPhone SE, the hold starts at 0.45 s).
+    func lookAhead() {
+        guard !looked, choosing == nil else { return }
+        choose()
     }
 
     @available(iOS 26.0, *)
@@ -624,33 +663,39 @@ final class SpeechInput: ObservableObject {
         let found = await Task.detached(priority: .userInitiated) { await SpeechInput.look(Locale.current) }.value
         let notes = found.notes
         let toGet = found.toGet
+        lookedToGet = analyzerChoice?.kind == AnalyzerListener.Kind.speech.rawValue || found.choice?.kind == AnalyzerListener.Kind.speech.rawValue ? nil : toGet
         if let c = found.choice { analyzerChoice = c }
         choiceWords = notes.joined(separator: "; ") + (analyzerChoice.map { " → \($0.kind)" } ?? " → SFSpeechRecognizer")
         Diagnostics.shared.log("quick ask", "talking: recognizers on this iPhone: \(choiceWords)")
         // (the better model isn't here yet: fetched once the microphone is used; the older way until it's in)
-        if let m = toGet, download, !downloading, analyzerChoice?.kind != AnalyzerListener.Kind.speech.rawValue {
-            downloading = true
-            getting = 0
-            Diagnostics.shared.log("quick ask", "talking: getting the speech model for this iPhone")
-            Task { @MainActor in
-                do {
-                    if let req = try await AssetInventory.assetInstallationRequest(supporting: [m]) {
-                        let watch = Task { @MainActor in
-                            while !Task.isCancelled { self.getting = req.progress.fractionCompleted; try? await Task.sleep(nanoseconds: 500_000_000) }
-                        }
-                        try await req.downloadAndInstall()
-                        watch.cancel()
+        if let m = toGet, download, analyzerChoice?.kind != AnalyzerListener.Kind.speech.rawValue { fetch(m) }
+    }
+
+    /// Apple's speech model fetched (AssetInventory; no audio goes anywhere), then looked at again.
+    @available(iOS 26.0, *)
+    private func fetch(_ m: any SpeechModule) {
+        guard !downloading else { return }
+        downloading = true
+        getting = 0
+        Diagnostics.shared.log("quick ask", "talking: getting the speech model for this iPhone")
+        Task { @MainActor in
+            do {
+                if let req = try await AssetInventory.assetInstallationRequest(supporting: [m]) {
+                    let watch = Task { @MainActor in
+                        while !Task.isCancelled { self.getting = req.progress.fractionCompleted; try? await Task.sleep(nanoseconds: 500_000_000) }
                     }
-                    Diagnostics.shared.log("quick ask", "talking: the speech model is on this iPhone")
-                } catch {
-                    Diagnostics.shared.log("quick ask", "talking: the speech model didn't download (\(error.localizedDescription))")
+                    try await req.downloadAndInstall()
+                    watch.cancel()
                 }
-                self.getting = nil
-                self.downloading = false
-                self.analyzerChoice = nil
-                self.looked = false
-                self.choose()
+                Diagnostics.shared.log("quick ask", "talking: the speech model is on this iPhone")
+            } catch {
+                Diagnostics.shared.log("quick ask", "talking: the speech model didn't download (\(error.localizedDescription))")
             }
+            self.getting = nil
+            self.downloading = false
+            self.analyzerChoice = nil
+            self.looked = false
+            self.choose()
         }
     }
 

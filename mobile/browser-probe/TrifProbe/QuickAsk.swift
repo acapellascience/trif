@@ -296,7 +296,9 @@ struct KeptTalkSlot: View {
         if speech.keptFromHold && speech.phase == .idle && !speech.draft.isEmpty {
             KeptTalkPill(open: open)
                 .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                // (going, it fades where it is: never moved down over the toolbar, where a removal that doesn't finish
+                // would take the toolbar's taps, as the robot's pill once did)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)), removal: .opacity))
                 .task {
                     try? await Task.sleep(nanoseconds: 15_000_000_000)
                     if !Task.isCancelled { withAnimation { speech.keptFromHold = false } }

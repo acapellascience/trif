@@ -182,7 +182,12 @@ change there is a change on both phones. Change this file whenever a rule change
   other. Nothing heard by the stop says so under the box ("No words were heard…"); a break with no words says so too. Slid 90 pt away and let go: this listen's words dropped, nothing asked ("Let go to cancel"
   first).
 - The robot held still 0.45 s with talking ready = hold to talk (a light haptic, the pill with the words); a finger
-  moving 20 pt first is a slide. Not ready: the list opens, saying why.
+  moving 20 pt first is a slide. Not ready: the list opens, saying why. A hold that ends without the finger lifting
+  (the touch taken by the system, the app leaving the front, the listening stopped by something else) ends cleanly:
+  nothing asked, the words kept in the box, the kept note shown (11-18). The pill takes no touches and goes at once on
+  let go: nothing of it may lie over the toolbar (iPhone, 11-18: a pill left in its exit animation took every toolbar
+  tap). The best recognizer is looked for as the finger comes down; one found after listening started takes over with
+  all the audio from the start, if no words came yet.
 - Sound around talking (11-18): as listening starts TRIF pauses what plays; however listening ends, the audio is put
   back exactly as it was and what TRIF paused plays on from its time (never a reload). After a call or Siri it stays
   paused.

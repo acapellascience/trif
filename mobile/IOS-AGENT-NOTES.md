@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (468 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (471 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -43,7 +43,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   iconqueue (the same options: the shown page's icon onto the list waiting), phonelink (PhoneLink.swift's self-test in iOS's CryptoKit: "phone link self-test: ok"),
   phonepair (1: the pairing's state; "trif://pair?…": pair with that code; "forget"), phonedrop (More's link to the
   computer lost as a suspended app loses it: it reconnects after 2 s, or at once when the app is back in front), iconbatch (the list's profile to
-  Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds),
+  Documents/icon-batch.mobileconfig), iconqueuelist, iconqueueclear, hit ([x, y]: the view UIKit's hit test finds, with no event: for SwiftUI areas
+  it isn't what a real touch gets; use toolbarwatch), toolbarwatch (the windows' gesture recognizers mid-gesture, the
+  toolbar's frame, the dead taps ToolbarWatch saw and, in Debug, the last touches: window, view, recognizers and states),
   exitbutton (where full screen's exit button and its taps are), desktop (true/false: ⋯ → Request Desktop / Mobile
   Website on the shown page), desktopstate (the sites kept, each tab's mode, "(Mac agent)" where the web view has it),
   links (the chat links, newest first, the banners, the shown tab and offer: "runs on … came from …"), gosite n /
@@ -206,6 +208,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badges()` (TabsView asks once a drawing; `badge(for:)` the step's) through TabListRules. The
   robot's tap → ChatListView (Go to chat first; `site` the shown tab's); its hold → hold to talk (ContentView
   robotPress/robotHold/robotLift, HoldTalkPill in QuickAsk.swift) or ChatListView when talking isn't ready.
+  `robotEnded(why, stop:)` (11-18): a hold ending without onEnded: `@GestureState robotTouching` going back with
+  robotDown still set (a cancelled touch: stop = interrupt, words kept), scenePhase leaving .active, SpeechInput's
+  phase leaving listening/finishing (SpeechInput stopped it itself: UI state only). robotPress calls
+  `SpeechInput.lookAhead()` at touch-down.
+- ToolbarWatch.swift (11-18, Tim's dead toolbar): `WindowTouchWatch` (a do-nothing recognizer on every window, as
+  TouchWatch) hands every touch to `ToolbarWatch.saw`; each toolbar button reports its frame and enabled state
+  (`WatchSlot`) and calls `fired(name)` in its action. A short tap on an enabled button whose action didn't run in
+  0.5 s → Diagnostics "toolbar": the touch's window and view, the recognizers that had it and their states, any
+  recognizer in the windows still began/changed (`busy()`), ContentView's `holdWords` (robot, speech, covers, strip,
+  quick, keyboard, bars, chat focus). One line per 10 s, 20 a launch. (A UIApplication subclass via NSPrincipalClass
+  was tried first: SwiftUI's App ignores it, the app stays SwiftUIApplication.)
 - Shared rules (11-18, the shared-core loop: mobile/SHARED-CORE-PROGRESS.md; spec docs/MOBILE-BEHAVIOUR.md):
   mobile/shared/core/*.js → `node mobile/prepare.js` → mobile/shared/gen/core.js (global `TrifCore`, a bundle resource;
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
@@ -728,6 +741,27 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   ready (first time, refused, no on-device speech): the list opens instead, its box saying why or asking. A finger
   moving 20 pt before the 0.45 s is a slide, not a hold. One DragGesture(minimumDistance 0) beside the Button (ContentView
   robotPress/robotHold/robotLift); `robotHeld` stops the tap that ends a hold.
+- The toolbar dead after a long robot hold (Tim's SE 11-18: 79 s held, the strip, Send, then no toolbar button worked
+  until the app was minimised). CAUSE FOUND in the Simulator with real touches (a 22 s hold of a 34 s recording at
+  `-speechrate 2`, 625 characters: the pill's HeardText becomes a ScrollView past 150 pt; 78 characters never
+  showed it): after the let go, HoldTalkPill stayed in its removal transition (.opacity + .move(edge: .bottom)) for
+  good, invisible and moved down over the toolbar, and SwiftUI hit-tested it: toolbar taps reached _UIHostingView but
+  no SwiftUI recognizer was made for them (ToolbarWatch: "recognizers: WindowTouchWatch, the system gate"; nothing
+  mid-gesture). Dead with the strip still up, and after the Send; in the Simulator even after a trip to the
+  background. Fixed: the pill `.allowsHitTesting(false)` (it only shows words) and its removal `.identity` (gone at
+  once); KeptTalkPill fades in place (never moved over the toolbar). Checked after: the same hold → strip → Send →
+  tabs opened at once; hold + app to the background mid-hold (words kept, the kept note, toolbar fine); slide-away
+  cancel (toolbar fine); a robot tap opens the list. Rule kept: nothing that only shows may take touches over the
+  toolbar, and no removal moves a view over it.
+- The hold's recognizer (11-18, Tim's log: listening on SFSpeechRecognizer 0.4 s before "SpeechTranscriber
+  installed", logged twice): the look starts at the robot's touch-down (`lookAhead`), so the hold at 0.45 s has it;
+  a look that ends after listening started hands over to the analyzer with the kept audio (`upgradeListening`, "the
+  look found … it takes over", event count "upgraded") if no words came; a press during a look no longer looks again
+  (`downloadAfter` answers from `lookedToGet`; a looked-already press fetches from it too). Checked: the dev
+  `robothold` step at launch (before any look): "listening (SFSpeechRecognizer)", one "recognizers" line, the
+  takeover 0.05 s later, all 78 characters asked; a real hold: the look before "listening (SpeechAnalyzer …)".
+  Shots 469 (the strip after a 22 s hold), 470 (Mods opened right after the Send), 471 (the list after a hold the
+  app left mid-way: the words kept).
 - The box's microphone: tap or hold (Tim, 11-18; built): a press under 0.3 s is a tap: listening goes on (a stop square,
   an ✕ beside it, "Listening, tap to stop") until the next tap (asked) or the ✕ (kept in the box, not asked). Longer
   is a hold, as before; slid 90 pt away and let go: this listen's words dropped, nothing asked.
@@ -1008,6 +1042,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   position (the app doesn't track one: WebKit's own), iPad. The 14.5 s hang Tim saw isn't explained: the rebuild
   measured 5–13 ms a change in the Simulator (32 mods, 587 KB, 7 tabs) before, ~4–5 ms now and 20 quick changes in ~56
   ms; the mark moved, so his next diagnostics say what really hangs.
+- The dead toolbar on Tim's phone (11-18): the Simulator's cause (above) matches his flow (a long hold, so a long
+  text); his phone came back after minimising, the Simulator didn't. If it ever recurs, Diagnostics "toolbar" says
+  where the taps went. Not tried: a real claude.ai strip, a phone, a touch cancelled by the system mid-hold (a call;
+  the GestureState path is code-read only; the app leaving mid-hold was tried).
 - Speech (Tim's phone 11-18: "SpeechTranscriber en_US: supported; DictationTranscriber en_US: supported →
   SFSpeechRecognizer"): "supported" = Apple's model not on the phone yet, so the old recognizer is right until it's in.
   The download starts at a press (choose(download: true)); a press while the list's own look was still running was
@@ -1068,6 +1106,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   them. A warm return by an icon (Simulator 26.3): onOpenURL (openLink) runs BEFORE sceneWillEnterForeground, then
   didBecomeActive ~0.43 s later; UIKit's openURLContexts after that ("already taken").
 
+- SwiftUI removal transitions can stick (11-18): a view holding a ScrollView (HeardText past its height) removed with
+  .opacity + .move stayed, invisible, and kept taking taps where it had moved to. Overlays that only show things get
+  `.allowsHitTesting(false)`; no removal moves a view over the toolbar.
+- `@Published`'s publisher fires in willSet: an `.onReceive($phase)` that calls back into SpeechInput sees the OLD
+  phase there (a reentrant interrupt emptied the kept words once): act a turn later, or only on UI state.
+- SwiftUI's App ignores Info.plist's NSPrincipalClass (UIApplication.shared is SwiftUIApplication): watch touches with a
+  recognizer on each window instead (ToolbarWatch). UITouch.gestureRecognizers lists what had a touch, with states.
 - SwiftUI's `.clipped()` hides but doesn't stop touches (11-18, the hit step): the chat's web view, clipped to the
   strip, still took touches over the whole tab, and its top bar's segmented switch (a UIKit control) took them over
   the address bar. Hence ChatWebView's hitTest cut-off and `.allowsHitTesting(!pane.strip)` on the chat's top bar.

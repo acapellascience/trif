@@ -218,6 +218,8 @@ extension Model {
             let all = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
             out += "\nwindows: " + all.map { "\(type(of: $0)) level \($0.windowLevel.rawValue) hidden \($0.isHidden) \(Int($0.frame.minY))..\(Int($0.frame.maxY)) hit \($0.hitTest($0.convert(CGPoint(x: p[0], y: p[1]), from: nil), with: nil).map { "\(type(of: $0))" } ?? "nil")" }.joined(separator: "; ")
         }
+        // ({"toolbarwatch": 1}: the last taps on the toolbar that did nothing, as ToolbarWatch would log them)
+        if step["toolbarwatch"] != nil { out = "busy: \(ToolbarWatch.busy()); bar \(ToolbarWatch.shared.bar)\nlogged:\n" + ToolbarWatch.shared.recent.joined(separator: "\n") + "\nseen:\n" + ToolbarWatch.shared.seen.joined(separator: "\n") }
         // ({"phonelink": 1}: the phone link's self-test, PhoneLink.swift: the published Noise vector and the frames vector)
         if step["phonelink"] != nil { out = "phone link self-test: " + (PhoneLink.selfTest() ?? "ok") }
         // ({"phonepair": 1}: the pairing's state; {"phonepair": "trif://pair?…"}: pair with that code (with
@@ -418,6 +420,10 @@ struct ContentView: View {
     @State private var robotHoldWait: Task<Void, Never>?
     @State private var holdTalk = false
     @State private var holdAway = false
+    /// The robot's finger is down as SwiftUI's gesture sees it (back to false however the gesture ends, cancelled too).
+    @GestureState private var robotTouching = false
+    /// A hold ended by something else while the finger is still down: nothing more from that finger (no second hold).
+    @State private var robotSpent = false
     @State private var showMods = false
     @State private var addingIcon = false
     @ObservedObject private var phoneLink = PhoneLinkModel.shared
@@ -450,6 +456,14 @@ struct ContentView: View {
             // diagnostics read as if the app had left three times)
             // (the shown tab's picture as the app leaves; not on the way back in, when its page may not have drawn yet)
             if p != .active { browser.saveTabs(); browser.history.saveNow(); VideoStore.shared.saveNow(); if p == .inactive, was == .active { browser.snapshot(nil, "the app left the front") } }
+            // (a hold going on as the app leaves the front: ended, its words kept)
+            if p != .active { robotEnded("the app left the front", stop: false) }
+        }
+        // (the hold's listening stopped by something else (a call, an error): the pill and the hold go with it)
+        // ($phase tells before the change is made (willSet): only the hold's own state goes back here, a turn later)
+        .onReceive(SpeechInput.shared.$phase) { now in
+            guard holdTalk, now != .listening, now != .finishing else { return }
+            Task { @MainActor in if holdTalk, SpeechInput.shared.phase != .listening, SpeechInput.shared.phase != .finishing { robotEnded("listening stopped (\(SpeechInput.shared.phase))", stop: false) } }
         }
         // (a link UIKit handed over that onOpenURL never brought: opened once the app has been in front 2 s)
         .onChange(of: phase, initial: true) { _, p in
@@ -548,7 +562,15 @@ struct ContentView: View {
             // (and the robot held: what's heard, over whatever is shown, just above the toolbar)
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
-                    if holdTalk { HoldTalkPill(away: holdAway).padding(.bottom, 10).transition(.opacity.combined(with: .move(edge: .bottom))) }
+                    // (Tim, 11-18: after a long hold the toolbar took no taps until the app went to the background.
+                    // Found in the Simulator: the pill, with a long text (its HeardText a ScrollView), stayed in its
+                    // removal for good, invisible and moved down over the toolbar, and SwiftUI gave it the taps. It
+                    // only shows words, so it takes no touches, and it goes at once when the finger lifts)
+                    if holdTalk {
+                        HoldTalkPill(away: holdAway).padding(.bottom, 10)
+                            .allowsHitTesting(false)
+                            .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)), removal: .identity))
+                    }
                     // (a hold stopped by a call, the app left, an error: nothing asked, the words kept; a tap shows them)
                     if !holdTalk { KeptTalkSlot { closeCovers(); showChatList = true } }
                     if pane.shown && !browser.status.isEmpty && !browser.fullScreen {
@@ -681,7 +703,11 @@ struct ContentView: View {
             }
         }
         // (the icon check's way in, Model.iconCheck: UIApplication.open of the app's own scheme asks "Open in …?" first)
-        .onAppear { ContentView.openForCheck = { url in openLink(url) } }
+        .onAppear {
+            ContentView.openForCheck = { url in openLink(url) }
+            // (a tap on the toolbar that did nothing: the app's state with it, in Diagnostics "toolbar")
+            ToolbarWatch.shared.state = { holdWords }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .zip, .folder, .json], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { browser.importFiles(urls) }
         }
@@ -991,15 +1017,48 @@ struct ContentView: View {
     /// The finger on the robot: held still 0.45 s, it talks (or opens the list); moved first, it was a slide, not a
     /// hold. While talking, slid well away (90 pt) means letting go cancels.
     private func robotPress(_ moved: CGSize) {
+        if robotSpent { return }
         let far = hypot(moved.width, moved.height)
         if robotDown == nil {
             robotDown = Date()
+            // (the best recognizer looked for as the finger comes down, so a hold that talks at 0.45 s uses it: Tim's
+            // phone, 11-18, started on SFSpeechRecognizer 0.4 s before the look said SpeechTranscriber was there)
+            SpeechInput.shared.lookAhead()
             robotHoldWait = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 if !Task.isCancelled, robotDown != nil { robotHold() }
             }
         }
         if holdTalk { holdAway = far > 90 } else if far > 20 { robotHoldWait?.cancel() }
+    }
+
+    /// The hold ended some other way than the finger lifting (the touch cancelled, the app leaving the front, the
+    /// listening stopped by something else): everything about it goes back. `stop`: the listening is stopped here too,
+    /// what was heard kept, not asked (SpeechInput.interrupt: the box keeps the words and KeptTalkPill says so); not when
+    /// SpeechInput stopped it itself (the app leaving, a call, an error: it has already kept the words).
+    private func robotEnded(_ why: String, stop: Bool) {
+        guard robotDown != nil || holdTalk || holdAway else { return }
+        robotHoldWait?.cancel()
+        robotDown = nil
+        let talking = holdTalk
+        holdTalk = false
+        holdAway = false
+        if talking, stop { SpeechInput.shared.interrupt(why: why) }
+        Diagnostics.shared.log("quick ask", "robot hold ended without its lift (\(why))\(talking ? "" : ", not talking yet")")
+        // (the finger still down: the rest of its touch does nothing, and its lift opens no list; else robotHeld goes)
+        if robotTouching { robotSpent = true } else { releaseHeld() }
+    }
+
+    /// The tap that ends a hold is stopped for a moment (robotHeld), then taps work again.
+    private func releaseHeld() {
+        if robotHeld { Task { @MainActor in try? await Task.sleep(nanoseconds: 400_000_000); robotHeld = false } }
+    }
+
+    /// (Diagnostics) The robot's hold and what lies over the toolbar now.
+    private var holdWords: String {
+        let robot = "the robot: \(robotDown == nil ? "up" : "down"), held \(robotHeld), talking \(holdTalk)\(holdAway ? ", slid away" : "")"
+        let strip = "strip \(pane.strip ? (pane.stripIn ? "in" : "filling") : "off"), its layer \(stripLayer ? (stripUp ? "up" : "drawn") : "gone")"
+        return "\(robot); speech \(SpeechInput.shared.phase); covers \(ContentView.coversNow); \(strip); quick \(pane.quick.map { "\($0.state)" } ?? "none"); keyboard \(bars.keyboardUp ? "up" : "down"), bars \(String(format: "%.2f", bars.progress)); chat focused \(pane.chatHasFocus)"
     }
 
     private func robotHold() {
@@ -1023,14 +1082,17 @@ struct ContentView: View {
 
     private func robotLift() {
         robotHoldWait?.cancel()
+        // (a hold already ended by something else: the finger's lift only clears it)
+        if robotSpent { robotSpent = false; holdAway = false; releaseHeld(); return }
+        let held = robotDown.map { Date().timeIntervalSince($0) }
         robotDown = nil
         if holdTalk {
             holdTalk = false
-            if holdAway { SpeechInput.shared.cancel() } else { SpeechInput.shared.release() }
+            if holdAway { SpeechInput.shared.cancel() } else { SpeechInput.shared.release(held: held) }
         }
         holdAway = false
         // (a hold that ends off the button sends no tap: not kept for the next one)
-        if robotHeld { Task { @MainActor in try? await Task.sleep(nanoseconds: 400_000_000); robotHeld = false } }
+        releaseHeld()
     }
 
     private var toolbar: some View {
@@ -1040,18 +1102,21 @@ struct ContentView: View {
             // (with the chat open, back and forward only close it, back to the page as it was: Tim, 11-15, "that's
             // the behaviour people will expect")
             // (the chat showing: its own history; the tabs, Mods or the address screen: closed; else the tab's history)
-            Button { if pane.shown { pane.back() } else if covered { closeCovers() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
+            Button { ToolbarWatch.shared.fired("back"); if pane.shown { pane.back() } else if covered { closeCovers() } else { browser.back() } } label: { Image(systemName: "chevron.left") }
                 .disabled(pane.shown ? !pane.canGoBack : !covered && !browser.canGoBack)
                 .accessibilityLabel(covered && !pane.shown ? backToTab : "Back")
+                .modifier(WatchSlot(name: "back", enabled: pane.shown ? pane.canGoBack : covered || browser.canGoBack))
                 .frame(maxWidth: .infinity)
-            Button { if pane.shown { pane.forward() } else if covered { closeCovers() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
+            Button { ToolbarWatch.shared.fired("forward"); if pane.shown { pane.forward() } else if covered { closeCovers() } else { browser.forward() } } label: { Image(systemName: "chevron.right") }
                 .disabled(pane.shown ? !pane.canGoForward : !covered && !browser.canGoForward)
                 .accessibilityLabel(covered && !pane.shown ? backToTab : "Forward")
+                .modifier(WatchSlot(name: "forward", enabled: pane.shown ? pane.canGoForward : covered || browser.canGoForward))
                 .frame(maxWidth: .infinity)
             // (Tim, 11-18: a tap opens the quick ask, "What should change?", with Go to chat and the chats below
             // (ChatListView); while the chat is open (shown selected) it goes back to the tab; with the quick ask's strip
             // up, the whole chat, as before. Held: talk at once (hold to talk), or the same list when talking can't start)
             Button {
+                ToolbarWatch.shared.fired("robot")
                 if robotHeld { robotHeld = false; return }
                 if pane.shown { pane.close() } else if pane.strip { pane.open() } else { showChatList = true }
             } label: {
@@ -1061,15 +1126,27 @@ struct ContentView: View {
                     .padding(-5)
             }
             .simultaneousGesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .updating($robotTouching) { _, on, _ in on = true }
                 .onChanged { g in robotPress(g.translation) }
                 .onEnded { _ in robotLift() })
+            // (a touch the system took (a call, Control Center, an alert): SwiftUI calls no onEnded, only the gesture
+            // state goes back. A moment later, a hold still marked down is ended here: nothing left half-held)
+            .onChange(of: robotTouching) { _, on in
+                guard !on else { return }
+                Task { @MainActor in
+                    if robotDown != nil { robotEnded("the touch was cancelled", stop: true) }
+                    if robotSpent { robotSpent = false; releaseHeld() }
+                }
+            }
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
             .accessibilityHint("Opens What should change? and the chats")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
             .accessibilityAction(named: "Go to chat") { closeCovers(); pane.open() }
+                .modifier(WatchSlot(name: "robot", enabled: true))
                 .frame(maxWidth: .infinity)
             // (the page: back to it from whatever covers it; on the page, a + for a new tab; in the middle, a little bigger)
             pageButton
+                .modifier(WatchSlot(name: "page", enabled: true))
                 .frame(width: 64)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { ContentView.pageButtonMidX = $0 }
             // (Tim, 11-17, later: back to the Mods switch next, then the tabs; `-tabsfirst`: the tabs first, as for a while that day)
@@ -1078,11 +1155,13 @@ struct ContentView: View {
             // (the last button adds this site to the Home Screen, Tim 11-16; what the ⋯ menu here held is in the ⋯ at the
             // address bar's left. Its glyph, an A in a rounded square like the App Store's (Tim, 11-17), so it isn't
             // taken for the new tab's +)
-            Button { onTab { addingIcon = true } } label: { Image(systemName: "a.square") }
+            Button { ToolbarWatch.shared.fired("A"); onTab { addingIcon = true } } label: { Image(systemName: "a.square") }
                 .disabled(!onWebPage)
                 .accessibilityLabel("Add to Home Screen")
+                .modifier(WatchSlot(name: "A", enabled: onWebPage))
                 .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { ToolbarWatch.shared.bar = $0 }
         .font(.title3)
         // (the same room on both sides: iOS's side safe areas are the same on both sides in landscape, so the row's
         // centre is the screen's)
@@ -1102,7 +1181,7 @@ struct ContentView: View {
     /// waiting for an OK.
     private var modsButton: some View {
         // (tapped again while it's open: back to the page, as it was; Tim, 11-18)
-        Button { if showMods { showMods = false } else { onTab { showMods = true } } } label: {
+        Button { ToolbarWatch.shared.fired("Mods"); if showMods { showMods = false } else { onTab { showMods = true } } } label: {
             SwitchGlyph(on: !store.paused).frame(width: 30, height: 24)
                 .overlay(alignment: .topTrailing) {
                     if waitingHere > 0 {
@@ -1112,24 +1191,26 @@ struct ContentView: View {
                 }
         }
         .accessibilityLabel(store.paused ? "Mods, all paused" : waitingHere > 0 ? "Mods, \(waitingHere) waiting for your OK" : "Mods")
+        .modifier(WatchSlot(name: "Mods", enabled: true))
     }
 
     /// The page: back to it from whatever covers it; on the page, a + for a new tab.
     private var pageButton: some View {
-        Button(action: showPage) { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
+        Button { ToolbarWatch.shared.fired("page"); showPage() } label: { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
             .accessibilityLabel(covered ? backToTab : "New Tab")
     }
     /// The tabs, their count in a rounded square.
     private var tabsButton: some View {
         // (tapped again with the tabs open and none picked: back to the page, as it was, as Safari's; Tim, 11-18)
         // (opened at the tab just left; from a chat, the chat's own tab: Tim, 11-18)
-        Button { if showTabs { showTabs = false } else { let f = pane.chatTabShown; onTab { tabsFocus = f; browser.snapshot(); showTabs = true } } } label: {
+        Button { ToolbarWatch.shared.fired("tabs"); if showTabs { showTabs = false } else { let f = pane.chatTabShown; onTab { tabsFocus = f; browser.snapshot(); showTabs = true } } } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
                 Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))
             }
         }
         .accessibilityLabel("Tabs, \(browser.tabs.count) open")
+        .modifier(WatchSlot(name: "tabs", enabled: true))
     }
 
 }

@@ -35,6 +35,9 @@ import java.io.File
  */
 /** onActivityResult's request: the Import mod… picker. */
 private const val PICK_IMPORT = 41
+/** …a page's file input's picker; Android's permission ask for a page's camera / mic / location. */
+private const val PICK_PAGE_FILE = 42
+private const val ASK_ANDROID = 43
 
 class MainActivity : Activity() {
     private lateinit var browser: Browser
@@ -96,6 +99,7 @@ class MainActivity : Activity() {
             addView(bar, LinearLayout.LayoutParams(-1, -2))
         })
         browser = Browser(this) { refresh() }
+        browser.host = pageHost
         browser.pageChanged = { panel?.pageChanged(); if (modsShown) titleMods() }
         // The installed mods, on a thread of their own (the store thread: reading a mod blocks on the reader); what
         // every page gets is made again after each change. What the reader made of each mod is kept, so the tabs
@@ -345,9 +349,63 @@ class MainActivity : Activity() {
         try { startActivityForResult(pick, PICK_IMPORT) } catch (_: ActivityNotFoundException) { say("Nothing to import there.") }
     }
 
-    @Deprecated("Activity's own; the picker is the only result TRIF asks for")
+    // What the pages need of the screen (Browser.Host): Android's permission ask, the file picker, full screen.
+    private var asked: (() -> Unit)? = null
+    private var picked: ((Array<Uri>?) -> Unit)? = null
+    private var fullView: View? = null
+    private var leaveFull: (() -> Unit)? = null
+    private val pageHost = object : Browser.Host {
+        override fun askAndroid(permissions: List<String>, done: () -> Unit) {
+            asked?.invoke()
+            asked = done
+            requestPermissions(permissions.toTypedArray(), ASK_ANDROID)
+        }
+        override fun refusedForGood(permission: String) =
+            checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                !shouldShowRequestPermissionRationale(permission)
+        override fun pickFiles(intent: Intent, multiple: Boolean, done: (Array<Uri>?) -> Unit): Boolean {
+            picked?.invoke(null)
+            picked = null
+            return try { startActivityForResult(intent, PICK_PAGE_FILE); picked = done; true } catch (_: ActivityNotFoundException) { false }
+        }
+        override fun fullScreen(view: View?, leave: (() -> Unit)?) = showFull(view, leave)
+        override fun offerText(text: String) = this@MainActivity.offerText(text)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, results)
+        if (requestCode != ASK_ANDROID) return
+        val done = asked; asked = null; done?.invoke()
+    }
+
+    /** A page's full-screen view over the whole window, the system bars hidden; null: back to the page. */
+    private fun showFull(view: View?, leave: (() -> Unit)?) {
+        val decor = window.decorView as FrameLayout
+        fullView?.let { decor.removeView(it) }
+        fullView = view; leaveFull = leave
+        // (the browser under it hidden from TalkBack too: only the full-screen page is there)
+        findViewById<View>(android.R.id.content).importantForAccessibility =
+            if (view != null) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        val bars = window.insetsController
+        if (view != null) {
+            view.setBackgroundColor(Color.BLACK)
+            decor.addView(view, FrameLayout.LayoutParams(-1, -1))
+            bars?.hide(android.view.WindowInsets.Type.systemBars())
+            bars?.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else bars?.show(android.view.WindowInsets.Type.systemBars())
+        backChanged()
+    }
+
+    @Deprecated("Activity's own; the pickers are the only results TRIF asks for")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_PAGE_FILE) {
+            val done = picked; picked = null
+            val uris = if (resultCode != RESULT_OK || data == null) null
+                else data.clipData?.let { c -> Array(c.itemCount) { c.getItemAt(it).uri } } ?: data.data?.let { arrayOf(it) }
+            done?.invoke(uris)
+            return
+        }
         if (requestCode != PICK_IMPORT || resultCode != RESULT_OK || data == null) return
         val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
         if (uris.isNotEmpty()) importFiles(uris)
@@ -576,6 +634,7 @@ class MainActivity : Activity() {
     // Back: closes the tab list, else goes back in the page while it can, else the system's own back (predictive
     // back stays on: the callback is registered only while there's somewhere to go back to).
     private fun backInApp(): Boolean {
+        if (fullView != null) { leaveFull?.invoke() ?: showFull(null, null); return true }
         if (modsShown) { showMods(false); return true }
         if (listShown) { showList(false); return true }
         if (!::browser.isInitialized) return false
@@ -589,7 +648,7 @@ class MainActivity : Activity() {
 
     private fun backChanged() {
         if (Build.VERSION.SDK_INT < 33) return
-        val want = modsShown || listShown || browser.current?.web?.canGoBack() == true
+        val want = fullView != null || modsShown || listShown || browser.current?.web?.canGoBack() == true
         if (want == backRegistered) return
         val cb = backCallback as OnBackInvokedCallback
         if (want) onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)

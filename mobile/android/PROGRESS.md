@@ -29,6 +29,8 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
   `adb reverse` as 127.0.0.1/localhost (Android 17 + targetSdk 37 refuses 10.0.2.2). Cleartext to those two hosts
   is allowed in the **debug** build only (src/debug/res/xml/network_security_config.xml).
 
+FOUNDATION COMPLETE (round 15, 2026-11-18)
+
 ## Foundation checklist
 
 1. [x] The project: Gradle wrapper, app module, debug build installs and opens on the emulator; unit tests run.
@@ -43,11 +45,11 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
      the Play Store button instead of the browser)
    - [x] default-browser role (round 5: http/https VIEW filter with no host + APP_BROWSER; can hold
      android.app.role.BROWSER; links open in it; the start page = address bar + start words)
-   - [ ] what a WebView doesn't do by itself and WKWebView does (found in round 14's last check): `<input type=file>`
-     (onShowFileChooser → the system picker), fullscreen video (onShowCustomView), a page asking for the camera / mic /
-     location (onPermissionRequest / onGeolocationPermissionsShowPrompt → Android's own permission ask; iPhone's
-     WKWebView asks by itself), downloads (setDownloadListener: a .js file → Add this mod?, iPhone's ModDownloads,
-     2 MB at most; anything else let go, as iPhone)
+   - [x] what a WebView doesn't do by itself and WKWebView does (round 15, `PageAsks.kt` + Browser's chrome client):
+     a page's camera / mic / location ask (TRIF's question per site, then Android's own permission ask the first
+     time; kept per site for the launch), `<input type=file>` (the system picker), full screen (over everything, the
+     bars hidden, Back leaves it), downloads (a .js ≤ 2 MB, also a page's blob:/data: file → Add this mod?; the rest
+     let go, as iPhone's ModDownloads). test/pageasks.sh on shared/pages/asks.html
 3. [x] Script worlds (round 6): TRIF's world + the box (SES + sandbox-runtime.js) at document start; page world
    for free mods; the iPhone's injected scripts (kit.js, start-own/start-page, style-mirror.js, page-bridge.js, the
    free pair) in iPhone's order through `Scripts.kt` + two adapter scripts (js/world-call.js, js/webkit-bridge.js)
@@ -82,26 +84,36 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
      restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed). Round 14: `test/all.sh`
      runs them all (11 tests, ~7 min, ALL PASS)
 
-## Done this round (round 14, 2026-11-18)
-- Merged origin/ios-poc (shared core: mod-offer.js). Add this mod?'s coral box now follows the shared rule:
-  `ModStore.offerPlace` calls `TrifCore.modOffer.elsewhere` (no answer: the box for every site, iPhone's fallback);
-  the words stay `ModOffer.elsewhere(m, place)`; ModOfferTest holds it to all 161 of mod-offer-cases.json.
-- `test/all.sh`: builds + unit tests, boots the emulator and both page servers if needed, runs every emulator test,
-  stops what it started. Unit tests all pass; emulator: all 11 PASS (startup tabs popups applinks worlds mods running
-  modstab import offer playing), nothing needed fixing.
-- Last check against ANDROID.md / the iPhone app: found browser basics a WebView lacks that WKWebView has by itself
-  (file inputs, fullscreen video, page permission asks, downloads). Added as item 2's last box; foundation not complete.
+## Done this round (round 15, 2026-11-18)
+- Item 2's last box: `PageAsks.kt` (pure: what's asked, the decision, kept answers, Android permissions; `PageDownloads`:
+  file name, wanted, data: text) + Browser's onPermissionRequest / geolocation / onShowFileChooser / onShowCustomView /
+  setDownloadListener, MainActivity as `Browser.Host` (requestPermissions, the picker's result, full screen).
+- Manifest: CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, FINE/COARSE location (all features required=false).
+- Tests: PageAsksTest (unit); test/pageasks.sh PASS (location Allow + Android's dialog + kept, camera Allow → "ok video",
+  camera+mic Don't Allow → NotAllowedError, picker = DocumentsUI, full screen on/off, mod download / blob file → Add this
+  mod?, style sheet let go); added to all.sh. `test/all.sh`: unit tests pass, all 12 emulator tests PASS.
+- Every foundation box is ticked and proven: **FOUNDATION COMPLETE**.
 
 ## Next step
-Item 2's last box: in `Browser.makeWebView`, onShowFileChooser (the system picker; MainActivity's onActivityResult as
-PICK_IMPORT does), onShowCustomView/onHideCustomView (fullscreen over the browser, Back leaves it), onPermissionRequest
-(camera/mic: Android's runtime permission ask, then grant only what was asked; needs CAMERA/RECORD_AUDIO in the
-manifest) and geolocation (ACCESS_FINE/COARSE_LOCATION, granted per origin for the launch), setDownloadListener (a .js
-≤ 2 MB → the offer, iPhone's ModDownloads; blob:/data: links need a page-side fetch, else let go). A stand-in page in
-mobile/android/test/pages or shared/pages if a shared one fits; one emulator test (downloads.sh / pageasks.sh), added
-to all.sh. Then, if all is proven: "FOUNDATION COMPLETE". Optional: a folder picked as a folder (OPEN_DOCUMENT_TREE).
+FOUNDATION COMPLETE. The UI layer waits for Tim's word that the iPhone app's UI has settled. Optional small items
+meanwhile, only if a round is asked for: a folder picked as a folder (ACTION_OPEN_DOCUMENT_TREE) for import; history
+exports once Android keeps history.
 
 ## Notes for next round
+- Page asks (round 15): `Browser.pageAsk` → `PageAsks.decide` (Refuse: tab not shown / TRIF behind / a question
+  up; Known: answered this launch; Ask) → the AlertDialog → `fromAndroid` (asks Android only for what TRIF lacks;
+  `Host.refusedForGood` → the "off for TRIF" toast). Logcat "page ask: <site> <kinds>: asked|Allow|Don't Allow|answered
+  earlier…", "<site>: camera granted[, Android refused …]". Protected media (DRM) and MIDI are refused, as WebView's
+  default: revisit if a streaming site needs DRM.
+- Downloads: "download: downloaded <name> (n characters): to Add this mod?" / "<name>: let go" / "couldn't download".
+  http(s) fetched again with the WebView's cookies and user agent (HttpURLConnection, 2 MB cut); blob: read in TRIF's
+  world (fetch works before the page revokes it); data: decoded. WebView passes no name for a blob's `download`
+  attribute: a blob of JavaScript type counts as a mod file.
+- Full screen: the page's view goes on the decor view, the content hidden from accessibility (uiautomator's
+  `dump --compressed` shows only what TalkBack sees). File input: `params.createIntent()` (GET_CONTENT), PICK_PAGE_FILE.
+- pageasks.sh: the emulator's GPS is slow to start; the test feeds `adb emu geo fix` every second and the page uses
+  enableHighAccuracy (a low-accuracy ask timed out: no network location on the emulator). Android's dialog button:
+  "While using the app". The file input's node is its "No file chosen" text.
 - all.sh (round 14): `./test/all.sh [--no-build] [names…]`; per-test logs in $TMPDIR/trif-android-tests/<name>.txt;
   it clears logcat before each test. Take the device lock before it. Add each new emulator test to its default list.
 - Offer box (round 14): `offerPlace` runs on the store thread (offerText computes `away` there, `ModOffer.show` takes
@@ -224,6 +236,14 @@ to all.sh. Then, if all is proven: "FOUNDATION COMPLETE". Optional: a folder pic
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 15: pages can now use the camera, microphone and location, pick files for upload buttons, go full screen, and
+  a downloaded .js mod goes to "Add this mod?" (as on iPhone). New words, drafts in STRINGS.md: TRIF's own question
+  before Android's permission ask, after the one iPhone's WebKit shows: "Allow “{site}” to use your camera?" (…your
+  microphone? / …your camera and microphone? / …your current location?) with Don't Allow / Allow; and, when Android has
+  turned TRIF down for good, a note such as "The camera is off for TRIF. To use it on pages, allow it in Android's
+  Settings, under Apps, TRIF." The answer is kept per site until TRIF closes (Allow and Don't Allow), so a page can't
+  ask over and over. Android's own dialog ("Allow TRIF to take pictures and record video?") is the system's; it comes
+  once, the first time any site needs it. TRIF now lists camera, microphone and location permissions (Play shows them).
 - Round 14: one script now runs every Android test on the emulator; all 11 pass. Nothing to see or decide, no new words.
   Before calling the foundation done I checked it against what the iPhone's web view does by itself, and found four
   things Android's needs added: choosing a file for a page's upload button, fullscreen video, a page asking for the

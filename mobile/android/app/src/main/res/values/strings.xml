@@ -31,6 +31,16 @@
     <string name="export_all_mods">Export all mods for %1$s</string>
     <string name="pause_all_mods">Pause all mods</string>
     <string name="resume_mods">Resume mods</string>
+    <string name="page_ask_camera">Allow “%s” to use your camera?</string>
+    <string name="page_ask_mic">Allow “%s” to use your microphone?</string>
+    <string name="page_ask_camera_mic">Allow “%s” to use your camera and microphone?</string>
+    <string name="page_ask_location">Allow “%s” to use your current location?</string>
+    <string name="dont_allow">Don’t Allow</string>
+    <string name="allow">Allow</string>
+    <string name="page_ask_off_camera">The camera is off for TRIF. To use it on pages, allow it in Android’s Settings, under Apps, TRIF.</string>
+    <string name="page_ask_off_mic">The microphone is off for TRIF. To use it on pages, allow it in Android’s Settings, under Apps, TRIF.</string>
+    <string name="page_ask_off_camera_mic">The camera and microphone are off for TRIF. To use them on pages, allow them in Android’s Settings, under Apps, TRIF.</string>
+    <string name="page_ask_off_location">Location is off for TRIF. To use it on pages, allow it in Android’s Settings, under Apps, TRIF.</string>
     <plurals name="tabs_title">
         <item quantity="one">%d tab</item>
         <item quantity="other">%d tabs</item>

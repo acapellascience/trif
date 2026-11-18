@@ -8,6 +8,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Message
 import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
 import android.util.Log
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -60,6 +63,20 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
     /** The screen is in front (set by MainActivity): only then may a page's own try at another app ask. */
     var inFront = false
     private var asking: AlertDialog? = null
+
+    /** What the screen does for the pages (MainActivity): Android's permission ask, its file picker, full screen, a
+     *  downloaded mod's Add this mod?. */
+    interface Host {
+        fun askAndroid(permissions: List<String>, done: () -> Unit)
+        /** Android won't show its ask for this any more (the person turned it down for good). */
+        fun refusedForGood(permission: String): Boolean
+        /** The system's file picker for a page's file input; false if none could be shown. */
+        fun pickFiles(intent: Intent, multiple: Boolean, done: (Array<Uri>?) -> Unit): Boolean
+        /** A page's full-screen view (a video) over everything, or null to leave it. */
+        fun fullScreen(view: android.view.View?, leave: (() -> Unit)?)
+        fun offerText(text: String)
+    }
+    var host: Host? = null
 
     /** The tabs kept from last time, else one new tab. */
     fun restore() {
@@ -227,6 +244,100 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
 
     private fun log(what: String, line: String) = Log.i("TRIF", "$what: $line")
 
+    // MARK: what WKWebView does by itself and a WebView doesn't (round 15): camera / mic / location asks, file
+    // inputs, full screen, downloads
+
+    private val kept = PageAsks.Kept()
+    /** The page ask whose question is up (a page can take it back: onPermissionRequestCanceled). */
+    private var askingFor: Any? = null
+
+    private fun has(p: String) = context.checkSelfPermission(p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** A page's ask for `kinds` (from `origin`): answered through `answer(allowed kinds)`. */
+    private fun pageAsk(tab: Tab, origin: String, kinds: Set<PageAsks.Kind>, token: Any, answer: (Set<PageAsks.Kind>) -> Unit) {
+        val what = kinds.joinToString("+") { it.name.lowercase() }
+        val site = PageAsks.site(origin)
+        val onScreen = tab === current && inFront
+        when (val d = PageAsks.decide(kinds, onScreen, asking != null, kept.of(origin))) {
+            PageAsks.Decision.Refuse -> { log("page ask", "$site $what: refused, ${if (!onScreen) "not on screen" else "a question is already up"}"); answer(emptySet()) }
+            is PageAsks.Decision.Known -> {
+                log("page ask", "$site $what: answered earlier, ${if (d.allowed.isEmpty()) "Don't Allow" else "Allow"}")
+                fromAndroid(site, d.allowed, answer)
+            }
+            PageAsks.Decision.Ask -> {
+                askingFor = token
+                asking = AlertDialog.Builder(context)
+                    .setTitle(context.getString(PageAsks.question(kinds), site))
+                    .setNegativeButton(R.string.dont_allow) { _, _ ->
+                        kept.put(origin, kinds, false); log("page ask", "$site $what: Don't Allow"); answer(emptySet())
+                    }
+                    .setPositiveButton(R.string.allow) { _, _ ->
+                        kept.put(origin, kinds, true); log("page ask", "$site $what: Allow")
+                        fromAndroid(site, kinds, answer)
+                    }
+                    .setOnCancelListener { log("page ask", "$site $what: dismissed"); answer(emptySet()) }
+                    .setOnDismissListener { asking = null; askingFor = null }
+                    .show()
+                log("page ask", "$site $what: asked")
+            }
+        }
+    }
+
+    /** What TRIF itself may have from Android of `kinds` (asking Android first for what it hasn't), to `answer`. */
+    private fun fromAndroid(site: String, kinds: Set<PageAsks.Kind>, answer: (Set<PageAsks.Kind>) -> Unit) {
+        val missing = PageAsks.missing(kinds, ::has)
+        val h = host
+        val finish = {
+            val got = PageAsks.allowed(kinds, ::has)
+            val lost = kinds - got
+            log("page ask", "$site: ${if (got.isEmpty()) "nothing" else got.joinToString("+") { it.name.lowercase() }} granted" +
+                if (lost.isEmpty()) "" else ", Android refused ${lost.joinToString("+") { it.name.lowercase() }}")
+            if (lost.isNotEmpty() && lost.all { k -> k.permissions.all { h?.refusedForGood(it) == true } })
+                Toast.makeText(context, PageAsks.refusedNote(lost), Toast.LENGTH_LONG).show()
+            answer(got)
+        }
+        if (missing.isEmpty() || h == null) finish() else { log("page ask", "$site: asking Android for ${missing.joinToString(" ") { it.substringAfterLast('.') }}"); h.askAndroid(missing) { finish() } }
+    }
+
+    private fun cancelAsk(token: Any) {
+        if (askingFor !== token) return
+        log("page ask", "taken back by the page")
+        asking?.dismiss()
+    }
+
+    /** A page's download: a .js mod to Add this mod?, the rest let go (iPhone's ModDownloads). */
+    private fun download(tab: Tab, url: String, agent: String?, disposition: String?, mime: String?, length: Long) {
+        val name = PageDownloads.name(url, disposition).ifEmpty { url.substringBefore(':') + " file" }
+        if (!PageDownloads.wanted(url, disposition, mime, length)) { log("download", "$name: let go"); return }
+        val got = { text: String?, why: String? ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (text == null) log("download", "couldn't download $name: $why")
+                else { log("download", "downloaded $name (${text.length} characters): to Add this mod?"); host?.offerText(text) }
+            }
+        }
+        when {
+            url.startsWith("data:") -> PageDownloads.dataText(url).let { got(it, if (it == null) "unreadable" else null) }
+            // (a page's own made file lives only in the page: read in TRIF's world, which shares its origin)
+            url.startsWith("blob:") -> tab.worlds?.call(Scripts.World.TRIF,
+                "const r = await fetch(${JSONObject.quote(url)}); const b = await r.blob(); if (b.size > ${PageDownloads.MAX}) throw new Error('over 2 MB'); return await b.text();"
+            ) { a -> if (a.ok) got(a.value as? String, null) else got(null, a.error ?: "no answer") } ?: got(null, "no page")
+            else -> Thread {
+                runCatching {
+                    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    c.connectTimeout = 15000; c.readTimeout = 15000
+                    agent?.let { c.setRequestProperty("User-Agent", it) }
+                    CookieManager.getInstance().getCookie(url)?.let { c.setRequestProperty("Cookie", it) }
+                    try {
+                        if (c.responseCode !in 200..299) throw java.io.IOException("the server answered ${c.responseCode}")
+                        val bytes = c.inputStream.use { s -> s.readNBytes(PageDownloads.MAX.toInt() + 1) }
+                        if (bytes.size > PageDownloads.MAX) throw java.io.IOException("over 2 MB")
+                        String(bytes, Charsets.UTF_8)
+                    } finally { c.disconnect() }
+                }.fold({ got(it, null) }, { got(null, it.message ?: it.javaClass.simpleName) })
+            }.start()
+        }
+    }
+
     // MARK: the pages' scripts (iPhone: Browser.installScripts / ModStore.userScripts)
 
     private val texts = mutableMapOf<String, String>()
@@ -339,6 +450,34 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
                     tab.title = title; changed()
                 }
             }
+            override fun onPermissionRequest(request: PermissionRequest) {
+                val kinds = PageAsks.kinds(request.resources)
+                if (kinds.isEmpty()) { log("page ask", "${PageAsks.site(request.origin.toString())} ${request.resources.joinToString(" ")}: refused"); request.deny(); return }
+                pageAsk(tab, request.origin.toString(), kinds, request) { got ->
+                    val res = got.mapNotNull(PageAsks::resource).toTypedArray()
+                    if (res.isEmpty()) request.deny() else request.grant(res)
+                }
+            }
+            override fun onPermissionRequestCanceled(request: PermissionRequest) = cancelAsk(request)
+            override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                pageAsk(tab, origin, setOf(PageAsks.Kind.LOCATION), callback) { got -> callback.invoke(origin, got.isNotEmpty(), false) }
+            }
+            override fun onGeolocationPermissionsHidePrompt() { askingFor?.let { if (it is GeolocationPermissions.Callback) cancelAsk(it) } }
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                val multiple = params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                val shown = host?.pickFiles(params.createIntent().apply { if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true) }, multiple) { uris ->
+                    log("file input", "${uris?.size ?: 0} picked"); callback.onReceiveValue(uris)
+                } ?: false
+                log("file input", if (shown) "the picker (${params.acceptTypes.filter { it.isNotEmpty() }.joinToString(" ").ifEmpty { "any file" }}${if (multiple) ", several" else ""})" else "no picker")
+                if (!shown) callback.onReceiveValue(null)
+                return true
+            }
+            override fun onShowCustomView(view: android.view.View, callback: CustomViewCallback) {
+                if (tab !== current) { callback.onCustomViewHidden(); return }
+                log("full screen", "on"); host?.fullScreen(view) { callback.onCustomViewHidden() }
+            }
+            override fun onHideCustomView() { log("full screen", "off"); host?.fullScreen(null, null) }
         }
+        setDownloadListener { url, agent, disposition, mime, length -> download(tab, url, agent, disposition, mime, length) }
     }
 }

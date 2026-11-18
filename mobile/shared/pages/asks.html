@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page asks</title>
+<!-- What a page asks of the browser beyond showing itself: the camera, the microphone, the location, a file for
+     its file input, full screen, downloads (a mod file, a picture, a file the page makes). Android's test:
+     mobile/android/test/pageasks.sh. Each answer is written in #out. -->
+<style>
+  body { font: 17px/1.5 -apple-system, sans-serif; margin: 12px }
+  button, label { display: block; margin: 8px 0; font: inherit; padding: 8px }
+  #big { background: #1f8a5b; color: white; padding: 8px }
+</style>
+<p id="out">ready</p>
+<button id="cam">Camera</button>
+<button id="cammic">Camera and mic</button>
+<button id="loc">Location</button>
+<label>Pick a file <input id="file" type="file" accept="image/*,.js" multiple></label>
+<div id="big"><button id="full">Full screen</button> <span id="fs"></span></div>
+<a href="stand-in-file/calmer-feed.js" style="display:block;margin:12px 0">Download a mod</a>
+<a href="page.css" download="page.css" style="display:block;margin:12px 0">Download a style sheet</a>
+<button id="made">Made file</button>
+<script>
+  const out = (s) => { document.getElementById('out').textContent = s; };
+  const media = (c, what) => navigator.mediaDevices.getUserMedia(c)
+    .then((s) => { out(what + ': ok ' + s.getTracks().map((t) => t.kind).join(' ')); s.getTracks().forEach((t) => t.stop()); })
+    .catch((e) => out(what + ': ' + e.name));
+  document.getElementById('cam').onclick = () => media({ video: true }, 'camera');
+  document.getElementById('cammic').onclick = () => media({ video: true, audio: true }, 'camera and mic');
+  document.getElementById('loc').onclick = () => navigator.geolocation.getCurrentPosition(
+    (p) => out('location: ' + p.coords.latitude.toFixed(2) + ' ' + p.coords.longitude.toFixed(2)),
+    (e) => out('location: error ' + e.code), { timeout: 15000, enableHighAccuracy: true });
+  const file = document.getElementById('file');
+  file.onchange = () => out('files: ' + file.files.length);
+  file.addEventListener('cancel', () => out('files: cancelled'));
+  document.getElementById('full').onclick = () => document.getElementById('big').requestFullscreen().catch((e) => out('fullscreen: ' + e.name));
+  document.onfullscreenchange = () => {
+    const s = 'fullscreen: ' + (document.fullscreenElement ? 'on' : 'off');
+    out(s); document.getElementById('fs').textContent = document.fullscreenElement ? s : '';
+  };
+  document.getElementById('made').onclick = () => {
+    const text = '// ==WebMod==\n// @name        Made here\n// @description Made by the page\n// @match       http://localhost/*\n// @style\n// ==/WebMod==\n' + JSON.stringify({ css: '#out { color: #f91880 }' }) + '\n';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+    a.download = 'made-here.js';
+    document.body.append(a); a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  };
+</script>

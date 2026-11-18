@@ -71,6 +71,17 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<!-- (the launch screen: black with TRIF's robot in the middle, the same as LeavingCover.swift's cover, so a cold
+	     launch from a Home Screen icon and a return to the app look alike; black in light and dark mode, after the
+	     Web Clip's own black screen. Tim, 11-18. iOS keeps a launch screen until the app is reinstalled or the phone
+	     restarts. INFOPLIST_KEY_UILaunchScreen_Generation is NO, so this one is used) -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBlack</string>
+		<key>UIImageName</key>
+		<string>CoverRobot</string>
+	</dict>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 </dict>

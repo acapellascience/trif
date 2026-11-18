@@ -70,6 +70,7 @@ final class Model: ObservableObject {
         // {"newtab": "…"}, {"select": n}, {"close": n}, {"back": true}.
         let panel = self.modsPanel
         Model.pane = self.pane
+        LeavingCover.shared.browser = browser
         Model.barsRef = self.bars
         Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
         PhoneSyncModel.shared.applied = { ids in browser.syncApplied(ids) }
@@ -261,6 +262,8 @@ extension Model {
         // whether each would be pictured, Tabs.swift PrivatePages)
         if step["tabshots"] != nil { out = TabShots.shared.describe(browser.tabs, current: browser.current) }
         if let us = step["privatepage"] as? [String] { out = us.map { u in "\(u): \(URL(string: u).flatMap(PrivatePages.why) ?? "pictured")" }.joined(separator: "\n") + "\n\(PrivatePages.sensitive.count) sensitive patterns" }
+        // ({"cover": 1}: the leaving cover's rule now and its last steps; {"cover": "show"}: up for 6 s, LeavingCover.swift)
+        if let c = step["cover"] { if c as? String == "show" { LeavingCover.shared.showForCheck() }; out = LeavingCover.shared.describe() }
         // ({"tabsfocus": 1}: the card the tab list last opened at: its index and host, and the shown tab's)
         if step["tabsfocus"] != nil {
             let i = browser.tabs.firstIndex { $0.id == TabsView.lastFocus }
@@ -791,7 +794,10 @@ struct ContentView: View {
     }
     private func openLinkNow(_ url: URL) {
         PendingLink.take(url)
-        if TrifLink.target(url) != nil { Diagnostics.shared.log("icon", "the app takes \(PendingLink.describe(url)), over: \(coverNames)") }
+        if TrifLink.target(url) != nil {
+            LeavingCover.shared.iconLinkCame("taken by the app")
+            Diagnostics.shared.log("icon", "the app takes \(PendingLink.describe(url)), over: \(coverNames)")
+        }
         if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
         else if url.host?.lowercased() == "pair", url.scheme?.lowercased() == "trif" {
             // (desktop TRIF's Connect a phone code, scanned with iOS's Camera app: My computer pairs at once)

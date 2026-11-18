@@ -78,7 +78,7 @@ target.build_configurations.each do |config|
   s['FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]'] = '$(inherited) $(PROJECT_DIR)/Vendor/llama.xcframework/ios-arm64'
   s['OTHER_LDFLAGS[sdk=iphoneos*]'] = '$(inherited) -framework llama'
   s['INFOPLIST_KEY_UIApplicationSceneManifest_Generation'] = 'YES'
-  s['INFOPLIST_KEY_UILaunchScreen_Generation'] = 'YES'
+  s['INFOPLIST_KEY_UILaunchScreen_Generation'] = 'NO' # (Info.plist's UILaunchScreen: black with the robot, LeavingCover.swift)
   s['INFOPLIST_KEY_UISupportedInterfaceOrientations'] = 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
   s['INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad'] = 'UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
   s['ENABLE_PREVIEWS'] = 'YES'

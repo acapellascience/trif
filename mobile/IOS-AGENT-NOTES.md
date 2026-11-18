@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (382 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (386 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -48,7 +48,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   openlink n (link n's Go to <site> / its chat), banner ("add", "go", "open", "dismiss": the banner shown's button),
   tabbadges (each tab's robot badge), sheet "chatlist" (the robot's long-press list), tabshots (each tab's picture
   file, size, sensitive or not, drawn; the folder's files and orphans; pictures read from disk since launch),
-  privatepage (["https://…"]: pictured or why not),
+  privatepage (["https://…"]: pictured or why not), cover (the leaving cover's rule now, up or down, its last steps
+  with ms since the app came to the front; "show": up for 6 s, for a screenshot),
   quick ("words": a quick ask as the box sends it), quickstate, quickundo, quickopen (the pill tapped), quickcancel
   (the strip's ✕), quickexpand; speech (permissions, on-device or not), speechfile ("/path.wav": the recognizer on a
   recorded file, SFSpeechURLRecognitionRequest on device), micpress / micrelease; tabsfocus (the card the tab list last
@@ -114,7 +115,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while something plays.
 - Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-stripheight <pt>` (the quick ask's strip, 270), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-exitbelow` (the exit button's old
+  `-nobarshift`, `-stripheight <pt>` (the quick ask's strip, 270), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`, `-linkhost 127.0.0.1:<port>` (the phone link pairs there,
   not over Bonjour: a helper's store.js + server.js on loopback in a temp HOME; `simctl openurl` the code's text).
@@ -237,6 +238,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   launch the app with `-linkhost 127.0.0.1:<port>`, pair with `simctl openurl` of its qr. Driving it from a shell:
   `mkfifo f; tail -f f | node tests/phone-link-computer.js --seconds 900 > log`, then `echo twin > f`. Its first
   look at held.js is at start, so what a sync brings later is judged).
+- LeavingCover.swift (Tim, 11-18): the black cover with the robot as the app leaves in icon use (`reason`), a
+  UIWindow at .alert + 1 put up in SceneDelegate.sceneDidEnterBackground (Safety.swift), taken off after
+  sceneDidBecomeActive once PendingLink.url is taken and the shown tab is `drawn` (cap 0.8 s), 0.2 s fade.
+  `iconLinkCame` from PendingLink.came and ContentView.openLinkNow. Its picture: Assets.xcassets/CoverRobot.imageset
+  (`make-icon.js --cover`: robot-shaded.svg at 88 pt, @2x/@3x) on LaunchBlack.colorset, also Info.plist's UILaunchScreen
+  (INFOPLIST_KEY_UILaunchScreen_Generation = NO in the pbxproj and make-project.rb).
 - make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).
@@ -319,8 +326,22 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   no-animation transaction + performWithoutAnimation. Measured (simctl recordVideo, every frame): in front, the switch is
   one frame; from the background, the APP's first frame is already the icon's tab, but iOS cross-fades its own snapshot
   of the app as it was left (the old tab) into it over ~0.35 s during the zoom. Nothing the app does at open time can
-  change that snapshot. The only lever: make the snapshot neutral on leaving (cover the window at didEnterBackground) —
-  costs a blank card in the app switcher and a blank-to-page fade on every ordinary return. Tim's call; not built.
+  change that snapshot: hence the leaving cover (next).
+- Leaving cover (Tim, 11-18, built 11-18; his recording: the FeedBook icon tapped, iOS slid in TRIF's picture of X):
+  as the app goes to the background in icon use, a black screen with the robot in the middle (no words; black in light
+  and dark mode, after the Web Clip's own black screen) covers it before iOS takes its picture, so the slide-in and
+  the fade show TRIF's robot, never another page. Launch screen the same (a cold launch from an icon looks like a
+  return). Icon use (`LeavingCover.reason`, my pick): the shown tab is an icon's own tab (`iconTabs`), on its site, in
+  full screen, OR the app last came to the front by an icon's link. Why: an icon lands exactly there, so someone
+  leaving from it or who came in by an icon is the one likely to come back by one; a tab put in full screen by the
+  two-finger hold with no icon is TRIF used as a browser, reached by TRIF's icon or the app switcher, where the card
+  should show the page. Otherwise iOS's real picture is kept (the switcher's card shows the page). Put up in
+  sceneDidEnterBackground, not on resign-active (Control Center, a pulled-down notification, the switcher keep the
+  page). Off on return once the icon's tab is chosen and its page drawn (≤ 0.8 s, so a page iOS let go reloads under
+  the robot, not as white), with a 0.2 s fade. Tab pictures are WebKit's takeSnapshot of the page alone (checked: one
+  taken with the cover up is the page). Pause all mods, Safety and the default-browser rules untouched. Diagnostics
+  kind "cover": one line each time it's put up, with why. Robot size: COVER_PT 88 in make-icon.js (the 128 box; the
+  robot ~70 pt), awaiting Tim's view (shots 383, 384).
 - ⋯ → Copy diagnostics (Tim, 11-17; after Import…, visible without scrolling on an SE): the same text as the Mods
   tab's Send diagnostics…, then the 2 s note "Copied." (draft).
 - Chat offers (Tim, 11-17, "spurious asks to add old code when I open Claude chat"): a chat never offers the same
@@ -427,6 +448,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- Leaving cover (11-18): Simulator only (shots 383-386). Checked: icon tab B in full screen, left, the icon link for A
+  (`simctl openurl`): every frame of the return (recordVideo) is the robot, then fading to A, no frame of B; with
+  `-nocover` B shows in 4 frames (the problem reproduced). A real Web Clip tap (an old X icon on the SE's page 2,
+  no app=1): zoom to black, the clip's shell slides out, the robot slides in, held 0.85 s while x.com drew, faded to it.
+  iOS's saved picture (Library/SplashBoard, .ktx) is the robot in icon use and the page in ordinary use (TRIF view,
+  launched plainly). The launch screen's picture there is black with the robot. Not tried: a phone (the Web Clip's
+  shell is light grey in the Simulator, black on Tim's phone), the app switcher itself (a double HOME by the tool
+  was too slow), the lock screen, iPad's several scenes, an icon tapped while a page plays sound in the background.
+  iOS keeps a launch screen until a reinstall or restart: a sideloaded update should show it, else restart the phone.
+
 - Quick ask (11-18): Simulator only, stand-in chat (shots 364-377, 381-382) and More's Simulator stand-in model
   (`/model stand-in` typed in More's box picks it; shot 372). Checked: a typed ask fills the stand-in's box and
   nothing is sent (the stand-in counts every send and whether a person made it: `window.__standinSends`,
@@ -525,6 +556,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- iOS's pictures of the app (11-18): `<data container>/Library/SplashBoard/Snapshots/sceneID:…/*.ktx` (the newest is
+  the app switcher's), the launch screen's under `… - {DEFAULT GROUP}/`; `sips -s format png x.ktx --out x.png` reads
+  them. A warm return by an icon (Simulator 26.3): onOpenURL (openLink) runs BEFORE sceneWillEnterForeground, then
+  didBecomeActive ~0.43 s later; UIKit's openURLContexts after that ("already taken").
 
 - SwiftUI's `.clipped()` hides but doesn't stop touches (11-18, the hit step): the chat's web view, clipped to the
   strip, still took touches over the whole tab, and its top bar's segmented switch (a UIKit control) took them over

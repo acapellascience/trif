@@ -206,6 +206,14 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
         if let url = URLContexts.first?.url { MainActor.assumeIsolated { PendingLink.came(url, "a link came in") } }
     }
 
+    // (the plain cover for iOS's picture of the app as it leaves in icon use, and off again on return: LeavingCover.swift)
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        guard let ws = scene as? UIWindowScene else { return }
+        MainActor.assumeIsolated { LeavingCover.shared.didEnterBackground(ws) }
+    }
+    func sceneWillEnterForeground(_ scene: UIScene) { MainActor.assumeIsolated { LeavingCover.shared.willEnterForeground() } }
+    func sceneDidBecomeActive(_ scene: UIScene) { MainActor.assumeIsolated { LeavingCover.shared.didBecomeActive() } }
+
     func windowScene(_ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem, completionHandler: @escaping (Bool) -> Void) {
         if shortcutItem.type == AppDelegate.pauseShortcut { ModStore.pauseFromShortcut() }
         completionHandler(true)

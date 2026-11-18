@@ -56,6 +56,7 @@ enum PendingLink {
         }
         url = link
         since = Date()
+        if TrifLink.target(link) != nil { LeavingCover.shared.iconLinkCame(how) }
         Diagnostics.shared.log("link", "\(how): \(describe(link))")
     }
     static func take(_ link: URL) {

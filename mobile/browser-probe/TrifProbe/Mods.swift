@@ -78,7 +78,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// Its file's name, as desktop keeps it (sites/<site>/<name>.js): read again, it keeps its id.
     var file: String { "\(id.split(separator: "/").last ?? "mod").js" }
     /// A mod for several sites (or every site) has a switch per site (desktop's isMultiSite).
-    var multiSite: Bool { everywhere || Set(sites.map(Site.of)).count > 1 }
+    var multiSite: Bool { ModRuns.multiSite(everywhere: everywhere, sites: sites) }
 
     /// The needs not yet allowed (modfile.js waiting): what a hold is waiting for.
     var waiting: [ModNeed] { ModHolds.waiting(needs + extraNeeds, allowed: allowed) }
@@ -99,6 +99,8 @@ struct InstalledMod: Codable, Identifiable, Equatable {
 
     /// What the hold rules read of it (ModHolds).
     var holdFacts: ModHolds.Facts { .init(tier: tier, site: site, matches: matches, needs: needs, extraNeeds: extraNeeds, allowed: allowed, ran: ran != nil) }
+    /// What the rules of what runs read of it (ModRuns).
+    var runFacts: ModRuns.Facts { .init(hold: holdFacts, on: on, sites: sites, offSites: offSites, excludes: excludes) }
     var held: Bool { !waiting.isEmpty }
     /// A change on hold: the version before runs meanwhile.
     var pending: Bool { held && ran != nil }
@@ -301,11 +303,10 @@ final class ModStore: ObservableObject {
         return (try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [[String: String]]) ?? []
     }
 
-    /// Whether a mod's @match (and @exclude) covers an address (MatchPattern: in Swift, as it's asked on every page
-    /// load for every mod; modfile.js matchesUrl is the same test, in the page).
+    /// Whether a mod's @match (and @exclude) covers an address (ModRuns.applies: a Swift twin of the shared rule, as
+    /// it's asked on every page load for every mod; modfile.js matchesUrl is the same test, in the page).
     func applies(_ m: InstalledMod, to url: String) -> Bool {
-        guard let u = URL(string: url) else { return false }
-        return MatchPattern.any(m.matches, u) && !MatchPattern.any(m.excludes, u)
+        ModRuns.applies(m.matches, m.excludes, URL(string: url).map(MatchPattern.parts))
     }
 
     static func allow(_ needs: [ModNeed], _ allowed: [String: [String]]) -> [String: [String]] { ModHolds.allow(needs, allowed) }
@@ -315,20 +316,12 @@ final class ModStore: ObservableObject {
     func groupOff(_ tier: String, on site: String) -> Bool { (groupsOff[site] ?? []).contains(tier) }
 
     /// Whether a mod is switched on (for a site: its switch there).
-    func isOn(_ m: InstalledMod, site: String?) -> Bool {
-        guard m.on else { return false }
-        guard let site, !site.isEmpty else { return true }
-        return !(m.multiSite && m.offSites.contains(site))
-    }
+    func isOn(_ m: InstalledMod, site: String?) -> Bool { ModRuns.isOn(m.runFacts, site: site) }
 
     /// The mods switched on, not held (a change on hold: its version before), whose @match covers this address.
+    /// (ModRuns.running: a Swift twin of the shared rule, as it's asked several times on every page load)
     func running(on url: String) -> [InstalledMod] {
-        if paused { return [] }
-        let site = Site.of(URL(string: url)?.host ?? "")
-        return mods.filter { m in
-            guard m.on, !(m.held && m.ran == nil), !groupOff(m.tier, on: site), !(m.multiSite && m.offSites.contains(site)) else { return false }
-            return applies(m, to: url)
-        }
+        ModRuns.running(mods.map(\.runFacts), paused: paused, groupsOff: groupsOff, url: url).map { mods[$0.i] }
     }
 
     /// What runs on a page at `url`, as one string (each mod running there and the version of it that runs): a page
@@ -382,7 +375,7 @@ final class ModStore: ObservableObject {
             .map { [$0.0.matches, $0.0.excludes] }
         var seen: [String: PlanKey] = [:]
         for (m, script, world, at, style) in list {
-            let off = Array(Set((m.multiSite ? m.offSites : []) + groupsOff.filter { $0.value.contains(m.tier) }.map(\.key))).sorted()
+            let off = ModRuns.off(m.runFacts, groupsOff: groupsOff)
             // (a mod's key is made again only when its texts changed: the same strings compare at once, so a change to
             // another mod costs this one nothing; hashing every script at each change was most of the time, 11-18)
             let key: String
@@ -547,23 +540,19 @@ final class ModStore: ObservableObject {
     }
 
     /// A mod's switch: the whole mod, or (a mod for several sites) its switch on one site.
+    /// (the shared rule, ModRuns.setOn: a mod for several sites switched on a site; switching on clears "new, off")
     func setOn(_ id: String, _ on: Bool, site: String?) {
-        guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
-        if let site, !site.isEmpty, mods[i].multiSite {
-            mods[i].offSites.removeAll { $0 == site }
-            if !on { mods[i].offSites.append(site) } else if !mods[i].on { mods[i].on = true }
-        } else {
-            mods[i].on = on
-        }
-        if on { mods[i].newOff = nil }
+        guard let i = mods.firstIndex(where: { $0.id == id }), let r = ModRuns.setOn(mods[i].runFacts, on, site: site) else { return }
+        mods[i].on = r.on
+        mods[i].offSites = r.offSites
+        if r.clearNewOff { mods[i].newOff = nil }
         save()
     }
 
+    /// (the shared rule, ModRuns.setGroup)
     func setGroup(_ tier: String, on: Bool, site: String) {
-        var list = groupsOff[site] ?? []
-        list.removeAll { $0 == tier }
-        if !on { list.append(tier) }
-        groupsOff[site] = list.isEmpty ? nil : list
+        guard let g = ModRuns.setGroup(groupsOff, tier, on: on, site: site) else { return }
+        groupsOff = g
         save()
     }
 
@@ -767,43 +756,6 @@ final class ModReader: @unchecked Sendable {
                 k.resume(returning: c.evaluateScript(ModReader.readCall)?.toString() ?? (c.exception?.toString() ?? ""))
             }
         }
-    }
-}
-
-/// Chrome-style match patterns (https://x.com/*, *://*.x.com/*, <all_urls>), as modfile.js matchesUrl tests them.
-enum MatchPattern {
-    nonisolated(unsafe) private static var paths: [String: NSRegularExpression] = [:]
-    private static let lock = NSLock()
-
-    static func any(_ patterns: [String], _ u: URL) -> Bool { patterns.contains { one($0, u) } }
-
-    static func one(_ p: String, _ u: URL) -> Bool {
-        let scheme = (u.scheme ?? "").lowercased(), host = (u.host ?? "").lowercased()
-        let web = scheme == "http" || scheme == "https"
-        if p == "<all_urls>" { return web }
-        guard let sep = p.range(of: "://") else { return false }
-        let ps = String(p[..<sep.lowerBound])
-        let rest = p[sep.upperBound...]
-        guard let slash = rest.firstIndex(of: "/") else { return false }
-        let ph = String(rest[..<slash]).lowercased(), path = String(rest[slash...])
-        if ps == "*" { if !web { return false } } else if ps != scheme || !(ps == "http" || ps == "https") { return false }
-        if ph != "*" {
-            if ph.hasPrefix("*.") { let base = String(ph.dropFirst(2)); if host != base && !host.hasSuffix("." + base) { return false } }
-            else if ph.contains("*") || host != ph { return false }
-        }
-        lock.lock(); defer { lock.unlock() }
-        let re: NSRegularExpression
-        if let cached = paths[path] { re = cached } else {
-            let escaped = NSRegularExpression.escapedPattern(for: path).replacingOccurrences(of: "\\*", with: ".*")
-            guard let made = try? NSRegularExpression(pattern: "^\(escaped)$", options: [.dotMatchesLineSeparators]) else { return false }
-            paths[path] = made
-            re = made
-        }
-        var target = u.path.isEmpty ? "/" : u.path
-        if let q = u.query { target += "?" + q }
-        // (URL.path decodes percent escapes; the page's location.pathname keeps them)
-        if let comps = URLComponents(url: u, resolvingAgainstBaseURL: false) { target = (comps.percentEncodedPath.isEmpty ? "/" : comps.percentEncodedPath) + (comps.percentEncodedQuery.map { "?" + $0 } ?? "") }
-        return re.firstMatch(in: target, range: NSRange(target.startIndex..., in: target)) != nil
     }
 }
 

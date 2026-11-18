@@ -127,10 +127,13 @@ the power icons' hovers, the approval card (all of it: it's the panel's own card
 |---|---|---|
 | The summary's one point | **All mods**: every mod you have, by site, in a tab of its own, with its switch, what's wrong with it and when it changed; search, filters, and Undo. From the mods' ⋯ menu or Settings. | |
 
-## Questions for Tim
+## Decided by Tim (2026-11-18)
 
-- The page's name: "All mods" (as the menu says) or something else ("Your mods", "Mod organizer")?
-- A mod for several sites is listed once, under its folder's site, with one switch for the whole mod (the
-  setup page's), not the panel's per-site switch; "off on x.com" says where it's switched off.
+- The page's name stays **"All mods"**.
+- A mod for several sites is listed **once**, with one switch for the whole mod; "off on x.com" says where it's
+  switched off.
+
+## Still open
+
 - Site icons come only from tabs open now (the browser already has them); a site without one gets its
-  first letter. Fetching icons would mean asking each site, which the page never does.
+  first letter. Fetching icons would mean asking each site, which the page never does. (Kept as is unless Tim says otherwise.)

@@ -235,6 +235,13 @@ change there is a change on both phones. Change this file whenever a rule change
     sound if the OS allows, else muted with "Tap for sound"). A site moving it in the next 6 s gets it put back once
     (not after the person's own touch or key).
   - Kept per tab across launches; older than 30 min dropped; a closed tab's removed.
+- Protected (DRM) video plays (Tim 11-18), as in Chrome on Android, whose Site settings → Protected content is
+  "Sites can play protected content" by default (no question; per-site exceptions kept until changed). Allowing it can
+  let the site identify the device for the licence, so each site can be switched off, and that choice is kept across
+  launches.
+  - iPhone: nothing to do; WebKit handles FairPlay by itself, with no question.
+  - Android: the WebView's protected media ask (RESOURCE_PROTECTED_MEDIA_ID, Widevine) is granted unless the site is
+    switched off: the Mods tab's ⋯ "Protected content on {site}" (checked = on; the page loads again to take it).
 
 ## Desktop websites
 

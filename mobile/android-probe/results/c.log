@@ -1,0 +1,324 @@
+# C1
+1794972512402 net LIFE create sdk=37 webview=149.0.7827.5
+1794972512772 net LIFE start
+1794972512775 net SEEN GET http://127.0.0.1:8477/net.html mainFrame=true headers=[Accept, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972512893 net SEEN POST http://127.0.0.1:8477/echo mainFrame=false headers=[Accept, Content-Type, Origin, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972513136 net LOADED http://127.0.0.1:8477/net.html
+1794972513392 net SEEN GET http://127.0.0.1:8477/favicon.ico mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972513500 net PAGE {"kind":"net","post":{"method":"POST","body":"probe-body-42"},"ws":"echo:probe-ws-hello"}
+# C2.noFgs
+1794972514372 video LIFE create sdk=37 webview=149.0.7827.5
+1794972515011 video SEEN GET http://127.0.0.1:8477/video.html mainFrame=true headers=[Accept, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972515012 video LIFE start
+1794972515311 video SEEN GET http://127.0.0.1:8477/clip.mp4 mainFrame=false headers=[Accept, Accept-Encoding, Range, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972515871 video SEEN GET http://127.0.0.1:8477/favicon.ico mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972515913 video LOADED http://127.0.0.1:8477/video.html
+1794972515915 video PAGE {"kind":"video","why":"playing","t":0.003591,"paused":false,"ended":false,"vis":"visible","wall":1794972515797}
+1794972516086 video PAGE {"kind":"video","why":"tick","t":0.259454,"paused":false,"ended":false,"vis":"visible","wall":1794972516086}
+1794972517086 video PAGE {"kind":"video","why":"tick","t":1.258425,"paused":false,"ended":false,"vis":"visible","wall":1794972517086}
+1794972518085 video PAGE {"kind":"video","why":"tick","t":2.258476,"paused":false,"ended":false,"vis":"visible","wall":1794972518085}
+1794972519086 video PAGE {"kind":"video","why":"tick","t":3.259396,"paused":false,"ended":false,"vis":"visible","wall":1794972519086}
+1794972520085 video PAGE {"kind":"video","why":"tick","t":4.258329,"paused":false,"ended":false,"vis":"visible","wall":1794972520085}
+1794972521088 video PAGE {"kind":"video","why":"tick","t":5.261471,"paused":false,"ended":false,"vis":"visible","wall":1794972521088}
+1794972522085 video PAGE {"kind":"video","why":"tick","t":6.255731,"paused":false,"ended":false,"vis":"visible","wall":1794972522084}
+1794972523085 video PAGE {"kind":"video","why":"tick","t":7.193718,"paused":false,"ended":false,"vis":"visible","wall":1794972523084}
+1794972523746 video LIFE stop
+1794972523759 video PAGE {"kind":"video","why":"visibility","t":7.811202,"paused":false,"ended":false,"vis":"hidden","wall":1794972523702}
+1794972523759 video PAGE {"kind":"video","why":"pause","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972523723}
+1794972524375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972524374}
+1794972525377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972525374}
+1794972526374 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972526373}
+1794972527377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972527375}
+1794972528376 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972528374}
+1794972529377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972529375}
+1794972530377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972530376}
+1794972531377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972531374}
+1794972532377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972532374}
+1794972533375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972533373}
+1794972534373 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972534373}
+1794972535377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972535375}
+1794972536376 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972536375}
+1794972537375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972537374}
+1794972538375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972538373}
+1794972539376 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972539375}
+1794972540373 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972540373}
+1794972541377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972541375}
+1794972542375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972542373}
+1794972543375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972543374}
+1794972544377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972544374}
+1794972545377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972545374}
+1794972546379 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972546377}
+1794972547377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972547374}
+1794972548375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972548373}
+1794972549375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972549373}
+1794972550385 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972550377}
+1794972551374 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972551374}
+1794972552375 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972552373}
+1794972553376 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972553374}
+1794972554377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972554375}
+1794972555378 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972555376}
+1794972556374 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972556373}
+1794972557374 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972557373}
+1794972558377 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972558374}
+1794972559373 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972559373}
+1794972560373 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972560372}
+1794972561376 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972561374}
+1794972562205 video LIFE start
+1794972562720 video PAGE {"kind":"video","why":"tick","t":7.811428,"paused":true,"ended":false,"vis":"hidden","wall":1794972562385}
+1794972562720 video PAGE {"kind":"video","why":"visibility","t":7.811428,"paused":true,"ended":false,"vis":"visible","wall":1794972562692}
+1794972562766 video SEEN GET http://127.0.0.1:8477/clip.mp4 mainFrame=false headers=[Accept, Accept-Encoding, Range, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972562841 video PAGE {"kind":"video","why":"playing","t":7.811428,"paused":false,"ended":false,"vis":"visible","wall":1794972562700}
+1794972563087 video PAGE {"kind":"video","why":"tick","t":7.8231,"paused":false,"ended":false,"vis":"visible","wall":1794972563085}
+1794972564141 video PAGE {"kind":"video","why":"tick","t":8.793779,"paused":false,"ended":false,"vis":"visible","wall":1794972564085}
+1794972565085 video PAGE {"kind":"video","why":"tick","t":9.792715,"paused":false,"ended":false,"vis":"visible","wall":1794972565084}
+1794972566085 video PAGE {"kind":"video","why":"tick","t":10.793296,"paused":false,"ended":false,"vis":"visible","wall":1794972566084}
+# services: no foreground service; process: isPendingFreeze=false isFrozen=false | earliestFreezableTimeMs=-- | isPendingFreeze=false isFrozen=false
+# C2.fgs
+1794972567350 video LIFE create sdk=37 webview=149.0.7827.5
+1794972567702 video FGS started
+1794972567715 video LIFE start
+1794972567724 video SEEN GET http://127.0.0.1:8477/video.html mainFrame=true headers=[Accept, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972567978 video SEEN GET http://127.0.0.1:8477/clip.mp4 mainFrame=false headers=[Accept, Accept-Encoding, Range, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972568581 video SEEN GET http://127.0.0.1:8477/favicon.ico mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972568643 video LOADED http://127.0.0.1:8477/video.html
+1794972568656 video PAGE {"kind":"video","why":"playing","t":0,"paused":false,"ended":false,"vis":"visible","wall":1794972568542}
+1794972568819 video PAGE {"kind":"video","why":"tick","t":0.122967,"paused":false,"ended":false,"vis":"visible","wall":1794972568818}
+1794972569819 video PAGE {"kind":"video","why":"tick","t":1.125658,"paused":false,"ended":false,"vis":"visible","wall":1794972569819}
+1794972570820 video PAGE {"kind":"video","why":"tick","t":2.12498,"paused":false,"ended":false,"vis":"visible","wall":1794972570818}
+1794972571819 video PAGE {"kind":"video","why":"tick","t":3.124894,"paused":false,"ended":false,"vis":"visible","wall":1794972571818}
+1794972572819 video PAGE {"kind":"video","why":"tick","t":4.124938,"paused":false,"ended":false,"vis":"visible","wall":1794972572818}
+1794972573819 video PAGE {"kind":"video","why":"tick","t":5.125422,"paused":false,"ended":false,"vis":"visible","wall":1794972573819}
+1794972574819 video PAGE {"kind":"video","why":"tick","t":6.125268,"paused":false,"ended":false,"vis":"visible","wall":1794972574818}
+1794972575833 video PAGE {"kind":"video","why":"tick","t":7.11736,"paused":false,"ended":false,"vis":"visible","wall":1794972575833}
+1794972576282 video LIFE stop
+1794972576337 video PAGE {"kind":"video","why":"visibility","t":7.602948,"paused":false,"ended":false,"vis":"hidden","wall":1794972576318}
+1794972576355 video PAGE {"kind":"video","why":"pause","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972576327}
+1794972577377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972577375}
+1794972578373 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972578373}
+1794972579375 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972579374}
+1794972580377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972580374}
+1794972581378 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972581375}
+1794972582373 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972582373}
+1794972583373 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972583373}
+1794972584376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972584374}
+1794972585376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972585374}
+1794972586376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972586375}
+1794972587377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972587375}
+1794972588379 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972588377}
+1794972589380 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972589374}
+1794972590376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972590374}
+1794972591379 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972591376}
+1794972592377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972592374}
+1794972593378 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972593377}
+1794972594376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972594374}
+1794972595374 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972595373}
+1794972596375 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972596374}
+1794972597378 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972597376}
+1794972598376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972598374}
+1794972599377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972599376}
+1794972600375 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972600374}
+1794972601376 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972601374}
+1794972602379 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972602376}
+1794972603377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972603375}
+1794972604377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972604375}
+1794972605375 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972605373}
+1794972606377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972606376}
+1794972607374 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972607374}
+1794972608377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972608375}
+1794972609375 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972609375}
+1794972610377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972610375}
+1794972611377 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972611375}
+1794972612373 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972612372}
+1794972613374 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972613373}
+1794972614379 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972614378}
+1794972614950 video LIFE start
+1794972615417 video PAGE {"kind":"video","why":"tick","t":7.60328,"paused":true,"ended":false,"vis":"hidden","wall":1794972615377}
+1794972615464 video PAGE {"kind":"video","why":"visibility","t":7.60328,"paused":true,"ended":false,"vis":"visible","wall":1794972615413}
+1794972615509 video PAGE {"kind":"video","why":"playing","t":7.603299,"paused":false,"ended":false,"vis":"visible","wall":1794972615482}
+1794972615526 video SEEN GET http://127.0.0.1:8477/clip.mp4 mainFrame=false headers=[Accept, Accept-Encoding, Range, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972615818 video PAGE {"kind":"video","why":"tick","t":7.624303,"paused":false,"ended":false,"vis":"visible","wall":1794972615818}
+1794972616824 video PAGE {"kind":"video","why":"tick","t":8.453489,"paused":false,"ended":false,"vis":"visible","wall":1794972616818}
+1794972617818 video PAGE {"kind":"video","why":"tick","t":9.453537,"paused":false,"ended":false,"vis":"visible","wall":1794972617818}
+1794972618819 video PAGE {"kind":"video","why":"tick","t":10.453974,"paused":false,"ended":false,"vis":"visible","wall":1794972618818}
+# services: foreground service running; process: isPendingFreeze=false isFrozen=false | earliestFreezableTimeMs=-- | isPendingFreeze=false isFrozen=false
+# C2.fgs+keepVisible
+1794972620008 video LIFE create sdk=37 webview=149.0.7827.5
+1794972620477 video KEEP visible
+1794972620485 video FGS started
+1794972620494 video LIFE start
+1794972620507 video SEEN GET http://127.0.0.1:8477/video.html mainFrame=true headers=[Accept, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972621104 video SEEN GET http://127.0.0.1:8477/clip.mp4 mainFrame=false headers=[Accept, Accept-Encoding, Range, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972621378 video LOADED http://127.0.0.1:8477/video.html
+1794972621385 video SEEN GET http://127.0.0.1:8477/favicon.ico mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972621392 video PAGE {"kind":"video","why":"playing","t":0,"paused":false,"ended":false,"vis":"visible","wall":1794972621379}
+1794972621735 video PAGE {"kind":"video","why":"tick","t":0.199237,"paused":false,"ended":false,"vis":"visible","wall":1794972621734}
+1794972622735 video PAGE {"kind":"video","why":"tick","t":1.199365,"paused":false,"ended":false,"vis":"visible","wall":1794972622734}
+1794972623735 video PAGE {"kind":"video","why":"tick","t":2.199229,"paused":false,"ended":false,"vis":"visible","wall":1794972623734}
+1794972624735 video PAGE {"kind":"video","why":"tick","t":3.199756,"paused":false,"ended":false,"vis":"visible","wall":1794972624735}
+1794972625735 video PAGE {"kind":"video","why":"tick","t":4.199618,"paused":false,"ended":false,"vis":"visible","wall":1794972625735}
+1794972626735 video PAGE {"kind":"video","why":"tick","t":5.199766,"paused":false,"ended":false,"vis":"visible","wall":1794972626735}
+1794972627754 video PAGE {"kind":"video","why":"tick","t":6.197823,"paused":false,"ended":false,"vis":"visible","wall":1794972627734}
+1794972628769 video PAGE {"kind":"video","why":"tick","t":7.214422,"paused":false,"ended":false,"vis":"visible","wall":1794972628749}
+1794972629017 video LIFE stop
+1794972629736 video PAGE {"kind":"video","why":"tick","t":8.199841,"paused":false,"ended":false,"vis":"visible","wall":1794972629735}
+1794972630735 video PAGE {"kind":"video","why":"tick","t":9.199336,"paused":false,"ended":false,"vis":"visible","wall":1794972630734}
+1794972631737 video PAGE {"kind":"video","why":"tick","t":10.199681,"paused":false,"ended":false,"vis":"visible","wall":1794972631735}
+1794972632736 video PAGE {"kind":"video","why":"tick","t":11.199268,"paused":false,"ended":false,"vis":"visible","wall":1794972632734}
+1794972633736 video PAGE {"kind":"video","why":"tick","t":12.200106,"paused":false,"ended":false,"vis":"visible","wall":1794972633735}
+1794972634735 video PAGE {"kind":"video","why":"tick","t":13.199365,"paused":false,"ended":false,"vis":"visible","wall":1794972634734}
+1794972635736 video PAGE {"kind":"video","why":"tick","t":14.199382,"paused":false,"ended":false,"vis":"visible","wall":1794972635735}
+1794972636737 video PAGE {"kind":"video","why":"tick","t":15.199671,"paused":false,"ended":false,"vis":"visible","wall":1794972636735}
+1794972637737 video PAGE {"kind":"video","why":"tick","t":16.19969,"paused":false,"ended":false,"vis":"visible","wall":1794972637735}
+1794972638736 video PAGE {"kind":"video","why":"tick","t":17.199429,"paused":false,"ended":false,"vis":"visible","wall":1794972638735}
+1794972639735 video PAGE {"kind":"video","why":"tick","t":18.199711,"paused":false,"ended":false,"vis":"visible","wall":1794972639735}
+1794972640739 video PAGE {"kind":"video","why":"tick","t":19.202653,"paused":false,"ended":false,"vis":"visible","wall":1794972640738}
+1794972641737 video PAGE {"kind":"video","why":"tick","t":20.199945,"paused":false,"ended":false,"vis":"visible","wall":1794972641735}
+1794972642737 video PAGE {"kind":"video","why":"tick","t":21.199864,"paused":false,"ended":false,"vis":"visible","wall":1794972642735}
+1794972643737 video PAGE {"kind":"video","why":"tick","t":22.19972,"paused":false,"ended":false,"vis":"visible","wall":1794972643735}
+1794972644735 video PAGE {"kind":"video","why":"tick","t":23.199368,"paused":false,"ended":false,"vis":"visible","wall":1794972644734}
+1794972645736 video PAGE {"kind":"video","why":"tick","t":24.199573,"paused":false,"ended":false,"vis":"visible","wall":1794972645735}
+1794972646736 video PAGE {"kind":"video","why":"tick","t":25.199201,"paused":false,"ended":false,"vis":"visible","wall":1794972646734}
+1794972647736 video PAGE {"kind":"video","why":"tick","t":26.199492,"paused":false,"ended":false,"vis":"visible","wall":1794972647735}
+1794972648737 video PAGE {"kind":"video","why":"tick","t":27.199684,"paused":false,"ended":false,"vis":"visible","wall":1794972648735}
+1794972649735 video PAGE {"kind":"video","why":"tick","t":28.199088,"paused":false,"ended":false,"vis":"visible","wall":1794972649734}
+1794972650737 video PAGE {"kind":"video","why":"tick","t":29.199628,"paused":false,"ended":false,"vis":"visible","wall":1794972650735}
+1794972651736 video PAGE {"kind":"video","why":"tick","t":30.199673,"paused":false,"ended":false,"vis":"visible","wall":1794972651735}
+1794972652738 video PAGE {"kind":"video","why":"tick","t":31.199677,"paused":false,"ended":false,"vis":"visible","wall":1794972652735}
+1794972653737 video PAGE {"kind":"video","why":"tick","t":32.199663,"paused":false,"ended":false,"vis":"visible","wall":1794972653735}
+1794972654737 video PAGE {"kind":"video","why":"tick","t":33.199701,"paused":false,"ended":false,"vis":"visible","wall":1794972654735}
+1794972655737 video PAGE {"kind":"video","why":"tick","t":34.199258,"paused":false,"ended":false,"vis":"visible","wall":1794972655735}
+1794972656737 video PAGE {"kind":"video","why":"tick","t":35.19983,"paused":false,"ended":false,"vis":"visible","wall":1794972656735}
+1794972657736 video PAGE {"kind":"video","why":"tick","t":36.199252,"paused":false,"ended":false,"vis":"visible","wall":1794972657735}
+1794972658736 video PAGE {"kind":"video","why":"tick","t":37.199791,"paused":false,"ended":false,"vis":"visible","wall":1794972658735}
+1794972659735 video PAGE {"kind":"video","why":"tick","t":38.199185,"paused":false,"ended":false,"vis":"visible","wall":1794972659734}
+1794972660737 video PAGE {"kind":"video","why":"tick","t":39.199844,"paused":false,"ended":false,"vis":"visible","wall":1794972660735}
+1794972661735 video PAGE {"kind":"video","why":"tick","t":40.199347,"paused":false,"ended":false,"vis":"visible","wall":1794972661734}
+1794972662737 video PAGE {"kind":"video","why":"tick","t":41.199565,"paused":false,"ended":false,"vis":"visible","wall":1794972662735}
+1794972663737 video PAGE {"kind":"video","why":"tick","t":42.199587,"paused":false,"ended":false,"vis":"visible","wall":1794972663735}
+1794972664735 video PAGE {"kind":"video","why":"tick","t":43.199253,"paused":false,"ended":false,"vis":"visible","wall":1794972664734}
+1794972665736 video PAGE {"kind":"video","why":"tick","t":44.199653,"paused":false,"ended":false,"vis":"visible","wall":1794972665735}
+1794972666737 video PAGE {"kind":"video","why":"tick","t":45.199544,"paused":false,"ended":false,"vis":"visible","wall":1794972666735}
+1794972667741 video LIFE start
+1794972668219 video PAGE {"kind":"video","why":"tick","t":46.214514,"paused":false,"ended":false,"vis":"visible","wall":1794972667750}
+1794972668735 video PAGE {"kind":"video","why":"tick","t":47.199304,"paused":false,"ended":false,"vis":"visible","wall":1794972668734}
+1794972669736 video PAGE {"kind":"video","why":"tick","t":48.200339,"paused":false,"ended":false,"vis":"visible","wall":1794972669735}
+1794972670735 video PAGE {"kind":"video","why":"tick","t":49.199368,"paused":false,"ended":false,"vis":"visible","wall":1794972670734}
+1794972671736 video PAGE {"kind":"video","why":"tick","t":50.200166,"paused":false,"ended":false,"vis":"visible","wall":1794972671735}
+# services: foreground service running; process: isPendingFreeze=false isFrozen=false | earliestFreezableTimeMs=-- | isPendingFreeze=false isFrozen=false
+# C2.noFgs+keepVisible
+1794972672862 video LIFE create sdk=37 webview=149.0.7827.5
+1794972673262 video KEEP visible
+1794972673280 video LIFE start
+1794972673301 video SEEN GET http://127.0.0.1:8477/video.html mainFrame=true headers=[Accept, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972673630 video SEEN GET http://127.0.0.1:8477/clip.mp4 mainFrame=false headers=[Accept, Accept-Encoding, Range, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972674077 video SEEN GET http://127.0.0.1:8477/favicon.ico mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972674120 video LOADED http://127.0.0.1:8477/video.html
+1794972674120 video PAGE {"kind":"video","why":"playing","t":0,"paused":false,"ended":false,"vis":"visible","wall":1794972674046}
+1794972674502 video PAGE {"kind":"video","why":"tick","t":0.227617,"paused":false,"ended":false,"vis":"visible","wall":1794972674502}
+1794972675503 video PAGE {"kind":"video","why":"tick","t":1.22815,"paused":false,"ended":false,"vis":"visible","wall":1794972675502}
+1794972676502 video PAGE {"kind":"video","why":"tick","t":2.227836,"paused":false,"ended":false,"vis":"visible","wall":1794972676502}
+1794972677502 video PAGE {"kind":"video","why":"tick","t":3.227561,"paused":false,"ended":false,"vis":"visible","wall":1794972677502}
+1794972678503 video PAGE {"kind":"video","why":"tick","t":4.228152,"paused":false,"ended":false,"vis":"visible","wall":1794972678502}
+1794972679502 video PAGE {"kind":"video","why":"tick","t":5.227775,"paused":false,"ended":false,"vis":"visible","wall":1794972679502}
+1794972680504 video PAGE {"kind":"video","why":"tick","t":6.2287,"paused":false,"ended":false,"vis":"visible","wall":1794972680503}
+1794972681629 video PAGE {"kind":"video","why":"tick","t":7.166601,"paused":false,"ended":false,"vis":"visible","wall":1794972681512}
+1794972682130 video LIFE stop
+1794972682505 video PAGE {"kind":"video","why":"tick","t":8.165343,"paused":false,"ended":false,"vis":"visible","wall":1794972682504}
+1794972683502 video PAGE {"kind":"video","why":"tick","t":9.163327,"paused":false,"ended":false,"vis":"visible","wall":1794972683502}
+1794972684504 video PAGE {"kind":"video","why":"tick","t":10.163417,"paused":false,"ended":false,"vis":"visible","wall":1794972684502}
+1794972685504 video PAGE {"kind":"video","why":"tick","t":11.163338,"paused":false,"ended":false,"vis":"visible","wall":1794972685502}
+1794972686502 video PAGE {"kind":"video","why":"tick","t":12.163117,"paused":false,"ended":false,"vis":"visible","wall":1794972686502}
+1794972687503 video PAGE {"kind":"video","why":"tick","t":13.163385,"paused":false,"ended":false,"vis":"visible","wall":1794972687502}
+1794972688503 video PAGE {"kind":"video","why":"tick","t":14.163606,"paused":false,"ended":false,"vis":"visible","wall":1794972688502}
+1794972689503 video PAGE {"kind":"video","why":"tick","t":15.163415,"paused":false,"ended":false,"vis":"visible","wall":1794972689502}
+1794972690505 video PAGE {"kind":"video","why":"tick","t":16.163654,"paused":false,"ended":false,"vis":"visible","wall":1794972690502}
+1794972691840 video PAGE {"kind":"video","why":"tick","t":17.198886,"paused":false,"ended":false,"vis":"visible","wall":1794972691538}
+1794972692505 video PAGE {"kind":"video","why":"tick","t":18.127693,"paused":false,"ended":false,"vis":"visible","wall":1794972692503}
+1794972693504 video PAGE {"kind":"video","why":"tick","t":19.126777,"paused":false,"ended":false,"vis":"visible","wall":1794972693502}
+1794972694503 video PAGE {"kind":"video","why":"tick","t":20.127075,"paused":false,"ended":false,"vis":"visible","wall":1794972694502}
+1794972695505 video PAGE {"kind":"video","why":"tick","t":21.127078,"paused":false,"ended":false,"vis":"visible","wall":1794972695502}
+1794972696505 video PAGE {"kind":"video","why":"tick","t":22.127967,"paused":false,"ended":false,"vis":"visible","wall":1794972696503}
+1794972697505 video PAGE {"kind":"video","why":"tick","t":23.127674,"paused":false,"ended":false,"vis":"visible","wall":1794972697503}
+1794972698504 video PAGE {"kind":"video","why":"tick","t":24.127547,"paused":false,"ended":false,"vis":"visible","wall":1794972698502}
+1794972699502 video PAGE {"kind":"video","why":"tick","t":25.127165,"paused":false,"ended":false,"vis":"visible","wall":1794972699502}
+1794972700504 video PAGE {"kind":"video","why":"tick","t":26.127352,"paused":false,"ended":false,"vis":"visible","wall":1794972700502}
+1794972701503 video PAGE {"kind":"video","why":"tick","t":27.127255,"paused":false,"ended":false,"vis":"visible","wall":1794972701502}
+1794972702504 video PAGE {"kind":"video","why":"tick","t":28.127513,"paused":false,"ended":false,"vis":"visible","wall":1794972702502}
+1794972703505 video PAGE {"kind":"video","why":"tick","t":29.128112,"paused":false,"ended":false,"vis":"visible","wall":1794972703503}
+1794972704502 video PAGE {"kind":"video","why":"tick","t":30.126778,"paused":false,"ended":false,"vis":"visible","wall":1794972704502}
+1794972705504 video PAGE {"kind":"video","why":"tick","t":31.127039,"paused":false,"ended":false,"vis":"visible","wall":1794972705502}
+1794972706504 video PAGE {"kind":"video","why":"tick","t":32.127426,"paused":false,"ended":false,"vis":"visible","wall":1794972706502}
+1794972707504 video PAGE {"kind":"video","why":"tick","t":33.127437,"paused":false,"ended":false,"vis":"visible","wall":1794972707503}
+1794972708505 video PAGE {"kind":"video","why":"tick","t":34.126886,"paused":false,"ended":false,"vis":"visible","wall":1794972708502}
+1794972709503 video PAGE {"kind":"video","why":"tick","t":35.127037,"paused":false,"ended":false,"vis":"visible","wall":1794972709502}
+1794972710505 video PAGE {"kind":"video","why":"tick","t":36.12753,"paused":false,"ended":false,"vis":"visible","wall":1794972710502}
+1794972711503 video PAGE {"kind":"video","why":"tick","t":37.127234,"paused":false,"ended":false,"vis":"visible","wall":1794972711502}
+1794972712505 video PAGE {"kind":"video","why":"tick","t":38.128294,"paused":false,"ended":false,"vis":"visible","wall":1794972712503}
+1794972713504 video PAGE {"kind":"video","why":"tick","t":39.127359,"paused":false,"ended":false,"vis":"visible","wall":1794972713502}
+1794972714503 video PAGE {"kind":"video","why":"tick","t":40.127498,"paused":false,"ended":false,"vis":"visible","wall":1794972714502}
+1794972715503 video PAGE {"kind":"video","why":"tick","t":41.127167,"paused":false,"ended":false,"vis":"visible","wall":1794972715502}
+1794972716504 video PAGE {"kind":"video","why":"tick","t":42.127351,"paused":false,"ended":false,"vis":"visible","wall":1794972716502}
+1794972717508 video PAGE {"kind":"video","why":"tick","t":43.130089,"paused":false,"ended":false,"vis":"visible","wall":1794972717505}
+1794972718505 video PAGE {"kind":"video","why":"tick","t":44.127518,"paused":false,"ended":false,"vis":"visible","wall":1794972718502}
+1794972719503 video PAGE {"kind":"video","why":"tick","t":45.127036,"paused":false,"ended":false,"vis":"visible","wall":1794972719502}
+1794972720502 video PAGE {"kind":"video","why":"tick","t":46.126842,"paused":false,"ended":false,"vis":"visible","wall":1794972720502}
+1794972720674 video LIFE start
+1794972721565 video PAGE {"kind":"video","why":"tick","t":47.059196,"paused":false,"ended":false,"vis":"visible","wall":1794972721503}
+1794972722508 video PAGE {"kind":"video","why":"tick","t":48.058309,"paused":false,"ended":false,"vis":"visible","wall":1794972722502}
+1794972723502 video PAGE {"kind":"video","why":"tick","t":49.058489,"paused":false,"ended":false,"vis":"visible","wall":1794972723502}
+1794972724502 video PAGE {"kind":"video","why":"tick","t":50.058331,"paused":false,"ended":false,"vis":"visible","wall":1794972724502}
+# services: no foreground service; process: isPendingFreeze=false isFrozen=false | earliestFreezableTimeMs=-- | isPendingFreeze=false isFrozen=false
+# C3
+1794972727945 pin LIFE create sdk=37 webview=149.0.7827.5
+1794972727957 pin PIN supported=true
+1794972728008 pin PIN requested=true
+1794972728037 pin LIFE start
+1794972730597 pin LIFE stop
+1794972730597 pin LIFE destroy
+1794972746016 site LIFE create sdk=37 webview=149.0.7827.5
+1794972747014 site LIFE start
+1794972747046 site SEEN GET http://127.0.0.1:8477/plain.html mainFrame=true headers=[Accept, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972747166 site SEEN GET http://127.0.0.1:8477/page.css mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972747166 site SEEN GET http://127.0.0.1:8477/body.js mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972747264 site SEEN GET http://127.0.0.1:8477/frame.html mainFrame=false headers=[Accept, Referer, Upgrade-Insecure-Requests, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972747336 site SEEN GET http://127.0.0.1:8477/page.css mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972747354 site LOADED http://127.0.0.1:8477/plain.html
+1794972747355 site SEEN GET http://127.0.0.1:8477/favicon.ico mainFrame=false headers=[Accept, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]
+1794972750009 site SITE url=http://127.0.0.1:8477/plain.html action=android.intent.action.VIEW systemBarsVisible=false size=1080x2400 screen=1080x2400
+# server
+GET 8477 /net.html
+POST 8477 /echo
+POST body probe-body-42
+WS 8477 /ws
+WS message probe-ws-hello
+GET 8477 /favicon.ico
+GET 8477 /video.html
+GET 8477 /clip.mp4
+GET 8477 /favicon.ico
+GET 8477 /clip.mp4
+GET 8477 /video.html
+GET 8477 /clip.mp4
+GET 8477 /favicon.ico
+GET 8477 /clip.mp4
+GET 8477 /video.html
+GET 8477 /clip.mp4
+GET 8477 /favicon.ico
+GET 8477 /video.html
+GET 8477 /clip.mp4
+GET 8477 /favicon.ico
+GET 8477 /plain.html
+GET 8477 /page.css
+GET 8477 /body.js
+GET 8477 /frame.html
+GET 8477 /page.css
+GET 8477 /favicon.ico
+# verdicts
+PASS C1.post: shouldInterceptRequest saw "POST http://127.0.0.1:8477/echo mainFrame=false headers=[Accept, Content-Type, Origin, Referer, User-Agent, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform]"; the server got body "probe-body-42"
+PASS C1.noBody: WebResourceRequest has method, url and headers only: no body in the API at all
+PASS C1.noWebSocket: the page's WebSocket worked (echo:probe-ws-hello), shouldInterceptRequest saw 0 WebSocket requests (of 3 requests)
+FAIL C2.noFgs: in the background 38 s: the video moved 0.6 s in 39.3 s of wall time (2%), 40 reports arrived meanwhile, paused events: 1; no foreground service
+FAIL C2.fgs: in the background 39 s: the video moved 0.5 s in 39.6 s of wall time (1%), 40 reports arrived meanwhile, paused events: 1; foreground service on
+PASS C2.fgs+keepVisible: in the background 39 s: the video moved 40.0 s in 40.0 s of wall time (100%), 38 reports arrived meanwhile, paused events: 0; foreground service on
+PASS C2.noFgs+keepVisible: in the background 39 s: the video moved 39.9 s in 40.0 s of wall time (100%), 39 reports arrived meanwhile, paused events: 0; no foreground service
+PASS C3.icon: the launcher shows a "Probe site" icon
+PASS C3.fullScreen: url=http://127.0.0.1:8477/plain.html action=android.intent.action.VIEW systemBarsVisible=false size=1080x2400 screen=1080x2400

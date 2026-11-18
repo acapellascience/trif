@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIF probe: C2 background video</title>
+</head>
+<body style="margin:0;background:#000">
+<video id="v" src="clip.mp4" autoplay playsinline style="width:100%"></video>
+<script>
+// C2: a 60 s clip (with a silent sound track) plays; the page reports its position every second, and the
+// app compares the position before and after its time in the background with the wall clock.
+const v = document.getElementById('v');
+const send = (why) => probe.postMessage(JSON.stringify({ kind: 'video', why, t: v.currentTime, paused: v.paused, ended: v.ended, vis: document.visibilityState, wall: Date.now() }));
+v.addEventListener('playing', () => send('playing'));
+v.addEventListener('pause', () => send('pause'));
+document.addEventListener('visibilitychange', () => send('visibility'));
+v.play().catch((e) => probe.postMessage(JSON.stringify({ kind: 'video', why: 'play failed: ' + e.message })));
+setInterval(() => send('tick'), 1000);
+</script>
+</body>
+</html>

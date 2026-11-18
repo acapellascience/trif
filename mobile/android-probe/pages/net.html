@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIF probe: C1 network</title>
+</head>
+<body>
+<p id="out">C1: a fetch POST and a WebSocket</p>
+<script>
+// C1: the page sends a fetch POST with a body and talks over a WebSocket; the app compares what its
+// shouldInterceptRequest saw with what the server got (both echoed back here).
+(async () => {
+  const r = { kind: 'net' };
+  try { const res = await fetch('/echo', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'probe-body-42' }); r.post = await res.json(); } catch (e) { r.postError = String(e); }
+  try {
+    r.ws = await new Promise((ok, no) => {
+      const ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.onopen = () => ws.send('probe-ws-hello');
+      ws.onmessage = (e) => { ws.close(); ok(e.data); };
+      ws.onerror = () => no(new Error('websocket error'));
+      setTimeout(() => no(new Error('websocket timeout')), 5000);
+    });
+  } catch (e) { r.wsError = String(e); }
+  document.getElementById('out').textContent = JSON.stringify(r);
+  probe.postMessage(JSON.stringify(r));
+})();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 // A site's own unread count, read from its page title (Tim, 11-18: "unread counts instead of notifications"). No UI and
-// no WebKit: built for the Mac too (mobile/test/unreadcount.test.js). The same rule as mobile/shared/unread-count.js,
-// which Android uses; the test holds the two to the same answers (mobile/shared/unread-cases.json and random titles),
+// no WebKit: built for the Mac too (mobile/test/unreadcount.test.js). The same rule as mobile/shared/core/unread-count.js,
+// which Android uses; the test holds the two to the same answers (mobile/shared/core/unread-count-cases.json and random titles),
 // so a change here is a change there. The patterns are spelt the same in both: ICU's \s and \d aren't JavaScript's.
 //
 // Counted: a count at the very start ("(3) Home / X", "(20+) Home / X", "(1,234) Feed | LinkedIn"), "Inbox (N)"

@@ -160,6 +160,8 @@ struct ChatLink: Codable, Identifiable, Equatable {
     var id: String { ClaudePane.linkKey(service, site) }
     /// The tab list's badge and the chat list's picture: working, a reply waiting, or plain.
     var activity: ChatActivity { state == .working ? .working : state == .waiting ? .replied : .idle }
+    /// As the tab list's shared rules take it (TabListRules).
+    var facts: TabListRules.LinkFacts { .init(site: site, tab: tab, state: state.rawValue) }
 }
 
 /// A reply done in a chat the person isn't looking at (Tim, 11-18): the banner that slides down over whatever is
@@ -1030,19 +1032,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
     /// The tab the shown chat (or the quick ask's strip) belongs to, for the tab list to open at (Tim, 11-18): the one it
     /// was sent from while open and on its site, else nil (the shown tab). More follows the shown tab: nil.
+    /// The shared rule decides (TabListRules: tabList.focus).
     var chatTabShown: UUID? {
-        guard shown || strip, !more else { return nil }
-        guard let l = links.first(where: { $0.id == curKey }) ?? fallbackLink(curKey) else { return nil }
-        return tabFor(l)?.id
+        guard let browser else { return nil }
+        let link = links.first(where: { $0.id == curKey })
+        let chat = link == nil ? views.first(where: { ClaudePane.linkKey($0.service.rawValue, $0.site) == curKey })?.site : nil
+        return TabListRules.focus(open: shown || strip, more: more, link: link.map(\.facts), chat: chat,
+                                  tabs: browser.tabs.map(\.facts), current: browser.current.id)
     }
     /// The shown chat's way back (its top bar's ← site).
     var curKey: String { ClaudePane.linkKey(cur.service.rawValue, cur.site) }
     /// A tab's robot badge in the tab list: its chats' (sent from it, while it's on their site): working, a reply
     /// waiting, or plain (nil: no chat).
-    func badge(for tab: UUID) -> ChatActivity? {
-        let mine = links.filter { $0.tab == tab && tabFor($0) != nil }.map(\.activity)
-        if mine.isEmpty { return nil }
-        return mine.contains(.working) ? .working : mine.contains(.replied) ? .replied : .idle
+    func badge(for tab: UUID) -> ChatActivity? { badges()[tab] }
+    /// Every tab's badge with any, at once (the tab list asks once a drawing): the shared rule (tabList.badges).
+    func badges() -> [UUID: ChatActivity] {
+        guard let browser else { return [:] }
+        return TabListRules.badges(links: links.map(\.facts), tabs: browser.tabs.map(\.facts)).compactMapValues(ChatActivity.init(rawValue:))
     }
     /// A chat from the chats' list (or a banner's Open chat): shown, at its conversation, nothing put in its box.
     func openChat(_ key: String) {

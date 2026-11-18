@@ -55,6 +55,7 @@
 		A1C10B0E5EB1C11B00000052 /* ModOfferRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000053 /* ModOfferRules.swift */; };
 		A1C10B0E5EB1C11B00000054 /* LeavingCoverRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000055 /* LeavingCoverRules.swift */; };
 		A1C10B0E5EB1C11B00000056 /* TabReloadRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000057 /* TabReloadRules.swift */; };
+		A1C10B0E5EB1C11B00000058 /* TabListRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000059 /* TabListRules.swift */; };
 		A1C10B0E5EB1C11B00000044 /* Core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000045 /* Core.swift */; };
 		A1C10B0E5EB1C11B00000046 /* core.js in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000047 /* core.js */; };
 		A1C10B0E5EB1C11B00000042 /* UnreadCounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */; };
@@ -129,6 +130,7 @@
 		A1C10B0E5EB1C11B00000053 /* ModOfferRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModOfferRules.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000055 /* LeavingCoverRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LeavingCoverRules.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000057 /* TabReloadRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "TabReloadRules.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000059 /* TabListRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "TabListRules.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000045 /* Core.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Core.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000047 /* core.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "core.js"; path = "../shared/gen/core.js"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "UnreadCounts.swift"; sourceTree = "<group>"; };
@@ -281,6 +283,7 @@
 				A1C10B0E5EB1C11B00000053 /* ModOfferRules.swift */,
 				A1C10B0E5EB1C11B00000055 /* LeavingCoverRules.swift */,
 				A1C10B0E5EB1C11B00000057 /* TabReloadRules.swift */,
+				A1C10B0E5EB1C11B00000059 /* TabListRules.swift */,
 				A1C10B0E5EB1C11B00000049 /* Site.swift */,
 				A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */,
 				A1C10B0E5EB1C11B00000039 /* AppLinks.swift */,
@@ -422,6 +425,7 @@
 				A1C10B0E5EB1C11B00000052 /* ModOfferRules.swift in Sources */,
 				A1C10B0E5EB1C11B00000054 /* LeavingCoverRules.swift in Sources */,
 				A1C10B0E5EB1C11B00000056 /* TabReloadRules.swift in Sources */,
+				A1C10B0E5EB1C11B00000058 /* TabListRules.swift in Sources */,
 				A1C10B0E5EB1C11B00000048 /* Site.swift in Sources */,
 				A1C10B0E5EB1C11B00000042 /* UnreadCounts.swift in Sources */,
 				A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */,

@@ -24,9 +24,9 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
 - [x] Core.swift + mobile/shared/core + gen/core.js (round 1)
 - [x] Link policy: AppLinks kind / decide / isTap / logged → core/app-links.js (round 1). Words and Apple app names stay
       Swift (looks); the app's own schemes come from Info.plist (platform) and are passed in.
-- [~] Unread count from a title: shared already as mobile/shared/unread-count.js with a Swift twin (UnreadTitle.swift),
-      held to the same cases by test/unreadcount.test.js. Left as a twin (it runs on every title change); optional:
-      move the file into shared/core so it's in TrifCore too (keep the twin).
+- [x] Unread count from a title → core/unread-count.js (round 12; moved from mobile/shared/unread-count.js, cases now
+      core/unread-count-cases.json): TrifCore.unreadCount too. UnreadTitle.swift stays the twin the app runs (every
+      title change), held to the same cases and random titles by test/unreadcount.test.js, which also checks gen/core.js.
 - [x] Chat-offer judge → core/chat-offers.js (round 2): normalise, key (FNV-1a 64, 16-bit limbs), outcome, note
       (entries in, new list out), skip (takes keys). Storage stays Swift (UserDefaults), plus a key cache (NSString)
       warmed off the main thread at launch.
@@ -77,7 +77,14 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       join cases).
 - [x] Desktop-mode per-site memory → core/desktop.js (round 9): key, wants, set, can. Swift: DesktopRules (in
       TabReloadRules.swift): set calls through (⋯'s Request Desktop / Mobile Website); key, wants, can are twins.
-- [ ] Which tab the tab list snaps to (ClaudePane.chatTabShown + the from-Mods/from-page cases).
+- [x] Which tab the tab list snaps to → core/tab-list.js (round 12): focus (ClaudePane.chatTabShown: open = chat shown or
+      the strip, More → null, the link's tab while open and on its site; a chat with no link yet: the shown tab if on its
+      site, else the last tab there), marked (the card drawn as current; a Swift twin: every card, every drawing), badges
+      (each card's robot: working > replied > idle, only links whose tab is open and on their site). Swift:
+      TabListRules.swift (TabsView asks badges once a drawing, not once a card).
+- [ ] Optional, found in round 12: Go to <site>'s choice (ClaudePane.goToSite: its tab via tabFor, else a new tab at
+      the page it was on if that page is on the site, else https://site/) → tabList.goTo. Then a last spec audit and
+      CORE COMPLETE.
 
 ## Done this round
 
@@ -222,12 +229,28 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   SpeechAnalyzer + DictationTranscriber: the same words (volatile 10), ✕ keeps them; no "shared rule" line in
   diagnostics. .ipa built (dSYM 53F68BF4-47EF-32DA-9D58-AE748B7226A8).
 
+- Round 12 (11-18): the tab list's rules moved (core/tab-list.js: focus, marked, badges, activity; TabListRules.swift;
+  ClaudePane.chatTabShown / badges() and TabsView call it). Cases recorded from the old Swift (scratchpad r12/g, the
+  old code verbatim in shape over Site.swift): 450 focus (120 a tab), 220 marked, 220 badges (113 with any); the pure
+  Swift passed them before the switch. Cost on the Mac (unoptimised): a tap's focus + a drawing's badges over 20 tabs,
+  6 chats ~180 µs; no chats: badges makes no call. Unread count moved into shared/core (TrifCore.unreadCount; twin
+  kept). Tests: core-tablist (3), tablist (Swift through JSC), unreadcount (+ gen check), all core-* pass. Simulator
+  (SE, headless): from the page on 127.0.0.1 / localhost → that tab; from the chat → its tab; from Mods → the shown
+  tab; More's chat → the shown tab; no "shared rule" line in diagnostics. .ipa built (dSYM
+  33188806-1468-3E24-A54D-CC74F1D28B16).
+
 ## Next step
 
-Round 12: which tab the tab list snaps to (ClaudePane.chatTabShown + the from-Mods / from-page cases), then the optional
-unread-count move (shared/unread-count.js into shared/core, keep the twin), then CORE COMPLETE if the spec is complete.
+Round 13: Go to <site>'s choice (ClaudePane.goToSite → tabList.goTo, beside tabFor), then a last audit of
+docs/MOBILE-BEHAVIOUR.md against IOS-AGENT-NOTES (every Tim decision there as a rule), then CORE COMPLETE.
 
 ## Notes for next round
+
+- Round 12: tab ids cross as uuidString (upper case); a chat's site on the SE's localhost pages is "" (Site.of has no
+  dot to cut), so the Simulator's chat follows the shown tab; links with real sites need a sent chat, so the cases carry
+  the link paths. Android: shared/unread-count.js is now shared/core/unread-count.js (its cases
+  core/unread-count-cases.json); origin/android doesn't reference the old path from Kotlin. Driver: scratchpad
+  r12/drive.py ({"sheet": "tabs"}, {"tabsfocus": 1}, {"sheet": "none"}, {"tabbadges": 1}).
 
 - Round 11: a rule over growing text can keep the growing part on the platform side: speechText.apply takes `said`
   (anything committed) and answers `added` (append it) and `tail` (text = committed + tail); the JS test rebuilds
@@ -303,6 +326,10 @@ unread-count move (shared/unread-count.js into shared/core, keep the twin), then
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 12: which card the tab list opens at (the tab you just left; from a chat, the chat's own tab) and each card's
+  robot badge now decide through the shared rules Android will use; they behave as before. The unread-count rule sits
+  with the other shared rules now. A new TRIF.ipa is in iCloud Drive/TRIF.
 
 - Round 11: the microphone's words (what was said before a pause stays, a recognizer starting over or repeating
   itself never loses or doubles words) now come from the shared rules Android will use; they behave as before. A new

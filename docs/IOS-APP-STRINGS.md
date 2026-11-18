@@ -286,6 +286,19 @@ person's name on the site is known) · **fixed {Site}** · **Custom…**. The re
 
 No new words: the same button (accessibility: Switch to TRIF view), now beside the clock at the foot of the status bar.
 
+## Long press on a link or a picture (added 11-18, Tim: "normal iphone behaviour")
+
+The system's own menu and preview, as in Safari. Its items are iOS's own words (link: Open · Add to Reading List ·
+Copy Link · Share…; picture: Share… · Save to Photos · Copy · Copy Subject · Look Up); Save to Photos asks with the
+Photos permission line already listed above ("To save pictures from websites to your photos.", unchanged).
+
+| Where | Old | New |
+|---|---|---|
+| A link's long-press menu, first item (draft: Safari's own words) | (no menu) | Open in New Tab |
+
+(The History screen's long-press item says "Open in a new tab": not changed, as it wasn't named. Say if it should
+match Safari's "Open in New Tab" too.)
+
 ## Add this mod?: what TRIF found, and a mod for another site (added 11-17, Tim approved a stronger out-of-site warning)
 
 The findings reuse the Mods tab's approval card's words unchanged: **TRIF found that this mod:** (boxed: **It asks for these powers. TRIF holds it to them:**, each line “It {finding}.”) and **Together,** it {warning}. New, at the top in coral with a warning sign, when the mod runs on a site other than the one it came from (the chat's site, or the page it was pasted on; not for a file or a code):

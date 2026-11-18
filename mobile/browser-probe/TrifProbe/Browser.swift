@@ -3,7 +3,8 @@
 //   TRIF's world ("trif")  the kit (mobile/shared/kit.js), the start script, and the only way to the app
 //   the box ("trif-box")   where SES locks the language down and boxed mods would run
 // It also does the things a TRIF browser would do by itself: hides what the saved rules say from the first
-// moment of each load, lets you long-press a thing to hide it, and stops a mod link before it loads.
+// moment of each load (rules point-and-hide made before 11-17), gives links and pictures the system's long-press
+// menu (with Open in New Tab), and stops a mod link before it loads.
 
 import SwiftUI
 import UIKit
@@ -118,6 +119,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         ModDownloads.shared.browser = self
         FolderWatch.shared.browser = self
         restoreTabs()
+        // (a launch by a Home Screen icon: its own tab shown from the first frame, WebClip.swift)
+        if let link = PendingLink.url, let site = TrifLink.target(link), TrifLink.wantsFullScreen(link) { showIconTabAtLaunch(site) }
     }
 
     // MARK: tabs
@@ -129,13 +132,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return tab
     }
 
-    /// Sets up a tab's web view: the app as its delegate, the long press, and watching its address and title.
+    /// Sets up a tab's web view: the app as its delegate, the two-finger hold, and watching its address and title.
     private func attach(_ tab: Tab) {
         let wv = tab.webView
         wv.navigationDelegate = self
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
-        wv.allowsLinkPreview = false
+        // (a long press on a link or picture: the system's menu and preview, `contextMenuConfigurationFor` below)
+        wv.allowsLinkPreview = true
         wv.isInspectable = true
         // (full screen and back: two fingers held still on the page; pages don't use it, and it never blocks them. A
         // pinch moves too far, a two-finger tap is too short)
@@ -1185,10 +1189,76 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let t = tab(of: webView) { close(t) }
     }
 
-    /// No menu of the system's on a long press (links, pictures). It was point-and-hide's until 11-17; that's gone
-    /// and a long press now only selects text, but the system's menu stays off as before (not asked for).
+    /// A long press on a link or a picture: the system's menu and preview, as in Safari (Tim, 11-17: "normal iphone
+    /// behaviour"). The system's own items stay (`suggested`: Open, Add to Reading List, Copy Link, Share…, and a
+    /// picture's Save to Photos, Copy…); a link also gets Open in New Tab first, a TRIF tab after this one. A web link's
+    /// preview is the page itself, as Safari's (`LinkPreview`; WebKit draws only the link's highlight once the app gives
+    /// the menu); tapping it opens the link in this tab, as Safari does. A picture keeps WebKit's own preview.
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
-        nil
+        let link = elementInfo.linkURL.flatMap { Browser.opensInNewTab($0) ? $0 : nil }
+        let web = link.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        let store = config.websiteDataStore, agent = config.applicationNameForUserAgent
+        // (the preview the page's width and about half its height, so the whole menu fits under it on an SE: at full
+        // height, Copy Link and Share… were off the screen's foot)
+        let size = CGSize(width: webView.bounds.width, height: (webView.bounds.height * 0.5).rounded())
+        let preview: UIContextMenuContentPreviewProvider? = web.map { url in { LinkPreview(url: url, store: store, agent: agent, size: size) } }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: preview) { [weak self, weak webView] suggested in
+            guard let link else { return UIMenu(children: suggested) }
+            let open = UIAction(title: "Open in New Tab", image: UIImage(systemName: "plus.square.on.square")) { _ in
+                Task { @MainActor in self?.openInNewTab(link, after: webView) }
+            }
+            return UIMenu(children: [UIMenu(options: .displayInline, children: [open])] + suggested)
+        }
+    }
+
+    /// The preview tapped: the link opens in its own tab, as Safari does.
+    func webView(_ webView: WKWebView, contextMenuForElement elementInfo: WKContextMenuElementInfo, willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating) {
+        guard let url = elementInfo.linkURL else { return }
+        animator.addCompletion { [weak self, weak webView] in
+            guard let self, let webView else { return }
+            if Browser.isModLink(url) { self.stopModLink(url, from: "a link's preview"); return }
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    /// Links a new tab can open (not javascript:, which runs in the page it's on).
+    nonisolated static func opensInNewTab(_ url: URL) -> Bool { url.scheme?.lowercased() != "javascript" }
+
+    /// Open in New Tab: a tab right after the one the link was on, shown, as a page's own new window opens.
+    func openInNewTab(_ url: URL, after webView: WKWebView?) {
+        if Browser.isModLink(url) { stopModLink(url, from: "Open in New Tab"); return }
+        let t = makeTab()
+        t.started = true
+        let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.firstIndex { $0 === current } ?? tabs.count - 1) + 1
+        tabs.insert(t, at: at)
+        select(t)
+        t.webView.load(URLRequest(url: url))
+        report.log("link", "opened in a new tab: \(Diagnostics.place(url))")
+    }
+}
+
+/// A link's preview on a long press: the page in a web view of its own, with the tabs' cookies but none of TRIF's
+/// scripts (no mods: it's a glance), quiet (nothing plays without a tap), no taps (the preview is one button).
+final class LinkPreview: UIViewController {
+    private let url: URL
+    private let store: WKWebsiteDataStore
+    private let agent: String?
+    init(url: URL, store: WKWebsiteDataStore, agent: String?, size: CGSize) {
+        self.url = url; self.store = store; self.agent = agent
+        super.init(nibName: nil, bundle: nil)
+        preferredContentSize = size
+    }
+    required init?(coder: NSCoder) { nil }
+    override func loadView() {
+        let c = WKWebViewConfiguration()
+        c.websiteDataStore = store
+        c.applicationNameForUserAgent = agent
+        c.allowsInlineMediaPlayback = true
+        c.mediaTypesRequiringUserActionForPlayback = .all
+        let wv = WKWebView(frame: .zero, configuration: c)
+        wv.isUserInteractionEnabled = false
+        wv.load(URLRequest(url: url))
+        view = wv
     }
 }
 

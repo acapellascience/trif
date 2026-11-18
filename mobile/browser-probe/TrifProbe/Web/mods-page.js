@@ -416,7 +416,7 @@
   }
   onSwitchChange(() => renderMods());
 
-  // ---- what was hidden by pointing (the phone's own: a long press on the page) --------------------------------
+  // ---- what was hidden by pointing (point-and-hide's rules from before 11-17; nothing adds to them now) ----------
   function renderHidden() {
     const list = view.state?.hidden || [];
     ui.hiddenBox.hidden = !list.length;

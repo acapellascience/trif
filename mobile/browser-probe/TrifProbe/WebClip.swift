@@ -81,6 +81,20 @@ extension TrifLink {
 }
 
 extension Browser {
+    /// A cold launch by a full screen icon whose site's own tab is open: that tab shown, in full screen, as the tabs are
+    /// restored (Browser.init), before anything is drawn, so the tab left in front never shows (Tim, 11-17). Only the
+    /// existing tab: ContentView.openLink takes the link a moment later and does the rest (a new tab, covers, logs),
+    /// finding this tab already in front.
+    func showIconTabAtLaunch(_ target: URL) {
+        let site = Site.of(target.host ?? "")
+        let map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
+        guard let t = map[site].flatMap(UUID.init(uuidString:)).flatMap({ id in tabs.first { $0.id == id } }),
+              Site.of(t.host) == site, t !== current else { return }
+        select(t)
+        setFullScreen(true, note: false)
+        Diagnostics.shared.log("icon", "launched by \(site)'s icon: its tab shown from the start")
+    }
+
     /// Opened from a site's Home Screen icon made for full screen (Tim, 11-16): the site with no browser around it, as
     /// a native app; each icon's site keeps its own tab for it, so the icon comes back to it. The icon always lands in
     /// full screen, whatever its tab was left in (Tim, 11-16: "it should go straight to full screen view so it feels

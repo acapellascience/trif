@@ -104,11 +104,7 @@ final class Report: ObservableObject {
         save()
     }
 
-    func add(_ rule: HideRule) {
-        rules.removeAll { $0.host == rule.host && $0.selector == rule.selector }
-        rules.append(rule)
-        save()
-    }
+    // (no new rules since point-and-hide went, 11-17: only the saved ones, each shown again from the Mods tab)
 
     func remove(_ rule: HideRule) {
         rules.removeAll { $0.id == rule.id }

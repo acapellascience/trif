@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (301 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (312 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -100,7 +100,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   screen note and exit button), `Model`, dev steps, BarState.
 - Browser.swift: tabs' web views, navigation, mod offers (Add this mod?; offerFromChat with ChatOffers.swift's judge
   and memory), old hide rules (applied, Show again from the Mods tab), outline and chat context
-  (pageForChat, feedbackForChat), screenshots, full screen state, ModDownloads (.js downloads to Add this mod?).
+  (pageForChat, feedbackForChat), screenshots, full screen state, ModDownloads (.js downloads to Add this mod?), the
+  long-press menu (`contextMenuConfigurationFor`: the system's `suggested` items + Open in New Tab → `openInNewTab`;
+  `LinkPreview`, a link's page preview; `willCommitWithAnimator`: the preview tapped opens it in the tab).
 - ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
   normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
   (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
@@ -249,6 +251,26 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   #hide= mod link sheet (trif: and /trif-install links in pages are now just not followed, a report line), the
   clipboard's selector path. Rules it made stay applied, each with Show again in the Mods tab. Pointing may come back
   later in the desktop mod tools, only if the right layer can be picked reliably.
+- Long press on links and pictures = Safari's (Tim, 11-17, "normal iphone behaviour"; built 11-18): the system's menu
+  (WebKit's `suggested` items kept: Open, Add to Reading List, Copy Link, Share…; a picture's Share…, Save to Photos,
+  Copy, Copy Subject, Look Up) and, for links, "Open in New Tab" first (a TRIF tab after the link's, shown; not for
+  javascript:; mod links stopped as ever). `allowsLinkPreview` is true. Once the app returns a configuration WebKit
+  draws only the link's highlight, so http(s) links get `LinkPreview` (the page in its own web view: the tabs' cookie
+  store, no TRIF scripts or mods, no autoplay, no touches), sized to the page's width and half its height so the whole
+  menu fits on an SE. Tapping the preview loads the link in the same tab, as Safari. A picture keeps WebKit's preview.
+  The two-finger hold still toggles full screen (also with a finger on a picture); text selection unchanged. Point-and-hide's
+  "Hidden by pointing" list in the Mods tab is NOT dead: it shows the saved rules (Show again); only Report.add(HideRule)
+  was dead and is gone.
+- An icon's link shows its tab from the first frame (Tim, 11-17, "comes up as that other tab and then quickly switches
+  with a little animation"; built 11-18). Cold: the link is known in configurationForConnecting BEFORE Model/Browser are
+  made (checked: "launched by a link" logs before restoreTabs), so `Browser.showIconTabAtLaunch` selects the icon's own
+  tab (on-site only; full screen) as the tabs are restored; ContentView.openLink then finds it in front. NewTabView isn't
+  shown over a tab with a kept address waiting to load (it flashed over the icon's tab). Warm: openLink runs in a
+  no-animation transaction + performWithoutAnimation. Measured (simctl recordVideo, every frame): in front, the switch is
+  one frame; from the background, the APP's first frame is already the icon's tab, but iOS cross-fades its own snapshot
+  of the app as it was left (the old tab) into it over ~0.35 s during the zoom. Nothing the app does at open time can
+  change that snapshot. The only lever: make the snapshot neutral on leaving (cover the window at didEnterBackground) —
+  costs a blank card in the app switcher and a blank-to-page fade on every ordinary return. Tim's call; not built.
 - ⋯ → Copy diagnostics (Tim, 11-17; after Import…, visible without scrolling on an SE): the same text as the Mods
   tab's Send diagnostics…, then the 2 s note "Copied." (draft).
 - Chat offers (Tim, 11-17, "spurious asks to add old code when I open Claude chat"): a chat never offers the same
@@ -282,7 +304,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Chat offers in the Simulator (11-17, stand-in `?history`, `chatOffers` cleared, shots 300-301): opening the chat
   offered nothing for the old block; a reply handed over only its own two blocks (one skipped as installed), and
   an older message rendering after it made no late offer. Toolbar there: < > robot + Mods tabs A, page button exactly
-  centred (187.5); a long press only selects text (no Hide bar).
+  centred (187.5); a long press on text only selects it (no Hide bar).
 - Chat offers on the real claude.ai (signed in, can't be checked here): whether its older messages render before
   the person's latest in the DOM (the page side assumes document order; the app's memory is the guarantee either
   way), whether the USER selector still matches (without it the page side falls back to all blocks), and a viewer
@@ -296,7 +318,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - API engines against real services: `fallbacks: "default"`, `include: reasoning.encrypted_content`; the Keychain in a
   sideloaded build.
 - Exit button placement checked only on logged-out X and Instagram. Three chat pages' memory on the SE.
-- Permission strings still await Tim.
+- Permission strings still await Tim. Long-press menu (11-18): Open in New Tab, the preview, Save to Photos (asks
+  with NSPhotoLibraryAddUsageDescription, present since 11-15) checked in the Simulator only (shots 302-309); never on
+  a phone, nor on real sites with long-press handlers of their own (X, Instagram, YouTube's thumbnails).
 - Tim's icon report (11-17): the cause found in the Simulator is the icon's old tab gone to Google; his log can't prove
   it (icon lines went only to report.json then). If it recurs, the new `link`/`icon` lines say whether the link came
   at all. The real Web Clip path (tap → web app shell → trif://) works cold and warm in the Simulator (26.3) only.
@@ -350,6 +374,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `{"newchat": 1}` to load the chat home with the flags. Clearing `chatOffers` (PlistBuddy, app stopped) makes a
   chat-offers check test the page side alone.
 
+- Recording what a transition shows: `simctl io <dev> recordVideo --codec=h264 --force f.mp4` (in the background;
+  stop with `pkill -INT -f recordVideo`), then ffmpeg `select='between(t,a,b)'`, `tile`, `-fps_mode passthrough`: it
+  writes a frame only on a change, so every frame is there. iOS's app snapshot vs the live app: open the same link
+  with the app in front (no snapshot) to compare. Icon test without a real icon: `simctl openurl` of
+  `trif://open?url=<site>&app=1` (a loopback site on another host name than the tab left in front).
 - `simctl openurl` cuts URLs at about 2 KB (UIApplication.open doesn't).
 - The app opening its own trif:// with UIApplication.open gets iOS's "Open in …?" prompt (and it can linger over a
   later screen): in-app checks call the handler (ContentView.openForCheck); `simctl openurl` has no prompt.

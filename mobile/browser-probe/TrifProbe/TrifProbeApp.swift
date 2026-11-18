@@ -401,7 +401,9 @@ struct ContentView: View {
         ZStack(alignment: .top) {
             ZStack(alignment: .top) {
                 WebViewHost(webView: browser.webView).id(browser.current.id)
-                if browser.current.webView.url == nil && !browser.loading {
+                // (not for a tab with an address of its own waiting to load: a launch by an icon showed this list
+                // for a moment over its site's tab, 11-17)
+                if browser.current.webView.url == nil && !browser.loading && browser.current.savedURL == nil && browser.current.savedState == nil {
                     NewTabView(history: browser.history).modifier(BarPadding(bars: bars, top: true, bottom: true))
                 }
             }
@@ -659,7 +661,16 @@ struct ContentView: View {
         askingProject = false; importing = false; pickingFolder = false
     }
     /// A link the app was opened with: a file to import, a mod's trif://add, a Home Screen icon's trif://open.
+    /// With no animation (Tim, 11-17: an icon tapped while TRIF was on another tab showed that tab first, then faded):
+    /// the tab switch, the bars leaving for full screen and the covers closing happen in one frame, before the app's
+    /// first frame back. (What still shows the old tab for ~0.35 s on a return from the background is iOS's own
+    /// picture of the app as it was left, cross-faded into the live app: see IOS-AGENT-NOTES.md.)
     private func openLink(_ url: URL) {
+        var still = Transaction(animation: nil)
+        still.disablesAnimations = true
+        withTransaction(still) { UIView.performWithoutAnimation { openLinkNow(url) } }
+    }
+    private func openLinkNow(_ url: URL) {
         PendingLink.take(url)
         if TrifLink.target(url) != nil { Diagnostics.shared.log("icon", "the app takes \(PendingLink.describe(url)), over: \(coverNames)") }
         if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }

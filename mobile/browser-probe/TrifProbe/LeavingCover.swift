@@ -137,7 +137,9 @@ final class LeavingCover {
     }
 }
 
-/// Black, TRIF's robot in the middle at its own size (CoverRobot: 88 pt, the launch screen's), no words.
+/// Black, TRIF's robot at the exact centre of the whole screen (not the safe area) at its own size, no words: CoverRobot,
+/// the launch screen's picture (make-icon.js --cover: 128 pt, the robot itself 124 pt, a third of an SE's width; Tim,
+/// 11-18), so a cold launch and a return look the same.
 private final class CoverController: UIViewController {
     override func loadView() {
         let v = UIView()

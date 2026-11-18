@@ -74,7 +74,18 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         await send(browser.modsState(askPage: false), open: open)
         let full: [String: Any]? = await Browser.within(2, nil) { await browser.modsState(askPage: true) }
         if let full { await send(full, open: nil) } else { Diagnostics.shared.log("slow", "the Mods tab asked \(Diagnostics.place(browser.webView.url)) which mods started there, and it didn't answer within 2 s") }
+        // (a mod still starting: asked again once its grace is over; one wait at a time)
+        if let wait = full?["recheck"] as? Double {
+            recheck?.cancel()
+            recheck = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                self.recheck = nil
+                await self.refresh()
+            }
+        }
     }
+    private var recheck: Task<Void, Never>?
 
     private func send(_ state: [String: Any], open: String?) async {
         _ = try? await webView.callAsyncJavaScript("window.trifRender && window.trifRender(JSON.parse(state), open || null); return 'ok';",
@@ -286,15 +297,25 @@ extension Browser {
             m.everywhere || Site.of(m.site) == site || m.sites.contains { Site.of($0) == site } || (!url.isEmpty && mods.applies(m, to: url))
         }
         let ran: Set<String>, errors: [String: [String]]
-        let pageKnown = askPage || lastPageAnswer?.url == url
+        var askedAt: Date?
         if askPage {
+            let asked = Date()
             ran = url.isEmpty ? [] : await ranHere()
             errors = await modErrorsById(listed)
-            lastPageAnswer = (url, ran, errors)
+            lastPageAnswer = (url, ran, errors, asked)
+            askedAt = asked
             for (id, list) in errors where !list.isEmpty {  Diagnostics.shared.logOnce("mod error", "\(id) on \(Diagnostics.place(webView.url)): \(list.prefix(3).joined(separator: " | "))") }
         } else if let last = lastPageAnswer, last.url == url {
-            ran = last.ran; errors = last.errors
+            ran = last.ran; errors = last.errors; askedAt = last.at
         } else { ran = []; errors = [:] }
+        // (the page's answer counts as the last word on which mods started only once it was asked a while after the
+        // page finished loading: before that a mod switched on may simply not have started yet. Tim, 11-18: "Can't
+        // run here on iPhone" flashed under each free mod he switched on, for a frame, before the page had loaded
+        // with it)
+        let tab = current
+        let finished = loading ? nil : tab?.finishedAt
+        let settled = finished.map { f in askedAt.map { $0.timeIntervalSince(f) >= Browser.startGrace } ?? false } ?? false
+        var starting = false
         let rows: [[String: Any]] = listed.map { m in
             let applies = !url.isEmpty && mods.applies(m, to: url)
             let on = mods.isOn(m, site: site)
@@ -313,10 +334,17 @@ extension Browser {
                 row[m.pending ? "pending" : "held"] = ["needs": m.waiting.map(\.key), "facts": m.waiting.map(\.fact), "asks": m.tier == "boxed",
                                                          "by": m.source, "site": m.site, "hash": m.hash]
             }
-            // (a free mod that should have started here and didn't: the page's own world wouldn't run it)
-            if pageKnown, m.tier == "free", on, !tierOff, !m.held, applies, !loading, !ran.contains(m.id) { row["cant"] = true }
+            // (one that should be running here and isn't said to be: switched on since this page loaded, so it starts at
+            // the next load; or loaded with it and not settled yet: starting; or loaded with it, settled, and a free mod:
+            // the page's own world wouldn't run it. Only that last is an error)
+            if on, !tierOff, !m.held, applies, !mods.paused, !ran.contains(m.id) {
+                if !(tab?.modsLoadedIds.contains(m.id) ?? false) { row["nextLoad"] = true }
+                else if !settled { row["starting"] = true; starting = true }
+                else if m.tier == "free" { row["cant"] = true }
+            }
             return row
         }
+        modsStateSeq += 1
         let tiers = ["style": "rules", "boxed": "sandboxed", "free": "page"]
         return [
             "site": site, "host": host, "url": url, "loading": loading,
@@ -328,6 +356,13 @@ extension Browser {
             "trash": mods.trash.map { ["entry": $0.id, "name": $0.mod.name, "site": $0.mod.everywhere ? "every site" : $0.mod.site] },
             "paused": mods.paused,
             "switchedOff": safety.switchedOff[site].map { ["why": $0.why, "ids": $0.ids] } ?? NSNull(),
+            "seq": modsStateSeq,
+            // (a mod still starting on a page that has loaded: ask the page again once the grace is over, so one that
+            // really can't start says so then)
+            "recheck": starting ? max(0.2, (finished?.addingTimeInterval(Browser.startGrace + 0.1).timeIntervalSinceNow ?? Browser.startGrace)) : NSNull(),
         ]
     }
+
+    /// How long after its page finished loading a mod has to say it started before the Mods tab says it couldn't.
+    static let startGrace: TimeInterval = 2
 }

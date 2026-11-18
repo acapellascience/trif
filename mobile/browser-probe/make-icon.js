@@ -209,11 +209,21 @@ function convert(img, to) {
 module.exports = { continuous, iconSvg, RADIUS, RIM, FACE_SIDE, readPng, writePng };
 
 // The robot on the black cover and launch screen (Tim, 11-18: "like you're going from TRIF to your app";
-// LeavingCover.swift, Info.plist UILaunchScreen): the desktop's shaded robot (extension/icons/robot-shaded.svg, its
-// 128 box) at COVER_PT points, @2x and @3x, transparent around it, into Assets.xcassets/CoverRobot.imageset:
+// LeavingCover.swift, Info.plist UILaunchScreen): the desktop's shaded robot (extension/icons/robot-shaded.svg),
+// drawn from the vector at the final pixel sizes, @2x and @3x, into Assets.xcassets/CoverRobot.imageset:
 //
 //   node mobile/browser-probe/make-icon.js --cover
-const COVER_PT = 88; // (the 128 box; the robot itself is 102/128 of it, ~70 pt: a Home Screen icon is 60-64 pt)
+//
+// Size (Tim, 11-18, "like this big, but perfectly centered and full resolution"; his SE reference: ~247 px @2x):
+// the robot itself, the rim's outer edge to outer edge, is COVER_ROBOT_PT wide, a third of an SE's width. One fixed
+// size on every iPhone: the launch screen (Info.plist UILaunchScreen) shows its picture at the picture's own size and
+// can't scale it with the screen, and the cover matches it. The picture is cropped to the robot with COVER_PAD points
+// of transparent room round it (its anti-aliased edge), the robot's centre at the picture's exact centre: the 128 box's
+// centre (64, 64) is the head's centre (HEAD.c), and the eyes' glow stays inside the head. No upscaling: each scale is
+// drawn from the vector at its own pixel size.
+const COVER_ROBOT_PT = 124;
+const COVER_PAD = 2;
+const COVER_PT = COVER_ROBOT_PT + 2 * COVER_PAD; // 128 pt: 256 px @2x, 384 px @3x
 async function writeCover() {
   const shaded = fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'icons', 'robot-shaded.svg'), 'utf8');
   const out = path.join(__dirname, 'TrifProbe', 'Assets.xcassets', 'CoverRobot.imageset');
@@ -223,7 +233,12 @@ async function writeCover() {
   for (const scale of [2, 3]) {
     const px = COVER_PT * scale, name = `cover-robot@${scale}x.png`;
     const svg = path.join(tmp, `cover-${scale}.svg`), png = path.join(tmp, `cover-${scale}.png`);
-    fs.writeFileSync(svg, shaded.replace('width="128" height="128"', `width="${px}" height="${px}"`));
+    // (the view box: the head's outer edge (HEAD.c ± HEAD.outer, 8..120 of 128) is COVER_ROBOT_PT, plus COVER_PAD round it)
+    const unit = (2 * HEAD.outer) / COVER_ROBOT_PT, half = (COVER_PT / 2) * unit;
+    const box = `${HEAD.c - half} ${HEAD.c - half} ${2 * half} ${2 * half}`;
+    const sized = shaded.replace('width="128" height="128" viewBox="0 0 128 128"', `width="${px}" height="${px}" viewBox="${box}"`);
+    if (sized === shaded) throw new Error('robot-shaded.svg: its size and view box have changed; update writeCover');
+    fs.writeFileSync(svg, sized);
     await shoot(svg, png, px, px);
     const img = readPng(fs.readFileSync(png));
     if (img.channels !== 4 || img.width !== px) throw new Error(`cover ${scale}x: unexpected screenshot (${img.width}, ${img.channels} channels)`);

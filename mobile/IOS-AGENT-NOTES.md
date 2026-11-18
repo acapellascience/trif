@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (442 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (449 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -342,7 +342,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   UIWindow at .alert + 1 put up in SceneDelegate.sceneDidEnterBackground (Safety.swift), taken off after
   sceneDidBecomeActive once PendingLink.url is taken and the shown tab is `drawn` (cap 0.8 s), 0.2 s fade.
   `iconLinkCame` from PendingLink.came and ContentView.openLinkNow. Its picture: Assets.xcassets/CoverRobot.imageset
-  (`make-icon.js --cover`: robot-shaded.svg at 88 pt, @2x/@3x) on LaunchBlack.colorset, also Info.plist's UILaunchScreen
+  (`make-icon.js --cover`: robot-shaded.svg drawn from the vector at 256 / 384 px, a 128 pt picture cropped to the
+  robot with 2 pt round it, the robot itself 124 pt) on LaunchBlack.colorset, also Info.plist's UILaunchScreen
   (INFOPLIST_KEY_UILaunchScreen_Generation = NO in the pbxproj and make-project.rb).
 - make-icon.js: the app icons (light, dark, tinted = Rec. 709 grayscale of the colour art, face black); run it with
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
@@ -440,8 +441,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   page). Off on return once the icon's tab is chosen and its page drawn (≤ 0.8 s, so a page iOS let go reloads under
   the robot, not as white), with a 0.2 s fade. Tab pictures are WebKit's takeSnapshot of the page alone (checked: one
   taken with the cover up is the page). Pause all mods, Safety and the default-browser rules untouched. Diagnostics
-  kind "cover": one line each time it's put up, with why. Robot size: COVER_PT 88 in make-icon.js (the 128 box; the
-  robot ~70 pt), awaiting Tim's view (shots 383, 384).
+  kind "cover": one line each time it's put up, with why. Robot size (Tim, 11-18: "like this big, but perfectly
+  centered and full resolution", his SE reference ~247 px): the robot itself (rim's outer edge to edge) 124 pt, a third
+  of an SE's width, ONE fixed size on every iPhone (COVER_ROBOT_PT in make-icon.js): the Info.plist launch screen shows
+  its picture at the picture's own size and can't scale it, and a storyboard that could would resample the bitmap on
+  every phone but one (not full resolution); the cover matches it. Centred on the whole screen, not the safe area.
+  Measured (bbox of the green): SE cover 248 px, offset 0, 0 (446); SE launch 247 px (h264 frame), +0.5, +0.5 (447);
+  16e (@3x) launch 372 px, +0.5, 0 (448); 16e cover 372 px, 0, 0 (449), crisp at 100%. Tim's reference sat 12 pt above
+  centre: the Simulator never showed that (nor the 11-18 shots 383-384); if his phone does, it's the phone's.
 - ⋯ → Copy diagnostics (Tim, 11-17; after Import…, visible without scrolling on an SE): the same text as the Mods
   tab's Send diagnostics…, then the 2 s note "Copied." (draft).
 - Chat offers (Tim, 11-17, "spurious asks to add old code when I open Claude chat"): a chat never offers the same
@@ -638,6 +645,23 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   person was already in keeps its focus). The strip too. Checked: Go to chat on the Claude and ChatGPT (`?octane`)
   stand-ins, the strip, a reply waiting: activeElement body, scrollY 0, a recording's frames show no keyboard bar
   (before: the Simulator's keyboard bar came up, shot 402).
+- The Mods tab never says "didn't let it start" too early (Tim, 11-18: "odd flashes of error", his recording: the
+  red line under each free mod for ~100 ms as he switched it on after safe mode). Cause: the quick state (the page's
+  LAST answer, from before the switch) said "on, not started" before the page had loaded with the mod. Now
+  (ModsPanel.modsState) a row that should run and isn't said to have started is `nextLoad` (not in Tab.modsLoadedIds:
+  the ids the page committed with; switched on since), `starting` (loaded with it, but the page's answer wasn't asked
+  ≥ Browser.startGrace 2 s after the page finished), or `cant` (loaded with it, answer settled, a free mod: the only
+  error). A state with `starting` rows carries `recheck` (s): ModsPanel.refresh asks again then, so a mod that really
+  can't start says so ~2 s after the page loads. The light's description says "Starts when this page loads again" /
+  "Starting on this page" (drafts). Also: each state is numbered (`seq`, made in order on main) and the page drops an
+  older one delivered late (a state made before a tap and delivered after it would show the switch's old state); a
+  tier's On/Off shows the tapped state at once (`groupPending`). The flip-back in Tim's recording was NOT reproduced in
+  the Simulator, old build or new (each "off then on" there looked like his own two taps ~0.6 s apart): the seq and
+  groupPending are guards. The message is the phone's own (desktop has no "cant"), so desktop is unaffected.
+- A page's own window closing itself (window.close(), a sign-in popup) goes back to the tab that opened it if that's
+  still open (Tim, 11-18, as Android): Tab.opener (weak) set in createWebViewWith; webViewDidClose → close(t, showing:
+  opener), only when that window was the tab shown. report.json "tabs" line. No docs/MOBILE-BEHAVIOUR.md exists yet on
+  ios-poc (nor android): record it there once it does.
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 - A video picks up where it was (Tim, 11-18; built 11-18, VideoResume above): every tab, every site, any reload of the
   same page within 30 min (a reload, a page process ended, a mod applying, back to it, a relaunch). Background
@@ -816,6 +840,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   The download starts at a press (choose(download: true)); a press while the list's own look was still running was
   DROPPED before 11-18 (`choosing` busy): now `downloadAfter` looks again. Look for "talking: getting the speech model"
   then "the speech model is on this iPhone"; the next look (that run or the next launch) says "→ SpeechTranscriber".
+
+- Mods tab flash (11-18): Simulator only, SE, stand-in pages on the Mac's LAN address (a site with no other mods;
+  the batch's scratchpad flashtest/server.js: plain.html, blocker.html which takes window.__trifRan first so a free
+  mod never marks its start) and three imported test mods (free, boxed, style). A recorder in the Mods page (modsjs:
+  every frame, each switch's shown state against the last tap's, any "let it start" line) over 29 JS taps, 5 real
+  taps (each mod on after safe mode switched them off, a tier Off then On), quick re-taps (0.3 s, 0.6 s): 0 error
+  frames, 0 switches showing their old state; recordVideo frames the same (444). The OLD build on the same harness:
+  the error in 5 frames (443, as Tim's). blocker.html: "Starting on this page" then the error 2.2 s later. Not on a
+  phone or x.com: a page that finishes very late (x.com may keep loading) keeps the row "starting" until it finishes.
+- Popup back to its opener (11-18): Simulator only, signin.html / signin-popup.html (from branch android, in
+  mobile/shared/pages; serve.js on 8377 and 8378): real taps, the popup inserted before a 127.0.0.1 tab; closing went
+  back to signin.html, "Signed in as Test Person" (445); the old code showed the next tab. Not tried: a popup closing
+  while another tab is shown, real Google sign-in.
 
 ## Gotchas
 

@@ -671,3 +671,14 @@ Drafts for Tim. Nothing else people see is new: a resumed video just carries on 
 |---|---|---|
 | The note over the toolbar when a video picked up where it was but iOS let it play only without sound (8 s; a tap turns the sound on) | — | a speaker icon and **Tap for sound** |
 | The model download's note when the server refuses it (403, 404…) | Couldn’t download {model}: the server answered {code}. (the same words as before; only now said at once, not after "100%") | unchanged |
+
+## The Mods tab while a mod starts (added 11-18, Tim: "odd flashes of error")
+
+No new line under a row. The error now shows only when it's true; what a mod switched on is doing meanwhile is
+said only by its light's description (read by VoiceOver; no hover on a phone). Drafts for Tim.
+
+| Where | Old | New (draft for Tim) |
+|---|---|---|
+| Under a free mod's row, right after its switch went on (or its tier's On), before the page had loaded with it | **Can't run here on iPhone: this page didn't let it start.** flashed for a moment | nothing; the error shows only once the page has loaded with the mod on and its start hasn't come within 2 s of the page finishing |
+| A mod's light, switched on since the page loaded (the page loads again at once, unless it's playing) | Not running on this page | **Starts when this page loads again** |
+| A mod's light, the page loaded with it, its start not in yet | Not running on this page | **Starting on this page** |

@@ -1,11 +1,13 @@
-// The video-resume rules (VideoResume.swift) on the Mac: which loads pick a video up where it was, and the site's
-// video ids. `check --videoid-script` prints the page's videoId function, for videoresume.test.js to run in node and
-// compare with the Swift one. Prints "video resume: ok" or the failures.
+// The video-resume rules (VideoResume.swift: the phones' shared mobile/shared/gen/core.js, TrifCore.videoResume, called
+// through Core.swift) on the Mac: which loads pick a video up where it was, and the site's video ids, against
+// video-resume-cases.json (argv[1]; gen/core.js argv[2]). `check --videoid-script` prints the page's videoId function,
+// for videoresume.test.js to run in node and compare with the Swift one. Prints "video resume: ok" or the failures.
 import Foundation
 
 if CommandLine.arguments.contains("--videoid-script") { print(VideoResume.videoIDScript); exit(0) }
 if CommandLine.arguments.contains("--videoid") {
-    // (one address a line on stdin → its id or "-")
+    // (one address a line on stdin → its id or "-"; gen/core.js the last argument)
+    Core.source = URL(fileURLWithPath: CommandLine.arguments.last!)
     while let line = readLine() { print(VideoResume.videoID(line) ?? "-") }
     exit(0)
 }
@@ -13,7 +15,39 @@ if CommandLine.arguments.contains("--videoid") {
 var failures: [String] = []
 func expect(_ ok: Bool, _ what: String) { if !ok { failures.append(what) } }
 
+let args = CommandLine.arguments
+if args.count > 2 { Core.source = URL(fileURLWithPath: args[2]) } else { failures.append("no core.js (argv[2])") }
+Core.report = { failures.append("Core: " + $0) }
+guard args.count > 1, let cd = FileManager.default.contents(atPath: args[1]), let C = (try? JSONSerialization.jsonObject(with: cd)) as? [String: Any] else {
+    print("no cases (argv[1])"); exit(1)
+}
 let now = Date()
+// the recorded answers
+let A = C["addresses"] as! [[Any]]
+for r in A {
+    let a = r[0] as! String, w = r[2] as! [String: Any]
+    // (the platform's parts, as recorded: what the rules were given)
+    let mine = try! JSONSerialization.data(withJSONObject: [VideoResume.parts(a)], options: [.sortedKeys, .fragmentsAllowed])
+    let kept = try! JSONSerialization.data(withJSONObject: [r[1]], options: [.sortedKeys, .fragmentsAllowed])
+    expect(mine == kept, "parts \(a): \(String(decoding: mine, as: UTF8.self))")
+    expect(VideoResume.videoID(a) == w["id"] as? String, "videoID \(a): \(VideoResume.videoID(a) ?? "nil")")
+    expect(VideoResume.asksForTime(a) == w["asks"] as! Bool, "asksForTime \(a)")
+}
+for r in C["same"] as! [[Any]] {
+    let i = r[0] as! Int, j = r[1] as! Int, a = A[i][0] as! String, b = A[j][0] as! String
+    expect(VideoResume.samePage(a, b) == r[2] as! Bool, "samePage \(a) \(b)")
+}
+var t0 = Date()
+for r in C["decide"] as! [[Any]] {
+    let f = r[0] as! [String: Any], w = r[1] as! [String: Any], address = f["address"] as! String
+    let s = (f["saved"] as? [String: Any]).map { v in
+        VideoResume.State(url: v["url"] as! String, time: (v["time"] as! NSNumber).doubleValue, playing: true, duration: (v["duration"] as! NSNumber).doubleValue,
+                          live: v["live"] as! Bool, ended: v["ended"] as! Bool, at: now.addingTimeInterval(-(v["age"] as! NSNumber).doubleValue))
+    }
+    let d = VideoResume.decide(saved: s, address: address, now: now)
+    expect((d.plan != nil) == w["plan"] as! Bool && d.why == w["why"] as! String && (d.plan == nil || d.plan == s), "decide \(f): \(d.why)")
+}
+let decideCost = Date().timeIntervalSince(t0) / Double((C["decide"] as! [[Any]]).count)
 func st(_ url: String, _ time: Double, playing: Bool = true, duration: Double = 600, live: Bool = false, ended: Bool = false, ago: TimeInterval = 10) -> VideoResume.State {
     VideoResume.State(url: url, time: time, playing: playing, duration: duration, live: live, ended: ended, at: now.addingTimeInterval(-ago))
 }
@@ -59,3 +93,4 @@ expect(VideoResume.state(from: ["time": 3]) == nil, "no address refused")
 expect(VideoResume.clock(42.9) == "0:42" && VideoResume.clock(3725) == "1:02:05", "clock")
 
 print(failures.isEmpty ? "video resume: ok" : failures.joined(separator: "\n"))
+print(String(format: "a load's decide %.0f µs", decideCost * 1e6))

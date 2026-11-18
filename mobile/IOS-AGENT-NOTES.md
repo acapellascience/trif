@@ -204,7 +204,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift); which tabs load again when the mods change, and desktop websites' per-site memory (TabReloadRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift); which tabs load again when the mods change, and desktop websites' per-site memory (TabReloadRules.swift); which load picks a video up where it was, and the sites' video ids (VideoResume.swift: decide / videoID / samePage / asksForTime call TrifCore.videoResume with an address as its parts). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -389,7 +389,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   video, or the last played: an unmuted one wins over a muted preview) on timeupdate every 3 s shown / 8 s hidden or
   backgrounded (media events, no timers: WebKit keeps them firing while it plays), and at once on play, pause, ended,
   seeked, rate/volume, pagehide/hidden. At the start it asks `videoplan` (with the navigation type: back_forward is a
-  reload line); no reports until answered, nor while a plan waits for its video. `decide` (30 min, same page = same
+  reload line); no reports until answered, nor while a plan waits for its video. `decide` (shared since round 10:
+  core/video-resume.js through Core, an address as `parts` (URLComponents: host, decoded path, query items,
+  fragment); no answer → no resume, "no answer from the shared rule" in report.json; 30 min, same page = same
   site video id (`videoID`: YouTube v=/shorts/embed/live/youtu.be, Vimeo) else the address without #, not live, not
   ended, not a link asking its own time (t=, start=), not the first 5 s / last 10 s). The page applies the plan to the
   video whose duration is within 1 s (and the same non-blob src), once it has metadata: speed, muted, seek; playing →

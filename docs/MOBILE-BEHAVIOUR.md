@@ -218,9 +218,11 @@ change there is a change on both phones. Change this file whenever a rule change
 - Sound and video play on with the app in the background or the phone locked; a page that pauses itself as it goes
   hidden is respected.
 - A video picks up where it was (11-18) after any reload of the same page within 30 min (a reload, a page process
-  ended, a mod applying, back to it, a relaunch). [the matching rules: to be shared; the page's video id already is in
-  the page script]
-  - Same page = the same site video id (YouTube v=/shorts/embed/live/youtu.be, Vimeo), else the address without #.
+  ended, a mod applying, back to it, a relaunch). The matching rules are shared (core/video-resume.js); the page's
+  own video id (in the page script) gives the same ids.
+  - Same page = the same site video id (YouTube's v=, /shorts/, /embed/, /live/, /v/, youtu.be/ on youtube.com,
+    youtube-nocookie.com and their subdomains; Vimeo's last all-digit path part), else the address without #. The kept
+    page asking its own time too (a reloaded t= link) still resumes.
   - Not resumed: live, ended, a link asking its own time (t=, start=), the first 5 s or the last 10 s.
   - Applied to the video whose duration is within 1 s (same non-blob src): speed, muted, time; playing → played (with
     sound if the OS allows, else muted with "Tap for sound"). A site moving it in the next 6 s gets it put back once
@@ -292,4 +294,5 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | A chat's offered mod: where it's read, where it came from, the coral box | shared/core/mod-offer.js | ModOfferRules.swift → TrifCore.modOffer (Browser.offerFromChat and the Add to TRIF tap; the words stay ModOfferView's) | test/core-modoffer.test.js, test/modoffer.test.js |
 | The leaving cover's "icon use" (an icon's tab in full screen, or arrived by an icon within 3 s) | shared/core/leaving-cover.js | LeavingCoverRules.swift → TrifCore.leavingCover (the cover, its timing and the scene hooks stay LeavingCover.swift) | test/core-leavingcover.test.js, test/leavingcover.test.js |
 | Which tabs load again when mods change (started or looked at; stale; later, keep, ask whether playing; reload) | shared/core/tab-reload.js | TabReloadRules.swift → TrifCore.tabReload (Browser.select / refreshIfStale; `loaded` and `stale` twins, same cases: every commit; the signature, the playing check and the reload stay Browser's) | test/core-tabreload.test.js, test/tabreload.test.js |
+| A video picked up where it was: which load resumes (30 min, same page, live, ended, own time, first 5 s / last 10 s), the sites' video ids | shared/core/video-resume.js | VideoResume.swift → TrifCore.videoResume (an address as its parts: URLComponents; the page's script, the store and the play stay Swift) | test/core-videoresume.test.js, test/videoresume.test.js |
 | Desktop websites' per-site memory (the key, wants, the kept list, can) | shared/core/desktop.js | DesktopRules (TabReloadRules.swift) → TrifCore.desktop `set` (`key`, `wants`, `can` twins, same cases: every page load) | test/core-tabreload.test.js, test/tabreload.test.js |

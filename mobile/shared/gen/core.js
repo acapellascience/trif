@@ -2,8 +2,8 @@
 var TrifCore = (function () {
 'use strict';
 const TrifCore = {};
-TrifCore.appLinks = (function () {
-const module = { exports: {} };
+const SOURCES = {};
+SOURCES["app-links.js"] = function (module, exports, require) {
 // Links that aren't web pages (tel:, mailto:, sms:, maps:, an app's own scheme such as fb-messenger:): handed to the
 // phone's OS, as Safari does (Tim, 11-18). Only at once when the person tapped; a page (or a mod) trying it by itself
 // gets the OS browser's question instead, at most one at a time and one a page load; never from a frame inside the
@@ -71,10 +71,8 @@ function logged(scheme) {
 
 module.exports = { kind, decide, isTap, logged, TAP_WINDOW, STAY };
 
-return module.exports;
-})();
-TrifCore.chatOffers = (function () {
-const module = { exports: {} };
+};
+SOURCES["chat-offers.js"] = function (module, exports, require) {
 // What a chat may offer with Add this mod? (Tim, 11-17: "spurious asks to add old code when I open Claude chat"): the
 // same code is never offered from a chat twice, whatever came of it (remembered across launches by a key of the code
 // with its line ends and trailing spaces evened out), nor an installed mod's current or earlier version, nor a mod's
@@ -226,8 +224,117 @@ function skip(a) {
 
 module.exports = { normalise, key, keys, outcome, note, skip, LIMIT };
 
-return module.exports;
-})();
+};
+SOURCES["quick-ask.js"] = function (module, exports, require) {
+// Quick ask's rules (Tim, 11-18: "have it done without fiddling with the chat"): which of a reply's mods are added at
+// once (look-only), what the pill then says, and what Undo puts back. docs/MOBILE-BEHAVIOUR.md, Quick ask. Both phone
+// apps run this (mobile/shared/gen/core.js: TrifCore.quickAsk); quick-ask-cases.json holds the iPhone's answers.
+
+'use strict';
+
+const site = require('./site.js');
+
+/**
+ * A look-only mod: a style mod (css, hide, settings) with no powers, nothing waiting for an OK, no warnings, not
+ * everywhere, and every site it runs on the chat's own. Anything else gets its card (Add this mod? or the approval).
+ * @param {{tier: string, powers: string[], held: boolean, warnings: string[], everywhere: boolean, sites: string[]}} m
+ * @param {string} chatSite the chat's site (site.chat: phone~ twin removed, registrable part)
+ */
+function lookOnly(m, chatSite) {
+  const sites = m.sites || [];
+  return m.tier === 'style' && !(m.powers || []).length && !m.held && !(m.warnings || []).length && !m.everywhere
+    && !!chatSite && sites.length > 0 && sites.every((s) => site.of(s) === chatSite);
+}
+
+/**
+ * A quick ask's reply: its offered mods (each {id, ...lookOnly's facts}) sorted into look (added at once) and rest
+ * (their cards; a mod whose id is among look's isn't carded too), and the pill's state: 'done' (something added),
+ * 'card' (only cards), 'replied' (no mods).
+ * @param {object[]} offered
+ * @param {string} chatSite the chat's site as the tab gave it (phone~ twins and hosts are fine)
+ */
+function sort(offered, chatSite) {
+  const s = site.chat(chatSite);
+  const look = (offered || []).filter((m) => lookOnly(m, s)).map((m) => m.id);
+  const rest = (offered || []).filter((m) => !look.includes(m.id)).map((m) => m.id);
+  return { site: s, look, rest, state: look.length ? 'done' : rest.length ? 'card' : 'replied' };
+}
+
+/**
+ * Undo after Done: newest first, each mod back to the version it replaced ('before') or removed ('remove': it was new),
+ * and its code remembered as declined (never offered again). Never to Recently deleted: as far as the person goes, it
+ * never was. Only from 'done'.
+ * @param {string} state the quick ask's state
+ * @param {{id: string, hadBefore: boolean}[]} applied what Done added, in order
+ * @returns {{id: string, to: string, decline: boolean}[]} the steps ([] when there's nothing to undo)
+ */
+function undo(state, applied) {
+  if (state !== 'done') return [];
+  return (applied || []).slice().reverse().map((a) => ({ id: a.id, to: a.hadBefore ? 'before' : 'remove', decline: true }));
+}
+
+module.exports = { lookOnly, sort, undo };
+
+};
+SOURCES["site.js"] = function (module, exports, require) {
+// Sites as both apps group them: a host's registrable part (en.wikipedia.org → wikipedia.org; news.bbc.co.uk →
+// bbc.co.uk), without www., lower case; IP addresses, one-word hosts and all-sites as they are. docs/MOBILE-BEHAVIOUR.md,
+// Sites. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.site); site-cases.json holds the answers the
+// iPhone's Site.of gave. The iPhone keeps a Swift twin (Site.swift: it runs on every navigation), held to the same cases.
+
+'use strict';
+
+/** the two-part public suffixes that keep three parts */
+const TWO_PART = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'ne.jp', 'or.jp',
+  'com.br', 'com.mx', 'co.in', 'co.kr', 'com.cn', 'com.tw', 'com.hk', 'co.za', 'com.sg', 'com.tr', 'com.ar', 'qc.ca'];
+
+/** lower case, without one leading www. */
+const plain = (host) => String(host || '').toLowerCase().replace(/^www\./, '');
+
+/**
+ * A host's site. Numbers-only hosts (any script's digits, as Unicode's Number category: an IP address) stay whole.
+ * (The iPhone's Swift also counts Han numerals such as 一 as numbers; hosts arrive as punycode, so it never shows.)
+ * @param {string} host
+ */
+function of(host) {
+  const h = plain(host);
+  if (!h || h === 'all-sites' || /^[\p{N}.]*$/u.test(h) || !h.includes('.')) return h;
+  const parts = h.split('.').filter(Boolean);
+  if (parts.length <= 2) return h;
+  const last2 = parts.slice(-2).join('.');
+  return TWO_PART.includes(last2) ? parts.slice(-3).join('.') : last2;
+}
+
+/** Whether `host` is `site` or under it (www. and case aside). */
+function hostIsIn(host, site) {
+  const h = plain(host);
+  return h === site || h.endsWith(`.${site}`);
+}
+
+/** A chat's site: its page's site, a phone twin (phone~x.com, the computer's phone view) as its site. */
+function chat(site) {
+  let s = String(site || '');
+  if (s.startsWith('phone~')) s = s.slice('phone~'.length);
+  return of(s);
+}
+
+module.exports = { of, hostIsIn, chat, TWO_PART };
+
+};
+const cache = {};
+function require(name) {
+  const f = name.replace(/^\.\//, '');
+  if (cache[f]) return cache[f].exports;
+  if (!SOURCES[f]) throw new Error(`no shared rule ${name}`);
+  const module = { exports: {} };
+  cache[f] = module;
+  SOURCES[f](module, module.exports, require);
+  return module.exports;
+}
+TrifCore.appLinks = require("app-links.js");
+TrifCore.chatOffers = require("chat-offers.js");
+TrifCore.quickAsk = require("quick-ask.js");
+TrifCore.site = require("site.js");
 // name "module.fn", args a JSON array; the answer as JSON (null for undefined)
 TrifCore.call = function (name, argsJSON) {
   const dot = name.indexOf('.');

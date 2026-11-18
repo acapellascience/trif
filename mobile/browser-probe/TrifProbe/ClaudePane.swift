@@ -1262,10 +1262,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private func quickDeliver(_ texts: [String], site: String, path: String, hold: Bool, view v: ChatView?) async -> [InstalledMod] {
         guard let browser else { return [] }
         let offered = await browser.offerFromChat(texts, from: site, path: path, hold: true)
-        var s = site
-        if s.hasPrefix("phone~") { s.removeFirst("phone~".count) }
-        let look = offered.filter { QuickAsk.lookOnly($0, site: Site.of(s)) }
-        let rest = offered.filter { m in !look.contains { $0.id == m.id } }
+        let sorted = QuickAskRules.sort(offered.map(\.quickFacts), chatSite: site)
+        let s = sorted.site
+        // (offered ids are one each: offerFromChat keeps a mod's last block)
+        let look = offered.filter { sorted.look.contains($0.id) }
+        let rest = offered.filter { sorted.rest.contains($0.id) }
         var applied: [(id: String, before: InstalledMod?)] = []
         for m in look {
             applied.append((m.id, browser.mods.mods.first { $0.id == m.id }))
@@ -1273,7 +1274,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
         if !rest.isEmpty { if hold, let v { banner(v, rest) } else { browser.offerHeld(rest) } }
         quick?.applied = applied
-        quick?.state = !look.isEmpty ? .done : !rest.isEmpty ? .card : .replied
+        quick?.state = sorted.state == "done" ? .done : sorted.state == "card" ? .card : .replied
         if quick?.state == .card { quick = nil }
         Diagnostics.shared.log("quick ask", "reply for \(s.isEmpty ? "no site" : s): \(look.count) look-only mod(s) added (\(look.map(\.id).joined(separator: ", "))), \(rest.count) to their card\(rest.isEmpty ? "" : hold ? " (held by the done banner)" : "")")
         return offered
@@ -1282,9 +1283,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// Done's Undo: each mod added as it was before (removed if it was new), the page shown again with it.
     func quickUndo() {
         guard let q = quick, q.state == .done, let browser else { return }
-        for a in q.applied.reversed() {
+        for step in QuickAskRules.undo(state: "done", applied: q.applied.map { ($0.id, $0.before != nil) }) {
+            guard let a = q.applied.last(where: { $0.id == step.id }) else { continue }
             if let code = browser.mods.mods.first(where: { $0.id == a.id })?.code { browser.chatOffers.note(code, .declined) }
-            browser.mods.undoAdd(a.id, before: a.before)
+            browser.mods.undoAdd(a.id, before: step.back ? a.before : nil)
         }
         browser.modsChanged(why: "the quick ask's Undo")
         quick?.applied = []

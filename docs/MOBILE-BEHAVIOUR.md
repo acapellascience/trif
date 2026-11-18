@@ -12,6 +12,9 @@ change there is a change on both phones. Change this file whenever a rule change
   suffixes such as `co.uk`, `com.au`, `qc.ca` keep three parts; IP addresses and one-word hosts as they are).
   `localhost` and `127.0.0.1` are two sites.
 - `phone~<site>` (a phone twin, from the computer's phone view) is `<site>` wherever a site is asked for.
+- Lower case, one leading `www.` dropped; empty labels ignore (`a..b.com` → `b.com`); a host that is only digits and
+  dots stays whole (any script's digits); `all-sites` is itself. A host is in a site when it is the site or ends in
+  `.<site>`.
 
 ## Mods and holds
 
@@ -103,6 +106,8 @@ change there is a change on both phones. Change this file whenever a rule change
   warnings, not everywhere, and every site it runs on is the chat's site. Anything else gets Add this mod? (or the
   done banner holds it).
 - Undo puts back the version before (an update) or removes the mod (a new one); it isn't put in Recently deleted.
+  Newest first; each undone mod's code is remembered as declined (never offered again). Only from Done.
+- The pill: Done when anything was added at once, else the card when there were mods, else Replied.
 - One offer per mod; follow-ups continue the same chat; the pill closed while working: the reply is offered as ever.
 - The chats' list: top right Send (dimmed when the box is empty), top left Cancel; Cancel, a tap outside and a swipe
   down all keep the box's words.
@@ -237,3 +242,5 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Unread count from a title | shared/unread-count.js | UnreadTitle.swift (a twin, same cases) | test/unreadcount.test.js |
 | Links to other apps | shared/core/app-links.js | AppLinks.swift → TrifCore.appLinks | test/core-applinks.test.js, test/applinks.test.js |
 | What a chat may offer (memory, key, judge) | shared/core/chat-offers.js | ChatOffers.swift → TrifCore.chatOffers (storage and a key cache stay Swift) | test/core-chatoffers.test.js, test/chatoffers.test.js |
+| Sites (a host's site; host in site; a chat's site) | shared/core/site.js | Site.swift (a twin, same cases: every navigation) | test/core-quickask.test.js, test/quickask.test.js |
+| Quick ask: look-only, the pill's state, Undo's steps | shared/core/quick-ask.js | QuickAskRules.swift → TrifCore.quickAsk | test/core-quickask.test.js, test/quickask.test.js |

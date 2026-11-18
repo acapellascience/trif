@@ -1,0 +1,3000 @@
+{
+ "about": "Quick ask's rules as the iPhone answered them before the move (QuickAsk.lookOnly, ClaudePane.quickDeliver's split and state, quickUndo's steps; round 3). core/quick-ask.js and the Swift that calls it must give the same answers (mobile/test/core-quickask.test.js, mobile/test/quickask.test.js). lookOnly: [mod facts, chat site (already a site), answer]; sort: [{offered}, the tab's chat site, answer]; undo: [state, applied, steps].",
+ "lookOnly": [
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "plain",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   true
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "plain",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "plain",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "plain",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "boxed",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "boxed",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "boxed",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "boxed",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "boxed",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "boxed",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "boxed",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "boxed",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "free",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "free",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "free",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "free",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "free",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "free",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "free",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "free",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "STYLE",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "Style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "STYLE",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "Style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "STYLE",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "Style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "STYLE",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "Style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "power",
+    "powers": [
+     "storage"
+    ],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "power",
+    "powers": [
+     "storage"
+    ],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "power",
+    "powers": [
+     "storage"
+    ],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "power",
+    "powers": [
+     "storage"
+    ],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": true,
+    "name": "held",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": true,
+    "name": "held",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": true,
+    "name": "held",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": true,
+    "name": "held",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "warned",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": [
+     "w"
+    ]
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "warned",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": [
+     "w"
+    ]
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "warned",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": [
+     "w"
+    ]
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "warned",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": [
+     "w"
+    ]
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere",
+    "powers": [],
+    "sites": [
+     "all-sites"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere",
+    "powers": [],
+    "sites": [
+     "all-sites"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere",
+    "powers": [],
+    "sites": [
+     "all-sites"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere",
+    "powers": [],
+    "sites": [
+     "all-sites"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere-site-only",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere-site-only",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere-site-only",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": true,
+    "held": false,
+    "name": "everywhere-site-only",
+    "powers": [],
+    "sites": [
+     "x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "no sites",
+    "powers": [],
+    "sites": [],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "no sites",
+    "powers": [],
+    "sites": [],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "no sites",
+    "powers": [],
+    "sites": [],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "no sites",
+    "powers": [],
+    "sites": [],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "subdomain",
+    "powers": [],
+    "sites": [
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   true
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "subdomain",
+    "powers": [],
+    "sites": [
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "subdomain",
+    "powers": [],
+    "sites": [
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "subdomain",
+    "powers": [],
+    "sites": [
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "www",
+    "powers": [],
+    "sites": [
+     "www.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   true
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "www",
+    "powers": [],
+    "sites": [
+     "www.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "www",
+    "powers": [],
+    "sites": [
+     "www.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "www",
+    "powers": [],
+    "sites": [
+     "www.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "two of its own",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   true
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "two of its own",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "two of its own",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "two of its own",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "m.x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site too",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site too",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site too",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site too",
+    "powers": [],
+    "sites": [
+     "x.com",
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site",
+    "powers": [],
+    "sites": [
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site",
+    "powers": [],
+    "sites": [
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site",
+    "powers": [],
+    "sites": [
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "other site",
+    "powers": [],
+    "sites": [
+     "y.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "phone twin site",
+    "powers": [],
+    "sites": [
+     "phone~x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "phone twin site",
+    "powers": [],
+    "sites": [
+     "phone~x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "phone twin site",
+    "powers": [],
+    "sites": [
+     "phone~x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "phone twin site",
+    "powers": [],
+    "sites": [
+     "phone~x.com"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "upper",
+    "powers": [],
+    "sites": [
+     "X.COM"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   true
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "upper",
+    "powers": [],
+    "sites": [
+     "X.COM"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "upper",
+    "powers": [],
+    "sites": [
+     "X.COM"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "upper",
+    "powers": [],
+    "sites": [
+     "X.COM"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "empty site entry",
+    "powers": [],
+    "sites": [
+     ""
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "empty site entry",
+    "powers": [],
+    "sites": [
+     ""
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "empty site entry",
+    "powers": [],
+    "sites": [
+     ""
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "empty site entry",
+    "powers": [],
+    "sites": [
+     ""
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "bbc",
+    "powers": [],
+    "sites": [
+     "news.bbc.co.uk"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "x.com",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "bbc",
+    "powers": [],
+    "sites": [
+     "news.bbc.co.uk"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "",
+   false
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "bbc",
+    "powers": [],
+    "sites": [
+     "news.bbc.co.uk"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "bbc.co.uk",
+   true
+  ],
+  [
+   {
+    "everywhere": false,
+    "held": false,
+    "name": "bbc",
+    "powers": [],
+    "sites": [
+     "news.bbc.co.uk"
+    ],
+    "tier": "style",
+    "warnings": []
+   },
+   "m.x.com",
+   false
+  ]
+ ],
+ "sort": [
+  [
+   {
+    "name": "none",
+    "offered": []
+   },
+   "x.com",
+   {
+    "look": [],
+    "rest": [],
+    "site": "x.com",
+    "state": "replied"
+   }
+  ],
+  [
+   {
+    "name": "none",
+    "offered": []
+   },
+   "phone~x.com",
+   {
+    "look": [],
+    "rest": [],
+    "site": "x.com",
+    "state": "replied"
+   }
+  ],
+  [
+   {
+    "name": "none",
+    "offered": []
+   },
+   "phone~m.x.com",
+   {
+    "look": [],
+    "rest": [],
+    "site": "x.com",
+    "state": "replied"
+   }
+  ],
+  [
+   {
+    "name": "none",
+    "offered": []
+   },
+   "www.x.com",
+   {
+    "look": [],
+    "rest": [],
+    "site": "x.com",
+    "state": "replied"
+   }
+  ],
+  [
+   {
+    "name": "none",
+    "offered": []
+   },
+   "",
+   {
+    "look": [],
+    "rest": [],
+    "site": "",
+    "state": "replied"
+   }
+  ],
+  [
+   {
+    "name": "none",
+    "offered": []
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [],
+    "site": "y.com",
+    "state": "replied"
+   }
+  ],
+  [
+   {
+    "name": "one look",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "one look",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "one look",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "one look",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "one look",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one look",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "y.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one card",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "boxed",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one card",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "boxed",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one card",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "boxed",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one card",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "boxed",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one card",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "boxed",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "one card",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "boxed",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "y.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "mixed",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "b",
+      "powers": [
+       "net"
+      ],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "c",
+      "powers": [],
+      "sites": [
+       "m.x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [
+     "a",
+     "c"
+    ],
+    "rest": [
+     "b"
+    ],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "mixed",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "b",
+      "powers": [
+       "net"
+      ],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "c",
+      "powers": [],
+      "sites": [
+       "m.x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [
+     "a",
+     "c"
+    ],
+    "rest": [
+     "b"
+    ],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "mixed",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "b",
+      "powers": [
+       "net"
+      ],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "c",
+      "powers": [],
+      "sites": [
+       "m.x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [
+     "a",
+     "c"
+    ],
+    "rest": [
+     "b"
+    ],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "mixed",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "b",
+      "powers": [
+       "net"
+      ],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "c",
+      "powers": [],
+      "sites": [
+       "m.x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [
+     "a",
+     "c"
+    ],
+    "rest": [
+     "b"
+    ],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "mixed",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "b",
+      "powers": [
+       "net"
+      ],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "c",
+      "powers": [],
+      "sites": [
+       "m.x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b",
+     "c"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "mixed",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "b",
+      "powers": [
+       "net"
+      ],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "c",
+      "powers": [],
+      "sites": [
+       "m.x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b",
+     "c"
+    ],
+    "site": "y.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "same id, one look one not",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "free",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, one look one not",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "free",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, one look one not",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "free",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, one look one not",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "free",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, one look one not",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "free",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "a"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "same id, one look one not",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "free",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "a"
+    ],
+    "site": "y.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "same id, card first",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": true,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, card first",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": true,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, card first",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": true,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, card first",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": true,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "x.com",
+    "state": "done"
+   }
+  ],
+  [
+   {
+    "name": "same id, card first",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": true,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "a"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "same id, card first",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": true,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     },
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "a"
+    ],
+    "site": "y.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "all cards",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": [
+       "w"
+      ]
+     },
+     {
+      "everywhere": true,
+      "held": false,
+      "id": "b",
+      "powers": [],
+      "sites": [
+       "all-sites"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "all cards",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": [
+       "w"
+      ]
+     },
+     {
+      "everywhere": true,
+      "held": false,
+      "id": "b",
+      "powers": [],
+      "sites": [
+       "all-sites"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "all cards",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": [
+       "w"
+      ]
+     },
+     {
+      "everywhere": true,
+      "held": false,
+      "id": "b",
+      "powers": [],
+      "sites": [
+       "all-sites"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "all cards",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": [
+       "w"
+      ]
+     },
+     {
+      "everywhere": true,
+      "held": false,
+      "id": "b",
+      "powers": [],
+      "sites": [
+       "all-sites"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "all cards",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": [
+       "w"
+      ]
+     },
+     {
+      "everywhere": true,
+      "held": false,
+      "id": "b",
+      "powers": [],
+      "sites": [
+       "all-sites"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "all cards",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "x.com"
+      ],
+      "tier": "style",
+      "warnings": [
+       "w"
+      ]
+     },
+     {
+      "everywhere": true,
+      "held": false,
+      "id": "b",
+      "powers": [],
+      "sites": [
+       "all-sites"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [],
+    "rest": [
+     "a",
+     "b"
+    ],
+    "site": "y.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "other site",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "y.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "other site",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "y.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "other site",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "y.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "phone~m.x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "other site",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "y.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "www.x.com",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "x.com",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "other site",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "y.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "",
+   {
+    "look": [],
+    "rest": [
+     "a"
+    ],
+    "site": "",
+    "state": "card"
+   }
+  ],
+  [
+   {
+    "name": "other site",
+    "offered": [
+     {
+      "everywhere": false,
+      "held": false,
+      "id": "a",
+      "powers": [],
+      "sites": [
+       "y.com"
+      ],
+      "tier": "style",
+      "warnings": []
+     }
+    ]
+   },
+   "y.com",
+   {
+    "look": [
+     "a"
+    ],
+    "rest": [],
+    "site": "y.com",
+    "state": "done"
+   }
+  ]
+ ],
+ "undo": [
+  [
+   "done",
+   [],
+   []
+  ],
+  [
+   "done",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    }
+   ],
+   [
+    {
+     "decline": true,
+     "id": "a",
+     "to": "remove"
+    }
+   ]
+  ],
+  [
+   "done",
+   [
+    {
+     "hadBefore": true,
+     "id": "a"
+    }
+   ],
+   [
+    {
+     "decline": true,
+     "id": "a",
+     "to": "before"
+    }
+   ]
+  ],
+  [
+   "done",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    },
+    {
+     "hadBefore": true,
+     "id": "b"
+    },
+    {
+     "hadBefore": false,
+     "id": "c"
+    }
+   ],
+   [
+    {
+     "decline": true,
+     "id": "c",
+     "to": "remove"
+    },
+    {
+     "decline": true,
+     "id": "b",
+     "to": "before"
+    },
+    {
+     "decline": true,
+     "id": "a",
+     "to": "remove"
+    }
+   ]
+  ],
+  [
+   "undone",
+   [],
+   []
+  ],
+  [
+   "undone",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "undone",
+   [
+    {
+     "hadBefore": true,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "undone",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    },
+    {
+     "hadBefore": true,
+     "id": "b"
+    },
+    {
+     "hadBefore": false,
+     "id": "c"
+    }
+   ],
+   []
+  ],
+  [
+   "card",
+   [],
+   []
+  ],
+  [
+   "card",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "card",
+   [
+    {
+     "hadBefore": true,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "card",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    },
+    {
+     "hadBefore": true,
+     "id": "b"
+    },
+    {
+     "hadBefore": false,
+     "id": "c"
+    }
+   ],
+   []
+  ],
+  [
+   "replied",
+   [],
+   []
+  ],
+  [
+   "replied",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "replied",
+   [
+    {
+     "hadBefore": true,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "replied",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    },
+    {
+     "hadBefore": true,
+     "id": "b"
+    },
+    {
+     "hadBefore": false,
+     "id": "c"
+    }
+   ],
+   []
+  ],
+  [
+   "working",
+   [],
+   []
+  ],
+  [
+   "working",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "working",
+   [
+    {
+     "hadBefore": true,
+     "id": "a"
+    }
+   ],
+   []
+  ],
+  [
+   "working",
+   [
+    {
+     "hadBefore": false,
+     "id": "a"
+    },
+    {
+     "hadBefore": true,
+     "id": "b"
+    },
+    {
+     "hadBefore": false,
+     "id": "c"
+    }
+   ],
+   []
+  ]
+ ]
+}

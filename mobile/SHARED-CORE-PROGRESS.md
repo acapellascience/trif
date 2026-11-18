@@ -30,10 +30,22 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
 - [x] Chat-offer judge → core/chat-offers.js (round 2): normalise, key (FNV-1a 64, 16-bit limbs), outcome, note
       (entries in, new list out), skip (takes keys). Storage stays Swift (UserDefaults), plus a key cache (NSString)
       warmed off the main thread at launch.
-- [ ] Quick ask: `QuickAsk.lookOnly` (style, no powers, not held, no warnings, not everywhere, every site the chat's)
-      and Undo's bookkeeping (version before or removed, not to Recently deleted).
-- [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision; needs
-      `Site.of` in JS (two-part suffix list in Mods.swift) — move Site.of with it.
+- [x] Quick ask → core/quick-ask.js (round 3): lookOnly (style, no powers, not held, no warnings, not everywhere,
+      every site the chat's), sort (look ids, card ids, the pill's state), undo (steps newest first, back or removed,
+      declined; only from Done). Swift: QuickAskRules.swift (ClaudePane.quickDeliver / quickUndo call it). Site.of moved
+      too: core/site.js (of, hostIsIn, chat = phone~ removed then of), Site.swift kept as a twin (every navigation),
+      held to site-cases.json. The mod list's own Undo (ModStore.undoAdd: not to Recently deleted) moves with the store.
+- [ ] The mod store's rules (Tim, 11-18: Android ported them to Kotlin by hand, branch android,
+      mobile/android/app/src/main/java/com/timsrobot/trif/ModStore.kt + ModStoreTest.kt; the Android loop switches to
+      the shared copy once it exists): Mods.swift's holds and Allow (allow, changeNeeds, seeded), Pause all, tier
+      switches (groupsOff, isOn), edits judged as changes (saveEdit/check), Recently deleted's 30 days (remove,
+      undoDelete, restoreDeleted, the 200 cap), history (30 days, 30 versions), @match (applies, running, signature),
+      add's rules (import/computer off and marked new), undoAdd. Likely core/mod-store.js as pure functions over plain
+      mod records (state in, new state out), the lists and files staying platform; ModStoreTest.kt's cases are a
+      second source for the cases file. Big: split over 2-3 rounds (holds/Allow first, then trash/history/add, then
+      @match + tier switches + Pause all).
+- [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision
+      (core/site.js exists now: TrifCore.site.of / hostIsIn / chat).
 - [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
       / select).
 - [ ] Leaving cover's "icon use" decision (LeavingCover.reason: icon tab on its site in full screen, or arrived by an
@@ -60,10 +72,22 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   (dismissed)); another → offered, added; again → skipped (installed as it is); relaunch → both still skipped; no
   "shared rule" line in diagnostics. .ipa built (dSYM 5D8CAAC5-CF9A-3A2B-AB67-8029334B4B85).
 
+- Round 3 (11-18): quick ask's rules moved (core/quick-ask.js: lookOnly, sort, undo; QuickAskRules.swift calls them
+  from ClaudePane.quickDeliver / quickUndo) and Site.of as core/site.js (of, hostIsIn, chat) with Site.swift (moved
+  out of Mods.swift, unchanged) as its twin. Cases recorded from the old Swift: 63 hosts (www., case, two-part
+  suffixes, empty labels, IPs and other scripts' digits, ports), 10 host-in-site, 10 chat sites (phone~), 76
+  look-only, 48 sorts (incl. duplicate ids), 20 undos; the Swift passed them before the move. prepare.js: core modules
+  may require each other. Cost: a sort ~50 µs on the Mac (unoptimised; once a reply). Tests: core-quickask (2),
+  quickask (Swift twin + call-through), the other core tests, all of mobile/test (25) pass. Simulator (SE, headless,
+  More's stand-in): quick ask → Done, a new mod added; Undo → removed; again → added; again (an update) → Done; Undo →
+  back to its version before; no "shared rule" failure. Not tried there: the card path (the stand-in writes style
+  mods only; unit cases cover it). .ipa built (dSYM 8B1867CD-BD28-3D03-9265-636ACACE4700).
+
 ## Next step
 
-Round 3: quick ask's auto-apply decision (`QuickAsk.lookOnly`) and Undo's bookkeeping → core/quick-ask.js, by the
-pattern above. Then the chat's-site rule with Site.of.
+Round 4: the mod store's rules (Tim's ask, 11-18), first part: holds and Allow (InstalledMod.held / waiting, ModStore
+approve / reject, allow, changeNeeds, seeded) → core/mod-store.js, cases recorded from Mods.swift (and checked against
+the branch android's ModStoreTest.kt). Plan the store's 2-3 rounds in the checklist first.
 
 ## Notes for next round
 
@@ -79,7 +103,15 @@ pattern above. Then the chat's-site rule with Site.of.
 - gen/core.js is committed; smoke runs `prepare.js --check`. Simulator helper: scratchpad step.sh (writes step.json,
   notifyutil, reads step-out.txt); `offerchat`/`cancelOffer`/`addOffer`/`copydiag` + `simctl pbpaste` for this path.
 
+- core/site.js and Swift differ on purpose in one place: three-part hosts of Han numerals (一.二.三), which Swift's
+  Character.isNumber counts and JS's \p{N} doesn't (left out of the cases; hosts arrive as punycode).
+- Simulator quick ask: `{"more":true}`, `{"sheet":"chat"}`, paneljs on `#input`: value "/model stand-in" + an Enter
+  keydown, `{"closechat":1}`, then `{"quick":"…"}`, `{"quickstate":1}`, `{"quickundo":1}`; copydiag + pbpaste.
+- The mod store item: Android's ModStore.kt (git show origin/android:mobile/android/app/src/main/java/com/timsrobot/
+  trif/ModStore.kt) has the same function names (allow, changeNeeds, seeded, undoAdd, remove, restoreDeleted, saveEdit).
+
 ## For Tim
 
-- Nothing to decide. No new words. The app behaves as before; links that aren't web pages (round 1) and what a chat
-  may offer (round 2) now decide through the shared rules Android will use. A new TRIF.ipa is in iCloud Drive/TRIF.
+- Nothing to decide. No new words. Quick ask behaves as before; which mods it adds at once, and what Undo puts back,
+  now decide through the shared rules Android will use. The mod store's rules are on the list, next round. A new
+  TRIF.ipa is in iCloud Drive/TRIF.

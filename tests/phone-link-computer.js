@@ -24,7 +24,11 @@
 //                host.js's syncMods does): {runDone: runId, ok, changedFiles, nudged}
 //   nudge         sync.changed to every connected phone: {nudged: n}
 //   synced        the last sync per phone (the Settings line's facts): {synced: {<phone id>: {...} | null}}
-//   held          the held map's twin entries: {held: {<id>: {by, ...}}}
+//   held          the held map's twin entries: {held: {<id>: {by, allowedOn?, ...}}}
+//   swset <mod id> <JSON {on, off, at}>   the browser's switch of a twin's mod (as the extension reports it), then
+//                 nudges: {swset, nudged}. The stand-in browser takes what the sync sends at once (its report), and
+//                 has every twin mod in it (off until said otherwise, as a new mod from outside starts there).
+//   switches      the browser's switches and what the sync sent it: {switches: {<mod id>: {on, off, at}}, sent: [[…]]}
 //   quit          stops (also after --seconds, and on SIGTERM / SIGINT); everything it made is deleted.
 
 const fs = require('fs');
@@ -75,7 +79,19 @@ const runs = new Runs({
   },
 });
 remote = new Remote(store, server, runs, { home, log: () => {}, agent: () => ({ id: 'claude', name: 'Stand-in agent', model: null }) });
-const sync = new PhoneSync(store, server, runs, { home, getWorkspace: () => P.workspace(home), log: () => {} });
+// (the browser's phone twin switches, as host.js keeps the extension's report: a stand-in that takes what's sent)
+const browserSwitches = new Map();
+const sentSwitches = [];
+// (every twin mod is in its report, as the extension's: one it hasn't been told about is off, as a new mod from
+// outside starts there)
+const switches = {
+  get: () => {
+    for (const rel of Object.keys(twin())) { const id = rel.replace(/\.js$/, ''); if (!browserSwitches.has(id)) browserSwitches.set(id, { on: false, off: [], at: 0 }); }
+    return browserSwitches;
+  },
+  set: (list) => { sentSwitches.push(list); for (const x of list) browserSwitches.set(x.modId, { on: x.on, off: x.off, at: x.at }); return true; },
+};
+const sync = new PhoneSync(store, server, runs, { home, getWorkspace: () => P.workspace(home), log: () => {}, switches });
 const sites = path.join(home, 'sites');
 // A path inside sites/phone~*/ (refused otherwise: this stand-in writes only where the sync may).
 function twinPath(rel) {
@@ -159,6 +175,12 @@ async function stop() {
       const out = {};
       for (const [id, h] of Object.entries(held.loadHeld(P.workspace(home).home) || {})) if (id.startsWith('phone~')) out[id] = h;
       say({ held: out });
-    } else if (cmd === 'quit') await stop();
+    } else if (cmd === 'swset') {
+      const v = JSON.parse(rest);
+      if (!/^phone~/.test(arg) || !v || typeof v.on !== 'boolean') throw new Error('swset phone~<site>/<name> <JSON {on, off, at}>');
+      browserSwitches.set(arg, { on: v.on, off: Array.isArray(v.off) ? v.off : [], at: Number(v.at) || 0 });
+      say({ swset: arg, nudged: sync.changed() });
+    } else if (cmd === 'switches') say({ switches: Object.fromEntries(browserSwitches), sent: sentSwitches });
+    else if (cmd === 'quit') await stop();
   }
 })().catch((e) => { process.stderr.write(String(e && e.stack || e) + '\n'); stop(); });

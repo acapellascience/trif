@@ -82,7 +82,8 @@ change there is a change on both phones. Change this file whenever a rule change
   (30 days, Restore).
 - Phone sync's switches (Tim, 11-18; docs/PHONE-SYNC.md 4b on branch phone-link): a mod's on/off and its per-site
   switches follow the last change on either side, three-way against the switch both sides last agreed on; changed on
-  both since, the later change wins (each side stamps when the person last switched it; the same time: the phone's).
+  both since, the later change wins (each side stamps when the person last switched it; the same time: the phone's,
+  unless the phone's is only the "new, off" of a mod never switched and the computer's isn't).
   A sync's switch keeps the other side's time. A tier's switch on a site and Pause all stay each device's: Pause all is
   a safety switch for the device in your hand, a tier's is the same kind of brake for a site. Safe mode's switch-offs
   are the mod's own switch, so they sync. An older computer sends no switches: nothing changes.

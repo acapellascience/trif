@@ -830,7 +830,7 @@ extension ModStore: @preconcurrency PhoneSyncStore {
 
     /// Each mod's switch (docs/PHONE-SYNC.md 4b): on, the sites it's off on, when the person last changed it.
     func syncSwitches() -> [String: PhoneSync.Switch] {
-        Dictionary(mods.filter { $0.id.contains("/") }.map { (PhoneSync.key($0.id), PhoneSync.Switch(on: $0.on, off: $0.offSites, at: $0.switchAt ?? 0)) }, uniquingKeysWith: { a, _ in a })
+        Dictionary(mods.filter { $0.id.contains("/") }.map { (PhoneSync.key($0.id), PhoneSync.Switch(on: $0.on, off: $0.offSites, at: $0.switchAt ?? 0, fresh: $0.newOff != nil)) }, uniquingKeysWith: { a, _ in a })
     }
 
     /// The computer's switch, set as it is (its time kept, so both sides agree); the "from your computer" mark stays

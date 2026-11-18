@@ -67,16 +67,21 @@ final class PhoneSync {
 
     /// A mod's switch as the sync carries it: on, the sites it's off on (sorted), and when the person last changed it
     /// (ms since 1970; 0: never). Two are the same switch when `on` and `off` are, whatever `at`.
+    /// `fresh`: off only because it came new from outside and was never switched (no choice of the person's): in a
+    /// tie on the first sync after an update it yields to the computer's (docs/PHONE-SYNC.md 4b).
     struct Switch: Equatable {
         var on: Bool
         var off: [String]
         var at: Double
-        init(on: Bool, off: [String], at: Double) { self.on = on; self.off = Array(Set(off)).sorted(); self.at = max(0, at.rounded(.down)) }
+        var fresh = false
+        init(on: Bool, off: [String], at: Double, fresh: Bool = false) {
+            self.on = on; self.off = Array(Set(off)).sorted(); self.at = max(0, at.rounded(.down)); self.fresh = fresh && !on && self.at == 0
+        }
         init?(_ d: [String: Any]?) {
             guard let d, let on = d["on"] as? Bool else { return nil }
             self.init(on: on, off: (d["off"] as? [String] ?? []).filter { !$0.isEmpty && $0.count <= 253 }, at: (d["at"] as? NSNumber)?.doubleValue ?? 0)
         }
-        var wire: [String: Any] { ["on": on, "off": off, "at": at] }
+        var wire: [String: Any] { fresh ? ["on": on, "off": off, "at": at, "fresh": true] : ["on": on, "off": off, "at": at] }
         func same(_ o: Switch) -> Bool { on == o.on && off == o.off }
     }
 

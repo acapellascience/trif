@@ -150,6 +150,8 @@ if args.count > 1, args[1] == "syncunit" {
     expect(PhoneSync.Switch(on: true, off: ["b", "a", "a"], at: 5.7) == PhoneSync.Switch(on: true, off: ["a", "b"], at: 5), "a switch's sites sorted once, its time whole")
     expect(PhoneSync.Switch(on: true, off: [], at: 1).same(.init(on: true, off: [], at: 99)) && !PhoneSync.Switch(on: true, off: [], at: 1).same(.init(on: false, off: [], at: 1)), "same: without the time")
     expect(PhoneSync.key("a.com/x") == "a.com/x", "the sync key is the id today")
+    expect(PhoneSync.Switch(on: false, off: [], at: 0, fresh: true).wire["fresh"] as? Bool == true && PhoneSync.Switch(on: false, off: [], at: 9, fresh: true).wire["fresh"] == nil
+           && PhoneSync.Switch(on: true, off: [], at: 0, fresh: true).wire["fresh"] == nil, "fresh: an off never switched only")
 
     // the computer says off: a failure, nothing changed
     let pc2 = Computer(); pc2.beginError = "off"

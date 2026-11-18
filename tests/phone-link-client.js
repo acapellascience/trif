@@ -125,8 +125,12 @@ class PhoneClient {
    * returned as they came (an `error` included): {plan, puts: id → answer, gets: id → answer, done}. A plan that's
    * an error ends there (done null). `beforePuts(plan)`: called between the plan and the first put.
    */
-  async sync(mods, { code = (id) => mods[id], beforePuts } = {}) {
-    const plan = await this.request({ t: 'sync.begin', mods: Object.entries(mods).map(([id, text]) => ({ id, rev: PhoneClient.rev(text) })) });
+  async sync(mods, { code = (id) => mods[id], beforePuts, switches = null, ok = null } = {}) {
+    // (an app that knows switches and the approval hint (docs/PHONE-SYNC.md 4b, 6b): `switches` id → {on, off, at},
+    // changed in place by the plan's; a new mod from the computer starts off (as an import) and then takes it;
+    // `ok`: id → {rev, tier, powers} for the mods allowed on this phone)
+    const row = (id, text) => ({ id, rev: PhoneClient.rev(text), ...(switches && switches[id] ? { sw: switches[id] } : {}), ...(ok && ok[id] ? { ok: ok[id] } : {}) });
+    const plan = await this.request({ t: 'sync.begin', ...(switches ? { switches: true } : {}), mods: Object.entries(mods).map(([id, text]) => row(id, text)) });
     if (plan.t !== 'sync.plan') return { plan, puts: {}, gets: {}, done: null };
     if (beforePuts) await beforePuts(plan);
     const puts = {}, gets = {};
@@ -135,10 +139,14 @@ class PhoneClient {
       const got = gets[g.id] = await this.request({ t: 'sync.get', syncId: plan.syncId, mod: g.id });
       if (got.t === 'sync.mod' && PhoneClient.rev(got.code) === g.rev) mods[g.id] = got.code;
     }
-    for (const id of plan.remove) { if (id in mods) { this.trash[id] = mods[id]; delete mods[id]; } }
+    for (const id of plan.remove) { if (id in mods) { this.trash[id] = mods[id]; delete mods[id]; if (switches) delete switches[id]; } }
+    if (switches) {
+      for (const id of Object.keys(mods)) if (!switches[id]) switches[id] = { on: false, off: [], at: 0 };
+      for (const x of plan.switches || []) if (x.id in mods) switches[x.id] = { on: x.on, off: x.off, at: x.at };
+    }
     const ids = new Set([...plan.want.map((w) => w.id), ...plan.give.map((g) => g.id), ...plan.remove]);
     const have = [...ids].filter((id) => id in mods).map((id) => ({ id, rev: PhoneClient.rev(mods[id]) }));
-    const done = await this.request({ t: 'sync.end', syncId: plan.syncId, have });
+    const done = await this.request({ t: 'sync.end', syncId: plan.syncId, have, ...(switches ? { switches: Object.keys(mods).map((id) => ({ id, ...switches[id] })) } : {}) });
     return { plan, puts, gets, done };
   }
 

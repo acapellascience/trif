@@ -290,3 +290,74 @@ test('phone sync end to end: join, edits both ways, a conflict, deletes both way
   assert.deepEqual(desktop(), desktopBefore);
   assert.deepEqual(fs.readdirSync(extra).sort(), ['bin', 'elsewhere', 'keychain']);
 });
+
+
+test('phone sync end to end, beside the text: switches both ways (the later change wins, new mods take the other side\'s), the extension told and nudging; the approval hint on the hold', async () => {
+  assert.ok(ext, 'after the first test');
+  // (the extension's report: the phone twins' switches as they are in the browser)
+  let report = {};
+  const tell = (r) => { report = r; ext.send({ type: 'modsApplied', registered: [], errors: [], phoneSwitches: report }); };
+  const window3 = await panel('phone.pair.start');
+  const { key: computerKey } = qrOf(window3.qr);
+  const C = await PhoneClient.connect({ port: window3.port, computerKey, keys: generateKeyPair(), name: 'Phone C', pair: qrOf(window3.qr).secret });
+  phones.push(C);
+  await C.request(HELLO);
+  tell({ 'phone~example.com/no-ads': { on: false, off: [], at: 100 }, 'phone~example.com/desk': { on: true, off: [], at: 0 }, 'phone~example.com/clicker': { on: true, off: [], at: 0 } });
+  await sleep(300);
+  // A new phone: every twin mod comes over with the computer's switch (D8: not off as an import).
+  const onC = {};
+  const sw = {};
+  const r1 = await sync(C, onC, { switches: sw });
+  assert.deepEqual(Object.keys(onC).sort(), ['example.com/clicker', 'example.com/desk', 'example.com/no-ads']);
+  assert.deepEqual(sw['example.com/no-ads'], { on: false, off: [], at: 100 });
+  assert.deepEqual(sw['example.com/desk'], { on: true, off: [], at: 0 });
+  // (what the computer allows: the style mod, not the held clicker)
+  const allowed = Object.fromEntries(r1.plan.allowed.map((a) => [a.id, a]));
+  assert.equal(allowed['example.com/no-ads'].tier, 'style');
+  assert.equal(allowed['example.com/no-ads'].rev, PhoneClient.rev(onC['example.com/no-ads']));
+  assert.equal(allowed['example.com/clicker'], undefined);
+
+  // The phone switches no-ads on, off on one site: the extension is told, and its report closes it.
+  sw['example.com/no-ads'] = { on: true, off: ['m.example.com'], at: Date.now() };
+  const toExt = ext.next((m) => m.type === 'phoneSwitches', { timeout: 10000, since: ext.messages.length });
+  await sync(C, onC, { switches: sw });
+  const told = await toExt;
+  assert.deepEqual(told.set, [{ id: 'phone~example.com/no-ads', on: true, off: ['m.example.com'], at: sw['example.com/no-ads'].at }]);
+  nudges(C);
+  tell({ ...report, 'phone~example.com/no-ads': { on: true, off: ['m.example.com'], at: sw['example.com/no-ads'].at } });
+  await nudged(C); // (the report changed: a nudge; the sync then finds them the same)
+  const r3 = await sync(C, onC, { switches: sw });
+  assert.deepEqual(r3.plan.switches, []);
+
+  // The computer switches desk off (the phone view's switch): the phone is nudged and takes it.
+  await sleep(2100); // (a nudge at most every 2 s)
+  nudges(C);
+  const at = Date.now();
+  tell({ ...report, 'phone~example.com/desk': { on: false, off: [], at } });
+  await nudged(C);
+  const r4 = await sync(C, onC, { switches: sw });
+  assert.deepEqual(r4.plan.switches, [{ id: 'example.com/desk', on: false, off: [], at }]);
+  assert.deepEqual(sw['example.com/desk'], { on: false, off: [], at });
+
+  // Both change desk: the later change wins (the phone's here).
+  tell({ ...report, 'phone~example.com/desk': { on: true, off: [], at: at + 1000 } });
+  sw['example.com/desk'] = { on: false, off: ['x.example.com'], at: at + 2000 };
+  const toExt2 = ext.next((m) => m.type === 'phoneSwitches', { timeout: 10000, since: ext.messages.length });
+  const r5 = await sync(C, onC, { switches: sw });
+  assert.deepEqual(r5.plan.switches, []);
+  assert.deepEqual((await toExt2).set, [{ id: 'phone~example.com/desk', on: false, off: ['x.example.com'], at: at + 2000 }]);
+
+  // The approval hint: Phone C allowed the clicker exactly as it is: its hold says so (still held: never approved);
+  // a changed version with the old approval: the normal card.
+  const clickerRev = PhoneClient.rev(onC['example.com/clicker']);
+  let since = ext.messages.length;
+  await sync(C, onC, { switches: sw, ok: { 'example.com/clicker': { rev: clickerRev, tier: 'free', powers: [] } } });
+  const withHint = await ext.nextMods((ms) => ms.some((m) => m.id === 'phone~example.com/clicker' && m.held && m.held.allowedOn), { since, timeout: 10000 });
+  assert.equal(withHint.find((m) => m.id === 'phone~example.com/clicker').held.allowedOn, 'Phone C');
+  onC['example.com/clicker'] = mod('Clicker', `${CLICKS}\n// changed on the phone`);
+  since = ext.messages.length;
+  await sync(C, onC, { switches: sw, ok: { 'example.com/clicker': { rev: clickerRev, tier: 'free', powers: [] } } });
+  const noHint = await ext.nextMods((ms) => ms.some((m) => m.id === 'phone~example.com/clicker' && m.held && !m.held.allowedOn), { since, timeout: 10000 });
+  assert.ok(noHint.find((m) => m.id === 'phone~example.com/clicker').held, 'still waiting');
+  assert.equal(read('phone~example.com/clicker.js'), onC['example.com/clicker']);
+});

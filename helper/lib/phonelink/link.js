@@ -40,10 +40,11 @@ class Link extends EventEmitter {
    * home: the workspace. runs: the helper's Runs. version: TRIF's. log: (line) => void.
    * agent: () => {id, name, model} | null (the computer's default agent: remote.js).
    * getWorkspace: for remote.js and the sync. afterWrite: () => held map | null (syncsession.js: the helper looks
-   * at the mods again after the sync wrote one). env: the helper's (the keyring's stand-in and dns-sd's, in tests).
+   * at the mods again after the sync wrote one). switches: the phone twins' switches in the browser, {get, set}
+   * (syncsession.js; host.js keeps the extension's last report). env: the helper's (the keyring's stand-in and dns-sd's, in tests).
    * Emits 'change' when what `status()` says may have changed.
    */
-  constructor({ home, runs, version, log, agent, getWorkspace, afterWrite, env = process.env, name } = {}) {
+  constructor({ home, runs, version, log, agent, getWorkspace, afterWrite, switches, env = process.env, name } = {}) {
     super();
     this.log = typeof log === 'function' ? log : () => {};
     this.env = env;
@@ -53,6 +54,7 @@ class Link extends EventEmitter {
     this.agent = agent;
     this.getWorkspace = getWorkspace;
     this.afterWrite = afterWrite;
+    this.switches = switches;
     this.home = home;
     this.server = null;
     this.announcer = null;
@@ -86,7 +88,7 @@ class Link extends EventEmitter {
     this.remote = new Remote(this.store, this.server, this.runs, { home: this.home, getWorkspace: this.getWorkspace, log: this.log, agent: this.agent });
     this.remote.start();
     this.sync = new PhoneSync(this.store, this.server, this.runs, {
-      home: this.home, getWorkspace: this.getWorkspace, log: this.log, afterWrite: this.afterWrite,
+      home: this.home, getWorkspace: this.getWorkspace, log: this.log, afterWrite: this.afterWrite, switches: this.switches,
       enabled: () => { try { return this.store.read().sync !== false; } catch { return false; } },
     }).start();
     for (const ev of ['listening', 'stopped']) this.server.on(ev, () => this.emit('change'));

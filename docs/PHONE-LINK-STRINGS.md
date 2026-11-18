@@ -105,3 +105,6 @@ ios-poc when the iPhone steps build them.
 | Phone, Mods tab button | Sync now | draft |
 | Phone, Mods tab, the deleted list | Recently deleted | draft. Each row: the name, "Restore" |
 | Phone, every-site mods if the computer can't take them (D10) | Mods for every site stay on this iPhone for now. | draft, only if step S2 finds the phone view doesn't run phone~all-sites |
+| Desktop, the hold card of a mod a sync brought, when that phone allowed this very version (the approval hint, D13) | You allowed this on {phone}. | draft (Tim, 11-18: "You allowed this on {your iPhone}"), in place of "From {phone}."; {phone} is the name it was paired under. The card's Allow is the same Allow: one tap. Only when the code is the very revision allowed there and asks for nothing beyond it; else "From {phone}." |
+| Phone, the approval card of a synced mod, when the computer allowed this very version (D13) | You allowed this on {computer}. | draft (Tim, 11-18: "You allowed this on {your Mac}"), in place of "It's new or changed since TRIF last let it run."; {computer} is the paired computer's name. Same conditions; Allow is the same Allow |
+| Phone, a mod new from the computer that arrives switched on (D8 as changed 11-18) | From your computer | the same mark as before, now shown on such a mod while it's on too, until its switch is first tapped here |

@@ -1854,8 +1854,10 @@ function siteBoxes(reach) {
 }
 
 // A hold the phone sync brought (helper held.js: `phone`, the phone's name): where it came from, beside the
-// reason (draft: docs/PHONE-LINK-STRINGS.md "Phone sync").
-const fromPhone = (info) => (info && typeof info.phone === 'string' && info.phone ? `From ${info.phone}.` : '');
+// reason; and when that phone allowed this very version (held.js `allowedOn`, the approval hint: never an approval
+// here, Allow is the same Allow), it says so (drafts: docs/PHONE-LINK-STRINGS.md "Phone sync").
+const fromPhone = (info) => (info && typeof info.allowedOn === 'string' && info.allowedOn ? `You allowed this on ${info.allowedOn}.`
+  : info && typeof info.phone === 'string' && info.phone ? `From ${info.phone}.` : '');
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
   box.append(el('p', 'facts-head', kind === 'held' && info.asks ? 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'

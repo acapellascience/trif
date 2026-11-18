@@ -9,7 +9,14 @@
 //   readManifest(list) the phone's `sync.begin` mods, checked: {revs: Map id -> rev, skipped: [{id, why}]}.
 //   plan({...})        the three-way rule of section 4: what each side does.
 //   siblingId, renameHeader   a conflict's mod kept beside it: `<name>-from-computer`, "@name … (from your computer)".
-//   loadBase, saveBase, deleteBase   <private>/phone-link/sync/<phone id>.json: {v: 1, base: {id: rev}, at}, mode 600.
+//   loadBase, saveBase, deleteBase   <private>/phone-link/sync/<phone id>.json: {v: 1, base: {id: rev}, sw?, at},
+//                      mode 600 (`sw`: the switches' base, {key: switchKey}, loadSwitchBase).
+//   syncKey, keyOfModId, modIdOfKey   the ONE place a mod is keyed for its switch and its approval hint (today its
+//                      id; a stable id can take over later without touching the rest).
+//   readSwitch, switchKey, planSwitches   the switches' three-way rule (D12): a mod's on/off and per-site switches
+//                      follow the last change on either side; changed on both: the latest change wins.
+//   readHint, hintFits, tierOf   the approval hint (D13): the other device allowed this exact revision. Never an
+//                      approval: words on the hold's card.
 //
 // The computer alone keeps the base. Equal revisions are in sync whatever the base says, so a lost answer costs
 // nothing: the next sync sets the base again.
@@ -158,6 +165,83 @@ function plan({ phone, computer, base = {}, leave = new Map() }) {
   return out;
 }
 
+// ---- beside the text: the switches (D12) and the approval hint (D13), keyed by syncKey
+
+/** A phone mod's sync key, from its id (`<site>/<name>`, the wire's): today the id itself. Every switch and hint
+ * record goes through here, so a stable id (coming) can replace it in one place. */
+function syncKey(id) { return parseId(id).id; }
+/** The helper's mod id (`phone~<site>/<name>`) -> its sync key, or null (not a phone twin's mod the sync takes). */
+function keyOfModId(modId) {
+  const s = String(modId || '');
+  const cut = s.indexOf('/');
+  if (cut < 1) return null;
+  const id = idOf(s.slice(0, cut), `${s.slice(cut + 1)}.js`);
+  return id ? syncKey(id) : null;
+}
+/** A sync key -> the helper's mod id. */
+function modIdOfKey(key) { const { folder, name } = parseId(key); return `${folder}/${name}`; }
+
+const OFF_SITE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+/** {on, off, at} as the wire carries a switch: on (bool), off (the sites it's switched off on, sorted), at (ms of its
+ * last change by the person; 0: never). Anything else: null. */
+function readSwitch(v) {
+  if (!v || typeof v !== 'object' || typeof v.on !== 'boolean') return null;
+  const off = Array.isArray(v.off) ? [...new Set(v.off.filter((x) => typeof x === 'string' && x.length <= 253 && OFF_SITE_RE.test(x)))].sort().slice(0, 200) : [];
+  const at = typeof v.at === 'number' && Number.isFinite(v.at) && v.at > 0 ? Math.min(Math.floor(v.at), 8.64e15) : 0;
+  return { on: v.on, off, at };
+}
+/** What a switch is, without when: two equal keys are the same switch. */
+const switchKey = (s) => `${s.on ? 'on' : 'off'}|${s.off.join(',')}`;
+
+/**
+ * The switches' three-way rule (docs/PHONE-SYNC.md section 4b). ids: the keys both sides have once this sync's
+ * files are done (never a removed one, nor a conflict's sibling). phone, computer: Map key -> switch, or null (that
+ * side has no such mod yet: it takes the other's); a key missing from either: that side can't say (an older app or
+ * extension), left alone. base: {key: switchKey}. Returns {toPhone, toComputer: [{id, on, off, at}], agreed: {key: switchKey}}.
+ *   P = C: in sync. P = B: the computer's goes to the phone. C = B: the phone's to the computer. Both changed (or no
+ *   base): the later change (`at`) wins; the same time: the phone's (as D5).
+ */
+function planSwitches({ ids, phone, computer, base = {} }) {
+  const out = { toPhone: [], toComputer: [], agreed: {} };
+  for (const id of [...new Set(ids)].sort()) {
+    if (!phone.has(id) || !computer.has(id)) continue;
+    const P = phone.get(id);
+    const C = computer.get(id);
+    if (!P && !C) continue;
+    if (!P) { out.toPhone.push({ id, ...C }); continue; }
+    if (!C) { out.toComputer.push({ id, ...P }); continue; }
+    const kp = switchKey(P);
+    const kc = switchKey(C);
+    if (kp === kc) { out.agreed[id] = kp; continue; }
+    const B = Object.prototype.hasOwnProperty.call(base, id) ? base[id] : null;
+    if (kp === B) out.toPhone.push({ id, ...C });
+    else if (kc === B) out.toComputer.push({ id, ...P });
+    else if (C.at > P.at) out.toPhone.push({ id, ...C });
+    else out.toComputer.push({ id, ...P });
+  }
+  return out;
+}
+
+const TIERS = ['style', 'boxed', 'free'];
+const POWER_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** {rev, tier, powers} as the wire carries the other device's approval of a mod, or null. */
+function readHint(v) {
+  if (!v || typeof v !== 'object' || typeof v.rev !== 'string' || !REV_RE.test(v.rev) || !TIERS.includes(v.tier)) return null;
+  const powers = Array.isArray(v.powers) ? [...new Set(v.powers.filter((p) => typeof p === 'string' && POWER_RE.test(p)))].sort().slice(0, 64) : [];
+  return { rev: v.rev, tier: v.tier, powers };
+}
+/** A helper mod's tier, as the phone names them. */
+const tierOf = (m) => (m && m.rules ? 'style' : m && m.sandboxed ? 'boxed' : 'free');
+/**
+ * Whether the other device's hint fits this version: the very revision it allowed, and what this one asks for
+ * within what was allowed there (its tier no higher, every power among those). Never an approval.
+ */
+function hintFits(hint, { rev: r, tier, powers = [] }) {
+  if (!hint || hint.rev !== r || !TIERS.includes(tier)) return false;
+  if (TIERS.indexOf(tier) > TIERS.indexOf(hint.tier)) return false;
+  return powers.every((p) => hint.powers.includes(p));
+}
+
 function basePath(privateDir, phoneId) {
   if (typeof phoneId !== 'string' || !PHONE_ID_RE.test(phoneId)) throw new SyncError('bad-request', 'not a phone id');
   return path.join(privateDir, 'phone-link', 'sync', `${phoneId}.json`);
@@ -177,11 +261,27 @@ function loadBase(privateDir, phoneId) {
   return base;
 }
 
-function saveBase(privateDir, phoneId, base, now = Date.now()) {
+/** The switches' base for a phone: {key: switchKey} (none: {}). An older helper's file has none. */
+function loadSwitchBase(privateDir, phoneId) {
+  let obj;
+  try { obj = JSON.parse(fs.readFileSync(basePath(privateDir, phoneId), 'utf8')); } catch { return {}; }
+  const out = {};
+  if (!obj || obj.v !== 1 || !obj.sw || typeof obj.sw !== 'object') return out;
+  for (const [id, k] of Object.entries(obj.sw)) {
+    if (typeof k !== 'string' || k.length > 20000 || !/^(on|off)\|/.test(k)) continue;
+    try { parseId(id); } catch { continue; }
+    out[id] = k;
+  }
+  return out;
+}
+
+/** `sw`: the switches' base to keep (undefined: the file's own, as it is). */
+function saveBase(privateDir, phoneId, base, now = Date.now(), sw = undefined) {
   const file = basePath(privateDir, phoneId);
+  const keep = sw === undefined ? loadSwitchBase(privateDir, phoneId) : sw;
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ v: 1, base, at: now }), { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify({ v: 1, base, ...(Object.keys(keep).length ? { sw: keep } : {}), at: now }), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -190,6 +290,7 @@ function deleteBase(privateDir, phoneId) {
 }
 
 module.exports = {
-  parseId, idOf, rev, readManifest, plan, siblingId, renameHeader, loadBase, saveBase, deleteBase, basePath,
+  parseId, idOf, rev, readManifest, plan, siblingId, renameHeader, loadBase, saveBase, deleteBase, basePath, loadSwitchBase,
+  syncKey, keyOfModId, modIdOfKey, readSwitch, switchKey, planSwitches, readHint, hintFits, tierOf, TIERS,
   SyncError, MAX_MODS, MOD_MAX, NAME_MAX, SIBLING, SIBLING_NAME, ALL_SITES,
 };

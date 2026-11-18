@@ -99,6 +99,7 @@ const state = {
   lastFingerprint: null,
   twinStamp: undefined, // (the phone twins' files as syncMods last saw them: a change nudges a connected phone to sync)
   syncWriting: false, // (syncMods for the phone sync's own write: no nudge for it)
+  phoneSwitches: null, // (the phone twins' switches as the extension last said: Map mod id -> {on, off, at}; null: never said)
   modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
   resentFor: null, // the signature of the last set re-sent because the extension asked (modsResend)
   sentMods: null, // id -> hash of the last set sent to this extension, for 'modsSame' (null: send every mod whole)
@@ -271,6 +272,16 @@ function onExtensionMessage(msg) {
         const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null);
         if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
       } catch (e) { logger.warn(`switches: ${e.message}`); }
+      // (the phone twins' switches, for the phone sync (docs/PHONE-SYNC.md section 4b): an extension that doesn't say
+      // has none synced. One changed since the last report: the phones are nudged)
+      if (msg.phoneSwitches && typeof msg.phoneSwitches === 'object' && !Array.isArray(msg.phoneSwitches)) {
+        const next = new Map();
+        for (const [id, v] of Object.entries(msg.phoneSwitches).slice(0, 2000)) if (/^phone~/.test(id) && v && typeof v === 'object') next.set(id, v);
+        const shape = (m) => JSON.stringify([...m].map(([k, v]) => [k, !!v.on, Array.isArray(v.off) ? [...v.off].sort() : []]).sort());
+        const was = state.phoneSwitches;
+        state.phoneSwitches = next;
+        if (was && shape(was) !== shape(next)) { try { link.syncChanged(); } catch (e) { logger.warn(`phone sync: ${e.message}`); } }
+      }
       break;
     case 'log': {
       const level = ['error', 'warn', 'info', 'debug'].includes(msg.level) ? msg.level : 'info';
@@ -399,6 +410,8 @@ function syncMods(reason, force) {
       ...(h.reach ? { reach: h.reach } : {}), ...(h.runId ? { runId: h.runId } : {}),
       // (a change the phone sync brought: the phone's name, for "From {phone}" on the card)
       ...(h.phone ? { phone: String(h.phone).slice(0, 80) } : {}),
+      // (and the phone that allowed this very version there: the approval hint's words, never an approval here)
+      ...(h.allowedOn ? { allowedOn: String(h.allowedOn).slice(0, 80) } : {}),
       // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
       ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^(power|site):/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
@@ -432,7 +445,7 @@ function syncMods(reason, force) {
   let starter = null;
   try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}` : ''}${m.siteOk ? `:site ${m.siteOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}${m.held.allowedOn ? ` ok ${m.held.allowedOn}` : ''}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}${m.pending.allowedOn ? ` ok ${m.pending.allowedOn}` : ''}` : ''}${m.siteOk ? `:site ${m.siteOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
@@ -628,6 +641,17 @@ const link = new Link({
     state.syncWriting = true;
     try { syncMods('phone sync', false); } finally { state.syncWriting = false; }
     return state.held;
+  },
+  // (the phone twins' switches in this browser: what the extension last said, and the phone's sent to it; its next
+  // report says they're in)
+  switches: {
+    get: () => state.phoneSwitches,
+    set: (list) => {
+      if (!state.stdoutOpen || state.shuttingDown) return false;
+      sendToExtension({ type: 'phoneSwitches', set: list.map((x) => ({ id: x.modId, on: x.on, off: x.off, at: x.at })) });
+      logger.info(`phone sync: ${list.length} switch(es) from the phone: ${list.map((x) => `${x.modId} ${x.on ? 'on' : 'off'}${x.off.length ? ` (off on ${x.off.join(', ')})` : ''}`).join('; ').slice(0, 500)}`);
+      return true;
+    },
   },
   // (a phone's run uses this computer's default agent: the first one that is installed, as agent.list says)
   agent: () => {

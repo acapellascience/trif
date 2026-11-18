@@ -65,6 +65,17 @@ None: every checklist item is done. Left for Tim: the decisions below, and a pas
   until OK, deduped, at most 20.
 - The pairing sheet opens over the app after `simctl openurl` of the qr: tap Done (322, 68) before the Mods tab.
 
+## Round 8 (11-18): switches, the approval hint, D8
+
+Tim's decisions of 11-18 (PHONE-SYNC.md D1, D4–D7, D9 approved; D8 changed; D12–D16 new). Computer: sync.js
+(`syncKey`, `planSwitches`, `readHint`/`hintFits`, the switches' base in the base file), syncsession.js (rows' `sw`
+and `ok`, the plan's `switches` and `allowed`, `sync.end`'s `switches`; the extension told at `sync.end`, the base
+moved on its report), held.js (`synced-allowed.json`, a hold's `allowedOn`), host.js (the extension's
+`phoneSwitches` report kept, a change nudges; `allowedOn` to the panel), background.js (`switchAt` stamped by
+mod.enable, reported; `phoneSwitches` applied to phone twin mods only, after the mods set, a mod not here yet
+waits), sidepanel.js ("You allowed this on {phone}."). Tests: phone-sync.test.js (every case), phone-sync-session
+(both ways, D8, older peers, the hint), phone-sync-e2e's second test. iPhone: ios-poc, the same round.
+
 ## For Tim (decisions)
 
 1. D1–D10 in docs/PHONE-SYNC.md section 1 are defaults: the goal's choices plus D5 (in a conflict the phone's

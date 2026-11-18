@@ -65,6 +65,7 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
+  switchAt: {},          // phone mod id → ms of its switch's last change by the person, or by the phone sync (persisted; docs/PHONE-SYNC.md 4b)
   groupsOff: {},         // site → groups ('rules', 'sandboxed', 'page') switched off there (persisted; lib.js "Groups")
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
@@ -251,6 +252,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   if (Array.isArray(s.recording)) state.recording = s.recording;
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
+  state.switchAt = s.switchAt && typeof s.switchAt === 'object' && !Array.isArray(s.switchAt) ? Object.fromEntries(Object.entries(s.switchAt).filter(([, v]) => Number.isFinite(v) && v > 0)) : {};
   state.groupsOff = normalizeGroupsOff(s.groupsOff);
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
@@ -813,8 +815,55 @@ function reportApplied(res) {
   // boxed mods together, helper/lib/sitecombos.js)
   let splits = [];
   try { splits = sens().splits; } catch { /* none yet */ }
-  post({ type: 'modsApplied', registered: res.registered, errors: res.errors, splits });
+  post({ type: 'modsApplied', registered: res.registered, errors: res.errors, splits, phoneSwitches: phoneSwitchesNow() });
   notifyPanels();
+}
+
+// ---- the phone sync's switches (docs/PHONE-SYNC.md section 4b): the phone twins' mods' on/off and per-site
+// switches follow the last change on the phone or here. Each report tells the helper what they are here, and when
+// the person last changed each (`switchAt`, stamped by mod.enable only: a mod switched off for being new isn't a
+// change of the person's); the helper sends `phoneSwitches` with what the phone changed. Only phone twins' mods:
+// never a desktop mod's switch, never Pause all or a group's.
+function phoneSwitchesNow() {
+  const out = {};
+  for (const m of state.mods) if (isPhoneMod(m) && m.id.startsWith(PHONE_PREFIX)) out[m.id] = { on: isEnabled(m.id), off: [...(state.offSites[m.id] || [])].sort(), at: state.switchAt[m.id] || 0 };
+  return out;
+}
+const phoneSwitchWait = new Map(); // mod id → {on, off, at, came}: for a mod not here yet (its file's mods set comes first, normally)
+async function setPhoneSwitches(list) {
+  let changed = false;
+  for (const e of list) {
+    const mod = state.mods.find((m) => m.id === e.id);
+    if (!mod) { phoneSwitchWait.set(e.id, { ...e, came: Date.now() }); continue; }
+    const before = { disabled: !isEnabled(e.id), offSites: state.offSites[e.id] || [] };
+    const off = normalizeOffSites({ [e.id]: e.off })[e.id] || [];
+    if (before.disabled !== !e.on || JSON.stringify([...before.offSites].sort()) !== JSON.stringify([...off].sort())) {
+      await setSwitchState(e.id, { disabled: !e.on, offSites: off });
+      changed = true;
+    }
+    if ((state.switchAt[e.id] || 0) !== e.at) { state.switchAt = { ...state.switchAt, [e.id]: e.at }; changed = true; }
+  }
+  if (changed) await save({ switchAt: state.switchAt }).catch((err) => log('warn', errMsg(err)));
+  return changed;
+}
+async function onPhoneSwitches(msg) {
+  await modsApplied; // (the mods set sent before this, with a mod the phone just sent, is in first)
+  const list = (Array.isArray(msg.set) ? msg.set : []).slice(0, 1000).filter((e) => e && typeof e.id === 'string' && e.id.startsWith(PHONE_PREFIX) && e.id.includes('/') && typeof e.on === 'boolean')
+    .map((e) => ({ id: e.id, on: e.on, off: Array.isArray(e.off) ? e.off.filter((x) => typeof x === 'string') : [], at: Number.isFinite(e.at) && e.at > 0 ? e.at : 0 }));
+  if (!list.length) return;
+  const changed = await serial(() => setPhoneSwitches(list));
+  log('info', `phone sync: ${list.length} switch(es) from the phone${changed ? '' : ' (as they were)'}`);
+  reportApplied(await serial(applyMods));
+}
+/** The switches that came before their mod: in once it's here (an hour at most). */
+async function phoneSwitchesWaiting() {
+  if (!phoneSwitchWait.size) return false;
+  const now = [];
+  for (const [id, e] of phoneSwitchWait) {
+    if (Date.now() - e.came > 3600000) phoneSwitchWait.delete(id);
+    else if (state.mods.some((m) => m.id === id)) { now.push(e); phoneSwitchWait.delete(id); }
+  }
+  return now.length ? setPhoneSwitches(now) : false;
 }
 
 function requireUserScripts() {
@@ -1021,6 +1070,7 @@ async function onModsMessage(msg) {
       log('warn', errMsg(e));
     }
   }
+  await phoneSwitchesWaiting().catch((e) => log('warn', `phone sync's switches: ${errMsg(e)}`));
   reportApplied(await serial(applyMods));
 }
 
@@ -1033,6 +1083,8 @@ async function onOtherHelperMessage(msg) {
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'the helper reported an error'));
   } else if (msg.type === 'agentEvent') {
     await onAgentEvent(msg.runId, msg.event);
+  } else if (msg.type === 'phoneSwitches') {
+    await onPhoneSwitches(msg);
   } else if (msg.type === 'phoneLink') {
     // How the phone link is (Settings' Connect a phone; helper/lib/phonelink/link.js): to the side panel's
     // own pages, which asked for it. It names the paired phones and never holds the QR's text.
@@ -1479,6 +1531,11 @@ const commands = {
       }
       return { failure, after };
     });
+    // (a phone twin's mod: when its switch changed, for the phone sync's rule: the later change wins)
+    if (!res.failure && isPhoneMod(mod) && id.startsWith(PHONE_PREFIX)) {
+      state.switchAt = { ...state.switchAt, [id]: Date.now() };
+      await save({ switchAt: state.switchAt }).catch((e) => log('warn', errMsg(e)));
+    }
     reportApplied(state.lastApply);
     if (res.failure) throw new Error(`couldn't turn ${id} ${enabled ? 'on' : 'off'}${site ? ` on ${site}` : ''}: ${res.failure.error}`);
     // Switched on: no longer off for being new.

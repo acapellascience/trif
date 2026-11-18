@@ -17,6 +17,15 @@
 // view has no every-site folder). Approval is held.js's, on the computer, as for any file from outside: what the
 // phone approved counts for nothing here.
 //
+// Beside the text (an app that says `switches: true` in sync.begin; older peers send and get none of it):
+//   - switches (D12): each manifest row's `sw` {on, off, at}; the computer's are the extension's (`switches.get()`,
+//     its last report). sync.js planSwitches decides; the plan's `switches` are what the phone sets, and what the
+//     computer takes goes to the extension at sync.end (`switches.set`). The base moves at sync.end only where the
+//     phone's (sync.end's `switches`) and the extension's last report agree, so nothing is taken as done unseen.
+//   - the approval hint (D13): each row's `ok` {rev, tier, powers} (the phone allows that revision there), kept in
+//     $TRIF_HOME/synced-allowed.json for held.js's card words; the plan's `allowed`: the same for every twin mod
+//     not held here. Never an approval, on either side.
+//
 // The switch: `enabled` (a function; link.js passes the user's setting: on for a paired phone, D11). Off, every sync.* is `off` and
 // nothing is read or written.
 
@@ -76,6 +85,8 @@ class PhoneSync {
    *   afterWrite: () => held map | null   the helper looks at the mods again (host.js syncMods) and says what's
    *     held; without it, held.js is asked here.
    *   enabled: () => bool     the switch (default on).
+   *   switches: {get: () => Map modId -> {on, off, at} | null (null: the extension hasn't said: no switch sync),
+   *     set: ([{modId, on, off, at}]) => bool}   the phone twins' switches in the browser (host.js).
    *   now: for tests.
    */
   constructor(store, server, runs, opts = {}) {
@@ -87,6 +98,7 @@ class PhoneSync {
     this.afterWrite = typeof opts.afterWrite === 'function' ? opts.afterWrite : null;
     this.enabled = typeof opts.enabled === 'function' ? opts.enabled : () => true;
     this.now = typeof opts.now === 'function' ? opts.now : Date.now;
+    this.switches = opts.switches && typeof opts.switches.get === 'function' && typeof opts.switches.set === 'function' ? opts.switches : null;
     this.syncs = new Map(); // phone id -> the sync going on
     this.begun = new Map(); // phone id -> when its last sync.begin came
     this.nudged = new Map(); // phone id -> when it was last sent sync.changed
@@ -257,20 +269,60 @@ class PhoneSync {
     for (const [id, r] of Object.entries(p.agreed)) base[id] = r;
     for (const id of p.gone) delete base[id];
     try { S.saveBase(ws.private, phone.id, base, now); } catch (e) { this.log(`phone sync: couldn't save the base (${e.code || e.message})`); }
-    if (trashed.length || conflicts.length) this._refresh(ws);
+
+    // Beside the text: the switches and the approval hint (an app that says it knows them)
+    const knows = msg.switches === true;
+    let sw = { toPhone: [], toComputer: [], agreed: {} };
+    let allowed = [];
+    let hinted = false;
+    if (knows) {
+      const rows = new Map();
+      for (const m of Array.isArray(msg.mods) ? msg.mods : []) if (m && typeof m.id === 'string' && revs.has(m.id)) rows.set(m.id, m);
+      // (the hints: this phone's rows replace what it said before)
+      const hints = new Map();
+      for (const [id, m] of rows) { const h = S.readHint(m.ok); if (h && h.rev === revs.get(id)) hints.set(S.syncKey(id), h); }
+      try { hinted = held.recordSyncedAllowed(ws.home, phone, hints); } catch (e) { this.log(`phone sync: couldn't keep the phone's approvals as hints (${e.code || e.message})`); }
+      // (the switches: the ids both sides have once the files are done; a conflict's sibling starts as a new mod does)
+      const report = this.switches ? this.switches.get() : null;
+      if (report) {
+        const siblings = new Set(conflicts.map((c) => c.sibling));
+        const want = new Set(p.want.map((w) => w.id));
+        const ids = [...Object.keys(p.agreed), ...want, ...give.filter((g) => !siblings.has(g.id)).map((g) => g.id)];
+        const phoneSw = new Map();
+        const compSw = new Map();
+        for (const id of ids) {
+          const key = S.syncKey(id);
+          if (revs.has(id)) { const v = S.readSwitch(rows.get(id) && rows.get(id).sw); if (v) phoneSw.set(key, v); } else phoneSw.set(key, null);
+          if (compRevs.has(id)) { const v = report.get(S.modIdOfKey(key)); if (v) compSw.set(key, S.readSwitch(v)); } else compSw.set(key, null);
+        }
+        sw = S.planSwitches({ ids: ids.map(S.syncKey), phone: phoneSw, computer: compSw, base: S.loadSwitchBase(ws.private, phone.id) });
+      }
+      // (what's allowed here: every twin mod not held, by its revision now)
+      const heldNow = held.loadHeld(ws.home);
+      for (const [id, m] of computer) {
+        if (!compRevs.has(id) || compRevs.get(id) !== m.rev) continue;
+        const { folder, file, name } = S.parseId(id);
+        if (heldNow[`${folder}/${name}`]) continue;
+        let built;
+        try { built = buildMod({ site: folder, file, code: m.text }).mod; } catch { continue; }
+        allowed.push({ id, rev: m.rev, tier: S.tierOf(built), powers: built.sandboxed && Array.isArray(built.powers) ? [...built.powers].sort() : [] });
+      }
+    }
+    if (trashed.length || conflicts.length || hinted) this._refresh(ws);
 
     const syncId = `s${crypto.randomBytes(8).toString('hex')}`;
     const sync = {
       syncId, session, phone: { id: phone.id, name: phone.name }, startedAt: now,
       want: new Map(p.want.map((w) => [w.id, w])), give: new Map(give.map((g) => [g.id, g])),
       remove: new Set(p.remove), compRevs, conflicts, trashed, written: [], held: new Set(),
-      skipped: [...skipped, ...p.skipped],
+      skipped: [...skipped, ...p.skipped], knows, swToComputer: sw.toComputer,
     };
     this.syncs.set(phone.id, sync);
     const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k, v]) => k === 'id' || k === 'rev' || ((k === 'back' || k === 'conflict') && v)));
     return {
       t: 'sync.plan', syncId,
       want: p.want.map(strip), give: give.map(strip), remove: p.remove, later: p.later, skipped: sync.skipped,
+      ...(knows ? { switches: sw.toPhone, allowed } : {}),
     };
   }
 
@@ -341,7 +393,35 @@ class PhoneSync {
       if (C === null) delete base[id]; else base[id] = C;
       agreed++;
     }
-    try { S.saveBase(ws.private, sync.phone.id, base, this.now()); } catch (e) { this.log(`phone sync: couldn't save the base (${e.code || e.message})`); }
+    // The switches: what the computer takes goes to the browser now; the base moves where both sides agree as last
+    // seen (the phone's now, the extension's last report: a switch sent now is confirmed by its next report).
+    let swBase;
+    let switched = 0;
+    if (sync.knows && this.switches) {
+      const takes = sync.swToComputer.filter((x) => { try { return !!this._current(ws, x.id); } catch { return false; } });
+      if (takes.length) {
+        try { if (this.switches.set(takes.map((x) => ({ modId: S.modIdOfKey(x.id), on: x.on, off: x.off, at: x.at })))) switched = takes.length; } catch (e) { this.log(`phone sync: couldn't send the switches to the browser (${e.message})`); }
+      }
+      const report = this.switches.get();
+      if (report && Array.isArray(msg.switches)) {
+        swBase = S.loadSwitchBase(ws.private, sync.phone.id);
+        const phoneNow = new Map();
+        for (const x of msg.switches.slice(0, S.MAX_MODS * 2)) {
+          if (!x || typeof x.id !== 'string') continue;
+          try { S.parseId(x.id); } catch { continue; }
+          const v = S.readSwitch(x);
+          if (v) phoneNow.set(S.syncKey(x.id), v);
+        }
+        for (const [key, v] of phoneNow) {
+          const c = report.get(S.modIdOfKey(key));
+          const cv = c ? S.readSwitch(c) : null;
+          if (cv && S.switchKey(cv) === S.switchKey(v)) swBase[key] = S.switchKey(v);
+        }
+        // (a mod on neither side any more: out of the switches' base)
+        for (const key of Object.keys(swBase)) if (!phoneNow.has(key) && !report.has(S.modIdOfKey(key))) delete swBase[key];
+      }
+    }
+    try { S.saveBase(ws.private, sync.phone.id, base, this.now(), swBase); } catch (e) { this.log(`phone sync: couldn't save the base (${e.code || e.message})`); }
     // (a mod's name as the user sees it: its @name, else the id's)
     const nameOf = (id) => { try { const f = this._current(ws, id); const n = f && f.text ? parseHeader(f.text).name : null; if (n) return String(n).slice(0, 120); } catch { /* the id's */ } return S.parseId(id).name; };
     const heldMap = held.loadHeld(ws.home);
@@ -359,7 +439,7 @@ class PhoneSync {
     const done = { synced: agreed, waiting, conflicts: sync.conflicts };
     this.last.set(sync.phone.id, {
       at: this.now(), fromPhone: sync.written.length + sync.trashed.length, toPhone, waiting: waiting.length,
-      conflicts: sync.conflicts.map((c) => nameOf(c.id)), skipped: sync.skipped.length,
+      conflicts: sync.conflicts.map((c) => nameOf(c.id)), skipped: sync.skipped.length, switched,
     });
     return { t: 'sync.done', ...done };
   }

@@ -131,3 +131,85 @@ test('the base: per phone, private, and nothing in it taken on trust', () => {
   assert.strictEqual(S.deleteBase(dir, phone), true);
   assert.strictEqual(fs.existsSync(file), false);
 });
+
+// ---- beside the text: the switches (D12) and the approval hint (D13)
+
+const sw = (on, off = [], at = 0) => ({ on, off, at });
+
+test('switches: what the wire carries, read strictly; a key without the time', () => {
+  assert.deepStrictEqual(S.readSwitch({ on: true, off: ['b.com', 'a.com', 'a.com', 'Bad Site', 5], at: 12.7 }), { on: true, off: ['a.com', 'b.com'], at: 12 });
+  assert.deepStrictEqual(S.readSwitch({ on: false }), { on: false, off: [], at: 0 });
+  for (const bad of [null, {}, { on: 'yes' }, 'on', []]) assert.strictEqual(S.readSwitch(bad), null);
+  assert.strictEqual(S.readSwitch({ on: true, at: -5 }).at, 0);
+  assert.strictEqual(S.switchKey(sw(true, ['a.com'], 1)), S.switchKey(sw(true, ['a.com'], 99)));
+  assert.notStrictEqual(S.switchKey(sw(true)), S.switchKey(sw(false)));
+  assert.notStrictEqual(S.switchKey(sw(true)), S.switchKey(sw(true, ['a.com'])));
+});
+
+test('switches: the three-way rule, every case (section 4b), and an older side that can\'t say', () => {
+  const on = sw(true, [], 100), off = sw(false, [], 200), offEarly = sw(false, [], 50), part = sw(true, ['m.a.com'], 300);
+  const k = S.switchKey;
+  const out = S.planSwitches({
+    ids: ['a.com/same', 'a.com/phone-changed', 'a.com/computer-changed', 'a.com/both-later-phone', 'a.com/both-later-computer', 'a.com/both-same-time',
+      'a.com/no-base-later-computer', 'a.com/new-on-phone', 'a.com/new-on-computer', 'a.com/old-app', 'a.com/old-extension', 'a.com/neither', 'a.com/site-switch'],
+    phone: map({
+      'a.com/same': on, 'a.com/phone-changed': off, 'a.com/computer-changed': on, 'a.com/both-later-phone': sw(false, [], 900), 'a.com/both-later-computer': sw(false, [], 100),
+      'a.com/both-same-time': sw(false, [], 500), 'a.com/no-base-later-computer': offEarly, 'a.com/new-on-phone': null, 'a.com/new-on-computer': on,
+      'a.com/old-extension': on, 'a.com/neither': null, 'a.com/site-switch': part,
+    }),
+    computer: map({
+      'a.com/same': sw(true, [], 7), 'a.com/phone-changed': on, 'a.com/computer-changed': off, 'a.com/both-later-phone': sw(true, ['x.com'], 800), 'a.com/both-later-computer': sw(true, ['x.com'], 800),
+      'a.com/both-same-time': sw(true, ['x.com'], 500), 'a.com/no-base-later-computer': on, 'a.com/new-on-phone': off, 'a.com/new-on-computer': null,
+      'a.com/old-app': on, 'a.com/neither': null, 'a.com/site-switch': on,
+    }),
+    base: { 'a.com/same': k(on), 'a.com/phone-changed': k(on), 'a.com/computer-changed': k(on), 'a.com/both-later-phone': k(on), 'a.com/both-later-computer': k(on), 'a.com/both-same-time': k(on), 'a.com/site-switch': k(on) },
+  });
+  assert.deepStrictEqual(out.agreed, { 'a.com/same': k(on) }, 'the same switch: in sync, whatever the times');
+  assert.deepStrictEqual(out.toComputer, [
+    { id: 'a.com/both-later-phone', ...sw(false, [], 900) }, // (both changed: the phone's later)
+    { id: 'a.com/both-same-time', ...sw(false, [], 500) }, // (the same time: the phone's)
+    { id: 'a.com/new-on-computer', ...on }, // (D8 the other way: a mod new to the computer takes the phone's switch)
+    { id: 'a.com/phone-changed', ...off }, // (only the phone changed: whatever the times)
+    { id: 'a.com/site-switch', ...part }, // (a per-site switch is a change too)
+  ]);
+  assert.deepStrictEqual(out.toPhone, [
+    { id: 'a.com/both-later-computer', ...sw(true, ['x.com'], 800) },
+    { id: 'a.com/computer-changed', ...off },
+    { id: 'a.com/new-on-phone', ...off }, // (D8: a mod new to the phone arrives with the computer's switch)
+    { id: 'a.com/no-base-later-computer', ...on }, // (no base, as the first sync after an update: the later wins)
+  ]);
+  // (an app or an extension that sends no switches: those mods are left as they are on both sides)
+  for (const id of ['a.com/old-app', 'a.com/old-extension', 'a.com/neither']) {
+    assert.ok(![...out.toPhone, ...out.toComputer].some((x) => x.id === id) && !(id in out.agreed), id);
+  }
+});
+
+test('the switches\' base: kept beside the files\' base, read strictly, and an older helper\'s file has none', () => {
+  const dir = tempDir('trif-sync-'); cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const phone = '0123456789abcdef';
+  S.saveBase(dir, phone, { 'a.com/x': r('x') }, 5);
+  assert.deepStrictEqual(S.loadSwitchBase(dir, phone), {});
+  S.saveBase(dir, phone, { 'a.com/x': r('x') }, 6, { 'a.com/x': 'on|', '../bad': 'on|', 'a.com/y': 'maybe' });
+  assert.deepStrictEqual(S.loadSwitchBase(dir, phone), { 'a.com/x': 'on|' });
+  // (saving the files' base alone keeps the switches' as they are; an older helper's loadBase reads its own part)
+  S.saveBase(dir, phone, { 'a.com/x': r('x2') }, 7);
+  assert.deepStrictEqual(S.loadSwitchBase(dir, phone), { 'a.com/x': 'on|' });
+  assert.deepStrictEqual(S.loadBase(dir, phone), { 'a.com/x': r('x2') });
+});
+
+test('the approval hint: the very revision, and nothing beyond what was allowed there; one sync key for it all', () => {
+  const rev = r('code');
+  const hint = S.readHint({ rev, tier: 'boxed', powers: ['click', 'keys', 'click', 'BAD!'] });
+  assert.deepStrictEqual(hint, { rev, tier: 'boxed', powers: ['click', 'keys'] });
+  for (const bad of [null, { rev: 'short', tier: 'boxed' }, { rev, tier: 'super' }]) assert.strictEqual(S.readHint(bad), null);
+  assert.strictEqual(S.hintFits(hint, { rev, tier: 'boxed', powers: ['click'] }), true, 'the same code, fewer powers');
+  assert.strictEqual(S.hintFits(hint, { rev, tier: 'style', powers: [] }), true, 'a lower tier');
+  assert.strictEqual(S.hintFits(hint, { rev: r('changed'), tier: 'boxed', powers: ['click'] }), false, 'changed code: the normal card');
+  assert.strictEqual(S.hintFits(hint, { rev, tier: 'boxed', powers: ['click', 'go-to'] }), false, 'more powers: the normal card');
+  assert.strictEqual(S.hintFits(hint, { rev, tier: 'free', powers: [] }), false, 'a higher tier: the normal card');
+  assert.strictEqual(S.hintFits(null, { rev, tier: 'style' }), false);
+  assert.strictEqual(S.syncKey('a.com/x'), 'a.com/x');
+  assert.strictEqual(S.keyOfModId('phone~a.com/x'), 'a.com/x');
+  assert.strictEqual(S.keyOfModId('a.com/x'), null, 'a desktop mod has no sync key');
+  assert.strictEqual(S.modIdOfKey('a.com/x'), 'phone~a.com/x');
+});

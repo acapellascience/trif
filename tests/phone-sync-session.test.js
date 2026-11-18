@@ -26,7 +26,7 @@ const mod = (name, body = 'document.body.style.color = "red"') => `// ==WebMod==
 const style = (name, css = '#ad') => `// ==WebMod==\n// @name ${name}\n// @match https://example.com/*\n// @style\n// ==/WebMod==\n{ "hide": ["${css}"] }\n`;
 const CLICKS = 'document.querySelector("button").click()';
 
-function setup({ enabled = () => true, runs = [] } = {}) {
+function setup({ enabled = () => true, runs = [], switches = null } = {}) {
   const home = tempDir('wm-psync-');
   const priv = `${home}-private`;
   fs.mkdirSync(path.join(home, 'sites'), { recursive: true });
@@ -41,7 +41,7 @@ function setup({ enabled = () => true, runs = [] } = {}) {
   server.sessions.add(session);
   let t = 1e12;
   const fakeRuns = { list: () => runs, scopes: () => [] };
-  const sync = new PhoneSync(store, server, fakeRuns, { getWorkspace: () => ws, enabled, now: () => t }).start();
+  const sync = new PhoneSync(store, server, fakeRuns, { getWorkspace: () => ws, enabled, now: () => t, ...(switches ? { switches } : {}) }).start();
   // (held.js's first look: what's there is the user's, as it is; a desktop mod so that it's remembered)
   fs.mkdirSync(path.join(ws.modsDir, 'other.com'));
   fs.writeFileSync(path.join(ws.modsDir, 'other.com', 'seed.js'), mod('Seed'));
@@ -69,7 +69,26 @@ function setup({ enabled = () => true, runs = [] } = {}) {
     const done = await ask({ t: 'sync.end', syncId: plan.syncId, have: Object.entries(phone).map(([id, text]) => ({ id, rev: S.rev(text) })) });
     return { plan, puts, done };
   };
-  return { ws, store, server, session, sync, ask, later, file, write, read, round };
+  /**
+   * One whole sync as an app that knows switches and hints does it: `phone` id -> {text, sw, ok?} (changed in place;
+   * a new mod from the computer gets `sw` from the plan's switches, as the app takes one off and then sets it).
+   */
+  const roundSw = async (phone) => {
+    later();
+    const plan = await ask({ t: 'sync.begin', switches: true, mods: Object.entries(phone).map(([id, m]) => ({ id, rev: S.rev(m.text), sw: m.sw, ...(m.ok ? { ok: m.ok } : {}) })) });
+    const puts = {};
+    for (const w of plan.want) puts[w.id] = await ask({ t: 'sync.put', syncId: plan.syncId, mod: w.id, code: phone[w.id].text });
+    for (const g of plan.give) {
+      const got = await ask({ t: 'sync.get', syncId: plan.syncId, mod: g.id });
+      phone[g.id] = phone[g.id] ? { ...phone[g.id], text: got.code } : { text: got.code, sw: { on: false, off: [], at: 0 } };
+    }
+    for (const id of plan.remove) delete phone[id];
+    for (const x of plan.switches) if (phone[x.id]) phone[x.id].sw = { on: x.on, off: x.off, at: x.at };
+    const done = await ask({ t: 'sync.end', syncId: plan.syncId, have: Object.entries(phone).map(([id, m]) => ({ id, rev: S.rev(m.text) })),
+      switches: Object.entries(phone).map(([id, m]) => ({ id, ...m.sw })) });
+    return { plan, puts, done };
+  };
+  return { ws, store, server, session, sync, ask, later, file, write, read, round, roundSw };
 }
 
 const fails = (code) => (e) => e instanceof S.SyncError && e.code === code;
@@ -280,4 +299,140 @@ test('the nudge: no mod, no name, at most every 2 s, not during a sync; a remove
   assert.equal(s.sync.status(PHONE.id), null);
   s.sync.stop();
   assert.ok(!s.server.handlers.has('sync.begin'));
+});
+
+
+/** A stand-in extension's switches: its report (mod id -> {on, off, at}), and what the helper sent it (taken at once, as its next report says). */
+function fakeSwitches({ said = true } = {}) {
+  const report = new Map();
+  const sent = [];
+  return {
+    report, sent,
+    get: () => (said ? report : null),
+    set: (list) => { sent.push(list); for (const x of list) report.set(x.modId, { on: x.on, off: x.off, at: x.at }); return true; },
+  };
+}
+const on = (at = 0, off = []) => ({ on: true, off, at });
+const off = (at = 0) => ({ on: false, off: [], at });
+
+test('switches follow the last change on either side: in sync, the phone\'s, the computer\'s, both (the later wins), new mods both ways (D8), the base', async () => {
+  const x = fakeSwitches();
+  const s = setup({ switches: x });
+  const base = () => S.loadSwitchBase(s.ws.private, PHONE.id);
+  s.write('phone~example.com/a.js', mod('A'));
+  x.report.set('phone~example.com/a', on());
+  const phone = { 'example.com/a': { text: mod('A'), sw: on() } };
+  let r = await s.roundSw(phone);
+  assert.deepEqual(r.plan.switches, []);
+  assert.deepEqual(base(), { 'example.com/a': 'on|' }, 'the same: in sync, the base set');
+  // the phone switches it off: the computer takes it
+  phone['example.com/a'].sw = off(5000);
+  r = await s.roundSw(phone);
+  assert.deepEqual(r.plan.switches, []);
+  assert.deepEqual(x.sent.at(-1), [{ modId: 'phone~example.com/a', on: false, off: [], at: 5000 }]);
+  assert.deepEqual(base(), { 'example.com/a': 'off|' });
+  // the computer switches it on, off on one site: the phone takes it (the phone's own time doesn't matter: it didn't change)
+  x.report.set('phone~example.com/a', on(4000, ['m.example.com']));
+  r = await s.roundSw(phone);
+  assert.deepEqual(r.plan.switches, [{ id: 'example.com/a', on: true, off: ['m.example.com'], at: 4000 }]);
+  assert.deepEqual(phone['example.com/a'].sw, on(4000, ['m.example.com']));
+  assert.deepEqual(base(), { 'example.com/a': 'on|m.example.com' });
+  // both change: the later change wins (here the computer's), and the other way
+  phone['example.com/a'].sw = off(6000);
+  x.report.set('phone~example.com/a', on(7000));
+  r = await s.roundSw(phone);
+  assert.deepEqual(r.plan.switches, [{ id: 'example.com/a', ...on(7000) }]);
+  phone['example.com/a'].sw = off(9000);
+  x.report.set('phone~example.com/a', on(8000, ['x.example.com']));
+  const sentBefore = x.sent.length;
+  r = await s.roundSw(phone);
+  assert.deepEqual(r.plan.switches, []);
+  assert.deepEqual(x.sent.slice(sentBefore), [[{ modId: 'phone~example.com/a', on: false, off: [], at: 9000 }]]);
+  // a mod new to the computer arrives with the phone's switch (on); one new to the phone with the computer's (on)
+  phone['example.com/made-on-phone'] = { text: style('Made on phone'), sw: on(10000) };
+  s.write('phone~example.com/made-here.js', style('Made here'));
+  x.report.set('phone~example.com/made-here', on(0));
+  r = await s.roundSw(phone);
+  assert.ok(r.puts['example.com/made-on-phone'].rev);
+  assert.deepEqual(x.sent.at(-1), [{ modId: 'phone~example.com/made-on-phone', on: true, off: [], at: 10000 }]);
+  assert.deepEqual(r.plan.switches, [{ id: 'example.com/made-here', ...on(0) }]);
+  assert.deepEqual(phone['example.com/made-here'].sw, on(0), 'not off as before D8: the computer\'s switch');
+  assert.deepEqual(base(), { 'example.com/a': 'off|', 'example.com/made-here': 'on|', 'example.com/made-on-phone': 'on|' });
+  // then nothing to do
+  const n = x.sent.length;
+  r = await s.roundSw(phone);
+  assert.deepEqual([r.plan.switches, x.sent.length], [[], n]);
+});
+
+test('switches: an older app (no switches in its sync) and an extension that hasn\'t said leave every switch as it is', async () => {
+  const x = fakeSwitches();
+  const s = setup({ switches: x });
+  s.write('phone~example.com/a.js', mod('A'));
+  x.report.set('phone~example.com/a', off(9000));
+  // an older app: no `switches: true`, no rows' sw: no switches in the plan, nothing sent, no switches' base
+  const old = await s.round({ 'example.com/a': mod('A'), 'example.com/new': style('New') });
+  assert.equal(old.plan.switches, undefined);
+  assert.equal(old.plan.allowed, undefined);
+  assert.deepEqual(x.sent, []);
+  assert.deepEqual(S.loadSwitchBase(s.ws.private, PHONE.id), {});
+  // an extension that hasn't said (an older one, or not yet): nothing either way
+  const y = fakeSwitches({ said: false });
+  const s2 = setup({ switches: y });
+  s2.write('phone~example.com/a.js', mod('A'));
+  const r = await s2.roundSw({ 'example.com/a': { text: mod('A'), sw: off(5) } });
+  assert.deepEqual([r.plan.switches, y.sent], [[], []]);
+});
+
+test('the approval hint, computer side: the very revision the phone allowed says so on the hold; changed code or more powers: the normal card; never approved', async () => {
+  const s = setup({ switches: fakeSwitches() });
+  const boxed = (powers, body = 'trif.hide(".a")') => `// ==WebMod==\n// @name Boxer\n// @match https://example.com/*\n// @boxed\n${powers.split(' ').map((p) => `// @powers ${p}\n`).join('')}// ==/WebMod==\n${body}\n`;
+  const clicker = mod('Clicker', CLICKS);
+  const b1 = boxed('keys');
+  const phone = {
+    'example.com/clicker': { text: clicker, sw: on(), ok: { rev: S.rev(clicker), tier: 'free', powers: [] } },
+    'example.com/boxer': { text: b1, sw: on(), ok: { rev: S.rev(b1), tier: 'boxed', powers: ['keys'] } },
+  };
+  const r = await s.roundSw(phone);
+  assert.equal(r.puts['example.com/clicker'].held, true, 'held as held.js decides: the hint never approves');
+  let h = held.loadHeld(s.ws.home);
+  assert.equal(h['phone~example.com/clicker'].allowedOn, 'Test iPhone');
+  assert.equal(h['phone~example.com/clicker'].phone, 'Test iPhone');
+  if (h['phone~example.com/boxer']) assert.equal(h['phone~example.com/boxer'].allowedOn, 'Test iPhone');
+  // the code changed on the phone since it was allowed there: the normal card
+  const c2 = mod('Clicker', `${CLICKS}\n// more`);
+  phone['example.com/clicker'] = { text: c2, sw: on(), ok: { rev: S.rev(clicker), tier: 'free', powers: [] } };
+  // more powers than were allowed there (a reader that sees more than the phone's did): the normal card
+  const b2 = boxed('keys read-drafts', 'trif.hide(".b")');
+  phone['example.com/boxer'] = { text: b2, sw: on(), ok: { rev: S.rev(b2), tier: 'boxed', powers: ['keys'] } };
+  await s.roundSw(phone);
+  h = held.loadHeld(s.ws.home);
+  assert.ok(h['phone~example.com/clicker'], 'still waiting');
+  assert.equal(h['phone~example.com/clicker'].allowedOn, undefined);
+  assert.ok(h['phone~example.com/boxer'], 'read-drafts waits');
+  assert.equal(h['phone~example.com/boxer'].allowedOn, undefined);
+  // allowed on the phone later, the file as it is: the next sync's hint says so on the same hold
+  phone['example.com/clicker'].ok = { rev: S.rev(c2), tier: 'free', powers: [] };
+  await s.roundSw(phone);
+  assert.equal(held.loadHeld(s.ws.home)['phone~example.com/clicker'].allowedOn, 'Test iPhone');
+  // no longer allowed there (Don't allow, or a new hold): gone again
+  delete phone['example.com/clicker'].ok;
+  await s.roundSw(phone);
+  assert.equal(held.loadHeld(s.ws.home)['phone~example.com/clicker'].allowedOn, undefined);
+});
+
+test('the approval hint, phone side: the plan names what the computer allows (not held), by revision', async () => {
+  const s = setup({ switches: fakeSwitches() });
+  s.write('phone~example.com/look.js', style('Look'));
+  s.write('phone~example.com/clicks.js', mod('Clicks', CLICKS));
+  held.updateHeld(s.ws, scanMods(s.ws.modsDir).mods, []);
+  const phone = {};
+  const r = await s.roundSw(phone);
+  const allowed = Object.fromEntries(r.plan.allowed.map((a) => [a.id, a]));
+  assert.deepEqual(allowed['example.com/look'], { id: 'example.com/look', rev: S.rev(style('Look')), tier: 'style', powers: [] });
+  assert.equal(allowed['example.com/clicks'], undefined, 'held here: no hint');
+  held.approveHeld(s.ws.home, 'phone~example.com/clicks');
+  held.updateHeld(s.ws, scanMods(s.ws.modsDir).mods, []);
+  const r2 = await s.roundSw(phone);
+  assert.deepEqual(held.loadHeld(s.ws.home), {});
+  assert.deepEqual(r2.plan.allowed.map((a) => [a.id, a.tier]), [['example.com/clicks', 'free'], ['example.com/look', 'style']]);
 });

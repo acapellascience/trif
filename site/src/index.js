@@ -227,6 +227,8 @@ export const HOME_HOST = 'timsrobot.com';
 // (and www.timsrobot.com, to the bare name)
 const OLD_HOSTS = new Set(['webmods.dev', 'www.webmods.dev', 'www.timsrobot.com']);
 
+export const INSTALL_SH = 'https://github.com/acapellascience/trif/releases/latest/download/install.sh';
+
 /** The redirect for a request to an old address (OLD_HOSTS), or null. */
 export function redirectFor(url) {
   const u = new URL(url);
@@ -240,6 +242,9 @@ export default {
     const moved = redirectFor(request.url);
     if (moved) return moved;
     const { pathname, searchParams } = new URL(request.url);
+    // The no-Node installer (`curl -fsSL https://timsrobot.com/install.sh | sh`): always the newest release's,
+    // attached by scripts/release.js. A short cache, since "newest" moves with each release.
+    if (pathname === '/install.sh' && (request.method === 'GET' || request.method === 'HEAD')) return new Response(null, { status: 302, headers: { Location: INSTALL_SH, 'Cache-Control': 'public, max-age=300' } });
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (pathname === '/windows' && request.method === 'POST') return receiveSignup(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);

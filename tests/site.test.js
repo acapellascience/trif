@@ -137,6 +137,16 @@ test('webmods.dev (the address before 0.2.0) redirects to the same place on tims
   assert.equal((await worker.fetch(new Request('https://timsrobot.com/'), e)).status, 200);
 });
 
+test('/install.sh redirects to the newest release\'s installer', async () => {
+  const [{ default: worker }] = await load();
+  for (const method of ['GET', 'HEAD']) {
+    const res = await worker.fetch(new Request('https://timsrobot.com/install.sh', { method }), env());
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('Location'), 'https://github.com/acapellascience/trif/releases/latest/download/install.sh');
+  }
+  assert.equal((await worker.fetch(new Request('https://www.timsrobot.com/install.sh'), env())).headers.get('Location'), 'https://timsrobot.com/install.sh', 'www goes to the bare name first');
+});
+
 test('the home page\'s robot is the extension\'s shaded robot', async () => {
   const fs = require('fs');
   const path = require('path');

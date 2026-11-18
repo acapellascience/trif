@@ -48,6 +48,7 @@ export const CLIP_WORDS = {
   heading: 'Add to Home Screen',
   ready: 'Safari asks to download a profile: tap Allow. Then open Settings, tap Profile Downloaded near the top, and Install.',
   again: 'Download it again',
+  settings: 'Open Settings',
   none: 'The icon didn’t come through to this page. Go back to TRIF and tap Add to Home Screen again, or use Save to Files there.',
   bad: 'This link doesn’t hold a TRIF Home Screen icon, so nothing was made.',
 };
@@ -58,7 +59,7 @@ export const CLIP_JS = `(() => {
   // (trif-clip-batch: the app looks for these words in this script before it sends a profile with several icons:
   // a page from before takes only one, and the app then hands a batch to Safari itself)
   const $ = (id) => document.getElementById(id);
-  const show = (id) => { for (const x of ['ready', 'none', 'bad']) $(x).hidden = x !== id; };
+  const show = (id) => { for (const x of ['ready', 'none', 'bad']) $(x).hidden = x !== id; $('settings').hidden = id !== 'ready'; };
   const TOP_KEYS = ${JSON.stringify(TOP_KEYS)};
   const CLIP_KEYS = ${JSON.stringify(CLIP_KEYS)};
   ${CHECK_SRC}
@@ -121,6 +122,7 @@ export const CLIP = page(CLIP_WORDS.title, `
   <p id="none" class="clip-line">${CLIP_WORDS.none}</p>
   <p id="bad" class="clip-line error" hidden>${CLIP_WORDS.bad}</p>
   <button id="again" type="button" hidden>${CLIP_WORDS.again}</button>
+  <a id="settings" class="button" href="trif://settings" hidden>${CLIP_WORDS.settings}</a>
   <p id="debug" class="note" hidden></p>
-</div>`, { script: `/clip.js?v=${CLIP_VERSION}`, style: '.clip-line { margin: 0 0 14px; } .clip-line:last-of-type { margin-bottom: 0; } #again { margin-top: 6px; }' });
+</div>`, { script: `/clip.js?v=${CLIP_VERSION}`, style: '.clip-line { margin: 0 0 14px; } .clip-line:last-of-type { margin-bottom: 0; } #again, #settings { margin-top: 6px; } #settings { display: inline-block; margin-left: 8px; font-weight: 600; border-radius: 8px; padding: 10px 20px; background: var(--accent); color: var(--on-accent); text-decoration: none; }' });
 

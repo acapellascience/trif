@@ -6,14 +6,13 @@ rest, which goes under "### More" (and on the GitHub release). It's written for 
 `node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
 summary is too long.
 
-## 0.3.1
+## 0.3.2
 
 - **Edit a mod's code in the panel.** TRIF checks it before saving; an edit that lets the mod do more
   waits for your OK.
 - **A click on something a mod hid is stopped**, and TRIF says which mod did it.
 - **Tim's mods get fixes between releases**, signed like TRIF's updates. One you changed is never replaced.
 - **TRIF names your browser**: Brave, Edge, Opera, Vivaldi and Arc aren't all called Chrome any more.
-- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
 
 ### More
 

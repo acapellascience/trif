@@ -211,7 +211,7 @@ function onExtensionMessage(msg) {
     case 'hello':
       state.hello = {
         version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome',
-        // (since 0.3.1: the kind of browser, and its own version where that isn't Chromium's or Firefox's)
+        // (since 0.3.2: the kind of browser, and its own version where that isn't Chromium's or Firefox's)
         family: browserFamily(msg), browserVersion: typeof msg.browserVersion === 'string' && msg.browserVersion ? msg.browserVersion.slice(0, 40) : null,
         installId: typeof msg.installId === 'string' && msg.installId ? msg.installId : null,
         // What this extension can do beyond 0.2.4's protocol ('modsParts': mods sets in parts).

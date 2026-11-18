@@ -1,5 +1,5 @@
 'use strict';
-// Which browser TRIF says it's in (0.3.1): the extension's own signals (extension/lib.js browserFromSignals,
+// Which browser TRIF says it's in (0.3.2): the extension's own signals (extension/lib.js browserFromSignals,
 // detectBrowser: navigator.userAgentData.brands, navigator.brave, Vivaldi's tab fields, Arc's missing side
 // panel, Firefox's getBrowserInfo), the helper's (helper/lib/browsers.js: the executable that started it),
 // how the two agree, and where the name shows (hello, `trif status`, `trif doctor`, reports, --browser).
@@ -191,14 +191,14 @@ test('reconcileBrowser: the launcher names it, but not over a name the extension
   const arc = { name: 'Arc', family: 'chromium' };
   const vivaldi = { name: 'Vivaldi', family: 'chromium' };
   const firefox = { name: 'Firefox', family: 'firefox' };
-  // no launcher (a terminal, Safari's bridge): what the extension says; before 0.3.1 an extension said nothing for Chrome
+  // no launcher (a terminal, Safari's bridge): what the extension says; before 0.3.2 an extension said nothing for Chrome
   assert.equal(B.reconcileBrowser({ browser: 'Edge' }, null), 'Edge');
   assert.equal(B.reconcileBrowser({}, null), 'Chrome');
   // the launcher over a plain name and over Arc's guess
   assert.equal(B.reconcileBrowser({ browser: 'Chrome', family: 'chromium' }, arc), 'Arc');
   assert.equal(B.reconcileBrowser({ browser: 'Chrome', family: 'chromium' }, vivaldi), 'Vivaldi');
   assert.equal(B.reconcileBrowser({ browser: 'Arc', family: 'chromium' }, chrome), 'Chrome', 'Chrome for Testing without a side panel (the e2e test)');
-  assert.equal(B.reconcileBrowser({ browser: 'Chrome' }, { name: 'Brave', family: 'chromium' }), 'Brave', 'an extension from before 0.3.1');
+  assert.equal(B.reconcileBrowser({ browser: 'Chrome' }, { name: 'Brave', family: 'chromium' }), 'Brave', 'an extension from before 0.3.2');
   // the extension's own particular name over the launcher's plain one
   assert.equal(B.reconcileBrowser({ browser: 'Brave', family: 'chromium' }, chrome), 'Brave');
   assert.equal(B.reconcileBrowser({ browser: 'LibreWolf', family: 'firefox' }, firefox), 'LibreWolf');

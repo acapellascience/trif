@@ -1,4 +1,4 @@
-# Mods feed strings (0.3.1): awaiting Tim
+# Mods feed strings (0.3.2): awaiting Tim
 
 **Awaiting Tim's OK.** New text people see for the mods feed (new versions of Tim's mods between TRIF
 releases, helper/lib/modsfeed.js). Nothing here is on main yet; it's on the `mods-feed` branch.
@@ -39,7 +39,7 @@ Question for Tim: "mods feed" is our word. The line could instead say only "Coul
 mods: it isn't signed by TRIF" etc., if you'd rather users never see "feed". The reasons above mirror the
 TRIF update line's ("the update feed is not signed by the TRIF release key; ignoring it"), which ships.
 
-## B. What's new (CHANGELOG.md, "## 0.3.1")
+## B. What's new (CHANGELOG.md, "## 0.3.2")
 
 | Where | Words | OK? |
 |---|---|---|

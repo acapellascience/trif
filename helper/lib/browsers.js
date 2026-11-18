@@ -188,7 +188,7 @@ async function launchingBrowser({ pid = process.ppid, env = process.env, platfor
   return b ? { ...b, exe } : null;
 }
 
-/** 'chromium' | 'firefox' | 'safari' for an extension's hello (`family` since 0.3.1; before, the name told). */
+/** 'chromium' | 'firefox' | 'safari' for an extension's hello (`family` since 0.3.2; before, the name told). */
 function browserFamily(hello) {
   if (!hello || typeof hello !== 'object') return 'chromium';
   if (['chromium', 'firefox', 'safari'].includes(hello.family)) return hello.family;

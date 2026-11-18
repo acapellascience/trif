@@ -1,4 +1,4 @@
-# Editing a mod in the code card: the new strings (branch code-editor, for 0.3.1)
+# Editing a mod in the code card: the new strings (branch code-editor, for 0.3.2)
 
 **Awaiting Tim.** Every string people see that the code card's Edit adds on desktop, exact. Where the iPhone app
 already has the words (docs/IOS-APP-STRINGS.md, "Editing a mod's code", on branch ios-poc), desktop uses them

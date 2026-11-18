@@ -238,7 +238,7 @@ make the page (or the user) act. What changed, and what each costs mods:
 - **RT-3, clickjacking (medium, tier-wide).** CSS alone can make a page's real control invisible (or move it)
   and float it over a decoy, so the user's own click lands on it. The first proposal (`style()` refusing
   `opacity`, `clip-path`, `transform`… on the page's controls) was dropped: it missed style mods and
-  `trif.css`, which can do the same with a selector. **Partly closed for 0.3.1 (branch clickjack-guard): a
+  `trif.css`, which can do the same with a selector. **Partly closed for 0.3.2 (branch clickjack-guard): a
   guard at the press**, for every tier whose styles TRIF applies. Strings: docs/CLICKJACK-STRINGS.md.
   - *What's built* (extension/runtime.js `clickGuard`, in the page's world, listening on the window in the
     capture phase from document_start, so before the page's own listeners; extension/sandbox.js, the

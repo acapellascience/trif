@@ -207,7 +207,7 @@ as a style mod (below). A mod moving to a higher tier is a change like any other
 
 **Clickjacking, for every tier that restyles (RT-3, docs/SANDBOX-TIER-NOTES.md): guarded at the press,
 partly.** CSS alone can make a page's real control invisible and float it over a decoy, so the user's own
-click lands on it; no power check sees that. Since 0.3.1 TRIF's page runtime (extension/runtime.js
+click lands on it; no power check sees that. Since 0.3.2 TRIF's page runtime (extension/runtime.js
 `clickGuard`) gets every trusted press before the page: if the control pressed is unseen and shows without
 the mods' styles (looked at again with TRIF's sheets disabled and boxed mods' inline styles undone for that
 moment), the press is stopped and the mod named in its errors and a card in the chat. The page's own
@@ -449,7 +449,7 @@ That's how runs were designed (an agent looks at the mods its change will meet),
 let through; whether a run should see other sites' mods at all, a sensitive site's above all, is a decision
 of its own.
 
-## The mods feed (0.3.1)
+## The mods feed (0.3.2)
 
 Tim's mods (the mods TRIF ships) can get a new version between releases, from a second signed feed beside
 the TRIF one: `updates/mods.json` + `.sig` on main, signed with the same release key (helper/lib/modsfeed.js;

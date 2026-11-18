@@ -1185,7 +1185,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let t = tab(of: webView) { close(t) }
     }
 
-    /// No menu of the system's on a long press: the long press is the probe's.
+    /// No menu of the system's on a long press (links, pictures). It was point-and-hide's until 11-17; that's gone
+    /// and a long press now only selects text, but the system's menu stays off as before (not asked for).
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
         nil
     }

@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (292 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (301 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -89,7 +89,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while something plays.
 - Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-pageletter`, `-modsfirst` (the toolbar's order before 11-17), `-exitbelow` (the exit button's old
+  `-nobarshift`, `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`, `-linkhost 127.0.0.1:<port>` (the phone link pairs there,
   not over Bonjour: a helper's store.js + server.js on loopback in a temp HOME; `simctl openurl` the code's text).
@@ -270,22 +270,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
-- 11-17 (free mods' style section, mod log lines): the Mac lost its iOS Simulator runtime AND the iOS platform
-  around 16:09 (`simctl list runtimes` empty, xcodebuild "iOS 26.2 is not installed"; disk went 97% → 25% used:
-  a cleanup?). Getting them back is a ~8 GB download (`xcodebuild -downloadPlatform iOS`): ask Tim first. Until
-  then: no Simulator checks (this batch used mobile/test/webkit-check on the Mac's WebKit instead), and the .ipa
-  builds only with actool swapped out (it needs a simulator runtime even for a device build): `xcodebuild -project
-  TrifProbe.xcodeproj -target TrifProbe -configuration Release -sdk iphoneos SYMROOT=<ddev>/Build/Products
-  OBJROOT=<ddev>/Build/Intermediates.noindex … ASSETCATALOG_EXEC=<dir>/actool`, where `<dir>/actool` (it must be
-  named actool) execs the real one except for `--compile`, which copies the 11-17 15:22 build's Assets.car and icon
-  PNGs, partial Info.plist and dependency file (kept in the session scratchpad's actool-cache). Only valid while
-  Assets.xcassets is unchanged (last changed 11-16). `-scheme` builds fail at destination resolution: use `-target`.
-- Free mods' style section on a phone: never seen on a real one. FeedBook's start and log lines should now be in
-  Tim's diagnostics ("mod log"). A held free mod's version that keeps running keeps its own style (desktop's
+- Free mods' style section: checked in the Simulator 11-17 (iOS 26.3.1, shots 293-296) with a FeedBook-like test mod
+  (title colour and size, page background, a loading cover the code lifts after 5 s) on feed.html and strict.html
+  (style-mirror: an adopted sheet); "<id> started on …" and log/warn/error reached Diagnostics as "mod log" lines,
+  and ⋯ → Copy diagnostics (a real tap) put them on the pasteboard. Never seen on a real phone. FeedBook's start and
+  log lines should now be in Tim's diagnostics ("mod log"). A held free mod's version that keeps running keeps its own style (desktop's
   restyle puts the waiting change's style on it); a setting changed in the code card reloads the page (as every
   mod change does), nothing is restyled live. Log lines from a later callback name the free mod that started
   last on the page (WebKit's stacks have no sourceURL); a free mod's errors from events or timers aren't told.
 
+- Chat offers in the Simulator (11-17, stand-in `?history`, `chatOffers` cleared, shots 300-301): opening the chat
+  offered nothing for the old block; a reply handed over only its own two blocks (one skipped as installed), and
+  an older message rendering after it made no late offer. Toolbar there: < > robot + Mods tabs A, page button exactly
+  centred (187.5); a long press only selects text (no Hide bar).
 - Chat offers on the real claude.ai (signed in, can't be checked here): whether its older messages render before
   the person's latest in the DOM (the page side assumes document order; the app's memory is the guarantee either
   way), whether the USER selector still matches (without it the page side falls back to all blocks), and a viewer
@@ -345,6 +342,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (ExitTaps). The status bar eats its own touches: SE 0–20, 17 Pro 0–54 (statusBarManager's height).
 - The clip page's check, as the last batches ran it: write the page with its script inline (clip-page's CLIP and CLIP_JS),
   load it in headless Chrome by CDP with the profile base64url after the #, read which of #ready/#none/#bad shows.
+
+- Simulator runtime: iOS 26.3.1 (back 11-17 after going missing that afternoon; Xcode's SDK is 26.2, which builds
+  and runs on it). If `simctl runtime list` is ever empty again, ask Tim before the ~8 GB `xcodebuild
+  -downloadPlatform iOS`; actool needs a runtime even for a device build. Normal builds (`-scheme`, both SDKs) work.
+- The chat stand-in reopens the last conversation without its query (`/chat/<id>`, so no `?history`): send
+  `{"newchat": 1}` to load the chat home with the flags. Clearing `chatOffers` (PlistBuddy, app stopped) makes a
+  chat-offers check test the page side alone.
 
 - `simctl openurl` cuts URLs at about 2 KB (UIApplication.open doesn't).
 - The app opening its own trif:// with UIApplication.open gets iOS's "Open in …?" prompt (and it can linger over a

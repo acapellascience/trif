@@ -178,6 +178,17 @@ test('switches: the three-way rule, every case (section 4b), and an older side t
     { id: 'a.com/new-on-phone', ...off }, // (D8: a mod new to the phone arrives with the computer's switch)
     { id: 'a.com/no-base-later-computer', ...on }, // (no base, as the first sync after an update: the later wins)
   ]);
+  // (the same time and no base, as the first sync after an update: a fresh off (a new mod from outside, never
+  // switched) yields to the other side; otherwise the phone's)
+  const tie = S.planSwitches({
+    ids: ['a.com/p-fresh', 'a.com/c-fresh', 'a.com/both-plain'],
+    phone: map({ 'a.com/p-fresh': S.readSwitch({ on: false, fresh: true }), 'a.com/c-fresh': sw(true), 'a.com/both-plain': sw(false) }),
+    computer: map({ 'a.com/p-fresh': sw(true), 'a.com/c-fresh': S.readSwitch({ on: false, fresh: true }), 'a.com/both-plain': sw(true) }),
+  });
+  assert.deepStrictEqual(tie.toPhone, [{ id: 'a.com/p-fresh', ...sw(true) }]);
+  assert.deepStrictEqual(tie.toComputer, [{ id: 'a.com/both-plain', ...sw(false) }, { id: 'a.com/c-fresh', ...sw(true) }]);
+  assert.strictEqual(S.readSwitch({ on: true, fresh: true }).fresh, undefined, 'only an off can be fresh');
+  assert.strictEqual(S.readSwitch({ on: false, at: 5, fresh: true }).fresh, undefined, 'a switched one isn\'t');
   // (an app or an extension that sends no switches: those mods are left as they are on both sides)
   for (const id of ['a.com/old-app', 'a.com/old-extension', 'a.com/neither']) {
     assert.ok(![...out.toPhone, ...out.toComputer].some((x) => x.id === id) && !(id in out.agreed), id);

@@ -102,12 +102,12 @@ the phone's, the computer's and the base:
 | P = C | In sync, whatever the times. The base becomes it. |
 | P = B, C ≠ B | Only the computer changed: the phone takes C (the plan's `switches`). |
 | C = B, P ≠ B | Only the phone changed: the computer takes P (sent to the extension at `sync.end`). |
-| P ≠ B, C ≠ B (or no base: the first sync after an update, a new pairing) | **The later change wins**: the one with the greater `at`; the same `at`: the phone's (as D5). |
+| P ≠ B, C ≠ B (or no base: the first sync after an update, a new pairing) | **The later change wins**: the one with the greater `at`; the same `at`: the phone's (as D5), unless the phone's is a *fresh* off and the computer's isn't (`fresh`: off only because it came new from outside and was never switched, the "new, off" mark: not a choice). That settles the first sync after the update, when no switch has a time yet: a mod that arrived off as an import (the old D8) takes the other side's switch, a switch the person set stays. |
 | A mod new to one side (D8) | It takes the other side's switch, after it's taken as a new mod (so a new mod is still marked new, and held if it needs an OK). |
 | A side that can't say (an older app, an extension that hasn't reported, an older extension) | Left as it is on both sides; the base doesn't move. |
 
 The computer's switches are the browser's (the extension of the helper that owns the phone link): it reports every
-phone twin mod's `{on, off, at}` in each `modsApplied` (`phoneSwitches`), the helper keeps the last report, and a
+phone twin mod's `{on, off, at, fresh?}` in each `modsApplied` (`phoneSwitches`), the helper keeps the last report, and a
 change in it nudges the phones (section 7). What the computer takes goes to the extension as `phoneSwitches`
 (`set: [{id: phone~<site>/<name>, on, off, at}]`; a phone twin's mod only, never a desktop mod's or a group's),
 which applies it and reports again. The base moves at `sync.end`, and only where the phone's switches then (its
@@ -183,7 +183,7 @@ none of it; an older helper ignores it all, and the app finds no `switches` or `
 | Where | Field | What |
 |---|---|---|
 | `sync.begin` | `switches: true` | this app syncs switches and hints |
-| `sync.begin` each row | `sw: {on, off, at}`, `ok?: {rev, tier, powers}` | the phone's switch; what it allows (section 6b) |
+| `sync.begin` each row | `sw: {on, off, at, fresh?}`, `ok?: {rev, tier, powers}` | the phone's switch; what it allows (section 6b) |
 | `sync.plan` | `switches: [{id, on, off, at}]` | what the phone sets, after its gets (a new mod: after it's taken) |
 | `sync.plan` | `allowed: [{id, rev, tier, powers}]` | the computer's hints |
 | `sync.end` | `switches: [{id, on, off, at}]` | every mod's switch on the phone now (the switches' base moves where it matches the extension) |

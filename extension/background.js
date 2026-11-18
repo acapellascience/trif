@@ -822,11 +822,12 @@ function reportApplied(res) {
 // ---- the phone sync's switches (docs/PHONE-SYNC.md section 4b): the phone twins' mods' on/off and per-site
 // switches follow the last change on the phone or here. Each report tells the helper what they are here, and when
 // the person last changed each (`switchAt`, stamped by mod.enable only: a mod switched off for being new isn't a
-// change of the person's); the helper sends `phoneSwitches` with what the phone changed. Only phone twins' mods:
+// change of the person's; such a mod, off and never switched, is `fresh`: its off was never a choice); the helper
+// sends `phoneSwitches` with what the phone changed. Only phone twins' mods:
 // never a desktop mod's switch, never Pause all or a group's.
 function phoneSwitchesNow() {
   const out = {};
-  for (const m of state.mods) if (isPhoneMod(m) && m.id.startsWith(PHONE_PREFIX)) out[m.id] = { on: isEnabled(m.id), off: [...(state.offSites[m.id] || [])].sort(), at: state.switchAt[m.id] || 0 };
+  for (const m of state.mods) if (isPhoneMod(m) && m.id.startsWith(PHONE_PREFIX)) out[m.id] = { on: isEnabled(m.id), off: [...(state.offSites[m.id] || [])].sort(), at: state.switchAt[m.id] || 0, ...(state.newOff[m.id] && !isEnabled(m.id) && !state.switchAt[m.id] ? { fresh: true } : {}) };
   return out;
 }
 const phoneSwitchWait = new Map(); // mod id → {on, off, at, came}: for a mod not here yet (its file's mods set comes first, normally)

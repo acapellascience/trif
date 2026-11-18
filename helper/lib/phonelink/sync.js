@@ -182,24 +182,28 @@ function keyOfModId(modId) {
 function modIdOfKey(key) { const { folder, name } = parseId(key); return `${folder}/${name}`; }
 
 const OFF_SITE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
-/** {on, off, at} as the wire carries a switch: on (bool), off (the sites it's switched off on, sorted), at (ms of its
- * last change by the person; 0: never). Anything else: null. */
+/** {on, off, at, fresh?} as the wire carries a switch: on (bool), off (the sites it's switched off on, sorted), at (ms
+ * of its last change by the person; 0: never), fresh (off only because it came new from outside and was never
+ * switched: no choice of the person's). Anything else: null. */
 function readSwitch(v) {
   if (!v || typeof v !== 'object' || typeof v.on !== 'boolean') return null;
   const off = Array.isArray(v.off) ? [...new Set(v.off.filter((x) => typeof x === 'string' && x.length <= 253 && OFF_SITE_RE.test(x)))].sort().slice(0, 200) : [];
   const at = typeof v.at === 'number' && Number.isFinite(v.at) && v.at > 0 ? Math.min(Math.floor(v.at), 8.64e15) : 0;
-  return { on: v.on, off, at };
+  return { on: v.on, off, at, ...(v.fresh === true && !v.on && !at ? { fresh: true } : {}) };
 }
 /** What a switch is, without when: two equal keys are the same switch. */
 const switchKey = (s) => `${s.on ? 'on' : 'off'}|${s.off.join(',')}`;
 
+/** A switch as sent (no `fresh`: it's only for deciding). */
+const sent = ({ id, on, off, at }) => ({ id, on, off, at });
 /**
  * The switches' three-way rule (docs/PHONE-SYNC.md section 4b). ids: the keys both sides have once this sync's
  * files are done (never a removed one, nor a conflict's sibling). phone, computer: Map key -> switch, or null (that
  * side has no such mod yet: it takes the other's); a key missing from either: that side can't say (an older app or
  * extension), left alone. base: {key: switchKey}. Returns {toPhone, toComputer: [{id, on, off, at}], agreed: {key: switchKey}}.
  *   P = C: in sync. P = B: the computer's goes to the phone. C = B: the phone's to the computer. Both changed (or no
- *   base): the later change (`at`) wins; the same time: the phone's (as D5).
+ *   base): the later change (`at`) wins; the same time: the phone's (as D5), unless the phone's is a fresh off (never a
+ *   choice: a new mod from outside, never switched) and the computer's isn't.
  */
 function planSwitches({ ids, phone, computer, base = {} }) {
   const out = { toPhone: [], toComputer: [], agreed: {} };
@@ -208,16 +212,19 @@ function planSwitches({ ids, phone, computer, base = {} }) {
     const P = phone.get(id);
     const C = computer.get(id);
     if (!P && !C) continue;
-    if (!P) { out.toPhone.push({ id, ...C }); continue; }
-    if (!C) { out.toComputer.push({ id, ...P }); continue; }
+    if (!P) { out.toPhone.push(sent({ id, ...C })); continue; }
+    if (!C) { out.toComputer.push(sent({ id, ...P })); continue; }
     const kp = switchKey(P);
     const kc = switchKey(C);
     if (kp === kc) { out.agreed[id] = kp; continue; }
     const B = Object.prototype.hasOwnProperty.call(base, id) ? base[id] : null;
-    if (kp === B) out.toPhone.push({ id, ...C });
-    else if (kc === B) out.toComputer.push({ id, ...P });
-    else if (C.at > P.at) out.toPhone.push({ id, ...C });
-    else out.toComputer.push({ id, ...P });
+    if (kp === B) out.toPhone.push(sent({ id, ...C }));
+    else if (kc === B) out.toComputer.push(sent({ id, ...P }));
+    else if (C.at > P.at) out.toPhone.push(sent({ id, ...C }));
+    else if (C.at < P.at) out.toComputer.push(sent({ id, ...P }));
+    // (the same time, both never switched as a rule after an update: a side whose off was never a choice yields)
+    else if (P.fresh && !C.fresh) out.toPhone.push(sent({ id, ...C }));
+    else out.toComputer.push(sent({ id, ...P }));
   }
   return out;
 }

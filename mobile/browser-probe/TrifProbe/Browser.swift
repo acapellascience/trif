@@ -892,11 +892,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         // (a whole mod: a chat's reply with a ==WebMod== file in it, or the file)
         if text.contains("==WebMod==") {
-            // (an Add to TRIF tap in a chat: that chat's site, whichever tab is shown, as offerFromChat)
-            let here = chatSite.isEmpty ? host : chatSite
+            // (an Add to TRIF tap in a chat: that chat's site, whichever tab is shown, as offerFromChat: the same shared
+            // rule, so a computer's phone twin (phone~<site>) is its site here too, as the spec says; round 8 fixed it)
+            let (here, came) = ModOfferRules.from(chatSite: chatSite, shown: host)
             Task { @MainActor in
                 let r = await mods.readNamedInBackground(text, here: here)
-                if var m = r.mod { m.cameFrom = Site.of(here); modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
+                if var m = r.mod { m.cameFrom = came; modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
             }
             return
         }

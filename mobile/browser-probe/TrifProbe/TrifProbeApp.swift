@@ -323,7 +323,8 @@ extension Model {
         }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
-        if let t = step["offer"] as? String { browser.offer(text: t) }
+        // ({"offer": text, "site": "…"}: pasted, or with a site an Add to TRIF tap in that chat)
+        if let t = step["offer"] as? String { browser.offer(text: t, site: step["site"] as? String ?? "") }
         if step["cancelOffer"] != nil { browser.modOffer = nil }
         // ({"offerchat": [code…], "site": "…", "path": "auto"}: as a chat hands mods over; what was offered, and the
         // offer shown. {"offerstate": 1}: the offer shown and the queue)
@@ -331,7 +332,7 @@ extension Model {
             let got = await browser.offerFromChat(texts, from: step["site"] as? String ?? "", path: step["path"] as? String ?? "auto")
             out = "offered: \(got.map(\.id).joined(separator: ", ").nonEmpty ?? "none")"
         }
-        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count) \($0.tier) sites \($0.sites) powers \($0.powers) held \($0.held) warnings \($0.warnings) everywhere \($0.everywhere)" } ?? "none"), queued: \(browser.offerQueue.count)" }
+        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count) \($0.tier) sites \($0.sites) powers \($0.powers) held \($0.held) warnings \($0.warnings) everywhere \($0.everywhere) came \($0.cameFrom ?? "-")" } ?? "none"), queued: \(browser.offerQueue.count)" }
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }

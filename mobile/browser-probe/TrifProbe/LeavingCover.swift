@@ -47,21 +47,23 @@ final class LeavingCover {
     /// an icon lands: the site as an app, no browser around it); (2) the app last came to the front through an icon's
     /// link. A tab put in full screen by the two-finger hold, with no icon, isn't (1): it's still TRIF used as a
     /// browser, reached from TRIF's own icon or the app switcher, where the card should show the page.
+    /// (the decision is the phones' shared rule: LeavingCoverRules.reason, TrifCore.leavingCover; the words here are
+    /// agent-only, for Diagnostics and {"cover": 1})
     func reason() -> String? {
         guard !LeavingCover.off, let b = browser, let t = b.current else { return nil }
-        let site = Site.of(t.host)
-        if b.fullScreen, !site.isEmpty,
-           (UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String])?[site] == t.id.uuidString {
-            return "\(site)'s icon tab in full screen"
+        switch LeavingCoverRules.reason(fullScreen: b.fullScreen, host: t.host, tab: t.id.uuidString,
+                                        iconTabs: UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String],
+                                        arrivedByIcon: arrivedByIcon) {
+        case .iconTab(let site): return "\(site)'s icon tab in full screen"
+        case .arrived: return "came to the front by an icon"
+        case nil: return nil
         }
-        if arrivedByIcon { return "came to the front by an icon" }
-        return nil
     }
 
     func willEnterForeground() {
         frontAt = Date()
         // (a cold launch: the link came in configurationForConnecting, before this; a warm return's comes after)
-        arrivedByIcon = Date().timeIntervalSince(iconLinkAt) < 3
+        arrivedByIcon = LeavingCoverRules.arrived(since: Date().timeIntervalSince(iconLinkAt))
         note("coming to the front\(window?.isHidden == false ? ", covered" : "")")
     }
 

@@ -105,7 +105,8 @@ change there is a change on both phones. Change this file whenever a rule change
   dismissed). Add to TRIF's tap isn't held to this. [shared: core/chat-offers.js]
 - A chat's mods belong to the chat's site (11-18, FeedBook from a Facebook chat said "runs on google.com"): a mod with
   no @match is read for the chat's site (phone~<site> → <site>), the shown page only when the chat has none. A mod
-  whose own @match names another site still warns. [shared: core/mod-offer.js from]
+  whose own @match names another site still warns. Add to TRIF's tap under a chat's code block the same (11-18; it
+  kept phone~<site> as the site until round 8 of the shared core). [shared: core/mod-offer.js from]
 - A conversation belongs to the site it started on: no follow-ups across sites.
 - Diagnostics "chat offers": one line per hand-over (ids offered, skipped and why, held and why).
 
@@ -240,8 +241,8 @@ change there is a change on both phones. Change this file whenever a rule change
 - The leaving cover (11-18): as the app leaves in icon use (the shown tab is an icon's own tab, on its site, in full
   screen, or the app came to the front by an icon's link within 3 s of coming back), a black screen with the robot
   covers it so the OS's picture is the robot, never another page; the launch screen the same. Otherwise the OS keeps
-  its real picture. Off on return once the icon's tab is drawn (≤ 0.8 s), 0.2 s fade. [to be shared: the "icon use"
-  decision]
+  its real picture. Off on return once the icon's tab is drawn (≤ 0.8 s), 0.2 s fade. [shared: core/leaving-cover.js,
+  the "icon use" decision]
 - Icons' look, names and batches: Tim's design 11-16/11-17 (see the notes); the profile is named "{Site} for TRIF".
 
 ## Safety and privacy
@@ -284,4 +285,5 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Mod store, part 1: what a hold waits for, Allow, a change judged, the version kept running | shared/core/mod-store.js | ModHolds.swift → TrifCore.modStore (`waiting` a twin, same cases: every page load) | test/core-modstore.test.js, test/modstore.test.js |
 | Mod store, part 2: adding, History, Recently deleted, Undo, Don't allow's and a restore's carry-over | shared/core/mod-store.js | ModChanges.swift → TrifCore.modStore (the records and the code compare stay Swift) | test/core-modstore.test.js, test/modstore.test.js |
 | Mod store, part 3: what runs (switches, tiers off, Pause all), @match | shared/core/mod-store.js, shared/core/match.js | ModRuns.swift → TrifCore.modStore setOn / setGroup (`running`, `isOn`, `off` and MatchPattern twins, same cases: every page load) | test/core-modruns.test.js, test/modruns.test.js |
-| A chat's offered mod: where it's read, where it came from, the coral box | shared/core/mod-offer.js | ModOfferRules.swift → TrifCore.modOffer (the words stay ModOfferView's) | test/core-modoffer.test.js, test/modoffer.test.js |
+| A chat's offered mod: where it's read, where it came from, the coral box | shared/core/mod-offer.js | ModOfferRules.swift → TrifCore.modOffer (Browser.offerFromChat and the Add to TRIF tap; the words stay ModOfferView's) | test/core-modoffer.test.js, test/modoffer.test.js |
+| The leaving cover's "icon use" (an icon's tab in full screen, or arrived by an icon within 3 s) | shared/core/leaving-cover.js | LeavingCoverRules.swift → TrifCore.leavingCover (the cover, its timing and the scene hooks stay LeavingCover.swift) | test/core-leavingcover.test.js, test/leavingcover.test.js |

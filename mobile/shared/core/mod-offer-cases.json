@@ -1,5 +1,5 @@
 {
- "about": "Recorded from the iPhone's Swift before the move (Browser.offerFromChat: where a chat's mod is read and where it came from; ModOfferView.elsewhere: the coral box's decision).",
+ "about": "Recorded from the iPhone's Swift before the move (Browser.offerFromChat: where a chat's mod is read and where it came from; ModOfferView.elsewhere: the coral box's decision). tap (round 8, a bug fix to follow the spec, phone~<site> is <site> everywhere): Add to TRIF's tap under a chat's code block (Browser.offer(text:site:)) takes the same rule as from; before, the tap kept phone~<site> as the site.",
  "from": [
   ["", "", ["", ""]],
   ["", "www.google.com", ["www.google.com", "google.com"]],
@@ -297,5 +297,13 @@
   ["all-sites", "x.com", ["x.com", "x.com"], {"also": false, "others": ["x.com"]}],
   ["all-sites", "bbc.co.uk", ["bbc.co.uk"], {"also": false, "others": ["bbc.co.uk"]}],
   ["all-sites", "x.com", ["sub.x.com", "x.com.evil.org"], {"also": false, "others": ["evil.org", "x.com"]}]
+ ],
+ "tap": [
+  ["phone~x.com", "www.google.com", ["x.com", "x.com"]],
+  ["phone~m.facebook.com", "localhost", ["m.facebook.com", "facebook.com"]],
+  ["phone~www.bbc.co.uk", "", ["www.bbc.co.uk", "bbc.co.uk"]],
+  ["phone~", "news.bbc.co.uk", ["news.bbc.co.uk", "bbc.co.uk"]],
+  ["x.com", "www.google.com", ["x.com", "x.com"]],
+  ["", "m.x.com", ["m.x.com", "x.com"]]
  ]
 }

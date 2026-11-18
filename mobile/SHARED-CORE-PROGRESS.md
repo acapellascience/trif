@@ -56,12 +56,13 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       host the mod reader takes, the site it came from: the chat's, phone~ removed, else the shown page's), elsewhere
       (the coral box: every / other sites sorted, also). Swift: ModOfferRules.swift (Browser.offerFromChat,
       ModOfferView.elsewhere; words stay Swift). @match itself was round 6 (core/match.js); trying a mod in More's chat
-      (PanelChat.tryMod) uses ModStore.applies, the round-6 twin. Left: the Add to TRIF tap (Browser.offer(text:site:))
-      keeps the phone~ prefix (see For Tim).
+      (PanelChat.tryMod) uses ModStore.applies, the round-6 twin. Round 8: the Add to TRIF tap (Browser.offer(text:site:))
+      takes `from` too (a bug fix: it kept the phone~ prefix, against the spec); mod-offer-cases.json "tap".
 - [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
       / select).
-- [ ] Leaving cover's "icon use" decision (LeavingCover.reason: icon tab on its site in full screen, or arrived by an
-      icon within 3 s).
+- [x] Leaving cover's "icon use" decision → core/leaving-cover.js (round 8): reason (icon tab on its site in full
+      screen, or arrived by an icon), arrived (within 3 s). Swift: LeavingCoverRules.swift (LeavingCover.reason /
+      willEnterForeground call through; `-nocover`, the browser, UserDefaults "iconTabs" and the words stay Swift).
 - [ ] Video-resume matching (VideoResume.decide, videoID; 30 min, 5 s / 10 s, live, ended, t=/start=). Swift unit check
       exists (test/videoresume.test.js; the page's JS videoId already compared). Move decide + videoID.
 - [ ] Dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking). Swift unit check exists
@@ -154,13 +155,31 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   runs on a.net, b.org"; *://*/* → "every site"; no chat site → localhost, no box; no "shared rule" line in
   diagnostics (shots 459-463). .ipa built (dSYM D5039D09-0258-34D7-86C5-D8184EE6301B).
 
+- Round 8 (11-18): the leaving cover's "icon use" moved (core/leaving-cover.js: reason, arrived; LeavingCoverRules.swift,
+  called by LeavingCover.reason / willEnterForeground). Cases recorded from the old Swift (scratchpad r8/rec: the
+  verbatim rule + Site.swift): 560 reasons (10 hosts incl. case, www., m., two-part suffixes, IPs, "", phone~ × 10
+  iconTabs sets incl. none, another tab's id, "" and www. keys × full screen × arrived) and 11 arrived (-5 s to
+  distantPast, 3 s ± 1 µs); the JS passed them at once, then the Swift through JSC. Cost (Mac, unoptimised): leaving
+  and back ~33 µs. Bug fix (Tim's rule, not a new decision): the Add to TRIF tap (Browser.offer(text:site:)) now takes
+  ModOfferRules.from, so phone~<site> is <site> there too (mod-offer-cases.json "tap": 6, and core-modoffer.test.js
+  checks the tap's Swift calls it). Tests: all of mobile/test (43 pass, 13 skipped as before), prepare --check.
+  Simulator (SE, headless, serve.js): the tap with phone~m.example.com → sites m.example.com, came example.com;
+  phone~example.com + other.org → came example.com; x.com → x.com; none → localhost. Cover: an icon link (simctl
+  openurl trif://open) → full screen on localhost's icon tab → left: covered (icon tab) → back by the icon: cover off
+  after 53 ms; full screen off → left: covered (came by an icon) → back by the app → left: the real picture kept; no
+  "shared rule" line in diagnostics. .ipa built (dSYM 380648BC-59FB-3DA9-A12D-79ABAC4EFFBB).
+
 ## Next step
 
-Round 8: which tabs reload when mods change (Browser.modsChanged / refreshIfStale / select: the signature compare
+Round 9: which tabs reload when mods change (Browser.modsChanged / refreshIfStale / select: the signature compare
 stays Swift (Hasher per launch), the decision moves: started, a page, not already reloading, signature differs, playing
-and evenPlaying, shown vs behind, scriptsPending). Or the leaving cover's "icon use" (LeavingCover.reason), small.
+and evenPlaying, shown vs behind, scriptsPending). Or desktop-mode per-site memory (Browser.desktopKey), small.
 
 ## Notes for next round
+
+- Round 8: the cover's driver is scratchpad r8/drive.py (`{"offer": text, "site": …}` is the Add to TRIF tap now;
+  `{"cover": 1}`; an icon return is `simctl openurl <dev> trif://open?url=http://localhost:8377/`, away is `simctl
+  launch <dev> com.apple.Preferences`). The SE remembers localhost as an icon tab from earlier rounds.
 
 - Round 7: ModOfferView is SwiftUI, so its decision moved into ModOfferRules.swift (no UI) first; the recorder ran the
   verbatim code. The offerFromChat Diagnostics line now names the chat's site as given (phone~x.com, not x.com):
@@ -210,12 +229,12 @@ and evenPlaying, shown vs behind, scriptsPending). Or the leaving cover's "icon 
 
 ## For Tim
 
+- Round 8: the Add to TRIF button in a chat from your computer's phone view now treats phone~<site> as <site>, as the
+  spec says (it kept "phone~<site>" before); a bug fix, no new decision. The leaving cover (the robot as the app
+  leaves in icon use) now decides through the shared rules; it behaves as before. A new TRIF.ipa is in iCloud Drive/TRIF.
+
 - Round 7: where a chat's mod is read and the coral "runs on another site / every site" box now decide through the
   shared rules; they behave as before. A new TRIF.ipa is in iCloud Drive/TRIF.
-- One to decide: the Add to TRIF button under a code block in a chat that belongs to your computer's phone view
-  (phone~<site>) treats "phone~<site>" as the site (the mod could be read for that, and the box could say it came from
-  "phone~<site>"), while a reply's mods handed over automatically use <site>. The spec says phone~<site> is <site>
-  everywhere; say if the button should follow it (a one-line change: the same shared rule).
 
 - Nothing to decide, no new words. Since round 6 the mod switches (a mod's, its per-site switch, a tier's per site)
   and which mods run on a page (Pause all, @match) also follow the shared rules; they behave as before. What a mod waits for, what Allow allows, and what an edit or a restore asks about now

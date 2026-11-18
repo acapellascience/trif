@@ -11,14 +11,7 @@ import JavaScriptCore
 import WebKit
 import CryptoKit
 
-/// What a mod needs allowed before it runs (held.js needsOf): a power, a combination, a finding; `lines`, the
-/// hashes of the lines of code that use it (a free mod's), so a later version is asked about again only for those.
-struct ModNeed: Codable, Equatable {
-    var key: String
-    var fact: String
-    var power: String?
-    var lines: [String]?
-}
+// (ModNeed and the hold rules: ModHolds.swift, the shared mobile/shared/core/mod-store.js)
 
 struct PowerFact: Codable, Equatable { var power: String; var fact: String }
 struct ModRisk: Codable, Equatable { var tier: Int; var why: String? }
@@ -88,12 +81,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     var multiSite: Bool { everywhere || Set(sites.map(Site.of)).count > 1 }
 
     /// The needs not yet allowed (modfile.js waiting): what a hold is waiting for.
-    var waiting: [ModNeed] {
-        (needs + extraNeeds).filter { n in
-            guard let ok = allowed[n.key] else { return true }
-            return (n.lines ?? []).contains { !ok.contains($0) }
-        }
-    }
+    var waiting: [ModNeed] { ModHolds.waiting(needs + extraNeeds, allowed: allowed) }
+    /// What the hold rules read of it (ModHolds).
+    var holdFacts: ModHolds.Facts { .init(tier: tier, site: site, matches: matches, needs: needs, extraNeeds: extraNeeds, allowed: allowed, ran: ran != nil) }
     var held: Bool { !waiting.isEmpty }
     /// A change on hold: the version before runs meanwhile.
     var pending: Bool { held && ran != nil }
@@ -303,11 +293,7 @@ final class ModStore: ObservableObject {
         return MatchPattern.any(m.matches, u) && !MatchPattern.any(m.excludes, u)
     }
 
-    static func allow(_ needs: [ModNeed], _ allowed: [String: [String]]) -> [String: [String]] {
-        var out = allowed
-        for n in needs { out[n.key] = Array(Set((out[n.key] ?? []) + (n.lines ?? []))).sorted() }
-        return out
-    }
+    static func allow(_ needs: [ModNeed], _ allowed: [String: [String]]) -> [String: [String]] { ModHolds.allow(needs, allowed) }
 
     // MARK: what runs
 
@@ -491,7 +477,11 @@ final class ModStore: ObservableObject {
             // (from the computer, phone sync: judged as an edit, its switch kept)
             if source == "import" { m.on = false; m.newOff = "update" } else if source == "edit" || source == "computer" { m.on = old.on; m.newOff = old.newOff } else { m.on = true; m.newOff = nil }
             // (the version before ran, and this one waits: it keeps running meanwhile)
-            if m.held, !old.held || old.ran != nil { m.ran = old.ran ?? .init(code: old.code, script: old.script, world: old.world, at: old.at, style: old.styleScript) }
+            switch ModHolds.ranAfter(held: m.held, old: old.holdFacts, restore: false) {
+            case .ran?: m.ran = old.ran
+            case .current?: m.ran = .init(code: old.code, script: old.script, world: old.world, at: old.at, style: old.styleScript)
+            case nil: break
+            }
             mods[i] = m
         } else {
             // (new from the computer, phone sync D8: as an import, off and marked new)
@@ -568,7 +558,7 @@ final class ModStore: ObservableObject {
     /// Allow: what it waits for is allowed for it (a later version that needs nothing more runs without asking).
     func approve(_ id: String) {
         guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
-        mods[i].allowed = ModStore.allow(mods[i].waiting, mods[i].allowed)
+        mods[i].allowed = ModHolds.approve(mods[i].holdFacts)
         mods[i].ran = nil
         save()
     }
@@ -599,29 +589,11 @@ final class ModStore: ObservableObject {
     /// What a change asks about beyond its code's needs, as held.js judges a change against the version before: a
     /// @match for another site, when the mod can do something there (a style mod or a boxed mod without powers can't
     /// act, wherever it runs); and becoming a free mod. Only what the user hasn't allowed for the mod waits (seeded).
-    static func changeNeeds(_ m: InstalledMod, was old: InstalledMod) -> [ModNeed] {
-        var out: [ModNeed] = []
-        if m.tier == "free" && old.tier != "free" { out.append(ModNeed(key: "tier:free", fact: "is now a free mod, so it can do anything the page can do")) }
-        if !m.needs.isEmpty && !old.everywhere {
-            let home = Site.of(old.site)
-            for p in m.matches {
-                let host = p == "<all_urls>" ? "*" : (p.range(of: "://").map { String(p[$0.upperBound...].prefix { $0 != "/" }) } ?? "")
-                let h = host.replacingOccurrences(of: "*.", with: "")
-                if host != "*", Site.host(h, isIn: home) { continue }
-                out.append(ModNeed(key: "match:\(p)", fact: "runs on \(p), outside \(home)"))
-            }
-        }
-        return out
-    }
+    static func changeNeeds(_ m: InstalledMod, was old: InstalledMod) -> [ModNeed] { ModHolds.changeNeeds(m.holdFacts, was: old.holdFacts) }
 
     /// What the user had allowed, plus what the version that ran already did (its sites, its tier), so a change is
     /// asked about only for what it adds.
-    static func seeded(_ old: InstalledMod) -> [String: [String]] {
-        guard !old.held else { return old.allowed }
-        var keys = old.matches.map { ModNeed(key: "match:\($0)", fact: "") }
-        if old.tier == "free" { keys.append(ModNeed(key: "tier:free", fact: "")) }
-        return allow(keys + old.extraNeeds, old.allowed)
-    }
+    static func seeded(_ old: InstalledMod) -> [String: [String]] { ModHolds.seeded(old.holdFacts) }
 
     /// Saves an edit (checked first: a broken one is never saved). The version before goes into History ("before you
     /// edited it"); the edit is judged as any change (held.js): if it needs an OK the version before didn't, the
@@ -650,7 +622,7 @@ final class ModStore: ObservableObject {
         back.allowed = ModStore.seeded(now)
         back.extraNeeds = ModStore.changeNeeds(back, was: now)
         back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: source)] + now.history
-        if back.held, !now.held { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at, style: now.styleScript) }
+        if ModHolds.ranAfter(held: back.held, old: now.holdFacts, restore: true) == .current { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at, style: now.styleScript) }
         mods[i] = back
         save()
         return true

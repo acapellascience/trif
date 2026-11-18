@@ -26,6 +26,18 @@ change there is a change on both phones. Change this file whenever a rule change
   none) gets the coral "It runs on another site / other sites / every site" box first (11-17).
 - Full code is first-class; guarantees come from opt-in safe tiers (style, boxed, free); a hold is informed consent: a
   held change keeps running its approved version (with its own style) until the person approves the new one.
+- What a hold waits for: each need (a power, a combination, a finding, a change's own ask) until its key is allowed for
+  that mod and, for a need tied to lines of code, every one of those lines. A held new mod never runs. [shared:
+  core/mod-store.js]
+- Allow allows exactly what waits (keys and their lines), so a later version that needs nothing more runs without
+  asking; one that needs more waits. Don't allow: the version before comes back (the change kept in History); a new mod
+  is deleted (to Recently deleted).
+- A change (an edit, a restore, a sync, an update) is judged against the version before and asks only for what it adds:
+  becoming a free mod; each @match outside the version before's site, when the mod can act at all (it has needs) and
+  the version before wasn't for every site. What the version before did (its @match, being free, what it was asked
+  before) counts as allowed, unless it was itself held. [shared: core/mod-store.js]
+- While a change waits, the version before keeps running (or the one it was already keeping); a restored version that
+  waits keeps the version before running only if that one wasn't waiting itself. [shared: core/mod-store.js]
 - A free mod with a style section gets that CSS at the page's start, as desktop's; its `trif.log/warn/error` and its
   start reach Diagnostics ("mod log", capped 40 a load, 200 characters), never page data.
 - Point-and-hide is gone (11-17: "a resting thumb set it off"). Rules it made stay applied, each with Show again in
@@ -244,3 +256,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | What a chat may offer (memory, key, judge) | shared/core/chat-offers.js | ChatOffers.swift → TrifCore.chatOffers (storage and a key cache stay Swift) | test/core-chatoffers.test.js, test/chatoffers.test.js |
 | Sites (a host's site; host in site; a chat's site) | shared/core/site.js | Site.swift (a twin, same cases: every navigation) | test/core-quickask.test.js, test/quickask.test.js |
 | Quick ask: look-only, the pill's state, Undo's steps | shared/core/quick-ask.js | QuickAskRules.swift → TrifCore.quickAsk | test/core-quickask.test.js, test/quickask.test.js |
+| Mod store, part 1: what a hold waits for, Allow, a change judged, the version kept running | shared/core/mod-store.js | ModHolds.swift → TrifCore.modStore (`waiting` a twin, same cases: every page load) | test/core-modstore.test.js, test/modstore.test.js |

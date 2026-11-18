@@ -18,6 +18,13 @@ for c in cases["from"] as? [[Any]] ?? [] {
     let got = ModOfferRules.from(chatSite: chat, shown: host)
     check([got.here, got.came] == want, "from \(chat) \(host): \(got), want \(want)")
 }
+// (Add to TRIF's tap, round 8: the same rule, phone~<site> as <site>)
+for c in cases["tap"] as? [[Any]] ?? [] {
+    n += 1
+    let (chat, host, want) = (c[0] as! String, c[1] as! String, c[2] as! [String])
+    let got = ModOfferRules.from(chatSite: chat, shown: host)
+    check([got.here, got.came] == want, "tap \(chat) \(host): \(got), want \(want)")
+}
 for c in cases["elsewhere"] as? [[Any]] ?? [] {
     n += 1
     let (f, s, ss) = (c[0] as? String, c[1] as! String, c[2] as! [String])

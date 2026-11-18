@@ -14,6 +14,7 @@ const cases = JSON.parse(fs.readFileSync(path.join(CORE, 'mod-offer-cases.json')
 
 function run(O, where) {
   for (const [c, h, [here, came]] of cases.from) assert.deepStrictEqual({ ...O.from(c, h) }, { here, came }, `${where} from ${JSON.stringify(c)} ${JSON.stringify(h)}`);
+  for (const [c, h, [here, came]] of cases.tap) assert.deepStrictEqual({ ...O.from(c, h) }, { here, came }, `${where} tap ${JSON.stringify(c)} ${JSON.stringify(h)}`);
   for (const [f, s, ss, want] of cases.elsewhere) assert.deepStrictEqual(JSON.parse(JSON.stringify(O.elsewhere(f, s, ss))), want, `${where} elsewhere ${f} ${s} ${JSON.stringify(ss)}`);
 }
 
@@ -32,4 +33,13 @@ test('gen/core.js: TrifCore.modOffer in a bare context (JavaScriptCore\'s view)'
 test('sorting: code point order, as Swift sorts (an astral character after U+FFFD)', () => {
   const O = require(path.join(CORE, 'mod-offer.js'));
   assert.deepStrictEqual(O.elsewhere('x.com', 'x.com', ['\u{1F600}.com', '�.com', 'b.com']).others, ['b.com', '�.com', '\u{1F600}.com']);
+});
+
+test('Add to TRIF\'s tap takes the same rule (round 8: phone~<site> is <site>, as a reply handed over)', () => {
+  assert.ok(cases.tap.some(([c]) => c.startsWith('phone~')));
+  const swift = fs.readFileSync(path.join(__dirname, '..', 'browser-probe', 'TrifProbe', 'Browser.swift'), 'utf8');
+  const tap = swift.slice(swift.indexOf('func offer(text pasted: String?'), swift.indexOf('// MARK: hiding'));
+  assert.match(tap, /ModOfferRules\.from\(chatSite: chatSite, shown: host\)/);
+  assert.match(tap, /m\.cameFrom = came/);
+  assert.doesNotMatch(tap, /chatSite\.isEmpty \? host : chatSite/);
 });

@@ -157,6 +157,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - A chat's offered mod (ModOfferRules.swift → core/mod-offer.js) on the Mac: `node --test mobile/test/modoffer.test.js`
   (swiftc with mobile/test/modoffer-check/main.swift, Site.swift, ModOfferRules.swift, Core.swift; argv
   mod-offer-cases.json, gen/core.js; an offer's two calls ~50 µs unoptimised) and `mobile/test/core-modoffer.test.js`.
+- The leaving cover's icon use (LeavingCoverRules.swift → core/leaving-cover.js) on the Mac: `node --test
+  mobile/test/leavingcover.test.js` (swiftc with leavingcover-check/main.swift, LeavingCoverRules.swift, Core.swift;
+  argv leaving-cover-cases.json, gen/core.js; leaving and back ~33 µs unoptimised) and `core-leavingcover.test.js`.
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -201,7 +204,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -284,8 +287,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - ModOfferRules.swift (round 7 of the shared core): `from(chatSite:shown:)` (Browser.offerFromChat: the host the mod
   reader takes and the site it came from; no answer: the shown page's) and `elsewhere(cameFrom:folder:sites:)`
   (ModOfferView's coral box: every / others sorted + also; no answer: the every-site box) through TrifCore.modOffer. The
-  words stay in ModOfferView. Browser.offer(text:site:) (the Add to TRIF tap) still does its own: `here` = the chat's
-  site as given (a phone~ twin not removed), came = Site.of(here).
+  words stay in ModOfferView. Browser.offer(text:site:) (the Add to TRIF tap) takes `from` too since round 8 (before,
+  it kept a phone~ twin as the site, against the spec): mod-offer-cases.json "tap"; core-modoffer.test.js also checks
+  the tap's Swift calls it. Dev step `{"offer": text, "site": "phone~x.com"}` is that tap; offerstate shows `came`.
+- LeavingCoverRules.swift (round 8 of the shared core): `reason(fullScreen:host:tab:iconTabs:arrivedByIcon:)` (.iconTab
+  site / .arrived / nil; no answer: nil, the real picture) and `arrived(since:)` (< 3 s; no answer: the same here)
+  through TrifCore.leavingCover. LeavingCover.reason / willEnterForeground call them; `-nocover`, the browser and
+  UserDefaults "iconTabs" stay Swift, and so do the words (agent-only: Diagnostics "cover", {"cover": 1}).
 - ModRuns.swift (round 6 of the shared core): what runs. setOn / setGroup through TrifCore.modStore (a tap; no answer:
   the switch doesn't move); running, isOn, off (the sites a mod's script checks it's off on) and MatchPattern (moved
   from Mods.swift; `parts` is the platform's URL parsing the shared rule reads: lower-case scheme and host,
@@ -405,7 +413,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - HeavyJob (Safety.swift, 11-18): TRIF's own heavy work (`begin`/`end`/`run`, UserDefaults "safety.heavyJobs", any
   thread): a model's check (LocalModels), its load and runs (LocalRunner), imports (ModFiles.collect). Safety.init: an
   unclean end during one logs "safe mode: the app quit while TRIF was <job>; mods left on" and switches nothing off.
-- LeavingCover.swift (Tim, 11-18): the black cover with the robot as the app leaves in icon use (`reason`), a
+- LeavingCover.swift (Tim, 11-18): the black cover with the robot as the app leaves in icon use (`reason`, deciding through LeavingCoverRules.swift since round 8), a
   UIWindow at .alert + 1 put up in SceneDelegate.sceneDidEnterBackground (Safety.swift), taken off after
   sceneDidBecomeActive once PendingLink.url is taken and the shown tab is `drawn` (cap 0.8 s), 0.2 s fade.
   `iconLinkCame` from PendingLink.came and ContentView.openLinkNow. Its picture: Assets.xcassets/CoverRobot.imageset

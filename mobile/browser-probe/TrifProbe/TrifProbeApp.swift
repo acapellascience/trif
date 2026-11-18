@@ -235,7 +235,7 @@ extension Model {
         if step["sync"] != nil { PhoneSyncModel.shared.syncNow(); out = "sync asked" }
         if step["syncstate"] != nil {
             let m = browser.mods
-            out = "sync: \(PhoneSyncModel.shared.syncing ? "running" : "idle"); last: \(PhoneSyncModel.shared.describe)\nmods: \(m.mods.map { "\($0.id)\($0.on ? "" : " off")\($0.held ? " held" : "")" }.sorted())\ndeleted: \(m.trash.map { "\($0.mod.id) by \($0.by)" })"
+            out = "sync: \(PhoneSyncModel.shared.syncing ? "running" : "idle"); last: \(PhoneSyncModel.shared.describe)\nmods: \(m.mods.map { "\($0.id)\($0.on ? "" : " off")\($0.offSites.isEmpty ? "" : " off on \($0.offSites.joined(separator: ","))")\($0.held ? " held" : "")\($0.newOff.map { " mark \($0)" } ?? "")\(m.allowedOnComputer($0) ? " allowed-there" : "")\($0.switchAt.map { " at \(Int($0))" } ?? "")" }.sorted())\ndeleted: \(m.trash.map { "\($0.mod.id) by \($0.by)" })"
         }
         if step["phonedrop"] != nil, let l = Model.pane?.panel.link { l.drop(); out = "phone link: \(l.state), following \(l.following.count)" }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }

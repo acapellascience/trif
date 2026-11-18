@@ -408,7 +408,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Application Support/mods-deleted.json, `restoreDeleted`; every delete goes there now). PhoneSyncModel
   (PhoneLinkView.swift) owns the app's ONE PhoneLinkRemote (PanelChat's `link` is it: one session per phone) and
   syncs on didBecomeActive, `$mods` changes, `sync.changed` (onSyncChanged), syncNow; closes a sync-only link after
-  30 s unused (`lastUse`). Dev steps `sync`, `syncstate`. The Mods tab (S7): PhoneSyncModel's `line` (syncing, the
+  30 s unused (`lastUse`). Dev steps `sync`, `syncstate` (each mod: off, off on sites, held, its mark, allowed-there
+  when the computer's hint fits, its switch time). Since 11-18 beside the text (docs/PHONE-SYNC.md 4b, 6b): each row's
+  `sw` (InstalledMod.switchAt, stamped by ModStore.setOn, which also clears the "computer" mark) and `ok`
+  (`syncAllowed`: mods not held, ran nil); the plan's `switches` set after the gets (`syncSetSwitch`: the computer's
+  time kept, the mark kept: D8) and `allowed` kept as `syncHintsKept` (UserDefaults "syncHints"; ModsPanel's hold gets
+  `allowedOn` when `allowedOnComputer`: the card says "You allowed this on {computer}."); sync.end's `switches`. Every
+  switch and hint keyed by `PhoneSync.key` (the id; a stable id later). The scheduler compares `syncSignature` (file,
+  switch, allowed) so a switch or an Allow syncs 3 s later. Tiers and Pause all never sync. The Mods tab (S7): PhoneSyncModel's `line` (syncing, the
   last sync's counts or why not; paired only) and Sync now under Import mod…; `notices` (conflict, came back, couldn't
   read, too big) at the top until OK (`seen`); Recently deleted (all sites, folded) with Restore; newOff "computer"
   marked "from your computer". ModsPanel's state has `sync` and `trash`; messages syncNow, syncSeen, restoreDeleted;
@@ -489,6 +496,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).
 
 ## Tim's decisions
+
+- Phone sync, 11-18: a mod's switches follow the last change on either side (the later change wins); tiers and Pause
+  all stay per device; a mod new from the computer arrives with its switch there (D8), still marked; approvals stay
+  per device, the other side's only a hint for "You allowed this on {computer}." (draft). A mod imported from a file
+  keeps the file's name (`<site>-<name>.js` → <name>), as the Mac's (modfile.js `fileName`); chat mods by @name.
 
 - Mods from a reply are picked up automatically (and Add to TRIF stays under each block). Instructions ask for code
   blocks, never attached files.

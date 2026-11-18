@@ -43,7 +43,9 @@ change there is a change on both phones. Change this file whenever a rule change
   (Tim, 11-18; before, the mod stopped until the person decided). Allow runs the waiting one; Don't allow puts back the
   one that ran. [shared: core/mod-store.js]
 - Adding: a mod added from a chat, a link or pasted is on; an import starts off, marked new (updated, if it replaces
-  one); a new one from the computer (phone sync) starts off, marked as from the computer. A new version keeps what was
+  one); a new one from the computer (phone sync) is first kept off and marked as from the computer, then takes the
+  computer's switch (D8, Tim 11-18: it arrives on if it's on there), keeping the mark until its switch is first tapped
+  here. A new version keeps what was
   allowed, its per-site switches and when it was first added; an edit or a sync keeps its switch and mark; anything
   else is on, unmarked. [shared: core/mod-store.js]
 - History: a new version with different code puts the one before first (as import, edit, computer, else chat); a
@@ -78,6 +80,20 @@ change there is a change on both phones. Change this file whenever a rule change
   once.
 - Phone sync with the computer: a change synced in makes the pages' scripts again; a delete goes to Recently deleted
   (30 days, Restore).
+- Phone sync's switches (Tim, 11-18; docs/PHONE-SYNC.md 4b on branch phone-link): a mod's on/off and its per-site
+  switches follow the last change on either side, three-way against the switch both sides last agreed on; changed on
+  both since, the later change wins (each side stamps when the person last switched it; the same time: the phone's).
+  A sync's switch keeps the other side's time. A tier's switch on a site and Pause all stay each device's: Pause all is
+  a safety switch for the device in your hand, a tier's is the same kind of brake for a site. Safe mode's switch-offs
+  are the mod's own switch, so they sync. An older computer sends no switches: nothing changes.
+- Approvals stay each device's (Tim, 11-18). A synced mod that needs an OK waits here whatever the computer allowed;
+  when the computer allowed this very version (the same revision, its tier no higher, no power beyond what was allowed
+  there), the approval card says "You allowed this on {computer}." and Allow is the same one tap. The computer's
+  approval is only a hint for those words: never an approval, never a switch.
+- A mod imported from a file keeps the file's name as its name, as the computer keeps sites/<site>/<name>.js (phone
+  sync matches mods by it): `<site>-<name>.js` (the computer's copy for the phone, the watched iCloud folder, an
+  export) is <name> under <site>; `<name>.js` is <name>; a name the computer couldn't have is cleaned up (lower case,
+  dashes). A mod from a chat or pasted is named by its @name, as before. Mods already here keep their names (11-18).
 
 ## Which tabs load again when mods change
 

@@ -147,3 +147,25 @@ test('boxed and style mods as before: a boxed mod\'s section goes in its grant; 
   assert.equal(style.world, 'trif');
   assert.equal(style.styleScript, '');
 });
+
+test('a mod from a file keeps the file\'s name as its id, as the computer does (phone sync matches by it); a chat\'s keeps its @name', () => {
+  const mod = `// ==WebMod==
+// @name   Filter: AI content
+// @match  https://www.facebook.com/*
+// ==/WebMod==
+document.body.dataset.x = '1';
+`;
+  const id = (opts) => R.readMod(mod, opts).id;
+  // (Tim, 11-18: the computer's filter-ai.js came in as facebook.com/filter-ai-content and would have been a second mod)
+  assert.equal(id({ file: 'facebook.com-filter-ai.js' }), 'facebook.com/filter-ai', 'the iCloud folder\'s / Send to iPhone\'s <site>-<name>.js');
+  assert.equal(id({ file: 'filter-ai.js' }), 'facebook.com/filter-ai', 'a plain <name>.js');
+  assert.equal(id({ file: 'phone~facebook.com-filter-ai.js' }), 'facebook.com/filter-ai', 'a phone twin\'s copy');
+  assert.equal(id({ file: 'www.facebook.com-filter-ai.js' }), 'facebook.com/filter-ai');
+  assert.equal(id({ file: 'Filter_AI.JS' }), 'facebook.com/Filter_AI', 'the computer\'s name as it is');
+  assert.equal(id({ file: 'my mod (2).js' }), 'facebook.com/my-mod-2', 'a name the computer\'s sync couldn\'t take: cleaned');
+  assert.equal(id({ file: 'facebook.com-.js' }), 'facebook.com/facebook.com-', 'nothing after the prefix: as it is');
+  assert.equal(id({}), 'facebook.com/filter-ai-content', 'no file (a chat, pasted): its @name, as before');
+  // (a mod read again under its kept id, or one from the computer by sync, keeps it: the prefix goes only for an import)
+  assert.equal(id({ file: 'facebook-com-filter-ai.js', site: 'facebook.com' }), 'facebook.com/facebook-com-filter-ai', 'one imported before keeps its id');
+  assert.equal(id({ file: 'facebook.com-x.js', site: 'facebook.com' }), 'facebook.com/facebook.com-x', 'a computer file named like that, by sync, stays');
+});

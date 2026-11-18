@@ -340,7 +340,7 @@ test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server
   }
 });
 
-test('PhoneSync.swift against the real helper (Store, Server and the sync session of helper/lib/phonelink, a temp HOME): a phone mod comes over and waits there, a desktop edit nudges the phone and comes back, a conflict keeps both, deletes both ways go to a trash', { skip: noComputer, timeout: 180000 }, async () => {
+test('PhoneSync.swift against the real helper (Store, Server and the sync session of helper/lib/phonelink, a temp HOME): a phone mod comes over and waits there, a desktop edit nudges the phone and comes back, a conflict keeps both, deletes both ways go to a trash; switches both ways (the later change wins, a new mod takes the computer\'s) and the approval hint on the computer\'s hold', { skip: noComputer, timeout: 180000 }, async () => {
   build();
   const comp = spawn(process.execPath, [computerFixture, '--seconds', '150'], { stdio: ['pipe', 'pipe', 'inherit'] });
   const C = lineReader(comp, 'computer');
@@ -418,6 +418,49 @@ test('PhoneSync.swift against the real helper (Store, Server and the sync sessio
     // 5. Nothing new: a sync that changes nothing.
     s = await sync();
     assert.deepEqual([s.taken, s.sent, s.removed, s.conflicts], [[], [], [], []]);
+
+    // 6. Switches (11-18, docs/PHONE-SYNC.md 4b): the phone's goes to the browser; the browser's comes to the phone
+    // with a nudge; both changed: the later wins. A mod new to the phone arrives with the browser's switch (D8).
+    const sws = async () => { say('sws'); const sw = JSON.parse((await P.next((l) => l.startsWith('switches '))).slice(9)); const h = JSON.parse((await P.next((l) => l.startsWith('hints '))).slice(6)); return { sw, h }; };
+    // (the browser has it off, as a new mod from outside; the phone switched it on: no base yet, the later wins)
+    say(`psw example.com/hello ${JSON.stringify({ on: true, off: [], at: 1000 })}`);
+    s = await sync();
+    let br = await ask('switches', 'switches');
+    assert.deepEqual(br.switches['phone~example.com/hello'], { on: true, off: [], at: 1000 }, 'the phone\'s switch reached the browser');
+    const swNudge = await ask(`swset phone~example.com/hello ${JSON.stringify({ on: true, off: ['m.example.com'], at: 2000 })}`, 'swset');
+    assert.equal(swNudge.nudged, 1, 'a switch changed on the computer nudges the phone');
+    await P.next((l) => l === 'nudged');
+    s = await sync();
+    assert.deepEqual(s.switched, ['example.com/hello']);
+    assert.deepEqual((await sws()).sw['example.com/hello'], { on: true, off: ['m.example.com'], at: 2000 });
+    say(`psw example.com/hello ${JSON.stringify({ on: false, off: [], at: 5000 })}`);
+    await ask(`swset phone~example.com/hello ${JSON.stringify({ on: true, off: [], at: 4000 })}`, 'swset');
+    s = await sync();
+    assert.deepEqual(s.switched, [], 'both changed: the phone\'s is later');
+    br = await ask('switches', 'switches');
+    assert.deepEqual(br.switches['phone~example.com/hello'], { on: false, off: [], at: 5000 });
+    // (a mod made on the computer, switched on there: on here too, not off as an import)
+    await ask(`write phone~example.com/made-here.js ${JSON.stringify(mod('Made here', 'document.title = "x"'))}`, 'wrote');
+    await ask(`swset phone~example.com/made-here ${JSON.stringify({ on: true, off: [], at: 6000 })}`, 'swset');
+    s = await sync();
+    assert.deepEqual(s.taken, ['example.com/made-here']);
+    assert.deepEqual((await sws()).sw['example.com/made-here'], { on: true, off: [], at: 6000 });
+
+    // 7. The approval hint (D13): the phone allows hello as it is: the computer's hold says so, still held. The
+    // computer's hints come to the phone (made-here runs there: allowed; hello is held there: none).
+    say('pok example.com/hello');
+    s = await sync();
+    const held2 = (await ask('held', 'held')).held;
+    assert.ok(held2['phone~example.com/hello'], 'still held: a hint never approves');
+    assert.equal(held2['phone~example.com/hello'].allowedOn, 'Check phone');
+    const { h } = await sws();
+    assert.ok(h['example.com/made-here'] && !h['example.com/hello'], JSON.stringify(h));
+    // changed on the phone after it was allowed there: the normal card on the computer
+    say(`pset example.com/hello ${JSON.stringify(mod('Hello', 'fetch("/changed")'))}`);
+    s = await sync();
+    const held3 = (await ask('held', 'held')).held['phone~example.com/hello'];
+    assert.ok(held3, 'still held');
+    assert.equal(held3.allowedOn, undefined, 'changed since it was allowed there: the normal card');
   } finally {
     if (phone) phone.kill('SIGKILL');
     comp.stdin.write('quit\n');

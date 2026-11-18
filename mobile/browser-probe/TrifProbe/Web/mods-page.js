@@ -355,9 +355,11 @@
       : m.nextLoad || shownEnabled(m.id, m.on, switchSite(m)) !== !!m.on ? 'Starts when this page loads again'
       : m.starting ? 'Starting on this page' : 'Not running on this page';
     const tag = li.querySelector('.tag');
-    tag.textContent = !on && m.newOff ? (m.newOff === 'update' ? 'updated' : m.newOff === 'computer' ? 'from your computer' : 'new') : '';
+    // (a mod new from the computer keeps its mark while it arrived on, D8: until its switch is first tapped here)
+    tag.textContent = m.newOff && (!on || m.newOff === 'computer') ? (m.newOff === 'update' ? 'updated' : m.newOff === 'computer' ? 'from your computer' : 'new') : '';
     tag.title = !on && m.newOff === 'update' ? 'You imported a new version of it, so TRIF switched it off: switch it on once you\'ve looked at it.'
       : !on && m.newOff === 'computer' ? 'It came from TRIF on your computer, so TRIF switched it off: switch it on once you\'ve looked at it.'
+      : on && m.newOff === 'computer' ? 'It came from TRIF on your computer, switched on there.'
       : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';
     showOneTag(li, false);
     // (only once the page has loaded with it switched on, and its start hasn't come within the grace: ModsPanel.swift)
@@ -612,7 +614,9 @@
       P.together.hidden = false;
     }
     const fromAgent = info.by === 'chat';
-    const who = info.by === 'edit' ? 'You edited it.' : m.imported || info.by === 'import' ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || site()}.` : 'It\'s new or changed since TRIF last let it run.';
+    // (a synced mod the computer allowed as it is: the approval hint's words, never an approval; D13)
+    const who = info.by === 'edit' ? 'You edited it.' : m.imported || info.by === 'import' ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || site()}.`
+      : info.allowedOn ? `You allowed this on ${info.allowedOn}.` : 'It\'s new or changed since TRIF last let it run.';
     P.note.textContent = kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.` : who;
     P.err.hidden = true;

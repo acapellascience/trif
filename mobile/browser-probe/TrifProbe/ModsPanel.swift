@@ -331,8 +331,11 @@ extension Browser {
             if let r = m.risk { row["risk"] = ["tier": r.tier, "why": r.why ?? ""] }
             if let n = m.newOff { row["newOff"] = n }
             if m.held {
-                row[m.pending ? "pending" : "held"] = ["needs": m.waiting.map(\.key), "facts": m.waiting.map(\.fact), "asks": m.tier == "boxed",
-                                                         "by": m.source, "site": m.site, "hash": m.hash]
+                var hold: [String: Any] = ["needs": m.waiting.map(\.key), "facts": m.waiting.map(\.fact), "asks": m.tier == "boxed",
+                                           "by": m.source, "site": m.site, "hash": m.hash]
+                // (the computer allowed this very version, asking nothing more: the card says so; Allow is the same Allow, D13)
+                if mods.allowedOnComputer(m) { hold["allowedOn"] = PhoneSyncModel.shared.computerName ?? "your computer" }
+                row[m.pending ? "pending" : "held"] = hold
             }
             // (one that should be running here and isn't said to be: switched on since this page loaded, so it starts at
             // the next load; or loaded with it and not settled yet: starting; or loaded with it, settled, and a free mod:

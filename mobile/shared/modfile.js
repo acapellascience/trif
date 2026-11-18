@@ -39,6 +39,19 @@ const hostOfMatch = (m) => {
   return x[1].toLowerCase().replace(/^\*\./, '').replace(/^www\./, '');
 };
 const nameOf = (s) => String(s || '').toLowerCase().replace(/\.js$/i, '').normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+// A mod file name the computer keeps as it is (helper/lib/phonelink/sync.js nameRefused's plain subset).
+const PLAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+/** The mod's name from its file's: as it is if plain, else cleaned (nameOf). `site`: an import's, whose copies for the
+ * phone are named `<site>-<name>.js` (also `phone~<site>-` and `www.<site>-`): that prefix goes. */
+function fileName(file, site) {
+  let b = String(file || '').split('/').pop().replace(/\.js$/i, '');
+  if (!b) return '';
+  if (site) {
+    const lower = b.toLowerCase();
+    for (const p of [`phone~${site}-`, `www.${site}-`, `${site}-`]) if (lower.startsWith(p) && b.length > p.length) { b = b.slice(p.length); break; }
+  }
+  return PLAIN_NAME.test(b) && !/\.$/.test(b) ? b : nameOf(b);
+}
 function stripShipped(text) {
   return String(text).split(/\r?\n/).filter((l) => !/^\s*\/\/\s*@(source|version)\b/i.test(l)).join('\n');
 }
@@ -97,7 +110,10 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
   if (!header.hasHeader) return { error: 'this file has no // ==WebMod== header, so it isn\'t a mod TRIF can read' };
   const s = site || siteFor(header, here);
   if (!s) return { error: 'its @match lines name no site' };
-  const base = nameOf(file) || nameOf(header.name) || 'mod';
+  // (a file keeps its name as the mod's, as the computer keeps sites/<site>/<name>.js: phone sync matches by it. An
+  // import of the computer's copy for the phone, `<site>-<name>.js` (Send to iPhone, the iCloud folder, an export), is
+  // <name> under <site>. Only a name the computer couldn't have is cleaned up. No file (a chat's, pasted): its @name.)
+  const base = fileName(file, site ? '' : s) || nameOf(header.name) || 'mod';
   let mod;
   try { mod = helperMods.buildMod({ site: s, file: `${base}.js`, code }).mod; } catch (e) { return { error: `this mod's header has a problem: ${(e && e.message) || e}` }; }
   const tier = mod.rules ? 'style' : mod.sandboxed ? 'boxed' : 'free';

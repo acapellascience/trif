@@ -52,6 +52,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     var on: Bool = true
     /// Sites it's switched off on (a mod for several sites: its switch is the site's, as desktop's offSites).
     var offSites: [String] = []
+    /// When the person last changed its switch here (ms since 1970), or the computer's time for a switch the phone
+    /// sync set (docs/PHONE-SYNC.md 4b: the later change wins). nil: never.
+    var switchAt: Double?
     /// What the user allowed it: {need key: [line hashes]} (allowed.json's shape).
     var allowed: [String: [String]] = [:]
     /// How it came: chat, import, link, pasted.
@@ -86,9 +89,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     mutating func take(_ fields: Set<String>, from o: InstalledMod) {
         for f in fields {
             switch f {
-            case "on": on = o.on
+            case "on": on = o.on; switchAt = o.switchAt
             case "newOff": newOff = o.newOff
-            case "offSites": offSites = o.offSites
+            case "offSites": offSites = o.offSites; switchAt = o.switchAt
             case "allowed": allowed = o.allowed
             case "source": source = o.source
             case "added": added = o.added
@@ -105,7 +108,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// A change on hold: the version before runs meanwhile.
     var pending: Bool { held && ran != nil }
 
-    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, allowed, source, newOff, added, history, ran, extraNeeds }
+    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, switchAt, allowed, source, newOff, added, history, ran, extraNeeds }
 
     init(id: String, site: String, name: String, description: String, tier: String, sites: [String], matches: [String], powers: [String], code: String, script: String, world: String, at: String) {
         self.id = id; self.site = site; self.name = name; self.description = description; self.tier = tier; self.sites = sites
@@ -121,7 +124,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
         try c.encode(tier, forKey: .tier); try c.encode(sites, forKey: .sites); try c.encode(matches, forKey: .matches); try c.encode(excludes, forKey: .excludes)
         try c.encode(powers, forKey: .powers); try c.encode(powerArgs, forKey: .powerArgs); try c.encode(facts, forKey: .facts); try c.encode(warnings, forKey: .warnings)
         try c.encodeIfPresent(risk, forKey: .risk); try c.encode(hash, forKey: .hash); try c.encode(needs, forKey: .needs); try c.encode(code, forKey: .code)
-        try c.encode(world, forKey: .world); try c.encode(at, forKey: .at); try c.encode(on, forKey: .on); try c.encode(offSites, forKey: .offSites)
+        try c.encode(world, forKey: .world); try c.encode(at, forKey: .at); try c.encode(on, forKey: .on); try c.encode(offSites, forKey: .offSites); try c.encodeIfPresent(switchAt, forKey: .switchAt)
         try c.encode(allowed, forKey: .allowed); try c.encode(source, forKey: .source); try c.encodeIfPresent(newOff, forKey: .newOff); try c.encode(added, forKey: .added)
         try c.encode(Array(history.prefix(10)), forKey: .history); try c.encodeIfPresent(ran, forKey: .ran); try c.encode(extraNeeds, forKey: .extraNeeds)
     }
@@ -149,6 +152,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
         at = try c.decodeIfPresent(String.self, forKey: .at) ?? "end"
         on = try c.decodeIfPresent(Bool.self, forKey: .on) ?? true
         offSites = try c.decodeIfPresent([String].self, forKey: .offSites) ?? []
+        switchAt = try c.decodeIfPresent(Double.self, forKey: .switchAt)
         allowed = try c.decodeIfPresent([String: [String]].self, forKey: .allowed) ?? [:]
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? "chat"
         newOff = try c.decodeIfPresent(String.self, forKey: .newOff)
@@ -168,6 +172,19 @@ final class ModStore: ObservableObject {
     @Published private(set) var lastDeleted: InstalledMod?
     /// Recently deleted (phone sync, D7): every mod deleted here, by the user or by a sync, for 30 days, newest first.
     @Published private(set) var trash: [DeletedMod] = []
+    /// The computer's approval hints (phone sync, D13), by sync key: what it allows as it is. Only words on the
+    /// approval card ("You allowed this on …"), never an approval. Kept in the settings (small).
+    @Published private(set) var syncHintsKept: [String: PhoneSync.Hint] = ModStore.loadHints()
+    private static let hintsKey = "syncHints"
+    nonisolated static func loadHints() -> [String: PhoneSync.Hint] {
+        guard let d = UserDefaults.standard.data(forKey: hintsKey), let h = try? JSONDecoder().decode([String: PhoneSync.Hint].self, from: d) else { return [:] }
+        return h
+    }
+    /// The computer allowed this version as it is, asking nothing beyond what it allowed there (the hint fits).
+    func allowedOnComputer(_ m: InstalledMod) -> Bool {
+        guard let h = syncHintsKept[PhoneSync.key(m.id)] else { return false }
+        return h.fits(rev: PhoneSync.rev(m.code), tier: m.tier, powers: m.tier == "boxed" ? m.powers : [])
+    }
     private let key = "installedMods"
     private let groupsKey = "groupsOff"
     private let readerKey = "modReader"
@@ -225,7 +242,7 @@ final class ModStore: ObservableObject {
         for old in mods {
             let fromProbe = !old.id.contains("/")
             guard var m = read(old.code, file: fromProbe ? "" : old.file, site: fromProbe ? "" : old.site).mod else { out.append(old); continue }
-            m.on = old.on; m.offSites = old.offSites; m.source = old.source; m.newOff = old.newOff; m.added = old.added; m.history = old.history
+            m.on = old.on; m.offSites = old.offSites; m.switchAt = old.switchAt; m.source = old.source; m.newOff = old.newOff; m.added = old.added; m.history = old.history
             m.allowed = fromProbe ? ModStore.allow(m.needs, old.allowed) : old.allowed
             if !fromProbe, let ran = old.ran { m.ran = ran }
             m.extraNeeds = old.extraNeeds
@@ -546,6 +563,10 @@ final class ModStore: ObservableObject {
         mods[i].on = r.on
         mods[i].offSites = r.offSites
         if r.clearNewOff { mods[i].newOff = nil }
+        // (the person's change, for the phone sync: the later change wins, docs/PHONE-SYNC.md 4b; a synced mod's "from
+        // your computer" mark, kept while it arrived on (D8), goes with the first tap of its switch here)
+        mods[i].switchAt = (Date().timeIntervalSince1970 * 1000).rounded(.down)
+        if mods[i].newOff == "computer" { mods[i].newOff = nil }
         save()
     }
 
@@ -805,6 +826,50 @@ extension ModStore: @preconcurrency PhoneSyncStore {
     func syncRemove(_ id: String) {
         remove(id, by: "computer")
         Diagnostics.shared.log("sync", "deleted on the computer: \(id) (in Recently deleted)")
+    }
+
+    /// Each mod's switch (docs/PHONE-SYNC.md 4b): on, the sites it's off on, when the person last changed it.
+    func syncSwitches() -> [String: PhoneSync.Switch] {
+        Dictionary(mods.filter { $0.id.contains("/") }.map { (PhoneSync.key($0.id), PhoneSync.Switch(on: $0.on, off: $0.offSites, at: $0.switchAt ?? 0)) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The computer's switch, set as it is (its time kept, so both sides agree); the "from your computer" mark stays
+    /// (D8: a new mod arrives with the computer's switch, still marked).
+    func syncSetSwitch(_ key: String, _ s: PhoneSync.Switch) -> Bool {
+        guard let i = mods.firstIndex(where: { PhoneSync.key($0.id) == key }) else { return false }
+        let was = mods[i]
+        mods[i].on = s.on
+        mods[i].offSites = s.off
+        mods[i].switchAt = s.at > 0 ? s.at : nil
+        guard was.on != s.on || was.offSites.sorted() != s.off || was.switchAt != mods[i].switchAt else { return false }
+        save()
+        Diagnostics.shared.log("sync", "switch from the computer: \(was.id) \(s.on ? "on" : "off")\(s.off.isEmpty ? "" : " (off on \(s.off.joined(separator: ", ")))")")
+        return was.on != s.on || was.offSites.sorted() != s.off
+    }
+
+    /// What this phone allows as it is: each mod not waiting for an OK (and no change waiting), its revision, tier
+    /// and powers (D13: a hint the computer words its card with; never an approval there).
+    func syncAllowed() -> [String: PhoneSync.Hint] {
+        Dictionary(mods.filter { $0.id.contains("/") && !$0.held && $0.ran == nil }.map {
+            (PhoneSync.key($0.id), PhoneSync.Hint(rev: PhoneSync.rev($0.code), tier: $0.tier, powers: $0.tier == "boxed" ? $0.powers : []))
+        }, uniquingKeysWith: { a, _ in a })
+    }
+
+    func syncHints(_ hints: [String: PhoneSync.Hint]) {
+        guard hints != syncHintsKept else { return }
+        syncHintsKept = hints
+        if let d = try? JSONEncoder().encode(hints) { UserDefaults.standard.set(d, forKey: ModStore.hintsKey) }
+    }
+
+    /// What the scheduler compares with the last sync (PhoneSync.Scheduler `files`): each mod's file, its switch and
+    /// whether it's allowed here, so a switch or an Allow syncs too (3 s later), not only an edit.
+    func syncSignature() -> [String: String] {
+        let sw = syncSwitches(), ok = syncAllowed()
+        return Dictionary(mods.filter { $0.id.contains("/") }.map { m in
+            let k = PhoneSync.key(m.id)
+            let s = sw[k].map { "\($0.on)|\($0.off.joined(separator: ","))" } ?? ""
+            return (m.id, "\(m.code)\u{0}\(s)\u{0}\(ok[k] != nil)")
+        }, uniquingKeysWith: { a, _ in a })
     }
 }
 

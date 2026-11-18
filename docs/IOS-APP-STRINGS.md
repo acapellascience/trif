@@ -512,6 +512,11 @@ something.
 | The list under the mods (folded) | Recently deleted (each row: the name, its site or "every site", Restore) |
 | Restore, the mod is gone from the list meanwhile | It isn't in Recently deleted any more. |
 | Restore, one with the same name is here | A mod with the same name is here now. Delete or rename it first. |
+| (11-18, D8) The mark's tip, for a mod new from the computer that arrived switched on (the mark stays until its switch is first tapped here) | It came from TRIF on your computer, switched on there. |
+| (11-18, D13) The approval card's line for a synced mod the computer allowed as it is (in place of "It's new or changed since TRIF last let it run.") | You allowed this on {computer}. ({computer}: the paired computer's name; Tim's draft was "You allowed this on {your Mac}") |
+
+Switches now follow the last change on either device (11-18, D12): no new words; a switch the computer changed
+shows as it is after the next sync.
 
 ## Copy diagnostics, point-and-hide taken out, and offers from a chat (changed 11-17, Tim)
 

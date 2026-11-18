@@ -45,7 +45,8 @@ final class PhoneSyncModel: ObservableObject {
         guard scheduler == nil else { return }
         self.store = store
         let sync = PhoneSync(store: store, link: link)
-        let s = PhoneSync.Scheduler(files: { store.syncFiles() }) { [weak self] done in
+        // (a file, a switch or an Allow that differs from the last sync's: a sync 3 s later; the sync itself reads the store)
+        let s = PhoneSync.Scheduler(files: { store.syncSignature() }) { [weak self] done in
             guard PhoneLinkKeys.shared.computer != nil else { return done(.failure(.init(code: "notPaired", message: ""))) }
             self?.syncing = true
             sync.run(done)
@@ -68,10 +69,10 @@ final class PhoneSyncModel: ObservableObject {
         case .success(let s):
             last = s; lastProblem = nil
             tell(s)
-            let here = s.taken + s.removed + s.cameBack + s.conflicts.map(\.sibling)
+            let here = s.taken + s.removed + s.cameBack + s.conflicts.map(\.sibling) + s.switched
             if !here.isEmpty { applied?(here) }
             if s.changedAnything || !s.skipped.isEmpty {
-                Diagnostics.shared.log("sync", "synced (\(why)): \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
+                Diagnostics.shared.log("sync", "synced (\(why)): \(s.switched.count) switched here, \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
             }
         case .failure(let f):
             guard f.code != "notPaired" else { return }
@@ -144,7 +145,7 @@ final class PhoneSyncModel: ObservableObject {
     /// (development) the last sync, as the dev step `syncstate` says it.
     var describe: String {
         guard let s = last else { return "no sync yet\(lastProblem.map { " (\($0))" } ?? "")" }
-        return "taken \(s.taken.sorted()) waitingHere \(s.waitingHere.sorted()) removed \(s.removed.sorted()) sent \(s.sent.sorted()) waitingThere \(s.waitingThere.map(\.id).sorted()) conflicts \(s.conflicts.map { "\($0.id)>\($0.sibling)" }) cameBack \(s.cameBack) refused \(s.refused.map(\.id)) skipped \(s.skipped.map(\.id)) later \(s.later)\(lastProblem.map { " problem \($0)" } ?? "")"
+        return "taken \(s.taken.sorted()) waitingHere \(s.waitingHere.sorted()) removed \(s.removed.sorted()) sent \(s.sent.sorted()) waitingThere \(s.waitingThere.map(\.id).sorted()) conflicts \(s.conflicts.map { "\($0.id)>\($0.sibling)" }) cameBack \(s.cameBack) switched \(s.switched.sorted()) refused \(s.refused.map(\.id)) skipped \(s.skipped.map(\.id)) later \(s.later)\(lastProblem.map { " problem \($0)" } ?? "")"
     }
 }
 

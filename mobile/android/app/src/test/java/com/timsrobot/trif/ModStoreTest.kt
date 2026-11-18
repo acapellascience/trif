@@ -30,6 +30,7 @@ class ModStoreTest {
         }
         override fun check(text: String, file: String, site: String) =
             JSONObject().put("ok", !text.contains("broken")).toString()
+        override val free = "P" to "R"
     }
 
     private var clock = 1_000_000_000_000L
@@ -73,10 +74,10 @@ class ModStoreTest {
             needs = listOf(ModNeed("power:net", "f", "net", listOf("h1"))), risk = ModRisk(2, "why"), newOff = "import",
             history = (1..12).map { ModVersion("$it", it.toLong(), "c$it", "chat") }, ran = RanVersion("c", "s", "box", "end"))
         val o = m.json()
-        assertFalse(o.has("script")); assertFalse(o.has("styleScript"))
+        assertEquals("S", o.getString("script")); assertEquals("Y", o.getString("styleScript"))
         assertEquals(10, o.getJSONArray("history").length())
         val back = InstalledMod.of(JSONObject(o.toString()))
-        assertEquals(m.copy(script = "", styleScript = "", history = m.history.take(10)), back)
+        assertEquals(m.copy(history = m.history.take(10)), back)
         // (only id, name and code are needed)
         val bare = InstalledMod.of(JSONObject("""{"id":"x","name":"X","code":"C"}"""))
         assertEquals("free", bare.tier); assertEquals("page", bare.world); assertEquals("end", bare.at); assertTrue(bare.on)
@@ -214,12 +215,15 @@ class ModStoreTest {
 
     @Test fun keptAcrossLaunches() {
         val s = store()
+        s.reread() // (a first reader: its version and free pair kept)
         s.addText(mod("A")); s.addText(mod("B")); s.remove("a.com/B")
         s.setGroup("style", false, "x.com"); s.setOn("a.com/A", false)
         val noReader = store(null)
         assertEquals(listOf("a.com/A"), noReader.mods.map { it.id })
-        assertEquals("", noReader.mods[0].script) // (scripts aren't kept: made again by the reader)
-        assertTrue(noReader.plan().mods.isEmpty())
+        assertEquals("run(1)", noReader.mods[0].script) // (kept: a start needs no reader)
+        assertFalse(noReader.needsReading)
+        assertTrue(noReader.plan().mods.isEmpty()) // (A is off)
+        assertEquals("P" to "R", noReader.plan().free) // (the reader's free pair, kept)
         assertEquals(mapOf("x.com" to listOf("style")), noReader.groupsOff)
         assertEquals("a.com/B", noReader.trash[0].mod.id)
         val again = store()

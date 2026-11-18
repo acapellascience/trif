@@ -57,6 +57,7 @@ androidComponents {
 
 dependencies {
     implementation("androidx.webkit:webkit:1.18.0")
+    implementation("androidx.javascriptengine:javascriptengine:1.1.1") // the mod reader (mods.js) in a JavaScriptSandbox
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517") // the real org.json for unit tests (Android's is a stub there)
 }

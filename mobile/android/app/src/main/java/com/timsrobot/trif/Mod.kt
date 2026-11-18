@@ -79,14 +79,15 @@ data class InstalledMod(
     /** A change on hold: the version before runs meanwhile. */
     val pending get() = held && ran != null
 
-    /** As kept (iPhone's encode): without script and styleScript, at most ten earlier versions. */
+    /** As kept (iPhone's encode, at most ten earlier versions) and with what the reader made of it (script and
+     *  styleScript, which iPhone makes again at each start): a start needs no reader, only a new reader reads again. */
     fun json(): JSONObject = JSONObject()
         .put("id", id).put("site", site).put("name", name).put("description", description).put("tier", tier)
         .put("sites", JSONArray(sites)).put("matches", JSONArray(matches)).put("excludes", JSONArray(excludes))
         .put("powers", JSONArray(powers)).put("powerArgs", lists(powerArgs))
         .put("facts", JSONArray(facts.map { JSONObject().put("power", it.power).put("fact", it.fact) }))
         .put("warnings", JSONArray(warnings)).put("hash", hash).put("needs", JSONArray(needs.map(ModNeed::json)))
-        .put("code", code).put("world", world).put("at", at).put("on", on).put("offSites", JSONArray(offSites))
+        .put("code", code).put("script", script).put("styleScript", styleScript).put("world", world).put("at", at).put("on", on).put("offSites", JSONArray(offSites))
         .put("allowed", lists(allowed)).put("source", source).put("added", added)
         .put("history", JSONArray(history.take(10).map {
             JSONObject().put("stamp", it.stamp).put("at", it.at).put("code", it.code).put("source", it.source)

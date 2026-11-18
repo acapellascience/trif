@@ -50,7 +50,8 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
    - [x] mod store (round 7: `Mod.kt` InstalledMod & co. under iPhone's JSON keys, `ModStore.kt` with every change
      iPhone's has: add/import/update + History, on/off per mod / per site / per tier, Pause all, Allow / Don't allow,
      edit + restore judged as changes, Recently deleted 30 days + Undo; `ModFiles` keeps it in files)
-   - [ ] reading mods with mods.js (JavaScriptSandbox or hidden WebView): implement `ModReader`
+   - [x] reading mods with mods.js (round 8: `JsModReader`, mods.js in an androidx.javascriptengine JavaScriptSandbox
+     isolate on the store thread; what it made of each mod kept in the mod's file, so a start needs no reader)
    - [x] @match matching (round 7: `MatchPattern` + `WebAddress`, as modfile.js matchesUrl; `ModStore.running/applies`)
    - [ ] style sections, boxed and free mods running
    - [ ] holds waiting for Allow (the store's side done in round 7: a held mod doesn't run, a held change runs
@@ -64,27 +65,38 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
      mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 7, 2026-11-18)
-- Merged origin/ios-poc (docs/MOBILE-BEHAVIOUR.md, mobile/shared/core + gen/core.js). The mod store, ported from
-  Mods.swift (its rules aren't in shared core yet): `Mod.kt` (InstalledMod, ModNeed, RanVersion, DeletedMod, Site,
-  MatchPattern) and `ModStore.kt` (ModStore, the `ModReader` interface, `ModStore.build` for the reader's answer,
-  ModFiles). `ModStore.plan()` → `browser.plan`, made again on every change (MainActivity).
-- 12 new unit tests (ModStoreTest, a stand-in reader), 33 in all pass; startup.sh and worlds.sh PASS on the emulator.
+## Done this round (round 8, 2026-11-18)
+- The reader: `JsModReader` (mods.js in a JavaScriptSandbox isolate, javascriptengine 1.1.1; blocking calls, a dead
+  isolate made again once). Every ModStore call now runs on MainActivity's store thread (`work`); plans go to the
+  pages on the main thread. Debug extra `trif.addMod` (a mod file → read → added as pasted).
+- Kept, unlike iPhone: each mod's script/styleScript in its file and the reader's free pair in mods-settings.json,
+  so the tabs start at once; only mods without scripts (or a new reader) are read at the start, the tabs waiting ≤3 s.
+- Measured on the AVD: sandbox up 235–570 ms, mods.js loaded 210–470 ms; a 70 KB free mod read in <0.4 s.
+- Tests: 33 unit tests pass (store tests updated for kept scripts); new test/mods.sh PASS (a pasted style mod read
+  and applied, a non-mod's reason, still applied on the first page after a force-stop); worlds, startup, tabs,
+  applinks PASS.
 
 ## Next step
-Item 4, the reader: implement `ModReader` over mobile/shared/gen/mods.js (androidx.javascriptengine
-JavaScriptSandbox if it fits: check `JavaScriptSandbox.isSupported()` on the AVD and its async/IPC cost for a big free
-mod; else a hidden WebView), `ModStore.reread()` at start (scripts aren't kept), `reader.free` from
-`__trifMods.freePageScript/freeRelayScript`. The same engine can load gen/core.js and run `TrifCore.appLinks` in place
-of AppLinks.kt's port (keep a Kotlin fast path for http/https, as iPhone). Then an emulator test: a debug extra adds a
-mod file through the reader, it applies, and it's still there after a force-stop.
+Item 4, "style sections, boxed and free mods running" through the real reader: extend test/mods.sh (or a new
+running.sh) with a boxed mod (its trif.log reaches logcat "mod log", page.find works in the box), a free mod with a
+==Style== section (style from TRIF's world, the code in the page's world, trif.style values) on strict.html, and
+check the plan's free pair (reader.free) is what makes `trif` exist for free mods. Fix whatever doesn't run. Then
+holds (item 4's last): a mod with a power waiting → not running until `approve` (a debug extra for Allow).
 
 ## Notes for next round
+- Threads (round 8): ModStore is touched only on MainActivity's `work` executor (`work.execute { mods.… }`); its
+  onChange posts the plan to the main thread (`showPlan`). JsModReader throws on the main thread. Startup: if
+  `mods.needsReading` is false the plan and tabs go at once (scripts kept); else `started()` waits for the reader
+  (or 3 s). A debug `trif.testMods` plan (`testPlan`) wins over the store's for that launch.
+- `am start` extras: a base64 mod of ~93 KB passes; ~400 KB silently doesn't start (adb/am limit). For big test
+  mods, add a file route when item 6 brings the file intent.
+- Logcat: "mod reader: sandbox N ms, mods.js M ms", then "mod reader: ready, K mods, T ms" (or "didn't start");
+  "add mod: <id> <tier> <world> runs|held" or "add mod: error <why>".
 - Mod store (round 7): pure and synchronous; methods that read (reread, reject, restore, saveEdit, readNamed) call
   the reader directly, so with a slow engine call them off the main thread (or give the reader a blocking call made
   off it). Files: filesDir/modstore/mods/<site__name>.json + order.json, mods-deleted.json, mods-settings.json
-  (groupsOff, paused, the reader's version). Times are epoch ms. `script`/`styleScript` aren't kept (as iPhone):
-  until `reread()` with a reader, every mod's plan entry is skipped. Signature hashes are Kotlin hashCodes (only
+  (groupsOff, paused, the reader's version and free pair). Times are epoch ms. `script`/`styleScript` are kept
+  (since round 8; iPhone doesn't): a mod without them is skipped in the plan until `reread()` with a reader. Signature hashes are Kotlin hashCodes (only
   compared within a launch, as iPhone's Hasher). Not ported: phone sync (syncTake/syncRemove), the move from
   UserDefaults, ModOfferView (UI, item 6), check()'s lint shape is whatever mods.js gives.
 - Kotlin nests block comments: a `/*` inside a KDoc (e.g. a match pattern like `https://x.com/` + `*`) opens one and
@@ -137,6 +149,9 @@ mod file through the reader, it applies, and it's still there after a force-stop
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 8 (the mod reader): nothing to see or decide; no new words, no new downloads beyond Google's Maven
+  (androidx.javascriptengine). One storage difference from iPhone: Android keeps what the reader made of each mod
+  in the mod's file, so the app opens without waiting about a second for the reader.
 - Round 7 (the mod store): nothing to see or decide; no new words.
 - WebView check (round 5): new screen, draft words in STRINGS.md ("TRIF needs a newer Android System WebView" …
   "Open the Play Store"). Shown only on phones whose WebView is older than 149 (or switched off).

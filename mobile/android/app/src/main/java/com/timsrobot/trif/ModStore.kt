@@ -56,15 +56,21 @@ class ModStore(
         files.write(mods)
         files.writeTrash(trash)
         files.writeSettings(JSONObject().put("groupsOff", JSONObject().apply { groupsOff.forEach { (k, v) -> put(k, JSONArray(v)) } })
-            .put("paused", paused).put("reader", readerVersion))
+            .put("paused", paused).put("reader", readerVersion)
+            .apply { freeKept?.let { (page, relay) -> put("free", JSONObject().put("page", page).put("relay", relay)) } })
         onChange?.invoke()
     }
 
     private var readerVersion: String? = files.loadSettings().str("reader")
+    /** The reader's free pair (freePageScript, freeRelayScript) as the last reader made it, for a start before it's up. */
+    private var freeKept: Pair<String, String>? = files.loadSettings().optJSONObject("free")
+        ?.let { o -> o.str("page")?.let { p -> o.str("relay")?.let { p to it } } }
+    /** Whether any mod waits for the reader to make its scripts (a file kept before scripts were). */
+    val needsReading get() = mods.any { it.script.isEmpty() }
 
     /**
-     * Every mod read again from its file when the reader is new (or when scripts are missing: they aren't kept, so
-     * at every start), so what runs is what this reader makes of it. Its switches, allowed, history and hold stay.
+     * Every mod read again from its file when the reader is new (or when a mod's scripts are missing), so what runs
+     * is what this reader makes of it. Its switches, allowed, history and hold stay.
      */
     fun reread(force: Boolean = mods.any { it.script.isEmpty() }) {
         val r = reader ?: return
@@ -79,6 +85,7 @@ class ModStore(
         }
         mods = out
         readerVersion = r.version
+        freeKept = r.free
         save()
     }
 
@@ -150,7 +157,7 @@ class ModStore(
             val off = ((if (m.multiSite) m.offSites else emptyList()) + groupsOff.filter { m.tier in it.value }.keys).toSortedSet().toList()
             Scripts.Plan.One(m.id, script, world, at, style, off)
         }
-        return Scripts.Plan(mods, reader?.free, bridged)
+        return Scripts.Plan(mods, reader?.free ?: freeKept, bridged)
     }
 
     // MARK: changes

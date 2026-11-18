@@ -82,32 +82,77 @@ class MainActivity : Activity() {
             addView(bar, LinearLayout.LayoutParams(-1, -2))
         })
         browser = Browser(this) { refresh() }
-        // (the installed mods: what every page gets is made again after each change; the reader comes next, item 4)
-        mods = ModStore(ModFiles(java.io.File(filesDir, "modstore"))).apply {
-            onChange = { browser.plan = plan() }
-            browser.plan = plan()
-        }
+        // The installed mods, on a thread of their own (the store thread: reading a mod blocks on the reader); what
+        // every page gets is made again after each change. What the reader made of each mod is kept, so the tabs
+        // start at once; only mods without it (or a new reader) wait for the reader, a few seconds at most.
+        mods = ModStore(ModFiles(java.io.File(filesDir, "modstore"))).apply { onChange = { showPlan(plan()) } }
         debug(intent)
+        if (!mods.needsReading) { showPlan(mods.plan(), now = true); started() }
+        val t0 = System.nanoTime()
+        work.execute {
+            val r = JsModReader.connect(this, assets.open("gen/mods.js").bufferedReader().use { it.readText() })
+            reader = r
+            mods.reader = r
+            mods.reread()
+            val p = mods.plan()
+            android.util.Log.i("TRIF", "mod reader: ${if (r == null) "didn't start" else "ready"}, ${mods.mods.size} mods, " +
+                "${(System.nanoTime() - t0) / 1_000_000} ms")
+            runOnUiThread { showPlan(p, now = true); started() }
+        }
+        page.postDelayed(::started, 3000)
+    }
+
+    /** The store thread (every ModStore call goes through it) and the reader on it. */
+    private val work = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "trif-mods") }
+    private var reader: JsModReader? = null
+    /** A debug build's test mods, in place of the store's (worlds.sh). */
+    private var testPlan: Scripts.Plan? = null
+    private var tabsShown = false
+
+    /** The store's plan to every page (from any thread). */
+    private fun showPlan(p: Scripts.Plan, now: Boolean = false) {
+        val put = { if (testPlan == null && !isDestroyed) browser.plan = p }
+        if (now) put() else runOnUiThread(put)
+    }
+
+    /** The tabs as they were and the link the app was opened with, once the mods are read (or the wait is over). */
+    private fun started() {
+        if (tabsShown || isDestroyed) return
+        tabsShown = true
         browser.restore()
         open(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        work.execute { reader?.close() }
+        work.shutdown()
     }
 
     /**
      * A debug build's test hooks (tests: base64 in the extras, so adb's quoting can't spoil them):
      * `trif.testMods` = a list of mods as JSON (Scripts.planOf), put in as the mod store's will be;
+     * `trif.addMod` = a mod file, read by the reader and added as pasted ("add mod: <id> <tier> <world> runs|held");
      * `trif.call` = "world:code" (trif, box or page), run on the shown tab's page, its answer logged ("call: …").
      */
     private fun debug(intent: Intent?) {
         if (intent == null || applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
         val b64 = { k: String -> intent.getStringExtra(k)?.let { String(android.util.Base64.decode(it, android.util.Base64.DEFAULT)) } }
-        b64("trif.testMods")?.let { browser.plan = Scripts.planOf(it) }
+        b64("trif.testMods")?.let { testPlan = Scripts.planOf(it); browser.plan = testPlan!! }
+        b64("trif.addMod")?.let { text ->
+            work.execute {
+                val r = mods.read(text)
+                val m = r.mod?.let { mods.add(it, "pasted") }
+                android.util.Log.i("TRIF", "add mod: " + (m?.let { "${it.id} ${it.tier} ${it.world} ${if (it.held) "held" else "runs"}" } ?: "error ${r.error}"))
+            }
+        }
         b64("trif.call")?.let { c ->
             val world = c.substringBefore(':')
             browser.call(Scripts.world(world), c.substringAfter(':')) { a ->
                 android.util.Log.i("TRIF", "call: $world ${if (a.ok) "ok ${a.value}" else "error ${a.error}"}")
             }
         }
-        intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call")
+        intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call"); intent.removeExtra("trif.addMod")
     }
 
     /**
@@ -170,7 +215,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (::browser.isInitialized) { debug(intent); open(intent) }
+        if (::browser.isInitialized) { debug(intent); if (tabsShown) open(intent) else setIntent(intent) }
     }
 
     /**

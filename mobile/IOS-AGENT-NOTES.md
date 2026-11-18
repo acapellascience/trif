@@ -144,6 +144,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `node --test mobile/test/quickask.test.js` (swiftc with mobile/test/quickask-check/main.swift, Site.swift,
   QuickAskRules.swift, Core.swift; argv site-cases.json, quick-ask-cases.json, gen/core.js; `TRIF_COST=1` prints a
   sort's cost, ~50 µs unoptimised) and `mobile/test/core-quickask.test.js` (the JS alone).
+- The mod store's hold rules (ModHolds.swift → core/mod-store.js) on the Mac: `node --test mobile/test/modstore.test.js`
+  (swiftc with mobile/test/modstore-check/main.swift, Site.swift, ModHolds.swift, Core.swift; argv mod-store-cases.json,
+  gen/core.js; `TRIF_COST=1` prints an edit's two calls, ~170 µs unoptimised, and 40 holds by the twin, ~85 µs) and
+  `mobile/test/core-modstore.test.js` (the JS alone, and Android's ModStoreTest.kt stories).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -188,7 +192,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -257,6 +261,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   ids, the pill's state; no answer → all to their cards), undo (steps newest first; no answer → still undone).
   ClaudePane.quickDeliver / quickUndo use it. Site.swift: `Site.of` / `Site.host(_:isIn:)` (moved out of Mods.swift
   in round 3), the twin of core/site.js.
+- ModHolds.swift (round 4 of the shared core): ModNeed, and the hold rules through TrifCore.modStore: allow, approve,
+  changeNeeds, seeded, ranAfter (add / restore: which version runs while a change waits); `waiting` stays a Swift twin
+  (InstalledMod.held is asked of every mod on every page load). No answer: allowed unchanged, every @match asked,
+  only what was allowed, nothing kept running (each asks more, never less). ModStore.allow / changeNeeds / seeded are
+  one-line wrappers over it; InstalledMod.holdFacts is what it reads.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
   (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
   a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is

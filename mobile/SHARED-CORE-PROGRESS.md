@@ -35,15 +35,20 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       declined; only from Done). Swift: QuickAskRules.swift (ClaudePane.quickDeliver / quickUndo call it). Site.of moved
       too: core/site.js (of, hostIsIn, chat = phone~ removed then of), Site.swift kept as a twin (every navigation),
       held to site-cases.json. The mod list's own Undo (ModStore.undoAdd: not to Recently deleted) moves with the store.
-- [ ] The mod store's rules (Tim, 11-18: Android ported them to Kotlin by hand, branch android,
+- [~] The mod store's rules (Tim, 11-18: Android ported them to Kotlin by hand, branch android,
       mobile/android/app/src/main/java/com/timsrobot/trif/ModStore.kt + ModStoreTest.kt; the Android loop switches to
-      the shared copy once it exists): Mods.swift's holds and Allow (allow, changeNeeds, seeded), Pause all, tier
-      switches (groupsOff, isOn), edits judged as changes (saveEdit/check), Recently deleted's 30 days (remove,
-      undoDelete, restoreDeleted, the 200 cap), history (30 days, 30 versions), @match (applies, running, signature),
-      add's rules (import/computer off and marked new), undoAdd. Likely core/mod-store.js as pure functions over plain
-      mod records (state in, new state out), the lists and files staying platform; ModStoreTest.kt's cases are a
-      second source for the cases file. Big: split over 2-3 rounds (holds/Allow first, then trash/history/add, then
-      @match + tier switches + Pause all).
+      the shared copy once it exists) → core/mod-store.js (TrifCore.modStore), pure functions over plain mod records,
+      the lists and files staying platform. Three parts:
+  - [x] Part 1 (round 4): holds and Allow: waiting / held (Swift twin: every page load), allow, approve, changeNeeds,
+        seeded, ranAfter (add / restore: which version runs while a change waits). Swift: ModHolds.swift (ModNeed moved
+        there too).
+  - [ ] Part 2: Recently deleted's 30 days (remove, undoDelete, restoreDeleted, the 200 cap), history (30 days, 30
+        versions), add's rules (chat on; import / computer off and marked new or updated; edit / computer keep the
+        switch; allowed, offSites and added carried over), undoAdd, reject's carry-over (on, offSites, allowed, source,
+        added; extraNeeds cleared; the change into History as undo). Likely `add(old|null, new, source, now)` →
+        the record's new fields, `trash(list, entry, now)` etc.; the code reading (ModReader) stays platform.
+  - [ ] Part 3: @match (applies: MatchPattern, hot: every page load × every mod, a twin), running (on, not held without
+        a version kept, tier switch, per-site switch), signature, tier switches (groupsOff, isOn), Pause all, multiSite.
 - [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision
       (core/site.js exists now: TrifCore.site.of / hostIsIn / chat).
 - [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
@@ -83,11 +88,27 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   back to its version before; no "shared rule" failure. Not tried there: the card path (the stand-in writes style
   mods only; unit cases cover it). .ipa built (dSYM 8B1867CD-BD28-3D03-9265-636ACACE4700).
 
+- Round 4 (11-18): the mod store, part 1 (holds and Allow) moved: core/mod-store.js (waiting, held, allow, approve,
+  changeNeeds, seeded, ranAfter) and ModHolds.swift (ModNeed moved from Mods.swift; ModStore.allow / changeNeeds /
+  seeded are wrappers; add / restore / approve call through; InstalledMod.waiting is the Swift twin). Cases recorded
+  from the old Swift (scratchpad recorder over the verbatim functions, Site.swift): 96 mods (waiting, approve, seeded,
+  ranAfter add / restore each), 77 allows, 191 changeNeeds (13 @match sets incl. <all_urls>, *://*/*, file:, no scheme,
+  ports, WWW, *.bbc.co.uk, x.com.evil.org, *.*.x.com; 7 home sites incl. all-sites, "" and www.), 10 more ranAfters;
+  the JS passed them all at once, then the new Swift (through JSC) did. core-modstore.test.js also runs Android's
+  ModStoreTest.kt stories (holdsWaitForAllow, editsAndRestores) on the pure functions. Cost (Mac, unoptimised): an
+  edit's seeded + changeNeeds 170 µs; the twin's held for 40 mods 85 µs. Tests: all of mobile/test (29) and smoke
+  pass. Simulator (SE, headless, via the Mods tab page's own messages): a boxed mod with keys offered and added →
+  held (power:keys); Allow → runs; an edit adding https://other.org/* → pending, asks only match:https://other.org/*;
+  Allow; restore the first version → not held; an edit to a free mod → pending, asks only tier:free; Don't allow →
+  the boxed version back, not held, History 4; no "shared rule" line in diagnostics. .ipa built (dSYM
+  6D3FE2EE-5C61-35F4-8483-1E1F3923E968).
+
 ## Next step
 
-Round 4: the mod store's rules (Tim's ask, 11-18), first part: holds and Allow (InstalledMod.held / waiting, ModStore
-approve / reject, allow, changeNeeds, seeded) → core/mod-store.js, cases recorded from Mods.swift (and checked against
-the branch android's ModStoreTest.kt). Plan the store's 2-3 rounds in the checklist first.
+Round 5: the mod store, part 2 (Recently deleted, history, add's rules, undoAdd, reject's carry-over) → more functions
+in core/mod-store.js, cases recorded from Mods.swift (ModStore.add / remove / undoDelete / restoreDeleted / undoAdd /
+reject) and checked against ModStoreTest.kt (addingAndImporting, deletingAndRecentlyDeleted). Dates: pass `now` in (ms)
+so the rules stay pure; the 30 days and the caps go in the module.
 
 ## Notes for next round
 
@@ -110,8 +131,19 @@ the branch android's ModStoreTest.kt). Plan the store's 2-3 rounds in the checkl
 - The mod store item: Android's ModStore.kt (git show origin/android:mobile/android/app/src/main/java/com/timsrobot/
   trif/ModStore.kt) has the same function names (allow, changeNeeds, seeded, undoAdd, remove, restoreDeleted, saveEdit).
 
+- Round 4: the mod store's records go to JS as {tier, site, matches, needs, extraNeeds, allowed, ran (Bool)}:
+  InstalledMod.holdFacts / ModHolds.Facts.plain. Line hashes are hex (ASCII), so JS's sort and Swift's sorted() agree;
+  keep them ASCII. A quirk kept as it was (no change in behaviour): a restore while a change is waiting, of a version
+  that itself waits, keeps nothing running (ranAfter 'restore' → null when the version before was held); add keeps
+  the one it was already keeping. Android's ModStore.kt has the same. Flagged to Tim below.
+- Simulator, mod store: the Mods tab page's own messages through `{"modsjs": "return JSON.stringify(await
+  window.webkit.messageHandlers.app.postMessage({type:'save'|'approve'|'reject'|'restore'|'history'|'state', id, …}))"}`
+  (sheet "mods" first); a boxed mod needs a power that isn't soft (keys) to be held. Helper: scratchpad ms/st.sh <id>.
+
 ## For Tim
 
-- Nothing to decide. No new words. Quick ask behaves as before; which mods it adds at once, and what Undo puts back,
-  now decide through the shared rules Android will use. The mod store's rules are on the list, next round. A new
-  TRIF.ipa is in iCloud Drive/TRIF.
+- Nothing to decide, no new words. What a mod waits for, what Allow allows, and what an edit or a restore asks about now
+  decide through the shared rules Android will use; they behave as before. A new TRIF.ipa is in iCloud Drive/TRIF.
+- One odd corner, kept as it was (a refactor changes nothing): if a change is waiting for your OK and you restore an
+  older version that also needs an OK, the mod stops running until you decide (an edit in the same spot keeps the
+  last approved version running). Say if you'd like a restore to keep it running too.

@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (456 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (458 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -120,8 +120,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (10 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
   code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply; the quick ask: never a
   scripted send, the person's Send told once, their message appearing as the send, takeText). One browser suite at a time; small payloads.
-- Links to other apps (AppLinks.swift's decisions) on the Mac: `node --test mobile/test/applinks.test.js` (swiftc with
-  mobile/test/applinks-check/main.swift). Simulator pages for it: any small node server with tel:/mailto:/sms:/maps:/
+- Links to other apps on the Mac: `node --test mobile/test/core-applinks.test.js` (the shared rule, mobile/shared/core/app-links.js,
+  and gen/core.js, against app-links-cases.json) and `node --test mobile/test/applinks.test.js` (swiftc: AppLinks.swift +
+  Core.swift + mobile/test/applinks-check/main.swift, calling through gen/core.js: the same cases, the words, and the cost
+  of a call: ~13 µs on the Mac). Simulator pages for it: any small node server with tel:/mailto:/sms:/maps:/
   fb-messenger: links, a target=_blank one, a trif: one, `location = 'mailto:…'` on load and every 1.5 s, an
   `a.click()` on load, an iframe to fb:// (the batch's own lived in the scratchpad).
 - The microphone's words (SpeechText.swift: segments, restarts, revised partials; committed words never shrink, a
@@ -176,10 +178,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badge(for: tab)` (TabCard). The
   robot's tap → ChatListView (Go to chat first; `site` the shown tab's); its hold → hold to talk (ContentView
   robotPress/robotHold/robotLift, HoldTalkPill in QuickAsk.swift) or ChatListView when talking isn't ready.
+- Shared rules (11-18, the shared-core loop: mobile/SHARED-CORE-PROGRESS.md; spec docs/MOBILE-BEHAVIOUR.md):
+  mobile/shared/core/*.js → `node mobile/prepare.js` → mobile/shared/gen/core.js (global `TrifCore`, a bundle resource;
+  Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
+  lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
+  "core" once). Moved so far: AppLinks' kind/decide/isTap/logged.
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
-  data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other), `decide` (tapped →
-  open; else ask once a load, one at a time, main frame, shown, app in front; else drop), `isTap`, `appName` (Apple's
-  apps only), the words. `TouchClock` + `TouchWatch` (a do-nothing recognizer on every tab's, chat's and More's web
+  data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
+  in Swift, the rest by TrifCore.appLinks), `decide` (tapped → open; else ask once a load, one at a time, main frame,
+  shown, app in front; else drop), `isTap` (both shared), `appName` (Apple's apps only), the words (Swift). `TouchClock` + `TouchWatch` (a do-nothing recognizer on every tab's, chat's and More's web
   view: when the finger was last on a page) and the long-press menu's open/close. Browser: `appLink(...)` (open /
   question by UIAlertController on the top controller / Diagnostics "app link" lines with the scheme only, a drop's line
   once a load), `askedLoads` cleared by each commit (`appLinkNewLoad`, the pane's didCommit too), `handToIOS`
@@ -354,8 +361,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   robot with 2 pt round it, the robot itself 124 pt) on LaunchBlack.colorset, also Info.plist's UILaunchScreen
   (INFOPLIST_KEY_UILaunchScreen_Generation = NO in the pbxproj and make-project.rb).
 - Unread counts (Tim, 11-18): UnreadTitle.swift (no UI; built for the Mac too) = mobile/shared/unread-count.js, the
-  shared rule (Android's to use; there's no mobile/shared/core or docs/MOBILE-BEHAVIOUR.md yet: put it there once there
-  is). `Tab.unread` (read in title's didSet; `cardLabel(counts:)` the title without the count). UnreadCounts.swift:
+  shared rule (Android's to use; in docs/MOBILE-BEHAVIOUR.md; a Swift twin rather than a call through Core: it runs on
+  every title change). `Tab.unread` (read in title's didSet; `cardLabel(counts:)` the title without the count). UnreadCounts.swift:
   `UnreadCounts.shared` (browser; `changed()` coalesces 0.3 s → `update()`: the sum over `iconTabs(b)` (iconTabs map,
   on its site) → getNotificationSettings → `apply`: not asked → `asking` (ContentView's alert, once: UserDefaults
   unreadBadgeAsked, cleared when the setting is switched on again) → `answer(allow:)` → requestAuthorization([.badge]);
@@ -678,8 +685,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   groupPending are guards. The message is the phone's own (desktop has no "cant"), so desktop is unaffected.
 - A page's own window closing itself (window.close(), a sign-in popup) goes back to the tab that opened it if that's
   still open (Tim, 11-18, as Android): Tab.opener (weak) set in createWebViewWith; webViewDidClose → close(t, showing:
-  opener), only when that window was the tab shown. report.json "tabs" line. No docs/MOBILE-BEHAVIOUR.md exists yet on
-  ios-poc (nor android): record it there once it does.
+  opener), only when that window was the tab shown. report.json "tabs" line. In docs/MOBILE-BEHAVIOUR.md (Links).
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 - A video picks up where it was (Tim, 11-18; built 11-18, VideoResume above): every tab, every site, any reload of the
   same page within 30 min (a reload, a page process ended, a mod applying, back to it, a relaunch). Background

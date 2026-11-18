@@ -197,7 +197,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             if let s = d["url"] as? String, let u = URL(string: s), ["http", "https"].contains(u.scheme ?? "") { browser?.newTab(s) }
             return (["opened": true], nil)
         case "reloadTab":
-            browser?.reload()
+            browser?.reload("More's run asked for it")
             return (["reloaded": true], nil)
         case "local.models":
             return (LocalModels.shared.describe(), nil)

@@ -40,6 +40,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var status = ""
     /// The note's Go to <site> (a mod from a chat added on another tab): shown while the note says `text`.
     @Published var statusGo: (text: String, site: String)?
+    /// The tab whose resumed video plays muted while the note says "Tap for sound" (VideoResume).
+    weak var soundTab: Tab?
     /// Whether a chat for a site knows its way back there (ClaudePane's chat links), and a mod from that site's chat
     /// was added (its link says "mod added"). Set by the pane.
     var chatTabFor: (String) -> Bool = { _ in false }
@@ -239,6 +241,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         tab.replaceWebView(WKWebView(frame: .zero, configuration: config))
         attach(tab)
         tab.started = false
+        tab.reloadCause = nil
+        tab.letGoWhy = why ?? "not shown for \(Int(Browser.backgroundSeconds)) s"
         Diagnostics.shared.log("tab", "let go of a background tab's page (\(Diagnostics.place(tab.savedURL)))\(why.map { ": \($0)" } ?? ""); it loads again when shown")
         noteRunning()
     }
@@ -246,6 +250,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// iOS warns the app of low memory: every background tab lets its page go now, except one that's playing (it
     /// goes on being looked at, and is let go once it has stopped).
     func memoryWarning() {
+        lastMemoryWarning = Date()
         let others = tabs.filter { $0 !== current && $0.started && $0.webView.url != nil }
         guard !others.isEmpty else { return }
         Task { @MainActor in
@@ -293,6 +298,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             }
             // (each card reads its tab's last picture when it shows: Tabs.swift TabShots)
             TabShots.shared.dropOrphans(keeping: Set(tabs.map(\.id)))
+            // (each tab's video, where a relaunch picks it up: VideoResume)
+            let videos = VideoStore.shared.load(keeping: Set(tabs.map(\.id)))
+            for t in tabs { t.video = videos[t.id] }
             select(tabs.first { $0.id == saved.selected } ?? tabs[tabs.count - 1])
         } else {
             let t = makeTab()
@@ -320,7 +328,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let was = current, was !== tab, tabs.contains(where: { $0 === was }) { TabShots.shared.take(was, "left"); letGoLater(was) }
         current = tab
         status = ""
-        if !tab.started && !waitingForFront { start(tab) } else { refreshIfStale(tab, "shown again") }
+        if !tab.started && !waitingForFront { start(tab) } else { refreshIfStale(tab, "shown again after they changed while it was behind") }
         address = tab.webView.url?.absoluteString ?? tab.savedURL?.absoluteString ?? ""
         title = tab.webView.title ?? tab.title
         loading = tab.webView.isLoading
@@ -333,6 +341,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A tab's page, the first time it's shown: what was kept of it (its back/forward list, else its address).
     private func start(_ tab: Tab) {
         tab.started = true
+        if tab.savedState != nil || tab.savedURL != nil {
+            logReload(tab, tab.savedURL, tab.letGoWhy.map { "shown again after its page was let go in the background (\($0))" } ?? "its tab restored as the app started")
+            tab.letGoWhy = nil
+        }
         if let state = tab.savedState { tab.webView.interactionState = state }
         else if let u = tab.savedURL { tab.webView.load(URLRequest(url: u)) }
         tab.savedState = nil
@@ -373,6 +385,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         tab.webView.stopLoading()
         tabs.remove(at: i)
         TabShots.shared.remove(tab.id)
+        tab.video = nil
+        VideoStore.shared.set(tab.id, nil)
         setFullScreen(false, tab: tab, note: false)
         if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
         if tab === current { select(tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
@@ -421,20 +435,104 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// The scripts every page gets at its start. Put in again whenever the hide rules change: the rules are
     /// part of the start script's own text, so a page never waits for them.
-    func installScripts() {
+    /// (development, the `rebuild` step) how long the last swap took on the main thread, in ms, and its parts.
+    var lastInstallMs: [String: Int] = [:]
+    /// The scripts every page gets whatever the mods: made again only when the hide rules change.
+    private var baseScripts: (rules: String, list: [WKUserScript])?
+    private func base() -> [WKUserScript] {
+        let rules = report.rulesJSON()
+        if let b = baseScripts, b.rules == rules { return b.list }
+        let start = { (s: String, w: WKContentWorld) in WKUserScript(source: s, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: w) }
+        let list = [
+            start(Diagnostics.stallWatch, Browser.trifWorld),
+            start(BackgroundPlay.watch, Browser.trifWorld),
+            start(VideoResume.watch, Browser.trifWorld),
+            start(Browser.resource("kit", "js"), Browser.trifWorld),
+            start(Browser.resource("start-own", "js") + "(\(rules));", Browser.trifWorld),
+            start(Browser.resource("start-page", "js"), .page),
+        ]
+        baseScripts = (rules, list)
+        return list
+    }
+    /// Puts in the scripts every page gets at its start (TRIF's own, then the mods'), in place of those there.
+    private func swapScripts(_ modScripts: [WKUserScript]) {
+        let t0 = Date()
         let ucc = config.userContentController
         ucc.removeAllUserScripts()
         // (development) `-bare`: nothing of the app's in any page, to measure a page without it
         if ProcessInfo.processInfo.arguments.contains("-bare") { return }
-        ucc.addUserScript(WKUserScript(source: Diagnostics.stallWatch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
-        ucc.addUserScript(WKUserScript(source: BackgroundPlay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
-        let kit = Browser.resource("kit", "js")
-        let startOwn = Browser.resource("start-own", "js") + "(\(report.rulesJSON()));"
-        let startPage = Browser.resource("start-page", "js")
-        ucc.addUserScript(WKUserScript(source: kit, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
-        ucc.addUserScript(WKUserScript(source: startOwn, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
-        ucc.addUserScript(WKUserScript(source: startPage, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
-        for script in mods.userScripts() { ucc.addUserScript(script) }
+        let all = base() + modScripts
+        for s in all { ucc.addUserScript(s) }
+        lastInstallMs["swap"] = Int(Date().timeIntervalSince(t0) * 1000)
+        lastInstallMs["scripts"] = all.count
+    }
+
+    /// The scripts every page gets at its start, made and put in now, on the main thread (the app's start, the hide
+    /// rules changed). A change to the mods goes through `rebuildScripts` instead.
+    func installScripts() {
+        let t0 = Date()
+        let list = mods.userScripts()
+        lastInstallMs = ["build": Int(Date().timeIntervalSince(t0) * 1000)]
+        swapScripts(list)
+        swappedShape = nil
+    }
+
+    /// After a change to the mods (Tim, 11-18: main-thread hangs after "making the pages' scripts again"): the mods'
+    /// scripts made again with several changes in a row taken as one, the texts of new or changed mods built off the
+    /// main thread (unchanged mods' scripts kept as they were made), then swapped in on the main thread; `then` once
+    /// they're in. A change while one is being built builds again after it.
+    private var rebuildTask: Task<Void, Never>?
+    /// The mods' scripts in now (ModStore.ScriptPlan.shape + the hide rules); nil after a swap made otherwise.
+    private var swappedShape: String?
+    private var rebuildAgain = false
+    private var afterRebuild: [() -> Void] = []
+    private var rebuildWaiters: [CheckedContinuation<Void, Never>] = []
+    /// A change to the mods isn't in the pages' scripts yet.
+    var scriptsPending: Bool { rebuildTask != nil }
+    func rebuildScripts(then: (() -> Void)? = nil) {
+        if let then { afterRebuild.append(then) }
+        if rebuildTask != nil { rebuildAgain = true; return }
+        rebuildTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var rounds = 0, built = 0, mainMs = 0
+            let t0 = Date()
+            repeat {
+                rebuildAgain = false
+                rounds += 1
+                // (changes made in the same moment: one build)
+                await Task.yield()
+                let m0 = Date()
+                let plan = mods.scriptPlan(), have = mods.builtKeys
+                mainMs += Int(Date().timeIntervalSince(m0) * 1000)
+                let fresh = await Task.detached(priority: .userInitiated) { ModStore.build(plan, have: have) }.value
+                if rebuildAgain { continue }
+                built = fresh.count
+                let m1 = Date()
+                // (what runs is what's in already (a switch that didn't change the scripts): nothing to put in)
+                let shape = plan.shape + "|" + report.rulesJSON()
+                if shape == swappedShape { lastInstallMs = ["same": 1]; mainMs += Int(Date().timeIntervalSince(m1) * 1000); continue }
+                let list = mods.userScripts(from: plan, fresh: fresh)
+                lastInstallMs = ["build": Int(Date().timeIntervalSince(m1) * 1000)]
+                swapScripts(list)
+                swappedShape = shape
+                mainMs += Int(Date().timeIntervalSince(m1) * 1000)
+            } while rebuildAgain
+            let total = Int(Date().timeIntervalSince(t0) * 1000)
+            lastInstallMs["main"] = mainMs; lastInstallMs["total"] = total; lastInstallMs["rounds"] = rounds; lastInstallMs["built"] = built
+            if mainMs >= 50 || total >= 1000 {
+                Diagnostics.shared.log("mods", "the pages' scripts made again: \(mainMs) ms on the main thread, \(total) ms in all, \(rounds) round(s), \(built) mod(s) built")
+            }
+            rebuildTask = nil
+            let after = afterRebuild; afterRebuild = []
+            for f in after { f() }
+            let waiters = rebuildWaiters; rebuildWaiters = []
+            for w in waiters { w.resume() }
+        }
+    }
+    /// Returns once the pages' scripts are the mods' as they are now (the rebuild is done and swapped in).
+    func scriptsInstalled() async {
+        guard rebuildTask != nil else { return }
+        await withCheckedContinuation { rebuildWaiters.append($0) }
     }
 
     // MARK: whole mods
@@ -448,7 +546,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         hideChat += 1
         let added = mods.add(m, source: source)
         report.log("mods", "added \(added.tierName.lowercased()) \(added.id) (\(source))\(added.held ? ", waiting for an OK" : "")")
-        modsChanged()
+        modsChanged(why: "\(added.id) added (\(source))")
         if added.held {
             status = "\(added.name) waits for your OK."
             // (the approval card over the page instead of the chat: what there is to do now; after Allow, or Don't
@@ -470,27 +568,32 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// while it plays sound or video; tabs behind load again when they're next shown (Tim, 11-18: "when you
     /// successfully add the mod to the other tab, your tab reloads. That's quite annoying for watching videos").
     /// `playing`: the shown page loads again even if it plays (Pause all mods: the person's own act on it).
-    func modsChanged(reload again: Bool = true, playing: Bool = false) {
+    func modsChanged(reload again: Bool = true, playing: Bool = false, why: String = "the mods changed") {
         Diagnostics.shared.mark("making the pages' scripts again after a change to the mods")
-        installScripts()
-        if again, let t = current { refreshIfStale(t, "the mods changed", evenPlaying: playing) }
-        noteRunning()
+        rebuildScripts { [weak self] in
+            guard let self else { return }
+            // (so a hang later isn't put down to this)
+            Diagnostics.shared.mark("the pages' scripts made again after a change to the mods")
+            if again, let t = self.current { self.refreshIfStale(t, why, evenPlaying: playing) }
+            self.noteRunning()
+        }
     }
 
     /// `tab` shown: loaded again if the mods running on its page are no longer the ones it loaded with, unless it's
     /// playing (then it keeps going as it is, and loads again the next time it's shown not playing).
     func refreshIfStale(_ tab: Tab, _ why: String, evenPlaying: Bool = false) {
-        guard tab.started, tab.webView.url != nil, let seen = tab.modsLoaded, mods.signature(seen.url) != seen.signature else { return }
+        // (a change not in the scripts yet: looked at once it is)
+        if scriptsPending { afterRebuild.append { [weak self, weak tab] in if let self, let tab, tab === self.current { self.refreshIfStale(tab, why, evenPlaying: evenPlaying) } }; return }
+        guard tab.started, tab.webView.url != nil, tab.reloadCause == nil, let seen = tab.modsLoaded, mods.signature(seen.url) != seen.signature else { return }
         Task { @MainActor [weak self, weak tab] in
             guard let self, let tab else { return }
             if !evenPlaying, await Browser.playing(tab) {
                 Diagnostics.shared.log("mods", "\(Diagnostics.place(tab.webView.url)): its mods changed (\(why)) but it's playing, so not loaded again now")
                 return
             }
-            guard tab === self.current, let seen = tab.modsLoaded, self.mods.signature(seen.url) != seen.signature else { return }
-            Diagnostics.shared.log("mods", "\(Diagnostics.place(tab.webView.url)) loaded again: its mods changed (\(why))")
+            guard tab === self.current, tab.reloadCause == nil, !self.scriptsPending, let seen = tab.modsLoaded, self.mods.signature(seen.url) != seen.signature else { return }
             self.keepStatus = true
-            tab.webView.reload()
+            self.reload(tab, "its mods changed: \(why)")
         }
     }
 
@@ -499,14 +602,14 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func syncApplied(_ ids: [String]) {
         // (the shown page reloads only if what runs on it changed: refreshIfStale)
         Diagnostics.shared.mark("synced: \(ids.count) mod(s) changed")
-        modsChanged()
+        modsChanged(why: "phone sync changed \(ids.count) mod(s)")
     }
 
     /// Pause all mods, or resume them: every page loads again without (or with) them.
     func pauseAll(_ p: Bool) {
         if mods.paused != p { mods.setPaused(p) }
         // (the shown page loads again without (or with) them; tabs behind when they're next shown, unless playing then)
-        modsChanged(playing: true)
+        modsChanged(playing: true, why: p ? "Pause all mods" : "mods resumed")
     }
 
     /// Which mods are running in the tabs, by site, for safe mode (Safety.running).
@@ -524,7 +627,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func approveMod(_ id: String) {
         mods.approve(id)
         report.log("mods", "allowed \(id)")
-        modsChanged()
+        modsChanged(why: "\(id) allowed")
     }
 
     // MARK: running JavaScript
@@ -569,7 +672,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
-    static func jsonText(_ value: Any) -> String {
+    nonisolated static func jsonText(_ value: Any) -> String {
         guard JSONSerialization.isValidJSONObject(value) || value is String || value is NSNumber || value is NSNull,
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return "null" }
@@ -606,7 +709,21 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return URL(string: (local ? "http://" : "https://") + entry)
     }
 
-    func reload() { webView.reload() }
+    /// The shown tab loaded again: `cause` says who asked (the Diagnostics "reload" line).
+    func reload(_ cause: String) { if let t = current { reload(t, cause) } }
+    /// A tab's page loaded again by the app, with why (Tim, 11-18: "Various things keep reloading my YouTube window. I'd
+    /// like to track them all down"): every reload of a tab is a Diagnostics line "reload <host>: <cause>" (logged as
+    /// WebKit starts it, decidePolicy). Its video picks up where it was (VideoResume).
+    func reload(_ tab: Tab, _ cause: String) {
+        tab.reloadCause = cause
+        logReload(tab, tab.webView.url, cause)
+        tab.webView.reload()
+    }
+    /// When iOS last warned of low memory (for the reload lines of pages it ended).
+    private var lastMemoryWarning: Date?
+    private func logReload(_ tab: Tab?, _ url: URL?, _ cause: String) {
+        Diagnostics.shared.log("reload", "reload \(url?.host ?? "a page"): \(cause)\(tab.map { $0 === current ? "" : " (a tab behind)" } ?? "")")
+    }
 
     // MARK: desktop websites
 
@@ -636,7 +753,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if on { desktopHosts.insert(key) } else { desktopHosts.remove(key) }
         UserDefaults.standard.set(desktopHosts.sorted(), forKey: "desktopHosts")
         Diagnostics.shared.log("desktop", "\(on ? "desktop" : "mobile") website for \(key) (\(desktopHosts.count) desktop sites)")
-        webView.reload()
+        reload(on ? "Request Desktop Website" : "Request Mobile Website")
     }
     func back() { webView.goBack() }
     func forward() { webView.goForward() }
@@ -1170,6 +1287,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             Diagnostics.shared.log("busy", "\(Diagnostics.place(url)): its main thread was busy \(busy)% of the last 10 s (longest stall \(longest) ms), \((body["elements"] as? NSNumber)?.intValue ?? 0) elements, \(running.map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
             safety.busy(site: Site.of(url?.host ?? ""), percent: busy, mods: running)
             return (["ok": true], nil)
+        case "videoplan", "videostate", "videoplay", "videoapplied", "videoresumed":
+            return await videoMessage(type, body, message.webView)
         case "modlog":
             // (a free mod's start, its window.trif.log/warn/error lines and its errors: modfile.js freeRelay, which caps
             // them; told by the page's world, so cut again here and kept to what the mod passed)
@@ -1264,6 +1383,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// (with the page's preferences: Request Desktop Website's sites load in WebKit's desktop mode, below)
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
         let policy = await decidePolicy(webView, navigationAction)
+        if policy == .allow, navigationAction.targetFrame?.isMainFrame ?? true, navigationAction.navigationType == .reload {
+            let t = tab(of: webView)
+            // (none of the app's (those say theirs as they ask, `reload`): the page's own location.reload(), or WebKit's own)
+            if t?.reloadCause == nil { logReload(t, navigationAction.request.url ?? webView.url, "the page reloaded itself (location.reload or a refresh)") }
+        }
         // (only the page itself: a frame inside it follows the page's mode. A new window's first load comes with no frame)
         if policy == .allow, navigationAction.targetFrame?.isMainFrame ?? true, let url = navigationAction.request.url,
            ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
@@ -1349,17 +1473,19 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             webView.customUserAgent = set
             Diagnostics.shared.log("desktop", "\(Diagnostics.place(url)) came back as \(want ? "a phone's" : "a computer's") page: its agent put again, loaded again")
             self.report.log("desktop", "agent fixed: \(Diagnostics.place(url))")
-            webView.reload()
+            self.reload(tab, "desktop mode: back/forward brought the page back in the other mode's agent")
         }
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         tab(of: webView)?.url = webView.url
+        tab(of: webView)?.reloadCause = nil
         appLinkNewLoad(webView)
         // (a new page: not drawn until it has finished, or a while has passed; its tab keeps the picture it had)
         if let t = tab(of: webView) { t.committedAt = Date(); t.finishedAt = nil }
         if let t = tab(of: webView) { checkAgent(t, webView) }
-        if let t = tab(of: webView), let u = webView.url?.absoluteString { t.modsLoaded = (u, mods.signature(u)) }
+        // (a change to the mods not in the scripts yet: this page has the old ones, so it counts as stale)
+        if let t = tab(of: webView), let u = webView.url?.absoluteString { t.modsLoaded = (u, scriptsPending ? "pending" : mods.signature(u)) }
         guard webView === self.webView else { return }
         address = webView.url?.absoluteString ?? ""
         canGoBack = webView.canGoBack
@@ -1399,6 +1525,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// already be under way, so not simply false); real failures (offline, an unknown host, a certificate) show.
     private func failed(_ webView: WKWebView, _ error: Error) {
         tab(of: webView)?.loading = webView.isLoading
+        if !webView.isLoading { tab(of: webView)?.reloadCause = nil }
         guard webView === self.webView else { return }
         loading = webView.isLoading
         if !Browser.stoppedNotFailed(error) { status = error.localizedDescription }
@@ -1435,7 +1562,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         safety.ended(site: Site.of(url?.host ?? ""), mods: mods.running(on: url?.absoluteString ?? ""))
         // (a black page until it's loaded again: never pictured)
         if let t = tab(of: webView) { t.committedAt = nil; t.finishedAt = nil }
-        if url != nil { webView.reload() }
+        let warned = lastMemoryWarning.map { " a memory warning \(Int(Date().timeIntervalSince($0))) s before," } ?? ""
+        let cause = "WebKit ended its page's process (\(Diagnostics.freeMB()) MB left for the app,\(warned) \(tabs.filter { $0.started && $0.webView.url != nil }.count) tabs with pages)"
+        // (a tab behind isn't loaded again now, as Safari's isn't: its page loads when it's shown, its video picked up
+        // there. Before 11-18 it loaded at once, unseen, into the memory that had just run out, and the video in it
+        // stayed paused anyway: WebKit doesn't load media for a page that isn't on the screen)
+        if url != nil, let t = tab(of: webView), t !== current {
+            letGo[t.id]?.cancel(); letGo[t.id] = nil
+            discard(t, cause)
+            return
+        }
+        if url != nil { if let t = tab(of: webView) { reload(t, cause) } else { webView.reload() } }
     }
 
     func webViewDidClose(_ webView: WKWebView) {
@@ -1537,6 +1674,64 @@ struct WebViewHost: UIViewRepresentable {
     let webView: WKWebView
     func makeUIView(context: Context) -> WKWebView { webView }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
+extension Browser {
+    /// The page's video messages (VideoResume.watch). Its state is kept in the tab (and on disk); the plan is the
+    /// saved state if VideoResume.decide says this load picks it up. A back/forward that loaded its page again (not
+    /// from WebKit's page memory) is a reload line too.
+    func videoMessage(_ type: String, _ body: [String: Any], _ webView: WKWebView?) async -> (Any?, String?) {
+        guard let webView, let tab = tabs.first(where: { $0.webView === webView }) else { return (["ok": false], nil) }
+        let host = webView.url?.host ?? "a page"
+        switch type {
+        case "videoplan":
+            let address = body["url"] as? String ?? webView.url?.absoluteString ?? ""
+            if body["nav"] as? String == "back_forward" { Diagnostics.shared.log("reload", "reload \(host): back/forward (its page loaded again, not kept by WebKit)\(tab === current ? "" : " (a tab behind)")") }
+            let d = VideoResume.decide(saved: tab.video, address: address)
+            if tab.video != nil { report.log("video", "\(host): \(d.why)") }
+            guard let plan = d.plan else { return (["plan": NSNull()], nil) }
+            return (["plan": VideoResume.planObject(plan, address: address)], nil)
+        case "videostate":
+            guard let st = VideoResume.state(from: body) else { return (["ok": false], nil) }
+            tab.video = st
+            VideoStore.shared.set(tab.id, st)
+            return (["ok": true], nil)
+        case "videoapplied":
+            let t = (body["time"] as? NSNumber)?.doubleValue ?? 0
+            Diagnostics.shared.log("video", "resumed a video at \(VideoResume.clock(t)) on \(host)")
+            return (["ok": true], nil)
+        case "videoplay":
+            // (the app's own play: counts as the person's, so sound is allowed where the page's own play isn't)
+            let r = await Browser.within(3, "no answer") { () -> String in
+                let v = try? await webView.callAsyncJavaScript(VideoResume.play, arguments: ["forceMuted": ProcessInfo.processInfo.arguments.contains("-resumemuted")], in: nil, contentWorld: Browser.trifWorld)
+                return v.map { "\($0)" } ?? "no answer"
+            }
+            report.log("video", "\(host): play after resuming: \(r)")
+            if r == "muted", tab === current {
+                status = Browser.tapForSound
+                soundTab = tab
+            }
+            return (["ok": true, "played": r], nil)
+        case "videoresumed":
+            report.log("video", "\(host): \(body["why"] as? String ?? "?"), put back \((body["applied"] as? NSNumber)?.intValue ?? 0) time(s), now at \((body["now"] as? NSNumber)?.doubleValue ?? -1)")
+            return (["ok": true], nil)
+        default:
+            return (nil, "unknown message")
+        }
+    }
+    /// The note when a video picked up where it was but iOS let it play only muted (draft wording).
+    static let tapForSound = "Tap for sound"
+    /// The note's tap: the video's sound on (the person's tap: allowed).
+    func soundOn() {
+        guard let t = soundTab else { return }
+        soundTab = nil
+        status = ""
+        let wv = t.webView
+        Task { @MainActor in
+            let r = try? await wv.callAsyncJavaScript(VideoResume.unmute, arguments: [:], in: nil, contentWorld: Browser.trifWorld)
+            self.report.log("video", "Tap for sound: \(r.map { "\($0)" } ?? "no answer")")
+        }
+    }
 }
 
 /// Sound and video go on with the app in the background or the phone locked (Tim, 11-16: YouTube with his
@@ -1789,6 +1984,34 @@ extension Model {
         browser.close(t)
         browser.select(before)
         return lines.joined(separator: "\n")
+    }
+
+    /// (development, {"rebuild": …}) The pages' scripts made again n times in a row, as n quick changes to the mods
+    /// (the Mods tab's switches) make them: each call's time on the main thread, how long until the last is in,
+    /// and the main thread's hangs meanwhile (Tim, 11-18: 14.5 s, 2.9 s… "making the pages' scripts again").
+    static func rebuildCheck(browser: Browser, n: Int, allOn: Bool) async -> String {
+        if allOn { for m in browser.mods.mods where !m.on { browser.mods.setOn(m.id, true, site: nil) } }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let h0 = Diagnostics.hangs.now
+        var calls: [Int] = []
+        let t0 = Date()
+        // (each change a real one: a mod switched off, then on again, as the Mods tab's switch does)
+        let first = browser.mods.mods.first
+        for i in 0..<n {
+            let c = Date()
+            if let f = first { browser.mods.setOn(f.id, i % 2 == 1, site: nil) }
+            browser.modsChanged(reload: false)
+            calls.append(Int(Date().timeIntervalSince(c) * 1000))
+            await Task.yield()
+        }
+        await browser.scriptsInstalled()
+        let total = Int(Date().timeIntervalSince(t0) * 1000)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let h1 = Diagnostics.hangs.now
+        let sizes = browser.mods.mods.map { $0.script.utf8.count + $0.styleScript.utf8.count }
+        return "\(browser.mods.mods.count) mods (\(browser.mods.mods.filter(\.on).count) on; \(sizes.reduce(0, +) / 1024) KB of scripts), \(browser.tabs.count) tabs\n" +
+            "calls (ms on the main thread): \(calls)\nall in after \(total) ms; last install: \(browser.lastInstallMs)\n" +
+            "hangs meanwhile: \(h1.count - h0.count), \(h1.totalMs - h0.totalMs) ms"
     }
 
     /// (development, {"playing": 1}) Each tab: shown (*), let go or not, and WebKit's playback state.

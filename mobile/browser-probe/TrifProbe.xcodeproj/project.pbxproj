@@ -45,6 +45,7 @@
 		A1C10B0E5EB1C11B00000032 /* ChatOffers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000033 /* ChatOffers.swift */; };
 		A1C10B0E5EB1C11B00000034 /* QuickAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000035 /* QuickAsk.swift */; };
 		A1C10B0E5EB1C11B00000036 /* LeavingCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */; };
+		A1C10B0E5EB1C11B0000003E /* VideoResume.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003F /* VideoResume.swift */; };
 		A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000039 /* AppLinks.swift */; };
 		A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003B /* SpeechText.swift */; };
 		A1C10B0E5EB1C11B0000003C /* SpeechInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */; };
@@ -106,6 +107,7 @@
 		A1C10B0E5EB1C11B00000033 /* ChatOffers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ChatOffers.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000035 /* QuickAsk.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "QuickAsk.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LeavingCover.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B0000003F /* VideoResume.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "VideoResume.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000039 /* AppLinks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AppLinks.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000003B /* SpeechText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SpeechText.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SpeechInput.swift"; sourceTree = "<group>"; };
@@ -244,6 +246,7 @@
 				A1C10B0E5EB1C11B00000033 /* ChatOffers.swift */,
 				A1C10B0E5EB1C11B00000035 /* QuickAsk.swift */,
 				A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */,
+				A1C10B0E5EB1C11B0000003F /* VideoResume.swift */,
 				A1C10B0E5EB1C11B00000039 /* AppLinks.swift */,
 				A1C10B0E5EB1C11B0000003B /* SpeechText.swift */,
 				A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */,
@@ -372,6 +375,7 @@
 				A1C10B0E5EB1C11B00000032 /* ChatOffers.swift in Sources */,
 				A1C10B0E5EB1C11B00000034 /* QuickAsk.swift in Sources */,
 				A1C10B0E5EB1C11B00000036 /* LeavingCover.swift in Sources */,
+				A1C10B0E5EB1C11B0000003E /* VideoResume.swift in Sources */,
 				A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */,
 				A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */,
 				A1C10B0E5EB1C11B0000003C /* SpeechInput.swift in Sources */,

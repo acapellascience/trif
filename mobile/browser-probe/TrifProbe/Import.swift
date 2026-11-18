@@ -39,6 +39,9 @@ enum ModFiles {
     /// Goes through files, folders and zip archives (at most `limit` bytes read in all: a mod is small, a browser's
     /// history export can be some megabytes).
     static func collect(_ urls: [URL], limit: Int = 64 * 1024 * 1024) -> Found {
+        // (TRIF's own heavy job: a crash in it isn't blamed on the pages' mods)
+        let job = HeavyJob.begin("importing files")
+        defer { HeavyJob.end(job) }
         var found = Found()
         var budget = limit
         func take(name: String, data: Data) {

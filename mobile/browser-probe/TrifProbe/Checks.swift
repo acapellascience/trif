@@ -148,7 +148,7 @@ struct Checks {
         """
         let before = await browser.call(ask, in: Browser.trifWorld)
         ucc.add(list)
-        browser.reload()
+        browser.reload("the probe's checks")
         await browser.waitForLoad()
         let after = await browser.call(ask, in: Browser.trifWorld)
         ucc.remove(list)
@@ -160,7 +160,7 @@ struct Checks {
         let detail: [String: Any] = ["before": beforeValue, "withTheRules": afterValue]
         let answer = hidden && blocked ? "yes" : (hidden || blocked ? "some" : "no")
         out.append(result("blocker.works", "The content blocker", "A rule list hides an element and blocks a request, with no script", answer, detail, started))
-        browser.reload()
+        browser.reload("the probe's checks")
         await browser.waitForLoad()
         return out
     }

@@ -333,6 +333,21 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
         let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
         let host = downloadTask.response?.url?.host ?? "?"
         MainActor.assumeIsolated {
+            // (a refusal's body (403, 404, a 5xx page) isn't the model coming in: said as a failure once, the task
+            // stopped, never logged as progress or "100% (0 MB of 0 MB)" as on Tim's phone, 11-18)
+            if status >= 300 {
+                guard self.tasks[id] === downloadTask else { return }
+                let why = "the server answered \(status)"
+                self.cancelling.insert(id)
+                downloadTask.cancel()
+                self.tasks[id] = nil
+                self.progress[id] = nil
+                self.keepResume(id, nil)
+                self.states[id] = .failed(why)
+                self.ended(id, ok: false, why: why)
+                self.log("\(self.name(id)): the download failed: \(why) (from \(host)); stopped, nothing kept")
+                return
+            }
             let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (LocalModels.named(id)?.size ?? 1)
             var pr = self.progress[id] ?? Progress(total: total)
             if pr.stallTold { self.log("\(self.name(id)): coming in again after a stall") }
@@ -387,6 +402,8 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
         var moveError: Error?
         do { try FileManager.default.moveItem(at: location, to: staging) } catch { moveError = error }
         MainActor.assumeIsolated {
+            // (already said as a failure as it came in: a refusal's body, didWriteData)
+            if self.cancelling.contains(id) { try? FileManager.default.removeItem(at: staging); return }
             self.tasks[id] = nil
             if let moveError {
                 let why = LocalModels.why(moveError) == moveError.localizedDescription ? "the download couldn't be kept" : LocalModels.why(moveError)
@@ -400,9 +417,17 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
             self.states[id] = .checking
             self.log("\(m.name): downloaded; checking its SHA-256")
             let target = self.file(m)
+            // (TRIF's own heavy job: a crash in it isn't blamed on the pages' mods, Safety's HeavyJob)
+            let job = HeavyJob.begin("checking the download of \(m.name)")
+            // (a low priority, and as the hash reads it: one 2 MB piece at a time, out of iOS's file cache. .background
+            // throttled the reading to ~35 MB/s in the Simulator (80 s for this model); .utility ~240 MB/s, memory flat)
             Task.detached(priority: .utility) {
+                let t0 = Date()
                 let ok = LocalModels.sha256(of: staging) == m.sha256
+                let secs = Date().timeIntervalSince(t0)
+                HeavyJob.end(job)
                 await MainActor.run {
+                    self.log("\(m.name): checked in \(Int(secs)) s (\(Diagnostics.freeMB()) MB of memory left)")
                     if ok {
                         try? FileManager.default.removeItem(at: target)
                         try? FileManager.default.moveItem(at: staging, to: target)
@@ -455,11 +480,27 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
         }
     }
 
-    nonisolated static func sha256(of url: URL) -> String {
-        guard let h = try? FileHandle(forReadingFrom: url) else { return "" }
-        defer { try? h.close() }
+    /// A file's SHA-256, read in 2 MB pieces into ONE buffer that's used again (Tim's SE, 11-18: the 2.74 GB Qwen3.5 4B
+    /// check took the phone's memory from 954 MB to 409 MB free in 5 s, froze the whole phone and the app was killed:
+    /// FileHandle.read(upToCount:)'s pieces were autoreleased, and none was let go until the whole file had been read).
+    /// Plain read(2) into the buffer holds one piece at a time and nothing else; F_NOCACHE keeps the file out of iOS's
+    /// file cache (2.7 GB of cached pages pressed on everything else too); a short pause between pieces leaves the disk
+    /// and the processor to the rest of the phone. Call it at a low priority, off the main thread. "" if it can't be read.
+    nonisolated static func sha256(of url: URL, chunk: Int = 2 << 20, pauseMicroseconds: UInt32 = 1000) -> String {
+        let fd = open(url.path, O_RDONLY)
+        guard fd >= 0 else { return "" }
+        defer { close(fd) }
+        _ = fcntl(fd, F_NOCACHE, 1)
         var hasher = SHA256()
-        while let chunk = try? h.read(upToCount: 8 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: chunk, alignment: 16)
+        defer { buffer.deallocate() }
+        while true {
+            let n = read(fd, buffer, chunk)
+            if n < 0 { if errno == EINTR { continue }; return "" }
+            if n == 0 { break }
+            hasher.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: n))
+            if pauseMicroseconds > 0 { usleep(pauseMicroseconds) }
+        }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
@@ -583,7 +624,7 @@ final class LocalRunner: @unchecked Sendable {
             guard self.loadedKey != key else { return }
             self.llama = nil
             let t0 = Date()
-            if let l = try? LocalLlama(path: path, nCtx: LocalModels.contextTokens, threads: threads, batch: batch, gpu: gpu) {
+            if let l = try? HeavyJob.run("loading the model on this iPhone", { try LocalLlama(path: path, nCtx: LocalModels.contextTokens, threads: threads, batch: batch, gpu: gpu) }) {
                 self.llama = l
                 self.loadedKey = key
                 let ms = Int(Date().timeIntervalSince(t0) * 1000)
@@ -605,6 +646,9 @@ final class LocalRunner: @unchecked Sendable {
             try await withCheckedThrowingContinuation { c in
                 queue.async {
                     #if canImport(llama)
+                    // (TRIF's own heavy job: a crash in it isn't blamed on the pages' mods)
+                    let job = HeavyJob.begin("running the model on this iPhone")
+                    defer { HeavyJob.end(job) }
                     do {
                         var loaded = "kept loaded"
                         if self.llama == nil || self.loadedKey != key {
@@ -684,4 +728,40 @@ final class LocalConversation: PanelConversation {
         return PanelStep(text: reply, calls: [], stop: "done", inputTokens: 0)
     }
     func addResults(_ results: [PanelToolResult]) {}
+}
+
+
+extension Model {
+    /// (development, the `hashtest` step) The memory a model's check takes (Tim, 11-18: the 2.74 GB model's check
+    /// took ~1.1 GB in 5 s and the phone froze).
+    static func hashTest(_ url: URL, old: Bool) async -> String {
+        func footprintMB() -> Int {
+            var info = task_vm_info_data_t()
+            var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+            let r = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) } }
+            return r == KERN_SUCCESS ? Int(info.phys_footprint / 1_048_576) : -1
+        }
+        let start = footprintMB()
+        let peak = OnceFlag()
+        var most = start
+        let t0 = Date()
+        let job = Task.detached(priority: .utility) { () -> String in
+            if old {
+                guard let h = try? FileHandle(forReadingFrom: url) else { return "" }
+                defer { try? h.close() }
+                var hasher = SHA256()
+                while let chunk = try? h.read(upToCount: 8 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+                return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            }
+            return HeavyJob.run("checking a test file (the hashtest step)") { LocalModels.sha256(of: url) }
+        }
+        let sampler = Task { @MainActor in
+            while !peak.done { most = max(most, footprintMB()); try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        let hash = await job.value
+        peak.done = true
+        _ = await sampler.value
+        let size = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0) / 1_048_576
+        return "\(old ? "old reading" : "now"): \(size) MB hashed in \(String(format: "%.1f", Date().timeIntervalSince(t0))) s; footprint \(start) MB at the start, \(most) MB at most (+\(most - start)), \(footprintMB()) MB at the end; \(hash.prefix(12))"
+    }
 }

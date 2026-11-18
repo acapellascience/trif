@@ -93,7 +93,7 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         let store = browser.mods
         let mod = store.mods.first { $0.id == id }
         func done(_ again: Bool = true) async -> (Any?, String?) {
-            if again { browser.modsChanged() }
+            if again { browser.modsChanged(why: "the Mods tab: \(type) \(id)") }
             await refresh()
             return (["ok": true], nil)
         }

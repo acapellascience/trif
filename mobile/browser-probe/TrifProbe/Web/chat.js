@@ -281,17 +281,34 @@
       said.push('so as text');
     }
     if (text) {
-      const dt = new DataTransfer();
-      dt.setData('text/plain', text);
       const box = editor() || ed;
+      // (text already in the box (the page's details typed in where the page takes no file, as ChatGPT's): this goes
+      // after it, a blank line between, never run into its start: 11-18, the quick ask's "thanks a lot" went in
+      // before "I'm looking at…" with no space on the ChatGPT stand-in, the caret at the box's start)
+      // (textContent, not innerText: innerText ends every box with a line break of its own)
+      const had = box.localName === 'textarea' ? box.value : (box.textContent || '');
+      const lastEmpty = box.localName !== 'textarea' && box.lastElementChild && !box.lastElementChild.textContent.trim();
+      const sep = had.trim() && !lastEmpty && !/\s$/.test(had) ? '\n\n' : '';
+      const dt = new DataTransfer();
+      dt.setData('text/plain', sep + text);
       inBox(box, () => {
+        if (box.localName !== 'textarea') {
+          try { const r = document.createRange(); r.selectNodeContents(box); r.collapse(false); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch (e) { /* as it is */ }
+        }
         if (paste(box, dt)) said.push('text pasted');
         else {
-          if (box.localName === 'textarea') { box.value += text; box.dispatchEvent(new Event('input', { bubbles: true })); }
-          else document.execCommand('insertText', false, text);
+          if (box.localName === 'textarea') { box.value += sep + text; box.dispatchEvent(new Event('input', { bubbles: true })); }
+          else document.execCommand('insertText', false, sep + text);
           said.push('text typed');
         }
       });
+      if (sep) {
+        said.push('after the text there');
+        // (the box's end in view, where it went: the quick ask's strip shows the box as it's scrolled)
+        for (let el = box; el && el !== document.body; el = el.parentElement) {
+          if (el.scrollHeight > el.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(el).overflowY)) { el.scrollTop = el.scrollHeight; break; }
+        }
+      }
     }
     return said.join(', ') || 'nothing';
   }
@@ -776,7 +793,9 @@
     if (ed.localName === 'textarea') {
       const i = ed.value.lastIndexOf(t);
       if (i < 0) return 'not there';
-      ed.value = ed.value.slice(0, i) + ed.value.slice(i + t.length);
+      // (with the blank line fill put before it, when it was the last thing there)
+      const rest = ed.value.slice(i + t.length);
+      ed.value = (rest.trim() ? ed.value.slice(0, i) : ed.value.slice(0, i).replace(/\n\n$/, '')) + rest;
       ed.dispatchEvent(new Event('input', { bubbles: true }));
       ed.blur();
       return 'taken out';

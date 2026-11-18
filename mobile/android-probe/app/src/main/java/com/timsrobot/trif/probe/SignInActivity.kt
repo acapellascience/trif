@@ -3,6 +3,7 @@ package com.timsrobot.trif.probe
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Message
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -45,6 +46,10 @@ class SignInActivity : Activity() {
     private lateinit var defaultUa: String
     private var defaultMeta: UserAgentMetadata? = null
     private lateinit var log: File
+    private lateinit var stack: FrameLayout
+    // sign-in popups ("Continue with Google" opens one; its last page, accounts.google.com/gsi/transform, hands the
+    // sign-in back to the page that opened it, so it needs a real window with an opener, as in a browser)
+    private val popups = mutableListOf<WebView>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,10 +61,10 @@ class SignInActivity : Activity() {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) defaultMeta = WebSettingsCompat.getUserAgentMetadata(web.settings)
         root.addView(row(variants.mapIndexed { i, v -> v to { variant = i; applyUa(web); pane?.let { applyUa(it) }; show() } }))
         root.addView(row(steps.mapIndexed { i, s -> "${s.first} ${s.second}" to { step = i; open(i) } }))
-        root.addView(row(listOf("PASS" to { record("PASS") }, "FAIL" to { record("FAIL") }, "back" to { if (web.canGoBack()) web.goBack() },
+        root.addView(row(listOf("PASS" to { record("PASS") }, "FAIL" to { record("FAIL") }, "back" to { popups.lastOrNull()?.let { p -> if (p.canGoBack()) p.goBack() else { popups.remove(p); stack.removeView(p); p.destroy(); note("popup closed by back") } } ?: run { if (web.canGoBack()) web.goBack() } },
             "clear cookies" to { CookieManager.getInstance().removeAllCookies(null); record("cookies cleared") })))
         root.addView(status)
-        val stack = FrameLayout(this)
+        stack = FrameLayout(this)
         stack.addView(web, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(stack, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         setContentView(root)
@@ -68,12 +73,28 @@ class SignInActivity : Activity() {
         record("started; webview ${web.settings.userAgentString}")
     }
 
-    private fun newWebView() = WebView(this).apply {
+    private fun newWebView(): WebView = WebView(this).apply {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
-        settings.setSupportMultipleWindows(false)
+        settings.setSupportMultipleWindows(true)
+        settings.javaScriptCanOpenWindowsAutomatically = true
         webViewClient = object : WebViewClient() { override fun onPageFinished(view: WebView, url: String) = show() }
-        webChromeClient = WebChromeClient()
+        webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+                val child = newWebView(); applyUa(child)
+                popups.add(child)
+                stack.addView(child, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+                (resultMsg.obj as WebView.WebViewTransport).webView = child
+                resultMsg.sendToTarget()
+                note("popup opened")
+                return true
+            }
+            override fun onCloseWindow(window: WebView) {
+                popups.remove(window); stack.removeView(window); window.destroy()
+                note("popup closed")
+                show()
+            }
+        }
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
     }
 
@@ -103,6 +124,7 @@ class SignInActivity : Activity() {
     }
 
     private fun open(i: Int) {
+        for (p in popups) { stack.removeView(p); p.destroy() }; popups.clear()
         if (steps[i].first == "5") {
             // a second web view, opened now, sharing the app's cookies: is it already signed in?
             pane?.let { (it.parent as? FrameLayout)?.removeView(it); it.destroy() }
@@ -119,7 +141,12 @@ class SignInActivity : Activity() {
     private fun where(w: WebView?) = w?.url?.substringBefore('?')?.substringBefore('#') ?: "-"
 
     private fun show() {
-        status.text = "user agent: ${variants[variant]}   step: ${steps[step].first} ${steps[step].second}\nnow on: ${where(pane ?: web)}"
+        status.text = "user agent: ${variants[variant]}   step: ${steps[step].first} ${steps[step].second}\nnow on: ${where(popups.lastOrNull() ?: pane ?: web)}${if (popups.isEmpty()) "" else " (popup)"}"
+    }
+
+    private fun note(what: String) {
+        val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+        log.appendText("$time $what step=${steps[step].first} ua=${variants[variant]}\n")
     }
 
     private fun record(what: String) {

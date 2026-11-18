@@ -632,6 +632,15 @@ nothing and keeps the words in the box.
 | The box and its pill while listening | the pill above the box, 3 lines | the pill in the box's place with every word heard, growing; past about 6 lines it scrolls, the newest words in view (the robot's pill the same, about 8 lines) |
 | Removed | the tapped microphone's silence stop (4 s; 8 s before any words) and its 60 s limit | — |
 
+
+## The microphone's tap on a phone (added 11-18, Tim: "Tapping the microphone … just listens for a moment and then doesn't record anything and then exits")
+
+Drafts for Tim. Before, listening that ended with no words, or broke with no words yet, closed without a word.
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| Under the box, after the person's stop when no words were heard (nothing sent) | — (the box just went back) | **No words were heard, so nothing was sent. Try again, or type.** |
+| Under the box, after the microphone or the recognizer broke before any word was heard | — (the box just went back) | **Listening stopped: the microphone or speech recognition stopped working. Nothing was sent. Type instead, or try again.** |
 ## Open Settings in the Home Screen icon steps, and trif://settings (added 11-18, Tim)
 
 Drafts for Tim. iOS's public way only (UIApplication.openSettingsURLString: TRIF's own page in Settings; never the

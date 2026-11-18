@@ -40,6 +40,8 @@ protocol SpeechListener: AnyObject {
     func endAudio()
     /// Dropped: no more events.
     func cancel()
+    /// (Diagnostics) What it was given and what it did with it.
+    var flow: String { get }
 }
 
 /// SFSpeechRecognizer, on device: one task after another on the same audio, so it never stops by itself.
@@ -55,6 +57,8 @@ final class RecognizerListener: SpeechListener, @unchecked Sendable {
     private var cancelled = false
     private var begunAt = Date()
     private var quickEnds = 0
+    private var fed = 0
+    private var lastEnd = ""
 
     init(_ recognizer: SFSpeechRecognizer, send: @escaping (SpeechEvent) -> Void) {
         self.recognizer = recognizer
@@ -104,6 +108,7 @@ final class RecognizerListener: SpeechListener, @unchecked Sendable {
     /// task starts at once, however long the silence. Only a recognizer that can't run at all (10 tasks in a row
     /// ending within half a second of starting) stops listening.
     private func taskEnded(_ g: Int, _ ending: Bool, why: String) {
+        lock.lock(); lastEnd = why; lock.unlock()
         if ending { post(.ended); return }
         lock.lock()
         quickEnds = Date().timeIntervalSince(begunAt) < 0.5 ? quickEnds + 1 : 0
@@ -116,8 +121,13 @@ final class RecognizerListener: SpeechListener, @unchecked Sendable {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        lock.lock(); let r = request; lock.unlock()
+        lock.lock(); let r = request; if r != nil { fed += 1 }; lock.unlock()
         r?.append(buffer)
+    }
+
+    var flow: String {
+        lock.lock(); defer { lock.unlock() }
+        return "\(fed) buffers in, task \(generation)\(lastEnd.isEmpty ? "" : ", the last task ended: \(lastEnd)")"
     }
 
     func endAudio() {
@@ -134,7 +144,7 @@ final class RecognizerListener: SpeechListener, @unchecked Sendable {
 
     static func describe(_ error: Error) -> String {
         let e = error as NSError
-        return "\(e.domain) \(e.code)"
+        return "\(e.domain) \(e.code): \(e.localizedDescription)"
     }
 }
 
@@ -156,8 +166,10 @@ final class AnalyzerListener: SpeechListener, @unchecked Sendable {
     private var cancelled = false
     private var begunAt = Date()
     private var quickEnds = 0
-    // (audio thread only)
+    // (audio thread only, or under the feed's lock)
     private var converter: AVAudioConverter?
+    private var fed = 0, notConverted = 0, results = 0
+    private var lastEnd = ""
 
     init(kind: Kind, locale: Locale, format: AVAudioFormat, send: @escaping (SpeechEvent) -> Void) {
         self.kind = kind
@@ -211,14 +223,16 @@ final class AnalyzerListener: SpeechListener, @unchecked Sendable {
 
     private func result(_ g: Int, _ text: String, _ final: Bool) {
         guard current(g).0 else { return }
+        lock.lock(); results += 1; lock.unlock()
         post(final ? .final(text) : .volatile(text))
     }
 
     private func resultsEnded(_ g: Int, _ error: Error?) {
         let (cur, ending) = current(g)
         guard cur else { return }
-        if ending { post(.ended); return }
         let why = error.map { RecognizerListener.describe($0) } ?? "results ended"
+        lock.lock(); lastEnd = why; lock.unlock()
+        if ending { post(.ended); return }
         lock.lock()
         quickEnds = Date().timeIntervalSince(begunAt) < 0.5 ? quickEnds + 1 : 0
         let broken = quickEnds >= 10
@@ -230,9 +244,14 @@ final class AnalyzerListener: SpeechListener, @unchecked Sendable {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        guard let b = convert(buffer) else { return }
-        lock.lock(); let c = continuation; lock.unlock()
+        guard let b = convert(buffer) else { lock.lock(); notConverted += 1; lock.unlock(); return }
+        lock.lock(); let c = continuation; if c != nil { fed += 1 }; lock.unlock()
         c?.yield(AnalyzerInput(buffer: b))
+    }
+
+    var flow: String {
+        lock.lock(); defer { lock.unlock() }
+        return "\(fed) buffers in as \(AudioFeed.words(format))\(notConverted > 0 ? " (\(notConverted) not converted)" : ""), \(results) results, analyzer \(generation)\(lastEnd.isEmpty ? "" : ", the last ended: \(lastEnd)")"
     }
 
     private func convert(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
@@ -267,6 +286,25 @@ final class AnalyzerListener: SpeechListener, @unchecked Sendable {
     private func post(_ e: SpeechEvent) { DispatchQueue.main.async { self.send(e) } }
 }
 
+/// (development, `-speechdeaf analyzer|recognizer`) That recognizer is given no audio, as one that hears nothing on
+/// a phone: the switch to the other, with all the audio from the start, can be tried in the Simulator.
+final class DeafListener: SpeechListener {
+    let inner: SpeechListener
+    init(_ inner: SpeechListener) { self.inner = inner }
+    var name: String { inner.name + " (deaf: -speechdeaf)" }
+    func begin() { inner.begin() }
+    func append(_ buffer: AVAudioPCMBuffer) {}
+    func endAudio() { inner.endAudio() }
+    func cancel() { inner.cancel() }
+    var flow: String { inner.flow }
+
+    static let kind: String? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-speechdeaf"), i + 1 < a.count else { return nil }
+        return a[i + 1]
+    }()
+}
+
 /// Where the audio comes from: the microphone, or (development) a recording played as if it were one.
 protocol AudioSource: AnyObject {
     func start(_ to: @escaping (AVAudioPCMBuffer) -> Void) throws
@@ -289,8 +327,24 @@ final class MicSource: AudioSource {
         // (headphones in or out, a route change: the engine stops; the tap is put back in the new format)
         change = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self, self.to != nil else { return }
-            do { try self.tap() } catch { self.onLost?("the microphone changed and couldn't start again") }
+            let s = AVAudioSession.sharedInstance()
+            // (something set the app's session to another category meanwhile (a page's sound, WebKit): back to recording)
+            var back = ""
+            if s.category != .record {
+                back = ", set back to record"
+                do { try s.setCategory(.record, mode: .measurement, options: .duckOthers); try s.setActive(true) } catch { back = ", couldn't be set back to record (\(error.localizedDescription))" }
+            }
+            let line = "talking: the microphone's setup changed (session \(s.category.rawValue)\(back), \(MicSource.route)); started again"
+            MainActor.assumeIsolated { Diagnostics.shared.log("quick ask", line) }
+            do { try self.tap() } catch { self.onLost?("the microphone changed and couldn't start again (\(error.localizedDescription))") }
         }
+    }
+
+    /// (Diagnostics) The input the tap has, and where the sound comes from.
+    private(set) var formatWords = "-"
+    static var route: String {
+        let r = AVAudioSession.sharedInstance().currentRoute.inputs.map { "\($0.portType.rawValue) \($0.portName)" }
+        return r.isEmpty ? "no input route" : "input \(r.joined(separator: ", "))"
     }
 
     private func tap() throws {
@@ -300,6 +354,7 @@ final class MicSource: AudioSource {
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw Failure.noInput }
         let to = self.to
+        formatWords = AudioFeed.words(format)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in to?(buffer) }
         tapOn = true
         engine.prepare()
@@ -359,6 +414,100 @@ final class FileSource: AudioSource, @unchecked Sendable {
     func stop() { lock.lock(); running = false; lock.unlock() }
 }
 
+/// The audio of one listen, on its way to the recognizer (the audio thread adds, the main thread reads and switches):
+/// how much came and how loud (Diagnostics: where it stops on a phone), and, until a recognizer hears words, all of
+/// it kept, so another recognizer can be given the whole of it from the start (no word lost by a switch).
+final class AudioFeed: @unchecked Sendable {
+    private let lock = NSLock()
+    private var listener: SpeechListener?
+    private var kept: [AVAudioPCMBuffer]? = []
+    private var keptSeconds = 0.0
+    private var buffers = 0
+    private var seconds = 0.0
+    private var loudest: Float = 0
+    private var sound = 0.0
+    private var format = "-"
+    /// Louder than this (−40 dBFS) a buffer counts as sound: a voice near the phone is well over it, a quiet room under.
+    static let soundLevel: Float = 0.01
+    /// At most this much audio is kept for a switch (the oldest goes first).
+    static let keepSeconds = 120.0
+
+    func add(_ b: AVAudioPCMBuffer) {
+        let peak = AudioFeed.peak(b)
+        let secs = b.format.sampleRate > 0 ? Double(b.frameLength) / b.format.sampleRate : 0
+        let copy = AudioFeed.copy(b)
+        lock.lock(); defer { lock.unlock() }
+        if buffers == 0 { format = AudioFeed.words(b.format) }
+        buffers += 1
+        seconds += secs
+        loudest = max(loudest, peak)
+        if peak > AudioFeed.soundLevel { sound += secs }
+        if kept != nil, let copy {
+            kept!.append(copy)
+            keptSeconds += secs
+            while keptSeconds > AudioFeed.keepSeconds, let first = kept!.first {
+                kept!.removeFirst()
+                keptSeconds -= Double(first.frameLength) / max(first.format.sampleRate, 1)
+            }
+        }
+        listener?.append(b)
+    }
+
+    /// The recognizer the audio goes to from now; `replay`: given everything kept first, from the start.
+    func use(_ l: SpeechListener?, replay: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        listener = l
+        if replay, let l, let kept { for b in kept { l.append(b) } }
+    }
+
+    /// Words were heard: nothing more to keep.
+    func stopKeeping() { lock.lock(); kept = nil; keptSeconds = 0; lock.unlock() }
+
+    /// Seconds of audio with sound in it so far.
+    var soundSeconds: Double { lock.lock(); defer { lock.unlock() }; return sound }
+    var keptAudio: Double { lock.lock(); defer { lock.unlock() }; return keptSeconds }
+
+    var words: String {
+        lock.lock(); defer { lock.unlock() }
+        let db = loudest > 0 ? String(format: "%.0f dB", 20 * log10(Double(loudest))) : "silent"
+        return buffers == 0 ? "no audio from the microphone" : "\(buffers) buffers of \(format), \(String(format: "%.1f", seconds)) s, loudest \(db), \(String(format: "%.1f", sound)) s with sound"
+    }
+
+    static func words(_ f: AVAudioFormat) -> String {
+        let kind: String
+        switch f.commonFormat {
+        case .pcmFormatFloat32: kind = "float32"
+        case .pcmFormatInt16: kind = "int16"
+        case .pcmFormatInt32: kind = "int32"
+        case .pcmFormatFloat64: kind = "float64"
+        default: kind = "other"
+        }
+        return "\(Int(f.sampleRate)) Hz \(f.channelCount) ch \(kind)\(f.isInterleaved && f.channelCount > 1 ? " interleaved" : "")"
+    }
+
+    static func peak(_ b: AVAudioPCMBuffer) -> Float {
+        let n = Int(b.frameLength)
+        var p: Float = 0
+        if let d = b.floatChannelData?[0] { for i in 0..<n { p = max(p, abs(d[i])) } }
+        else if let d = b.int16ChannelData?[0] { for i in 0..<n { p = max(p, abs(Float(d[i]) / 32768)) } }
+        return p
+    }
+
+    static func copy(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let c = AVAudioPCMBuffer(pcmFormat: b.format, frameCapacity: max(b.frameLength, 1)) else { return nil }
+        c.frameLength = b.frameLength
+        let from = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: b.audioBufferList))
+        let to = UnsafeMutableAudioBufferListPointer(c.mutableAudioBufferList)
+        for i in 0..<min(from.count, to.count) {
+            guard let src = from[i].mData, let dst = to[i].mData else { continue }
+            let n = min(Int(from[i].mDataByteSize), Int(to[i].mDataByteSize))
+            memcpy(dst, src, n)
+            to[i].mDataByteSize = UInt32(n)
+        }
+        return c
+    }
+}
+
 /// The microphone of the quick ask: the box's (tap or hold) and the robot's hold.
 @MainActor
 final class SpeechInput: ObservableObject {
@@ -386,6 +535,19 @@ final class SpeechInput: ObservableObject {
     private var base = ""
     private var listener: SpeechListener?
     private var source: AudioSource?
+    /// This listen's audio on its way to the recognizer (counted; kept until words are heard, for a switch).
+    private var feed: AudioFeed?
+    private var listenID = 0
+    /// Each listener made gets the next number; events from one replaced are ignored.
+    private var listenerSerial = 0
+    /// The recognizers tried this listen ("analyzer", "recognizer").
+    private var tried: [String] = []
+    /// A recognizer gave words this listen.
+    private var heardWords = false
+    /// The feed's seconds with sound when the current recognizer began.
+    private var soundAtListener = 0.0
+    private var watch: Task<Void, Never>?
+    private var pressAt = Date()
     private var finished: ((String) -> Void)?
     private var finishing: Task<Void, Never>?
     /// (development) How many times the words were handed on to be asked, and the events seen this listen.
@@ -396,6 +558,8 @@ final class SpeechInput: ObservableObject {
 
     static let stoppedWords = "Listening stopped. Nothing was sent: your words are kept here."
     static let keptHoldWords = "Listening stopped. Nothing was sent. Tap to see your words."
+    static let nothingHeardWords = "No words were heard, so nothing was sent. Try again, or type."
+    static let failedWords = "Listening stopped: the microphone or speech recognition stopped working. Nothing was sent. Type instead, or try again."
 
     private init() {
         let nc = NotificationCenter.default
@@ -455,26 +619,12 @@ final class SpeechInput: ObservableObject {
 
     @available(iOS 26.0, *)
     private func chooseAnalyzer(download: Bool) async {
-        let here = Locale.current
-        var notes: [String] = []
-        var toGet: (any SpeechModule)?
-        // (SpeechTranscriber where this iPhone has it; else DictationTranscriber)
-        var kinds: [AnalyzerListener.Kind] = []
-        if SpeechTranscriber.isAvailable { kinds.append(.speech) } else { notes.append("SpeechTranscriber not on this device") }
-        kinds.append(.dictation)
-        for kind in kinds {
-            let loc: Locale? = kind == .speech ? await SpeechTranscriber.supportedLocale(equivalentTo: here) : await DictationTranscriber.supportedLocale(equivalentTo: here)
-            guard let loc else { notes.append("\(kind.rawValue): \(here.identifier) not supported"); continue }
-            let m = AnalyzerListener.module(kind, loc)
-            let status = await AssetInventory.status(forModules: [m])
-            notes.append("\(kind.rawValue) \(loc.identifier): \(status)")
-            if status == .installed {
-                guard let f = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [m]) else { notes.append("no audio format"); continue }
-                analyzerChoice = (kind.rawValue, loc, f)
-                break
-            }
-            if status == .supported || status == .downloading, toGet == nil { toGet = m }
-        }
+        // (looked at off the main thread: in the Simulator the look held it ~430 ms, and a tap on the microphone right
+        // as the list opened waited for it)
+        let found = await Task.detached(priority: .userInitiated) { await SpeechInput.look(Locale.current) }.value
+        let notes = found.notes
+        let toGet = found.toGet
+        if let c = found.choice { analyzerChoice = c }
         choiceWords = notes.joined(separator: "; ") + (analyzerChoice.map { " → \($0.kind)" } ?? " → SFSpeechRecognizer")
         Diagnostics.shared.log("quick ask", "talking: recognizers on this iPhone: \(choiceWords)")
         // (the better model isn't here yet: fetched once the microphone is used; the older way until it's in)
@@ -502,6 +652,42 @@ final class SpeechInput: ObservableObject {
                 self.choose()
             }
         }
+    }
+
+    /// What iOS 26's analyzer has on this iPhone for the language: the best module whose model is installed (its
+    /// audio format), else the one to fetch.
+    @available(iOS 26.0, *)
+    struct Look: @unchecked Sendable {
+        var notes: [String] = []
+        var choice: (kind: String, locale: Locale, format: AVAudioFormat)?
+        var toGet: (any SpeechModule)?
+    }
+
+    @available(iOS 26.0, *)
+    nonisolated static func look(_ here: Locale) async -> Look {
+        var r = Look()
+        // (SpeechTranscriber where this iPhone has it; else DictationTranscriber)
+        var kinds: [AnalyzerListener.Kind] = []
+        if SpeechTranscriber.isAvailable { kinds.append(.speech) } else { r.notes.append("SpeechTranscriber not on this device") }
+        kinds.append(.dictation)
+        for kind in kinds {
+            let loc: Locale? = kind == .speech ? await SpeechTranscriber.supportedLocale(equivalentTo: here) : await DictationTranscriber.supportedLocale(equivalentTo: here)
+            guard let loc else { r.notes.append("\(kind.rawValue): \(here.identifier) not supported"); continue }
+            let m = AnalyzerListener.module(kind, loc)
+            let status = await AssetInventory.status(forModules: [m])
+            r.notes.append("\(kind.rawValue) \(loc.identifier): \(status)")
+            if status == .installed {
+                guard let f = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [m]) else { r.notes.append("no audio format"); continue }
+                // (the model kept for TRIF: one installed for another app may otherwise not be usable, or go)
+                do { if !(try await AssetInventory.reserve(locale: loc)) { r.notes.append("\(loc.identifier) reserved before") } }
+                catch { r.notes.append("\(loc.identifier) not reserved (\(error.localizedDescription))") }
+                r.notes.append("audio \(AudioFeed.words(f))")
+                r.choice = (kind.rawValue, loc, f)
+                break
+            }
+            if status == .supported || status == .downloading, r.toGet == nil { r.toGet = m }
+        }
+        return r
     }
 
     /// Talking can start at once: both permissions given, recognition on this iPhone and available now (the robot's
@@ -543,6 +729,7 @@ final class SpeechInput: ObservableObject {
     /// shown). `done`: the whole text, when the person stops or lets go.
     func press(robot: Bool = false, _ done: @escaping (String) -> Void) {
         guard phase == .idle else { return }
+        pressAt = Date()
         let speech = SFSpeechRecognizer.authorizationStatus()
         let mic = SpeechInput.standInFile != nil ? .granted : AVAudioApplication.shared.recordPermission
         if speech == .denied || speech == .restricted || mic == .denied { phase = .refused; Diagnostics.shared.log("quick ask", "talking: refused (speech \(speech.rawValue), microphone \(mic.rawValue))"); return }
@@ -573,21 +760,20 @@ final class SpeechInput: ObservableObject {
 
     private func start(robot: Bool, _ done: @escaping (String) -> Void) {
         let file = SpeechInput.standInFile
+        let t0 = CACurrentMediaTime()
+        var sessionMs = 0
         if file == nil || ProcessInfo.processInfo.arguments.contains("-speechsession") {
             do { try takeSession() } catch {
                 phase = .unavailable("The microphone can't be used right now. Type instead.")
                 Diagnostics.shared.log("quick ask", "talking: the audio session wouldn't start (\(error.localizedDescription))")
                 return
             }
+            sessionMs = Int((CACurrentMediaTime() - t0) * 1000)
         }
-        let send: (SpeechEvent) -> Void = { e in MainActor.assumeIsolated { SpeechInput.shared.event(e) } }
-        var l: SpeechListener?
-        if #available(iOS 26.0, *), let c = analyzerChoice, let kind = AnalyzerListener.Kind(rawValue: c.kind) {
-            l = AnalyzerListener(kind: kind, locale: c.locale, format: c.format, send: send)
-        } else if let r = SpeechInput.recognizer() {
-            l = RecognizerListener(r, send: send)
-        }
-        guard let l else { phase = .unavailable(SpeechInput.notOnDevice); return }
+        guard let kind = kinds().first else { phase = .unavailable(SpeechInput.notOnDevice); giveBackSession(); return }
+        listenID += 1
+        tried = []
+        heardWords = false
         words = SpeechText()
         events = [:]
         base = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -596,32 +782,121 @@ final class SpeechInput: ObservableObject {
         keptFromHold = false
         fromRobot = robot
         finished = done
-        listener = l
-        l.begin()
+        let f = AudioFeed()
+        feed = f
+        let l = begin(kind)
         let src: AudioSource = file.map { FileSource($0, rate: SpeechInput.standInRate) } ?? MicSource()
         (src as? MicSource)?.onLost = { why in MainActor.assumeIsolated { SpeechInput.shared.interrupt(why: why, failed: true) } }
-        do { try src.start { [weak l] b in l?.append(b) } } catch {
+        do { try src.start { b in f.add(b) } } catch {
             l.cancel()
             listener = nil
+            feed = nil
             finished = nil
             transcript = ""
             phase = .unavailable(file != nil ? "The stand-in recording can't be read." : "The microphone can't be used right now. Type instead.")
+            Diagnostics.shared.log("quick ask", "talking: the microphone wouldn't start (\(error.localizedDescription); \(MicSource.route))")
             giveBackSession()
             return
         }
         source = src
         listenStarted = Date()
         phase = .listening
-        Diagnostics.shared.log("quick ask", "talking: listening (\(l.name)\(file != nil ? ", a stand-in recording" : "")\(robot ? ", the robot held" : ""))")
+        let s = AVAudioSession.sharedInstance()
+        let mic = (src as? MicSource).map { "microphone \($0.formatWords), \(MicSource.route)" } ?? "a stand-in recording"
+        Diagnostics.shared.log("quick ask", "talking: listening (\(l.name)\(robot ? ", the robot held" : "")), ready \(Int((CACurrentMediaTime() - t0) * 1000)) ms after the press (the audio session \(sessionMs) ms); \(mic); session \(s.category.rawValue) \(s.mode.rawValue)")
+        watchListening()
     }
 
-    private func event(_ e: SpeechEvent) {
-        guard phase == .listening || phase == .finishing else { return }
+    // MARK: which recognizer hears it (Tim, 11-18 on his iPhone SE: "Tapping the microphone … just listens for a
+    // moment and then doesn't record anything and then exits")
+
+    /// What can recognise speech on this iPhone now, best first: iOS 26's analyzer (its model here), then
+    /// SFSpeechRecognizer on device.
+    private func kinds() -> [String] {
+        var k: [String] = []
+        if analyzerChoice != nil { k.append("analyzer") }
+        if let r = SpeechInput.recognizer(), r.supportsOnDeviceRecognition { k.append("recognizer") }
+        return k
+    }
+
+    /// One this listen hasn't tried yet.
+    private func alternative() -> String? { kinds().first { !tried.contains($0) } }
+
+    /// A new listener of that kind, begun, the audio going to it (`replay`: all of it from the start first).
+    @discardableResult
+    private func begin(_ kind: String, replay: Bool = false) -> SpeechListener {
+        listenerSerial += 1
+        let serial = listenerSerial
+        let send: (SpeechEvent) -> Void = { e in MainActor.assumeIsolated { SpeechInput.shared.event(e, serial) } }
+        var made: SpeechListener?
+        if kind == "analyzer", #available(iOS 26.0, *), let c = analyzerChoice, let k = AnalyzerListener.Kind(rawValue: c.kind) {
+            made = AnalyzerListener(kind: k, locale: c.locale, format: c.format, send: send)
+        }
+        var l: SpeechListener = made ?? RecognizerListener(SpeechInput.recognizer() ?? SFSpeechRecognizer()!, send: send)
+        if DeafListener.kind == kind { l = DeafListener(l) }
+        tried.append(kind)
+        listener = l
+        soundAtListener = feed?.soundSeconds ?? 0
+        l.begin()
+        feed?.use(l, replay: replay)
+        return l
+    }
+
+    /// The recognizer heard no words though there was sound (or it stopped working): the next one takes over, given
+    /// all the audio from the start, so nothing said is lost.
+    private func switchListener(to kind: String, why: String) {
+        let old = listener
+        old?.cancel()
+        words = SpeechText()
+        transcript = base
+        let kept = feed?.keptAudio ?? 0
+        let l = begin(kind, replay: true)
+        count("switched")
+        Diagnostics.shared.log("quick ask", "talking: \(old?.name ?? "-") heard no words (\(why); \(old?.flow ?? "-")); now \(l.name), given the \(String(format: "%.1f", kept)) s kept from the start")
+    }
+
+    /// While listening: what reached the recognizer, said in Diagnostics at 1.5 s, 6 s, then each minute; and the
+    /// switch to the other recognizer when 4 s with sound brought no words.
+    private func watchListening() {
+        watch?.cancel()
+        let id = listenID
+        watch = Task { @MainActor [weak self] in
+            let marks = [1.5, 6.0]
+            var said = 0
+            var nextMinute = 60.0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self, !Task.isCancelled, self.phase == .listening, self.listenID == id else { return }
+                let t = Date().timeIntervalSince(self.listenStarted)
+                if said < marks.count, t >= marks[said] {
+                    said += 1
+                    Diagnostics.shared.log("quick ask", "talking: after \(String(format: "%.1f", t)) s: \(self.flowWords)")
+                } else if t >= nextMinute {
+                    nextMinute += 60
+                    Diagnostics.shared.log("quick ask", "talking: after \(Int(t)) s: \(self.flowWords)")
+                }
+                if !self.heardWords, let f = self.feed, f.soundSeconds - self.soundAtListener >= SpeechInput.noWordsSound, let alt = self.alternative() {
+                    self.switchListener(to: alt, why: "\(Int(SpeechInput.noWordsSound)) s with sound and no words")
+                }
+            }
+        }
+    }
+
+    /// Seconds of audio with sound in it after which a recognizer that gave no words is replaced.
+    static let noWordsSound = 4.0
+
+    /// (Diagnostics) The audio, the recognizer, what it gave.
+    private var flowWords: String {
+        "\(feed?.words ?? "no audio"); \(listener?.name ?? "no recognizer"): \(listener?.flow ?? "-"); events (\(eventWords))"
+    }
+
+    private func event(_ e: SpeechEvent, _ serial: Int) {
+        guard serial == listenerSerial, phase == .listening || phase == .finishing else { return }
         switch e {
-        case .volatile(let s): words.volatile(s); count("volatile")
-        case .final(let s): words.final(s); count("final")
-        case .partial(let s): words.partial(s); count("partial")
-        case .segment(let s): words.segmentEnded(s); count("segment")
+        case .volatile(let s): words.volatile(s); count("volatile"); heard(s)
+        case .final(let s): words.final(s); count("final"); heard(s)
+        case .partial(let s): words.partial(s); count("partial"); heard(s)
+        case .segment(let s): words.segmentEnded(s); count("segment"); heard(s)
         case .newTask(let why):
             words.newTask(); count("new task")
             Diagnostics.shared.log("quick ask", "talking: the recognizer ended by itself (\(why)); listening goes on")
@@ -630,32 +905,56 @@ final class SpeechInput: ObservableObject {
             end()
             return
         case .failed(let why):
+            Diagnostics.shared.log("quick ask", "talking: \(listener?.name ?? "the recognizer") failed: \(why)")
+            if phase == .finishing { end(); return }
+            if !heardWords, let alt = alternative() { switchListener(to: alt, why: why); return }
             interrupt(why: why, failed: true)
             return
         }
         transcript = SpeechText.join(base, words.text)
     }
 
+    /// The first words of this listen: what's kept for a switch isn't needed any more.
+    private func heard(_ s: String) {
+        guard !heardWords, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        heardWords = true
+        feed?.stopKeeping()
+        Diagnostics.shared.log("quick ask", "talking: first words \(String(format: "%.1f", Date().timeIntervalSince(listenStarted))) s in (\(listener?.name ?? "-"))")
+    }
+
     private func count(_ k: String) { events[k, default: 0] += 1 }
 
     /// The press was a tap: listening goes on until the next tap (asked) or the ✕ (kept, not asked). Nothing else stops it.
-    func keepListening() {
+    /// `held`: the finger's time down, by the touches' own times (nil: not known, a dev step).
+    func keepListening(held: TimeInterval? = nil) {
         guard phase == .listening else { return }
         tapMode = true
-        Diagnostics.shared.log("quick ask", "talking: tapped, listening until the next tap")
+        Diagnostics.shared.log("quick ask", "talking: tapped (\(SpeechInput.heldWords(held)), handled \(Int(Date().timeIntervalSince(pressAt) * 1000)) ms after the press), listening until the next tap")
     }
 
+    private static func heldWords(_ held: TimeInterval?) -> String { held.map { "held \(Int($0 * 1000)) ms" } ?? "held for a dev step" }
+
     /// The person's stop (the tap on stop, or letting go): everything heard is asked, once the last words are in.
-    func release() {
+    func release(held: TimeInterval? = nil) {
         guard phase == .listening else { return }
+        let how = tapMode ? "the stop tap" : "let go, \(SpeechInput.heldWords(held)), handled \(Int(Date().timeIntervalSince(pressAt) * 1000)) ms after the press"
         phase = .finishing
         tapMode = false
+        watch?.cancel()
+        watch = nil
         source?.stop()
         source = nil
+        // (no words yet, but there was sound: the other recognizer gets all of it before the end)
+        var wait: UInt64 = 2_500_000_000
+        if !heardWords, let f = feed, f.soundSeconds - soundAtListener >= 0.3, let alt = alternative() {
+            switchListener(to: alt, why: "none by the stop")
+            wait = 8_000_000_000
+        }
+        Diagnostics.shared.log("quick ask", "talking: the person's stop (\(how)): \(flowWords)")
         listener?.endAudio()
-        // (at most 2.5 s for the last words)
+        // (at most 2.5 s for the last words; 8 s when the other recognizer was just given it all)
         finishing = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            try? await Task.sleep(nanoseconds: wait)
             if !Task.isCancelled { self?.end() }
         }
     }
@@ -673,11 +972,12 @@ final class SpeechInput: ObservableObject {
     /// The ✕ while tap-listening: stopped, every word kept in the box, nothing asked.
     func keep(why: String = "the ✕") {
         guard phase == .listening || phase == .finishing else { return }
+        let flow = flowWords
         stopAll()
         draft = transcript
         transcript = ""
         phase = .idle
-        Diagnostics.shared.log("quick ask", "talking: stopped (\(why)), \(draft.count) characters kept in the box, nothing asked")
+        Diagnostics.shared.log("quick ask", "talking: stopped (\(why)), \(draft.count) characters kept in the box, nothing asked (\(flow))")
     }
 
     /// Stopped by anything but the person (a call, Siri, the app leaving the front, the list closed, an error):
@@ -685,6 +985,7 @@ final class SpeechInput: ObservableObject {
     func interrupt(why: String, failed: Bool = false) {
         guard phase == .listening else { return }
         let robot = fromRobot
+        let flow = flowWords
         // (a call or Siri took the sound: what was playing stays paused, as iOS leaves it; anything else plays on)
         stopAll(resume: !why.hasPrefix("an audio interruption"))
         draft = transcript
@@ -693,17 +994,24 @@ final class SpeechInput: ObservableObject {
         if !draft.isEmpty {
             stoppedNote = SpeechInput.stoppedWords
             keptFromHold = robot
+        } else if failed {
+            // (an error with nothing heard: said, not a silent close)
+            stoppedNote = SpeechInput.failedWords
         }
-        Diagnostics.shared.log("quick ask", "talking: stopped by \(why)\(failed ? " (an error)" : ""), nothing asked, \(draft.count) characters kept in the box")
+        Diagnostics.shared.log("quick ask", "talking: stopped by \(why)\(failed ? " (an error)" : ""), nothing asked, \(draft.count) characters kept in the box (\(flow))")
     }
 
     private func stopAll(resume: Bool = true) {
         finished = nil
         tapMode = false
+        watch?.cancel()
+        watch = nil
         finishing?.cancel()
         finishing = nil
         source?.stop()
         source = nil
+        feed?.use(nil, replay: false)
+        feed = nil
         listener?.cancel()
         listener = nil
         giveBackSession(resume: resume)
@@ -711,11 +1019,17 @@ final class SpeechInput: ObservableObject {
 
     private func end() {
         guard phase == .listening || phase == .finishing else { return }
+        let flow = flowWords
+        let robot = fromRobot
         finishing?.cancel()
         finishing = nil
+        watch?.cancel()
+        watch = nil
         tapMode = false
         source?.stop()
         source = nil
+        feed?.use(nil, replay: false)
+        feed = nil
         listener?.cancel()
         listener = nil
         giveBackSession()
@@ -725,8 +1039,12 @@ final class SpeechInput: ObservableObject {
         let done = finished
         finished = nil
         let secs = Int(Date().timeIntervalSince(listenStarted))
-        Diagnostics.shared.log("quick ask", "talking: stopped by the person after \(secs) s, \(all.isEmpty ? "nothing heard" : "\(all.count) characters asked") (\(eventWords))")
-        guard !all.isEmpty, let done else { return }
+        Diagnostics.shared.log("quick ask", "talking: stopped by the person after \(secs) s, \(all.isEmpty ? "nothing heard" : "\(all.count) characters asked") (\(flow))")
+        guard !all.isEmpty, let done else {
+            // (nothing heard: said in the box, not a silent close)
+            if all.isEmpty, !robot { stoppedNote = SpeechInput.nothingHeardWords }
+            return
+        }
         draft = ""
         stoppedNote = nil
         asked += 1

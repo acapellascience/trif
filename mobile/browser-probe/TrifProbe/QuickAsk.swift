@@ -67,7 +67,6 @@ struct QuickAskBox: View {
     @ObservedObject private var speech = SpeechInput.shared
     @FocusState private var focused: Bool
     @State private var pressing = false
-    @State private var pressedAt: Date?
     @State private var stopPress = false
     @State private var micAway = false
 
@@ -150,29 +149,40 @@ struct QuickAskBox: View {
             .background(Circle().fill(live ? Color.trifGreen : Color(.tertiarySystemFill)))
             .shadow(color: live ? Color.trifGreen.opacity(0.6) : .clear, radius: 8)
             .contentShape(Circle())
-            .onLongPressGesture(minimumDuration: 0.05, maximumDistance: 300, perform: {}, onPressingChanged: { down in
-                if down {
-                    guard !pressing else { return }
-                    pressing = true
-                    micAway = false
-                    // (listening by a tap: this press is the tap that stops it)
-                    if speech.tapMode { stopPress = true; return }
-                    pressedAt = Date()
-                    focused = false
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    speech.press { words in ask(words) }
-                } else {
-                    pressing = false
-                    if stopPress { stopPress = false; speech.release(); return }
-                    if speech.phase == .listening, let at = pressedAt, Date().timeIntervalSince(at) < 0.3 { speech.keepListening() }
-                    else if micAway { speech.cancel() }
-                    else { speech.release() }
-                    pressedAt = nil
-                }
-            })
-            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { g in micAway = hypot(g.translation.width, g.translation.height) > 90 })
+            // (the press's length from the touches' own times, not from when the app got round to them: on Tim's SE,
+            // 11-18, the main thread was busy as listening started, the finger's lift came late, and a tap was taken
+            // for a hold let go: it listened a moment and stopped with nothing heard)
+            .overlay(PressArea(down: micDown, moved: { micAway = $0 > 90 }, up: micUp))
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                if speech.tapMode { speech.release() } else { micDown(); micUp(0, false) }
+            }
             .accessibilityLabel(speech.tapMode ? "Stop listening" : "Talk")
             .accessibilityHint(speech.tapMode ? "Asks what was heard" : "Tap, say what should change, then tap again. Or hold, and let go")
+    }
+
+    private func micDown() {
+        guard !pressing else { return }
+        pressing = true
+        micAway = false
+        // (listening by a tap: this press is the tap that stops it)
+        if speech.tapMode { stopPress = true; return }
+        focused = false
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        speech.press { words in ask(words) }
+    }
+
+    /// `held`: seconds between the finger's touch and its lift, by the touches' times. `cancelled`: iOS took the touch
+    /// (the sheet dragged, a call): listening goes on as a tap's would, nothing lost and nothing asked.
+    private func micUp(_ held: TimeInterval, _ cancelled: Bool) {
+        guard pressing else { return }
+        pressing = false
+        if stopPress { stopPress = false; if !cancelled { speech.release() }; return }
+        guard speech.phase == .listening else { return }
+        if held < 0.3 || cancelled { speech.keepListening(held: held) }
+        else if micAway { speech.cancel() }
+        else { speech.release(held: held) }
     }
 
     /// (tap-listening: stop without asking, the words kept in the box)
@@ -431,4 +441,69 @@ enum QuickStrip {
         if let i = a.firstIndex(of: "-stripheight"), i + 1 < a.count, let n = Double(a[i + 1]) { return CGFloat(n) - header }
         return 230
     }()
+}
+
+/// A press measured by its touches' own times (UITouch.timestamp): when the finger went down, how far it moved, how
+/// long it was held when it lifted. SwiftUI's gestures say only when the app handled them, which can be much later
+/// while the app is busy (the microphone starting). A gesture recognizer that begins at the touch, so the list's
+/// scrolling and the sheet's drag don't take the finger away mid-hold (a slide away is the hold's cancel).
+struct PressArea: UIViewRepresentable {
+    let down: () -> Void
+    let moved: (CGFloat) -> Void
+    let up: (_ held: TimeInterval, _ cancelled: Bool) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        v.backgroundColor = .clear
+        let r = Press(target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+        v.addGestureRecognizer(r)
+        return v
+    }
+    func updateUIView(_ v: UIView, context: Context) { context.coordinator.area = self }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var area: PressArea
+        init(_ a: PressArea) { area = a }
+        @objc func changed(_ r: Press) {
+            switch r.state {
+            case .began: area.down()
+            case .changed: area.moved(r.distance)
+            case .ended: area.up(r.held, false)
+            case .cancelled, .failed: area.up(r.held, true)
+            default: break
+            }
+        }
+    }
+
+    /// Begins as the finger touches, ends as it lifts; `held` from the touches' timestamps.
+    final class Press: UIGestureRecognizer {
+        private var began: (time: TimeInterval, at: CGPoint)?
+        private(set) var held: TimeInterval = 0
+        private(set) var distance: CGFloat = 0
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard began == nil, let t = touches.first else { return }
+            began = (t.timestamp, t.location(in: view))
+            held = 0
+            distance = 0
+            state = .began
+        }
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let b = began, let t = touches.first else { return }
+            let p = t.location(in: view)
+            distance = hypot(p.x - b.at.x, p.y - b.at.y)
+            state = .changed
+        }
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { finish(touches, .ended) }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { finish(touches, .cancelled) }
+        private func finish(_ touches: Set<UITouch>, _ s: UIGestureRecognizer.State) {
+            guard let b = began else { return }
+            held = max(0, (touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime) - b.time)
+            state = s
+        }
+        override func reset() { super.reset(); began = nil }
+        // (nothing else takes this finger: not the list's scrolling, not the sheet's drag)
+        override func canBePrevented(by other: UIGestureRecognizer) -> Bool { false }
+    }
 }

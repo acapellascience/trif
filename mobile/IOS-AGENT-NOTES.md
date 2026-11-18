@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (466 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (468 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -175,7 +175,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Dev launch flags: `-speechfile <wav>` (a recording stands in for the microphone in every hold or tap of it: played in
   0.1 s pieces at the pace of speech, then silence for as long as listening goes on; `-speechrate N` N times as fast;
   make them with `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"` and ffmpeg's anullsrc for silences, never the
-  live microphone), `-oldspeech` (SFSpeechRecognizer even where iOS 26's SpeechAnalyzer is there), `-speechsession` (the real audio session switch with `-speechfile`), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
+  live microphone), `-oldspeech` (SFSpeechRecognizer even where iOS 26's SpeechAnalyzer is there), `-speechdeaf analyzer|recognizer` (that recognizer gets no audio: the switch to the other, with the audio kept, can be tried), `-speechsession` (the real audio session switch with `-speechfile`), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
   `-nobarshift`, `-stripmax <pt>` (the most of their box's text the strip shows, 112), `-stripheight <pt>` (the strip when no message box is found, 264), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-resumemuted` (a resumed video
   is played muted, as when iOS refuses its sound: the "Tap for sound" note), `-exitbelow` (the exit button's old
@@ -260,8 +260,24 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `AnalyzerListener` (an AsyncStream of AnalyzerInput, AVAudioConverter to bestAvailableAudioFormat; results ending by
   themselves → a new analyzer), `RecognizerListener` (requiresOnDeviceRecognition; metadata → segment; a task ending
   by itself (final, an error, no speech) → a new task at once on the same audio; only 10 tasks in a row ending within
-  0.5 s of starting stop it). Sources: `MicSource` (AVAudioEngine tap, re-tapped on a configuration change),
-  `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator, deciding through
+  0.5 s of starting stop it). Sources: `MicSource` (AVAudioEngine tap, re-tapped on a configuration change, the session
+  set back to .record if something changed it), `FileSource` (`-speechfile`). `AudioFeed` (11-18): every buffer goes
+  through it to the listener: counts, seconds, loudest, seconds with sound (> −40 dBFS), and ALL the audio kept (copies,
+  120 s cap) until the first words; `use(listener, replay:)` hands a new listener everything kept. Switching (11-18,
+  Tim's "listens for a moment … then exits"): `kinds()` = analyzer (model here) then recognizer; `watchListening` every
+  0.5 s: 4 s of sound with no words → `switchListener` to the untried one (replayed from the start); the same in
+  `release` when there was sound and no words (8 s wait then); `.failed` → the other, else `interrupt` with
+  `failedWords`; nothing heard at the stop → `nothingHeardWords` (box only). Events carry the listener's serial: a
+  replaced one's late events are ignored. Diagnostics "quick ask": "talking: listening (…), ready N ms after the press
+  (the audio session N ms); microphone <format>, <route>; session …", "after 1.5 s / 6 s / each minute: <feed>;
+  <listener>: <flow>; events (…)", "first words N s in", "<old> heard no words (…); now <new>, given N s kept",
+  "the person's stop (the stop tap | let go, held N ms, handled N ms after the press): …", "the microphone's setup
+  changed (…)", the end line with the same summary. `DeafListener` (`-speechdeaf analyzer|recognizer`, dev): that
+  recognizer gets no audio, to try the switch. The look (`SpeechInput.look`) runs off the main thread, and reserves
+  the installed model's locale (`AssetInventory.reserve`).
+- The box's microphone is `PressArea` (QuickAsk.swift, 11-18): a UIGestureRecognizer subclass that begins at the
+  touch and times the press by UITouch.timestamp (`held`), `canBePrevented` false so the list's scroll and the sheet's
+  drag don't steal a hold (a slide away needs it); cancelled → tap mode. Not SwiftUI's onLongPressGesture any more. SpeechText.swift (no UI; built for the Mac too): the accumulator, deciding through
   core/speech-text.js (TrifCore.speechText.apply, once per recognizer event; `committed` stays Swift, the answer's `added`
   is appended; its Swift copy answers only if the shared rule can't).
 - ChatOffers.swift (no UI; built for the Mac too): storage and the call-through. The rules are
@@ -837,6 +853,24 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   the ✕ with the video in a tab behind, the app leaving mid-listen; left paused after a call-like interruption.
   The stall Tim saw wasn't reproduced in the Simulator (not tried with the old build); never on a phone, nor with
   AirPods, nor YouTube's own player (main-frame <video>, should work; iframes not reached).
+- The microphone's tap on Tim's SE (11-18, "just listens for a moment and then doesn't record anything and then
+  exits"): CAUSE FOUND in the Simulator with real touches (iOS Simulator tool taps on the box's microphone, the stand-in
+  recording with `-speechsession` and a silent video playing): a 0.1 s tap was logged "let go 518 ms after the press":
+  the main thread was busy as listening started (a ~430-560 ms hang right as the list opens, cause not found; 110 ms
+  after a press), the lift was handled late, so the 0.3 s rule took the tap for a hold let go: release, nothing heard
+  yet, back to idle with no note. Fixed by PressArea (the touches' own times): taps then logged "held 109/110 ms" →
+  tap mode; stop tap asks; a 2.5 s hold asks on lift; a slide away cancels (it was stolen by the list's scroll and
+  became tap mode with the first UIView version). Switching verified with `-speechdeaf analyzer` (stop-time switch:
+  28 characters asked; mid-listen after 4 s of sound: the replay gave the words from the start) and the "No words
+  were heard" note with `-oldspeech -speechdeaf recognizer` (shot 468; 467 a hold asked). Also seen: with a video
+  playing, the session stayed record/measurement all through listening (WebKit didn't change it), and the video
+  played on after. The analyzer's converter was only tried float32 16 kHz → int16 16 kHz (the recording); a phone's
+  48 kHz microphone → 16 kHz is untried. NOT verified with a live
+  microphone: the Simulator's AVAudioEngine inputNode hung in AURemoteIO::Initialize ("RPC timeout. Apparently
+  deadlocked") and the app aborted after ~9 s, while macOS showed a permission window (UserNotificationCenter,
+  presumably the Simulator asking for the Mac's microphone) that only Tim can answer. Also reasoned, not seen: whether
+  his phone's recognizers give words (the old build's robot holds said "let go, nothing heard"; an SFSpeech task that
+  ended at once ended listening then): his next diagnostics' "talking:" lines say where it stops.
 - The never-stopping microphone (11-18): Simulator only, recordings, never a live microphone (see Gotchas for what the
   Simulator has). NOT known: whether Tim's iPhone SE (A15) has SpeechTranscriber (`isAvailable`) or only
   DictationTranscriber; the first Diagnostics "quick ask" line "talking: recognizers on this iPhone: …" says, and
@@ -1006,6 +1040,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   folder as a test file (style-demo.js failed CI for a day: it's style-demo.mod now). CI's per-file limit
   (package.json --test-timeout) counts the browser lock's waits: the browser files run one at a time (tests/cdp-page's
   lock), chat.test.js alone is ~170 s; hence 600000 there and LOCK_WAIT + n on each browser test (11-18).
+- Live microphone in the Simulator (11-18): engine.inputNode's first use asks the Mac's audio for the microphone;
+  with macOS's microphone question for the Simulator unanswered it hangs ~9 s and AudioToolbox aborts the app
+  (AURemoteIO::Initialize RPC timeout; a SIGABRT .ips in ~/Library/Logs/DiagnosticReports). Don't retry until Tim has
+  answered it. BlackHole 2ch is on this Mac, but the Simulator's input device is chosen only in Simulator.app's
+  I/O menu (a window): ask Tim before using it.
+- SwiftUI in the chats' list (a List: UIScrollView's delaysContentTouches): a plain UIView's touchesBegan came ~110-
+  150 ms late (with the lift, for a tap); a UIGestureRecognizer gets the touch at once. Time presses by UITouch.timestamp.
 - `-speechsession` (dev): with `-speechfile`, the real audio session switch too (to try what it does to pages'
   sound). In the Simulator the session's .record activation needed no microphone question.
 - Speech in the Simulator (26.3.1, iPhone SE, en_CA, 11-18): `SpeechTranscriber.isAvailable` is false;

@@ -173,7 +173,13 @@ change there is a change on both phones. Change this file whenever a rule change
 - Anything else stopping it (a call, Siri, the app leaving the front, the list closed, an error) keeps every word in
   the box, asks nothing, and says so; a robot hold stopped that way leaves a pill with the words (15 s).
 - The box's microphone: a press under 0.3 s is a tap (listens until the next tap, which asks; ✕ keeps the words, not
-  asked); longer is a hold. Slid 90 pt away and let go: this listen's words dropped, nothing asked ("Let go to cancel"
+  asked); longer is a hold. The press is timed by the touch's own times (down to lift), never by when the app got to
+  them: a busy moment as the microphone starts must not turn a tap into a short hold (11-18, Tim's SE: it listened a
+  moment and stopped). A touch the system takes away mid-press goes on listening as a tap.
+- A recognizer that gives no words is replaced, never trusted blindly: 4 s of audio with sound in it (louder than
+  −40 dBFS) and no words → the other on-device recognizer, given all the audio from the start (kept until the first
+  words), so nothing said is lost; the same at the stop when there was sound and no words; one that breaks → the
+  other. Nothing heard by the stop says so under the box ("No words were heard…"); a break with no words says so too. Slid 90 pt away and let go: this listen's words dropped, nothing asked ("Let go to cancel"
   first).
 - The robot held still 0.45 s with talking ready = hold to talk (a light haptic, the pill with the words); a finger
   moving 20 pt first is a slide. Not ready: the list opens, saying why.

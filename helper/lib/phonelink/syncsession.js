@@ -87,6 +87,7 @@ class PhoneSync {
    *   enabled: () => bool     the switch (default on).
    *   switches: {get: () => Map modId -> {on, off, at} | null (null: the extension hasn't said: no switch sync),
    *     set: ([{modId, on, off, at}]) => bool}   the phone twins' switches in the browser (host.js).
+   *   synced: (phoneId) => void   a sync with that phone ended (its Settings line changed: link.js tells the panels).
    *   now: for tests.
    */
   constructor(store, server, runs, opts = {}) {
@@ -98,6 +99,7 @@ class PhoneSync {
     this.afterWrite = typeof opts.afterWrite === 'function' ? opts.afterWrite : null;
     this.enabled = typeof opts.enabled === 'function' ? opts.enabled : () => true;
     this.now = typeof opts.now === 'function' ? opts.now : Date.now;
+    this.synced = typeof opts.synced === 'function' ? opts.synced : () => {};
     this.switches = opts.switches && typeof opts.switches.get === 'function' && typeof opts.switches.set === 'function' ? opts.switches : null;
     this.syncs = new Map(); // phone id -> the sync going on
     this.begun = new Map(); // phone id -> when its last sync.begin came
@@ -138,6 +140,24 @@ class PhoneSync {
       try { if (session.send({ t: 'sync.changed' })) sent++; } catch { /* closed */ }
     }
     return sent;
+  }
+
+  /**
+   * Sync now, from the panel: each paired phone with a live session (or `phoneId`'s alone) is told to sync, at once
+   * (not held to the 2 s of `changed`). Returns the ids of the phones told; a phone that's syncing just now isn't
+   * told again (that sync ends and is shown). [] when syncing is off, or no phone is connected just now.
+   */
+  nudge(phoneId = null) {
+    if (!this.enabled()) return [];
+    const told = [];
+    for (const session of this.server.sessions || []) {
+      const id = session.phone && session.phone.id;
+      if (!id || !session.open || (phoneId && id !== phoneId)) continue;
+      if (this.syncs.has(id)) { told.push(id); continue; }
+      this.nudged.set(id, this.now());
+      try { if (session.send({ t: 'sync.changed' })) told.push(id); } catch { /* closed */ }
+    }
+    return [...new Set(told)];
   }
 
   /** What the last sync with a phone did (null: none since the helper started). */
@@ -441,6 +461,7 @@ class PhoneSync {
       at: this.now(), fromPhone: sync.written.length + sync.trashed.length, toPhone, waiting: waiting.length,
       conflicts: sync.conflicts.map((c) => nameOf(c.id)), skipped: sync.skipped.length, switched,
     });
+    try { this.synced(sync.phone.id); } catch { /* the panel's line, no more */ }
     return { t: 'sync.done', ...done };
   }
 

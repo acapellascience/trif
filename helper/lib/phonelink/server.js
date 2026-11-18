@@ -29,6 +29,8 @@ const VERSION = 1;
 const FIRST_MESSAGE_MS = 5000; // (for the handshake's first message, and then for the first transport message)
 const IDLE_MS = 120000; // (the app pings; a phone that went quiet is a dead connection)
 const MAX_CONNECTIONS = 8;
+const KEPT_TRIES = 8; // (the kept port, KEPT_PAUSE_MS apart while it's busy, before any port: _listen)
+const KEPT_PAUSE_MS = 250;
 const MAX_WAITING = 32 * 1024 * 1024; // (unsent bytes to one phone: beyond this it isn't reading)
 
 const text = (v, max) => (typeof v === 'string' ? Array.from(v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')).slice(0, max).join('') : '');
@@ -159,9 +161,13 @@ class Server extends EventEmitter {
 
   async _listen() {
     const kept = this.store.status().port;
-    const wanted = this.port !== undefined ? [this.port] : kept ? [kept, 0] : [0];
+    // (the kept port a few times over 2 s: when another browser's helper hands the link over, its listener closes
+    // a moment after this one starts, and the phones find the same port again)
+    const wanted = this.port !== undefined ? [this.port] : kept ? [...Array(KEPT_TRIES).fill(kept), 0] : [0];
     let last;
-    for (const port of wanted) {
+    for (const [i, port] of wanted.entries()) {
+      if (i > 0 && port === kept && last && last.code === 'EADDRINUSE') await new Promise((r) => setTimeout(r, KEPT_PAUSE_MS));
+      else if (i > 0 && port === kept) continue;
       const listener = net.createServer({ allowHalfOpen: false }, (socket) => this._connection(socket));
       listener.maxConnections = this.maxConnections; // (the system's side of the same limit)
       try {
@@ -170,6 +176,7 @@ class Server extends EventEmitter {
           listener.listen({ port, host: this.host }, () => { listener.removeListener('error', reject); resolve(); });
         });
       } catch (e) { last = e; continue; } // (the kept port is someone else's now: any port)
+      if (!this.started) { listener.close(); return; } // (stopped while it waited for the kept port)
       listener.on('error', (e) => { this.log(`phone link: the listener stopped (${e.code || e.message})`); this._close().catch(() => {}); });
       this.listener = listener;
       const got = listener.address().port;

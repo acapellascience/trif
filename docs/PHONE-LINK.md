@@ -299,18 +299,32 @@ connection to its helper; never the socket, never a run), built in `helper/lib/p
 | `phone.pair.start` | `{qr, expires}` and the status. `qr` is the QR's text: the only place the secret ever goes |
 | `phone.pair.stop` | the status |
 | `phone.remove {id}` | `{removed: {id, name} or null}` and the status |
+| `phone.sync {on}` | the status (the sync switch, PHONE-SYNC.md D11) |
+| `phone.syncNow` | `{told: [phone ids]}` and the status: the connected phones are told to sync (`sync.changed`) at once |
 
-`here`: this helper owns the link. `listening`: a listener is up. `announce`: null, or why the phone can't find
+`here`: this helper owns the link, or reaches the one that does (below). Each phone also has `online` (a live
+session now: Sync now reaches it) and `synced` (its last sync). `browser`: the owning helper's browser's name.
+`listening`: a listener is up. `announce`: null, or why the phone can't find
 the computer (`unsupported`, `missing`, `failing`: bonjour.js). After its first `phone.status` the panel also gets
 `{type: 'phoneLink', status}` whenever the status changes (never the QR's text).
 
-**Which helper.** Each browser with TRIF has a helper of its own. The one that owns `helper.sock` owns the link:
-the listener, the announcer and the phones' runs. The other helpers have the file alone
-(`here: false`): they can show the link, turn it on or off and remove a phone, and the owner follows the file
-(within 2 seconds: its poll), but they can't open a pairing window, which lives in the owner's memory. When the
-owner goes (its browser closed), the helper that takes `helper.sock` takes the link; a helper that finds
-`helper.sock` isn't its own any more gives the link up. A run that was going for a phone ends with its helper,
-as a panel's does.
+**Which helper (two browsers).** Each browser with TRIF has a helper of its own. The one that owns `helper.sock`
+owns the link: the listener, the announcer, the pairing window and the phones' runs. Since 11-18 (Tim's report:
+Chrome's panel sent him to Firefox) every other helper relays its panel's `phone.*` to the owner over
+`helper.sock` (`helper/lib/phonelink/relay.js`, `phone.relay {key, cmd, args}`), so any browser's panel pairs,
+lists, removes, syncs and changes the settings, and the answer is the owner's (`here: true`, the QR's text to the
+panel that asked alone). The owner tells every other helper when the link changes (`phone.relayed {key, status}`
+to each `helper-<pid>.sock`, never with a QR's text), and each tells its panel if it has asked. Both carry the
+relay key: 32 random bytes in the private folder (`phone-relay.key`, mode 600, made by the first helper that
+needs it), which no run can read, and a request with a run's token is refused: the link stays the side panel's
+alone, whichever browser's. When the owner can't be reached as one (a helper from before the relay), the other
+helper falls back to the file (on, off, remove, the sync switch; the owner follows within 2 seconds, its poll),
+with `here: false` and the owner's browser named (its `ping`): the panel says "TRIF in {browser} is handling
+phones: connect from there, or quit {browser}." When the owner goes (its browser closed), the helper that takes
+`helper.sock` (within half a second: its secondary check) takes the link with the same key, and tries the kept
+port for 2 seconds while the old listener closes, so the phones find it where it was, paired as they were; a
+helper that finds `helper.sock` isn't its own any more gives the link up. A run that was going for a phone ends
+with its helper, as a panel's does. Tests: tests/phone-link-host.test.js (two real helpers).
 
 **The panel's side** (built): `extension/phonelink.js` is the section (its state, what it shows, its
 elements), at the end of Settings. It asks the background with `phoneLink.status|on|off|pair.start|pair.stop|
@@ -326,6 +340,13 @@ The QR is drawn by a small encoder of TRIF's own in the extension (`extension/qr
 10, level M, or L when M has no room; no dependency, no network), as an SVG, dark on white in either theme.
 Its matrices are the same, module for module, as macOS's own generator's for the test texts
 (tests/phone-link-qr.test.js).
+**The phone menu and the phone line** (11-18): the bar's phone button opens a menu, "Switch to phone view" (Back
+to desktop in the phone view) and "Sync with phone": with no phone paired it opens Settings at Connect a phone
+with the code on screen; with one, `phone.syncNow` and the phone line under the bar ("Asking {phone} to sync…",
+then what that sync did, with Phone settings and a ×). The phone view's banner always has the phone line: Connect
+a phone, or "Syncing with {phone}." and Sync now (`phonelink.js` `phoneSyncView`; strings in
+PHONE-LINK-STRINGS.md).
+
 While a phone's run works, the desktop shows nothing new in version 1 (the run is in the helper's log and
 `agent.running`); a line in the panel is a later option.
 

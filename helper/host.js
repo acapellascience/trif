@@ -27,6 +27,7 @@ const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
 const { remoteRefusal, remoteCommand, REMOTE_COMMANDS, REMOTE_TOOLS, NOT_REMOTE } = require('./lib/phonelink/remoterun');
 const { Link, COMMANDS: PHONE_COMMANDS } = require('./lib/phonelink/link');
+const phoneRelay = require('./lib/phonelink/relay');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
@@ -36,7 +37,7 @@ const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
   starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds, changedShipped } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
-const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
+const { ownSock, removeStaleSockets, codeStamp, helperSockets } = require('./lib/helpers');
 const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = require('./lib/browsers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash, siteInScope } = require('./lib/trash');
@@ -662,10 +663,111 @@ const link = new Link({
 });
 // The side panel is told when the link changes, once it has asked about it (an older extension never does).
 let linkWatched = false;
-link.on('change', () => {
+function tellPanel(status) {
   if (!linkWatched || !state.stdoutOpen || state.shuttingDown) return;
-  try { sendToExtension({ type: 'phoneLink', status: link.status() }); } catch (e) { logger.warn(`could not send the phone link's status: ${e.message}`); }
+  try { sendToExtension({ type: 'phoneLink', status }); } catch (e) { logger.warn(`could not send the phone link's status: ${e.message}`); }
+}
+link.on('change', () => {
+  if (state.shuttingDown) return;
+  if (link.owner) {
+    const status = linkStatus();
+    tellPanel(status);
+    tellHelpers(status);
+    return;
+  }
+  // (not the owner: what the owner says, so this panel shows its pairing window and its phones' syncs too)
+  if (!linkWatched) return;
+  phoneCommand('phone.status', {}).then(tellPanel, (e) => logger.warn(`phone link: ${e.message}`));
 });
+
+// ---- the phone link through another browser's helper (lib/phonelink/relay.js) ----
+// Every browser's panel can connect a phone, list and remove phones and change the link's settings: a helper that
+// doesn't own the link relays its panel's phone.* to the one that does (helper.sock's), which tells every helper
+// when the link changes. When the owner goes (its browser quits), another helper takes helper.sock, and the link
+// with it (becomePrimary): the same key and the same port, so the phones find it again with no pairing.
+
+/** The link's status as this helper's panel is told it: the owner's browser's name with it. */
+function linkStatus() {
+  return { ...link.status(), browser: state.hello?.browser || null };
+}
+let relayKeyCache = null;
+function relayKey() {
+  if (!relayKeyCache) relayKeyCache = phoneRelay.relayKey(ws.private);
+  return relayKeyCache;
+}
+/** The owner tells every other helper how the link is now (each tells its panel, if it has asked). */
+let toldHelpers = Promise.resolve();
+function tellHelpers(status) {
+  const others = helperSockets(ws.home).filter((h) => h.pid !== process.pid).map((h) => h.sock);
+  if (!others.length) return;
+  let key;
+  try { key = relayKey(); } catch (e) { logger.warn(`phone link: no relay key (${e.code || e.message})`); return; }
+  toldHelpers = toldHelpers.then(() => Promise.all(others.map((sock) => phoneRelay.ask(sock, 'phone.relayed', { key, status }, 3000).catch(() => null)))).catch(() => {});
+}
+/**
+ * A phone.* command of this helper's panel: the link's own, when this helper owns it; else relayed to the one that
+ * does. When none answers as the owner (none there, or one from before the relay), the file's part here (on, off,
+ * remove, the sync switch) and, for what needs the owner, the owner's browser's name in the error.
+ */
+async function phoneCommand(cmd, args) {
+  if (link.owner) {
+    const r = await link.command(cmd, args);
+    return r && typeof r === 'object' ? { ...r, browser: state.hello?.browser || null } : r;
+  }
+  let answer = null;
+  let why = null;
+  try {
+    answer = await phoneRelay.ask(ws.sock, 'phone.relay', { key: relayKey(), cmd, args }, cmd === 'phone.on' ? 60000 : 20000);
+  } catch (e) {
+    if (e.code === 'timeout') throw e; // (it may have done it: not done twice)
+    why = e.message;
+  }
+  if (answer && answer.ok) return answer.result;
+  // (the owner's own answer: an error of the link's, said as it is. Anything else, a helper from before the relay)
+  if (answer && answer.relay && answer.code !== 'not-owner' && answer.code !== 'refused') { const e = new Error(String(answer.error || 'the other helper refused')); e.code = answer.code; throw e; }
+  if (answer) why = answer.error;
+  // (no relay: as before, with the owner's browser named)
+  const owner = await ownerBrowser();
+  logger.info(`phone link: ${cmd} here, not relayed (${why || 'no answer'})`);
+  try {
+    const r = await link.command(cmd, args);
+    return r && typeof r === 'object' ? { ...r, browser: owner } : r;
+  } catch (e) {
+    if (e.code === 'elsewhere' && owner) e.message = `TRIF in ${owner} has the phone link just now: connect the phone from there, or quit ${owner}`;
+    throw e;
+  }
+}
+/** The browser whose helper serves helper.sock (its ping), or null. */
+async function ownerBrowser() {
+  try {
+    const info = await phoneRelay.ask(ws.sock, 'ping', {}, 1500);
+    return (info.ok && info.result && info.result.extension && info.result.extension.browser) || null;
+  } catch { return null; }
+}
+/**
+ * phone.relay and phone.relayed from another helper (the socket: never from a run, whose token isn't taken here,
+ * nor from anyone without the relay key, which is in the private folder). Answers through `answer(msg)`.
+ */
+function onRelay(cmd, args, answer) {
+  if (!phoneRelay.keyMatches(ws.private, args.key)) return answer({ ok: false, error: 'only another browser\'s TRIF helper can relay the phone link', code: 'refused' });
+  if (cmd === 'phone.relayed') {
+    // (the owner's news: this panel, if it has asked about the link)
+    if (!link.owner && args.status && typeof args.status === 'object' && !Array.isArray(args.status)) {
+      const { qr, ...status } = args.status; // (never a QR's text in news: it's only ever an answer to its panel)
+      tellPanel(status);
+    }
+    return answer({ ok: true, result: {} });
+  }
+  if (!link.owner) return answer({ ok: false, error: 'this helper doesn\'t have the phone link', code: 'not-owner' });
+  const inner = typeof args.cmd === 'string' ? args.cmd : '';
+  if (!PHONE_COMMANDS.includes(inner)) return answer({ ok: false, error: `"${inner.slice(0, 40)}" isn't a phone link command`, code: 'refused' });
+  const innerArgs = args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? args.args : {};
+  logger.info(`phone link: ${inner} from another browser's panel`);
+  Promise.resolve().then(() => link.command(inner, innerArgs)).then(
+    (r) => answer({ ok: true, result: r && typeof r === 'object' ? { ...r, browser: state.hello?.browser || null } : r }),
+    (e) => answer({ ok: false, error: e.message, code: e.code || null }),
+  );
+}
 /** helper.sock is still the one this helper made (a helper that lost it gives up the phone link). */
 function ownsSock() {
   if (!server || serverIno === null) return !!server;
@@ -1350,7 +1452,7 @@ function onExtensionRequest(msg) {
  * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
  */
 function panelCommand(cmd, args) {
-  if (PHONE_COMMANDS.includes(cmd)) { linkWatched = true; return link.command(cmd, args); }
+  if (PHONE_COMMANDS.includes(cmd)) { linkWatched = true; return phoneCommand(cmd, args); }
   if (cmd === 'agent.logout') {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
@@ -1567,6 +1669,11 @@ function onClientLine(sock, line) {
   const args = req && req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
+  // Another browser's helper, for its panel (onRelay): with the relay key, never with a run's token.
+  if (cmd === 'phone.relay' || cmd === 'phone.relayed') {
+    if (req.token !== undefined) return reply(sock, { id, ok: false, error: `"${cmd}" isn't available inside an agent run` });
+    return onRelay(cmd, args, (r) => reply(sock, { id, ...r, relay: 1 }));
+  }
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
   if (PANEL_COMMANDS.has(cmd)) {
     const error = cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)'

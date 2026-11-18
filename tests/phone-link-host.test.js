@@ -9,10 +9,14 @@
 //   - turned on, still nothing listens until a phone may pair; the QR's secret goes to the panel that asked
 //     and nowhere else (no file, no log, no other message);
 //   - a phone pairs with the QR, a stranger gets not one byte, the panel is told when the list changes;
-//   - a second helper (another browser) has no listener and can't open a pairing window, but it can remove a
-//     phone, and the helper that owns the link drops that phone at once;
+//   - a second helper (another browser) has no listener of its own: its panel's phone.* go to the owner through
+//     helper.sock (lib/phonelink/relay.js, with the relay key from the private folder: refused without it, and
+//     never from a run), so it shows the owner's link, opens a pairing window there, removes a phone (the owner
+//     drops it at once) and asks the phones to sync; the owner's news reaches its panel too;
+//   - Sync now: each connected phone is told to sync (sync.changed), from either browser's panel;
 //   - when the owner goes, its listener and its announcement go with it, and the helper that takes
-//     helper.sock takes the link: the paired phone reaches it with the keys it has;
+//     helper.sock takes the link on the same port: the paired phone reaches it with the keys it has;
+//   - with an owner that can't relay (a helper from before it), the panel names the owner's browser;
 //   - turned off: nothing listens, nothing is announced, the phone is closed.
 
 const test = require('node:test');
@@ -99,7 +103,7 @@ test.after(async () => {
 test('the phone link in the real helper: off until the panel turns it on, the owner of helper.sock alone listens', async () => {
   const first = helper();
   await first.waitForSocket();
-  first.hello();
+  first.hello({ browser: 'Firefox' });
 
   // A new install: off, nothing of it anywhere.
   const fresh = await panel(first, 'phone.status');
@@ -187,14 +191,53 @@ test('the phone link in the real helper: off until the panel turns it on, the ow
   assert.equal((await panel(first, 'phone.sync', { on: true })).sync, true);
   assert.equal(JSON.parse(fs.readFileSync(path.join(`${home}-private`, 'phone-link.json'), 'utf8')).sync, true);
 
-  // Another browser's helper: the store alone.
+  // Sync now, in the owner's panel: the connected phone is told at once (not held to the nudges' 2 s).
+  const nowAsked = await panel(first, 'phone.syncNow');
+  assert.deepEqual(nowAsked.told, [idA]);
+  assert.equal(nowAsked.phones[0].online, true);
+  assert.deepEqual(await a.next((m) => m.t === 'sync.changed', { timeout: 5000 }), { t: 'sync.changed' });
+
+  // Another browser's helper: its panel reaches the owner's link through helper.sock.
   const second = helper();
   await second.waitForSocket(5000, second.ownSock);
-  second.hello();
+  second.hello({ browser: 'Chrome' });
   const there = await panel(second, 'phone.status');
-  assert.deepEqual([there.on, there.here, there.listening, there.phones.length], [true, false, false, 1]);
-  await assert.rejects(panel(second, 'phone.pair.start'), /another browser/);
+  assert.deepEqual([there.on, there.here, there.listening, there.phones.length, there.phones[0].online], [true, true, true, 1, true]);
   assert.equal(standIn.calls().length, 1, 'the second helper announces nothing');
+  // (the relay: refused on the socket without the key, with a wrong one, and with a run's token)
+  const relayKey = fs.readFileSync(path.join(`${home}-private`, 'phone-relay.key'), 'utf8').trim();
+  assert.match(relayKey, /^[0-9a-f]{64}$/);
+  assert.equal(fs.statSync(path.join(`${home}-private`, 'phone-relay.key')).mode & 0o777, 0o600);
+  for (const args of [{ cmd: 'phone.pair.start' }, { cmd: 'phone.pair.start', key: 'f'.repeat(64) }, { cmd: 'phone.pair.start', key: relayKey.toUpperCase() }]) {
+    const r = await socket(first.sock, { id: 1, cmd: 'phone.relay', args });
+    assert.deepEqual([r.ok, r.code], [false, 'refused']);
+  }
+  const ran = await socket(first.sock, { id: 1, cmd: 'phone.relay', args: { cmd: 'phone.pair.start', key: relayKey }, token: 'a-run' });
+  assert.match(ran.error, /inside an agent run/);
+  const odd = await socket(first.sock, { id: 1, cmd: 'phone.relay', args: { cmd: 'agent.logout', key: relayKey } });
+  assert.deepEqual([odd.ok, odd.code], [false, 'refused']);
+  // (a pairing window opened from the second browser: the owner's, its QR to the second panel alone)
+  const fromSecond = await panel(second, 'phone.pair.start');
+  assert.equal(qrOf(fromSecond.qr).key.equals(computerKey), true);
+  assert.equal(fromSecond.port, port);
+  for (const m of first.messages) assert.equal(JSON.stringify(m).includes(qrOf(fromSecond.qr).secret), false, 'the second panel\'s secret reached the first');
+  const closedThere = await panel(second, 'phone.pair.stop');
+  assert.equal(closedThere.pairing, null);
+  // (the owner's news reaches the second panel: the sync switch turned in the first browser)
+  let mark2 = second.messages.length;
+  await panel(first, 'phone.sync', { on: false });
+  await second.next((m) => m.type === 'phoneLink' && m.status.sync === false && m.status.here === true, { since: mark2, timeout: 5000 });
+  mark2 = second.messages.length;
+  await panel(second, 'phone.sync', { on: true });
+  await first.next((m) => m.type === 'phoneLink' && m.status.sync === true, { timeout: 5000 });
+  // (Sync now from the second browser: the owner tells the phone; the sync's end reaches the second panel)
+  const relayedNow = await panel(second, 'phone.syncNow');
+  assert.deepEqual([relayedNow.told, relayedNow.browser], [[idA], 'Firefox'], 'the owner\'s browser, named');
+  assert.deepEqual(await a.next((m) => m.t === 'sync.changed', { timeout: 5000 }), { t: 'sync.changed' });
+  const beginAgain = await a.request({ t: 'sync.begin', mods: [] });
+  mark2 = second.messages.length;
+  await a.request({ t: 'sync.end', syncId: beginAgain.syncId, have: [] });
+  await second.next((m) => m.type === 'phoneLink' && m.status.phones[0] && m.status.phones[0].synced && m.status.phones[0].synced.at >= relayedNow.phones[0].synced.at, { since: mark2, timeout: 5000 });
   // It can remove a phone: the owner closes that phone, and with no phone left nothing listens.
   const mark = first.messages.length;
   const removed = await panel(second, 'phone.remove', { id: idA });
@@ -222,6 +265,7 @@ test('the phone link in the real helper: off until the panel turns it on, the ow
   await waitFor(async () => { const s = await panel(second, 'phone.status'); return s.here && s.listening; }, { timeout: 15000, interval: 200, message: 'the second helper to take the link' });
   const now = await panel(second, 'phone.status');
   assert.deepEqual(now.phones.map((p) => p.name), ['Phone B']);
+  assert.equal(now.port, window2.port, 'the same port: the phones find it where it was');
   const b2 = await connect(now.port, computerKey, keysB);
   assert.equal(b2.hello.t, 'hello');
   const call3 = await waitFor(() => standIn.calls()[2], { message: 'the new owner\'s announcement' });
@@ -237,4 +281,39 @@ test('the phone link in the real helper: off until the panel turns it on, the ow
   await waitFor(() => gone(call3.pid), { message: 'the announcement to end' });
   await second.close();
   for (const c of standIn.calls()) assert.equal(gone(c.pid), true, 'no dns-sd is left behind');
+});
+
+test('an owner that can\'t relay (a helper from before the relay): the panel names its browser, the file\'s part still works here', async () => {
+  const home2 = path.join(root, 'home2');
+  fs.mkdirSync(home2);
+  // (a stand-in older helper on helper.sock: it answers ping with its browser, and knows no phone.relay)
+  const old = net.createServer((s) => {
+    s.setEncoding('utf8');
+    let buf = '';
+    s.on('data', (d) => {
+      buf += d;
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const req = JSON.parse(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+        s.write(`${JSON.stringify(req.cmd === 'ping' ? { id: req.id, ok: true, result: { role: 'primary', extension: { browser: 'Firefox' } } } : { id: req.id, ok: false, error: `unknown command "${req.cmd}"` })}\n`);
+      }
+    });
+    s.on('error', () => {});
+  });
+  await new Promise((r) => old.listen(path.join(home2, 'helper.sock'), r));
+  try {
+    const ext = new FakeExtension({ home: home2, env });
+    exts.push(ext);
+    await ext.waitForSocket(5000, ext.ownSock);
+    ext.hello({ browser: 'Chrome' });
+    const st = await panel(ext, 'phone.status');
+    assert.deepEqual([st.here, st.browser], [false, 'Firefox']);
+    const on = await panel(ext, 'phone.on');
+    assert.deepEqual([on.on, on.here], [true, false]);
+    await assert.rejects(panel(ext, 'phone.pair.start'), /TRIF in Firefox has the phone link just now: connect the phone from there, or quit Firefox/);
+    await ext.close();
+  } finally {
+    await new Promise((r) => old.close(r));
+  }
 });

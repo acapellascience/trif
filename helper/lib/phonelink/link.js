@@ -30,7 +30,7 @@ const { deleteBase } = require('./sync');
 const P = require('../paths');
 const { envVar } = require('../env');
 
-const COMMANDS = ['phone.status', 'phone.on', 'phone.off', 'phone.pair.start', 'phone.pair.stop', 'phone.remove', 'phone.sync'];
+const COMMANDS = ['phone.status', 'phone.on', 'phone.off', 'phone.pair.start', 'phone.pair.stop', 'phone.remove', 'phone.sync', 'phone.syncNow'];
 const LOOPBACK = new Set(['127.0.0.1', '::1']);
 
 function fail(code, message) { const e = new Error(message); e.code = code; return e; }
@@ -90,6 +90,7 @@ class Link extends EventEmitter {
     this.sync = new PhoneSync(this.store, this.server, this.runs, {
       home: this.home, getWorkspace: this.getWorkspace, log: this.log, afterWrite: this.afterWrite, switches: this.switches,
       enabled: () => { try { return this.store.read().sync !== false; } catch { return false; } },
+      synced: () => this.emit('change'), // (a phone's "Synced …" line in the panels)
     }).start();
     for (const ev of ['listening', 'stopped']) this.server.on(ev, () => this.emit('change'));
     this.announcer.on('change', () => this.emit('change'));
@@ -151,7 +152,9 @@ class Link extends EventEmitter {
     const a = this.announcer ? this.announcer.status() : null;
     const st = this.store.status();
     const synced = (id) => { const r = this.sync ? this.sync.status(id) : null; return r ? { ...r } : null; };
-    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null };
+    // (online: a live session with this phone just now, so Sync now reaches it)
+    const online = new Set([...((this.server && this.server.sessions) || [])].filter((x) => x.open && x.phone).map((x) => x.phone.id));
+    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id), online: online.has(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null };
   }
 
   /** A `phone.*` command from the side panel. Resolves what the panel is answered. */
@@ -192,6 +195,14 @@ class Link extends EventEmitter {
         this.log(`phone sync: turned ${on ? 'on' : 'off'} in the side panel`);
         if (!on && this.sync) this.sync.syncs.clear(); // (a sync going on ends: its next sync.* is answered off)
         return this.status();
+      }
+      case 'phone.syncNow': {
+        // (Sync now: the phones are told to sync, as after a change here; the phone starts every sync, PHONE-SYNC.md D9)
+        if (!this.owner) throw fail('elsewhere', 'another browser\'s TRIF has the phone link just now: sync from that browser');
+        const id = typeof args.id === 'string' && args.id ? args.id : null;
+        const told = this.sync ? this.sync.nudge(id) : [];
+        this.log(`phone sync: Sync now in the side panel: ${told.length ? `told ${told.length} phone(s)` : 'no phone connected just now'}`);
+        return { told, ...this.status() };
       }
       default: throw new Error(`unknown command "${cmd}"`);
     }

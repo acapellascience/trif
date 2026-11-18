@@ -126,13 +126,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   of a call: ~13 µs on the Mac). Simulator pages for it: any small node server with tel:/mailto:/sms:/maps:/
   fb-messenger: links, a target=_blank one, a trif: one, `location = 'mailto:…'` on load and every 1.5 s, an
   `a.click()` on load, an iframe to fb:// (the batch's own lived in the scratchpad).
-- The microphone's words (SpeechText.swift: segments, restarts, revised partials; committed words never shrink, a
-  random walk of 2000 × 40 events) on the Mac: `node --test mobile/test/speechtext.test.js` (swiftc with
-  mobile/test/speechtext-check/main.swift; ~3 s).
+- The microphone's words (SpeechText.swift → the shared core/speech-text.js: segments, restarts, revised partials;
+  committed words never shrink) on the Mac: `node --test mobile/test/core-speechtext.test.js` (the JS against
+  speech-text-cases.json) and `mobile/test/speechtext.test.js` (swiftc with Core.swift and
+  mobile/test/speechtext-check/main.swift: the cases through the shared rule and through the Swift copy, a random walk,
+  a partial's cost; ~5 s).
 - Video resume's rules (VideoResume.swift) on the Mac: `node --test mobile/test/videoresume.test.js` (swiftc with
   mobile/test/videoresume-check/main.swift; the page's JS videoId compared with the Swift one in node; ~2 s).
-- Unread counts' title rule on the Mac: `node --test mobile/test/unreadcount.test.js` (mobile/shared/unread-count.js
-  against mobile/shared/unread-cases.json, then UnreadTitle.swift built by swiftc with mobile/test/unreadcount-check
+- Unread counts' title rule on the Mac: `node --test mobile/test/unreadcount.test.js` (mobile/shared/core/unread-count.js
+  against mobile/shared/core/unread-count-cases.json, and TrifCore.unreadCount in gen/core.js, then UnreadTitle.swift built by swiftc with mobile/test/unreadcount-check
   giving the same answers on the cases and 3000 random titles; ~2 s). Stand-in page: mobile/shared/pages/unread.html
   (`?n=4`, `window.__count(n | "whole title")`, `?cycle=s`); serve.js on 8377 and 8378 (127.0.0.1:8378 = another tab
   on the same host). An icon tab: `simctl openurl 'trif://open?url=http%3A%2F%2Flocalhost%3A8377%2Funread.html%3Fn%3D1&app=1'`.
@@ -160,6 +162,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - The leaving cover's icon use (LeavingCoverRules.swift → core/leaving-cover.js) on the Mac: `node --test
   mobile/test/leavingcover.test.js` (swiftc with leavingcover-check/main.swift, LeavingCoverRules.swift, Core.swift;
   argv leaving-cover-cases.json, gen/core.js; leaving and back ~33 µs unoptimised) and `core-leavingcover.test.js`.
+- The tab list's card it opens at and its robot badges (TabListRules.swift → core/tab-list.js) on the Mac: `node --test
+  mobile/test/tablist.test.js` (swiftc with tablist-check/main.swift, TabListRules.swift, Site.swift, Core.swift; argv
+  tab-list-cases.json, gen/core.js; a tap's focus + one drawing's badges over 20 tabs and 6 chats ~180 µs unoptimised)
+  and `core-tablist.test.js`.
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -195,8 +201,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   keeps its tab), `remember` follows the conversation, `seen` (shown → read), `modAdded` (Browser.addMod →
   modAddedFrom). `banners` ([ChatBanner], the first shown; ChatBannerView over everything in ContentView.page; a plain
   one goes after 8 s, one with mods stays: they're its offer, ✕ = dismissed). `goToSite(key)`: its tab if open and on
-  its site, else a new tab at the page it was on (else https://site/); then the banner's held mods come up.
-  `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badge(for: tab)` (TabCard). The
+  its site, else a new tab at the page it was on (else https://site/), decided by TabListRules.goTo; then the
+  banner's held mods come up.
+  `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badges()` (TabsView asks once a drawing; `badge(for:)` the step's) through TabListRules. The
   robot's tap → ChatListView (Go to chat first; `site` the shown tab's); its hold → hold to talk (ContentView
   robotPress/robotHold/robotLift, HoldTalkPill in QuickAsk.swift) or ChatListView when talking isn't ready.
 - Shared rules (11-18, the shared-core loop: mobile/SHARED-CORE-PROGRESS.md; spec docs/MOBILE-BEHAVIOUR.md):
@@ -204,7 +211,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift); the card the tab list opens at and its robot badges (TabListRules.swift: focus / badges call TrifCore.tabList; marked a twin); which tabs load again when the mods change, and desktop websites' per-site memory (TabReloadRules.swift); which load picks a video up where it was, and the sites' video ids (VideoResume.swift: decide / videoID / samePage / asksForTime call TrifCore.videoResume with an address as its parts); the microphone's words (SpeechText.swift: every recognizer event calls TrifCore.speechText.apply; the committed words stay Swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -254,7 +261,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   themselves → a new analyzer), `RecognizerListener` (requiresOnDeviceRecognition; metadata → segment; a task ending
   by itself (final, an error, no speech) → a new task at once on the same audio; only 10 tasks in a row ending within
   0.5 s of starting stop it). Sources: `MicSource` (AVAudioEngine tap, re-tapped on a configuration change),
-  `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator.
+  `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator, deciding through
+  core/speech-text.js (TrifCore.speechText.apply, once per recognizer event; `committed` stays Swift, the answer's `added`
+  is appended; its Swift copy answers only if the shared rule can't).
 - ChatOffers.swift (no UI; built for the Mac too): storage and the call-through. The rules are
   mobile/shared/core/chat-offers.js (TrifCore.chatOffers, round 2 of the shared core): normalise, key (FNV-1a 64 in
   16-bit limbs, no BigInt), outcome, note (entries in, the new list out; null = unchanged), skip (takes keys, not code).
@@ -290,10 +299,24 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   words stay in ModOfferView. Browser.offer(text:site:) (the Add to TRIF tap) takes `from` too since round 8 (before,
   it kept a phone~ twin as the site, against the spec): mod-offer-cases.json "tap"; core-modoffer.test.js also checks
   the tap's Swift calls it. Dev step `{"offer": text, "site": "phone~x.com"}` is that tap; offerstate shows `came`.
+- TabReloadRules.swift (round 9 of the shared core): which tabs load again when the mods change. `starts` (Browser.select:
+  the first load or a look), `refresh` (.later / .keep / .ask / .next; no answer: keep) and `recheck` (.playing / .keep /
+  .reload; no answer: keep) through TrifCore.tabReload; refreshIfStale computes the facts (the signature for the address
+  the tab loaded, ModStore.signature: Hasher, per launch) and does the waiting, the playing check and the reload.
+  `loaded` (didCommit) and `stale` (dev step modsstale) are Swift twins. DesktopRules in the same file: `set` (⋯'s
+  Request Desktop / Mobile Website) through TrifCore.desktop; `key` (Browser.desktopKey), `wants`, `can` twins (every
+  page load). Mac check: `node --test mobile/test/tabreload.test.js` (tabreload-check/main.swift; argv
+  tab-reload-cases.json, desktop-cases.json, gen/core.js; refresh + recheck ~29 µs, a request ~20 µs, unoptimised).
 - LeavingCoverRules.swift (round 8 of the shared core): `reason(fullScreen:host:tab:iconTabs:arrivedByIcon:)` (.iconTab
   site / .arrived / nil; no answer: nil, the real picture) and `arrived(since:)` (< 3 s; no answer: the same here)
   through TrifCore.leavingCover. LeavingCover.reason / willEnterForeground call them; `-nocover`, the browser and
   UserDefaults "iconTabs" stay Swift, and so do the words (agent-only: Diagnostics "cover", {"cover": 1}).
+- TabListRules.swift (round 12 of the shared core): `focus(open:more:link:chat:tabs:current:)` (ClaudePane.chatTabShown:
+  the chat's own tab, or nil; no answer: nil, the shown tab) and `badges(links:tabs:)` (no chats: none without a call;
+  no answer: none) through TrifCore.tabList; `marked` (the card drawn as current: every card, every drawing) a twin.
+  Round 13: `goTo(link:chat:tabs:current:)` (ClaudePane.goToSite: `.tab(id)` or `.open(address, page:)`; nil, a chat
+  with no site; no answer: the site's home) through TrifCore.tabList; the link's tabURL crosses as URL(string:)'s
+  parts {url: absoluteString, host}. ClaudePane.tabFor is gone. Tab.facts / ChatLink.facts are the records that cross.
 - ModRuns.swift (round 6 of the shared core): what runs. setOn / setGroup through TrifCore.modStore (a tap; no answer:
   the switch doesn't move); running, isOn, off (the sites a mod's script checks it's off on) and MatchPattern (moved
   from Mods.swift; `parts` is the platform's URL parsing the shared rule reads: lower-case scheme and host,
@@ -381,7 +404,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   video, or the last played: an unmuted one wins over a muted preview) on timeupdate every 3 s shown / 8 s hidden or
   backgrounded (media events, no timers: WebKit keeps them firing while it plays), and at once on play, pause, ended,
   seeked, rate/volume, pagehide/hidden. At the start it asks `videoplan` (with the navigation type: back_forward is a
-  reload line); no reports until answered, nor while a plan waits for its video. `decide` (30 min, same page = same
+  reload line); no reports until answered, nor while a plan waits for its video. `decide` (shared since round 10:
+  core/video-resume.js through Core, an address as `parts` (URLComponents: host, decoded path, query items,
+  fragment); no answer → no resume, "no answer from the shared rule" in report.json; 30 min, same page = same
   site video id (`videoID`: YouTube v=/shorts/embed/live/youtu.be, Vimeo) else the address without #, not live, not
   ended, not a link asking its own time (t=, start=), not the first 5 s / last 10 s). The page applies the plan to the
   video whose duration is within 1 s (and the same non-blob src), once it has metadata: speed, muted, seek; playing →
@@ -420,7 +445,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`make-icon.js --cover`: robot-shaded.svg drawn from the vector at 256 / 384 px, a 128 pt picture cropped to the
   robot with 2 pt round it, the robot itself 124 pt) on LaunchBlack.colorset, also Info.plist's UILaunchScreen
   (INFOPLIST_KEY_UILaunchScreen_Generation = NO in the pbxproj and make-project.rb).
-- Unread counts (Tim, 11-18): UnreadTitle.swift (no UI; built for the Mac too) = mobile/shared/unread-count.js, the
+- Unread counts (Tim, 11-18): UnreadTitle.swift (no UI; built for the Mac too) = mobile/shared/core/unread-count.js (TrifCore.unreadCount since round 12 of the shared core; Swift keeps its twin: every title change), the
   shared rule (Android's to use; in docs/MOBILE-BEHAVIOUR.md; a Swift twin rather than a call through Core: it runs on
   every title change). `Tab.unread` (read in title's didSet; `cardLabel(counts:)` the title without the count). UnreadCounts.swift:
   `UnreadCounts.shared` (browser; `changed()` coalesces 0.3 s → `update()`: the sum over `iconTabs(b)` (iconTabs map,
@@ -658,7 +683,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   is "TRIF" (Settings sentences, the icon steps). CFBundleName stays TrifProbe (PRODUCT_NAME; the generated plist wins
   over Info.plist's; Settings and iOS's questions show the display name). The developer menu "The probe" kept its words.
 - The tab list opens at the right card (Tim, 11-18: "it should snap to the tab that I just left"): the shown tab;
-  from the chat (or the quick ask's strip), the chat's own tab (`ClaudePane.chatTabShown`: its link's tab while open
+  from the chat (or the quick ask's strip), the chat's own tab (`ClaudePane.chatTabShown` → TabListRules → core/tab-list.js: its link's tab while open
   and on its site, else the shown tab; More follows the shown tab); from Mods, the shown tab (Mods always shows the
   shown tab's site). That card is centred (`scrollPosition(id:)` from the first frame, plus `scrollTo` without
   animation on appear) and drawn as the current one (green), even when it isn't the tab shown under the list.

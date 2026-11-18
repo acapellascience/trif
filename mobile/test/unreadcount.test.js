@@ -1,6 +1,6 @@
 'use strict';
 // The sites' own unread counts, read from their page titles (Tim, 11-18: "unread counts instead of notifications"):
-// mobile/shared/unread-count.js (both phone apps' rule; Android's to use) against mobile/shared/unread-cases.json, and
+// mobile/shared/core/unread-count.js (both phone apps' rule; Android's to use) against mobile/shared/core/unread-count-cases.json, and
 // on macOS the iPhone's UnreadTitle.swift (swiftc with mobile/test/unreadcount-check/main.swift) giving the very same
 // answers, on the cases and on random titles made of the pieces that matter.
 
@@ -10,10 +10,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { readCount, countText } = require('../shared/unread-count');
+const { readCount, countText } = require('../shared/core/unread-count');
 
 const HERE = __dirname;
-const CASES = require('../shared/unread-cases.json');
+const CASES = require('../shared/core/unread-count-cases.json');
 
 test('unread-count.js: the cases', () => {
   for (const [title, count, plus, rest] of CASES) {
@@ -74,4 +74,13 @@ test('UnreadTitle.swift gives the same answers as unread-count.js', { skip: proc
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('gen/core.js: TrifCore.unreadCount in a bare context (JavaScriptCore\'s view) gives the same answers', () => {
+  const vm = require('vm');
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(HERE, '..', 'shared', 'gen', 'core.js'), 'utf8'), ctx);
+  const U = vm.runInContext('TrifCore.unreadCount', ctx);
+  for (const [title] of CASES) assert.equal(JSON.stringify(U.readCount(title)), JSON.stringify(readCount(title)), JSON.stringify(title));
+  assert.equal(vm.runInContext('TrifCore.call("unreadCount.readCount", JSON.stringify(["(3) Home / X"]))', ctx), '{"count":3,"plus":false,"title":"Home / X"}');
 });

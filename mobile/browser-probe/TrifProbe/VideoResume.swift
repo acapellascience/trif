@@ -36,50 +36,46 @@ enum VideoResume {
         var at: Date
     }
 
+    /// (the shared rule's 30 minutes: what's kept on disk is dropped after it)
     static let window: TimeInterval = 30 * 60
-    static let skipStart = 5.0, skipEnd = 10.0
+
+    // The rules (which load resumes; the sites' video ids) are the phones' shared mobile/shared/core/video-resume.js
+    // (TrifCore.videoResume), through Core.swift: once a page load (its videoplan), not a hot path. An address goes as
+    // its parts (`parts`: URLComponents). No answer: nothing resumes (the page plays from wherever it starts).
+
+    /// An address as the shared rules take it: {host, path (decoded), query [[name, value]], fragment}; null: not one.
+    static func parts(_ address: String) -> Any {
+        guard let u = URLComponents(string: address) else { return NSNull() }
+        let q: Any = u.queryItems.map { $0.map { [$0.name, $0.value ?? NSNull()] as [Any] } } ?? NSNull()
+        return ["host": u.host ?? NSNull(), "path": u.path, "query": q, "fragment": u.fragment ?? NSNull()] as [String: Any]
+    }
+    private static func at(_ address: String) -> [String: Any] { ["url": address, "parts": parts(address)] }
 
     /// The site's own id for the video in a page's address, where it has one: YouTube's watch?v=, /shorts/, /embed/,
     /// /live/, youtu.be/; Vimeo's number. nil elsewhere (the address itself is the page then).
     static func videoID(_ address: String) -> String? {
-        guard let u = URLComponents(string: address), let host = u.host?.lowercased() else { return nil }
-        let parts = u.path.split(separator: "/").map(String.init)
-        if host == "youtu.be" { return parts.first.map { "yt:" + $0 } }
-        if host == "youtube.com" || host.hasSuffix(".youtube.com") || host == "youtube-nocookie.com" || host.hasSuffix(".youtube-nocookie.com") {
-            if let v = u.queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty { return "yt:" + v }
-            if parts.count >= 2, ["shorts", "embed", "live", "v"].contains(parts[0]) { return "yt:" + parts[1] }
-            return nil
-        }
-        if host == "vimeo.com" || host.hasSuffix(".vimeo.com"), let n = parts.last(where: { !$0.isEmpty && $0.allSatisfy(\.isNumber) }) { return "vimeo:" + n }
-        return nil
+        Core.shared.call("videoResume.videoID", [parts(address)]) as? String
     }
 
     /// The address asks for its own time (a shared link's t=, start=, YouTube's #t=): the person chose it.
     static func asksForTime(_ address: String) -> Bool {
-        guard let u = URLComponents(string: address) else { return false }
-        if u.queryItems?.contains(where: { ["t", "start", "time_continue"].contains($0.name) }) == true { return true }
-        return (u.fragment ?? "").hasPrefix("t=")
+        Core.shared.call("videoResume.asksForTime", [parts(address)]) as? Bool ?? false
     }
 
     /// The same page: the same video id when the site has one, else the same address (its #part aside).
     static func samePage(_ a: String, _ b: String) -> Bool {
-        let va = videoID(a), vb = videoID(b)
-        if va != nil || vb != nil { return va == vb }
-        func strip(_ s: String) -> String { s.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? s }
-        return strip(a) == strip(b)
+        Core.shared.call("videoResume.samePage", [at(a), at(b)]) as? Bool ?? false
     }
 
     /// What the page loading `address` in this tab gets: the plan (the saved state), or why not.
     static func decide(saved: State?, address: String, now: Date = Date()) -> (plan: State?, why: String) {
-        guard let s = saved else { return (nil, "nothing kept") }
-        if now.timeIntervalSince(s.at) > window { return (nil, "kept more than 30 minutes ago") }
-        if s.live { return (nil, "a live stream") }
-        if s.ended { return (nil, "it had ended") }
-        if !samePage(s.url, address) { return (nil, "another page or video") }
-        if asksForTime(address) && !asksForTime(s.url) { return (nil, "the address asks for its own time") }
-        if s.time < skipStart { return (nil, "in its first \(Int(skipStart)) s") }
-        if s.duration > 0, s.time > s.duration - skipEnd { return (nil, "in its last \(Int(skipEnd)) s") }
-        return (s, "resume")
+        let kept: Any = saved.map { s -> [String: Any] in
+            ["url": s.url, "parts": parts(s.url), "time": s.time, "duration": s.duration, "live": s.live, "ended": s.ended,
+             "age": now.timeIntervalSince(s.at)]
+        } ?? NSNull()
+        guard let r = Core.shared.call("videoResume.decide", [["saved": kept, "address": at(address)] as [String: Any]]) as? [String: Any],
+              let plan = r["plan"] as? Bool, let why = r["why"] as? String else { return (nil, "no answer from the shared rule") }
+        return (plan ? saved : nil, why)
     }
 
     /// A state from the page's message (nil if it isn't one).
@@ -104,7 +100,7 @@ enum VideoResume {
         return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
     }
 
-    /// The page's video id, as `videoID` (in TRIF's world; the same rules, kept in step by the Mac test).
+    /// The page's video id, as the shared videoID (in TRIF's world; the same rules, kept in step by the Mac test).
     static let videoIDScript = """
         function (address) {
           let u; try { u = new URL(address); } catch (e) { return null; }

@@ -87,6 +87,9 @@ change there is a change on both phones. Change this file whenever a rule change
   switches and edits, safe mode, phone sync, imports (no reload).
 - Pause all mods: the shown tab loads again even if playing (the person's own act); tabs behind only when shown.
 - Every reload the app makes says why in Diagnostics ("reload <host>: <cause>"), 11-18.
+- A page that commits while a change isn't in the pages' scripts yet counts as stale; a tab looked at then is looked
+  at again once the scripts are in (if it's still shown); a tab already reloading is left alone. [shared:
+  core/tab-reload.js, the decision; the signature, the playing check and the reload are each app's]
 
 ## Chat offers (what a chat may hand over)
 
@@ -118,9 +121,11 @@ change there is a change on both phones. Change this file whenever a rule change
   own site's tab with nothing over it, Add this mod? comes up at once instead.
 - A tap anywhere on the banner outside its buttons = Open chat (11-18); a mod banner stays over the chat, still
   holding its mods. A plain banner goes after 8 s.
-- Go to {site}: the tab sent from while it's open and on that site; else a new tab at its page (never a tab navigated
-  elsewhere, nothing rewritten).
-- Tab list robot badges show each tab's chat state; a long press on the toolbar's robot lists the chats.
+- Go to {site}: the tab sent from while it's open and on that site; else a new tab at its page if that page is on the
+  site, else at https://{site}/ (never a tab navigated elsewhere, nothing rewritten); a chat not sent from yet: its
+  site's tab as the tab list picks it [shared: tab-list.js goTo].
+- Tab list robot badges show each tab's chat state (its chats sent from it while it's on their site: working, else a
+  reply waiting, else plain) [shared: tab-list.js]; a long press on the toolbar's robot lists the chats.
 - Chat pages read as TRIF (11-16): the robot in their greeting's place, "From TRIF: …" pills, upsells hidden; never
   their branding, Log in, terms or safety lines. Cosmetic only.
 - No private routes or tokens of claude.ai / chatgpt.com; TRIF reads only what their pages show.
@@ -158,8 +163,11 @@ change there is a change on both phones. Change this file whenever a rule change
   going and have long stretches of silence … The user will know when to stop it"): no silence stop, no time limit.
   Only the person's stop (tap) or letting go (hold) asks.
 - The words only grow: what was said before a pause stays; a restarted recognizer's words are added after; a revised
-  partial replaces only the words since the last committed ones. A new listen goes on after the box's words. [the
-  accumulator: to be shared]
+  partial replaces only the words since the last committed ones. A new listen goes on after the box's words. [shared:
+  core/speech-text.js]
+  - A partial much shorter than the live words, or starting with other words, is a fresh transcription: the live words
+    are committed first. A repeat of the segment just ended (the same words, or nearly: a word in five revised) is
+    not added twice. Words compare by their letters and numbers, case aside.
 - Anything else stopping it (a call, Siri, the app leaving the front, the list closed, an error) keeps every word in
   the box, asks nothing, and says so; a robot hold stopped that way leaves a pill with the words (15 s).
 - The box's microphone: a press under 0.3 s is a tap (listens until the next tap, which asks; ✕ keeps the words, not
@@ -194,7 +202,7 @@ change there is a change on both phones. Change this file whenever a rule change
 
 - Background tabs are let go after 20 s (and on a memory warning) unless playing sound; a playing tab is kept and let
   go once paused 20 s (11-16). A tab behind whose page process ends is let go and loads when shown.
-- The tab list opens at the right card (11-18: "it should snap to the tab that I just left"): the shown tab; from the
+- The tab list opens at the right card (11-18: "it should snap to the tab that I just left") [shared: tab-list.js]: the shown tab; from the
   chat (or the strip), the chat's own tab (its link's tab while open and on its site, else the shown tab); from Mods, the
   shown tab. That card is centred from the first frame and drawn as the current one.
 - Tab pictures as Safari's and Chrome's (11-18): only the shown tab, only once drawn, never mid-scroll, never one of
@@ -203,7 +211,7 @@ change there is a change on both phones. Change this file whenever a rule change
 - Toolbar buttons toggle (11-18): tabs and Mods tapped again close them, the page untouched; [+] again on its empty new
   tab closes it and goes back. The address screen's Cancel does the same; never closes the last tab.
 - Toolbar order (11-17, "the old order"): back, forward, chat, page/+ (exactly centred), Mods, tabs, A.
-- Unread counts instead of notifications (11-18) [shared: unread-count.js]: a site's count from its page title only
+- Unread counts instead of notifications (11-18) [shared: core/unread-count.js]: a site's count from its page title only
   (a count at the very start "(3) …", "(99+) …", "(1,234) …"; "Inbox (N)" anywhere; "(N unread)" anywhere; never a
   year at the start or a bracketed number elsewhere). A grey pill on the card (never red), the count taken out of the
   card's title. The app icon's badge = the sum over Home Screen icon tabs on their sites; badge permission only, asked
@@ -215,9 +223,11 @@ change there is a change on both phones. Change this file whenever a rule change
 - Sound and video play on with the app in the background or the phone locked; a page that pauses itself as it goes
   hidden is respected.
 - A video picks up where it was (11-18) after any reload of the same page within 30 min (a reload, a page process
-  ended, a mod applying, back to it, a relaunch). [the matching rules: to be shared; the page's video id already is in
-  the page script]
-  - Same page = the same site video id (YouTube v=/shorts/embed/live/youtu.be, Vimeo), else the address without #.
+  ended, a mod applying, back to it, a relaunch). The matching rules are shared (core/video-resume.js); the page's
+  own video id (in the page script) gives the same ids.
+  - Same page = the same site video id (YouTube's v=, /shorts/, /embed/, /live/, /v/, youtu.be/ on youtube.com,
+    youtube-nocookie.com and their subdomains; Vimeo's last all-digit path part), else the address without #. The kept
+    page asking its own time too (a reloaded t= link) still resumes.
   - Not resumed: live, ended, a link asking its own time (t=, start=), the first 5 s or the last 10 s.
   - Applied to the video whose duration is within 1 s (same non-blob src): speed, muted, time; playing → played (with
     sound if the OS allows, else muted with "Tap for sound"). A site moving it in the next 6 s gets it put back once
@@ -229,6 +239,7 @@ change there is a change on both phones. Change this file whenever a rule change
 - Request Desktop Website / Request Mobile Website (11-18, "a desktop mode like safari has"): websites only; the label
   follows the shown tab's loaded mode. Kept per host without `www.`, every tab, across launches; picking it reloads the
   shown tab only (others change at their next load). Phone mods run unchanged in it. The chat panes are never desktop.
+  The key: the host in lower case, a leading `www.` removed. [shared: core/desktop.js]
 
 ## Icons (Home Screen) and full screen
 
@@ -244,12 +255,16 @@ change there is a change on both phones. Change this file whenever a rule change
   its real picture. Off on return once the icon's tab is drawn (≤ 0.8 s), 0.2 s fade. [shared: core/leaving-cover.js,
   the "icon use" decision]
 - Icons' look, names and batches: Tim's design 11-16/11-17 (see the notes); the profile is named "{Site} for TRIF".
+- Several icons at once (11-16): "Add to Home Screen later" keeps an icon with its choices on a list (up to 20, across
+  launches), added together in one go; the list clears once TRIF is opened from one of them.
 
 ## Safety and privacy
 
 - No private APIs (the sites' or the OS's) and no session tokens; the one exception kept on iPhone is WebKit's cookie
   flush, with a public fallback.
 - Diagnostics never hold cookie values, API keys, page titles with addresses, or a link's address/number.
+- Diagnostics are the person's to send: the Mods tab's Send diagnostics…, and the page menu's Copy diagnostics (11-17,
+  the same text, reachable without scrolling on the smallest phone).
 - API keys stay on the device (Keychain / Keystore), this device only.
 - On-device models download only when asked, with a visible bar; a model runs only after its checksum check.
 
@@ -277,7 +292,7 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 
 | Rule | Shared file | iPhone | Test |
 |---|---|---|---|
-| Unread count from a title | shared/unread-count.js | UnreadTitle.swift (a twin, same cases) | test/unreadcount.test.js |
+| Unread count from a title | shared/core/unread-count.js (TrifCore.unreadCount) | UnreadTitle.swift (a twin, same cases: every title change) | test/unreadcount.test.js |
 | Links to other apps | shared/core/app-links.js | AppLinks.swift → TrifCore.appLinks | test/core-applinks.test.js, test/applinks.test.js |
 | What a chat may offer (memory, key, judge) | shared/core/chat-offers.js | ChatOffers.swift → TrifCore.chatOffers (storage and a key cache stay Swift) | test/core-chatoffers.test.js, test/chatoffers.test.js |
 | Sites (a host's site; host in site; a chat's site) | shared/core/site.js | Site.swift (a twin, same cases: every navigation) | test/core-quickask.test.js, test/quickask.test.js |
@@ -287,3 +302,8 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Mod store, part 3: what runs (switches, tiers off, Pause all), @match | shared/core/mod-store.js, shared/core/match.js | ModRuns.swift → TrifCore.modStore setOn / setGroup (`running`, `isOn`, `off` and MatchPattern twins, same cases: every page load) | test/core-modruns.test.js, test/modruns.test.js |
 | A chat's offered mod: where it's read, where it came from, the coral box | shared/core/mod-offer.js | ModOfferRules.swift → TrifCore.modOffer (Browser.offerFromChat and the Add to TRIF tap; the words stay ModOfferView's) | test/core-modoffer.test.js, test/modoffer.test.js |
 | The leaving cover's "icon use" (an icon's tab in full screen, or arrived by an icon within 3 s) | shared/core/leaving-cover.js | LeavingCoverRules.swift → TrifCore.leavingCover (the cover, its timing and the scene hooks stay LeavingCover.swift) | test/core-leavingcover.test.js, test/leavingcover.test.js |
+| Which tabs load again when mods change (started or looked at; stale; later, keep, ask whether playing; reload) | shared/core/tab-reload.js | TabReloadRules.swift → TrifCore.tabReload (Browser.select / refreshIfStale; `loaded` and `stale` twins, same cases: every commit; the signature, the playing check and the reload stay Browser's) | test/core-tabreload.test.js, test/tabreload.test.js |
+| A video picked up where it was: which load resumes (30 min, same page, live, ended, own time, first 5 s / last 10 s), the sites' video ids | shared/core/video-resume.js | VideoResume.swift → TrifCore.videoResume (an address as its parts: URLComponents; the page's script, the store and the play stay Swift) | test/core-videoresume.test.js, test/videoresume.test.js |
+| Desktop websites' per-site memory (the key, wants, the kept list, can) | shared/core/desktop.js | DesktopRules (TabReloadRules.swift) → TrifCore.desktop `set` (`key`, `wants`, `can` twins, same cases: every page load) | test/core-tabreload.test.js, test/tabreload.test.js |
+| The microphone's words only grow (segments, restarts after a pause, revised partials, a repeated segment) | shared/core/speech-text.js | SpeechText.swift → TrifCore.speechText.apply, every recognizer event (the committed words stay Swift and never cross: the answer says what to add; a Swift copy answers only if the shared rule can't) | test/core-speechtext.test.js, test/speechtext.test.js |
+| The tab list: the card it opens at (the chat's own tab, else the shown tab), each card's robot badge; Go to {site}'s tab | shared/core/tab-list.js | TabListRules.swift → TrifCore.tabList (ClaudePane.chatTabShown and goToSite, TabsView's badges; `marked`, the card drawn as current, a twin, same cases: every drawing) | test/core-tablist.test.js, test/tablist.test.js |

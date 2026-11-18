@@ -1,6 +1,7 @@
 // A site's own unread count, read from its page title (Tim, 11-18: "unread counts instead of notifications"). Shared by
 // both phone apps: the iPhone's UnreadTitle.swift is the same rule in Swift, and mobile/test/unreadcount.test.js holds
-// them to the same answers (mobile/shared/unread-cases.json, and random titles). Only the title the page itself shows:
+// them to the same answers (mobile/shared/core/unread-count-cases.json, and random titles; both phones also have it as
+// TrifCore.unreadCount in mobile/shared/gen/core.js). Only the title the page itself shows:
 // never a site's own API.
 //
 // Counted:

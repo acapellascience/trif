@@ -225,6 +225,58 @@ function skip(a) {
 module.exports = { normalise, key, keys, outcome, note, skip, LIMIT };
 
 };
+SOURCES["desktop.js"] = function (module, exports, require) {
+// Request Desktop Website's per-site memory (docs/MOBILE-BEHAVIOUR.md, Desktop websites; Tim 11-18, "a desktop mode
+// like safari has"): as Safari's per-website setting, by host without www., in every tab, kept across launches; Request
+// Mobile Website takes the site off. How a page loads as a computer's, and where the list is kept, stay each app's.
+// Both phone apps run this (mobile/shared/gen/core.js: TrifCore.desktop); desktop-cases.json holds the answers the
+// iPhone's Swift gave.
+
+'use strict';
+
+/** Code point order (Swift's sorted(); hosts are punycode, so ASCII in practice). */
+const byCodePoint = (a, b) => {
+  const x = [...a], y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (d) return d;
+  }
+  return x.length - y.length;
+};
+
+/** The key a host is kept by: lower case, a leading www. removed. */
+function key(host) {
+  const h = String(host || '').toLowerCase();
+  return h.startsWith('www.') ? h.slice(4) : h;
+}
+
+/**
+ * A page on `host` loads as a computer's.
+ * @param {string[]} kept the kept keys
+ */
+function wants(kept, host) {
+  const h = String(host || '');
+  return h !== '' && (kept || []).includes(key(h));
+}
+
+/**
+ * The kept list after Request Desktop (on) or Mobile (off) Website on `host`: sorted, once each.
+ * @param {string[]} kept
+ */
+function set(kept, host, on) {
+  const s = new Set(kept || []);
+  if (on) s.add(key(host)); else s.delete(key(host));
+  return [...s].sort(byCodePoint);
+}
+
+/** The page can be asked for as a computer's or a phone's: a website (http or https) with a host. */
+function can(scheme, host) {
+  return ['http', 'https'].includes(String(scheme || '').toLowerCase()) && String(host || '') !== '';
+}
+
+module.exports = { key, wants, set, can };
+
+};
 SOURCES["leaving-cover.js"] = function (module, exports, require) {
 // The leaving cover's "icon use" decision (docs/MOBILE-BEHAVIOUR.md, Icons and full screen; Tim 11-18): as the app
 // leaves while it's used through Home Screen icons, a plain cover goes up so the OS's picture of the app is never
@@ -794,6 +846,496 @@ function chat(site) {
 module.exports = { of, hostIsIn, chat, TWO_PART };
 
 };
+SOURCES["speech-text.js"] = function (module, exports, require) {
+// The microphone's words, put together so they only ever grow (docs/MOBILE-BEHAVIOUR.md, Voice; Tim 11-18: "If you
+// pause, it deletes the things you've said so far"): what was said before a pause stays, a restarted recognizer's
+// words go after it, a revised partial replaces only the words since the last committed ones. The recognizers, the
+// audio and the box stay each app's. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.speechText);
+// speech-text-cases.json holds the answers the iPhone's Swift (SpeechText.swift) gave.
+//
+// The words' state is a plain record {said, live, taskSaid, restarts}; the committed words stay the caller's (they
+// only grow). `apply` takes one recognizer event and gives the next state, what to add to the committed words, and
+// the text's tail after them. Events:
+//   - iOS 26's SpeechAnalyzer: ['volatile', s] the words being heard (they may change), ['final', s] a finished stretch.
+//   - SFSpeechRecognizer (and Android's SpeechRecognizer the same way): ['partial', s] the task's best transcription so
+//     far, ['segment', s] the recognizer marked the utterance done, ['newTask'] a task ended and the next one starts.
+//
+// The iPhone's Swift split words on Characters (a whitespace followed by a mark is one whitespace Character; a Prepend
+// sign joins what follows it), lowercased scalar by scalar (no final-sigma rule), kept Characters whose first scalar is
+// a letter or a number, and compared by canonical equivalence; so does this.
+
+'use strict';
+
+/** what joins the Character before it (marks, joiners, emoji modifiers, tags, Thai and Lao AM): nearly Unicode's
+ * Extend + SpacingMark, as the iPhone's Swift has them */
+const JOINS = '\\p{M}\\u200C\\u200D\\u0E33\\u0EB3\\uFF9E\\uFF9F\\u{1F3FB}-\\u{1F3FF}\\u{E0020}-\\u{E007F}';
+/** Unicode's Prepend signs (they join the Character after them unless it's a control) */
+const PREPEND = '\\u0600-\\u0605\\u06DD\\u070F\\u0890\\u0891\\u08E2\\u0D4E\\u{110BD}\\u{110CD}\\u{111C2}\\u{111C3}\\u{1193F}\\u{11941}\\u{11A3A}\\u{11A84}-\\u{11A89}\\u{11D46}\\u{11F02}';
+/** a control: nothing joins it, and a Prepend sign doesn't join it */
+const CONTROL = `(?![\\u200C\\u200D\\u{E0020}-\\u{E007F}${PREPEND}])[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]`;
+const CHARACTER = new RegExp(`[${PREPEND}]+(?!${CONTROL})[^][${JOINS}]*|\\r\\n|${CONTROL}|[^][${JOINS}]*`, 'gu');
+const SPACE = /^\p{White_Space}/u;
+const KEEP = /^[\p{Alphabetic}\p{N}]/u;
+const PLAIN = /^[\x21-\x7e]*$/;
+
+const same = (a, b) => a === b || a.normalize('NFC') === b.normalize('NFC');
+
+/** The words in `s`: split at whitespace Characters, none empty. */
+function words(s) {
+  s = String(s);
+  if (/^[\x20-\x7e\t\n\v\f\r]*$/.test(s)) return s.split(/[ \t\n\v\f\r]+/).filter((w) => w !== '');
+  const out = [];
+  let w = '';
+  for (const c of s.match(CHARACTER) || []) {
+    if (SPACE.test(c)) { if (w) out.push(w); w = ''; } else w += c;
+  }
+  if (w) out.push(w);
+  return out;
+}
+
+/** A word as it's compared: lowercased scalar by scalar, only its letters and numbers. */
+function norm(w) {
+  w = String(w);
+  if (PLAIN.test(w)) return w.toLowerCase().replace(/[^a-z0-9]/g, '');
+  let lower = '';
+  for (const c of w) lower += c.toLowerCase();
+  return (lower.match(CHARACTER) || []).filter((c) => KEEP.test(c)).join('');
+}
+
+/** `s`'s words with one space between them. */
+const clean = (s) => words(s).join(' ');
+
+/** what a join trims (Foundation's whitespacesAndNewlines: White_Space and U+200B; all of it is in the BMP) */
+const trims = (c) => c === 0x20 || (c >= 9 && c <= 13) || c === 0x85 || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200b) ||
+  c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000;
+
+/** `s` without those at either end (a loop, not a regular expression: `committed` grows long) */
+function trim(s) {
+  let i = 0, j = s.length;
+  while (i < j && trims(s.charCodeAt(i))) i++;
+  while (j > i && trims(s.charCodeAt(j - 1))) j--;
+  return i === 0 && j === s.length ? s : s.slice(i, j);
+}
+
+/** `a` then `b`, trimmed, with a space between when both have words. */
+function join(a, b) {
+  a = trim(String(a));
+  b = trim(String(b));
+  if (!a) return b;
+  if (!b) return a;
+  return a + ' ' + b;
+}
+
+/**
+ * Whether `next` is a new transcription rather than a revision of `previous`: shorter, and either starting
+ * differently or much shorter. (A wrong guess repeats a few words; the other way round would lose them.)
+ */
+function isFresh(previous, next) {
+  const p = words(previous).map(norm), n = words(next).map(norm);
+  if (p.length < 2 || n.length >= p.length) return false;
+  if (n.length === 0) return true;
+  for (let i = 0; i < Math.min(2, n.length); i++) if (!same(n[i], p[i])) return true;
+  return n.length * 3 <= p.length * 2;
+}
+
+/** `s` without the task's already committed words at its start (when the recognizer repeats them). */
+function afterTaskSaid(taskSaid, s) {
+  if (!taskSaid) return s;
+  const said = words(taskSaid), all = words(s);
+  if (all.length < said.length) return s;
+  const a = said.map(norm), b = all.slice(0, said.length).map(norm);
+  let alike = 0;
+  for (let i = 0; i < a.length; i++) if (same(a[i], b[i])) alike++;
+  // (the same words; or, for a longer stretch, nearly the same: a word revised in the repeat)
+  const ok = alike === a.length || (a.length >= 3 && alike >= a.length - Math.max(1, Math.floor(a.length / 5)) && same(a[0], b[0]));
+  return ok ? all.slice(said.length).join(' ') : s;
+}
+
+/** The words before anything was heard. */
+const start = () => ({ said: false, live: '', taskSaid: '', restarts: 0 });
+
+/**
+ * The next state after one recognizer event. What's committed stays the caller's (it only grows, and it grows long:
+ * it never crosses): the answer says what to add to its end, and what follows it in the text.
+ * @param {{said: boolean, live: string, taskSaid: string, restarts: number}|null} state said: anything committed yet
+ * @param {Array} event ['volatile'|'final'|'partial'|'segment', text] or ['newTask']
+ * @returns {{added: string, said: boolean, live: string, taskSaid: string, restarts: number, tail: string}}
+ *   committed += added; text = committed + tail. restarts: how many times a fresh transcription was caught replacing
+ *   the live words (for diagnostics)
+ */
+function apply(state, event) {
+  const st = state || {};
+  let live = String(st.live || ''), taskSaid = String(st.taskSaid || ''), restarts = Number(st.restarts) || 0;
+  let said = !!st.said, added = '';
+  // join(committed, x): committed is always trimmed, so only whether it has words matters
+  const commit = (x) => {
+    x = trim(x);
+    if (!x) return;
+    added += (said ? ' ' : '') + x;
+    said = true;
+  };
+  const partial = (whole) => {
+    const next = afterTaskSaid(taskSaid, clean(whole));
+    if (isFresh(live, next)) {
+      // (the recognizer started over after a pause: the words it dropped are kept)
+      commit(live);
+      restarts += 1;
+    }
+    live = next;
+  };
+  const [kind, s] = Array.isArray(event) ? event : [];
+  switch (kind) {
+    case 'volatile': live = clean(s || ''); break;
+    case 'final': commit(clean(s || '')); live = ''; break;
+    case 'partial': partial(s || ''); break;
+    case 'segment': {
+      partial(s || '');
+      commit(live);
+      live = '';
+      const w = clean(s || '');
+      if (w) taskSaid = w;
+      break;
+    }
+    case 'newTask': commit(live); live = ''; taskSaid = ''; break;
+    default: break;
+  }
+  const rest = trim(live);
+  return { added, said, live, taskSaid, restarts, tail: rest ? (said ? ' ' : '') + rest : '' };
+}
+
+module.exports = { words, norm, clean, join, isFresh, start, apply };
+
+};
+SOURCES["tab-list.js"] = function (module, exports, require) {
+// The tab list's rules (docs/MOBILE-BEHAVIOUR.md, Tabs and Chats and tabs; Tim 11-18: "it should snap to the tab that
+// I just left"): which card it opens at, and each card's robot badge; and which tab Go to <site> shows. The list
+// itself, its scrolling and the badges' looks stay each app's. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.tabList); tab-list-cases.json
+// holds the answers the iPhone's Swift gave.
+
+'use strict';
+
+const site = require('./site.js');
+
+/**
+ * The tab a chat link goes back to now: the one it was sent from, while it's still open and on the chat's site.
+ * @param {{site: string, tab: string|null}} l
+ * @param {{id: string, host: string}[]} tabs
+ */
+function tabFor(l, tabs) {
+  if (l.tab == null) return null;
+  const t = tabs.find((x) => x.id === l.tab);
+  return t && site.of(String(t.host || '')) === l.site ? t : null;
+}
+
+/**
+ * The card the list opens at, from the chat: the chat's own tab (its link's tab while open and on its site). A chat
+ * not sent from yet has no link: its site's tab then, the shown one if it's on that site, else the last one there.
+ * Not from the chat (the page, Mods, More's chat): null, the shown tab.
+ * @param {{open: boolean, more: boolean, link: {site: string, tab: string|null}|null, chat: string|null,
+ *   tabs: {id: string, host: string}[], current: string}} f
+ *   open: the chat shown or the quick ask's strip; more: More's chat; link: the shown chat's; chat: its site, when it
+ *   has no link; current: the shown tab's id
+ * @returns {string|null} a tab's id
+ */
+function focus(f) {
+  if (!f.open || f.more) return null;
+  const tabs = Array.isArray(f.tabs) ? f.tabs : [];
+  const l = linkOf(f, tabs);
+  if (!l) return null;
+  const t = tabFor(l, tabs);
+  return t ? t.id : null;
+}
+
+/**
+ * The shown chat's link; a chat not sent from yet has none: one made from the chat, its site's tab (the shown one if
+ * it's on that site, else the last one there), no page.
+ */
+function linkOf(f, tabs) {
+  if (f.link && typeof f.link === 'object') return f.link;
+  if (typeof f.chat !== 'string') return null;
+  const cur = tabs.find((x) => x.id === f.current);
+  if (!cur) return null;
+  const s = f.chat;
+  let t = site.of(String(cur.host || '')) === s ? cur : null;
+  if (!t) for (let i = tabs.length - 1; i >= 0 && !t; i--) if (site.of(String(tabs[i].host || '')) === s) t = tabs[i];
+  return { site: s, tab: t ? t.id : null, page: null };
+}
+
+/**
+ * Go to <site> (a chat's top bar, its banner, the chats' list): the chat's own tab while it's open and on its site;
+ * else a new tab at the page it was on, if that page is on the site, else the site's home (a new tab, as a link opens
+ * one: nothing rewritten). A chat with no site: nothing.
+ * @param {{link: {site: string, tab: string|null, page: {url: string, host: string}|null}|null, chat: string|null,
+ *   tabs: {id: string, host: string}[], current: string}} f
+ *   link: the chat's (page: the address it was on, as the platform parsed it); chat: its site, when it has no link
+ * @returns {{tab: string}|{open: string, page: boolean}|null}
+ */
+function goTo(f) {
+  const tabs = Array.isArray(f.tabs) ? f.tabs : [];
+  const l = linkOf(f, tabs);
+  if (!l || typeof l.site !== 'string' || !l.site) return null;
+  const t = tabFor(l, tabs);
+  if (t) return { tab: t.id };
+  const p = l.page && typeof l.page === 'object' ? l.page : null;
+  const page = p && typeof p.url === 'string' && site.of(String(p.host || '')) === l.site ? p.url : null;
+  return { open: page != null ? page : `https://${l.site}/`, page: page != null };
+}
+
+/**
+ * The card drawn as the current one: the focus while that tab is open, else the shown tab.
+ * @param {{focus: string|null, tabs: string[], current: string}} f
+ */
+function marked(f) {
+  return f.focus != null && (f.tabs || []).includes(f.focus) ? f.focus : f.current;
+}
+
+/** A chat's state as its badge: a reply being written, a reply waiting, or plain. */
+function activity(state) {
+  return state === 'working' ? 'working' : state === 'waiting' ? 'replied' : 'idle';
+}
+
+/**
+ * Each card's robot badge: its chats' (sent from it, while it's on their site), working before a reply waiting
+ * before plain. Tabs with none are left out.
+ * @param {{links: {site: string, tab: string|null, state: string}[], tabs: {id: string, host: string}[]}} f
+ * @returns {Object<string, 'working'|'replied'|'idle'>} tab id → badge
+ */
+function badges(f) {
+  const tabs = Array.isArray(f.tabs) ? f.tabs : [];
+  const links = Array.isArray(f.links) ? f.links : [];
+  const out = {};
+  for (const t of tabs) {
+    const mine = links.filter((l) => l.tab === t.id && tabFor(l, tabs)).map((l) => activity(l.state));
+    if (!mine.length) continue;
+    out[t.id] = mine.includes('working') ? 'working' : mine.includes('replied') ? 'replied' : 'idle';
+  }
+  return out;
+}
+
+module.exports = { focus, marked, badges, activity, goTo };
+
+};
+SOURCES["tab-reload.js"] = function (module, exports, require) {
+// Which tabs load again when the mods change (docs/MOBILE-BEHAVIOUR.md, Tabs; Tim 11-18: "when you successfully add
+// the mod to the other tab, your tab reloads. That's quite annoying for watching videos"). After a change to the mods
+// the scripts every page gets are made again; the shown page loads again only if what runs on it changed, and never
+// while it plays (unless the person's own act asks for it: Pause all); tabs behind load again when they're next shown.
+// What runs on a page is a signature each app makes (iPhone: Hasher, per launch); only its equality matters here. The
+// reload itself, the playing check and the scripts stay each app's. Both phone apps run this (mobile/shared/gen/core.js:
+// TrifCore.tabReload); tab-reload-cases.json holds the answers the iPhone's Swift gave.
+
+'use strict';
+
+/** The signature a page keeps as it commits while a change isn't in the scripts yet: it counts as stale. */
+const PENDING = 'pending';
+
+/**
+ * A tab shown: its first load (what was kept of it) or a look at whether its mods changed.
+ * @param {{started: boolean, waitingForFront: boolean}} f waitingForFront: the app isn't in front yet (it starts then)
+ * @returns {'start' | 'refresh'}
+ */
+function shown(f) {
+  return !f.started && !f.waitingForFront ? 'start' : 'refresh';
+}
+
+/**
+ * The signature a page keeps as it commits.
+ * @param {{pending: boolean, signature: string}} f pending: a change to the mods isn't in the scripts yet
+ */
+function loaded(f) {
+  return f.pending ? PENDING : String(f.signature);
+}
+
+/**
+ * Whether the mods running on a page changed since it loaded (null: it hasn't loaded).
+ * @param {string|null} kept what loaded() gave as it committed
+ * @param {string} now the signature for its address now
+ */
+function stale(kept, now) {
+  return kept == null ? null : String(now) !== String(kept);
+}
+
+/**
+ * The shown tab looked at after a change (or as it's shown again).
+ * @param {{pending: boolean, started: boolean, hasPage: boolean, reloading: boolean, loaded: string|null, now: string,
+ *   evenPlaying: boolean}} f hasPage: it has an address; reloading: a reload of it is under way; evenPlaying: Pause all
+ * @returns {'later' | 'keep' | 'ask' | 'next'} later: once the scripts are in, look again (if it's still the tab
+ *   shown); ask: find out whether it plays, then recheck; next: recheck (on the next turn) without asking
+ */
+function refresh(f) {
+  if (f.pending) return 'later';
+  if (!f.started || !f.hasPage || f.reloading || !stale(f.loaded, f.now)) return 'keep';
+  return f.evenPlaying ? 'next' : 'ask';
+}
+
+/**
+ * After refresh's ask (or next): whether it loads again now.
+ * @param {{playing: boolean, shown: boolean, reloading: boolean, pending: boolean, loaded: string|null, now: string}} f
+ *   playing: it plays sound or video (false when not asked); shown: it's still the tab shown
+ * @returns {'playing' | 'keep' | 'reload'} playing: it keeps going as it is, and loads again the next time it's shown
+ *   not playing
+ */
+function recheck(f) {
+  if (f.playing) return 'playing';
+  if (!f.shown || f.reloading || f.pending || !stale(f.loaded, f.now)) return 'keep';
+  return 'reload';
+}
+
+module.exports = { PENDING, shown, loaded, stale, refresh, recheck };
+
+};
+SOURCES["unread-count.js"] = function (module, exports, require) {
+// A site's own unread count, read from its page title (Tim, 11-18: "unread counts instead of notifications"). Shared by
+// both phone apps: the iPhone's UnreadTitle.swift is the same rule in Swift, and mobile/test/unreadcount.test.js holds
+// them to the same answers (mobile/shared/core/unread-count-cases.json, and random titles; both phones also have it as
+// TrifCore.unreadCount in mobile/shared/gen/core.js). Only the title the page itself shows:
+// never a site's own API.
+//
+// Counted:
+//   - a count at the very start: "(3) Home / X", "(12) Facebook", "(99+) YouTube", "(1,234) Feed | LinkedIn";
+//   - "Inbox (N)" anywhere: "Inbox (5) - tim@example.com - Gmail";
+//   - "(N unread)" anywhere: "Yahoo Mail - (5 unread)".
+// Nothing else: a number in brackets elsewhere is part of the real title ("Dune: Part Two (2024) - IMDb", "Top 10
+// (2023 film)"), and a year at the start ("(2024) Dune trailer - YouTube"). The count comes out of the title shown
+// beside its badge, so it isn't said twice.
+//
+// readCount(title) → null (no count in it), or { count, plus, title }: count a whole number (0 possible: "Inbox (0)"),
+// plus true for "99+", title the title without the count. countText(count, plus) → the badge's text.
+
+'use strict';
+
+// (spaces and digits spelt out, the same in JavaScript and in ICU (the Swift side): \s and \d differ between them)
+const SP = '[ \\t\\n\\r\\f\\u000b\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
+const NUM = '([0-9]{1,3}(?:[,.\\u00a0\\u202f][0-9]{3})+|[0-9]{1,7})';
+const LEAD = new RegExp(`^${SP}*\\(${NUM}(\\+?)\\)${SP}*`);
+const INBOX = new RegExp(`(^|[^A-Za-z0-9])(inbox)${SP}*\\(${NUM}(\\+?)\\)`, 'i');
+const UNREAD = new RegExp(`${SP}*\\(${NUM}(\\+?)${SP}+unread\\)`, 'i');
+const SEPS = new RegExp(`${SP}+([-\\u2013\\u2014|\\u2022\\u00b7:])(?:${SP}+[-\\u2013\\u2014|\\u2022\\u00b7:])+(?=${SP})`, 'g');
+const ENDS = new RegExp(`^(?:${SP}|[-\\u2013\\u2014|\\u2022\\u00b7:])+|(?:${SP}|[-\\u2013\\u2014|\\u2022\\u00b7:])+$`, 'g');
+const RUNS = new RegExp(`${SP}{2,}`, 'g');
+
+function number(text) { return parseInt(text.replace(/[^0-9]/g, ''), 10); }
+
+function tidy(t) { return t.replace(SEPS, ' $1').replace(RUNS, ' ').replace(ENDS, ''); }
+
+function readCount(title) {
+  const t = String(title == null ? '' : title);
+  let m = LEAD.exec(t);
+  // (a year in brackets at the start is the title's own: "(2024) Dune trailer - YouTube"; no site's count is that
+  // big without a "+")
+  if (m && !(m[2] !== '+' && /^(19|20)[0-9]{2}$/.test(m[1]))) return { count: number(m[1]), plus: m[2] === '+', title: t.slice(m[0].length).replace(ENDS, '') };
+  m = INBOX.exec(t);
+  if (m) return { count: number(m[3]), plus: m[4] === '+', title: tidy(t.slice(0, m.index) + m[1] + m[2] + t.slice(m.index + m[0].length)) };
+  m = UNREAD.exec(t);
+  if (m) return { count: number(m[1]), plus: m[2] === '+', title: tidy(t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length)) };
+  return null;
+}
+
+/** The badge's words: "3", "20+", and past 999 "999+" (a card's badge stays small). */
+function countText(count, plus) {
+  if (count > 999) return '999+';
+  return `${count}${plus ? '+' : ''}`;
+}
+
+const api = { readCount, countText };
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+else globalThis.trifUnread = api;
+
+};
+SOURCES["video-resume.js"] = function (module, exports, require) {
+// A video picks up where it was after its page loads again (docs/MOBILE-BEHAVIOUR.md, Video; Tim 11-18): which load
+// resumes the video kept for its tab (the same page within 30 minutes, not live, not ended, not another video, not the
+// first 5 s or the last 10 s, not a link asking for its own time), and the sites' video ids. What the page reports,
+// where it's kept and how it's put back stay each app's (and the page's). Both phone apps run this
+// (mobile/shared/gen/core.js: TrifCore.videoResume); video-resume-cases.json holds the answers the iPhone's Swift gave.
+//
+// An address crosses in as its parts, as the platform's parser gives them (a bare JavaScriptCore has no URL):
+// {host, path (percent escapes decoded), query: [[name, value or null]] or null, fragment or null}, or null when it
+// isn't an address. The iPhone's Swift compared text as Characters (a mark after "/" or "#" belongs to it, a number is
+// a Character whose first scalar is one) and by canonical equivalence; so does this. (Its Character.isNumber also
+// counts Han numerals such as 一; JS's \p{N} doesn't. Addresses are punycode and percent escapes in practice.)
+
+'use strict';
+
+const WINDOW = 30 * 60, SKIP_START = 5, SKIP_END = 10;
+
+/** what joins the Character before it (marks, joiners, emoji modifiers, tags): nearly Unicode's Extend + SpacingMark */
+const JOINS = '\\p{M}\\u200C\\u200D\\uFF9E\\uFF9F\\u{1F3FB}-\\u{1F3FF}\\u{E0020}-\\u{E007F}';
+const SLASH = new RegExp(`/(?![${JOINS}])`, 'u');
+const HASH = new RegExp(`#(?![${JOINS}])`, 'u');
+const NUMBER = new RegExp(`^(?:\\p{N}[${JOINS}]*)+$`, 'u');
+const T_IS = new RegExp(`^t=(?![${JOINS}])`, 'u');
+
+const same = (a, b) => a === b || (a != null && b != null && String(a).normalize('NFC') === String(b).normalize('NFC'));
+
+/**
+ * The site's own id for the video at an address, where it has one: YouTube's watch?v=, /shorts/, /embed/, /live/,
+ * /v/, youtu.be/; Vimeo's number (the last one in the path). null elsewhere (the address itself is the page then).
+ * @param {{host: ?string, path: string, query: ?Array, fragment: ?string}|null} p
+ */
+function videoID(p) {
+  if (!p || p.host == null) return null;
+  const host = String(p.host).toLowerCase().normalize('NFC');
+  const parts = String(p.path || '').split(SLASH).filter((s) => s !== '');
+  const is = (h) => host === h || host.endsWith('.' + h);
+  if (host === 'youtu.be') return parts.length ? 'yt:' + parts[0] : null;
+  if (is('youtube.com') || is('youtube-nocookie.com')) {
+    const v = (p.query || []).find(([name]) => same(name, 'v'));
+    if (v && v[1] != null && v[1] !== '') return 'yt:' + v[1];
+    if (parts.length >= 2 && ['shorts', 'embed', 'live', 'v'].some((k) => same(parts[0], k))) return 'yt:' + parts[1];
+    return null;
+  }
+  if (is('vimeo.com')) {
+    const n = [...parts].reverse().find((s) => NUMBER.test(s));
+    return n ? 'vimeo:' + n : null;
+  }
+  return null;
+}
+
+/** The address asks for its own time (a shared link's t=, start=, time_continue=, a #t=): the person chose it. */
+function asksForTime(p) {
+  if (!p) return false;
+  if ((p.query || []).some(([name]) => ['t', 'start', 'time_continue'].some((k) => same(name, k)))) return true;
+  return T_IS.test(p.fragment || '');
+}
+
+/** An address without its #part. */
+const bare = (url) => String(url).split(HASH)[0];
+
+/**
+ * The same page: the same video id when the site has one, else the same address (its #part aside).
+ * @param {{url: string, parts: object|null}} a
+ * @param {{url: string, parts: object|null}} b
+ */
+function samePage(a, b) {
+  const va = videoID(a.parts), vb = videoID(b.parts);
+  if (va != null || vb != null) return same(va, vb);
+  return same(bare(a.url), bare(b.url));
+}
+
+/**
+ * Whether the page loading `address` in this tab picks up the video kept for it, and why (Diagnostics only).
+ * @param {{saved: ?{url: string, parts: object|null, time: number, duration: number, live: boolean, ended: boolean, age: number}, address: {url: string, parts: object|null}}} f
+ *   duration: -1 when live or not known; age: seconds since it was kept
+ * @returns {{plan: boolean, why: string}}
+ */
+function decide(f) {
+  const s = f.saved;
+  const no = (why) => ({ plan: false, why });
+  if (!s) return no('nothing kept');
+  if (s.age > WINDOW) return no('kept more than 30 minutes ago');
+  if (s.live) return no('a live stream');
+  if (s.ended) return no('it had ended');
+  if (!samePage(s, f.address)) return no('another page or video');
+  if (asksForTime(f.address.parts) && !asksForTime(s.parts)) return no('the address asks for its own time');
+  if (s.time < SKIP_START) return no(`in its first ${SKIP_START} s`);
+  if (s.duration > 0 && s.time > s.duration - SKIP_END) return no(`in its last ${SKIP_END} s`);
+  return { plan: true, why: 'resume' };
+}
+
+module.exports = { videoID, asksForTime, samePage, decide, WINDOW, SKIP_START, SKIP_END };
+
+};
 const cache = {};
 function require(name) {
   const f = name.replace(/^\.\//, '');
@@ -806,12 +1348,18 @@ function require(name) {
 }
 TrifCore.appLinks = require("app-links.js");
 TrifCore.chatOffers = require("chat-offers.js");
+TrifCore.desktop = require("desktop.js");
 TrifCore.leavingCover = require("leaving-cover.js");
 TrifCore.match = require("match.js");
 TrifCore.modOffer = require("mod-offer.js");
 TrifCore.modStore = require("mod-store.js");
 TrifCore.quickAsk = require("quick-ask.js");
 TrifCore.site = require("site.js");
+TrifCore.speechText = require("speech-text.js");
+TrifCore.tabList = require("tab-list.js");
+TrifCore.tabReload = require("tab-reload.js");
+TrifCore.unreadCount = require("unread-count.js");
+TrifCore.videoResume = require("video-resume.js");
 // name "module.fn", args a JSON array; the answer as JSON (null for undefined)
 TrifCore.call = function (name, argsJSON) {
   const dot = name.indexOf('.');

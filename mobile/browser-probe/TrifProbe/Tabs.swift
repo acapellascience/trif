@@ -384,7 +384,7 @@ struct TabsView: View {
     private let columns = [GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top), GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top)]
     /// (where the list is scrolled to: the focused card from the first frame, no scroll from the top)
     @State private var at: UUID?
-    private var marked: UUID { focus.flatMap { id in browser.tabs.contains { $0.id == id } ? id : nil } ?? browser.current.id }
+    private var marked: UUID { TabListRules.marked(focus: focus, tabs: browser.tabs.map(\.id), current: browser.current.id) }
 
     init(pane: ClaudePane, focus: UUID? = nil, close: @escaping () -> Void = {}) {
         self.pane = pane
@@ -396,10 +396,11 @@ struct TabsView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
+            let badges = pane.badges(), marked = self.marked
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(browser.tabs) { tab in
-                        TabCard(tab: tab, current: tab.id == marked, chat: pane.badge(for: tab.id),
+                        TabCard(tab: tab, current: tab.id == marked, chat: badges[tab.id],
                                 select: { browser.select(tab); dismiss() },
                                 close: { withAnimation { browser.close(tab) } })
                         .id(tab.id)
@@ -557,4 +558,9 @@ struct NewTabView: View {
         }
         .listStyle(.insetGrouped)
     }
+}
+
+extension Tab {
+    /// As the tab list's shared rules take it (TabListRules).
+    var facts: TabListRules.TabFacts { .init(id: id, host: host) }
 }

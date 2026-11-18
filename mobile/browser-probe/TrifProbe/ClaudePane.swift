@@ -160,6 +160,8 @@ struct ChatLink: Codable, Identifiable, Equatable {
     var id: String { ClaudePane.linkKey(service, site) }
     /// The tab list's badge and the chat list's picture: working, a reply waiting, or plain.
     var activity: ChatActivity { state == .working ? .working : state == .waiting ? .replied : .idle }
+    /// As the tab list's shared rules take it (TabListRules).
+    var facts: TabListRules.LinkFacts { .init(site: site, tab: tab, state: state.rawValue) }
 }
 
 /// A reply done in a chat the person isn't looking at (Tim, 11-18): the banner that slides down over whatever is
@@ -992,29 +994,30 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         banners.removeAll { $0.id == b.id }
         browser?.offerHeld(b.mods)
     }
-    /// The tab a chat link goes back to now: the one it was sent from while it's still open and on the chat's site.
-    func tabFor(_ l: ChatLink) -> Tab? {
-        guard let browser, let id = l.tab, let t = browser.tabs.first(where: { $0.id == id }), Site.of(t.host) == l.site else { return nil }
-        return t
-    }
     /// Go to <site>: the chat closed and its tab shown; that tab closed (or gone to another site): a new tab at the
     /// page it was on, else the site's home (a new tab, as a link opens one: nothing rewritten). Its held mods, if
-    /// it has a banner with any, then come up there. Returns false for a chat with no site.
+    /// it has a banner with any, then come up there. Returns false for a chat with no site. The shared rule decides
+    /// which (TabListRules: tabList.goTo; a chat not sent from yet: fallbackLink's tab, the same choice).
     @discardableResult
     func goToSite(_ key: String) -> Bool {
-        guard let browser, let l = links.first(where: { $0.id == key }) ?? fallbackLink(key), !l.site.isEmpty else { return false }
+        guard let browser else { return false }
+        let link = links.first(where: { $0.id == key })
+        let chat = link == nil ? views.first(where: { ClaudePane.linkKey($0.service.rawValue, $0.site) == key })?.site : nil
+        guard let site = link?.site ?? chat,
+              let go = TabListRules.goTo(link: link.map { ($0.site, $0.tab, $0.tabURL) }, chat: chat, tabs: browser.tabs.map(\.facts), current: browser.current.id)
+        else { return false }
         if shown { close() }
-        if let t = tabFor(l) {
-            if t !== browser.current { browser.select(t) }
-            Diagnostics.shared.log("chats", "go to \(l.site): its tab")
-        } else {
-            let page = l.tabURL.flatMap(URL.init(string:)).flatMap { Site.of($0.host ?? "") == l.site ? $0.absoluteString : nil }
-            browser.newTab(page ?? "https://\(l.site)/")
-            Diagnostics.shared.log("chats", "go to \(l.site): its tab is closed or on another site, a new tab at \(page == nil ? "the site" : "its page")")
-            if let i = links.firstIndex(where: { $0.id == l.id }) { links[i].tab = browser.current.id; links[i].tabURL = browser.current.webView.url?.absoluteString ?? page; saveLinks() }
+        switch go {
+        case .tab(let id):
+            if let t = browser.tabs.first(where: { $0.id == id }), t !== browser.current { browser.select(t) }
+            Diagnostics.shared.log("chats", "go to \(site): its tab")
+        case .open(let address, let page):
+            browser.newTab(address)
+            Diagnostics.shared.log("chats", "go to \(site): its tab is closed or on another site, a new tab at \(page ? "its page" : "the site")")
+            if let i = links.firstIndex(where: { $0.id == key }) { links[i].tab = browser.current.id; links[i].tabURL = browser.current.webView.url?.absoluteString ?? (page ? address : nil); saveLinks() }
         }
         follow(site: browser.site)
-        if let i = banners.firstIndex(where: { $0.link == l.id }) {
+        if let i = banners.firstIndex(where: { $0.link == key }) {
             let b = banners.remove(at: i)
             browser.offerHeld(b.mods)
         }
@@ -1030,19 +1033,23 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     }
     /// The tab the shown chat (or the quick ask's strip) belongs to, for the tab list to open at (Tim, 11-18): the one it
     /// was sent from while open and on its site, else nil (the shown tab). More follows the shown tab: nil.
+    /// The shared rule decides (TabListRules: tabList.focus).
     var chatTabShown: UUID? {
-        guard shown || strip, !more else { return nil }
-        guard let l = links.first(where: { $0.id == curKey }) ?? fallbackLink(curKey) else { return nil }
-        return tabFor(l)?.id
+        guard let browser else { return nil }
+        let link = links.first(where: { $0.id == curKey })
+        let chat = link == nil ? views.first(where: { ClaudePane.linkKey($0.service.rawValue, $0.site) == curKey })?.site : nil
+        return TabListRules.focus(open: shown || strip, more: more, link: link.map(\.facts), chat: chat,
+                                  tabs: browser.tabs.map(\.facts), current: browser.current.id)
     }
     /// The shown chat's way back (its top bar's ← site).
     var curKey: String { ClaudePane.linkKey(cur.service.rawValue, cur.site) }
     /// A tab's robot badge in the tab list: its chats' (sent from it, while it's on their site): working, a reply
     /// waiting, or plain (nil: no chat).
-    func badge(for tab: UUID) -> ChatActivity? {
-        let mine = links.filter { $0.tab == tab && tabFor($0) != nil }.map(\.activity)
-        if mine.isEmpty { return nil }
-        return mine.contains(.working) ? .working : mine.contains(.replied) ? .replied : .idle
+    func badge(for tab: UUID) -> ChatActivity? { badges()[tab] }
+    /// Every tab's badge with any, at once (the tab list asks once a drawing): the shared rule (tabList.badges).
+    func badges() -> [UUID: ChatActivity] {
+        guard let browser else { return [:] }
+        return TabListRules.badges(links: links.map(\.facts), tabs: browser.tabs.map(\.facts)).compactMapValues(ChatActivity.init(rawValue:))
     }
     /// A chat from the chats' list (or a banner's Open chat): shown, at its conversation, nothing put in its box.
     func openChat(_ key: String) {

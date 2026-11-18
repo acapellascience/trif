@@ -338,7 +338,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let was = current, was !== tab, tabs.contains(where: { $0 === was }) { TabShots.shared.take(was, "left"); letGoLater(was) }
         current = tab
         status = ""
-        if !tab.started && !waitingForFront { start(tab) } else { refreshIfStale(tab, "shown again after they changed while it was behind") }
+        if TabReloadRules.starts(started: tab.started, waitingForFront: waitingForFront) { start(tab) } else { refreshIfStale(tab, "shown again after they changed while it was behind") }
         address = tab.webView.url?.absoluteString ?? tab.savedURL?.absoluteString ?? ""
         title = tab.webView.title ?? tab.title
         loading = tab.webView.isLoading
@@ -596,17 +596,26 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// playing (then it keeps going as it is, and loads again the next time it's shown not playing).
     func refreshIfStale(_ tab: Tab, _ why: String, evenPlaying: Bool = false) {
         // (a change not in the scripts yet: looked at once it is)
-        if scriptsPending { afterRebuild.append { [weak self, weak tab] in if let self, let tab, tab === self.current { self.refreshIfStale(tab, why, evenPlaying: evenPlaying) } }; return }
-        guard tab.started, tab.webView.url != nil, tab.reloadCause == nil, let seen = tab.modsLoaded, mods.signature(seen.url) != seen.signature else { return }
+        // (the decision: TabReloadRules, the phones' shared rule; the signature, the playing check and the reload here)
+        let seen = tab.modsLoaded
+        let look = TabReloadRules.refresh(pending: scriptsPending, started: tab.started, hasPage: tab.webView.url != nil,
+                                          reloading: tab.reloadCause != nil, loaded: seen?.signature,
+                                          now: seen.map { mods.signature($0.url) } ?? "", evenPlaying: evenPlaying)
+        if look == .later { afterRebuild.append { [weak self, weak tab] in if let self, let tab, tab === self.current { self.refreshIfStale(tab, why, evenPlaying: evenPlaying) } }; return }
+        guard look == .ask || look == .next else { return }
         Task { @MainActor [weak self, weak tab] in
             guard let self, let tab else { return }
-            if !evenPlaying, await Browser.playing(tab) {
+            let playing = look == .ask ? await Browser.playing(tab) : false
+            let seen = tab.modsLoaded
+            switch TabReloadRules.recheck(playing: playing, shown: tab === self.current, reloading: tab.reloadCause != nil,
+                                          pending: self.scriptsPending, loaded: seen?.signature, now: seen.map { self.mods.signature($0.url) } ?? "") {
+            case .playing:
                 Diagnostics.shared.log("mods", "\(Diagnostics.place(tab.webView.url)): its mods changed (\(why)) but it's playing, so not loaded again now")
-                return
+            case .reload:
+                self.keepStatus = true
+                self.reload(tab, "its mods changed: \(why)")
+            case .keep: break
             }
-            guard tab === self.current, tab.reloadCause == nil, !self.scriptsPending, let seen = tab.modsLoaded, self.mods.signature(seen.url) != seen.signature else { return }
-            self.keepStatus = true
-            self.reload(tab, "its mods changed: \(why)")
         }
     }
 
@@ -746,25 +755,20 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// launches; Request Mobile Website takes the site off. Only the hosts are kept (UserDefaults `desktopHosts`).
     /// The tabs' pages only: the chat's pages keep their own mode, and the mods that run are the same either way.
     @Published private(set) var desktopHosts: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "desktopHosts") ?? [])
-    nonisolated static func desktopKey(_ host: String) -> String {
-        var h = host.lowercased()
-        if h.hasPrefix("www.") { h.removeFirst(4) }
-        return h
-    }
-    func wantsDesktop(_ url: URL?) -> Bool {
-        guard let h = url?.host, !h.isEmpty else { return false }
-        return desktopHosts.contains(Browser.desktopKey(h))
-    }
+    /// (the per-site memory's rules: DesktopRules, the phones' shared rule; key / wants / can are its Swift twins)
+    nonisolated static func desktopKey(_ host: String) -> String { DesktopRules.key(host) }
+    func wantsDesktop(_ url: URL?) -> Bool { DesktopRules.wants(desktopHosts, host: url?.host) }
     /// The shown page was loaded as a computer's (what ⋯'s Request Desktop / Mobile Website says it would change).
     var desktopShown: Bool { current?.desktop ?? false }
     /// The shown page is a website (http/https): only those can be asked for as a computer's or a phone's.
-    var canRequestDesktop: Bool { ["http", "https"].contains(webView.url?.scheme?.lowercased() ?? "") && !host.isEmpty }
+    var canRequestDesktop: Bool { DesktopRules.can(scheme: webView.url?.scheme, host: host) }
     /// ⋯ → Request Desktop / Mobile Website: the site remembered (or forgotten) and the page loaded again in that mode.
     func requestDesktop(_ on: Bool) {
         guard canRequestDesktop else { return }
         let key = Browser.desktopKey(host)
-        if on { desktopHosts.insert(key) } else { desktopHosts.remove(key) }
-        UserDefaults.standard.set(desktopHosts.sorted(), forKey: "desktopHosts")
+        let kept = DesktopRules.set(desktopHosts, host: host, on: on)
+        desktopHosts = Set(kept)
+        UserDefaults.standard.set(kept, forKey: "desktopHosts")
         Diagnostics.shared.log("desktop", "\(on ? "desktop" : "mobile") website for \(key) (\(desktopHosts.count) desktop sites)")
         reload(on ? "Request Desktop Website" : "Request Mobile Website")
     }
@@ -1498,7 +1502,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let t = tab(of: webView) { checkAgent(t, webView) }
         // (a change to the mods not in the scripts yet: this page has the old ones, so it counts as stale)
         if let t = tab(of: webView), let u = webView.url?.absoluteString {
-            t.modsLoaded = (u, scriptsPending ? "pending" : mods.signature(u))
+            t.modsLoaded = (u, TabReloadRules.loaded(pending: scriptsPending, signature: mods.signature(u)))
             // (which mods this page loaded with: only those can have failed to start on it; the Mods tab)
             t.modsLoadedIds = scriptsPending ? [] : Set(mods.running(on: u).map(\.id))
         }

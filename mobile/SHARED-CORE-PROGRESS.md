@@ -24,9 +24,9 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
 - [x] Core.swift + mobile/shared/core + gen/core.js (round 1)
 - [x] Link policy: AppLinks kind / decide / isTap / logged → core/app-links.js (round 1). Words and Apple app names stay
       Swift (looks); the app's own schemes come from Info.plist (platform) and are passed in.
-- [~] Unread count from a title: shared already as mobile/shared/unread-count.js with a Swift twin (UnreadTitle.swift),
-      held to the same cases by test/unreadcount.test.js. Left as a twin (it runs on every title change); optional:
-      move the file into shared/core so it's in TrifCore too (keep the twin).
+- [x] Unread count from a title → core/unread-count.js (round 12; moved from mobile/shared/unread-count.js, cases now
+      core/unread-count-cases.json): TrifCore.unreadCount too. UnreadTitle.swift stays the twin the app runs (every
+      title change), held to the same cases and random titles by test/unreadcount.test.js, which also checks gen/core.js.
 - [x] Chat-offer judge → core/chat-offers.js (round 2): normalise, key (FNV-1a 64, 16-bit limbs), outcome, note
       (entries in, new list out), skip (takes keys). Storage stays Swift (UserDefaults), plus a key cache (NSString)
       warmed off the main thread at launch.
@@ -58,17 +58,37 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       ModOfferView.elsewhere; words stay Swift). @match itself was round 6 (core/match.js); trying a mod in More's chat
       (PanelChat.tryMod) uses ModStore.applies, the round-6 twin. Round 8: the Add to TRIF tap (Browser.offer(text:site:))
       takes `from` too (a bug fix: it kept the phone~ prefix, against the spec); mod-offer-cases.json "tap".
-- [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
-      / select).
+- [x] Which tabs reload when mods change → core/tab-reload.js (round 9): shown (start or refresh), loaded (the "pending"
+      signature), stale, refresh (later / keep / ask / next), recheck (playing / keep / reload). Swift: TabReloadRules.swift
+      (Browser.select / refreshIfStale call through; loaded and stale are twins: every commit). The signature (Hasher,
+      per launch), the playing check, the waiting and the reload stay Swift; Pause all's evenPlaying is the caller's.
 - [x] Leaving cover's "icon use" decision → core/leaving-cover.js (round 8): reason (icon tab on its site in full
       screen, or arrived by an icon), arrived (within 3 s). Swift: LeavingCoverRules.swift (LeavingCover.reason /
       willEnterForeground call through; `-nocover`, the browser, UserDefaults "iconTabs" and the words stay Swift).
-- [ ] Video-resume matching (VideoResume.decide, videoID; 30 min, 5 s / 10 s, live, ended, t=/start=). Swift unit check
-      exists (test/videoresume.test.js; the page's JS videoId already compared). Move decide + videoID.
-- [ ] Dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking). Swift unit check exists
-      (test/speechtext.test.js, random walk). Hot path (every partial result): measure; maybe a twin like unread.
-- [ ] Desktop-mode per-site memory (Browser.desktopKey: lower case, no www.; the kept list's add/remove).
-- [ ] Which tab the tab list snaps to (ClaudePane.chatTabShown + the from-Mods/from-page cases).
+- [x] Video-resume matching → core/video-resume.js (round 10): videoID, asksForTime, samePage, decide (30 min, live,
+      ended, same page, own time, first 5 s / last 10 s). Swift: VideoResume.swift calls through (once a page load), an
+      address as its parts (VideoResume.parts: URLComponents). The page's script (its own videoId, compared by
+      videoresume.test.js), the store (VideoStore, its 30-minute drop), the play and the words stay Swift.
+- [x] Dictation accumulator → core/speech-text.js (round 11): apply (one recognizer event: volatile, final, partial,
+      segment, newTask) over {said, live, taskSaid, restarts} → {added, …, tail}; words, norm, clean, join, isFresh.
+      Swift: SpeechText.swift calls through on every event; `committed` stays Swift and never crosses (committed +=
+      added; text = committed + tail), so a call's cost doesn't grow with the talk. The old Swift stays as its copy,
+      answering only if the shared rule can't (held to the same cases). SpeechInput's base join is Swift's join (same
+      join cases).
+- [x] Desktop-mode per-site memory → core/desktop.js (round 9): key, wants, set, can. Swift: DesktopRules (in
+      TabReloadRules.swift): set calls through (⋯'s Request Desktop / Mobile Website); key, wants, can are twins.
+- [x] Which tab the tab list snaps to → core/tab-list.js (round 12): focus (ClaudePane.chatTabShown: open = chat shown or
+      the strip, More → null, the link's tab while open and on its site; a chat with no link yet: the shown tab if on its
+      site, else the last tab there), marked (the card drawn as current; a Swift twin: every card, every drawing), badges
+      (each card's robot: working > replied > idle, only links whose tab is open and on their site). Swift:
+      TabListRules.swift (TabsView asks badges once a drawing, not once a card).
+- [x] Go to <site>'s choice → tabList.goTo (round 13): the chat's own tab while open and on its site, else a new tab at
+      the page it was on if that page is on the site, else https://site/; a chat not sent from yet: focus's tab choice
+      (linkOf, shared with focus). Swift: TabListRules.goTo (ClaudePane.goToSite; ClaudePane.tabFor removed). The new
+      tab, the link's bookkeeping, follow and the banner's held mods stay Swift.
+- [x] Last spec audit (round 13): every "Tim, 11-xx" decision in IOS-AGENT-NOTES checked against docs/MOBILE-BEHAVIOUR.md;
+      added Copy diagnostics and several icons at once. Left as notes on purpose: looks (icon face, robot size, toolbar
+      glyphs), iOS mechanics (profiles, Open Settings' URL), and the open idea (desktop mode running desktop mods).
 
 ## Done this round
 
@@ -169,13 +189,115 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   after 53 ms; full screen off → left: covered (came by an icon) → back by the app → left: the real picture kept; no
   "shared rule" line in diagnostics. .ipa built (dSYM 380648BC-59FB-3DA9-A12D-79ABAC4EFFBB).
 
+- Round 9 (11-18): which tabs load again when the mods change (core/tab-reload.js: shown, loaded, stale, refresh,
+  recheck) and desktop websites' per-site memory (core/desktop.js: key, wants, set, can); both in TabReloadRules.swift
+  (DesktopRules beside it). Cases recorded from the old Swift (scratchpad r9/rec.swift: the verbatim guards over facts):
+  4 shown, 8 loaded, 15 stale, 480 refresh, 240 recheck; 18 keys (case, www., www, wwwx, www.www., Ü/É, IPv6, ""), 90
+  wants, 180 sets, 22 cans; the JS passed them at once, then the Swift through JSC (twins compared with the JS). Cost
+  (Mac, unoptimised): refresh + recheck ~29 µs, a request ~20 µs. Tests: all of mobile/test (46 pass, 13 skipped as
+  before), prepare --check, smoke. Simulator (SE, headless, serve.js + serve-media.js): a mod for 127.0.0.1 added with
+  localhost shown → localhost not loaded again, 127.0.0.1 marked stale → shown: loaded again (outline); localhost
+  shown again unchanged → not loaded again; a mod for the shown site → loaded again; Pause all → loaded again without
+  (outline 0), resumed → with; a video playing (unmuted, a silent track) and a mod added → "playing, so not loaded
+  again now", stale; paused, shown again → loaded again; Request Desktop Website → sites [localhost], the tab desktop
+  (Mac agent); Mobile → [] ; no "shared rule" line in diagnostics. .ipa built (dSYM 4551F1E9-7562-327D-9B9C-79900B473811).
+
+- Round 10 (11-18): video resume's matching rules moved (core/video-resume.js: videoID, asksForTime, samePage, decide;
+  VideoResume.swift calls through with an address as its parts, VideoResume.parts). Cases recorded from the old Swift
+  (scratchpad r10: the verbatim file + a recorder): 115 addresses (YouTube hosts, case, ports, user:pw, v= empty /
+  doubled / +, é both ways, /shorts|embed|live|v, youtu.be, Vimeo's last number incl. ١٢, ½, １, 1+mark, a '/' or '#'
+  with a mark after it, t= / start= / time_continue= / %74= / #t=, raw non-ASCII) with their parts, 2261 page pairs,
+  2478 decisions (times 0-700, durations -1-600, live, ended, ages -5 s to 1801 s and 30 min ±1 ms); the old Swift
+  passed them through the new check, then the JS at once, then the new Swift (its parts compared too). Cost (Mac,
+  unoptimised): a load's decide ~62 µs (once a page load). Tests: all of mobile/test (48 pass, 13 skipped as before),
+  prepare --check, smoke. Simulator (SE, headless, serve-media.js on 8392, muted): playing at 0:42 → reload resumed
+  playing (0:43); paused 0:31 → paused 0:31; paused at 0:02.5 → not resumed ("in its first 5 s"); 1:25 of 1:30 → not
+  ("in its last 10 s"); another address → not ("another page or video"); back to ?v=a → resumed at 0:41; no "shared
+  rule" line in diagnostics. .ipa built (dSYM E7C83E32-0828-3E27-A482-7CD200D9D51C).
+
+- Round 11 (11-18): the microphone's words moved (core/speech-text.js; SpeechText.swift calls apply once per recognizer
+  event). Cases recorded from the old Swift (scratchpad r11/m: verbatim, taskSaid readable; seeded): 167 event runs
+  (the check's stories; 120 recognizer-like: growing, revised, restarted fresh or with the same first words, segments
+  repeated as they were, with punctuation, a word or two changed, upper-cased, NFD; 40 random walks) with every
+  state, 381 cleans, 81 norms, 324 joins, 500 isFresh, over odd words (marks, NFD, Σ / ς, İ, ß, ﬁ, Ǆ, Han, Arabic
+  digits, emoji with modifiers, flags, ZWJ, ZWSP, BOM mid-word, Thai AM, a Prepend sign) and separators (tab, CR LF,
+  NBSP, ideographic space, LS, NEL, a space with a mark after it, U+180E). The old Swift passed all 4373 (unoptimised),
+  then the JS after two fixes (Foundation's trim also takes U+200B; a mark after a control is its own Character),
+  then the new Swift through JSC and its copy. Cost (Mac, -O, warm): a partial of 10 / 60 live words 40 / 123 µs
+  through the shared rule (Swift copy 22 / 116 µs), the same after 13 KB committed (sending `committed` cost +100 µs
+  there, so it no longer crosses); node --jitless's JS part 9 / 43 µs. Tests: all of mobile/test (52 pass, 12
+  skipped), prepare --check, smoke. Simulator (SE, headless, `-speechfile` r11/talk.wav: "Make the header blue." 4 s
+  of silence "And make it bigger please."; speech permission allowed by a headless tap on the alert):
+  SFSpeechRecognizer (-oldspeech): "Make the header blue" → after the pause "Make the header blue And make it bigger,
+  please" (partial 10, segment 2), kept on; ✕ → in the box; a second listen → after the box's words (95 characters);
+  SpeechAnalyzer + DictationTranscriber: the same words (volatile 10), ✕ keeps them; no "shared rule" line in
+  diagnostics. .ipa built (dSYM 53F68BF4-47EF-32DA-9D58-AE748B7226A8).
+
+- Round 12 (11-18): the tab list's rules moved (core/tab-list.js: focus, marked, badges, activity; TabListRules.swift;
+  ClaudePane.chatTabShown / badges() and TabsView call it). Cases recorded from the old Swift (scratchpad r12/g, the
+  old code verbatim in shape over Site.swift): 450 focus (120 a tab), 220 marked, 220 badges (113 with any); the pure
+  Swift passed them before the switch. Cost on the Mac (unoptimised): a tap's focus + a drawing's badges over 20 tabs,
+  6 chats ~180 µs; no chats: badges makes no call. Unread count moved into shared/core (TrifCore.unreadCount; twin
+  kept). Tests: core-tablist (3), tablist (Swift through JSC), unreadcount (+ gen check), all core-* pass. Simulator
+  (SE, headless): from the page on 127.0.0.1 / localhost → that tab; from the chat → its tab; from Mods → the shown
+  tab; More's chat → the shown tab; no "shared rule" line in diagnostics. .ipa built (dSYM
+  33188806-1468-3E24-A54D-CC74F1D28B16).
+
+- Round 13 (11-18): Go to <site>'s choice moved (core/tab-list.js goTo, linkOf now shared by focus and goTo;
+  TabListRules.goTo; ClaudePane.goToSite calls it, tabFor gone). Cases recorded from the old Swift (scratchpad r13/m:
+  the old goToSite / fallbackLink / tabFor over Site.swift, 9631 runs packed to 744 distinct: 74 no site, 86 its tab, 48
+  its page, 536 the site's home) over 9 sites (incl. "", IPs, ü and punycode, localhost), 12 hosts, 24 addresses
+  (case, ports, user:pw, a space (Foundation encodes it), "not a url", "", no scheme, about:, javascript:, a trailing
+  dot, IPv6, another site with ours in its query) and tab ids present / gone / none; the JS passed them at once, then
+  the Swift through JSC (the page's parts compared too). Cost (Mac, unoptimised): a Go to ~73 µs (once a tap). Tests:
+  all of mobile/test (58 pass, 13 skipped), prepare --check, smoke. Simulator (SE, headless, serve.js, three chat
+  links seeded through `defaults write … chatLinks`): from the plain page, Go to 127.0.0.1 → its tab (2); a link whose
+  tab is on another site → a new tab at http://127.0.0.1:8377/agent?r13, the link now on it; example.com with no tab and
+  a page on evil.org → a new tab at https://example.com/; Diagnostics "go to …" lines as before, no "shared rule" line.
+  Spec audit (above). .ipa built (dSYM 9F78F478-50FC-3B68-88B2-E43D4F546762).
+
 ## Next step
 
-Round 9: which tabs reload when mods change (Browser.modsChanged / refreshIfStale / select: the signature compare
-stays Swift (Hasher per launch), the decision moves: started, a page, not already reloading, signature differs, playing
-and evenPlaying, shown vs behind, scriptsPending). Or desktop-mode per-site memory (Browser.desktopKey), small.
+Core complete for the listed candidates. If more is wanted later (none asked): which tab a Home Screen icon lands on
+(its site's own tab, off-site → a new own tab, a blank one takes the address) and the background tabs' let-go timing
+(20 s, playing kept) are pure decisions still in Swift; Android may want them shared once it has icons.
 
 ## Notes for next round
+
+- Round 13: a link's tabURL crosses as URL(string:)'s parts {url: absoluteString, host} (Foundation now encodes a
+  space, so absoluteString can differ from the stored string; the new tab opens absoluteString, as before). Chat links
+  can be seeded with the app stopped: `simctl spawn <dev> defaults write com.timsrobot.trifprobe.browser chatLinks
+  -data <hex of JSON [{service, site, tab, tabTitle, tabURL, state, at (s since 2001)}]>`; tab ids from Application
+  Support/tabs.json. Driver: scratchpad r13/step.sh ({"links":1}, {"select":0}, {"gosite":n}).
+
+- Round 12: tab ids cross as uuidString (upper case); a chat's site on the SE's localhost pages is "" (Site.of has no
+  dot to cut), so the Simulator's chat follows the shown tab; links with real sites need a sent chat, so the cases carry
+  the link paths. Android: shared/unread-count.js is now shared/core/unread-count.js (its cases
+  core/unread-count-cases.json); origin/android doesn't reference the old path from Kotlin. Driver: scratchpad
+  r12/drive.py ({"sheet": "tabs"}, {"tabsfocus": 1}, {"sheet": "none"}, {"tabbadges": 1}).
+
+- Round 11: a rule over growing text can keep the growing part on the platform side: speechText.apply takes `said`
+  (anything committed) and answers `added` (append it) and `tail` (text = committed + tail); the JS test rebuilds
+  committed the same way. Foundation's trimmingCharacters(in: .whitespacesAndNewlines) is White_Space plus U+200B
+  (checked over every scalar); Swift's Characters: a mark after a control (tab, LF, NEL, ZWSP, BOM) is its own,
+  Thai / Lao AM join (SpacingMark), a Prepend sign joins what follows unless it's a control. Simulator speech:
+  `simctl privacy grant speech-recognition` fails and the grant attempt quits the app; tap the alert's Allow headless
+  (iOS Simulator tool, SE at (261, 506) points) after `{"mictap":1}`, then tap again. Steps: mictap, micstate, micx
+  (keeps in the box), micdraft "" (clears it).
+
+- Round 10: an address crosses as URLComponents' parts {host, path (decoded), query [[name, value|null]], fragment}
+  (null: unparsable; Foundation now parses "not a url" as a path). The old Swift compared Characters and canonically:
+  video-resume.js does too (NFC compare; a '/' or '#' with a mark after it doesn't split; a number part is \p{N} per
+  grapheme start); Han numerals differ, as in site.js. Recorder: scratchpad r10/m/main.swift over r10/old.swift
+  (verbatim), pack in the round's python. Simulator driver: r10/drive.py (serve-media.js on 8390, muted plays,
+  `{"reload": why}`, `{"videos": 1}`, report.json's "video" lines).
+
+- Round 9: the reload drivers are scratchpad r9/drive.py (tabs by index: the SE has pages, localhost, 127.0.0.1; a
+  page marker `window.__r9` tells a reload; `{"modsstale": 1}`, `{"pause": true}`, `{"desktop": true}` /
+  `{"desktopstate": 1}`) and r9/play.py (serve-media.js 8390 + a copy of a.mp4 with a silent audio track made by
+  ffmpeg anullsrc, deleted after: Browser.playing ignores muted media, and sound must not reach Tim's speakers). A
+  paused test video can come back playing after a tab switch (another feature's resume): check `paused` before
+  reading a reload.
 
 - Round 8: the cover's driver is scratchpad r8/drive.py (`{"offer": text, "site": …}` is the Add to TRIF tap now;
   `{"cover": 1}`; an icon return is `simctl openurl <dev> trif://open?url=http://localhost:8377/`, away is `simctl
@@ -228,6 +350,25 @@ and evenPlaying, shown vs behind, scriptsPending). Or desktop-mode per-site memo
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 13: Go to {site} (from a chat, its banner or the chats' list) now picks its tab through the shared rules
+  Android will use; it behaves as before. The behaviour spec got its last check against the notes (two small rules
+  written down: Copy diagnostics, several icons at once). A new TRIF.ipa is in iCloud Drive/TRIF.
+
+- Round 12: which card the tab list opens at (the tab you just left; from a chat, the chat's own tab) and each card's
+  robot badge now decide through the shared rules Android will use; they behave as before. The unread-count rule sits
+  with the other shared rules now. A new TRIF.ipa is in iCloud Drive/TRIF.
+
+- Round 11: the microphone's words (what was said before a pause stays, a recognizer starting over or repeating
+  itself never loses or doubles words) now come from the shared rules Android will use; they behave as before. A new
+  TRIF.ipa is in iCloud Drive/TRIF.
+
+- Round 10: a video picking up where it was after its page loads again now decides through the shared rules (which
+  load resumes, the YouTube / Vimeo video ids); it behaves as before. A new TRIF.ipa is in iCloud Drive/TRIF.
+
+- Round 9: which tabs load again when a mod changes (never another site's, never one playing; tabs behind when next
+  shown; Pause all even while playing) and Request Desktop Website's per-site memory now decide through the shared
+  rules; they behave as before. A new TRIF.ipa is in iCloud Drive/TRIF.
 
 - Round 8: the Add to TRIF button in a chat from your computer's phone view now treats phone~<site> as <site>, as the
   spec says (it kept "phone~<site>" before); a bug fix, no new decision. The leaving cover (the robot as the app

@@ -342,7 +342,13 @@ class ModStore(
         back = back.take(c.optJSONArray("keep").strings(), cur).copy(allowed = seeded(cur),
             history = pick(ints(c.opt("history")) ?: return false, cur.history, kept(c.opt("version"), at, cur.code)))
         back = back.copy(extraNeeds = changeNeeds(back, cur))
-        back = back.copy(ran = if (ranAfter(back.held, cur, restore = true) == "current") RanVersion(cur.code, cur.script, cur.world, cur.at, cur.styleScript) else null)
+        // (it waits: the version before keeps running, or what that one was keeping while a change waited: the last
+        // approved version, as an edit there keeps it (Tim, 11-18; iPhone's Mods.swift restore))
+        back = back.copy(ran = when (ranAfter(back.held, cur, restore = true)) {
+            "ran" -> cur.ran
+            "current" -> RanVersion(cur.code, cur.script, cur.world, cur.at, cur.styleScript)
+            else -> null
+        })
         replace(id, back)
         return true
     }

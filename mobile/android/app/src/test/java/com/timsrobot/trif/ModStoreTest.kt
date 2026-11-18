@@ -2,6 +2,7 @@ package com.timsrobot.trif
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -304,5 +305,53 @@ class ModStoreTest {
         assertFalse(s.restore("a.com/E", "nope"))
         // (becoming a free mod asks)
         assertEquals(listOf("tier:free"), s.changeNeeds(r.copy(tier = "free", needs = emptyList()), r).map { it.key })
+    }
+
+    /** A restore while a change waits keeps the last approved version running (Tim, 11-18; iPhone's Mods.swift restore
+     *  taking .ran): the restored one runs only after Allow, Don't allow puts the approved one back. */
+    @Test fun restoreWhileAChangeWaitsKeepsTheApprovedOne() {
+        val s = store()
+        fun edit(v: Int, vararg extra: String) = s.saveEdit("a.com/R", mod("R", "tier" to "boxed", "v" to v,
+            "needs" to need("power:net", "l"), "matches" to JSONArray(listOf("*://*.a.com/*", *extra)))).mod!!
+        s.addText(mod("R", "tier" to "boxed", "needs" to need("power:net", "l")))
+        s.approve("a.com/R")
+        clock += 5; val v2 = edit(2, "*://b.com/*")
+        assertTrue(v2.held); assertEquals("run(1)", v2.ran!!.script)
+        clock += 5; val v3 = edit(3, "*://c.com/*")
+        assertTrue(v3.held); assertEquals("run(1)", v3.ran!!.script)
+        // (restore v2 while v3 waits: v2 waits too, and v1, the approved one, keeps running)
+        clock += 5
+        assertTrue(s.restore("a.com/R", v3.history.first { it.code.contains("\"v\":2") }.stamp))
+        val r = s.mods[0]
+        assertEquals("run(2)", r.script); assertTrue(r.held); assertEquals("run(1)", r.ran!!.script)
+        assertEquals(listOf("run(1)"), s.running("https://a.com/").map { it.ran?.script ?: it.script })
+        // (Allow: the restored one runs)
+        s.approve("a.com/R")
+        assertFalse(s.mods[0].held); assertNull(s.mods[0].ran); assertEquals("run(2)", s.mods[0].script)
+        // (again, Don't allow this time: the approved one is back)
+        clock += 5; val v4 = edit(4, "*://d.com/*")
+        clock += 5; edit(5, "*://e.com/*")
+        clock += 5
+        assertTrue(s.restore("a.com/R", s.mods[0].history.first { it.code.contains("\"v\":4") }.stamp))
+        assertEquals("run(2)", s.mods[0].ran!!.script); assertTrue(v4.held)
+        s.reject("a.com/R")
+        assertFalse(s.mods[0].held); assertNull(s.mods[0].ran); assertEquals("run(2)", s.mods[0].script)
+    }
+
+    /** The shared ranAfter cases (mod-store-cases.json, re-recorded 11-18 with a restore after a held version before
+     *  answering 'ran') through the same core call ModStore makes. */
+    @Test fun ranAfterSharedCases() {
+        val cases = JSONObject(generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "mobile/shared/core/mod-store-cases.json") }.first { it.isFile }.readText()).getJSONArray("ranAfter")
+        var restoreRan = 0
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONArray(i)
+            val want = c.opt(3).takeIf { it != JSONObject.NULL }
+            val got = JSONTokener(NodeCore.call("modStore.ranAfter", JSONArray().put(c.get(0)).put(c.get(1)).put(c.get(2)).toString())!!)
+                .nextValue().takeIf { it != JSONObject.NULL }
+            assertEquals("ranAfter $c", want, got)
+            if (c.getString(2) == "restore" && want == "ran") restoreRan++
+        }
+        assertTrue(restoreRan > 0)
     }
 }

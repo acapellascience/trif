@@ -84,7 +84,17 @@ FOUNDATION COMPLETE (round 15, 2026-11-18)
      restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed). Round 14: `test/all.sh`
      runs them all (11 tests, ~7 min, ALL PASS)
 
-## Done this round (round 16, 2026-11-18: one extra item, protected video)
+## Done this round (round 17, 2026-11-18: a small sync)
+- Merged origin/ios-poc (d5b4bf2, 753e1f7; MOBILE-BEHAVIOUR.md merged by itself with both rules). The Mods page's
+  "Can't run here on this phone" comes in through the build's copy of the iPhone app's Web/ (checked in the built
+  assets); STRINGS.md updated; no Android-side text says "on iPhone".
+- Restore while a change waits: `ModStore.restore` now takes the shared rule's 'ran' (keeps `cur.ran`, the last
+  approved version), as iPhone's Mods.swift; Allow runs the restored one, Don't allow puts the approved one back.
+  ModStoreTest +2 (the story, and mod-store-cases.json's ranAfter cases through NodeCore).
+- Upstreamed the protected-content rule to ios-poc (43544c8, docs/MOBILE-BEHAVIOUR.md only), merged back.
+- Tests: unit tests pass; test/all.sh ALL PASS (13 tests).
+
+## Done in round 16 (2026-11-18: one extra item, protected video)
 - Protected (DRM) video, as Chrome on Android (Tim, through the coordinator: "follow what Chrome does"): Chrome's
   content setting is ALLOW by default on Android (content_settings_registry.cc), no question; per-site exceptions kept.
   So `PageAsks.Kind.PROTECTED` (RESOURCE_PROTECTED_MEDIA_ID) is granted with no question unless the site is switched
@@ -239,6 +249,8 @@ exports once Android keeps history.
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 17 (sync): the "Can't run here on this phone" line you approved shows on Android too. Restoring an older
+  version while another change waits now keeps the approved version running until you choose, as on iPhone.
 - Round 16 (protected video, e.g. Netflix-style sites): now plays, as in Chrome on Android, which allows it by default
   with no question. Your draft question isn't used, since Chrome doesn't ask. Instead, each site can be switched off
   in the Mods tab's ⋯ menu: a checked item "Protected content on {site}" (Chrome's own label, a draft in STRINGS.md).
@@ -265,7 +277,7 @@ exports once Android keeps history.
   No new words. Under the hood, adding, History, Recently deleted, Undo and Restore now follow the iPhone's shared rules.
 - Round 11: nothing new to decide. Mod files opened with or shared to TRIF are imported with the iPhone's words
   (said in a small pop-up note for now; the iPhone's status strip comes with the UI layer). Mod changes no longer
-  reload a page playing sound, as on iPhone. The "Can't run here on iPhone" line is left as you asked.
+  reload a page playing sound, as on iPhone. The "Can't run here on iPhone" line is left as you asked (since round 17: "on this phone").
 - Round 10 (the Mods tab): it's the iPhone's own Mods page, unchanged, in a sheet with Mods on {site}, ⋯ and Done.
   No new words (all iPhone's; STRINGS.md lists them). One shared line names iPhone: a free mod a page won't let start
   says "Can't run here on iPhone: this page didn't let it start." (mods-page.js, ios-poc's file, so I left it). Fine to

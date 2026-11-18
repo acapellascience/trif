@@ -32,6 +32,7 @@ import android.window.OnBackInvokedDispatcher
  */
 class MainActivity : Activity() {
     private lateinit var browser: Browser
+    private lateinit var mods: ModStore
     private lateinit var field: EditText
     private lateinit var page: FrameLayout
     private lateinit var start: TextView
@@ -81,6 +82,11 @@ class MainActivity : Activity() {
             addView(bar, LinearLayout.LayoutParams(-1, -2))
         })
         browser = Browser(this) { refresh() }
+        // (the installed mods: what every page gets is made again after each change; the reader comes next, item 4)
+        mods = ModStore(ModFiles(java.io.File(filesDir, "modstore"))).apply {
+            onChange = { browser.plan = plan() }
+            browser.plan = plan()
+        }
         debug(intent)
         browser.restore()
         open(intent)

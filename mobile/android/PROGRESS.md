@@ -9,7 +9,8 @@ pictures, the toolbar's fine details) waits until Tim says the iPhone app's UI h
 
 Sources: ANDROID.md (`git show origin/landscape:ANDROID.md`), the probe (`origin/android-probe`,
 mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's decisions), docs/IOS-APP-STRINGS.md
-(wording), docs/MOBILE-BEHAVIOUR.md (the shared behaviour spec, once another loop writes it; not there on 11-18).
+(wording), docs/MOBILE-BEHAVIOUR.md (the shared behaviour spec both phones follow; merged in from ios-poc in round 7),
+mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link policy; call those rather than port Swift).
 
 ## Plan
 
@@ -46,11 +47,14 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    for free mods; the iPhone's injected scripts (kit.js, start-own/start-page, style-mirror.js, page-bridge.js, the
    free pair) in iPhone's order through `Scripts.kt` + two adapter scripts (js/world-call.js, js/webkit-bridge.js)
 4. The mod engine
-   - [ ] mod store (installed, on/off, holds and allowed, history, Recently deleted, as iPhone)
-   - [ ] reading mods with mods.js (JavaScriptSandbox or hidden WebView)
-   - [ ] @match matching
+   - [x] mod store (round 7: `Mod.kt` InstalledMod & co. under iPhone's JSON keys, `ModStore.kt` with every change
+     iPhone's has: add/import/update + History, on/off per mod / per site / per tier, Pause all, Allow / Don't allow,
+     edit + restore judged as changes, Recently deleted 30 days + Undo; `ModFiles` keeps it in files)
+   - [ ] reading mods with mods.js (JavaScriptSandbox or hidden WebView): implement `ModReader`
+   - [x] @match matching (round 7: `MatchPattern` + `WebAddress`, as modfile.js matchesUrl; `ModStore.running/applies`)
    - [ ] style sections, boxed and free mods running
-   - [ ] holds waiting for Allow
+   - [ ] holds waiting for Allow (the store's side done in round 7: a held mod doesn't run, a held change runs
+     the version before; left: proving it on a page once the reader exists)
 5. [ ] Mods tab: shared mods.html / mods-page.js in a WebView, Android message adapter
 6. Getting mods in
    - [ ] "Add this mod?" for a pasted mod, a .js file opened with/shared to the app
@@ -60,22 +64,31 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
      mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 6, 2026-11-18)
-- `Scripts.kt` (pure; 5 unit tests): iPhone's base() + ModStore.userScripts(from:) as a list of (world, start/end,
-  text), from a `Scripts.Plan` (iPhone's ScriptPlan: the mod store fills it in item 4). Each guarded to the main
-  frame (`if (window === window.top) {…}`), as desktop/iPhone. `Worlds.kt`: one WebView's worlds
-  (addJavaScriptOnEvent per world, DOCUMENT_START/END; swap = remove the ScriptHandlers, add again), `trifApp`
-  message object in TRIF's world and the box only, `call(world, code)` (iPhone's callAsyncJavaScript(in:)).
-- `test/worlds.sh` PASSES (16 checks on strict.html: start-own's "load" answered, worlds isolated, style mod applies
-  despite the CSP, boxed mod locked down + confined + writes the page, free mod at the end + its style section, no
-  frame gets anything). tabs/popups/applinks/startup still PASS; 21 unit tests pass.
+## Done this round (round 7, 2026-11-18)
+- Merged origin/ios-poc (docs/MOBILE-BEHAVIOUR.md, mobile/shared/core + gen/core.js). The mod store, ported from
+  Mods.swift (its rules aren't in shared core yet): `Mod.kt` (InstalledMod, ModNeed, RanVersion, DeletedMod, Site,
+  MatchPattern) and `ModStore.kt` (ModStore, the `ModReader` interface, `ModStore.build` for the reader's answer,
+  ModFiles). `ModStore.plan()` → `browser.plan`, made again on every change (MainActivity).
+- 12 new unit tests (ModStoreTest, a stand-in reader), 33 in all pass; startup.sh and worlds.sh PASS on the emulator.
 
 ## Next step
-Item 4, the mod store: installed mods, on/off, holds and allowed, history, Recently deleted, as iPhone (Mods.swift
-ModStore / ModFilesStore, InstalledMod). Then the reader (mods.js) fills `browser.plan` in place of the debug
-`trif.testMods` extra.
+Item 4, the reader: implement `ModReader` over mobile/shared/gen/mods.js (androidx.javascriptengine
+JavaScriptSandbox if it fits: check `JavaScriptSandbox.isSupported()` on the AVD and its async/IPC cost for a big free
+mod; else a hidden WebView), `ModStore.reread()` at start (scripts aren't kept), `reader.free` from
+`__trifMods.freePageScript/freeRelayScript`. The same engine can load gen/core.js and run `TrifCore.appLinks` in place
+of AppLinks.kt's port (keep a Kotlin fast path for http/https, as iPhone). Then an emulator test: a debug extra adds a
+mod file through the reader, it applies, and it's still there after a force-stop.
 
 ## Notes for next round
+- Mod store (round 7): pure and synchronous; methods that read (reread, reject, restore, saveEdit, readNamed) call
+  the reader directly, so with a slow engine call them off the main thread (or give the reader a blocking call made
+  off it). Files: filesDir/modstore/mods/<site__name>.json + order.json, mods-deleted.json, mods-settings.json
+  (groupsOff, paused, the reader's version). Times are epoch ms. `script`/`styleScript` aren't kept (as iPhone):
+  until `reread()` with a reader, every mod's plan entry is skipped. Signature hashes are Kotlin hashCodes (only
+  compared within a launch, as iPhone's Hasher). Not ported: phone sync (syncTake/syncRemove), the move from
+  UserDefaults, ModOfferView (UI, item 6), check()'s lint shape is whatever mods.js gives.
+- Kotlin nests block comments: a `/*` inside a KDoc (e.g. a match pattern like `https://x.com/` + `*`) opens one and
+  the file fails with "Unclosed comment". Keep patterns out of comments or break them.
 - Scripts (round 6): `browser.plan = …` puts a plan's scripts into every live WebView (next load) and every new one.
   Assets by name: `browser.text("web/style-mirror.js")` (web/ = the iPhone app's Web/, gen/, shared/, js/ = ours,
   ses.umd.min.js). Not ported yet: iPhone's stallWatch, BackgroundPlay.watch, VideoResume.watch (Swift strings;
@@ -124,7 +137,7 @@ ModStore / ModFilesStore, InstalledMod). Then the reader (mods.js) fills `browse
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
-- Round 6 (the script worlds): nothing to see or decide; no new words.
+- Round 7 (the mod store): nothing to see or decide; no new words.
 - WebView check (round 5): new screen, draft words in STRINGS.md ("TRIF needs a newer Android System WebView" …
   "Open the Play Store"). Shown only on phones whose WebView is older than 149 (or switched off).
 - App links (round 4): the question is always the generic "Open this page in another app?" (Android can't name the

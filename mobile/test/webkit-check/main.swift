@@ -6,9 +6,10 @@
 //
 //   node mobile/serve.js 8377 &
 //   swiftc -O mobile/test/webkit-check/main.swift -o <scratch>/wkcheck
-//   <scratch>/wkcheck <repo> mobile/test/webkit-check/style-demo.js <shots dir> http://localhost:8377
+//   <scratch>/wkcheck <repo> mobile/test/webkit-check/style-demo.mod <shots dir> http://localhost:8377
 //
 // Prints what applied in each world and what reached the app's handler; an offscreen window, nothing shown.
+// (the demo mod is style-demo.mod, not .js: node --test runs every .js under a test/ folder as a test file)
 import AppKit
 import WebKit
 import JavaScriptCore

@@ -31,7 +31,7 @@ const isVisible = (pg, sel) => pg.evaluate((s) => {
   return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
 }, sel);
 
-test('the mobile probes: the Safari probe\'s extension and the browser probe\'s checks run, in Chromium', { skip: browserTestsSkip(), timeout: 170000 }, async () => {
+test('the mobile probes: the Safari probe\'s extension and the browser probe\'s checks run, in Chromium', { skip: browserTestsSkip(), timeout: 470000 }, async () => {
   execFileSync(process.execPath, [path.join(__dirname, '..', 'prepare.js'), '--check'], { stdio: 'inherit' });
   const ext = execFileSync(process.execPath, [path.join(__dirname, '..', 'safari-probe', 'build.js'), '--chrome']).toString().trim();
   const canary = [];

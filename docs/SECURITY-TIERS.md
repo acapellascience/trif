@@ -42,7 +42,7 @@ took `/*` inside a `url()` for a comment, so CSS could sit where the check saw a
 browser saw rules; tests/css-browser.test.js runs every allowed case in a real browser.
 
 **Clickjacking (RT-3, tier-wide): guarded at the press, partly.** CSS can make a real control invisible and
-float it over a decoy, so the user's own click lands on it. Since 0.3.1 (branch clickjack-guard), a guard in
+float it over a decoy, so the user's own click lands on it. Since 0.3.2 (branch clickjack-guard), a guard in
 TRIF's page runtime (extension/runtime.js `clickGuard`) sees every trusted press first: when the control
 pressed is unseen (faded, masked, a few pixels small, or showing nothing) and it shows with the mods' styles
 taken away for that moment, the press is stopped and the mod named (its errors, a card in the chat). The

@@ -9,17 +9,19 @@ summary is too long.
 ## 0.3.1
 
 - **Style mods make every replacement**, not just the first one.
+- **Your agent stops what it hides**: something that keeps playing or loading, like a live preview, is
+  stopped instead of left running out of sight.
 - **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
 - **Claude Code runs on Opus** when you haven't picked a model, and the panel says "Opus (default)".
 - **A paused tab works after your agent reloads it**: the site's own requests go through again.
-- **Sites' own errors** show in the browser's console again where a boxed mod runs.
 
 ### More
 
+- Sites' own errors show in the browser's console again where a boxed mod runs.
 - A side-panel chat can read only its own site's mods through TRIF, and send TRIF only the commands its
   `trif` uses (a security review finding).
-- Shorter guides for your agent, so it starts sooner. On scrolling feeds it hides first, and filters what the
-  site sends only when hiding isn't enough.
+- Shorter guides for your agent, so it starts sooner and goes deeper when a quick fix would leave something
+  wrong.
 
 ## 0.3.0
 

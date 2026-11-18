@@ -9,7 +9,8 @@ import Foundation
 // in Recently deleted. A new version of a mod is still offered. The Add to TRIF button under a block is the person's
 // own tap and isn't held to this (Browser.offer(text:)).
 //
-// No UI and Foundation only: built for the Mac too, by mobile/test/chatoffers.test.js.
+// The rules are the phones' shared rule, mobile/shared/core/chat-offers.js (Android runs the same); storage stays
+// here. No UI and Foundation only: built for the Mac too, by mobile/test/chatoffers.test.js.
 
 /// Every code offered from a chat, newest last, at most `limit`: its key and what came of it.
 final class ChatOfferMemory {
@@ -31,48 +32,54 @@ final class ChatOfferMemory {
         return ChatOfferMemory(entries: kept) { list in if let d = try? JSONEncoder().encode(list) { defaults.set(d, forKey: key) } }
     }
 
+    /// The rules are the phones' shared rule (mobile/shared/core/chat-offers.js, through Core.swift): the memory's
+    /// entries as it takes them (at: seconds since 1970).
+    private static func plain(_ e: [Entry]) -> [[String: Any]] { e.map { ["key": $0.key, "outcome": $0.outcome.rawValue, "at": $0.at.timeIntervalSince1970] } }
+
     /// The code as compared: line ends as \n, no trailing spaces on a line (non-breaking ones as spaces), no blank
     /// lines at either end. (A page's innerText, a viewer's lines and the stored file differ only in those.)
-    static func normalise(_ code: String) -> String {
-        let lines = code.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "\u{00A0}", with: " ")
-            .components(separatedBy: "\n")
-            .map { l -> String in var s = Substring(l); while let c = s.last, c == " " || c == "\t" { s = s.dropLast() }; return String(s) }
-        var a = lines.startIndex, z = lines.endIndex
-        while a < z, lines[a].isEmpty { a += 1 }
-        while z > a, lines[z - 1].isEmpty { z -= 1 }
-        return lines[a..<z].joined(separator: "\n")
-    }
+    static func normalise(_ code: String) -> String { (Core.shared.call("chatOffers.normalise", [code]) as? String) ?? code }
 
-    /// FNV-1a 64 of the normalised code, and its length.
-    static func key(_ code: String) -> String {
-        let n = normalise(code)
-        var h: UInt64 = 0xcbf29ce484222325
-        for b in n.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
-        return String(h, radix: 16) + ":" + String(n.utf8.count)
+    /// FNV-1a 64 of the normalised code, and its length ("" if the shared rule didn't answer).
+    static func key(_ code: String) -> String { keys([code])?.first ?? "" }
+
+    /// Codes' keys, remembered while the app runs (a code's key never changes: a hand-over hashes only new code; the
+    /// judge takes every installed mod's versions). nil if the shared rule didn't answer. (Remembered by NSString, which
+    /// compares literally: Swift's String calls "café" and "cafe\u{301}" equal, their keys differ.)
+    static func keys(_ codes: [String]) -> [String]? {
+        keyLock.lock(); defer { keyLock.unlock() }
+        let ns = codes.map { $0 as NSString }
+        var missing: [NSString] = [], seen = Set<NSString>()
+        for c in ns where keyCache[c] == nil && seen.insert(c).inserted { missing.append(c) }
+        if !missing.isEmpty {
+            guard let got = Core.shared.call("chatOffers.keys", [missing]) as? [String], got.count == missing.count else { return nil }
+            if keyCache.count + missing.count > 2000 { keyCache.removeAll() }
+            for (c, k) in zip(missing, got) { keyCache[c] = k }
+        }
+        var out: [String] = []
+        for c in ns { guard let k = keyCache[c] else { return nil }; out.append(k) }
+        return out
     }
+    private static let keyLock = NSLock()
+    /// Works out the keys ahead (off the main thread, a few at a time, so a call meanwhile waits little): the app's
+    /// installed and deleted versions at launch, so a reply's first hand-over doesn't hash them all.
+    static func warm(_ codes: [String]) {
+        let codes = Array(codes.prefix(1500))
+        for i in stride(from: 0, to: codes.count, by: 16) { _ = keys(Array(codes[i..<min(i + 16, codes.count)])) }
+    }
+    nonisolated(unsafe) private static var keyCache: [NSString: String] = [:]
 
     func outcome(_ code: String) -> Outcome? {
-        let k = ChatOfferMemory.key(code)
-        return entries.last(where: { $0.key == k })?.outcome
+        (Core.shared.call("chatOffers.outcome", [ChatOfferMemory.plain(entries), code]) as? String).flatMap(Outcome.init(rawValue:))
     }
 
     /// Offered: remembered (newest last). Added, declined, dismissed: what came of a code offered, if it was (dismissed
-    /// only over offered: Cancel says declined first).
+    /// only over offered: Cancel says declined first). (Nothing changes if the shared rule didn't answer.)
     func note(_ code: String, _ o: Outcome, at: Date = Date()) {
-        let k = ChatOfferMemory.key(code)
-        let i = entries.lastIndex(where: { $0.key == k })
-        switch o {
-        case .offered:
-            if let i { entries.remove(at: i) }
-            entries.append(Entry(key: k, outcome: .offered, at: at))
-            if entries.count > ChatOfferMemory.limit { entries.removeFirst(entries.count - ChatOfferMemory.limit) }
-        case .dismissed:
-            guard let i, entries[i].outcome == .offered else { return }
-            entries[i].outcome = .dismissed
-        case .added, .declined:
-            guard let i else { return }
-            entries[i].outcome = o
+        guard let list = Core.shared.call("chatOffers.note", [ChatOfferMemory.plain(entries), code, o.rawValue, at.timeIntervalSince1970]) as? [[String: Any]] else { return }
+        entries = list.compactMap { e in
+            guard let k = e["key"] as? String, let o = (e["outcome"] as? String).flatMap(Outcome.init(rawValue:)), let t = e["at"] as? NSNumber else { return nil }
+            return Entry(key: k, outcome: o, at: Date(timeIntervalSince1970: t.doubleValue))
         }
         store(entries)
     }
@@ -86,14 +93,24 @@ enum ChatOfferJudge {
         var history: [String] = []
     }
 
+    /// (The shared rule; if it didn't answer, not offered: a chat's offer is never a must.)
     static func skip(id: String, code: String, installed: [Known], deleted: [Known], queued: [Known], memory: ChatOfferMemory) -> String? {
-        let k = ChatOfferMemory.key(code)
-        let same = { (c: String) in ChatOfferMemory.key(c) == k }
-        if installed.contains(where: { same($0.code) }) { return "installed as it is" }
-        if queued.contains(where: { same($0.code) }) { return "waiting to be offered" }
-        if let o = memory.outcome(code) { return "offered from a chat before (\(o.rawValue))" }
-        if let m = installed.first(where: { $0.history.contains(where: same) }) { return "an earlier version of \(m.id)" }
-        if deleted.contains(where: { same($0.code) || $0.history.contains(where: same) }) { return "in Recently deleted" }
-        return nil
+        let all = installed + deleted + queued
+        guard let ks = ChatOfferMemory.keys([code] + all.flatMap { [$0.code] + $0.history }) else { return "the shared rule didn't answer" }
+        var i = 1
+        let known = { (list: [Known]) -> [[String: Any]] in
+            list.map { m in
+                let k = ks[i], h = Array(ks[(i + 1)..<(i + 1 + m.history.count)])
+                i += 1 + m.history.count
+                return ["id": m.id, "key": k, "history": h]
+            }
+        }
+        let a: [String: Any] = ["key": ks[0], "installed": known(installed), "deleted": known(deleted), "queued": known(queued),
+                                "entries": memory.entries.map { ["key": $0.key, "outcome": $0.outcome.rawValue] }]
+        switch Core.shared.call("chatOffers.skip", [a]) {
+        case let why as String: return why
+        case is NSNull: return nil
+        default: return "the shared rule didn't answer"
+        }
     }
 }

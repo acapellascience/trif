@@ -130,6 +130,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             MainActor.assumeIsolated { if let self { BackgroundPlay.resume(self) } }
         }
         installScripts()
+        // (the chat-offer judge's keys of every version a chat mustn't offer again, ahead: ChatOffers.swift)
+        let versions = mods.mods.flatMap { [$0.code] + $0.history.map(\.code) } + mods.trash.flatMap { [$0.mod.code] + $0.mod.history.map(\.code) }
+        Task.detached(priority: .utility) { ChatOfferMemory.warm(versions) }
         ModDownloads.shared.browser = self
         FolderWatch.shared.browser = self
         UnreadCounts.shared.browser = self

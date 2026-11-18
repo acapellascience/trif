@@ -137,8 +137,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`?n=4`, `window.__count(n | "whole title")`, `?cycle=s`); serve.js on 8377 and 8378 (127.0.0.1:8378 = another tab
   on the same host). An icon tab: `simctl openurl 'trif://open?url=http%3A%2F%2Flocalhost%3A8377%2Funread.html%3Fn%3D1&app=1'`.
   Notification permission: `simctl privacy` has no notifications; uninstall resets it, the question is tapped.
-- What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
-  mobile/test/chatoffers-check/main.swift; ~20 s).
+- What a chat may offer (ChatOffers.swift → core/chat-offers.js) on the Mac: `node --test mobile/test/chatoffers.test.js`
+  (swiftc with mobile/test/chatoffers-check/main.swift, Core.swift, argv chat-offers-cases.json + gen/core.js; ~20 s;
+  prints the judge's cost) and `mobile/test/core-chatoffers.test.js` (the JS alone).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -232,11 +233,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   by itself (final, an error, no speech) → a new task at once on the same audio; only 10 tasks in a row ending within
   0.5 s of starting stop it). Sources: `MicSource` (AVAudioEngine tap, re-tapped on a configuration change),
   `FileSource` (`-speechfile`). SpeechText.swift (no UI; built for the Mac too): the accumulator.
-- ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
-  normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
-  (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
-  `chat offers`: one line per hand-over (path auto/late/viewer/panel/computer, ids offered and skipped with why) and
-  declined/dismissed.
+- ChatOffers.swift (no UI; built for the Mac too): storage and the call-through. The rules are
+  mobile/shared/core/chat-offers.js (TrifCore.chatOffers, round 2 of the shared core): normalise, key (FNV-1a 64 in
+  16-bit limbs, no BigInt), outcome, note (entries in, the new list out; null = unchanged), skip (takes keys, not code).
+  `ChatOfferMemory` keeps the entries (UserDefaults `chatOffers`, last 500, global; `at` crosses as seconds since 1970)
+  and a key cache by NSString (Swift's String equality is canonical: "café" == "cafe\u{301}", their keys differ),
+  warmed off the main thread at launch for every installed and deleted version (`warm`, 16 a call) so a hand-over
+  hashes only new code (warm judge ~2.5 ms on the Mac; the first, cold, 0.35 s in the 440-version worst case).
+  `ChatOfferJudge.skip`: installed as it is, queued, offered before, an installed mod's History, Recently deleted; if
+  the rule doesn't answer, not offered. Diagnostics kind `chat offers`: one line per hand-over (path
+  auto/late/viewer/panel/computer, ids offered and skipped with why) and declined/dismissed.
 - Tabs.swift: Tab, tab pictures (TabShots, PrivatePages), TabsView/TabCard. History.swift: history. Import.swift: importing mod files. FolderWatch.swift: the watched
   iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
   WebClipMaker.compose; profile hand-off; IconHandoffSteps, the steps shared with the list), `trif://open`.

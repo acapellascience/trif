@@ -27,9 +27,9 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
 - [~] Unread count from a title: shared already as mobile/shared/unread-count.js with a Swift twin (UnreadTitle.swift),
       held to the same cases by test/unreadcount.test.js. Left as a twin (it runs on every title change); optional:
       move the file into shared/core so it's in TrifCore too (keep the twin).
-- [ ] Chat-offer judge: ChatOfferMemory.normalise/key (FNV-1a 64 + utf8 length), note() bookkeeping, ChatOfferJudge.skip
-      order (installed, queued, offered before, earlier version, Recently deleted). Swift unit check exists
-      (test/chatoffers.test.js). Storage stays Swift (UserDefaults); the rule takes the entries list.
+- [x] Chat-offer judge → core/chat-offers.js (round 2): normalise, key (FNV-1a 64, 16-bit limbs), outcome, note
+      (entries in, new list out), skip (takes keys). Storage stays Swift (UserDefaults), plus a key cache (NSString)
+      warmed off the main thread at launch.
 - [ ] Quick ask: `QuickAsk.lookOnly` (style, no powers, not held, no warnings, not everywhere, every site the chat's)
       and Undo's bookkeeping (version before or removed, not to Recently deleted).
 - [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision; needs
@@ -47,30 +47,39 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
 
 ## Done this round
 
-- Round 1 (11-18): docs/MOBILE-BEHAVIOUR.md (all areas, incl. unread counts, popup-to-opener, video resume, voice);
-  the core mechanism (mobile/shared/core, prepare.js → gen/core.js, Core.swift, Diagnostics "core" line on a failure);
-  the link policy moved (app-links.js + app-links-cases.json; AppLinks.swift calls through; http/https fast path in
-  Swift). Tests: core-applinks (node, 2), applinks (Swift through JSC: 47 cases + words; ~13 µs a call on the Mac,
-  http(s) 1 µs), unreadcount, speechtext, videoresume, chatoffers, smoke all pass. Simulator (SE, headless): a page's
-  own mailto: → asked; again while up → dropped (question up); Cancel; again → dropped (once a load); a real tap on
-  tel: → opened (no app: the note). Shots 457-458. .ipa built (dSYM 503B2ECE-EE85-312E-A453-5EF9A063F93C).
+- Round 1 (11-18): docs/MOBILE-BEHAVIOUR.md; the core mechanism (Core.swift, prepare.js → gen/core.js); the link
+  policy (app-links.js). .ipa dSYM 503B2ECE-EE85-312E-A453-5EF9A063F93C.
+- Round 2 (11-18): the chat-offer judge moved (chat-offers.js + chat-offers-cases.json: 35 codes incl. CRLF/CR, NBSP,
+  tabs, combining marks, CJK, emoji, ZWNBSP, NUL, U+10FFFF; 6 note sequences; the 500 limit; 23 judge cases, all
+  recorded from the old Swift, which passed them before the move). ChatOffers.swift calls through; skip takes keys and
+  Swift caches each code's key, warmed at launch (Browser.init → ChatOfferMemory.warm, detached, 16 a call). Cost on the
+  Mac (unoptimised check, 40 mods × 11 versions of 3 KB, 500 remembered): old Swift 113 ms a hand-over; now warm 2.5 ms,
+  warming 0.35 s once off the main thread (16-code batch 10 ms), note 2.7 ms. Tests: core-chatoffers (node, 2),
+  chatoffers (Swift through JSC), core-applinks, applinks, chat, smoke pass. Simulator (SE, headless, `chatOffers`
+  cleared): offerchat → offered; Cancel → dismissed; the same code with CRLF/trailing spaces → skipped (offered before
+  (dismissed)); another → offered, added; again → skipped (installed as it is); relaunch → both still skipped; no
+  "shared rule" line in diagnostics. .ipa built (dSYM 5D8CAAC5-CF9A-3A2B-AB67-8029334B4B85).
 
 ## Next step
 
-Round 2: the chat-offer judge (ChatOffers.swift → core/chat-offers.js), by the pattern above. The memory's entries are
-data the Swift keeps in UserDefaults; pass them in and take the new list back from `note`. The hash must match the
-Swift exactly (FNV-1a 64 over UTF-8: use BigInt or two 32-bit halves in JS; check non-ASCII code in the cases).
+Round 3: quick ask's auto-apply decision (`QuickAsk.lookOnly`) and Undo's bookkeeping → core/quick-ask.js, by the
+pattern above. Then the chat's-site rule with Site.of.
 
 ## Notes for next round
 
 - `Core.call` args go through JSONSerialization: use NSNull for nil, `[String: Any]` for objects; Bool answers come
-  back as NSNumber (`as? Bool` works).
-- gen/core.js is committed (as the other gen files); smoke runs `prepare.js --check`.
-- The Simulator step helper: write Documents/step.json, `notifyutil -p com.trif.probe.step`, read step-out.txt
-  (a 15-line sh in the scratchpad did it). `pagejs` that navigates answers "error: ?" (fine).
-- The control tool's `tap` works headless (no panel) on the SE.
+  back as NSNumber (`as? Bool` works). A null answer arrives as NSNull (`case is NSNull`).
+- Swift String equality and Set/Dictionary keys are canonical (é precomposed == decomposed): never key a cache of
+  byte-exact rules by String; NSString compares literally. NSString bridging also drops a leading U+FEFF read from
+  JSON (JSONSerialization): keep cases' BOMs mid-string.
+- Recording the Swift's answers: a throwaway generator (scratchpad co/g/main.swift: the old Swift + inputs → JSON) is
+  quicker than hand-writing them.
+- The phone's JSContext has no JIT: hashing big inputs in JS costs ~0.2 µs a byte (node --jitless estimates it);
+  cache or warm off the main thread.
+- gen/core.js is committed; smoke runs `prepare.js --check`. Simulator helper: scratchpad step.sh (writes step.json,
+  notifyutil, reads step-out.txt); `offerchat`/`cancelOffer`/`addOffer`/`copydiag` + `simctl pbpaste` for this path.
 
 ## For Tim
 
-- Nothing to decide. No new words. The app behaves as before; links that aren't web pages now decide through the
-  shared rule Android will use.
+- Nothing to decide. No new words. The app behaves as before; links that aren't web pages (round 1) and what a chat
+  may offer (round 2) now decide through the shared rules Android will use. A new TRIF.ipa is in iCloud Drive/TRIF.

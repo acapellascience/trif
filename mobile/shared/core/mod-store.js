@@ -94,8 +94,9 @@ function seeded(old) {
 /**
  * Which version runs while a change waits for an OK: 'ran' (the one the version before was already keeping), 'current'
  * (the version before itself), or null (none kept: the change runs, or nothing does). how: 'add' (a new version: chat,
- * import, an edit, the computer) or 'restore' (a kept version restored, which keeps one only if the version before
- * wasn't held).
+ * import, an edit, the computer) or 'restore' (a kept version restored). A held version before keeps what it was
+ * keeping either way: a restore while a change waits keeps the last approved version running, as an edit does (Tim,
+ * 11-18; before, a restore there kept none, so the mod stopped until the user decided).
  * @param {boolean} changeHeld whether the change waits for an OK
  * @param {object} old the version before (its hold record)
  * @param {'add'|'restore'} how
@@ -103,8 +104,8 @@ function seeded(old) {
 function ranAfter(changeHeld, old, how) {
   if (!changeHeld) return null;
   const oldHeld = held(old);
-  if (how === 'restore') return oldHeld ? null : 'current';
   if (oldHeld && !old.ran) return null;
+  if (how === 'restore') return oldHeld ? 'ran' : 'current';
   return old.ran ? 'ran' : 'current';
 }
 

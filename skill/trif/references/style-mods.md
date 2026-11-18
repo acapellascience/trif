@@ -42,7 +42,8 @@ style mod's old name, `@rules`, still works):
   mod can't put them back.
 - `hide`: selectors to hide (`display: none !important`, including elements that appear later).
 - `replace`: `{ in?, find, with, regex?, caseless? }`: text to replace inside the elements `in` matches
-  (default the whole page). `with` is plain text. Patterns are capped and can't nest repeats.
+  (default the whole page). `with` is plain text: no `$1`, a regex's groups aren't filled in. Patterns are
+  capped and can't nest repeats.
 - `filter`: `{ items, hideIfText | hideIfRegex | hideIfHas }`: hide each element matching `items` whose
   text contains the words (case-insensitive), matches the pattern, or that has an element matching the
   selector inside it.

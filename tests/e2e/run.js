@@ -9,7 +9,7 @@
 // (--guidance-repeats N); results in guidance.json. See docs/TESTING.md.
 // --study: harder requests with four guides (0.2's, before the 2026-11-12 trim, this checkout's, next to none),
 // a real Claude Code run each (opus unless --claude-model; --guidance-repeats N rounds; --study-tasks
-// promos,pink,hearth,feed,autoplay,follow,jump,suggest,newest,live and --study-guides v02,pre,trim,now,current,lean,lean2,box,dig,none to narrow;
+// promos,pink,hearth,feed,autoplay,follow,jump,suggest,newest,live and --study-guides v02,pre,trim,now,current,lean,lean2,rel031,box,dig,none to narrow;
 // --study-effort high sets Claude Code's effort; --study-solve measures scripted fixes instead, no agent runs); results in study.json.
 // --oss: open-model (codex-oss) runs through OpenRouter, with the key already saved in your Keychain (the
 // panel's API key field, or `trif agent open-model --provider openrouter --set-key`); skipped without one.

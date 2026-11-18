@@ -1760,6 +1760,9 @@ class Scenario {
       lean: Object.fromEntries(DOCS.map((f) => [f, show('8334aa2', f)])),
       // the second depth study (docs/STUDY-DEEP-2.md): lean-guides as it stood then (ce5b1bc)
       lean2: Object.fromEntries(DOCS.map((f) => [f, show('ce5b1bc', f)])),
+      // the third depth study (docs/STUDY-DEEP-3.md): the guides 0.3.1 ships (release-0.3.1 at 1f3ec78: lean2 plus
+      // "Hidden isn't stopped", "get curious", "Don't dig in silence", and the box's empty <script src> text)
+      rel031: Object.fromEntries(DOCS.map((f) => [f, show('1f3ec78', f)])),
       // the 2026-11-17 depth study: this checkout's guides (main's, eb92635 or later) as they are ("box"), and with
       // the `trif run` passage of AGENTS.md's "The CLI" (from "It runs in one of two places:" to the end of that
       // list) replaced by one that says what the page's own world is for ("dig"); both texts are in study.json

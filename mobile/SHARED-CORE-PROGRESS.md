@@ -47,8 +47,11 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
         switch; allowed, offSites and added carried over), undoAdd, reject's carry-over (on, offSites, allowed, source,
         added; extraNeeds cleared; the change into History as undo), restore's carry-over. Swift: ModChanges.swift;
         answers are field names (`keep`) and indices (-1 the new entry), so no code text crosses into JS.
-  - [ ] Part 3: @match (applies: MatchPattern, hot: every page load × every mod, a twin), running (on, not held without
-        a version kept, tier switch, per-site switch), signature, tier switches (groupsOff, isOn), Pause all, multiSite.
+  - [x] Part 3 (round 6): what runs: running (Pause all, on, not held without a version kept, tier off on the site,
+        per-site switch, @match / @exclude; which runs the version kept), isOn, multiSite, off (the plan's off sites),
+        setOn, setGroup → core/mod-store.js; @match → core/match.js (one, any, applies; an address as its parts).
+        Swift: ModRuns.swift (setOn / setGroup call through; running, isOn, off, MatchPattern are twins: every page
+        load). signature's hashing stays Swift (Hasher, per launch); what it hashes follows running's `kept`.
 - [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision
       (core/site.js exists now: TrifCore.site.of / hostIsIn / chat).
 - [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
@@ -119,15 +122,34 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   History: edit) → Don't allow → the version before, not held, History undo, edit; no "shared rule" line in
   diagnostics. .ipa built (dSYM F1CC45A7-9944-3ACC-B78D-2D061A6636E8).
 
+- Round 6 (11-18): the mod store, part 3 (what runs) moved: core/mod-store.js multiSite, isOn, running, off, setOn,
+  setGroup and core/match.js (one, any, applies over an address's parts {scheme, host, path}); ModRuns.swift (setOn /
+  setGroup call through; running, isOn, off and MatchPattern, moved from Mods.swift, are twins); InstalledMod.runFacts.
+  Cases recorded from the old Swift (scratchpad r6/rec: verbatim functions, then pack.py): 57 patterns × 57 addresses
+  (3135 answers incl. case, ports, punycode, IPv6, %7e vs ~, é both ways, regex characters, newline, empty path,
+  about:/data:/javascript:, unparsable), 104 isOn × 6 sites, 960 setOn, 432 off × 4 groupsOff, 120 running lists
+  (1-8 mods, duplicates, held with and without a kept version, tiers off, paused) × 10 addresses, 96 setGroup; the JS
+  passed all at once, then the Swift twins and call-through. A recorder bug (duplicate ids in a list) fixed before use.
+  Cost (Mac, unoptimised): running 40 mods twin ~125 µs (the URL is now parsed once, not per mod), shared ~450 µs; a
+  switch's call ~30 µs. Tests: all of mobile/test (34 pass, 13 skipped as before), prepare --check, smoke. Simulator
+  (SE, headless, serve.js, the Mods tab's own messages; a style mod for localhost and 127.0.0.1, outline read in the
+  page): runs on localhost → off on localhost (stored offSites [localhost], still on) → gone there, still on 127.0.0.1
+  → on again → the style tier off on localhost → gone there, still on 127.0.0.1 → tier on → the whole switch off → gone
+  on both → on → back; no "core" line in diagnostics. .ipa built (dSYM 7241AF10-D0E0-383F-A9B5-14B63BE9CCEE).
+
 ## Next step
 
-Round 6: the mod store, part 3 (@match applies: MatchPattern, a hot path, every page load × every mod: a twin with
-cases; running: on, not held without a version kept, tier switches, per-site switch, Pause all; signature; groupsOff /
-isOn; multiSite) → core/mod-store.js (and maybe core/match.js), cases recorded from Mods.swift (ModStore.applies /
-running / signature / isOn, ModReader.one), checked against ModStoreTest.kt (matchPatterns, switchesTiersAndPause,
-signatureChangesOnlyWithWhatRunsThere). setOn's rule (multiSite: offSites, switching on clears newOff) goes with it.
+Round 7: which site a chat's mod runs on and the cross-site warning's decision (chat's site, phone~ twins, @match:
+now TrifCore.site and TrifCore.match exist), or which tabs reload when mods change (Browser.refreshIfStale / select:
+signature compare, playing, shown vs behind, Pause all). Read the Swift first (PanelChat.swift ~873 uses applies;
+the coral "runs on another site" box in ModOfferView / the offer path).
 
 ## Notes for next round
+
+- Round 6: an address crosses into JS as its parts (MatchPattern.parts: lower-case scheme and host, percent-encoded
+  path or "/", ?query), since a bare JSContext has no URL parser; Android passes its own Uri's. signature stays Swift
+  (Hasher is seeded per launch; compared only within a launch). Simulator driver: scratchpad r6/drive.py (serve.js on
+  8377; `{"go"}` then `{"pagejs": "return getComputedStyle(document.body).outlineWidth"}`; enable / group messages).
 
 - `Core.call` args go through JSONSerialization: use NSNull for nil, `[String: Any]` for objects; Bool answers come
   back as NSNumber (`as? Bool` works). A null answer arrives as NSNull (`case is NSNull`).
@@ -167,7 +189,8 @@ signatureChangesOnlyWithWhatRunsThere). setOn's rule (multiSite: offSites, switc
 
 ## For Tim
 
-- Nothing to decide, no new words. What a mod waits for, what Allow allows, and what an edit or a restore asks about now
+- Nothing to decide, no new words. Since round 6 the mod switches (a mod's, its per-site switch, a tier's per site)
+  and which mods run on a page (Pause all, @match) also follow the shared rules; they behave as before. What a mod waits for, what Allow allows, and what an edit or a restore asks about now
   decide through the shared rules Android will use; since round 5 also adding (on or off, marked new or updated),
   History (30 days, 30 versions), Recently deleted (30 days), Undo, Restore and Don't allow. They behave as before. A
   new TRIF.ipa is in iCloud Drive/TRIF.

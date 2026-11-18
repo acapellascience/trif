@@ -127,7 +127,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   (requirements, install, Firefox, Safari, updates, troubleshooting, uninstall via `trif uninstall`,
   releasing), help.js, doctor/update fixes, PROTOCOL.md, beta START HERE files. Drafts:
   docs/NO-NODE-STRINGS.md. Merged origin/main (the install.sh redirect). New test in
-  tests/install-script.test.js (the command is the same in extension, CLI, README, site route). CI: CI_LINK
+  tests/install-script.test.js (the command is the same in extension, CLI, README, site route). CI: https://github.com/acapellascience/trif/actions/runs/44211356838 green on attempt 1. Previous run 44196244739: only the clickjack-browser flake.
 
 ## Next step
 

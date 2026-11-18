@@ -155,7 +155,7 @@ class ModStore(
         }.map { it.m.matches to it.m.excludes }
         val mods = list.map { (m, script, world, at, style) ->
             val off = ((if (m.multiSite) m.offSites else emptyList()) + groupsOff.filter { m.tier in it.value }.keys).toSortedSet().toList()
-            Scripts.Plan.One(m.id, script, world, at, style, off)
+            Scripts.Plan.One(m.id, script, world, at, style, off, m.matches, m.excludes)
         }
         return Scripts.Plan(mods, reader?.free ?: freeKept, bridged)
     }

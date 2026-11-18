@@ -14,7 +14,7 @@ import java.nio.file.Files
 class ModStoreTest {
     /** A stand-in reader: a "mod file" here is JSON {name, site, tier, matches, needs, powers, check}; the answer is
      *  shaped as mods.js readMod's (id site/name, script and world made from it). */
-    private class FakeReader(override val version: String = "r1") : ModReader {
+    internal class FakeReader(override val version: String = "r1") : ModReader {
         override fun read(text: String, file: String, site: String, here: String): String {
             val d = runCatching { JSONObject(text) }.getOrElse { return JSONObject().put("error", "there is no mod file").toString() }
             val s = site.ifEmpty { d.optString("site", "a.com") }

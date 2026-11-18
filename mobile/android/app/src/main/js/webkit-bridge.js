@@ -1,7 +1,9 @@
 // Android's adapter, in TRIF's world after world-call.js: the iPhone scripts post to the app with
 // window.webkit.messageHandlers.trif.postMessage(body), which gives back a promise of the app's answer. Here that
 // goes through the app's message object, `trifApp`: `{post, body}` out, `{answer, ok, value | error}` back.
-(() => {
+// The Mods tab's page (mods.html, the page world of a WebView of its own) posts to `app` instead: ModsPanel.kt
+// puts this in with the last line's name changed.
+((name) => {
   const app = globalThis.trifApp;
   if (!app || globalThis.webkit) return;
   const stringify = JSON.stringify, parse = JSON.parse;
@@ -20,5 +22,5 @@
     waiting.set(id, { resolve, reject });
     try { app.postMessage(stringify({ post: id, body })); } catch (err) { waiting.delete(id); reject(err); }
   });
-  Object.defineProperty(globalThis, 'webkit', { value: Object.freeze({ messageHandlers: Object.freeze({ trif: Object.freeze({ postMessage }) }) }) });
-})();
+  Object.defineProperty(globalThis, 'webkit', { value: Object.freeze({ messageHandlers: Object.freeze({ [name]: Object.freeze({ postMessage }) }) }) });
+})('trif');

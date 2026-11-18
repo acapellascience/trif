@@ -18,3 +18,8 @@ app/src/main/res/values/strings.xml.
 | No WebView with script worlds (older than 149): the screen instead of the browser | TRIF needs a newer Android System WebView · This phone's WebView is version {n}. TRIF needs version 149 or newer to run mods. Update it in the Play Store, then open TRIF again. (version unreadable: TRIF needs WebView version 149 or newer to run mods. Update it in the Play Store, then open TRIF again.) · Open the Play Store | **New** (draft; iPhone has no such screen) |
 | No WebView at all (switched off or missing) | TRIF needs Android System WebView · It's switched off or not installed on this phone. Turn it on in Settings, under Apps, or install it from the Play Store, then open TRIF again. · Open the Play Store | **New** (draft) |
 | Open the Play Store, with no Play Store on the phone (a toast) | No app on this phone can open this link. | reuses the app-link toast above |
+| Toolbar: the Mods button (its text for now; the robot icon is UI layer) and its accessibility label | Mods | iPhone (toolbar's label) |
+| The Mods tab's title | Mods on {site} (Mods when no site) | iPhone |
+| The Mods tab's buttons | ⋯ (More) · Done | iPhone |
+| The Mods tab's ⋯ menu | Pause all mods · Resume mods | iPhone (Send diagnostics… comes with diagnostics; Import mod… and Export with item 6) |
+| The Mods tab's page itself (rows, tiers, cards, Recently deleted…) | the iPhone app's own page (mods.html / mods-page.js), its words as they are | iPhone. One says "iPhone": "Can't run here on iPhone: this page didn't let it start." (a free mod a page refuses): see For Tim in PROGRESS.md |

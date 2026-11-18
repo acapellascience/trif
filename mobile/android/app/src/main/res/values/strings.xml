@@ -21,6 +21,12 @@
     <string name="webview_missing_title">TRIF needs Android System WebView</string>
     <string name="webview_missing_body">It\'s switched off or not installed on this phone. Turn it on in Settings, under Apps, or install it from the Play Store, then open TRIF again.</string>
     <string name="webview_update">Open the Play Store</string>
+    <string name="mods">Mods</string>
+    <string name="mods_on">Mods on %s</string>
+    <string name="done">Done</string>
+    <string name="more">More</string>
+    <string name="pause_all_mods">Pause all mods</string>
+    <string name="resume_mods">Resume mods</string>
     <plurals name="tabs_title">
         <item quantity="one">%d tab</item>
         <item quantity="other">%d tabs</item>

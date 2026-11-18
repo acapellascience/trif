@@ -56,33 +56,51 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
    - [x] style sections, boxed and free mods running (round 9: test/running.sh, all through the real reader, on
      strict.html; nothing needed fixing)
    - [x] holds waiting for Allow (round 9: a boxed mod with a power is held and doesn't run; Allow → it runs)
-5. [ ] Mods tab: shared mods.html / mods-page.js in a WebView, Android message adapter
+5. [x] Mods tab (round 10): the iPhone's mods.html / mods-page.js / panel-kit.js in a WebView of its own
+   (`ModsPanel.kt`, served by WebViewAssetLoader at https://appassets.androidplatform.net/mods/), its messages through
+   js/webkit-bridge.js as `webkit.messageHandlers.app`; state = `ModsState.kt` (iPhone's modsState); a changed plan
+   loads the shown tab again when what runs there changed (`Browser.reloadIfStale`, iPhone's refreshIfStale)
 6. Getting mods in
    - [ ] "Add this mod?" for a pasted mod, a .js file opened with/shared to the app
    - [ ] import of desktop exports
 7. Tests
    - [ ] unit tests for Kotlin logic (ongoing, one per piece)
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod (mods.sh), boxed mod, free mod's style
-     section, held mod (running.sh), popup sign-in stand-in (popups.sh) all PASS; left: Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
+     section, held mod (running.sh), popup sign-in stand-in (popups.sh), the Mods tab lists / switches / deletes /
+     restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 9, 2026-11-18)
-- Merged origin/ios-poc at bb2a8b9 (shared core round 2: chat-offers.js; its CI is green). The shared core has no
-  mod store rules yet (only app-links.js, chat-offers.js), so ModStore.kt stays the Kotlin port for now.
-- New test/running.sh PASS: a boxed mod's trif.hide applies on strict.html and its trif.log is in the box's log
-  (not the page's); a free mod's ==Style== section applies with its settings, its code sees trif.style in the
-  page's world, its window.trif.log reaches the app ("mod log"); a boxed mod with @powers click is held, doesn't
-  run, and runs after Allow. No app fixes were needed. New debug extra `trif.allow` (a mod id → approve).
-- mods.sh, worlds.sh PASS again; 33 unit tests pass.
+## Done this round (round 10, 2026-11-18)
+- Merged origin/ios-poc (shared core round 3: quick-ask.js, site.js; still no mod store rules in core).
+- Item 5, the Mods tab: `ModsPanel.kt` (the page, its messages: state, enable, group, delete, undoDelete,
+  restoreDeleted, approve, reject, code, diff, history, historyCode/Diff, restore, check, save, undoEdit, copy,
+  resume), `ModsState.kt` (pure; iPhone's modsState incl. running / errors / starting / nextLoad / cant), a Mods
+  button and a sheet (Mods on {site}, ⋯ Pause all mods / Resume mods, Done; Back closes it).
+- `Scripts.Plan.One` carries matches/excludes, `Plan.signature(url)`: tabs load again when their mods changed.
+- New test/modstab.sh PASS (lists both mods, page says both running, a real tap on a switch → off in the store,
+  page reloads, mod gone, other kept; on again; bin → Recently deleted → Restore; Done). All 7 older emulator tests
+  PASS again; unit tests 37 (4 new in ModsStateTest).
 
 ## Next step
-Item 5, the Mods tab: the shared mods.html / mods-page.js / panel in a WebView with an Android adapter for its
-messages (in place of the iPhone's WKScriptMessageHandler: read how the iPhone app loads it and what it posts,
-Mods tab in mobile/browser-probe/TrifProbe, Web/panel-adapter.js). Prove it with an emulator test: it lists the
-store's mods and switching one off stops it on the page. **Whenever** `mobile/shared/core` gains the mod store's
-rules (shared-core loop, rounds 3–4; check `ls mobile/shared/core` after the merge), first switch ModStore.kt to
-call them (as Swift's Core.swift calls TrifCore) and drop the Kotlin port, keeping ModStoreTest green.
+Item 6, getting mods in: "Add this mod?" (plain, native) for a pasted mod and for a .js file opened with or shared
+to TRIF (ACTION_VIEW / ACTION_SEND intent filters for text/javascript and text/plain; read through the reader,
+added with source "pasted"/"import"; iPhone: Import.swift, ModOfferView), and the Mods tab's Import mod… (the page
+posts `import`: answer it with the system file picker, ACTION_OPEN_DOCUMENT) + desktop exports (read Import.swift
+for the export's shape). Export / Export all mods for a site (share sheet, a FileProvider) fit there too. Then
+the file route lets tests add big mods (am extras stop at ~93 KB).
 
 ## Notes for next round
+- Mods tab (round 10): `ModsPanel` is made on first use (MainActivity.showMods) and kept; `shown` gates asking the
+  page; `pageChanged` (Browser.pageChanged, the shown tab started/finished) refreshes it. It doesn't ask the page while
+  the tab is loading (calls to the page being replaced go unanswered: 2 s lost). Debug extra `trif.panel` = code run in
+  the tab's page (shows it first) → logcat "panel: {ok, value}". The page's `import`/`export`/`exportSite` answer ok
+  and do nothing yet (item 6). Not ported: closeIfDecided/holdFromChat (chat), safety (dismissOff, switchedOff),
+  phone sync (sync, syncNow/Seen), hide rules (hidden, unhide), Send diagnostics, the toolbar's waiting count.
+- Reload when mods change (round 10): each tab records at onPageStarted its url, `plan.signature(url)` and the ids
+  that run (`loadedIds`, for the tab's nextLoad); `Browser.plan = …` and `select` reload the shown tab when the
+  signature there changed. So `trif.addMod` now reloads the shown page by itself (tests still `open` again: harmless).
+  Not ported: iPhone's "not while playing" exception (comes with background play).
+- uiautomator: WebView content is in the dump (text="Outlined"; the panel's switches are class android.widget.Switch).
+  Borderless Buttons are all caps unless `isAllCaps = false` (Mods, Done have it).
 - running.sh (round 9) is the pattern for mod tests: `add` (trif.addMod, logs "add mod: <id> <tier> <world>
   runs|held"), `extra trif.allow <id>` ("allow: <id> runs|held"), `call box …` reads `__trifSandbox.logs` (a
   boxed mod's trif.log stays in the box, as on iPhone; only free mods' lines go to the app as "mod log").
@@ -153,6 +171,10 @@ call them (as Swift's Core.swift calls TrifCore) and drop the Kotlin port, keepi
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 10 (the Mods tab): it's the iPhone's own Mods page, unchanged, in a sheet with Mods on {site}, ⋯ and Done.
+  No new words (all iPhone's; STRINGS.md lists them). One shared line names iPhone: a free mod a page won't let start
+  says "Can't run here on iPhone: this page didn't let it start." (mods-page.js, ios-poc's file, so I left it). Fine to
+  make it "on this phone" in the shared page, or should Android pass its own word in?
 - Round 9 (mods running): nothing to see or decide; no new words, no downloads. Boxed, free and style mods and
   holds all work on Android as on iPhone, tested on a strict page.
 - Round 8 (the mod reader): nothing to see or decide; no new words, no new downloads beyond Google's Maven

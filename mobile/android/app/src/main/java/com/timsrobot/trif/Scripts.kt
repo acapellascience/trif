@@ -27,9 +27,21 @@ object Scripts {
         val bridged: List<Pair<List<String>, List<String>>> = emptyList(),
     ) {
         /** One mod as the reader made it: its script (it checks its own @match), world (trif/box/page), at
-         *  (start/end), a free mod's style section, and the sites it's switched off on. */
+         *  (start/end), a free mod's style section, the sites it's switched off on, and its @match / @exclude
+         *  (the script checks them itself; kept here for [signature]). */
         data class One(val id: String, val script: String, val world: String, val at: String, val style: String = "",
-                       val off: List<String> = emptyList())
+                       val off: List<String> = emptyList(), val matches: List<String> = emptyList(),
+                       val excludes: List<String> = emptyList())
+        /** The mods of this plan that run on a page at `url`. */
+        fun runningOn(url: String): List<One> {
+            val site = Site.of(WebAddress.of(url)?.host ?: "")
+            return mods.filter { site !in it.off && MatchPattern.any(it.matches, url) && !MatchPattern.any(it.excludes, url) }
+        }
+        /** What runs on a page at `url` under this plan, as one string: a page loaded under one plan whose
+         *  signature differs under the next loads again (iPhone's refreshIfStale; docs/MOBILE-BEHAVIOUR.md). */
+        fun signature(url: String): String = runningOn(url).map { o ->
+            "${o.id}:${Integer.toHexString(listOf(o.script, o.world, o.at, o.style).fold(17) { a, s -> 31 * a + s.hashCode() })}"
+        }.sorted().joinToString(",")
         val mirrorTrif get() = mods.any { it.world == "trif" || it.style.isNotEmpty() }
         val hasFree get() = free != null && mods.any { it.world == "page" }
         val box get() = mods.any { it.world == "box" }

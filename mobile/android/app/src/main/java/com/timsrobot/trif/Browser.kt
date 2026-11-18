@@ -31,6 +31,13 @@ class Tab(val id: String = UUID.randomUUID().toString(), var title: String = "",
     /** The question about another app's link was put for this load (one a load); the last line logged. */
     var askedThisLoad = false
     var droppedLine: String? = null
+    /** Its page's load under the mods' plan: the address, the plan's signature there and the mods it ran
+     *  (Scripts.Plan.signature), whether it's loading, when it finished (the Mods tab's starting / next load). */
+    var loadedUrl: String? = null
+    var loadedSig: String? = null
+    var loadedIds: Set<String>? = null
+    var loading = false
+    var finishedAt: Long? = null
     val started get() = web != null
     val url: String? get() = SavedTabs.keepable(web?.url) ?: savedUrl.takeIf { !started }
     val host: String get() = url?.let { Uri.parse(it).host } ?: ""
@@ -44,6 +51,8 @@ class Tab(val id: String = UUID.randomUUID().toString(), var title: String = "",
  * Every WebView is made in [makeWebView], with its script worlds (Worlds) and the pages' scripts (Scripts).
  */
 class Browser(private val context: Context, private val changed: () -> Unit) {
+    /** A page started or finished loading (the Mods tab follows the shown one). */
+    var pageChanged: (() -> Unit)? = null
     val tabs = mutableListOf<Tab>()
     var current: Tab? = null
         private set
@@ -63,7 +72,7 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
 
     fun select(tab: Tab) {
         current = tab
-        if (!tab.started) start(tab)
+        if (!tab.started) start(tab) else reloadIfStale(tab)
         save()
         changed()
     }
@@ -225,7 +234,20 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
     fun text(name: String) = texts.getOrPut(name) { context.assets.open(name).bufferedReader().use { it.readText() } }
     /** What the mods put in (the mod store's, once there is one; a debug build's test mods until then). */
     var plan = Scripts.Plan()
-        set(p) { field = p; scripts = null; tabs.forEach { t -> t.worlds?.install(scripts()) } }
+        set(p) { field = p; scripts = null; tabs.forEach { t -> t.worlds?.install(scripts()) }; current?.let(::reloadIfStale) }
+
+    /**
+     * `tab` (shown) loaded again if the mods that run on its page under the plan now aren't the ones it loaded with
+     * (iPhone's refreshIfStale; docs/MOBILE-BEHAVIOUR.md "Which tabs load again"). Not ported yet: iPhone's
+     * exception for a page that's playing (it comes with background play).
+     */
+    private fun reloadIfStale(tab: Tab) {
+        val url = tab.loadedUrl ?: return
+        val wv = tab.web ?: return
+        if (wv.url == null || plan.signature(url) == tab.loadedSig) return
+        log("mods", "${Uri.parse(url).host}: its mods changed, loading it again")
+        wv.reload()
+    }
     private var scripts: List<Scripts.Injection>? = null
     private fun scripts() = scripts ?: Scripts.all(plan, ::text).also { scripts = it }
 
@@ -280,12 +302,17 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = takeLink(tab, view, request)
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 tab.askedThisLoad = false; tab.droppedLine = null
+                tab.loadedUrl = url; tab.loading = true; tab.finishedAt = null
+                tab.loadedSig = url?.let(plan::signature); tab.loadedIds = url?.let { u -> plan.runningOn(u).map { it.id }.toSet() }
+                if (tab === current) pageChanged?.invoke()
             }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, reload: Boolean) { changed() }
             override fun onPageFinished(view: WebView, url: String) {
                 tab.title = view.title?.takeIf { SavedTabs.keepable(url) != null && it != url } ?: ""
+                tab.loading = false; tab.finishedAt = System.currentTimeMillis()
                 save()
                 changed()
+                if (tab === current) pageChanged?.invoke()
             }
         }
         webChromeClient = object : WebChromeClient() {

@@ -41,6 +41,12 @@ class MainActivity : Activity() {
     private lateinit var forward: Button
     private lateinit var tabsButton: Button
     private var listShown = false
+    /** The Mods tab (made on first use), over the page; its title bar. */
+    private var panel: ModsPanel? = null
+    private lateinit var modsSheet: LinearLayout
+    private lateinit var modsTitle: TextView
+    private lateinit var pauseButton: Button
+    private val modsShown get() = ::modsSheet.isInitialized && modsSheet.visibility == View.VISIBLE
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
@@ -68,11 +74,13 @@ class MainActivity : Activity() {
         forward = toolButton("›", getString(R.string.forward)) { browser.current?.web?.goForward() }
         val plus = toolButton("+", getString(R.string.new_tab_button)) { showList(false); newTab() }
         tabsButton = toolButton("1", "") { showList(!listShown) }
+        val modsButton = toolButton(getString(R.string.mods), getString(R.string.mods)) { showMods(!modsShown) }.apply { textSize = 15f; isAllCaps = false }
         val bar = LinearLayout(this).apply {
-            listOf(back, forward, plus, tabsButton).forEach { addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+            listOf(back, forward, modsButton, plus, tabsButton).forEach { addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
         }
+        modsSheet = makeModsSheet()
         val middle = FrameLayout(this).apply {
-            addView(page, -1, -1); addView(start, -1, -1); addView(list, -1, -1)
+            addView(page, -1, -1); addView(start, -1, -1); addView(list, -1, -1); addView(modsSheet, -1, -1)
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -82,10 +90,13 @@ class MainActivity : Activity() {
             addView(bar, LinearLayout.LayoutParams(-1, -2))
         })
         browser = Browser(this) { refresh() }
+        browser.pageChanged = { panel?.pageChanged(); if (modsShown) titleMods() }
         // The installed mods, on a thread of their own (the store thread: reading a mod blocks on the reader); what
         // every page gets is made again after each change. What the reader made of each mod is kept, so the tabs
         // start at once; only mods without it (or a new reader) wait for the reader, a few seconds at most.
-        mods = ModStore(ModFiles(java.io.File(filesDir, "modstore"))).apply { onChange = { showPlan(plan()) } }
+        mods = ModStore(ModFiles(java.io.File(filesDir, "modstore"))).apply {
+            onChange = { val p = plan(); val paused = paused; runOnUiThread { showPlan(p, now = true); pausedChanged(paused) } }
+        }
         debug(intent)
         if (!mods.needsReading) { showPlan(mods.plan(), now = true); started() }
         val t0 = System.nanoTime()
@@ -134,7 +145,8 @@ class MainActivity : Activity() {
      * `trif.testMods` = a list of mods as JSON (Scripts.planOf), put in as the mod store's will be;
      * `trif.addMod` = a mod file, read by the reader and added as pasted ("add mod: <id> <tier> <world> runs|held");
      * `trif.call` = "world:code" (trif, box or page), run on the shown tab's page, its answer logged ("call: …");
-     * `trif.allow` = a mod's id: Allow on its hold, as the Mods tab's button ("allow: <id> runs|held").
+     * `trif.allow` = a mod's id: Allow on its hold, as the Mods tab's button ("allow: <id> runs|held");
+     * `trif.panel` = code run in the Mods tab's page (shown first), its answer logged ("panel: …").
      */
     private fun debug(intent: Intent?) {
         if (intent == null || applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
@@ -160,7 +172,14 @@ class MainActivity : Activity() {
                 android.util.Log.i("TRIF", "call: $world ${if (a.ok) "ok ${a.value}" else "error ${a.error}"}")
             }
         }
+        b64("trif.panel")?.let { code ->
+            showMods(true)
+            panel?.web?.evaluateJavascript("(() => { try { return JSON.stringify({ ok: true, value: (function () {\n$code\n})() }); } catch (e) { return JSON.stringify({ ok: false, error: String(e) }); } })()") { raw ->
+                android.util.Log.i("TRIF", "panel: " + (runCatching { org.json.JSONTokener(raw).nextValue() as String }.getOrNull() ?: raw))
+            }
+        }
         intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call"); intent.removeExtra("trif.addMod"); intent.removeExtra("trif.allow")
+        intent.removeExtra("trif.panel")
     }
 
     /**
@@ -281,7 +300,66 @@ class MainActivity : Activity() {
         backChanged()
     }
 
+    /** The Mods tab's sheet: its title (Mods on {site}), ⋯ (Pause all mods / Resume mods) and Done over the page. */
+    private fun makeModsSheet(): LinearLayout {
+        modsTitle = TextView(this).apply { textSize = 17f; setTextColor(Color.BLACK); gravity = Gravity.CENTER; setSingleLine() }
+        pauseButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = "⋯"; textSize = 20f; contentDescription = getString(R.string.more)
+            setOnClickListener { v ->
+                android.widget.PopupMenu(this@MainActivity, v).apply {
+                    val paused = mods.paused
+                    menu.add(getString(if (paused) R.string.resume_mods else R.string.pause_all_mods)).setOnMenuItemClickListener {
+                        work.execute { mods.setPaused(!paused) }; true
+                    }
+                }.show()
+            }
+        }
+        val done = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = getString(R.string.done); isAllCaps = false; setOnClickListener { showMods(false) }
+        }
+        val top = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(pauseButton, LinearLayout.LayoutParams(-2, -2))
+            addView(modsTitle, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(done, LinearLayout.LayoutParams(-2, -2))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
+            visibility = View.GONE
+            isClickable = true
+            addView(top, LinearLayout.LayoutParams(-1, -2))
+        }
+    }
+
+    private fun titleMods() {
+        val site = Site.of(browser.current?.host ?: "")
+        modsTitle.text = if (site.isEmpty()) getString(R.string.mods) else getString(R.string.mods_on, site)
+    }
+
+    private fun showMods(show: Boolean) {
+        if (show) {
+            if (listShown) showList(false)
+            val p = panel ?: ModsPanel(this, browser, mods, work) { reader }.also { p ->
+                panel = p
+                modsSheet.addView(p.web, LinearLayout.LayoutParams(-1, 0, 1f))
+            }
+            titleMods()
+            p.shown = true
+            modsSheet.visibility = View.VISIBLE
+            p.refresh()
+        } else {
+            panel?.shown = false
+            modsSheet.visibility = View.GONE
+        }
+        backChanged()
+    }
+
+    /** All mods paused or running again: the shown Mods tab follows. */
+    private fun pausedChanged(@Suppress("UNUSED_PARAMETER") paused: Boolean) { if (modsShown) panel?.refresh() }
+
     private fun showList(show: Boolean) {
+        if (show && modsShown) showMods(false)
         listShown = show
         list.visibility = if (show) View.VISIBLE else View.GONE
         if (show) {
@@ -338,6 +416,7 @@ class MainActivity : Activity() {
     // Back: closes the tab list, else goes back in the page while it can, else the system's own back (predictive
     // back stays on: the callback is registered only while there's somewhere to go back to).
     private fun backInApp(): Boolean {
+        if (modsShown) { showMods(false); return true }
         if (listShown) { showList(false); return true }
         if (!::browser.isInitialized) return false
         val wv = browser.current?.web ?: return false
@@ -350,7 +429,7 @@ class MainActivity : Activity() {
 
     private fun backChanged() {
         if (Build.VERSION.SDK_INT < 33) return
-        val want = listShown || browser.current?.web?.canGoBack() == true
+        val want = modsShown || listShown || browser.current?.web?.canGoBack() == true
         if (want == backRegistered) return
         val cb = backCallback as OnBackInvokedCallback
         if (want) onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)

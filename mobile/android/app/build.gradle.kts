@@ -21,11 +21,13 @@ android {
 
 // The web code shared with the iPhone app comes straight from the repo at build time (never copied into git):
 // SES, mobile/shared/gen (made by mobile/prepare.js), mobile/shared's kit.js + modfile.js, the iPhone app's Web/
-// folder, and Android's own adapter scripts (src/main/js). Assets: ses.umd.min.js, gen/, shared/, web/, js/.
+// folder, the desktop panel's sidepanel.css + switch.css (the Mods tab's styles, as the iPhone bundles them) and
+// Android's own adapter scripts (src/main/js). Assets: ses.umd.min.js, gen/, shared/, web/, ext/, js/.
 abstract class SharedAssets : DefaultTask() {
     @get:InputFile abstract val ses: RegularFileProperty
     @get:InputDirectory abstract val gen: DirectoryProperty
     @get:InputFiles abstract val shared: ConfigurableFileCollection
+    @get:InputFiles abstract val ext: ConfigurableFileCollection
     @get:InputDirectory abstract val web: DirectoryProperty
     @get:InputDirectory abstract val own: DirectoryProperty
     @get:OutputDirectory abstract val out: DirectoryProperty
@@ -38,6 +40,7 @@ abstract class SharedAssets : DefaultTask() {
             from(gen) { into("gen") }
             from(shared) { into("shared") }
             from(web) { into("web") }
+            from(ext) { into("ext") }
             from(own) { into("js") }
         }
     }
@@ -48,6 +51,7 @@ val sharedAssets = tasks.register<SharedAssets>("sharedAssets") {
     gen.set(repo.resolve("mobile/shared/gen"))
     shared.from(repo.resolve("mobile/shared/kit.js"), repo.resolve("mobile/shared/modfile.js"))
     web.set(repo.resolve("mobile/browser-probe/TrifProbe/Web"))
+    ext.from(repo.resolve("extension/sidepanel.css"), repo.resolve("extension/switch.css"))
     own.set(projectDir.resolve("src/main/js"))
     out.set(layout.buildDirectory.dir("generated/trif-assets"))
 }

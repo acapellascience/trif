@@ -36,6 +36,12 @@ final class Tab: ObservableObject, Identifiable {
     /// that alters what runs there reloads it only once it's the tab shown (Tim, 11-18: a mod added for another site
     /// reloaded the YouTube video being watched).
     var modsLoaded: (url: String, signature: String)?
+    /// The ids of the mods its page loaded with (switched on and not held then, for its address): a mod switched on
+    /// since starts at the next load, so the Mods tab never says the page didn't let it start (Tim, 11-18).
+    var modsLoadedIds: Set<String> = []
+    /// The tab whose page opened this one as its window (window.open, target=_blank): shown again when this one's page
+    /// closes it (Browser.webViewDidClose).
+    weak var opener: Tab?
     var started = false
     /// Its page was last loaded as a computer's (Request Desktop Website, Browser.desktopHosts).
     var desktop = false

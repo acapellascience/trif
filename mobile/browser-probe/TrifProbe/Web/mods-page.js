@@ -41,7 +41,9 @@
   const TIER_TERMS = { rules: 'style-mods', sandboxed: 'boxed-mods', page: 'free-mods' };
   const modGroup = (m) => (m.rules ? 'rules' : m.sandboxed ? 'sandboxed' : 'page');
   const site = () => view.state?.site || '';
-  const groupOff = (g) => (view.state?.groupsOff || []).includes(g);
+  // (a tier's On / Off just tapped shows its new state at once, until the app has answered: groupPending)
+  const groupPending = new Map();
+  const groupOff = (g) => (groupPending.has(g) ? !groupPending.get(g) : (view.state?.groupsOff || []).includes(g));
   const switchSite = (m) => (m.multi ? site() : undefined);
 
   // "more": a line's explanation (explain.json), unfolded in place under it (sidepanel.js addMore)
@@ -159,8 +161,10 @@
       const setGroup = async (on) => {
         if (sw.hasAttribute('aria-busy') || on === !groupOff(g)) return;
         sw.setAttribute('aria-busy', 'true');
+        groupPending.set(g, on);
+        renderMods();
         try { await ask({ type: 'group', group: g, enabled: on }); } catch (e) { showUndo(`Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${errText(e)}`, false); }
-        finally { sw.removeAttribute('aria-busy'); }
+        finally { groupPending.delete(g); sw.removeAttribute('aria-busy'); renderMods(); }
       };
       for (const on of [false, true]) {
         const btn = el('button', 'gs-btn', on ? 'On' : 'Off');
@@ -345,14 +349,19 @@
     li.classList.toggle('off', !on);
     const running = on && m.applies && !groupOff(modGroup(m)) && m.running;
     light.classList.toggle('on', running);
-    light.title = running ? 'Running on this page' : !on ? 'Switched off' : 'Not running on this page';
+    // (switched on since the page loaded: it starts when the page loads again, which the app does at once unless the
+    // page is playing; loaded with it, not started yet: starting. Neither is an error)
+    light.title = running ? 'Running on this page' : !on ? 'Switched off'
+      : m.nextLoad || shownEnabled(m.id, m.on, switchSite(m)) !== !!m.on ? 'Starts when this page loads again'
+      : m.starting ? 'Starting on this page' : 'Not running on this page';
     const tag = li.querySelector('.tag');
     tag.textContent = !on && m.newOff ? (m.newOff === 'update' ? 'updated' : m.newOff === 'computer' ? 'from your computer' : 'new') : '';
     tag.title = !on && m.newOff === 'update' ? 'You imported a new version of it, so TRIF switched it off: switch it on once you\'ve looked at it.'
       : !on && m.newOff === 'computer' ? 'It came from TRIF on your computer, so TRIF switched it off: switch it on once you\'ve looked at it.'
       : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';
     showOneTag(li, false);
-    rowError(li, switchError(m.id, switchSite(m)) || (m.cant ? 'Can\'t run here on iPhone: this page didn\'t let it start.' : ''));
+    // (only once the page has loaded with it switched on, and its start hasn't come within the grace: ModsPanel.swift)
+    rowError(li, switchError(m.id, switchSite(m)) || (m.cant && on && m.on ? 'Can\'t run here on iPhone: this page didn\'t let it start.' : ''));
   }
 
   let foldLi = null;
@@ -1118,6 +1127,9 @@
   }
 
   window.trifRender = (state, openId) => {
+    // (states are numbered as the app makes them: one made before a later one but delivered after it is old news, and
+    // would show a switch just tapped in its old state for a moment)
+    if (view.state && typeof state.seq === 'number' && state.seq < (view.state.seq || 0)) { if (openId) openApproval(openId); return; }
     view.state = state;
     renderSafety(state);
     renderSync(state);

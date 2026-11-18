@@ -31,8 +31,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published private(set) var current: Tab!
     /// The pages visited, in every tab (History.swift).
     let history = HistoryStore()
-    /// What the shown page last said about its mods (ModsPanel: the Mods tab shows it at once, then asks again).
-    var lastPageAnswer: (url: String, ran: Set<String>, errors: [String: [String]])?
+    /// What the shown page last said about its mods (ModsPanel: the Mods tab shows it at once, then asks again),
+    /// and when it was asked (a mod is judged as not starting only on an answer asked a while after the page loaded).
+    var lastPageAnswer: (url: String, ran: Set<String>, errors: [String: [String]], at: Date)?
+    /// Each Mods tab state is numbered as it's made: the page keeps only the newest (a state made before a switch
+    /// was tapped and delivered after it would show the switch in its old state; Tim's recording, 11-18).
+    var modsStateSeq = 0
     /// A hold that came from the chat opened the Mods tab: it closes again once that's decided.
     var holdFromChat = false
     /// Set when something wants the Mods tab open (a mod added that waits for an OK); the app opens it.
@@ -379,7 +383,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         return true
     }
 
-    func close(_ tab: Tab) {
+    /// `showing`: the tab to show next if `tab` was the one shown and `showing` is still open (a page's own window
+    /// closing itself: its opener); else the tab that takes its place.
+    func close(_ tab: Tab, showing next: Tab? = nil) {
         guard let i = tabs.firstIndex(where: { $0 === tab }) else { return }
         letGo[tab.id]?.cancel(); letGo[tab.id] = nil
         tab.webView.stopLoading()
@@ -389,7 +395,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         VideoStore.shared.set(tab.id, nil)
         setFullScreen(false, tab: tab, note: false)
         if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
-        if tab === current { select(tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
+        if tab === current { select(next.flatMap { n in tabs.contains { $0 === n } ? n : nil } ?? tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
     }
 
     /// The tab's picture for the switcher (TabShots: kept on disk too). Taken as a tab is left, when the app goes to
@@ -1485,7 +1491,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let t = tab(of: webView) { t.committedAt = Date(); t.finishedAt = nil }
         if let t = tab(of: webView) { checkAgent(t, webView) }
         // (a change to the mods not in the scripts yet: this page has the old ones, so it counts as stale)
-        if let t = tab(of: webView), let u = webView.url?.absoluteString { t.modsLoaded = (u, scriptsPending ? "pending" : mods.signature(u)) }
+        if let t = tab(of: webView), let u = webView.url?.absoluteString {
+            t.modsLoaded = (u, scriptsPending ? "pending" : mods.signature(u))
+            // (which mods this page loaded with: only those can have failed to start on it; the Mods tab)
+            t.modsLoadedIds = scriptsPending ? [] : Set(mods.running(on: u).map(\.id))
+        }
         guard webView === self.webView else { return }
         address = webView.url?.absoluteString ?? ""
         canGoBack = webView.canGoBack
@@ -1544,6 +1554,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         let t = makeTab(configuration: configuration)
         t.started = true
+        // (its opener: where it goes back to when the page closes it, as a sign-in window does)
+        t.opener = tab(of: webView)
         // (a window the page opens: a new tab, in TRIF view)
         let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.count - 1) + 1
         tabs.insert(t, at: at)
@@ -1575,8 +1587,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if url != nil { if let t = tab(of: webView) { reload(t, cause) } else { webView.reload() } }
     }
 
+    /// A page's own window closed itself (window.close(): a sign-in popup done): its tab closes and, if it was the tab
+    /// shown, the tab that opened it is shown again while it's still open (Tim, 11-18, as the Android app does; before,
+    /// whichever tab came next took its place). A window closed in a tab behind leaves the shown tab as it is.
     func webViewDidClose(_ webView: WKWebView) {
-        if let t = tab(of: webView) { close(t) }
+        guard let t = tab(of: webView) else { return }
+        report.log("tabs", "a page closed its own window\(t.opener.map { o in tabs.contains { $0 === o } ? "; back to its opener, \(Diagnostics.place(o.webView.url))" : "; its opener is gone" } ?? "")")
+        close(t, showing: t.opener)
     }
 
     /// A long press on a link or a picture: the system's menu and preview, as in Safari (Tim, 11-17: "normal iphone

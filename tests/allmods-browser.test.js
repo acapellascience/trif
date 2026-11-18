@@ -55,10 +55,18 @@ test('the All mods page: every mod by site, its status, search, filters, switche
     await ctl.send('ServiceWorker.enable');
     const restart = async (patch, ready) => {
       await ctl.evaluate((p) => chrome.storage.local.set(p), patch);
-      await ctl.send('ServiceWorker.stopAllWorkers');
-      await sleep(500);
-      await until('the worker started again', async () => ready(await ctl.evaluate(() => chrome.runtime.sendMessage({ type: 'status' }))), 20000);
-      return browser.serviceWorker();
+      let last = null;
+      // (stopped again if it isn't yet: a busy machine can take a moment to let it go)
+      for (let i = 0; i < 6; i++) {
+        await ctl.send('ServiceWorker.stopAllWorkers').catch(() => {});
+        await sleep(700);
+        for (let j = 0; j < 20; j++) {
+          last = await ctl.evaluate(() => chrome.runtime.sendMessage({ type: 'status' })).catch((e) => ({ error: e.message }));
+          if (ready(last)) return browser.serviceWorker();
+          await sleep(250);
+        }
+      }
+      throw new Error(`the worker didn't start again with ${Object.keys(patch).join(', ')}: its status ${JSON.stringify({ error: last?.error, helper: last?.helper, blocked: last?.blockedSites, sitesOn: last?.sitesOn, mods: last?.mods?.length })}; Chrome's log: ${browser.logTail().slice(-1200)}`);
     };
     // TRIF on for five sites, off on one (wikipedia.org), blocked on one (reddit.com), and amazon.com not connected
     let sw = await restart({ sitesOn: ['x.com', 'google.com', 'youtube.com', 'github.com', 'ycombinator.com', 'reddit.com'], blockedSites: ['reddit.com'] },

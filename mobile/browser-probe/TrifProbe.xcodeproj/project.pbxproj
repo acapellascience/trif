@@ -47,6 +47,8 @@
 		A1C10B0E5EB1C11B00000036 /* LeavingCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */; };
 		A1C10B0E5EB1C11B0000003E /* VideoResume.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003F /* VideoResume.swift */; };
 		A1C10B0E5EB1C11B00000040 /* UnreadTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000041 /* UnreadTitle.swift */; };
+		A1C10B0E5EB1C11B00000048 /* Site.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000049 /* Site.swift */; };
+		A1C10B0E5EB1C11B0000004A /* QuickAskRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000004B /* QuickAskRules.swift */; };
 		A1C10B0E5EB1C11B00000044 /* Core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000045 /* Core.swift */; };
 		A1C10B0E5EB1C11B00000046 /* core.js in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000047 /* core.js */; };
 		A1C10B0E5EB1C11B00000042 /* UnreadCounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */; };
@@ -113,6 +115,8 @@
 		A1C10B0E5EB1C11B00000037 /* LeavingCover.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LeavingCover.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000003F /* VideoResume.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "VideoResume.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000041 /* UnreadTitle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "UnreadTitle.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000049 /* Site.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Site.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B0000004B /* QuickAskRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "QuickAskRules.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000045 /* Core.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Core.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000047 /* core.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "core.js"; path = "../shared/gen/core.js"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "UnreadCounts.swift"; sourceTree = "<group>"; };
@@ -258,6 +262,8 @@
 				A1C10B0E5EB1C11B0000003F /* VideoResume.swift */,
 				A1C10B0E5EB1C11B00000041 /* UnreadTitle.swift */,
 				A1C10B0E5EB1C11B00000045 /* Core.swift */,
+				A1C10B0E5EB1C11B0000004B /* QuickAskRules.swift */,
+				A1C10B0E5EB1C11B00000049 /* Site.swift */,
 				A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */,
 				A1C10B0E5EB1C11B00000039 /* AppLinks.swift */,
 				A1C10B0E5EB1C11B0000003B /* SpeechText.swift */,
@@ -391,6 +397,8 @@
 				A1C10B0E5EB1C11B0000003E /* VideoResume.swift in Sources */,
 				A1C10B0E5EB1C11B00000040 /* UnreadTitle.swift in Sources */,
 				A1C10B0E5EB1C11B00000044 /* Core.swift in Sources */,
+				A1C10B0E5EB1C11B0000004A /* QuickAskRules.swift in Sources */,
+				A1C10B0E5EB1C11B00000048 /* Site.swift in Sources */,
 				A1C10B0E5EB1C11B00000042 /* UnreadCounts.swift in Sources */,
 				A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */,
 				A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */,

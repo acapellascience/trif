@@ -46,13 +46,17 @@ struct QuickAsk: Equatable {
     static func == (a: QuickAsk, b: QuickAsk) -> Bool { a.id == b.id && a.state == b.state && a.applied.map(\.id) == b.applied.map(\.id) }
 
     /// A look-only mod: a style mod (css, hide, settings) with no powers, nothing waiting for an OK, no warnings, and
-    /// only the chat's own site. Anything else gets its card.
-    static func lookOnly(_ m: InstalledMod, site: String) -> Bool {
-        m.tier == "style" && m.powers.isEmpty && !m.held && m.warnings.isEmpty && !m.everywhere && !site.isEmpty
-            && !m.sites.isEmpty && m.sites.allSatisfy { Site.of($0) == site }
-    }
+    /// only the chat's own site. Anything else gets its card. (The shared rule: QuickAskRules.swift.)
+    static func lookOnly(_ m: InstalledMod, site: String) -> Bool { QuickAskRules.lookOnly(m.quickFacts, site: site) }
     /// The request, short enough for a pill.
     var short: String { request.count > 38 ? String(request.prefix(36)).trimmingCharacters(in: .whitespaces) + "…" : request }
+}
+
+extension InstalledMod {
+    /// What quick ask's rules look at (QuickAskRules).
+    var quickFacts: QuickAskRules.Facts {
+        .init(id: id, tier: tier, powers: powers, held: held, warnings: warnings, everywhere: everywhere, sites: sites)
+    }
 }
 
 // MARK: the box at the top of the chats' list

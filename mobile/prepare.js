@@ -63,9 +63,12 @@ const CORE_OUT = path.join(__dirname, 'shared', 'gen', 'core.js');
 const camel = (file) => file.replace(/\.js$/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 function coreFile() {
   const mods = fs.readdirSync(CORE_DIR).filter((f) => f.endsWith('.js')).sort();
+  // (a module may require another as './name.js': each runs once, at the first require)
   return '// Made by mobile/prepare.js from mobile/shared/core/*.js: don\'t edit. The phone apps\' shared rules ' +
-    '(docs/MOBILE-BEHAVIOUR.md).\nvar TrifCore = (function () {\n\'use strict\';\nconst TrifCore = {};\n' +
-    mods.map((f) => `TrifCore.${camel(f)} = (function () {\nconst module = { exports: {} };\n${fs.readFileSync(path.join(CORE_DIR, f), 'utf8')}\nreturn module.exports;\n})();\n`).join('') +
+    '(docs/MOBILE-BEHAVIOUR.md).\nvar TrifCore = (function () {\n\'use strict\';\nconst TrifCore = {};\nconst SOURCES = {};\n' +
+    mods.map((f) => `SOURCES[${JSON.stringify(f)}] = function (module, exports, require) {\n${fs.readFileSync(path.join(CORE_DIR, f), 'utf8')}\n};\n`).join('') +
+    'const cache = {};\nfunction require(name) {\n  const f = name.replace(/^\\.\\//, \'\');\n  if (cache[f]) return cache[f].exports;\n  if (!SOURCES[f]) throw new Error(`no shared rule ${name}`);\n  const module = { exports: {} };\n  cache[f] = module;\n  SOURCES[f](module, module.exports, require);\n  return module.exports;\n}\n' +
+    mods.map((f) => `TrifCore.${camel(f)} = require(${JSON.stringify(f)});\n`).join('') +
     '// name "module.fn", args a JSON array; the answer as JSON (null for undefined)\n' +
     'TrifCore.call = function (name, argsJSON) {\n  const dot = name.indexOf(\'.\');\n  const r = TrifCore[name.slice(0, dot)][name.slice(dot + 1)].apply(null, JSON.parse(argsJSON));\n  return JSON.stringify(r === undefined ? null : r);\n};\n' +
     'return TrifCore;\n})();\nif (typeof module === \'object\' && module && module.exports) module.exports = TrifCore;\n';

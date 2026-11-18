@@ -140,6 +140,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - What a chat may offer (ChatOffers.swift → core/chat-offers.js) on the Mac: `node --test mobile/test/chatoffers.test.js`
   (swiftc with mobile/test/chatoffers-check/main.swift, Core.swift, argv chat-offers-cases.json + gen/core.js; ~20 s;
   prints the judge's cost) and `mobile/test/core-chatoffers.test.js` (the JS alone).
+- Sites and quick ask's rules (Site.swift twin, QuickAskRules.swift → core/site.js, core/quick-ask.js) on the Mac:
+  `node --test mobile/test/quickask.test.js` (swiftc with mobile/test/quickask-check/main.swift, Site.swift,
+  QuickAskRules.swift, Core.swift; argv site-cases.json, quick-ask-cases.json, gen/core.js; `TRIF_COST=1` prints a
+  sort's cost, ~50 µs unoptimised) and `mobile/test/core-quickask.test.js` (the JS alone).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -183,7 +187,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mobile/shared/core/*.js → `node mobile/prepare.js` → mobile/shared/gen/core.js (global `TrifCore`, a bundle resource;
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
-  "core" once). Moved so far: AppLinks' kind/decide/isTap/logged.
+  "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
+  Undo steps (QuickAskRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
   in Swift, the rest by TrifCore.appLinks), `decide` (tapped → open; else ask once a load, one at a time, main frame,
@@ -195,7 +201,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   createWebViewWith (no tab), Open in New Tab, the preview's commit, ClaudePane's decidePolicy/createWebViewWith,
   PanelChat's (taps only, never asks). The note shows over the chat too (ContentView.page's bottom overlay).
 - QuickAsk.swift (Tim, 11-18): `QuickAsk` (request, service, site, key, state waitingSend/working/done/replied/card/
-  undone/failed, `applied` for Undo; `lookOnly`), `QuickAskBox` (the box at the top of ChatListView; its text is
+  undone/failed, `applied` for Undo; `lookOnly` → QuickAskRules, `InstalledMod.quickFacts`), `QuickAskBox` (the box at the top of ChatListView; its text is
   `SpeechInput.draft`, so it outlives the sheet), `HeardText` (every word heard, scrolling past a height, the newest
   in view), `HoldTalkPill`, `KeptTalkSlot`/`KeptTalkPill` (a robot hold stopped by something else: the words, a tap
   opens the list), `QuickPill` (above the toolbar, in ContentView.notes; `preparing`: "Putting it in {Service}…" while
@@ -247,6 +253,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
   WebClipMaker.compose; profile hand-off; IconHandoffSteps, the steps shared with the list), `trif://open`.
   IconQueue.swift: the list of icons waiting (QueuedIcon, IconQueue, the batch profile, IconQueueView).
+- QuickAskRules.swift: quick ask's rules through the shared core (TrifCore.quickAsk): lookOnly, sort (look ids, card
+  ids, the pill's state; no answer → all to their cards), undo (steps newest first; no answer → still undone).
+  ClaudePane.quickDeliver / quickUndo use it. Site.swift: `Site.of` / `Site.host(_:isIn:)` (moved out of Mods.swift
+  in round 3), the twin of core/site.js.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
   (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
   a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is

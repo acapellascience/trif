@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (355 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (363 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -46,7 +46,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Website on the shown page), desktopstate (the sites kept, each tab's mode, "(Mac agent)" where the web view has it),
   links (the chat links, newest first, the banners, the shown tab and offer: "runs on … came from …"), gosite n /
   openlink n (link n's Go to <site> / its chat), banner ("add", "go", "open", "dismiss": the banner shown's button),
-  tabbadges (each tab's robot badge), sheet "chatlist" (the robot's long-press list),
+  tabbadges (each tab's robot badge), sheet "chatlist" (the robot's long-press list), tabshots (each tab's picture
+  file, size, sensitive or not, drawn; the folder's files and orphans; pictures read from disk since launch),
+  privatepage (["https://…"]: pictured or why not),
   playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
@@ -135,7 +137,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
   `chat offers`: one line per hand-over (path auto/late/viewer/panel/computer, ids offered and skipped with why) and
   declined/dismissed.
-- Tabs.swift: Tab, tab pictures. History.swift: history. Import.swift: importing mod files. FolderWatch.swift: the watched
+- Tabs.swift: Tab, tab pictures (TabShots, PrivatePages), TabsView/TabCard. History.swift: history. Import.swift: importing mod files. FolderWatch.swift: the watched
   iCloud folder and `trif://add` links. WebClip.swift: Home Screen icons (the sheet's look and name: IconLook,
   WebClipMaker.compose; profile hand-off; IconHandoffSteps, the steps shared with the list), `trif://open`.
   IconQueue.swift: the list of icons waiting (QueuedIcon, IconQueue, the batch profile, IconQueueView).
@@ -362,9 +364,32 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   the buttons.
 - The chat pages read as TRIF (Tim, 11-16): greeting with the robot in the service's greeting's place, pills "From
   TRIF: …" with the robot, upsell buttons hidden; never their branding, Log in, terms or safety lines. Cosmetic only.
+- Tab pictures as Safari's and Chrome's (Tim, 11-18: "a lot of the tabs in tab view are still blank"; built 11-18).
+  Cause found (Simulator, shot 356 vs the old build): a restored tab left (or the list opened, or the app coming
+  back) before its page had drawn saved a white picture over its good one. Now TabShots (Tabs.swift) pictures only
+  the shown tab (left, tabs opened, app leaving the front (not coming back), 1 s after a load), only once
+  `Tab.drawn` (finished + 0.3 s, or committed + 2.5 s; reset by a commit, a web view made again, a process ended),
+  never mid-scroll (a load's picture retries 4 × 1 s), at most every 3 s a tab per address, and drops a picture
+  all of one colour. File: Caches/tab-shots/<id>.jpg, the card's width ((window − 42)/2 pt) at the screen's scale,
+  the card's shape (0.7), from just under the address bar (obscuredContentInsets.top; the page under the toolbar
+  is kept). Cards read them lazily (`.task(id: shotVersion)`, ImageIO downscale, NSCache 12 MB, let go on
+  disappear); Tab holds no image. Closed tab → file deleted (and a closing tab isn't pictured as it goes);
+  orphans deleted at launch. PrivatePages: never pictured, old picture deleted: TRIF's sensitive list
+  (SENSITIVE_DEFAULT parsed from the bundle's panel/agentsites.js, 80 patterns, agentsites' matching), sign-in
+  hosts (accounts.google.com, appleid/idmsa.apple.com, login.microsoftonline.com, …), sign-in paths (/login,
+  /signin, /auth, /oauth, /sso, /session, /i/flow/login…) and a password field showing (TRIF's world, 1 s). The
+  fallback: a grey card (secondarySystemBackground) with the site's first letter (Site.of) in a circle
+  (tertiarySystemFill; an empty tab a globe); under every card its title, then its host (when it has a title).
+  The app keeps no favicons (WebClip fetches them only for Home Screen icons), so no favicon card. Not touched:
+  Mods, the chat pane, the start page, links/new tabs (default-browser rules unaffected).
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
+
+- Tab pictures (11-18): Simulator only (shots 356-363, local stand-in pages; 20 tabs: the app's footprint ~51 MB
+  with the list open, 4 pictures read for the visible cards). Not tried: the mid-scroll wait (needs real touches),
+  real sites (a page drawn but still loading for > 2.5 s, or with a long white splash: the one-colour check keeps
+  the old picture), a 3× phone, iPad. The list opens at its top, not at the shown tab (as before).
 
 - Request Desktop Website: checked in the Simulator only (11-18, shots 323-331, Safari's own for comparison 324) on
   stand-in pages. Never on real sites or a phone: Google sign-in on a desktop site (accounts.google.com isn't

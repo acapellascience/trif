@@ -144,7 +144,9 @@ Built on the probe, toward something to use every day:
 
 - **Tabs** (TrifProbe/Tabs.swift). Each tab is a web view of its own (its own back and forward), all made from
   one configuration, so every tab gets the same scripts, mods and sign-ins. The switcher shows each tab's
-  picture; + opens one, × closes one; a link or page that opens a window opens a tab after its own. Tabs and
+  picture (TabShots: WebKit's snapshot of the shown tab as it's left, as the list opens, as the app leaves and
+  after a load, once the page has drawn; a small JPEG per tab in Caches, read only for the cards on the screen;
+  never of sensitive sites or sign-in pages, which get a grey card with the site's letter); + opens one, × closes one; a link or page that opens a window opens a tab after its own. Tabs and
   their back/forward lists (WebKit's interactionState) are kept between launches. A new tab shows the sites
   visited lately under the address bar.
 - **The chat follows the tab's site** (ClaudePane.follow). Each site (its domain) keeps its own conversation:

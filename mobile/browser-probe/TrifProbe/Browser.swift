@@ -287,13 +287,15 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                 let t = makeTab(id: s.id, title: s.title, url: nil)
                 t.savedState = s.state
                 t.savedURL = s.url.flatMap(URL.init(string:))
-                TabShots.shared.load(t) // (its last picture, from the last launch: Tabs.swift)
                 return t
             }
+            // (each card reads its tab's last picture when it shows: Tabs.swift TabShots)
+            TabShots.shared.dropOrphans(keeping: Set(tabs.map(\.id)))
             select(tabs.first { $0.id == saved.selected } ?? tabs[tabs.count - 1])
         } else {
             let t = makeTab()
             tabs = [t]
+            TabShots.shared.dropOrphans(keeping: [t.id])
             select(t)
             go(PageSchemeHandler.home + "plain.html")
         }
@@ -312,7 +314,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func select(_ tab: Tab) {
         defer { noteRunning() }
         letGo[tab.id]?.cancel()
-        if let was = current, was !== tab { TabShots.shared.take(was, "left"); letGoLater(was) }
+        // (a tab being closed isn't pictured as it goes: its picture was just deleted)
+        if let was = current, was !== tab, tabs.contains(where: { $0 === was }) { TabShots.shared.take(was, "left"); letGoLater(was) }
         current = tab
         status = ""
         if !tab.started && !waitingForFront { start(tab) }
@@ -379,15 +382,16 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         guard let t = tab ?? current else { return }
         TabShots.shared.take(t, why)
     }
-    /// After the shown tab's page loads: its picture a second later (once it has drawn), at most every 3 s.
+    /// After the shown tab's page loads: its picture a second later (once it has drawn), the last load's if several
+    /// come quickly (TabShots keeps it to one every few seconds); waited for while the page is being scrolled.
     private var shotLater: Task<Void, Never>?
     private func snapshotSoon() {
-        guard shotLater == nil, let t = current else { return }
+        guard let t = current else { return }
+        shotLater?.cancel()
         shotLater = Task { @MainActor [weak self, weak t] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if let t, t === self?.current { TabShots.shared.take(t, "loaded") }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            self?.shotLater = nil
+            guard !Task.isCancelled, let t, t === self?.current else { return }
+            TabShots.shared.take(t, "loaded", retries: 4)
         }
     }
 
@@ -1239,6 +1243,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         tab(of: webView)?.url = webView.url
+        // (a new page: not drawn until it has finished, or a while has passed; its tab keeps the picture it had)
+        if let t = tab(of: webView) { t.committedAt = Date(); t.finishedAt = nil }
         if let t = tab(of: webView) { checkAgent(t, webView) }
         guard webView === self.webView else { return }
         address = webView.url?.absoluteString ?? ""
@@ -1249,7 +1255,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         CookieKeeper.shared.firstPageLoaded()
         Diagnostics.shared.log("page", "\(Diagnostics.place(webView.url)) loaded, with \(mods.running(on: webView.url?.absoluteString ?? "").map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
-        if let t = tab(of: webView) { t.loading = false; t.title = webView.title ?? t.title }
+        if let t = tab(of: webView) { t.loading = false; t.title = webView.title ?? t.title; t.finishedAt = Date() }
         history.visit(webView.url, title: webView.title ?? "")
         saveTabs()
         noteRunning()
@@ -1307,6 +1313,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         report.log("load", "process ended: \(Diagnostics.place(url))")
         if webView === self.webView { status = "This page stopped (iPhone ended it, often for memory), so it was loaded again." }
         safety.ended(site: Site.of(url?.host ?? ""), mods: mods.running(on: url?.absoluteString ?? ""))
+        // (a black page until it's loaded again: never pictured)
+        if let t = tab(of: webView) { t.committedAt = nil; t.finishedAt = nil }
         if url != nil { webView.reload() }
     }
 

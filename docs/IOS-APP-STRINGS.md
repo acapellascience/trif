@@ -13,7 +13,7 @@ proof of concept's own strings (the probe's checks, report, point-and-hide bar) 
 | Toolbar, accessibility labels | (icons only) | Back · Forward · Chat · Mods · Mods, {n} waiting for your OK · Tabs, {n} open · More · Reload · Stop |
 | Tab switcher's title | — | 1 tab · {n} tabs |
 | Tab switcher, a tab with no page | — | New tab |
-| Tab switcher, a tab never pictured yet (rare now: every tab's picture is kept between launches) | its site's letter | its site's letter, and the site under it (no new words) |
+| Tab switcher, a tab never pictured yet, or on a page never pictured (sensitive sites, sign-in pages, a password field) | its site's letter, and the site under it | a grey card with the site's letter in a circle (an empty tab: a globe); under every card its title, then its site (no new words; 11-18) |
 | Tab switcher, + and × (accessibility) | — | New tab · Close {tab's title} |
 | A new tab's page, its list | — | Visited lately |
 | A new tab's page, nothing visited yet | — | Type an address or a search above. |

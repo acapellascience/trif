@@ -241,6 +241,10 @@ extension Model {
         // sites kept and each tab's mode)
         if let d = step["desktop"] as? Bool { browser.requestDesktop(d); out = "asked \(d ? "desktop" : "mobile")" }
         if step["desktopstate"] != nil { out = "sites: \(browser.desktopHosts.sorted()); tabs: " + browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) + ($0.desktop ? " desktop" : " mobile") + (($0.webView.customUserAgent ?? "").isEmpty ? "" : " (Mac agent)") }.joined(separator: ", ") }
+        // ({"tabshots": 1}: each tab's picture for the tab list, and the pictures' folder; {"privatepage": ["https://…"]}:
+        // whether each would be pictured, Tabs.swift PrivatePages)
+        if step["tabshots"] != nil { out = TabShots.shared.describe(browser.tabs, current: browser.current) }
+        if let us = step["privatepage"] as? [String] { out = us.map { u in "\(u): \(URL(string: u).flatMap(PrivatePages.why) ?? "pictured")" }.joined(separator: "\n") + "\n\(PrivatePages.sensitive.count) sensitive patterns" }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
@@ -348,7 +352,8 @@ struct ContentView: View {
             browser.safety.active(p == .active)
             // (inactive on the way in too, from the background: "left the front" only on the way out; 11-17, Tim's
             // diagnostics read as if the app had left three times)
-            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive { browser.snapshot(nil, was == .active ? "the app left the front" : "the app is coming to the front") } }
+            // (the shown tab's picture as the app leaves; not on the way back in, when its page may not have drawn yet)
+            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive, was == .active { browser.snapshot(nil, "the app left the front") } }
         }
         // (a link UIKit handed over that onOpenURL never brought: opened once the app has been in front 2 s)
         .onChange(of: phase, initial: true) { _, p in

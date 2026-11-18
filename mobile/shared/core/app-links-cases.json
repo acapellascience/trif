@@ -1,0 +1,41 @@
+{
+  "about": "AppLinks' rules (links that aren't web pages: Tim, 11-18), as the iPhone's AppLinks.swift answered them before the move. core/app-links.js and the Swift that calls it must give the same answers (mobile/test/core-applinks.test.js, mobile/test/applinks.test.js). own = the app's own schemes.",
+  "own": ["trif", "trifprobe", "trifpanel"],
+  "kind": [
+    ["https://x.com/", "web"], ["HTTP://x.com/", "web"], ["http://localhost:8377/a", "web"],
+    ["about:blank", "stay"], ["blob:https://x.com/1", "stay"], ["data:text/html,hi", "stay"], ["trifprobe://checks/a", "stay"],
+    ["javascript:alert(1)", "never"], ["JavaScript:void(0)", "never"], ["file:///etc/hosts", "never"],
+    ["trif://add?x", "own"], ["TRIF://pair?y", "own"], ["trifpanel://panel/", "own"],
+    ["tel:+15551234567", "other"], ["mailto:a@b.c", "other"], ["sms:+1555", "other"], ["maps://?q=x", "other"],
+    ["facetime:a@b.c", "other"], ["itms-apps://apps.apple.com/app/id1", "other"], ["fb-messenger://user/1", "other"],
+    ["fb://profile", "other"], ["x-safari-https://example.com/", "other"], ["intent://scan/#Intent;scheme=zxing;end", "other"]
+  ],
+  "decide": [
+    [{ "tapped": true, "mainFrame": true, "askedThisLoad": false, "asking": false }, "open"],
+    [{ "tapped": true, "mainFrame": false, "askedThisLoad": true, "asking": true }, "open"],
+    [{ "tapped": true, "mainFrame": true, "askedThisLoad": false, "asking": false, "mayAsk": false }, "open"],
+    [{ "tapped": false, "mainFrame": true, "askedThisLoad": false, "asking": false }, "ask"],
+    [{ "tapped": false, "mainFrame": true, "askedThisLoad": false, "asking": false, "mayAsk": true }, "ask"],
+    [{ "tapped": false, "mainFrame": true, "askedThisLoad": false, "asking": false, "mayAsk": false }, "drop:not tapped"],
+    [{ "tapped": false, "mainFrame": false, "askedThisLoad": false, "asking": false }, "drop:a frame inside the page, not tapped"],
+    [{ "tapped": false, "mainFrame": false, "askedThisLoad": true, "asking": true, "mayAsk": false }, "drop:not tapped"],
+    [{ "tapped": false, "mainFrame": true, "askedThisLoad": false, "asking": true }, "drop:a question is already up"],
+    [{ "tapped": false, "mainFrame": true, "askedThisLoad": true, "asking": true }, "drop:a question is already up"],
+    [{ "tapped": false, "mainFrame": true, "askedThisLoad": true, "asking": false }, "drop:asked once on this page already"]
+  ],
+  "isTap": [
+    [{ "linkOrForm": true, "sinceTouch": 0.2, "touching": false, "menu": false }, true],
+    [{ "linkOrForm": true, "sinceTouch": 0, "touching": false, "menu": false }, true],
+    [{ "linkOrForm": true, "sinceTouch": 1.49, "touching": false, "menu": false }, true],
+    [{ "linkOrForm": true, "sinceTouch": 1.5, "touching": false, "menu": false }, false],
+    [{ "linkOrForm": true, "sinceTouch": 5, "touching": false, "menu": false }, false],
+    [{ "linkOrForm": true, "sinceTouch": -0.1, "touching": false, "menu": false }, false],
+    [{ "linkOrForm": true, "sinceTouch": null, "touching": false, "menu": false }, false],
+    [{ "linkOrForm": true, "sinceTouch": null, "touching": true, "menu": false }, true],
+    [{ "linkOrForm": true, "sinceTouch": 30, "touching": false, "menu": true }, true],
+    [{ "linkOrForm": false, "sinceTouch": 0.1, "touching": true, "menu": true }, false]
+  ],
+  "logged": [
+    ["mailto:someone@example.com", "mailto:"], ["TEL:+15551234567", "tel:"], ["fb-messenger://user/1", "fb-messenger:"]
+  ]
+}

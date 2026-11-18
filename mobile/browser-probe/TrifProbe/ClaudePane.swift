@@ -1341,12 +1341,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     static let stillNote = "trif.reply.still"
     private var working: [ChatView] { views.filter { $0.activity == .working } }
 
-    /// Notifications asked for once, at the first send (not at launch). Refused: nothing else changes.
+    /// Notifications asked for once, at the first send (not at launch). Refused: nothing else changes. `.badge` too
+    /// (11-18): iOS asks only once, so the icon's unread badge (UnreadCounts) can't be asked for after this.
     private func askToNotify() {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .notDetermined else { return }
-            center.requestAuthorization(options: [.alert, .sound]) { ok, _ in
+            center.requestAuthorization(options: [.alert, .sound, .badge]) { ok, _ in
                 Task { @MainActor in Diagnostics.shared.log("notify", "notifications \(ok ? "allowed" : "not allowed")") }
             }
         }

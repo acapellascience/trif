@@ -6,8 +6,9 @@ import UIKit
 /// Links that aren't web pages (tel:, mailto:, sms:, maps:, an app's own scheme such as fb-messenger:): handed to iOS,
 /// as Safari does (Tim, 11-18). Like Safari, only at once when the person tapped; a page (or a mod) trying it by itself
 /// gets Safari's question instead, at most one at a time and one a load; never from a frame inside the page unless
-/// tapped. http/https always stay in TRIF (the default-browser rules). The decisions here have no UI, so the Mac test
-/// (mobile/test/applinks.test.js) builds them too.
+/// tapped. http/https always stay in TRIF (the default-browser rules). The decisions are the phones' shared rule
+/// (mobile/shared/core/app-links.js, through Core); the words and the app names are the iPhone's. No UI here, so the
+/// Mac test (mobile/test/applinks.test.js) builds it too.
 enum AppLinks {
     enum Kind: Equatable {
         /// http/https: TRIF's own business (tabs, full screen's rule…)
@@ -39,14 +40,21 @@ enum AppLinks {
         return s
     }()
 
+    /// The rule is shared (mobile/shared/core/app-links.js, TrifCore.appLinks.kind); http/https, every navigation's,
+    /// are answered here first (the same answer: mobile/test/applinks.test.js). A rule that can't answer: never leaves.
     static func kind(_ url: URL, own: Set<String> = ownSchemes) -> Kind {
         let s = url.scheme?.lowercased() ?? ""
-        if s.isEmpty { return .never }
         if s == "http" || s == "https" { return .web }
-        if ["about", "blob", "data", "trifprobe"].contains(s) { return .stay }
-        if s == "javascript" || s == "file" { return .never }
-        if own.contains(s) { return .own }
-        return .other
+        return kindShared(s, own: own)
+    }
+    static func kindShared(_ scheme: String, own: Set<String>) -> Kind {
+        switch Core.shared.call("appLinks.kind", [scheme, own.sorted()]) as? String {
+        case "web": return .web
+        case "stay": return .stay
+        case "own": return .own
+        case "other": return .other
+        default: return .never
+        }
     }
 
     /// What to do with another app's link.
@@ -55,23 +63,23 @@ enum AppLinks {
     /// - askedThisLoad: the question was already put for this page's load (answered either way)
     /// - asking: a question is up now
     /// - mayAsk: where it came from can ask at all (More's panel can't: its own page, only taps)
+    /// (shared: TrifCore.appLinks.decide; a rule that can't answer: nothing)
     static func decide(tapped: Bool, mainFrame: Bool, askedThisLoad: Bool, asking: Bool, mayAsk: Bool = true) -> Decision {
-        if tapped { return .open }
-        if !mayAsk { return .drop("not tapped") }
-        if !mainFrame { return .drop("a frame inside the page, not tapped") }
-        if asking { return .drop("a question is already up") }
-        if askedThisLoad { return .drop("asked once on this page already") }
-        return .ask
+        let a: [String: Any] = ["tapped": tapped, "mainFrame": mainFrame, "askedThisLoad": askedThisLoad, "asking": asking, "mayAsk": mayAsk]
+        guard let d = Core.shared.call("appLinks.decide", [a]) as? String else { return .drop("the shared rule didn't answer") }
+        if d == "open" { return .open }
+        if d == "ask" { return .ask }
+        return .drop(d.hasPrefix("drop:") ? String(d.dropFirst(5)) : d)
     }
 
     /// A link or form counts as tapped when the person's finger was on the page just now (WebKit calls a script's
     /// a.click() a link too), or a long-press menu's item was chosen.
+    /// (shared: TrifCore.appLinks.isTap, its window 1.5 s: a tap's link comes ~0–0.4 s after the finger lifts, WebKit
+    /// waiting for a double tap on pages without a phone viewport; a rule that can't answer: not a tap, so it asks)
     static func isTap(linkOrForm: Bool, sinceTouch: TimeInterval?, touching: Bool, menu: Bool) -> Bool {
-        guard linkOrForm else { return false }
-        return menu || touching || (sinceTouch.map { $0 >= 0 && $0 < tapWindow } ?? false)
+        let a: [String: Any] = ["linkOrForm": linkOrForm, "sinceTouch": sinceTouch.map { $0 as Any } ?? NSNull(), "touching": touching, "menu": menu]
+        return (Core.shared.call("appLinks.isTap", [a]) as? Bool) ?? false
     }
-    /// (a tap's link comes ~0–0.4 s after the finger lifts: WebKit waits for a double tap on pages without a phone viewport)
-    static let tapWindow: TimeInterval = 1.5
 
     /// The app iOS will hand it to, where that's certain (Apple's own apps; there's no public way to ask iOS which
     /// app takes a scheme, and Mail may not be the person's mail app).
@@ -102,7 +110,8 @@ enum AppLinks {
     static let noApp = "No app on this iPhone can open this link."
 
     /// What the log may say about it: the scheme only (a mailto:'s address or a tel:'s number is the person's business).
-    static func logged(_ url: URL) -> String { "\(url.scheme?.lowercased() ?? "?"):" }
+    /// (shared: TrifCore.appLinks.logged)
+    static func logged(_ url: URL) -> String { (Core.shared.call("appLinks.logged", [url.scheme]) as? String) ?? "?:" }
 }
 
 #if os(iOS)

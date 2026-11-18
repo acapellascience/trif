@@ -12,8 +12,16 @@ final class Tab: ObservableObject, Identifiable {
     /// Its web view: made again when the tab comes back after being let go in the background (Browser.discard).
     private(set) var webView: WKWebView
     func replaceWebView(_ wv: WKWebView) { webView = wv; committedAt = nil; finishedAt = nil }
-    @Published var title: String
-    @Published var url: URL?
+    @Published var title: String { didSet { readUnread() } }
+    @Published var url: URL? { didSet { if url?.host != oldValue?.host { UnreadCounts.shared.changed() } } }
+    /// The site's own unread count in its title, if it shows one (UnreadTitle; Tim, 11-18).
+    private(set) var unread: UnreadTitle.Count?
+    private func readUnread() {
+        let u = UnreadTitle.read(title)
+        guard u != unread else { return }
+        unread = u
+        UnreadCounts.shared.changed()
+    }
     @Published var loading = false
     /// Its picture for the tab list changed (taken, or dropped): the card reads it again (TabShots: the pictures
     /// themselves are on disk and in a small cache, never held by the tab).
@@ -60,11 +68,17 @@ final class Tab: ObservableObject, Identifiable {
         self.webView = webView
         self.title = title
         self.url = url
+        self.unread = UnreadTitle.read(title)
     }
 
     /// The tab's name in the switcher: its title, else its host, else New tab.
     var label: String { !title.isEmpty ? title : url?.host ?? (savedURL?.host ?? "New tab") }
     var host: String { (url ?? savedURL)?.host ?? "" }
+    /// The card's name: as `label`, but without the count its badge shows (counts shown).
+    func cardLabel(counts: Bool) -> String {
+        guard counts, let u = unread, u.count > 0 else { return label }
+        return !u.title.isEmpty ? u.title : url?.host ?? (savedURL?.host ?? "New tab")
+    }
 }
 
 /// The tabs' pictures for the tab list, as Safari's and Chrome's (Tim, 11-15: only the shown tab had one; 11-18:
@@ -433,6 +447,8 @@ struct TabCard: View {
     var chat: ChatActivity? = nil
     let select: () -> Void
     let close: () -> Void
+    /// ⋯ → Show unread counts (on at first): the site's count as a badge beside the robot's, and out of the title.
+    @AppStorage(UnreadCounts.settingKey) private var counts = true
     @Environment(\.displayScale) private var scale
     /// Its picture, read while the card is on the screen (TabShots), let go when it scrolls off.
     @State private var shot: UIImage?
@@ -469,15 +485,19 @@ struct TabCard: View {
                 }
                 .buttonStyle(.plain)
                 .overlay(alignment: .topLeading) {
-                    if let chat {
-                        ChatGlyph(activity: chat).frame(width: 16, height: 16)
-                            .foregroundStyle(Color.trifGreen)
-                            .padding(5)
-                            .background(Circle().fill(.regularMaterial))
-                            .padding(6)
-                            .allowsHitTesting(false)
-                            .accessibilityLabel(chat == .working ? "Chat, working" : chat == .replied ? "Chat, reply waiting" : "Chat")
+                    // (the robot's badge first, the site's own count beside it, the same height)
+                    HStack(spacing: 4) {
+                        if let chat {
+                            ChatGlyph(activity: chat).frame(width: 16, height: 16)
+                                .foregroundStyle(Color.trifGreen)
+                                .padding(5)
+                                .background(Circle().fill(.regularMaterial))
+                                .accessibilityLabel(chat == .working ? "Chat, working" : chat == .replied ? "Chat, reply waiting" : "Chat")
+                        }
+                        if counts, let u = tab.unread, u.count > 0 { UnreadBadge(count: u) }
                     }
+                    .padding(6)
+                    .allowsHitTesting(false)
                 }
                 Button(action: close) {
                     Image(systemName: "xmark").font(.caption.bold()).foregroundStyle(.white)
@@ -487,9 +507,9 @@ struct TabCard: View {
                 .accessibilityLabel("Close \(tab.label)")
             }
             .padding(.bottom, 4)
-            Text(tab.label).font(.caption).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+            Text(tab.cardLabel(counts: counts)).font(.caption).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
             // (the site under the title; a tab with no title is already named by its site)
-            if !site.isEmpty, tab.label != tab.host {
+            if !site.isEmpty, tab.cardLabel(counts: counts) != tab.host {
                 Text(site).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

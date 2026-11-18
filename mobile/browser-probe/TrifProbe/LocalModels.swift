@@ -308,7 +308,7 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { s in
             guard s.authorizationStatus == .notDetermined else { return }
-            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         }
     }
 

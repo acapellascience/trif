@@ -10,6 +10,10 @@
 //   app can hand to WKWebView. Each step becomes the body of an async function that gets `prevJson` and
 //   returns JSON text.
 //
+// - core.js: the phone apps' shared rules (mobile/shared/core/*.js, CommonJS modules) as one plain script defining
+//   the global TrifCore, one object per module (app-links.js → TrifCore.appLinks), plus TrifCore.call(name, argsJSON)
+//   → JSON, the iPhone's way in through JavaScriptCore (Core.swift). Android takes it from mobile/shared/gen too.
+//
 //   node mobile/prepare.js           write them
 //   node mobile/prepare.js --check   exit 1 if any isn't what the current sources give
 
@@ -54,6 +58,19 @@ function modsFile() {
 // icons (extension/icons.js), how noticeable a mod is and its icons' words (modlevel.js), the explanations
 // behind each "i" (explain.js with explain.json), the switch (modswitch.js) and the robot's outline from the
 // panel's bar (sidepanel.html), as one plain script (their exports made top-level declarations).
+const CORE_DIR = path.join(__dirname, 'shared', 'core');
+const CORE_OUT = path.join(__dirname, 'shared', 'gen', 'core.js');
+const camel = (file) => file.replace(/\.js$/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+function coreFile() {
+  const mods = fs.readdirSync(CORE_DIR).filter((f) => f.endsWith('.js')).sort();
+  return '// Made by mobile/prepare.js from mobile/shared/core/*.js: don\'t edit. The phone apps\' shared rules ' +
+    '(docs/MOBILE-BEHAVIOUR.md).\nvar TrifCore = (function () {\n\'use strict\';\nconst TrifCore = {};\n' +
+    mods.map((f) => `TrifCore.${camel(f)} = (function () {\nconst module = { exports: {} };\n${fs.readFileSync(path.join(CORE_DIR, f), 'utf8')}\nreturn module.exports;\n})();\n`).join('') +
+    '// name "module.fn", args a JSON array; the answer as JSON (null for undefined)\n' +
+    'TrifCore.call = function (name, argsJSON) {\n  const dot = name.indexOf(\'.\');\n  const r = TrifCore[name.slice(0, dot)][name.slice(dot + 1)].apply(null, JSON.parse(argsJSON));\n  return JSON.stringify(r === undefined ? null : r);\n};\n' +
+    'return TrifCore;\n})();\nif (typeof module === \'object\' && module && module.exports) module.exports = TrifCore;\n';
+}
+
 const KIT_OUT = path.join(__dirname, 'shared', 'gen', 'panel-kit.js');
 function kitFile() {
   const plain = (file) => fs.readFileSync(path.join(ROOT, 'extension', file), 'utf8')
@@ -171,7 +188,7 @@ function panelFiles() {
 }
 
 async function main() {
-  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()], [ROBOT_OUT, robotSwiftFile()]];
+  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()], [ROBOT_OUT, robotSwiftFile()], [CORE_OUT, coreFile()]];
   for (const [file, text] of files) {
     if (process.argv.includes('--check')) {
       if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) { console.error(`${path.relative(ROOT, file)} is out of date: run node mobile/prepare.js`); process.exit(1); }
@@ -200,4 +217,4 @@ function listFiles(dir, base = '') {
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { panelFiles, PANEL_DIR, runtimeFile, checksFile, modsFile, kitFile, bridgeFile, robotSwiftFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT, ROBOT_OUT };
+module.exports = { panelFiles, PANEL_DIR, runtimeFile, checksFile, modsFile, kitFile, bridgeFile, robotSwiftFile, coreFile, stepBody, OUT, CHECKS_OUT, MODS_OUT, KIT_OUT, BRIDGE_OUT, ROBOT_OUT, CORE_OUT };

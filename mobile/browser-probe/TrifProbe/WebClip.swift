@@ -129,6 +129,7 @@ extension Browser {
         }
         saveTabs()
         setFullScreen(true, note: false)
+        UnreadCounts.shared.changed()
         report.log("icon", "opened \(site) from its icon: \(why)")
         Diagnostics.shared.log("icon", "opened \(site) from its Home Screen icon: \(why); \(tabs.count) tabs")
     }

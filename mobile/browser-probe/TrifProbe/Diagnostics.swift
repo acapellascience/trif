@@ -29,6 +29,8 @@ final class Diagnostics {
     }
 
     private init() {
+        // (a shared rule that couldn't answer: Core.swift, its safe answer used)
+        Core.report = { line in DispatchQueue.main.async { Diagnostics.shared.log("core", line) } }
         if let data = try? Data(contentsOf: Diagnostics.file), let list = try? JSONDecoder().decode([Event].self, from: data) { events = list }
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { Diagnostics.shared.log("memory", "the app was warned it's low on memory (\(Diagnostics.freeMB()) MB left for it)") }

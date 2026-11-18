@@ -132,7 +132,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         installScripts()
         ModDownloads.shared.browser = self
         FolderWatch.shared.browser = self
+        UnreadCounts.shared.browser = self
         restoreTabs()
+        // (the counts in the titles kept with the tabs: the cards and TRIF's icon as they were left, UnreadCounts)
+        UnreadCounts.shared.changed()
         // (a launch by a Home Screen icon: its own tab shown from the first frame, WebClip.swift)
         if let link = PendingLink.url, let site = TrifLink.target(link), TrifLink.wantsFullScreen(link) { showIconTabAtLaunch(site) }
     }
@@ -394,6 +397,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         tab.video = nil
         VideoStore.shared.set(tab.id, nil)
         setFullScreen(false, tab: tab, note: false)
+        UnreadCounts.shared.changed()
         if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
         if tab === current { select(next.flatMap { n in tabs.contains { $0 === n } ? n : nil } ?? tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
     }

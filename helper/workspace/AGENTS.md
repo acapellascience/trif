@@ -97,7 +97,8 @@ Use JavaScript only when a style mod can't do the job.
   `data:`; no `@import`). Recolour with
   `background-color`, not `background`: the shorthand wipes the page's background pictures.
 - `hide`: selectors to hide, now and later.
-- `replace`: `{ in?, find, with, regex?, caseless? }`, plain-text replacement.
+- `replace`: `{ in?, find, with, regex?, caseless? }`: `with` is plain text, no `$1` (a regex's groups aren't
+  filled in).
 - `filter`: `{ items, hideIfText | hideIfRegex | hideIfHas }`: hide each item with that text, pattern or
   descendant.
 

@@ -1,0 +1,1062 @@
+{
+  "about" : "ChatOffers' rules (what a chat may offer: Tim, 11-17, \"spurious asks to add old code\"), as the iPhone's ChatOffers.swift answered them before the move (round 2). core/chat-offers.js and the Swift that calls it must give the same answers (mobile/test/core-chatoffers.test.js, mobile/test/chatoffers.test.js). key: [code, normalised, key]; note: steps [code, outcome, at (s since 1970)] from no entries, then the entries and the outcomes of a, b, pasted; skip: entries are the memory's.",
+  "key" : [
+    [
+      "",
+      "",
+      "cbf29ce484222325:0"
+    ],
+    [
+      " ",
+      "",
+      "cbf29ce484222325:0"
+    ],
+    [
+      "\n\n",
+      "",
+      "cbf29ce484222325:0"
+    ],
+    [
+      " \t\n \n",
+      "",
+      "cbf29ce484222325:0"
+    ],
+    [
+      "a",
+      "a",
+      "af63dc4c8601ec8c:1"
+    ],
+    [
+      "a ",
+      "a",
+      "af63dc4c8601ec8c:1"
+    ],
+    [
+      "a\t  ",
+      "a",
+      "af63dc4c8601ec8c:1"
+    ],
+    [
+      " a ",
+      " a",
+      "7c56707b48e65fa:2"
+    ],
+    [
+      "a\r\nb\rc\n",
+      "a\nb\nc",
+      "b2080eccdfd3df77:5"
+    ],
+    [
+      "\r\n\r\nx\r\n\r\n",
+      "x",
+      "af63f54c86021707:1"
+    ],
+    [
+      "  lead kept\n\n\nmiddle blanks kept\n\n",
+      "  lead kept\n\n\nmiddle blanks kept",
+      "3e12d51df1ca1335:32"
+    ],
+    [
+      "line \n  \n x",
+      "line\n\n x",
+      "4e33444ed6d52567:8"
+    ],
+    [
+      "tab\tinside\t",
+      "tab\tinside",
+      "5df11f5917667eaf:10"
+    ],
+    [
+      "a ",
+      "a ",
+      "a6f1608179af54c7:4"
+    ],
+    [
+      "a　",
+      "a　",
+      "af9adc817e975525:4"
+    ],
+    [
+      "café",
+      "café",
+      "48e8823acfa40d89:5"
+    ],
+    [
+      "café",
+      "café",
+      "14ecc3ece0723bb7:6"
+    ],
+    [
+      "e ́",
+      "e ́",
+      "4113c46151e1d07f:4"
+    ],
+    [
+      "x ́ ",
+      "x ́",
+      "62110f531752a4be:4"
+    ],
+    [
+      "naïve — “quotes” ‘ok’",
+      "naïve — “quotes” ‘ok’",
+      "983acc02fdc4dcd4:32"
+    ],
+    [
+      "日本語のコード\n// 説明",
+      "日本語のコード\n// 説明",
+      "6fc71743222ebcae:31"
+    ],
+    [
+      "emoji 🎉👍🏽\n👨‍👩‍👧",
+      "emoji 🎉👍🏽\n👨‍👩‍👧",
+      "1f53b1593474ab8f:37"
+    ],
+    [
+      "x﻿bom",
+      "x﻿bom",
+      "89672dcf877c32a0:7"
+    ],
+    [
+      "nul\u0000byte",
+      "nul\u0000byte",
+      "7ff3180094b7f97a:8"
+    ],
+    [
+      "😀\r\n😀",
+      "😀\n😀",
+      "9a4b3b1408fa5d7:9"
+    ],
+    [
+      "􏿿",
+      "􏿿",
+      "6eb1861c2c1fff5a:4"
+    ],
+    [
+      "\r",
+      "",
+      "cbf29ce484222325:0"
+    ],
+    [
+      "\r\r\n\n\r",
+      "",
+      "cbf29ce484222325:0"
+    ],
+    [
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "e35766f95f3d24be:123"
+    ],
+    [
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "fb0563fbd3d09cbb:123"
+    ],
+    [
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+      "5bc580c77fc15acb:123"
+    ],
+    [
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "1e7703fcb4bb1e0b:123"
+    ],
+    [
+      "// ==WebMod==\n// @name No cookie box\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "// ==WebMod==\n// @name No cookie box\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "55195f9dc15e6644:125"
+    ],
+    [
+      "\n// ==WebMod== \r\n// @name Calmer feed \r\n// @match http://localhost/* \r\n// @style \r\n// ==/WebMod== \r\n{ \"css\": \"h2 { color: #b22222 }\" }\n\n",
+      "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "e35766f95f3d24be:123"
+    ],
+    [
+      "body { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\n",
+      "body { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }\nbody { color: red }",
+      "d2c19ae6791302ad:7999"
+    ]
+  ],
+  "limit" : 500,
+  "note" : [
+    {
+      "entries" : [
+        {
+          "at" : 1,
+          "key" : "af63dc4c8601ec8c:1",
+          "outcome" : "declined"
+        }
+      ],
+      "outcomes" : [
+        "declined",
+        null,
+        null
+      ],
+      "steps" : [
+        [
+          "a",
+          "offered",
+          1
+        ],
+        [
+          "a",
+          "declined",
+          2
+        ],
+        [
+          "a",
+          "dismissed",
+          3
+        ]
+      ]
+    },
+    {
+      "entries" : [
+        {
+          "at" : 1,
+          "key" : "af63dc4c8601ec8c:1",
+          "outcome" : "added"
+        }
+      ],
+      "outcomes" : [
+        "added",
+        null,
+        null
+      ],
+      "steps" : [
+        [
+          "a",
+          "offered",
+          1
+        ],
+        [
+          "a",
+          "dismissed",
+          2
+        ],
+        [
+          "a",
+          "added",
+          3
+        ]
+      ]
+    },
+    {
+      "entries" : [
+        {
+          "at" : 2,
+          "key" : "af63df4c8601f1a5:1",
+          "outcome" : "added"
+        },
+        {
+          "at" : 3,
+          "key" : "af63dc4c8601ec8c:1",
+          "outcome" : "offered"
+        }
+      ],
+      "outcomes" : [
+        "offered",
+        "added",
+        null
+      ],
+      "steps" : [
+        [
+          "a",
+          "offered",
+          1
+        ],
+        [
+          "b",
+          "offered",
+          2
+        ],
+        [
+          "a",
+          "offered",
+          3
+        ],
+        [
+          "b",
+          "added",
+          4
+        ]
+      ]
+    },
+    {
+      "entries" : [
+
+      ],
+      "outcomes" : [
+        null,
+        null,
+        null
+      ],
+      "steps" : [
+        [
+          "pasted",
+          "added",
+          1
+        ],
+        [
+          "pasted",
+          "declined",
+          2
+        ],
+        [
+          "pasted",
+          "dismissed",
+          3
+        ]
+      ]
+    },
+    {
+      "entries" : [
+        {
+          "at" : 4,
+          "key" : "af63dc4c8601ec8c:1",
+          "outcome" : "offered"
+        }
+      ],
+      "outcomes" : [
+        "offered",
+        null,
+        null
+      ],
+      "steps" : [
+        [
+          "a",
+          "offered",
+          1
+        ],
+        [
+          "a",
+          "added",
+          2
+        ],
+        [
+          "a",
+          "dismissed",
+          3
+        ],
+        [
+          "a",
+          "offered",
+          4
+        ]
+      ]
+    },
+    {
+      "entries" : [
+        {
+          "at" : 1,
+          "key" : "af63dc4c8601ec8c:1",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 3,
+          "key" : "af63df4c8601f1a5:1",
+          "outcome" : "declined"
+        }
+      ],
+      "outcomes" : [
+        "declined",
+        "declined",
+        null
+      ],
+      "steps" : [
+        [
+          "a \r\n",
+          "offered",
+          1
+        ],
+        [
+          "\na",
+          "declined",
+          2
+        ],
+        [
+          "b",
+          "offered",
+          3
+        ],
+        [
+          "b",
+          "dismissed",
+          4
+        ],
+        [
+          "b",
+          "declined",
+          5
+        ]
+      ]
+    }
+  ],
+  "noteLimit" : {
+    "code 0" : null,
+    "code 519" : "offered",
+    "count" : 500,
+    "first" : "d801ccffee12046e:7",
+    "last" : "d80552ffee151df7:7"
+  },
+  "skip" : [
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : null
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (declined)"
+    },
+    {
+      "code" : "\n// ==WebMod== \r\n// @name Calmer feed \r\n// @match http://localhost/* \r\n// @style \r\n// ==/WebMod== \r\n{ \"css\": \"h2 { color: #b22222 }\" }\n\n",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (declined)"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name No cookie box\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (dismissed)"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (added)"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "installed as it is"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "an earlier version of localhost/calmer-feed"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "an earlier version of localhost/calmer-feed"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : null
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : null
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (declined)"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "installed as it is"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name No cookie box\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+          "history" : [
+
+          ],
+          "id" : "a/one"
+        },
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "an earlier version of localhost/calmer-feed"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name No cookie box\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name No cookie box\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+          "history" : [
+
+          ],
+          "id" : "a/one"
+        },
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "installed as it is"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "in Recently deleted"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "in Recently deleted"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : null
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (declined)"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+          "history" : [
+
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "want" : "waiting to be offered"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+      "deleted" : [
+
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+          "history" : [
+
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #abcdef }\" }",
+          "history" : [
+
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "want" : "installed as it is"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+          "history" : [
+
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "want" : "waiting to be offered"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+
+      ],
+      "installed" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #b22222 }\" }",
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "queued" : [
+
+      ],
+      "want" : "an earlier version of localhost/calmer-feed"
+    },
+    {
+      "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }",
+      "deleted" : [
+        {
+          "code" : "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #123456 }\" }",
+          "history" : [
+            "// ==WebMod==\n// @name Calmer feed\n// @match http://localhost/*\n// @style\n// ==/WebMod==\n{ \"css\": \"h2 { color: #1f8a5b }\" }"
+          ],
+          "id" : "localhost/calmer-feed"
+        }
+      ],
+      "entries" : [
+        {
+          "at" : 1795013096.6352019,
+          "key" : "e35766f95f3d24be:123",
+          "outcome" : "declined"
+        },
+        {
+          "at" : 1795013096.6352382,
+          "key" : "55195f9dc15e6644:125",
+          "outcome" : "dismissed"
+        },
+        {
+          "at" : 1795013096.6352711,
+          "key" : "fb0563fbd3d09cbb:123",
+          "outcome" : "added"
+        }
+      ],
+      "installed" : [
+
+      ],
+      "queued" : [
+
+      ],
+      "want" : "offered from a chat before (added)"
+    }
+  ]
+}

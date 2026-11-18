@@ -62,7 +62,7 @@ change there is a change on both phones. Change this file whenever a rule change
   Claude chat"), nor an installed mod's current or earlier version, nor one in Recently deleted, nor one already
   waiting to be offered. Code is compared after evening out line ends, trailing spaces and blank end lines. Memory:
   the last 500 codes offered, all chats, across launches, with what came of each (offered, added, declined,
-  dismissed). Add to TRIF's tap isn't held to this.
+  dismissed). Add to TRIF's tap isn't held to this. [shared: core/chat-offers.js]
 - A chat's mods belong to the chat's site (11-18, FeedBook from a Facebook chat said "runs on google.com"): a mod with
   no @match is read for the chat's site (phone~<site> → <site>), the shown page only when the chat has none. A mod
   whose own @match names another site still warns.
@@ -236,3 +236,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 |---|---|---|---|
 | Unread count from a title | shared/unread-count.js | UnreadTitle.swift (a twin, same cases) | test/unreadcount.test.js |
 | Links to other apps | shared/core/app-links.js | AppLinks.swift → TrifCore.appLinks | test/core-applinks.test.js, test/applinks.test.js |
+| What a chat may offer (memory, key, judge) | shared/core/chat-offers.js | ChatOffers.swift → TrifCore.chatOffers (storage and a key cache stay Swift) | test/core-chatoffers.test.js, test/chatoffers.test.js |

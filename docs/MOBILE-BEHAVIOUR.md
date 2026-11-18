@@ -38,8 +38,10 @@ change there is a change on both phones. Change this file whenever a rule change
   becoming a free mod; each @match outside the version before's site, when the mod can act at all (it has needs) and
   the version before wasn't for every site. What the version before did (its @match, being free, what it was asked
   before) counts as allowed, unless it was itself held. [shared: core/mod-store.js]
-- While a change waits, the version before keeps running (or the one it was already keeping); a restored version that
-  waits keeps the version before running only if that one wasn't waiting itself. [shared: core/mod-store.js]
+- While a change waits, the version before keeps running (or the one it was already keeping), whether the change is an
+  edit, a sync, an update or a restore: a restore while another change waits keeps the last approved version running
+  (Tim, 11-18; before, the mod stopped until the person decided). Allow runs the waiting one; Don't allow puts back the
+  one that ran. [shared: core/mod-store.js]
 - Adding: a mod added from a chat, a link or pasted is on; an import starts off, marked new (updated, if it replaces
   one); a new one from the computer (phone sync) starts off, marked as from the computer. A new version keeps what was
   allowed, its per-site switches and when it was first added; an edit or a sync keeps its switch and mark; anything

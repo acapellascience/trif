@@ -60,6 +60,10 @@ test('core/mod-store.js: Android\'s stories (ModStoreTest.kt holdsWaitForAllow, 
   assert.ok(S.held(v3));
   assert.equal(S.ranAfter(S.held(v3), v2, 'add'), 'current');
   assert.equal(S.ranAfter(true, { ...v3, ran: true }, 'add'), 'ran');
+  // (Tim, 11-18: a restore while an edit waits keeps the approved version running, as another edit there does)
+  assert.equal(S.ranAfter(true, { ...v3, ran: true }, 'restore'), 'ran');
+  assert.equal(S.ranAfter(true, v3, 'restore'), null);
+  assert.equal(S.ranAfter(true, v2, 'restore'), 'current');
   // (an edit that runs on another site asks for that site only)
   const e = { ...ok, matches: ['*://*.a.com/*', '*://b.com/*'] };
   const edit = { ...e, allowed: S.seeded(ok), extraNeeds: S.changeNeeds(e, ok) };

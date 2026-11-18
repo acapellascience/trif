@@ -625,7 +625,13 @@ final class ModStore: ObservableObject {
         back.allowed = ModStore.seeded(now)
         back.extraNeeds = ModStore.changeNeeds(back, was: now)
         back.history = ModChanges.pick(c.history, from: now.history, new: ModVersion(stamp: c.version.stamp, at: date, code: now.code, source: c.version.source))
-        if ModHolds.ranAfter(held: back.held, old: now.holdFacts, restore: true) == .current { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at, style: now.styleScript) }
+        // (it waits: the version before keeps running, or what that one was keeping while a change waited: the last
+        // approved version, as an edit there keeps it (Tim, 11-18))
+        switch ModHolds.ranAfter(held: back.held, old: now.holdFacts, restore: true) {
+        case .ran?: back.ran = now.ran
+        case .current?: back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at, style: now.styleScript)
+        case nil: break
+        }
         mods[i] = back
         save()
         return true

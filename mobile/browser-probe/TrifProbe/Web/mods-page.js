@@ -361,7 +361,7 @@
       : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';
     showOneTag(li, false);
     // (only once the page has loaded with it switched on, and its start hasn't come within the grace: ModsPanel.swift)
-    rowError(li, switchError(m.id, switchSite(m)) || (m.cant && on && m.on ? 'Can\'t run here on iPhone: this page didn\'t let it start.' : ''));
+    rowError(li, switchError(m.id, switchSite(m)) || (m.cant && on && m.on ? 'Can\'t run here on this phone: this page didn\'t let it start.' : ''));
   }
 
   let foldLi = null;
@@ -880,7 +880,7 @@
     const everywhere = m.site === 'all-sites';
     for (const l of [
       ...(everywhere ? ['Runs on every site.'] : (m.sites || []).length > 1 ? [`Runs on ${m.sites.join(', ')}.`] : []),
-      ...(m.cant ? ['Can\'t run here on iPhone: this page didn\'t let it start.'] : []),
+      ...(m.cant ? ['Can\'t run here on this phone: this page didn\'t let it start.'] : []),
     ]) out.push(el('p', null, l));
     P.details.replaceChildren(...out);
   }

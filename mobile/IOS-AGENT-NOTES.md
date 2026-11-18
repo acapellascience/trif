@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (458 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (466 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -755,6 +755,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   person was already in keeps its focus). The strip too. Checked: Go to chat on the Claude and ChatGPT (`?octane`)
   stand-ins, the strip, a reply waiting: activeElement body, scrollY 0, a recording's frames show no keyboard bar
   (before: the Simulator's keyboard bar came up, shot 402).
+- A restore while a change waits keeps the last approved version running (Tim, 11-18), as an edit there does: shared
+  core ranAfter(true, held old with ran, 'restore') → 'ran' (was null: the mod stopped until he decided); ModStore.restore
+  (Mods.swift) takes `.ran` (now.ran) as add does. Allow runs the restored one; Don't allow puts back the approved one.
+  The Mods tab's line for a free mod that didn't start says "on this phone" (approved by Tim 11-18; was "on iPhone":
+  the page is shared with Android). Android's own copy (branch android) still says "on iPhone" until it takes the page.
 - The Mods tab never says "didn't let it start" too early (Tim, 11-18: "odd flashes of error", his recording: the
   red line under each free mod for ~100 ms as he switched it on after safe mode). Cause: the quick state (the page's
   LAST answer, from before the switch) said "on, not started" before the page had loaded with the mod. Now
@@ -975,6 +980,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   DROPPED before 11-18 (`choosing` busy): now `downloadAfter` looks again. Look for "talking: getting the speech model"
   then "the speech model is on this iPhone"; the next look (that run or the next launch) says "→ SpeechTranscriber".
 
+- Restore while a change waits (11-18): Simulator only, SE, two boxed test mods on flashtest's plain.html (LAN address),
+  driven by the Mods page's messages (approve, enable, save, reject, history/historyCode, restore, code): A (keys)
+  approved and on; C (+read-drafts) saved and refused, so it's in History; B (+local-fonts) saved, waiting; restore C:
+  waiting for read-drafts, A still "Running on this page" (code version 'ran' = A); Allow → C runs; Don't allow → A
+  runs, C gone (465, 466). The box world on iOS has no `document`: a test mod names itself by its thrown error, which
+  the row shows ("New error: … version A …"). The approval card still says "You edited it." for a restore (unchanged).
 - Mods tab flash (11-18): Simulator only, SE, stand-in pages on the Mac's LAN address (a site with no other mods;
   the batch's scratchpad flashtest/server.js: plain.html, blocker.html which takes window.__trifRan first so a free
   mod never marks its start) and three imported test mods (free, boxed, style). A recorder in the Mods page (modsjs:

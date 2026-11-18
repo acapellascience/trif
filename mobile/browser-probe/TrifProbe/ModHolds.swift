@@ -63,7 +63,8 @@ enum ModHolds {
     }
 
     /// Which version runs while a change waits: .ran (the one the version before kept), .current (the version before),
-    /// or nil. `restore`: a kept version restored. No answer: nil (nothing runs until the user decides).
+    /// or nil. `restore`: a kept version restored (since 11-18 it keeps what a held version before kept, as an add).
+    /// No answer: nil (nothing runs until the user decides).
     enum Kept: String { case ran, current }
     static func ranAfter(held: Bool, old: Facts, restore: Bool) -> Kept? {
         (Core.shared.call("modStore.ranAfter", [held, old.plain, restore ? "restore" : "add"]) as? String).flatMap(Kept.init)

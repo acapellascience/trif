@@ -334,9 +334,10 @@ Core complete for the listed candidates. If more is wanted later (none asked): w
 
 - Round 4: the mod store's records go to JS as {tier, site, matches, needs, extraNeeds, allowed, ran (Bool)}:
   InstalledMod.holdFacts / ModHolds.Facts.plain. Line hashes are hex (ASCII), so JS's sort and Swift's sorted() agree;
-  keep them ASCII. A quirk kept as it was (no change in behaviour): a restore while a change is waiting, of a version
-  that itself waits, keeps nothing running (ranAfter 'restore' → null when the version before was held); add keeps
-  the one it was already keeping. Android's ModStore.kt has the same. Flagged to Tim below.
+  keep them ASCII. A restore while a change is waiting, of a version that itself waits, kept nothing running until
+  11-18 (ranAfter 'restore' → null when the version before was held); Tim chose (11-18) to keep the last approved
+  version running, as add does: ranAfter 'restore' → 'ran' there now (cases re-recorded; Mods.swift restore takes
+  `.ran` as add does). Android's caller of ranAfter('restore') needs the same `ran` branch if it only handled current.
 - Simulator, mod store: the Mods tab page's own messages through `{"modsjs": "return JSON.stringify(await
   window.webkit.messageHandlers.app.postMessage({type:'save'|'approve'|'reject'|'restore'|'history'|'state', id, …}))"}`
   (sheet "mods" first); a boxed mod needs a power that isn't soft (keys) to be held. Helper: scratchpad ms/st.sh <id>.
@@ -382,6 +383,3 @@ Core complete for the listed candidates. If more is wanted later (none asked): w
   decide through the shared rules Android will use; since round 5 also adding (on or off, marked new or updated),
   History (30 days, 30 versions), Recently deleted (30 days), Undo, Restore and Don't allow. They behave as before. A
   new TRIF.ipa is in iCloud Drive/TRIF.
-- One odd corner, kept as it was (a refactor changes nothing): if a change is waiting for your OK and you restore an
-  older version that also needs an OK, the mod stops running until you decide (an edit in the same spot keeps the
-  last approved version running). Say if you'd like a restore to keep it running too.

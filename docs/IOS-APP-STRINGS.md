@@ -198,7 +198,8 @@ iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" 
 |---|---|
 | Camera | To scan the code TRIF shows on your computer. Websites you visit can also ask to use the camera, for a photo or a video call. (changed 11-17, draft, the phone link: was "Websites you visit can ask to use the camera, for a photo or a video call.") |
 | Local Network (added 11-17, draft, the phone link) | TRIF looks for your computer on your Wi-Fi when you choose My computer. |
-| Microphone | Websites you visit can ask to use the microphone, for a voice or video call. |
+| Microphone | To hear what you'd like changed while you hold the microphone in TRIF. Websites you visit can also ask to use the microphone, for a voice or video call. (changed 11-18, draft, quick ask: was "Websites you visit can ask to use the microphone, for a voice or video call.") |
+| Speech Recognition (added 11-18, draft, quick ask) | To turn what you say into text, on this iPhone, while you hold the microphone in TRIF. (iOS puts its own fixed lines above it: "Speech data from this app will be sent to Apple to process your requests…". TRIF asks for on-device recognition only, but that system text can't be changed.) |
 | Saving to Photos | To save pictures from websites to your photos. |
 
 ## Pulling the page down (added 11-16, as Chrome's)
@@ -572,3 +573,26 @@ All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names the
 | The robot's long press: the chats' list | — | title **Chats**, **Done**; each row: {site}, the tab's title, **{Service} · Working…** / **Reply waiting** / **Mod added** / **Read**; its arrow (VoiceOver **Go to {site}**); VoiceOver hint on a row **Opens the chat** |
 | The same, empty | — | **No chats yet. Tap the robot on a page to start one.** |
 | The toolbar robot's VoiceOver action | — | **Chats** |
+
+
+## Quick ask (added 11-18, Tim: "stay on the page, long-press, say or type what to change")
+
+All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names them.
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| The robot's long press: the chats' list, its top | — | the box's placeholder **What should change?**; its send arrow (VoiceOver **Ask**); the microphone (VoiceOver **Hold to talk**, hint **Hold, say what should change, then let go**) |
+| While the microphone is held: the glowing pill | — | **Listening…**, then the words as they're heard (VoiceOver **Listening** / **Heard: {words}**) |
+| Under the box, the first time the microphone is held (iOS's two questions up) | — | **Allow TRIF to hear you, then hold the microphone and speak.** |
+| Under the box, the microphone or speech recognition refused (the box still takes typing) | — | **TRIF can't hear you: allow the Microphone and Speech Recognition for TRIF Probe in Settings. You can still type.** |
+| Under the box, where this iPhone can't recognise speech itself (TRIF never sends audio to a server) | — | **This iPhone can't recognise speech in {language} by itself, so TRIF doesn't listen. Type instead, or use the keyboard's dictation.** |
+| Under the box, rarer | — | **Speech recognition isn't available right now. Type instead.** · **The microphone can't be used right now. Type instead.** · **This iPhone has no microphone to use. Type instead.** |
+| The strip (Claude's or ChatGPT's own message box and Send, over the tab), its header | — | **Check it, then tap Send in {Service}**; its buttons (VoiceOver) **Open the whole chat** · **Cancel** |
+| The pill above the toolbar | — | **Working: {request}…** (the request cut at about 36 characters) |
+| The same, a look-only mod added | — | **Done · Undo** (then **Undone**) |
+| The same, a reply with no mod | — | **Replied: {request}** |
+| The same, not sent (More) | — | **Open a website first, then ask.** · **Still working on this site. Ask again when it's done.** · **More can't ask yet: open the chat to set it up.** · **Not done: open the chat to see why.** |
+| The pill (VoiceOver) | — | hint **Opens the chat**; action **Close** |
+
+No new words for mods that can click, send or load: they get Add this mod? or the approval card, as ever (through
+the done banner when the person is on another tab).

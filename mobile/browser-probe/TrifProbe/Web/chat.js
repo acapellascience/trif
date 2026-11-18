@@ -725,6 +725,66 @@
     }
     return trifInBox().count;
   }
+  // ---- quick ask (Tim, 11-18): the request in the box, the person's own Send ------------------------------------
+  // TRIF never sends here (Claude's and ChatGPT's terms): no click, no Enter, no submit. The person taps the site's own
+  // Send; what tells TRIF it went is their message appearing on the page (a person's message that wasn't there when
+  // the box was filled), as well as the send button's click and Return that maybeSent already watches for.
+  let armed = null;
+  function armSend() {
+    if (armed) armed.stop();
+    const usersBefore = new Set(document.querySelectorAll(USER));
+    const seen = new Set(modBlocks().map((b) => b.raw));
+    const repliesBefore = new Set(turns());
+    const convo = convoOf(location.pathname);
+    const c = composer();
+    const withInstructions = c.names.some((n) => n.includes('TRIF instruction')) || c.text.includes('--- How TRIF mods are written ---');
+    const mo = new MutationObserver(() => {
+      if (watch) { stop(); return; } // (seen by the click or Return already)
+      if (sending) return;
+      if (![...document.querySelectorAll(USER)].some((u) => !usersBefore.has(u))) return;
+      stop();
+      post({ type: 'sent', how: 'message seen', withInstructions });
+      startWatch(seen, { mode: 'send', usersBefore, repliesBefore, convo });
+    });
+    const timer = setTimeout(() => stop(), 30 * 60 * 1000);
+    function stop() { mo.disconnect(); clearTimeout(timer); if (armed && armed.mo === mo) armed = null; }
+    armed = { mo, stop };
+    mo.observe(document.body, { childList: true, subtree: true });
+    return 'armed';
+  }
+  /** A request's words out of the message box again (the strip's Cancel, or a new ask over one not sent), as the
+   *  person would delete them. */
+  function takeText(t) {
+    const ed = editor();
+    if (!ed || !t) return 'no box';
+    if (armed) armed.stop();
+    if (ed.localName === 'textarea') {
+      const i = ed.value.lastIndexOf(t);
+      if (i < 0) return 'not there';
+      ed.value = ed.value.slice(0, i) + ed.value.slice(i + t.length);
+      ed.dispatchEvent(new Event('input', { bubbles: true }));
+      ed.blur();
+      return 'taken out';
+    }
+    const w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const i = n.data.lastIndexOf(t);
+      if (i < 0) continue;
+      ed.focus();
+      const r = document.createRange();
+      r.setStart(n, i);
+      r.setEnd(n, i + t.length);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      document.execCommand('delete');
+      // (no keyboard left up over the tab: the box isn't shown)
+      ed.blur();
+      return 'taken out';
+    }
+    return 'not there';
+  }
+
   /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
   function resume() {
     const users = document.querySelectorAll(USER);
@@ -1025,5 +1085,5 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, look, viewer: () => { const v = viewer(); return v ? v.why : null; } };
+  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, viewer: () => { const v = viewer(); return v ? v.why : null; } };
 })();

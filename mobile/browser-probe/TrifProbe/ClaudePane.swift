@@ -129,6 +129,17 @@ final class ChatView: Identifiable {
     }
 }
 
+/// A chat's web view. While the quick ask's strip shows only its foot, touches above the strip's top (`stripTop`, in
+/// the window) aren't its: they go to the tab under it (SwiftUI's clipping hides the rest of the chat but doesn't
+/// keep touches from it: checked with the hit step, 11-18).
+final class ChatWebView: WKWebView {
+    static var stripTop: CGFloat?
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let top = ChatWebView.stripTop, let w = window, convert(point, to: w).y < top { return nil }
+        return super.hitTest(point, with: event)
+    }
+}
+
 /// A chat the person sent a message in, and the way back from it to the tab it started from (Tim, 11-18: "the site is
 /// lost in the tabs"; chats linked tab → chat only, now both ways). One per service and site (each site has one
 /// conversation at a time: ClaudePane's lastChat), newest first, kept across launches (UserDefaults `chatLinks`, 20).
@@ -174,6 +185,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let p = PanelChat(browser: browser!, report: report)
         p.onActivity = { [weak self] a in self?.panelActivity = a; self?.refreshActivity() }
         p.isShown = { [weak self] in self?.shown ?? false }
+        // (a quick ask's run done: its mods through the quick ask's own way, look-only ones added at once)
+        p.quickDone = { [weak self] site, codes, ok, path in await self?.quickMoreDone(site, codes, ok: ok, path: path) ?? 0 }
         // (Not right? Ask Claude, after the model on this iPhone: the same request in Claude's chat, with the page)
         p.onAskClaude = { [weak self] request in
             guard let self else { return }
@@ -290,7 +303,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         // (Add to TRIF under each mod in a reply, and filling the message box: Web/chat.js, main frame only)
         config.userContentController.addUserScript(WKUserScript(source: Browser.resource("chat", "js"), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: ClaudePane.chatWorld))
-        let wv = WKWebView(frame: .zero, configuration: config)
+        let wv = ChatWebView(frame: .zero, configuration: config)
         config.userContentController.add(self, contentWorld: ClaudePane.chatWorld, name: "trif")
         let v = ChatView(webView: wv, service: s)
         v.changed = { [weak self] in self?.objectWillChange.send() }
@@ -534,6 +547,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             report.log("claude", "More: opened")
             return
         }
+        // (the quick ask's strip up: the whole chat instead, as it is)
+        if strip { strip = false; if quick?.state == .waitingSend { shown = true; seen(cur); return } }
         let already = shown
         if !already { showFor(tabSite) }
         let v = cur!
@@ -669,7 +684,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // (and only with the conversation itself in front: the message box shown and usable, nothing over it. While a
         // viewer is open (a file, an artifact: 11-16, Tim tapped a .js and Claude's viewer covered the box), the wait
         // goes on, however long, for as long as the chat is shown: closing the viewer lets the fill go in)
-        let inFront = { [weak self] in (self?.shown ?? false) && self?.cur === v }
+        // (the quick ask's strip counts: its message box is in front there)
+        let inFront = { [weak self] in ((self?.shown ?? false) || (self?.strip ?? false)) && self?.cur === v }
         var st: [String: Any] = [:]
         var waited = 0
         var saidViewer = false
@@ -788,6 +804,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             sentLink(v)
             v.sentTab = link(v)?.tab
             askToNotify()
+            // (a quick ask sent by the person's own Send in the strip (or in the whole chat): the strip slides away,
+            // the pill says it's working)
+            if let q = quick, q.key == ClaudePane.linkKey(v.service.rawValue, v.site), q.state == .waitingSend {
+                quick?.state = .working
+                Diagnostics.shared.log("quick ask", "\(name): sent by the person (\(d["how"] as? String ?? "?"))")
+            }
+            if strip && cur === v { strip = false; blur(v) }
             if shown && cur === v { close() } else { blur(v) }
             let since = v.workingSince
             // (a reply that never says it's done, a page that went away: the dots stop after 16 minutes)
@@ -846,9 +869,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         report.log("claude", "\(v.service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")) for \(v.site.isEmpty ? "no site" : v.site), \(texts.count) mod file(s) in it")
         let late = d["why"] as? String == "late"
         // (the person went to another conversation before the reply was done: its watch ended, nothing offered)
+        let key = ClaudePane.linkKey(v.service.rawValue, v.site)
         if d["why"] as? String == "left" {
             if v.activity == .working { v.activity = .idle }
             updateLink(v) { if $0.state == .working { $0.state = .read } }
+            if quick?.key == key, quick?.state == .working { quick = nil }
             endBackgroundIfIdle(); return
         }
         guard v.activity == .working || late else { return }
@@ -858,7 +883,18 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let looking = shown && cur === v
         let onItsTab = !shown && !v.site.isEmpty && browser.site == v.site && ContentView.coversNow == "none"
         let hold = !looking && !onItsTab
+        // (a quick ask's reply: its look-only mods added at once, the rest to their card; the pill says which)
+        let isQuick = !late && quick?.key == key && quick?.state == .working
         Task { @MainActor in
+            if isQuick {
+                let offered = await self.quickDeliver(texts, site: v.site, path: "quick", hold: hold, view: v)
+                if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
+                if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) }
+                v.activity = offered.isEmpty && !looking ? .replied : .idle
+                self.updateLink(v) { $0.state = looking || !offered.isEmpty ? .read : .waiting }
+                self.endBackgroundIfIdle()
+                return
+            }
             let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto", hold: hold)
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
@@ -987,6 +1023,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         if let b = browser { t = b.site == v.site ? b.current : b.tabs.last { Site.of($0.host) == v.site } }
         return ChatLink(service: v.service.rawValue, site: v.site, tab: t?.id, tabTitle: t?.title ?? "", tabURL: nil, conv: v.conversation, state: .read, at: Date())
     }
+    /// The tab the shown chat (or the quick ask's strip) belongs to, for the tab list to open at (Tim, 11-18): the one it
+    /// was sent from while open and on its site, else nil (the shown tab). More follows the shown tab: nil.
+    var chatTabShown: UUID? {
+        guard shown || strip, !more else { return nil }
+        guard let l = links.first(where: { $0.id == curKey }) ?? fallbackLink(curKey) else { return nil }
+        return tabFor(l)?.id
+    }
     /// The shown chat's way back (its top bar's ← site).
     var curKey: String { ClaudePane.linkKey(cur.service.rawValue, cur.site) }
     /// A tab's robot badge in the tab list: its chats' (sent from it, while it's on their site): working, a reply
@@ -1021,6 +1064,155 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let b = banners.remove(at: i)
             if !b.mods.isEmpty { browser?.offerHeld(b.mods) }
         }
+    }
+
+    // MARK: quick ask (QuickAsk.swift; Tim, 11-18): the robot's long press, a box, the request to the tab's chat
+
+    /// The quick ask under way (the pill above the toolbar), or nil.
+    @Published var quick: QuickAsk?
+    /// Claude's or ChatGPT's real page in a slim strip over the tab: its message box, filled, and its own Send.
+    @Published private(set) var strip = false
+
+    /// A request from the box: to the tab's site's chat (its conversation if it has one, else a new one), with the
+    /// page as the robot's tap puts it. Claude / ChatGPT: the strip, for the person's own Send (TRIF never sends
+    /// there). More: sent at once by TRIF's own panel.
+    func quickAsk(_ raw: String) {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let browser, !tabSite.isEmpty, browser.webView.url?.scheme?.hasPrefix("http") == true else {
+            quick = QuickAsk(request: text, service: more ? "More" : service.rawValue, site: "", key: "", state: .failed("Open a website first, then ask."))
+            return
+        }
+        if more { return quickMore(text) }
+        if shown { close() }
+        // (an ask still waiting for its Send: its words come out of the box before the new ones go in)
+        let prior = quick?.state == .waitingSend ? quick : nil
+        showFor(tabSite)
+        let v = cur!
+        let was = v.activity
+        if was == .replied { v.activity = .idle }
+        seen(v)
+        let key = ClaudePane.linkKey(v.service.rawValue, v.site)
+        quick = QuickAsk(request: text, service: v.service.rawValue, site: v.site, key: key, state: .waitingSend)
+        strip = true
+        Diagnostics.shared.log("quick ask", "\(v.service.rawValue) for \(v.site): \(text.count) characters; the strip up for the person's own Send\(was == .working ? " (a reply still being written there)" : "")")
+        let ready = was != .working && v.site == tabSite ? prepare(v) : nil
+        queue(v) { [weak self] in
+            guard let self else { return }
+            if let prior, prior.key == key { _ = await self.chatCall(v, "takeText(t)", ["t": prior.request]) }
+            if let ready { await self.fillContext(v, ready) }
+            let said = await self.fill(v, text)
+            // (the person's message appearing is the send, however they sent it)
+            let armed = await self.chatCall(v, "armSend()", [:]) ?? "?"
+            Diagnostics.shared.log("quick ask", "the request into \(v.service.rawValue)'s box: \(said); watching for the send: \(armed)")
+        }
+    }
+
+    /// More: the panel's own message box, sent (TRIF's own page). Its run's end comes back to quickMoreDone.
+    private func quickMore(_ text: String) {
+        if shown { close() }
+        let site = tabSite
+        quick = QuickAsk(request: text, service: "More", site: site, key: "More|\(site)", state: .working)
+        let id = quick!.id
+        Diagnostics.shared.log("quick ask", "More for \(site): \(text.count) characters, sent by TRIF's panel")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let said = await self.panel.quickSend(text)
+            guard said != "sent", self.quick?.id == id else { return }
+            let why: String
+            switch said {
+            case "busy": why = "Still working on this site. Ask again when it's done."
+            case "nosite": why = "Open a website first, then ask."
+            default: why = "More can't ask yet: open the chat to set it up."
+            }
+            self.quick?.state = .failed(why)
+            Diagnostics.shared.log("quick ask", "More: not sent (\(said))")
+        }
+    }
+
+    /// A quick ask's More run done (PanelChat.quickDone). Its pill closed meanwhile: offered as ever.
+    func quickMoreDone(_ site: String, _ codes: [String], ok: Bool, path: String) async -> Int {
+        guard quick?.service == "More", quick?.state == .working else {
+            guard let browser, !codes.isEmpty else { return 0 }
+            return await browser.offerFromChat(codes, from: site, path: path).count
+        }
+        if codes.isEmpty && !ok {
+            quick?.state = .failed("Not done: open the chat to see why.")
+            return 0
+        }
+        return await quickDeliver(codes, site: site, path: "quick \(path)", hold: false, view: nil).count
+    }
+
+    /// A quick ask's reply: its mods judged as any chat's (offered once: ChatOffers), the look-only ones added at
+    /// once (Undo keeps what each replaced), the others to Add this mod? or the approval card: now, or held by the
+    /// done banner when the person is elsewhere (`hold`). The pill says Done, Replied, or goes for the card.
+    private func quickDeliver(_ texts: [String], site: String, path: String, hold: Bool, view v: ChatView?) async -> [InstalledMod] {
+        guard let browser else { return [] }
+        let offered = await browser.offerFromChat(texts, from: site, path: path, hold: true)
+        var s = site
+        if s.hasPrefix("phone~") { s.removeFirst("phone~".count) }
+        let look = offered.filter { QuickAsk.lookOnly($0, site: Site.of(s)) }
+        let rest = offered.filter { m in !look.contains { $0.id == m.id } }
+        var applied: [(id: String, before: InstalledMod?)] = []
+        for m in look {
+            applied.append((m.id, browser.mods.mods.first { $0.id == m.id }))
+            browser.addMod(m, quiet: true)
+        }
+        if !rest.isEmpty { if hold, let v { banner(v, rest) } else { browser.offerHeld(rest) } }
+        quick?.applied = applied
+        quick?.state = !look.isEmpty ? .done : !rest.isEmpty ? .card : .replied
+        if quick?.state == .card { quick = nil }
+        Diagnostics.shared.log("quick ask", "reply for \(s.isEmpty ? "no site" : s): \(look.count) look-only mod(s) added (\(look.map(\.id).joined(separator: ", "))), \(rest.count) to their card\(rest.isEmpty ? "" : hold ? " (held by the done banner)" : "")")
+        return offered
+    }
+
+    /// Done's Undo: each mod added as it was before (removed if it was new), the page shown again with it.
+    func quickUndo() {
+        guard let q = quick, q.state == .done, let browser else { return }
+        for a in q.applied.reversed() {
+            if let code = browser.mods.mods.first(where: { $0.id == a.id })?.code { browser.chatOffers.note(code, .declined) }
+            browser.mods.undoAdd(a.id, before: a.before)
+        }
+        browser.modsChanged()
+        quick?.applied = []
+        quick?.state = .undone
+        Diagnostics.shared.log("quick ask", "undone: \(q.applied.map { "\($0.id) \($0.before == nil ? "removed" : "back to its version before")" }.joined(separator: ", "))")
+    }
+    /// The pill tapped: its chat, at its conversation (More: the panel).
+    func quickOpen() {
+        guard let q = quick else { return }
+        if q.state == .waitingSend { return expandStrip() }
+        if q.service == "More" { choose(more: true); open() }
+        else if !q.key.isEmpty { openChat(q.key) }
+        if q.state == .replied || q.state == .undone || { if case .failed = q.state { return true } else { return false } }() { quick = nil }
+    }
+    /// The strip's ✕: no ask; the request's words out of the box (the page's own things stay, as a fill left unsent).
+    func cancelStrip() {
+        guard strip else { return }
+        strip = false
+        let v = cur!
+        blur(v)
+        if let q = quick, q.state == .waitingSend {
+            quick = nil
+            queue(v) { [weak self] in _ = await self?.chatCall(v, "takeText(t)", ["t": q.request]); self?.blur(v) }
+            Diagnostics.shared.log("quick ask", "cancelled in the strip")
+        }
+    }
+    /// The strip's expand: the whole chat, as it is (its Send there counts as the quick ask's too).
+    func expandStrip() {
+        strip = false
+        shown = true
+        seen(cur)
+    }
+    /// The chat's JS with arguments, in TRIF's world there.
+    private func chatCall(_ v: ChatView, _ call: String, _ args: [String: Any]) async -> String? {
+        let r = try? await v.webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.\(call) : null;", arguments: args, in: nil, contentWorld: ClaudePane.chatWorld)
+        return r.map { "\($0)" }
+    }
+    /// (development: the quick ask's state, for the dev steps)
+    var quickDescribe: String {
+        guard let q = quick else { return "quick: none, strip \(strip)" }
+        return "quick: \(q.service) for \(q.site.isEmpty ? "no site" : q.site), \(q.state), applied \(q.applied.map(\.id)), strip \(strip), shown \(shown)"
     }
 
     // MARK: a reply in the background (Tim, 11-15: "a notification when a new mod is ready")
@@ -1392,6 +1584,9 @@ struct ChatScreen: View {
             .zIndex(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            // (the quick ask's strip shows only the chat's foot: its top bar, clipped away, takes no touches (its
+            // switch, a UIKit control, still took them over the tab's address bar: the hit step, 11-18))
+            .allowsHitTesting(!pane.strip)
             // (the way back to the tab the chat is for, Tim 11-18: "← facebook.com"; its tab, or a new one at its page
             // if that tab has closed)
             if !pane.more, !pane.site.isEmpty {
@@ -1407,6 +1602,7 @@ struct ChatScreen: View {
                 .padding(.bottom, 6)
                 .padding(.top, -2)
                 .accessibilityLabel("Go to \(pane.site)")
+                .allowsHitTesting(!pane.strip)
             }
             Divider()
             if pane.more {
@@ -1540,10 +1736,12 @@ struct ChatBannerView: View {
     }
 }
 
-/// The toolbar robot's long press (Tim, 11-18): the chats sent from, newest first, each with its site, its tab's
-/// title and its state. A row opens its chat; its arrow goes to its site's tab.
+/// The toolbar robot's long press (Tim, 11-18): at its top the quick ask's box (QuickAsk.swift), "What should
+/// change?" with the microphone; then the chats sent from, newest first, each with its site, its tab's title and its
+/// state. A row opens its chat; its arrow goes to its site's tab.
 struct ChatListView: View {
     @ObservedObject var pane: ClaudePane
+    let ask: (String) -> Void
     let open: (String) -> Void
     let go: (String) -> Void
     let close: () -> Void
@@ -1560,6 +1758,8 @@ struct ChatListView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section { QuickAskBox(ask: ask).listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 12)) }
+                Section {
                 if pane.links.isEmpty {
                     Text("No chats yet. Tap the robot on a page to start one.").font(.footnote).foregroundStyle(.secondary)
                 }
@@ -1584,6 +1784,7 @@ struct ChatListView: View {
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Go to \(l.site)")
                     }
+                }
                 }
             }
             .navigationTitle("Chats")

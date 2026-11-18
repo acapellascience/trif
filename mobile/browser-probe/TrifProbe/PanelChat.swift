@@ -71,6 +71,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     /// What a run's state means for the chat button (the pane's activity).
     var onActivity: (ChatActivity) -> Void = { _ in }
     var isShown: () -> Bool = { false }
+    /// A quick ask's run done (ClaudePane.quickMoreDone): its site, its mod files, whether it finished, the path.
+    var quickDone: (String, [String], Bool, String) async -> Int = { _, _, _, _ in 0 }
+    /// A quick ask was just put in the panel's own message box and sent: the next run started is its.
+    private var quickPending = false
 
     private static let storeFile: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -352,6 +356,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         var tried = false
         /// My computer's run id (the computer's), once started; the done event held until its result came.
         var remoteId: String?
+        /// Started by a quick ask (quickSend): its end goes to quickDone.
+        var quick = false
         var heldDone: [String: Any]?
         var sessionIdSeen: String?
         init(site: String, url: String, prompt: String, engine: PanelEngine, model: String, effort: String?, sessionId: String, isNew: Bool, said: [[String: String]], tab: WKWebView?) {
@@ -372,6 +378,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             // (the conversation is the computer's: its session id comes back in the run's events, and goes with the next run)
             let run = Run(site: d["site"] as? String ?? "", url: d["url"] as? String ?? "", prompt: d["prompt"] as? String ?? "", engine: e, model: "",
                           effort: nil, sessionId: d["sessionId"] as? String ?? "", isNew: false, said: [], tab: browser.webView)
+            run.quick = quickPending; quickPending = false
             runs[run.id] = run
             return (["runId": run.id], nil)
         }
@@ -397,6 +404,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         }
         let run = Run(site: d["site"] as? String ?? "", url: d["url"] as? String ?? "", prompt: d["prompt"] as? String ?? "", engine: e, model: model,
                       effort: (d["effort"] as? String).flatMap { $0.isEmpty ? nil : $0 }, sessionId: sid, isNew: isNew, said: said, tab: browser.webView)
+        run.quick = quickPending; quickPending = false
         runs[run.id] = run
         return (["runId": run.id], nil)
     }
@@ -463,11 +471,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             }
             await self.undoTry(run)
             // (the mods the replies wrote: to Add this mod?, with its checks and holds)
-            var offered = 0
-            if let browser = self.browser {
-                let mods = texts.flatMap(PanelChat.modFiles)
-                if !mods.isEmpty { offered = await browser.offerFromChat(mods, from: run.site, path: "panel").count }
-            }
+            let offered = await self.offerRun(run, texts.flatMap(PanelChat.modFiles), ok: ok, path: "panel")
             self.emit(run, ["kind": "done", "ok": ok, "sessionId": run.sessionId, "contextTokens": lastTokens])
             self.runs[run.id] = nil
             self.onActivity(offered > 0 || self.isShown() ? .idle : .replied)
@@ -476,6 +480,51 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     }
 
     static let maxSteps = 15
+
+    /// A run's mods: to Add this mod? (with its checks and holds), or, a quick ask's, to quickDone.
+    private func offerRun(_ run: Run, _ codes: [String], ok: Bool, path: String) async -> Int {
+        if run.quick { run.quick = false; return await quickDone(run.site, codes, ok, path) }
+        guard let browser, !codes.isEmpty else { return 0 }
+        return await browser.offerFromChat(codes, from: run.site, path: path).count
+    }
+
+    // MARK: quick ask (QuickAsk.swift): the request into the panel's own message box, and sent. The panel is
+    // TRIF's own page, so TRIF sends there (never in Claude's or ChatGPT's).
+
+    /// "sent", or why not: busy (a run going on this site already), nosite, cannot (no engine ready), loading.
+    func quickSend(_ text: String) async -> String {
+        start()
+        pushTab()
+        let url = browser?.webView.url?.absoluteString ?? ""
+        let js = """
+        const c = document.querySelector('#composer'), i = document.querySelector('#input'), stop = document.querySelector('#stop'), site = document.querySelector('#site');
+        if (!c || !i || !site) return 'loading';
+        if (site.title !== url) return 'loading';
+        if (stop && !stop.hidden) return 'busy';
+        if (i.disabled) return 'nosite';
+        if (!c.dataset.canSend) return 'cannot';
+        i.value = t;
+        i.dispatchEvent(new Event('input', { bubbles: true }));
+        c.requestSubmit();
+        return 'sent';
+        """
+        var said = "loading"
+        for _ in 0..<60 {
+            quickPending = true
+            said = (try? await webView.callAsyncJavaScript(js, arguments: ["t": text, "url": url], in: nil, contentWorld: .page) as? String) ?? "loading"
+            if said == "sent" {
+                // (the run started (startRun took the mark), or the panel refused it (no key, say: its chat says why))
+                for _ in 0..<40 where quickPending { try? await Task.sleep(nanoseconds: 150_000_000) }
+                if quickPending { quickPending = false; said = "refused" }
+                break
+            }
+            quickPending = false
+            if said == "busy" { break }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        report.log("panel", "quick ask: \(said)")
+        return said
+    }
 
     // MARK: My computer (the phone link)
 
@@ -596,8 +645,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             let codes = mods.compactMap { $0["code"] as? String }
             let big = mods.filter { $0["tooBig"] as? Bool == true }.compactMap { $0["name"] as? String ?? $0["id"] as? String }
             if !big.isEmpty { self.emit(run, ["kind": "error", "message": "Too big to bring over: \(big.joined(separator: ", ")). It stays in TRIF on your computer."]) }
-            var offered = 0
-            if let browser = self.browser, !codes.isEmpty { offered = await browser.offerFromChat(codes, from: run.site, path: "computer").count }
+            let offered = await self.offerRun(run, codes, ok: true, path: "computer")
             var done = run.heldDone ?? ["kind": "done", "ok": true]
             if done["sessionId"] == nil, let s = run.sessionIdSeen { done["sessionId"] = s }
             self.report.log("panel", "My computer: the run ended, \(mods.count) mod(s) from the computer, \(offered) offered")
@@ -607,6 +655,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     private func endComputer(_ run: Run, _ done: [String: Any], offered: Int = 0) {
         guard runs[run.id] != nil else { return }
+        // (a quick ask's run that never got to its result: not started, lost)
+        if run.quick { run.quick = false; Task { _ = await quickDone(run.site, [], false, "computer") } }
         emit(run, done)
         runs[run.id] = nil
         if let rid = run.remoteId { link.unfollow(rid) }

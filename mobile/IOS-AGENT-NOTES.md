@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (363 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (382 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -49,6 +49,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   tabbadges (each tab's robot badge), sheet "chatlist" (the robot's long-press list), tabshots (each tab's picture
   file, size, sensitive or not, drawn; the folder's files and orphans; pictures read from disk since launch),
   privatepage (["https://…"]: pictured or why not),
+  quick ("words": a quick ask as the box sends it), quickstate, quickundo, quickopen (the pill tapped), quickcancel
+  (the strip's ✕), quickexpand; speech (permissions, on-device or not), speechfile ("/path.wav": the recognizer on a
+  recorded file, SFSpeechURLRecognitionRequest on device), micpress / micrelease; tabsfocus (the card the tab list last
+  opened at, and the shown tab),
   playing (each tab: WebKit's state,
   the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
@@ -57,7 +61,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Stand-in chat (where Claude/ChatGPT can't be signed in): `node mobile/serve.js` (8377), launch with
   `-chathome http://localhost:8377/chat.html` (`?greet`: an empty-state heading and an Upgrade plan button, for TRIF's
   greeting and upsell hiding). A saved project (`chatProject.Claude` in the app's prefs plist) sends the chat to
-  /project/… instead and drops the query: delete it with PlistBuddy (`Delete :chatProject.Claude`) while the app is stopped. Message words steer it: "two", "no mod", "file", "file and block",
+  /project/… instead and drops the query: delete it with PlistBuddy (`Delete :chatProject.Claude`) while the app is stopped. Message words steer it: "two", "no mod", "file", "file and block", "powers" (a boxed
+  mod with the click power: its card, never added by itself), "called <Name>" (the style mod's name: a new mod, not
+  an update of Calmer feed), "ask <words>" (those words in its CSS as a comment: code of its own, so ChatOffers
+  doesn't skip it as offered before; "powers" puts the message's words in a comment too),
   "viewer", "wait N", "no match" (the mod has no @match line, as desktop's folder mods: FeedBook). The mod's
   @match is the first http(s) origin in the attached files + the text: TRIF's own fill names the tab's page first, so a
   URL typed in the message doesn't win (use the `offerchat` step for a mod matching another site). Query flags: `?history` (a long conversation's older messages rendering late: an older
@@ -94,8 +101,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   browser-checks.json, mods.js, panel-kit.js, mod-guide.txt, page-bridge.js, RobotShape.swift, and the side panel folder
   `shared/gen/panel`. Never edit those by hand.
 - Browser tests (headless Chrome, muted): `TRIF_BROWSER_TESTS=1 TRIF_E2E_CHROME="/Users/tim/WebMods/tests/e2e/.browsers/chrome/mac_arm-156.0.8078.80/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" node --test mobile/test/chat.test.js`
-  (9 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
-  code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply). One browser suite at a time; small payloads.
+  (10 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
+  code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply; the quick ask: never a
+  scripted send, the person's Send told once, their message appearing as the send, takeText). One browser suite at a time; small payloads.
 - What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
   mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
@@ -106,7 +114,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while something plays.
 - Dev launch flags: `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-exitbelow` (the exit button's old
+  `-nobarshift`, `-stripheight <pt>` (the quick ask's strip, 270), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`, `-linkhost 127.0.0.1:<port>` (the phone link pairs there,
   not over Bonjour: a helper's store.js + server.js on loopback in a temp HOME; `simctl openurl` the code's text).
@@ -132,6 +140,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its site, else a new tab at the page it was on (else https://site/); then the banner's held mods come up.
   `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badge(for: tab)` (TabCard). The
   robot's long press (simultaneousGesture + `robotHeld`, so the release isn't also a tap) → ChatListView.
+- QuickAsk.swift (Tim, 11-18): `QuickAsk` (request, service, site, key, state waitingSend/working/done/replied/card/
+  undone/failed, `applied` for Undo; `lookOnly`), `SpeechInput.shared` (hold-to-talk: SFSpeechRecognizer,
+  requiresOnDeviceRecognition, AVAudioEngine tap; the session .record/.measurement while held, then back to
+  .playback/.moviePlayback), `QuickAskBox` (the box at the top of ChatListView), `QuickPill` (above the toolbar, in
+  ContentView.notes), `QuickStripHeader`, `QuickStrip.height`. ClaudePane: `quick`, `strip`, `quickAsk` (Claude/
+  ChatGPT: showFor + prepare/fillContext + the request as text + chat.js `armSend`; More: `quickMore` →
+  PanelChat.quickSend), `quickDeliver` (offerFromChat(hold: true), look-only → Browser.addMod(quiet:), the rest
+  offerHeld or the done banner), `quickUndo` (ModStore.undoAdd: the version before, or removed; not to Recently
+  deleted), `cancelStrip` (chat.js `takeText`), `expandStrip`, `quickOpen`. handleDone's quick branch; "sent" moves
+  waitingSend → working. ContentView: `ChatLayer` (the chat laid out full size; in strip mode clipped to its foot,
+  sliding: `stripLayer`/`stripUp`), `ChatWebView.stripTop` (touches above the strip go to the tab). PanelChat:
+  `quickSend` (TRIF's own panel: #input, #composer.requestSubmit(); waits for #site.title == the tab's address;
+  `quickPending` marks the next run; refused if startRun never takes it), `Run.quick`, `offerRun` → `quickDone`.
 - ChatOffers.swift (no UI; built for the Mac too): `ChatOfferMemory` (every code a chat offered, by a hash of the
   normalised code, with added/declined/dismissed; UserDefaults `chatOffers`, last 500, global), `ChatOfferJudge.skip`
   (installed as it is, queued, offered before, an installed mod's History, Recently deleted). Diagnostics kind
@@ -382,9 +403,45 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (tertiarySystemFill; an empty tab a globe); under every card its title, then its host (when it has a title).
   The app keeps no favicons (WebClip fetches them only for Home Screen icons), so no favicon card. Not touched:
   Mods, the chat pane, the start page, links/new tabs (default-browser rules unaffected).
+- Quick ask (Tim, 11-18, "yes build it"; words drafts): the robot's long press opens the chats' list with the box
+  "What should change?" and a hold-to-talk microphone at its top (a tap on the robot unchanged). Typed (the
+  keyboard's own dictation works in it) or said (on-device Speech only: where `supportsOnDeviceRecognition` is
+  false the microphone says so and records nothing; refused permissions: the box still types). The request goes to
+  the tab's site's chat (its conversation, else a new one) with the same page details as the robot's tap, plus the
+  request as text. HARD RULE (Claude's and ChatGPT's terms): in their panes TRIF fills the box but NEVER sends: no
+  click(), no synthesized Enter, no submit, no TRIF button that triggers theirs. A strip of their real page (its foot:
+  the box and the site's own Send) slides up over the tab; the person taps Send; their message appearing (chat.js
+  armSend, plus the click/Return listeners) is the send; the strip goes, the pill says "Working: …". More's engines
+  (API keys, My computer, On this iPhone) have no site page: TRIF's own panel sends at once. Done: look-only mods
+  (style tier, no powers, nothing held, no warnings, only the chat's site: `QuickAsk.lookOnly`) are added at once,
+  the pill "Done · Undo" (20 s); anything else gets Add this mod? / the approval card (on the chat's tab now, else
+  the done banner holds it). One offer per mod (offerFromChat's judge). Follow-ups continue the same chat. The pill
+  closed while working: the reply is offered as ever (nothing added by itself). A tap on the pill opens the chat.
+- The tab list opens at the right card (Tim, 11-18: "it should snap to the tab that I just left"): the shown tab;
+  from the chat (or the quick ask's strip), the chat's own tab (`ClaudePane.chatTabShown`: its link's tab while open
+  and on its site, else the shown tab; More follows the shown tab); from Mods, the shown tab (Mods always shows the
+  shown tab's site). That card is centred (`scrollPosition(id:)` from the first frame, plus `scrollTo` without
+  animation on appear) and drawn as the current one (green), even when it isn't the tab shown under the list.
+  Recorded frame by frame (11-18): no scroll from the top, the card pictures fade in where they are.
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
 
 ## Open and unverified
+
+- Quick ask (11-18): Simulator only, stand-in chat (shots 364-377, 381-382) and More's Simulator stand-in model
+  (`/model stand-in` typed in More's box picks it; shot 372). Checked: a typed ask fills the stand-in's box and
+  nothing is sent (the stand-in counts every send and whether a person made it: `window.__standinSends`,
+  `__standinUntrusted()` = 0 throughout); a real tap on its Send → working → a style mod added, Undo removes it
+  (a new mod) or puts the version before back (an update); a boxed mod with click → Add this mod?, or the done banner
+  on another tab; More sends directly, Done · Undo; cancel and a second ask take the earlier words out; the speech
+  recognizer on a recorded file (`say -v Samantha`, the default voice made silence) heard it on device (en_CA); the
+  microphone revoked → the refused note, typing still works. Not tried: live hold-to-talk with the microphone (the
+  Simulator would record the Mac's room: not done), the real claude.ai / chatgpt.com composers in the strip (their
+  box is taller with tiles; `-stripheight` to tune; claude.ai's new-chat page may centre its box, then the strip
+  shows the page's middle-bottom), the keyboard coming up in the strip (a tap into their box), a phone, iPad, the
+  ChatGPT pane, My computer and API engines (same panel path, untested), a quick ask on a chat already writing a
+  reply (its Send is the stop button: the ask waits in the box; chat.js's maybeSent skips while a watch runs).
+- Tab list snap (11-18): Simulator only, 21 tabs (shots 378-380): from a page (tab 15 centred), from a chat on
+  localhost over a 127.0.0.1 tab (its tab 17 centred and green; the shown tab isn't marked then), from Mods.
 
 - Tab pictures (11-18): Simulator only (shots 356-363, local stand-in pages; 20 tabs: the app's footprint ~51 MB
   with the list open, 4 pictures read for the visible cards). Not tried: the mid-scroll wait (needs real touches),
@@ -468,6 +525,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
 ## Gotchas
+
+- SwiftUI's `.clipped()` hides but doesn't stop touches (11-18, the hit step): the chat's web view, clipped to the
+  strip, still took touches over the whole tab, and its top bar's segmented switch (a UIKit control) took them over
+  the address bar. Hence ChatWebView's hitTest cut-off and `.allowsHitTesting(!pane.strip)` on the chat's top bar.
+  The hit step returns the page's web view for SwiftUI areas (the toolbar, the strip's header): SwiftUI's own
+  gestures still get those taps.
+- Terminating the app (a relaunch) with mods running trips safe mode on that site ("The app quit while mods were
+  running…"); going to Settings first didn't avoid it.
+- iOS's Speech Recognition question shows its own fixed "Speech data from this app will be sent to Apple…" above
+  TRIF's words, even though TRIF asks for on-device recognition only. `simctl privacy` has no speech service: tap Allow.
 
 - Desktop mode (WebKit, Simulator 26.3, 11-18): WebKit's desktop user agent is "Mozilla/5.0 (Macintosh; …) … (KHTML,
   like Gecko) " + the configuration's applicationNameForUserAgent, i.e. ours, "Version/26.0 Mobile/15E148

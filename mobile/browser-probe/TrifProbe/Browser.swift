@@ -439,7 +439,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// A mod the user added (from the chat or the clipboard: its Add it), or imported. One that needs an OK waits
     /// for it, with TRIF's approval card in the Mods tab, and doesn't run until then.
-    func addMod(_ m: InstalledMod, source: String = "chat") {
+    /// `quiet`: no note (a quick ask's look-only mod: its pill says Done · Undo).
+    func addMod(_ m: InstalledMod, source: String = "chat", quiet: Bool = false) {
         Diagnostics.shared.mark("adding \(m.id) (\(source))")
         chatOffers.note(m.code, .added)
         hideChat += 1
@@ -453,7 +454,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             holdFromChat = source != "import"
             // (after the Add this mod? sheet has gone: one sheet can't open while another is closing)
             Task { @MainActor in try? await Task.sleep(nanoseconds: 700_000_000); self.wantsMods = true }
-        } else if source != "import" {
+        } else if source != "import" && !quiet {
             status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
             // (added away from the site its chat was for (the done banner's Add, Tim 11-18): the note offers the way there)
             if let from = m.cameFrom, !from.isEmpty, from != site, chatTabFor(from) { statusGo = (status, from) }

@@ -463,3 +463,51 @@ test('the chat script: an old conversation (Tim, 11-18: "opening an old chat get
     server.close();
   }
 });
+
+test('the chat script: a quick ask (Tim, 11-18): the request goes in the box and TRIF never sends (no scripted click, Enter or submit); the person\'s own Send is told once; their message appearing counts as the send; the request taken out again', { skip: browserTestsSkip(), timeout: 90000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    await page.goto(`${base}/chat.html`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    const box = () => page.evaluate(() => document.querySelector('.ProseMirror').textContent);
+
+    // Filled and armed: nothing sent, by anyone, for a good while.
+    assert.match(await page.evaluate(() => globalThis.__trifChat.fill('make the headings thinner', null, null, null, null)), /text/);
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.armSend()), 'armed');
+    await page.waitForTimeout(1500);
+    assert.equal(await page.evaluate(() => window.__standinSends.length), 0);
+    assert.equal((await posts(page)).filter((m) => m.type === 'sent').length, 0);
+
+    // A new ask over it: the old words out, the new in; still nothing sent.
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.takeText('make the headings thinner')), 'taken out');
+    assert.equal(await box(), '');
+    await page.evaluate(() => globalThis.__trifChat.fill('hide the cookie box', null, null, null, null));
+    await page.evaluate(() => globalThis.__trifChat.armSend());
+
+    // The person's Send (a real click): told once, not again by the message appearing.
+    await page.click('button[aria-label="Send message"]');
+    const [sent] = await waitPost(page, 'sent');
+    assert.equal(sent.how, 'button');
+    await waitPost(page, 'done');
+    await page.waitForTimeout(600);
+    assert.equal((await posts(page)).filter((m) => m.type === 'sent').length, 1);
+    assert.deepEqual(await page.evaluate(() => window.__standinSends.map((s) => `${s.how} ${s.trusted}`)), ['button true']);
+
+    // A send TRIF's listeners didn't see (the site's own way): the person's message appearing is the send.
+    await page.evaluate(() => globalThis.__trifChat.fill('one more', null, null, null, null));
+    await page.evaluate(() => globalThis.__trifChat.armSend());
+    await page.evaluate(() => { const u = document.createElement('div'); u.setAttribute('data-testid', 'user-message'); u.textContent = 'one more'; document.getElementById('log').append(u); });
+    const two = await waitPost(page, 'sent', 2);
+    assert.equal(two[1].how, 'message seen');
+    assert.equal(await page.evaluate(() => window.__standinUntrusted()), 0);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

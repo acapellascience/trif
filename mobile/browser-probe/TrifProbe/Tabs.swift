@@ -345,22 +345,48 @@ struct TabsView: View {
     @EnvironmentObject var browser: Browser
     /// (the tabs' chats: each card's robot badge, Tim 11-18)
     @ObservedObject var pane: ClaudePane
+    /// The tab it opens at, marked as the current one (Tim, 11-18: "it should snap to the tab that I just left"):
+    /// the shown tab, or, from a chat, the chat's own tab (ContentView.tabsFocus). nil: the shown tab.
+    var focus: UUID? = nil
     /// Closes it (it lies over the page, the toolbar under it).
     var close: () -> Void = {}
     private func dismiss() { close() }
     private let columns = [GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top), GridItem(.flexible(minimum: 60), spacing: 14, alignment: .top)]
+    /// (where the list is scrolled to: the focused card from the first frame, no scroll from the top)
+    @State private var at: UUID?
+    private var marked: UUID { focus.flatMap { id in browser.tabs.contains { $0.id == id } ? id : nil } ?? browser.current.id }
+
+    init(pane: ClaudePane, focus: UUID? = nil, close: @escaping () -> Void = {}) {
+        self.pane = pane
+        self.focus = focus
+        self.close = close
+        _at = State(initialValue: focus)
+    }
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(browser.tabs) { tab in
-                        TabCard(tab: tab, current: tab.id == browser.current.id, chat: pane.badge(for: tab.id),
+                        TabCard(tab: tab, current: tab.id == marked, chat: pane.badge(for: tab.id),
                                 select: { browser.select(tab); dismiss() },
                                 close: { withAnimation { browser.close(tab) } })
+                        .id(tab.id)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(14)
+            }
+            .scrollPosition(id: $at, anchor: .center)
+            .onAppear {
+                // (no animation: the list opens already there)
+                let id = marked
+                if at != id { at = id }
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { proxy.scrollTo(id, anchor: .center) }
+                TabsView.lastFocus = id
+            }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle(browser.tabs.count == 1 ? "1 tab" : "\(browser.tabs.count) tabs")
@@ -374,6 +400,11 @@ struct TabsView: View {
             }
         }
     }
+}
+
+extension TabsView {
+    /// (development: the card the list last opened at, for the step {"tabsfocus": 1})
+    static var lastFocus: UUID?
 }
 
 struct TabCard: View {

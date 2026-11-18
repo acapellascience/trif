@@ -432,6 +432,17 @@ final class ModStore: ObservableObject {
 
     static let trashDays = 30.0
 
+    /// A quick ask's Undo: the mod as it was before it was added (`before`), or gone if it was new; not to Recently
+    /// deleted (it never was, as far as the person goes).
+    func undoAdd(_ id: String, before: InstalledMod?) {
+        if let before {
+            if let i = mods.firstIndex(where: { $0.id == id }) { mods[i] = before } else { mods.append(before) }
+        } else {
+            mods.removeAll { $0.id == id }
+        }
+        save()
+    }
+
     /// Deletes a mod: to Recently deleted (30 days). `by`: you (the Mods tab: Undo too) or computer (a sync).
     func remove(_ id: String, by: String = "you") {
         guard let i = mods.firstIndex(where: { $0.id == id }) else { return }

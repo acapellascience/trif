@@ -222,8 +222,17 @@
     if (d.text) ed.textContent = d.text;
     refresh();
   }, 800);
-  ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
-  row.addEventListener('click', (e) => { if (e.target.closest('button[aria-label="Send message"]')) go(); });
+  // (every send, and whether a person did it: TRIF must never send here (the quick ask's hard rule). A click or an
+  // Enter a script made (isTrusted false), a submit, or form.submit/requestSubmit called: counted as `untrusted`)
+  const sends = window.__standinSends = [];
+  const noteSend = (how, e) => sends.push({ how, trusted: !!(e && e.isTrusted), at: Date.now() });
+  window.__standinUntrusted = () => sends.filter((x) => !x.trusted).length;
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('button[aria-label="Send message"]') && !e.isTrusted) noteSend('scripted click', e); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isTrusted) noteSend('scripted Enter', e); }, true);
+  document.addEventListener('submit', (e) => noteSend('submit', e), true);
+  for (const name of ['submit', 'requestSubmit']) { const was = HTMLFormElement.prototype[name]; HTMLFormElement.prototype[name] = function (...a) { noteSend(`form.${name}()`, null); return was.apply(this, a); }; }
+  ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (e.isTrusted) noteSend('Enter', e); go(); } });
+  row.addEventListener('click', (e) => { if (e.target.closest('button[aria-label="Send message"]')) { if (e.isTrusted) noteSend('button', e); go(); } });
 
   // (origin null: no @match line, as desktop's mods in a site's folder (FeedBook): the site comes from the chat's)
   const modFor = (origin, name, body) => `// ==WebMod==
@@ -257,14 +266,27 @@ ${JSON.stringify(body, null, 2)}`;
     if (/no mod/i.test(text)) parts = [['p', 'Which part of the page do you mean? Point TRIF at it and send me that.']];
     // ("file": the mod as an attached file, a card with a download link, as Claude's file cards, for a tap; "file
     // and block": the same mod in a code block too)
+    // ("powers": a boxed mod asking for a power, so Add this mod? and its OK come up, never added by itself)
+    else if (/powers/i.test(text)) parts = [['p', 'This one needs to click for you, so TRIF will ask first.'], ['pre', `// ==WebMod==
+// @name        Auto expand
+// @description Opens collapsed posts (from the stand-in chat)${origin ? `\n// @match       ${origin}/*` : ''}
+// @boxed
+// @powers      click
+// @click       the show more buttons: button.show-more
+// ==/WebMod==
+trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).replace(/[^\w ]/g, '')}`]];
     else if (/viewer/i.test(text)) parts = [['p', 'Here it is as a file:'], ['card', modFor(origin, 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }', hide: ['#promo-banner'] }), 'calmer-feed.js']];
     else if (/file/i.test(text)) {
       parts = [['p', 'The mod is big, so here it is as a file:'], ['a', '/stand-in-file/calmer-feed.js', 'calmer-feed.js']];
       if (/block/i.test(text)) parts.push(['pre', modFor('http://localhost', 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }' })]);
     }
     else {
+      // ("called <Name>": the mod's name (a new mod, not an update of Calmer feed); "ask <words>": those words in its
+      // CSS, so each quick ask's mod is code of its own)
+      const called = (text.match(/called (\w+)/i) || [])[1];
+      const asked = (text.match(/ask ([\w ]{1,40})/i) || [])[1];
       parts = [['p', 'Here is a style mod that does that. It only changes how the page looks.'],
-        ['pre', modFor(origin, 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }', hide: ['#promo-banner', '.feed-item.promoted'] })]];
+        ['pre', modFor(origin, called || 'Calmer feed', { css: `.feed-item h2 { color: #1f8a5b }${asked ? ` /* ${asked.trim()} */` : ''}`, hide: ['#promo-banner', '.feed-item.promoted'] })]];
       if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', { hide: ['.cookie-consent'] })]);
       parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
     }

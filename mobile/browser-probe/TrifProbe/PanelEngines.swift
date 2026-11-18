@@ -433,8 +433,12 @@ final class StandInConversation: PanelConversation {
     var takesImages: Bool { false }
     var usesTools: Bool { false }
     private var page = ""
+    private var asked = ""
     func addUser(_ text: String, image: Data?) {
-        if let m = text.range(of: "https?://[^\\s/]+", options: .regularExpression) { page = String(text[m]) }
+        // (a match pattern has no port: the origin without one, as the chat stand-in's)
+        if let m = text.range(of: "https?://[^\\s/]+", options: .regularExpression) { page = String(text[m]).replacingOccurrences(of: ":[0-9]+$", with: "", options: .regularExpression) }
+        // (the request's last line, in the mod's CSS as a comment: each ask's mod is code of its own)
+        asked = String((text.split(separator: "\n").last ?? "").filter { $0.isLetter || $0.isNumber || $0 == " " }.prefix(40))
     }
     func step(system: String, tools: [PanelTool], model: String, effort: String?) async throws -> PanelStep {
         try await Task.sleep(nanoseconds: 700_000_000)
@@ -452,7 +456,7 @@ final class StandInConversation: PanelConversation {
         // @style
         // ==/WebMod==
         {
-          "css": "a { text-decoration: underline !important }"
+          "css": "a { text-decoration: underline !important }\(asked.isEmpty ? "" : " /* \(asked) */")"
         }
         ```
         """

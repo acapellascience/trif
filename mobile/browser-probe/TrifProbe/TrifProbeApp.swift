@@ -219,6 +219,22 @@ extension Model {
         }
         if step["phonedrop"] != nil, let l = Model.pane?.panel.link { l.drop(); out = "phone link: \(l.state), following \(l.following.count)" }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }
+        // (quick ask, QuickAsk.swift: {"quick": "words"} as the box sends them; {"quickstate": 1}; {"quickundo": 1},
+        // {"quickopen": 1} (the pill tapped), {"quickcancel": 1} (the strip's ✕), {"quickexpand": 1})
+        if let pane = Model.pane {
+            if let t = step["quick"] as? String { pane.quickAsk(t) }
+            if step["quickundo"] != nil { pane.quickUndo() }
+            if step["quickopen"] != nil { pane.quickOpen() }
+            if step["quickcancel"] != nil { pane.cancelStrip() }
+            if step["quickexpand"] != nil { pane.expandStrip() }
+            if ["quick", "quickstate", "quickundo", "quickopen", "quickcancel", "quickexpand"].contains(where: { step[$0] != nil }) { out = pane.quickDescribe }
+        }
+        // (talking: {"speech": 1} the permissions and the recognizer; {"speechfile": "/path.wav"} the recognizer on a
+        // recorded file; {"micpress": 1} / {"micrelease": 1} the box's microphone pressed and let go)
+        if step["speech"] != nil { SpeechInput.shared.check(); out = SpeechInput.shared.describe }
+        if let f = step["speechfile"] as? String { out = await SpeechInput.shared.recognize(file: URL(fileURLWithPath: f)) }
+        if step["micpress"] != nil { SpeechInput.shared.press { words in Model.pane?.quickAsk(words) }; try? await Task.sleep(nanoseconds: 300_000_000); out = SpeechInput.shared.describe }
+        if step["micrelease"] != nil { SpeechInput.shared.release(); out = SpeechInput.shared.describe }
         if step["view"] != nil { out = "on \(browser.current?.host.nonEmpty ?? "-"), full screen \(browser.fullScreen), covers \(ContentView.coversNow), \(browser.tabs.count) tabs" }
         if let u = step["iconcheck"] as? String, let site = URL(string: u) { out = await Model.iconCheck(browser: browser, site: site) }
         // ({"iconqueue": {…the same as iconprofile}}: the shown page's icon put on the list of icons waiting;
@@ -245,6 +261,11 @@ extension Model {
         // whether each would be pictured, Tabs.swift PrivatePages)
         if step["tabshots"] != nil { out = TabShots.shared.describe(browser.tabs, current: browser.current) }
         if let us = step["privatepage"] as? [String] { out = us.map { u in "\(u): \(URL(string: u).flatMap(PrivatePages.why) ?? "pictured")" }.joined(separator: "\n") + "\n\(PrivatePages.sensitive.count) sensitive patterns" }
+        // ({"tabsfocus": 1}: the card the tab list last opened at: its index and host, and the shown tab's)
+        if step["tabsfocus"] != nil {
+            let i = browser.tabs.firstIndex { $0.id == TabsView.lastFocus }
+            out = "list opened at \(i.map(String.init) ?? "-") \(i.map { browser.tabs[$0].host } ?? ""); shown tab \(browser.tabs.firstIndex { $0 === browser.current } ?? -1) \(browser.host)"
+        }
         if step["tabhosts"] != nil { out = browser.tabs.map { ($0 === browser.current ? "*" : "") + ($0.host.isEmpty ? "-" : $0.host) }.joined(separator: " ") }
         if let p = step["import"] as? String { browser.importFiles(p.split(separator: ",").map { URL(fileURLWithPath: String($0)) }) }
         if let t = step["offer"] as? String { browser.offer(text: t) }
@@ -255,7 +276,7 @@ extension Model {
             let got = await browser.offerFromChat(texts, from: step["site"] as? String ?? "", path: step["path"] as? String ?? "auto")
             out = "offered: \(got.map(\.id).joined(separator: ", ").nonEmpty ?? "none")"
         }
-        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count)" } ?? "none"), queued: \(browser.offerQueue.count)" }
+        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count) \($0.tier) sites \($0.sites) powers \($0.powers) held \($0.held) warnings \($0.warnings) everywhere \($0.everywhere)" } ?? "none"), queued: \(browser.offerQueue.count)" }
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }
@@ -323,6 +344,11 @@ struct ContentView: View {
     @State private var showHistory = false
     /// The robot's long press: the chats' list (ChatListView).
     @State private var showChatList = false
+    /// The quick ask's strip is drawn (a moment longer than it's up, so it can slide away).
+    @State private var stripLayer = false
+    @State private var stripUp = false
+    /// The card the tab list opens at (nil: the shown tab's).
+    @State private var tabsFocus: UUID?
     /// (the robot's long press just opened the list: the tap that ends it doesn't also open the chat)
     @State private var robotHeld = false
     @State private var showMods = false
@@ -386,18 +412,22 @@ struct ContentView: View {
             ZStack {
                 // (the chat leaves the toolbar showing under it, so the chat button is where it was, to go back: Tim,
                 // 11-15, "sometimes you hit it by accident and you just wanna go back")
+                // (a quick ask's strip (Tim, 11-18): the same chat, laid out as ever, only its foot showing over the tab:
+                // its message box, filled, and the site's own Send. Nothing in it is resized or moved)
                 ChatScreen(pane: pane)
-                    .modifier(ToolbarRoom(insets: bars.insets))
-                    .zIndex(pane.shown ? 1 : 0)
-                    .allowsHitTesting(pane.shown)
-                    .accessibilityHidden(!pane.shown)
+                    .modifier(ChatLayer(insets: bars.insets, size: geo.size, strip: stripLayer && !pane.shown, up: stripUp,
+                                        header: QuickStripHeader(service: pane.quick?.service ?? pane.service.rawValue,
+                                                                 expand: { pane.expandStrip() }, cancel: { withAnimation { pane.cancelStrip() } })))
+                    .zIndex(pane.shown || stripLayer ? 1 : 0)
+                    .allowsHitTesting(pane.shown || pane.strip)
+                    .accessibilityHidden(!pane.shown && !pane.strip)
                 column
                     .background(Color(.systemBackground))
-                    .zIndex(pane.shown ? 0 : 1)
+                    .zIndex(pane.shown || stripLayer ? 0 : 1)
                 // (what else covers the page lies over it the same way, the toolbar showing under it, so the toolbar's
                 // page button (and the others) can always take you back: Tim, 11-15)
                 if showTabs {
-                    TabsView(pane: pane, close: { showTabs = false }).environmentObject(browser)
+                    TabsView(pane: pane, focus: tabsFocus, close: { showTabs = false }).environmentObject(browser)
                         .modifier(ToolbarRoom(insets: bars.insets)).zIndex(3)
                 }
                 if showMods {
@@ -503,6 +533,15 @@ struct ContentView: View {
         // (the bars stay full while anything covers the page: its toolbar is how to get back)
         .onChange(of: covered) { _, now in bars.hold(now) }
         .onChange(of: pane.shown) { _, now in if now { pane.settleLayout() } }
+        .onChange(of: pane.strip) { _, now in
+            if now {
+                stripLayer = true
+                Task { @MainActor in try? await Task.sleep(nanoseconds: 30_000_000); if pane.strip { stripUp = true } }
+            } else {
+                stripUp = false
+                Task { @MainActor in try? await Task.sleep(nanoseconds: 380_000_000); if !pane.strip { stripLayer = false } }
+            }
+        }
         .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
         .onChange(of: browser.hideChat) { _, _ in pane.close() }
         // (the next of a reply's mods once the Mods tab, opened for one that waits for an OK, has closed)
@@ -517,7 +556,7 @@ struct ContentView: View {
         .onChange(of: browser.wantsSheet) { _, which in
             switch which {
             case "mods": showMods = true
-            case "tabs": browser.snapshot(); showTabs = true
+            case "tabs": tabsFocus = pane.chatTabShown; browser.snapshot(); showTabs = true
             case "history": showHistory = true
             case "chat": pane.open()
             case "import": importing = true
@@ -557,6 +596,7 @@ struct ContentView: View {
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
         .sheet(isPresented: $showChatList) {
             ChatListView(pane: pane,
+                         ask: { text in showChatList = false; closeCovers(); pane.quickAsk(text) },
                          open: { key in showChatList = false; closeCovers(); pane.openChat(key) },
                          go: { key in showChatList = false; closeCovers(); pane.goToSite(key) },
                          close: { showChatList = false })
@@ -570,6 +610,13 @@ struct ContentView: View {
     /// that matters stays where it already is (a mod's errors on its row and in diagnostics).
     private var notes: some View {
         VStack(spacing: 0) {
+            // (the quick ask's pill: Working, then Done · Undo or Replied; a tap opens the chat)
+            if let q = pane.quick, ![QuickAsk.State.waitingSend, .card].contains(q.state), !pane.shown {
+                QuickPill(quick: q, open: { closeCovers(); pane.quickOpen() }, undo: { pane.quickUndo() }, dismiss: { if pane.quick?.id == q.id { pane.quick = nil } })
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if !browser.status.isEmpty {
                 // (a mod from a chat added on another tab: the way to its site, Tim 11-18)
                 if let g = browser.statusGo, g.text == browser.status {
@@ -773,7 +820,7 @@ struct ContentView: View {
     private var coverNames: String {
         let all: [(Bool, String)] = [(pane.shown, "chat"), (showTabs, "tabs"), (showMods, "mods"), (showAddress, "address"),
                                      (showHistory, "history"), (showChecks, "checks"), (showReport, "report"), (addingIcon, "icon"), (showIconQueue, "iconqueue"),
-                                     (askingProject, "project"), (importing, "import"), (pickingFolder, "folder"), (showChatList, "chatlist")]
+                                     (askingProject, "project"), (importing, "import"), (pickingFolder, "folder"), (showChatList, "chatlist"), (pane.strip, "strip")]
         return all.filter(\.0).map(\.1).joined(separator: ",").nonEmpty ?? "none"
     }
     static var coversNow = "none"
@@ -893,7 +940,8 @@ struct ContentView: View {
     /// The tabs, their count in a rounded square.
     private var tabsButton: some View {
         // (tapped again with the tabs open and none picked: back to the page, as it was, as Safari's; Tim, 11-18)
-        Button { if showTabs { showTabs = false } else { onTab { browser.snapshot(); showTabs = true } } } label: {
+        // (opened at the tab just left; from a chat, the chat's own tab: Tim, 11-18)
+        Button { if showTabs { showTabs = false } else { let f = pane.chatTabShown; onTab { tabsFocus = f; browser.snapshot(); showTabs = true } } } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(lineWidth: 1.8).frame(width: 22, height: 22)
                 Text("\(browser.tabs.count)").font(.system(size: 12, weight: .semibold))
@@ -1748,6 +1796,36 @@ final class BarInsets: ObservableObject {
 }
 
 /// Room at the foot for the toolbar (the open chat leaves it showing).
+/// The chat's layer: over the page with the toolbar showing under it; or, for a quick ask, only its foot (`strip`),
+/// clipped to QuickStrip.height with the strip's header over it, sliding up (`up`) and away. The chat is laid out at
+/// its full size either way (its page never changes size for the strip).
+struct ChatLayer<Header: View>: ViewModifier {
+    @ObservedObject var insets: BarInsets
+    let size: CGSize
+    let strip: Bool
+    let up: Bool
+    let header: Header
+    func body(content: Content) -> some View {
+        let bottom = insets.keyboard ? 0 : insets.toolbar
+        let h = max(0, size.height - bottom)
+        content
+            .frame(width: size.width, height: h)
+            .frame(width: size.width, height: strip ? min(QuickStrip.height, h) : h, alignment: .bottom)
+            .clipped()
+            // (the strip's top, below its header: the chat's page takes no touches above it)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in ChatWebView.stripTop = strip ? y + QuickStrip.header : nil }
+            .onChange(of: strip) { _, on in if !on { ChatWebView.stripTop = nil } }
+            .overlay(alignment: .top) { if strip { header } }
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: strip ? 14 : 0, topTrailingRadius: strip ? 14 : 0, style: .continuous))
+            .shadow(color: .black.opacity(strip ? 0.22 : 0), radius: 10, y: -2)
+            .offset(y: strip && !up ? QuickStrip.height + 20 : 0)
+            .animation(.spring(duration: 0.35), value: up)
+            .frame(width: size.width, height: h, alignment: .bottom)
+            .clipped()
+            .padding(.bottom, bottom)
+    }
+}
+
 struct ToolbarRoom: ViewModifier {
     @ObservedObject var insets: BarInsets
     func body(content: Content) -> some View { content.padding(.bottom, insets.keyboard ? 0 : insets.toolbar) }

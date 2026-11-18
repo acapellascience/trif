@@ -511,7 +511,7 @@ class MainActivity : Activity() {
     }
 
     /** The Mods tab's sheet: its title (Mods on {site}), ⋯ (Import mod…, Export all mods for {site}, Pause all mods /
-     *  Resume mods) and Done over the page. */
+     *  Resume mods, Protected content on {site}) and Done over the page. */
     private fun makeModsSheet(): LinearLayout {
         modsTitle = TextView(this).apply { textSize = 17f; setTextColor(Color.BLACK); gravity = Gravity.CENTER; setSingleLine() }
         pauseButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
@@ -528,6 +528,13 @@ class MainActivity : Activity() {
                     // (a group of its own: Android draws no divider in a PopupMenu, iPhone's Divider)
                     menu.add(1, 0, 2, getString(if (paused) R.string.resume_mods else R.string.pause_all_mods)).setOnMenuItemClickListener {
                         work.execute { mods.setPaused(!paused) }; true
+                    }
+                    // (protected video, Chrome's per-site switch: on unless switched off; shown for a web page only)
+                    browser.shownOrigin?.let { origin ->
+                        menu.add(2, 0, 3, getString(R.string.protected_on_site, Uri.parse(origin).host)).apply {
+                            isCheckable = true; isChecked = browser.protectedOn(origin)
+                            setOnMenuItemClickListener { browser.setProtected(origin, !isChecked); true }
+                        }
                     }
                 }.show()
             }

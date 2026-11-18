@@ -84,15 +84,15 @@ FOUNDATION COMPLETE (round 15, 2026-11-18)
      restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed). Round 14: `test/all.sh`
      runs them all (11 tests, ~7 min, ALL PASS)
 
-## Done this round (round 15, 2026-11-18)
-- Item 2's last box: `PageAsks.kt` (pure: what's asked, the decision, kept answers, Android permissions; `PageDownloads`:
-  file name, wanted, data: text) + Browser's onPermissionRequest / geolocation / onShowFileChooser / onShowCustomView /
-  setDownloadListener, MainActivity as `Browser.Host` (requestPermissions, the picker's result, full screen).
-- Manifest: CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, FINE/COARSE location (all features required=false).
-- Tests: PageAsksTest (unit); test/pageasks.sh PASS (location Allow + Android's dialog + kept, camera Allow → "ok video",
-  camera+mic Don't Allow → NotAllowedError, picker = DocumentsUI, full screen on/off, mod download / blob file → Add this
-  mod?, style sheet let go); added to all.sh. `test/all.sh`: unit tests pass, all 12 emulator tests PASS.
-- Every foundation box is ticked and proven: **FOUNDATION COMPLETE**.
+## Done this round (round 16, 2026-11-18: one extra item, protected video)
+- Protected (DRM) video, as Chrome on Android (Tim, through the coordinator: "follow what Chrome does"): Chrome's
+  content setting is ALLOW by default on Android (content_settings_registry.cc), no question; per-site exceptions kept.
+  So `PageAsks.Kind.PROTECTED` (RESOURCE_PROTECTED_MEDIA_ID) is granted with no question unless the site is switched
+  off; the Mods tab's ⋯ "Protected content on {site}" (checked item) switches it, the tab reloads. Kept across launches
+  in filesDir/page-asks.txt (`PageAsks.Kept(file)`; camera/mic/location still last for the launch).
+- Tests: PageAsksTest (+2); test/protected.sh PASS (default allowed → "protected: ok" from Widevine on the emulator; off →
+  NotSupportedError after the reload; kept after a relaunch; 127.0.0.1 unaffected; on again → ok); pageasks.sh PASS.
+  asks.html has a Protected video button. Added to all.sh.
 
 ## Next step
 FOUNDATION COMPLETE. The UI layer waits for Tim's word that the iPhone app's UI has settled. Optional small items
@@ -100,11 +100,14 @@ meanwhile, only if a round is asked for: a folder picked as a folder (ACTION_OPE
 exports once Android keeps history.
 
 ## Notes for next round
+- Protected video (round 16): `Browser.shownOrigin` / `protectedOn` / `setProtected`; logcat "page ask: <site>
+  protected: allowed | off for this site | switched on|off". The emulator's Play image has Widevine: createMediaKeys
+  succeeds when granted. Switching off takes effect on the reload (no WebView-wide cache got in the way).
 - Page asks (round 15): `Browser.pageAsk` → `PageAsks.decide` (Refuse: tab not shown / TRIF behind / a question
   up; Known: answered this launch; Ask) → the AlertDialog → `fromAndroid` (asks Android only for what TRIF lacks;
   `Host.refusedForGood` → the "off for TRIF" toast). Logcat "page ask: <site> <kinds>: asked|Allow|Don't Allow|answered
-  earlier…", "<site>: camera granted[, Android refused …]". Protected media (DRM) and MIDI are refused, as WebView's
-  default: revisit if a streaming site needs DRM.
+  earlier…", "<site>: camera granted[, Android refused …]". MIDI is refused, as WebView's default; protected media:
+  round 16.
 - Downloads: "download: downloaded <name> (n characters): to Add this mod?" / "<name>: let go" / "couldn't download".
   http(s) fetched again with the WebView's cookies and user agent (HttpURLConnection, 2 MB cut); blob: read in TRIF's
   world (fetch works before the page revokes it); data: decoded. WebView passes no name for a blob's `download`
@@ -236,6 +239,11 @@ exports once Android keeps history.
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 16 (protected video, e.g. Netflix-style sites): now plays, as in Chrome on Android, which allows it by default
+  with no question. Your draft question isn't used, since Chrome doesn't ask. Instead, each site can be switched off
+  in the Mods tab's ⋯ menu: a checked item "Protected content on {site}" (Chrome's own label, a draft in STRINGS.md).
+  Switching it off is kept across launches. When the UI layer starts, a site-settings place (Chrome's is page info →
+  Site settings) may be a better home than the Mods tab's menu.
 - Round 15: pages can now use the camera, microphone and location, pick files for upload buttons, go full screen, and
   a downloaded .js mod goes to "Add this mod?" (as on iPhone). New words, drafts in STRINGS.md: TRIF's own question
   before Android's permission ask, after the one iPhone's WebKit shows: "Allow “{site}” to use your camera?" (…your

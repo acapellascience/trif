@@ -11,10 +11,44 @@ class PageAsksTest {
     private val cam = "android.webkit.resource.VIDEO_CAPTURE"
     private val mic = "android.webkit.resource.AUDIO_CAPTURE"
 
-    @Test fun kindsAreOnlyCameraAndMic() {
+    private val drm = "android.webkit.resource.PROTECTED_MEDIA_ID"
+
+    @Test fun kindsAreCameraMicAndProtected() {
         assertEquals(setOf(Kind.CAMERA, Kind.MIC), PageAsks.kinds(arrayOf(cam, mic)))
-        assertEquals(emptySet<Kind>(), PageAsks.kinds(arrayOf("android.webkit.resource.PROTECTED_MEDIA_ID", "android.webkit.resource.MIDI_SYSEX")))
+        assertEquals(setOf(Kind.PROTECTED), PageAsks.kinds(arrayOf(drm, "android.webkit.resource.MIDI_SYSEX")))
+        assertEquals(emptySet<Kind>(), PageAsks.kinds(arrayOf("android.webkit.resource.MIDI_SYSEX")))
         assertEquals(cam, PageAsks.resource(Kind.CAMERA))
+        assertEquals(drm, PageAsks.resource(Kind.PROTECTED))
+    }
+
+    @Test fun protectedVideoAsChrome() {
+        val p = setOf(Kind.PROTECTED)
+        // (Chrome on Android's default: allowed with no question, even behind; refused only when switched off)
+        assertEquals(Decision.Known(p), PageAsks.decide(p, true, false, emptyMap()))
+        assertEquals(Decision.Known(p), PageAsks.decide(p, false, true, emptyMap()))
+        assertEquals(Decision.Known(emptySet()), PageAsks.decide(p, true, false, mapOf(Kind.PROTECTED to false)))
+        assertEquals(Decision.Known(p), PageAsks.decide(p, true, false, mapOf(Kind.PROTECTED to true, Kind.CAMERA to false)))
+        assertEquals(Decision.Refuse, PageAsks.decide(p + Kind.CAMERA, true, false, emptyMap()))
+        // (no Android permission behind it)
+        assertEquals(emptyList<String>(), PageAsks.missing(p) { false })
+        assertEquals(p, PageAsks.allowed(p) { false })
+    }
+
+    @Test fun protectedAnswersLastAcrossLaunches() {
+        val f = java.io.File.createTempFile("page-asks", ".txt").apply { delete() }
+        try {
+            val k = PageAsks.Kept(f)
+            k.put("https://Stream.example/", setOf(Kind.PROTECTED), true)
+            k.put("https://other.example", setOf(Kind.PROTECTED), false)
+            k.put("https://stream.example", setOf(Kind.CAMERA), true)
+            val next = PageAsks.Kept(f) // a new launch
+            assertEquals(mapOf(Kind.PROTECTED to true), next.of("https://stream.example"))
+            assertEquals(mapOf(Kind.PROTECTED to false), next.of("https://other.example"))
+            k.put("https://other.example", setOf(Kind.PROTECTED), true)
+            assertEquals(mapOf(Kind.PROTECTED to true), PageAsks.Kept(f).of("https://other.example"))
+            f.writeText("junk\nhttps://x.example CAMERA 1\n")
+            assertTrue(PageAsks.Kept(f).of("https://x.example").isEmpty())
+        } finally { f.delete() }
     }
 
     @Test fun decide() {

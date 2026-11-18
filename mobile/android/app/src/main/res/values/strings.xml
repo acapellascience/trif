@@ -35,6 +35,7 @@
     <string name="page_ask_mic">Allow “%s” to use your microphone?</string>
     <string name="page_ask_camera_mic">Allow “%s” to use your camera and microphone?</string>
     <string name="page_ask_location">Allow “%s” to use your current location?</string>
+    <string name="protected_on_site">Protected content on %s</string>
     <string name="dont_allow">Don’t Allow</string>
     <string name="allow">Allow</string>
     <string name="page_ask_off_camera">The camera is off for TRIF. To use it on pages, allow it in Android’s Settings, under Apps, TRIF.</string>

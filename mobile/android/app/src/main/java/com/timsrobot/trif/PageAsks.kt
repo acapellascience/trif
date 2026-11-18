@@ -9,15 +9,21 @@ import android.webkit.PermissionRequest
  * question per site first (a draft for Tim, after WebKit's), then, only if TRIF hasn't got it yet, Android's own
  * runtime permission ask (the system's dialog and words). Only what was asked is granted, and only what Android
  * granted. The answer is kept per site for the launch (Allow and Don't Allow), so a page can't ask again and again.
- * A tab behind, or TRIF not in front: no question, refused. Anything else a page asks for (protected media, MIDI):
- * refused, as WebView's default.
+ * A tab behind, or TRIF not in front: no question, refused.
+ *
+ * Protected (DRM) video (Tim 11-18): as Chrome on Android (its Site settings → Protected content: allowed by default,
+ * per-site exceptions kept for good): allowed without a question, unless switched off for the site (the Mods tab's ⋯,
+ * "Protected content on {site}"). That choice lasts across launches, in a small file; the other answers last
+ * for the launch. Anything else (MIDI): refused, as WebView's default.
  */
 object PageAsks {
-    enum class Kind(val permissions: List<String>) {
+    /** `lasting`: its answer is kept across launches. */
+    enum class Kind(val permissions: List<String>, val lasting: Boolean = false) {
         CAMERA(listOf(Manifest.permission.CAMERA)),
         MIC(listOf(Manifest.permission.RECORD_AUDIO)),
         // (either is enough: Android 12+ lets the person pick approximate)
         LOCATION(listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)),
+        PROTECTED(emptyList(), lasting = true),
     }
 
     /** What a WebView PermissionRequest's resources are, of the ones TRIF asks about. */
@@ -25,6 +31,7 @@ object PageAsks {
         when (it) {
             PermissionRequest.RESOURCE_VIDEO_CAPTURE -> Kind.CAMERA
             PermissionRequest.RESOURCE_AUDIO_CAPTURE -> Kind.MIC
+            PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID -> Kind.PROTECTED
             else -> null
         }
     }.toSet()
@@ -32,6 +39,7 @@ object PageAsks {
     fun resource(k: Kind) = when (k) {
         Kind.CAMERA -> PermissionRequest.RESOURCE_VIDEO_CAPTURE
         Kind.MIC -> PermissionRequest.RESOURCE_AUDIO_CAPTURE
+        Kind.PROTECTED -> PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID
         Kind.LOCATION -> null
     }
 
@@ -56,7 +64,8 @@ object PageAsks {
         kinds.filter { k -> k.permissions.none(has) }.flatMap { it.permissions }
 
     /** Of what was asked, what Android lets TRIF have (`has`, after its ask). */
-    fun allowed(kinds: Set<Kind>, has: (String) -> Boolean): Set<Kind> = kinds.filter { k -> k.permissions.any(has) }.toSet()
+    fun allowed(kinds: Set<Kind>, has: (String) -> Boolean): Set<Kind> =
+        kinds.filter { k -> k.permissions.isEmpty() || k.permissions.any(has) }.toSet()
 
     sealed class Decision {
         object Refuse : Decision()
@@ -71,18 +80,39 @@ object PageAsks {
      */
     fun decide(kinds: Set<Kind>, onScreen: Boolean, asking: Boolean, kept: Map<Kind, Boolean>): Decision {
         if (kinds.isEmpty()) return Decision.Refuse
+        // (protected video: never asked, Chrome's default; only a site switched off is refused; never folded into a
+        // camera ask)
+        if (Kind.PROTECTED in kinds) return if (kinds.size > 1) Decision.Refuse else Decision.Known(if (protectedOn(kept)) kinds else emptySet())
         if (kinds.all { it in kept }) return Decision.Known(kinds.filter { kept[it] == true }.toSet())
         if (!onScreen || asking) return Decision.Refuse
         return Decision.Ask
     }
 
-    /** The answers this launch, per site (the page's origin) and kind. */
-    class Kept {
+    /** Protected video on a site, given its kept answers: on unless switched off. */
+    fun protectedOn(kept: Map<Kind, Boolean>) = kept[Kind.PROTECTED] != false
+
+    /**
+     * The answers per site (the page's origin) and kind: this launch's, and the lasting kinds' from `file` (one
+     * "<origin> <KIND> 1|0" a line; a missing or unreadable file = none kept).
+     */
+    class Kept(private val file: java.io.File? = null) {
         private val answers = mutableMapOf<String, MutableMap<Kind, Boolean>>()
+        init {
+            runCatching { file?.takeIf { it.exists() }?.readLines() }.getOrNull()?.forEach { line ->
+                val p = line.trim().split(' ')
+                val k = Kind.entries.firstOrNull { it.name == p.getOrNull(1) }
+                if (p.size == 3 && k != null && k.lasting) answers.getOrPut(p[0]) { mutableMapOf() }[k] = p[2] == "1"
+            }
+        }
         fun of(origin: String): Map<Kind, Boolean> = answers[key(origin)] ?: emptyMap()
         fun put(origin: String, kinds: Set<Kind>, allowed: Boolean) {
             val m = answers.getOrPut(key(origin)) { mutableMapOf() }
             kinds.forEach { m[it] = allowed }
+            if (file != null && kinds.any { it.lasting }) save(file)
+        }
+        private fun save(f: java.io.File) = runCatching {
+            val text = answers.flatMap { (o, m) -> m.filterKeys { it.lasting }.map { (k, v) -> "$o ${k.name} ${if (v) 1 else 0}\n" } }.joinToString("")
+            val tmp = java.io.File(f.path + ".tmp"); tmp.writeText(text); tmp.renameTo(f)
         }
         private fun key(origin: String) = origin.trimEnd('/').lowercase()
     }

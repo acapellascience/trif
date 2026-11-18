@@ -2,7 +2,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Page asks</title>
-<!-- What a page asks of the browser beyond showing itself: the camera, the microphone, the location, a file for
+<!-- What a page asks of the browser beyond showing itself: the camera, the microphone, the location, protected
+     (DRM) video's key system (Widevine; no licence: only the ask and its answer), a file for
      its file input, full screen, downloads (a mod file, a picture, a file the page makes). Android's test:
      mobile/android/test/pageasks.sh. Each answer is written in #out. -->
 <style>
@@ -14,6 +15,7 @@
 <button id="cam">Camera</button>
 <button id="cammic">Camera and mic</button>
 <button id="loc">Location</button>
+<button id="drm">Protected video</button>
 <label>Pick a file <input id="file" type="file" accept="image/*,.js" multiple></label>
 <div id="big"><button id="full">Full screen</button> <span id="fs"></span></div>
 <a href="stand-in-file/calmer-feed.js" style="display:block;margin:12px 0">Download a mod</a>
@@ -29,6 +31,10 @@
   document.getElementById('loc').onclick = () => navigator.geolocation.getCurrentPosition(
     (p) => out('location: ' + p.coords.latitude.toFixed(2) + ' ' + p.coords.longitude.toFixed(2)),
     (e) => out('location: error ' + e.code), { timeout: 15000, enableHighAccuracy: true });
+  document.getElementById('drm').onclick = () => navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{
+    initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }] }])
+    .then((a) => a.createMediaKeys().then(() => out('protected: ok'), (e) => out('protected: keys ' + e.name)))
+    .catch((e) => out('protected: ' + e.name));
   const file = document.getElementById('file');
   file.onchange = () => out('files: ' + file.files.length);
   file.addEventListener('cancel', () => out('files: cancelled'));

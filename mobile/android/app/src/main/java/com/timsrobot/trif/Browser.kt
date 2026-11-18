@@ -247,7 +247,7 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
     // MARK: what WKWebView does by itself and a WebView doesn't (round 15): camera / mic / location asks, file
     // inputs, full screen, downloads
 
-    private val kept = PageAsks.Kept()
+    private val kept = PageAsks.Kept(java.io.File(context.filesDir, "page-asks.txt"))
     /** The page ask whose question is up (a page can take it back: onPermissionRequestCanceled). */
     private var askingFor: Any? = null
 
@@ -261,7 +261,8 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
         when (val d = PageAsks.decide(kinds, onScreen, asking != null, kept.of(origin))) {
             PageAsks.Decision.Refuse -> { log("page ask", "$site $what: refused, ${if (!onScreen) "not on screen" else "a question is already up"}"); answer(emptySet()) }
             is PageAsks.Decision.Known -> {
-                log("page ask", "$site $what: answered earlier, ${if (d.allowed.isEmpty()) "Don't Allow" else "Allow"}")
+                if (PageAsks.Kind.PROTECTED in kinds) log("page ask", "$site $what: ${if (d.allowed.isEmpty()) "off for this site" else "allowed"}")
+                else log("page ask", "$site $what: answered earlier, ${if (d.allowed.isEmpty()) "Don't Allow" else "Allow"}")
                 fromAndroid(site, d.allowed, answer)
             }
             PageAsks.Decision.Ask -> {
@@ -297,6 +298,17 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
             answer(got)
         }
         if (missing.isEmpty() || h == null) finish() else { log("page ask", "$site: asking Android for ${missing.joinToString(" ") { it.substringAfterLast('.') }}"); h.askAndroid(missing) { finish() } }
+    }
+
+    /** The shown tab's site (its origin) for the Mods tab's protected video switch, or null (no web page). */
+    val shownOrigin: String? get() = current?.url?.let { Uri.parse(it) }?.takeIf { it.scheme == "http" || it.scheme == "https" }
+        ?.let { u -> "${u.scheme}://${u.host}${if (u.port >= 0) ":" + u.port else ""}" }
+    fun protectedOn(origin: String) = PageAsks.protectedOn(kept.of(origin))
+    /** Protected video on or off for a site, kept for good; the shown tab loads again to take it. */
+    fun setProtected(origin: String, on: Boolean) {
+        kept.put(origin, setOf(PageAsks.Kind.PROTECTED), on)
+        log("page ask", "${PageAsks.site(origin)} protected: switched ${if (on) "on" else "off"}")
+        current?.web?.reload()
     }
 
     private fun cancelAsk(token: Any) {

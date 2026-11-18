@@ -10,7 +10,7 @@ LOG="${TMPDIR:-/tmp}/trif-android-tests"
 mkdir -p "$LOG" shots
 build=1
 [ "$1" = --no-build ] && { build=0; shift; }
-tests="${*:-startup tabs popups applinks worlds mods running modstab import offer playing pageasks}"
+tests="${*:-startup tabs popups applinks worlds mods running modstab import offer playing pageasks protected}"
 
 started_emu=0; pids=""
 cleanup() {

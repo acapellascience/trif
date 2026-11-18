@@ -90,6 +90,9 @@ final class ChatView: Identifiable {
     var lastPrepared: ClaudePane.Prepared?
     var refill: ClaudePane.Prepared?
     var workingSince = Date.distantPast
+    /// The conversation the person sent from (nil: a new chat with no address yet): a reload onto another one while
+    /// .working isn't that reply (Tim, 11-18: old chats' code picked up).
+    var workingConversation: String?
     /// The instructions went in a new chat's first message: its address, once it has one, is noted.
     var contextNext = false
     /// The page went into a new chat in TRIF's project without the guide (the project has it).
@@ -740,6 +743,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             setLastFill(v, nil)
             v.activity = .working
             v.workingSince = Date()
+            v.workingConversation = v.conversation
             v.lastUsed = Date()
             v.sentTab = browser?.current.id
             askToNotify()
@@ -754,6 +758,15 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "done":
             // (the mods: the reply's new code blocks with a whole mod file in each)
             handleDone(v, d, d["mods"] as? [String] ?? [])
+        case "held":
+            // (mod files on the page that weren't offered: outside the assistant's replies (the person's own pasted
+            // code, the message box) or in replies TRIF didn't see arrive (an old conversation's history), Tim, 11-18)
+            let outside = d["outside"] as? Int ?? 0, history = d["history"] as? Int ?? 0
+            var parts: [String] = []
+            if outside > 0 { parts.append("\(outside) outside the assistant's replies") }
+            if history > 0 { parts.append("\(history) in replies not seen arriving") }
+            let how = "\(d["why"] as? String ?? "?"), \(d["mode"] as? String ?? "?"), \(d["anchored"] as? Bool == true ? "sent message found" : "no sent message found"), \(d["live"] as? Int ?? 0) live"
+            Diagnostics.shared.log("chat offers", "held from \(v.site.isEmpty ? "no site" : v.site) at \(d["path"] as? String ?? "?"): \(parts.joined(separator: ", ")) (\(how))")
         case "nopickup":
             // (a reply with code in it, and no mod read from it: what there was, for the next report)
             let what = "\(name)'s reply at \(d["path"] as? String ?? "?") had \(d["blocks"] as? Int ?? 0) code block(s)\(d["header"] as? Bool == true ? " and a mod's header" : ""), and no mod was read from it (\(d["kinds"] as? String ?? "?"))"
@@ -790,6 +803,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private func handleDone(_ v: ChatView, _ d: [String: Any], _ texts: [String]) {
         report.log("claude", "\(v.service.rawValue): reply done (\(d["why"] as? String ?? "?")\(d["stop"] as? Bool == true ? ", its stop button seen" : "")) for \(v.site.isEmpty ? "no site" : v.site), \(texts.count) mod file(s) in it")
         let late = d["why"] as? String == "late"
+        // (the person went to another conversation before the reply was done: its watch ended, nothing offered)
+        if d["why"] as? String == "left" { if v.activity == .working { v.activity = .idle }; endBackgroundIfIdle(); return }
         guard v.activity == .working || late else { return }
         guard let browser else { v.activity = .idle; endBackgroundIfIdle(); return }
         Task { @MainActor in
@@ -1049,7 +1064,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard let v else { return }
         v.tellLook()
         // (the chat's page loaded again while a reply was being written, its process ended say: watched again)
-        if v.activity == .working { Task { _ = await chatJS(v, "resume()") } }
+        if v.activity == .working {
+            // (only the conversation the person sent from (or a new chat's, which had no address yet): another one
+            // loaded meanwhile is history, nothing to watch; chat.js's resume itself takes only a reply still being written)
+            if let w = v.workingConversation, v.conversation != w {
+                v.activity = .idle
+                Diagnostics.shared.log("chat offers", "\(v.service.rawValue): another conversation loaded while a reply was being written: not watched")
+            } else { Task { _ = await chatJS(v, "resume()") } }
+        }
         // (reloaded while the tab's data was going in: in again)
         if let p = v.refill {
             v.refill = nil

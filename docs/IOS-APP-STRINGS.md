@@ -26,7 +26,7 @@ proof of concept's own strings (the probe's checks, report, point-and-hide bar) 
 | Title, search field | History · Search history |
 | Empty | No history yet. The pages you visit are kept here, on this phone only. |
 | Search finds nothing | Nothing in your history matches. |
-| A visit's long-press menu | Open in a new tab · Copy address |
+| A visit's long-press menu | Open in New Tab (approved by Tim 11-18, was "Open in a new tab") · Copy address |
 | Clear button, its question | Clear… · **Clear history** — The last hour · Today · All history — Your history is kept only on this phone. Cleared, it's gone. |
 | After importing a browser's history | Added {n} visit(s) to your history. |
 
@@ -294,10 +294,8 @@ Photos permission line already listed above ("To save pictures from websites to 
 
 | Where | Old | New |
 |---|---|---|
-| A link's long-press menu, first item (draft: Safari's own words) | (no menu) | Open in New Tab |
-
-(The History screen's long-press item says "Open in a new tab": not changed, as it wasn't named. Say if it should
-match Safari's "Open in New Tab" too.)
+| A link's long-press menu, first item (Safari's own words; approved by Tim 11-18) | (no menu) | Open in New Tab |
+| History, a visit's long-press menu, first item (approved by Tim 11-18, to match) | Open in a new tab | Open in New Tab |
 
 ## Add this mod?: what TRIF found, and a mod for another site (added 11-17, Tim approved a stronger out-of-site warning)
 

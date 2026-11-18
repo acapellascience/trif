@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (312 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (322 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -56,7 +56,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   exchange with an earlier Calmer feed put at the top 1.5 s after load and 2 s after each reply), `?reopen` (the
   chat reopens a viewer on an old file by itself, no tap), `?gpt` (/c/ addresses), `?slow`, `?nostop`, `?draft`, `?gptpaste`, `?viewerroute`,
   `?octane` (ChatGPT's newer mobile page: li[data-message-role], data-message-complete, a 3 s pause, picture-only
-  inputs), `?cm` (code as .cm-editor/.cm-line), `?slowload`. `/project/<id>` serves it as a project page.
+  inputs), `?cm` (code as .cm-editor/.cm-line), `?slowload`, `?pasted` (a paste of several lines goes into the box as a
+  pre inside the ProseMirror, 20+ lines as a PASTED tile with a preview pre; the sent message keeps both, the pasted card
+  opening the viewer), `?oldchat` (an old conversation loading in pieces into a .history box: the last reply's box filled
+  in twice, the reply before it, the person's messages 2 s late; `window.__standinScrollUp()` or a scroll to the top
+  draws an older exchange and redraws the rest). The header's "Older chat" button switches the page to such a
+  conversation (pushState /chat/old-…, no load), mid-reply or not. `/project/<id>` serves it as a project page, `/new`
+  as claude.ai's new-chat page.
 - Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner) and is the best check of
   ChatGPT's markup; claude.ai needs a sign-in, so it's stand-in only.
 - Mock APIs (More's engines): `node mobile/mock-api.js 8379` (`MOCK_MODEL_MS=125` for 2 MB/s model downloads), launch with
@@ -78,7 +84,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   browser-checks.json, mods.js, panel-kit.js, mod-guide.txt, page-bridge.js, RobotShape.swift, and the side panel folder
   `shared/gen/panel`. Never edit those by hand.
 - Browser tests (headless Chrome, muted): `TRIF_BROWSER_TESTS=1 TRIF_E2E_CHROME="/Users/tim/WebMods/tests/e2e/.browsers/chrome/mac_arm-156.0.8078.80/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" node --test mobile/test/chat.test.js`
-  (7 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late). One browser suite at a time; small payloads.
+  (9 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
+  code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply). One browser suite at a time; small payloads.
 - What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
   mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
@@ -274,11 +281,29 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - ⋯ → Copy diagnostics (Tim, 11-17; after Import…, visible without scrolling on an SE): the same text as the Mods
   tab's Send diagnostics…, then the 2 s note "Copied." (draft).
 - Chat offers (Tim, 11-17, "spurious asks to add old code when I open Claude chat"): a chat never offers the same
-  code twice (whatever came of it), nor an installed mod's current or earlier version, nor one in Recently deleted;
-  Add to TRIF under a block still offers anything. chat.js: the reply's and `late` pickups take only blocks after the
-  person's latest message (older messages render late on a long conversation, and after the page reloads); a viewer
-  is offered only if a tap (kept in sessionStorage `__trifTap`, 6 s) or a reply in this page (2 min) came before it,
-  else posted with `skipped` (a Diagnostics line).
+  code twice (whatever came of it), nor an installed mod's current or earlier version, nor one in Recently deleted
+  (ChatOffers.swift: the second guard).
+- Only the assistant's code, only from a reply TRIF saw arrive (Tim, 11-18: "When I paste code into Claude in the app,
+  the app reads it as a mod"; "opening an old chat gets spurious pickups of old code"). Positive rules in chat.js, fail
+  closed: `turnOf` — a block counts only if the nearest message around it is a REPLY (not USER), the outermost reply
+  there holds no USER and not the message box, and it isn't in anything editable; else no Add to TRIF, no pickup, no
+  late. `track` — a send's watch offers only replies that weren't on the page at the send, come after the person's
+  message sent in this page (the last USER that wasn't there at the send), and were seen being written (Claude's
+  data-is-streaming="true" on them, or their text changing between looks; after a reload, `resume`, twice); `late`
+  takes only more of those (`last.live`). The watch is its conversation's (`convoOf`: /chat|/c|/uc/<id>; a new chat's
+  first address is the same one; any other → done `left`, nothing offered, the app's dots stop). A viewer is offered
+  only if the tap that opened it (sessionStorage `__trifTap` {at, reply}, 6 s) was inside an assistant's reply, or
+  with no tap while a live reply is being written / ended < 2 min ago; else `skipped`. The app: a reload onto another
+  conversation than the one sent from (`workingConversation`) isn't resumed. Not offered but on the page → message
+  `held` → Diagnostics "chat offers": `held from <site> at <path>: N outside the assistant's replies, M in replies not
+  seen arriving (<why>, send|resume, sent message found or not, K live)`. Add to TRIF stays under every assistant
+  block, old ones too (a tap is consent).
+- TRIF must stay default-browser compatible (Tim, 11-18, a standing design constraint): Apple's
+  com.apple.developer.web-browser entitlement rules, so it can be made the default browser later: on launch, an
+  address/search field or a usable start page; http/https links open where they point, in a new tab, with no
+  redirecting or rewriting the destination; WebKit only; no crash-prone launch paths. Tim has no entitlement yet
+  (needs the paid account + Apple's request); the Info.plist http/https declaration comes with that step.
+- "Open in New Tab" (link long-press menu, and History's long-press item, was "Open in a new tab"): approved by Tim 11-18.
 - Full screen's exit button (Tim, 11-17, "can we move it up?"; glyph kept): beside the clock at the foot of the status
   bar: SE right of the clock (circle centre 250, 18), Dynamic Island phones between the clock and the island (17 Pro:
   117, 52). Its taps go to a window-level recognizer (ExitTaps), 40 × 44 from the bar's foot down.
@@ -305,11 +330,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   offered nothing for the old block; a reply handed over only its own two blocks (one skipped as installed), and
   an older message rendering after it made no late offer. Toolbar there: < > robot + Mods tabs A, page button exactly
   centred (187.5); a long press on text only selects it (no Hide bar).
-- Chat offers on the real claude.ai (signed in, can't be checked here): whether its older messages render before
-  the person's latest in the DOM (the page side assumes document order; the app's memory is the guarantee either
-  way), whether the USER selector still matches (without it the page side falls back to all blocks), and a viewer
-  opened by a tap that does a full page load (the tap time survives in sessionStorage). Tim's next diagnostics
-  should have `chat offers` lines.
+- Chat offers in the Simulator (11-18, stand-in `?pasted` and `?oldchat`, `chatOffers` cleared, shots 313-322): code
+  pasted into the box (a real paste, shot 314) and a pasted tile: no button, nothing offered; sent, the person's
+  message's code block and pasted card: nothing, the reply's mod handed over (first skipped as installed, then
+  example.test's offered, shot 319); their pasted card tapped → viewer `skipped (opened by a tap outside the
+  assistant's replies)`; code pasted after the reply: no late offer; "Older chat" tapped mid-reply → done `left`, idle,
+  nothing; an old chat opened cold, scrolled up: nothing (Add to TRIF under its replies).
+- On the real claude.ai / chatgpt.com (signed in, can't be checked here): that Claude's reply wrapper
+  ([data-is-streaming], .font-claude-response/.font-claude-message) holds its code blocks and never the person's
+  message; that USER still matches (without it NOTHING is picked up now: fail closed, `held … no sent message found`);
+  how Claude renders pasted code in the box and in the sent message, and its pasted-text viewer; ChatGPT has no
+  streaming mark, so its replies count as live by growing between looks only; a reply that finished while the chat's
+  page wasn't running (WebKit suspended it, then a reload) isn't offered (fail closed: `held … not seen arriving`;
+  Add to TRIF is still there). Tim's next diagnostics should have `chat offers` lines (held/offered/skipped).
 
 - Never run on a real phone: the local model after the freeze fix (Tim tests next: compare Runs on processor vs graphics
   chip; diagnostics lines have the numbers), real model downloads from Hugging Face, background download events.
@@ -410,6 +443,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   ms before didEnterBackground, then visibilitychange), and resumes it on return; Safari the same. A play() then
   (from the page or the app) is allowed and keeps going; <audio> isn't paused at all. Without our session category
   sound still went on (WebKit sets its own); UIBackgroundModes audio is the part that matters.
+- Chrome's `new ClipboardEvent('paste', {clipboardData})` drops the clipboardData: tests make an Event and
+  defineProperty its clipboardData (mobile/test/chat.test.js pasteInto). The stand-in's `?octane` pause used to skip a
+  reply step (a crash when that step made the element): fixed 11-18.
+- Simulator Paste: long-press the empty box, then Paste in the callout (`simctl pbcopy` first); inside a code block the
+  long press only shows the loupe.
 - zsh doesn't split `$FILES`: use an array for commit-by-path lists. Never `git add -N .` (it picks up shots/).
 - Simulator toggles (SwiftUI Toggle) often ignore a quick tool tap: tap with duration 0.15. After `simctl ui
   appearance dark` a running app sometimes stays light (11-16): relaunch, or darken the stand-in page itself (panejs

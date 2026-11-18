@@ -7,7 +7,8 @@
 //   - the person's send (the send button, or Return in the message box) told to the app, which goes back to
 //     the tab; then the reply watched until it's done (for the chat button's dots and its replied mark), and the mod
 //     files in its code blocks (ones that weren't there before the send) handed to the app, which asks Add this mod?
-//     about each (Tim, 11-15; kept, 11-16) (the AUTO path).
+//     about each (Tim, 11-15; kept, 11-16) (the AUTO path). Only the assistant's code, and only from a reply TRIF saw
+//     arrive in this page (Tim, 11-18: never the person's own pasted code, never an old chat's: turnOf, track).
 //   - a file the person opens in the chat's own viewer (Claude's, over the conversation, when a .js in a reply is
 //     tapped): the code it shows is read off the screen, as a code block's is, and handed to the app for Add this mod?;
 //     and while a viewer (or anything) is over the message box, nothing is filled in: the app waits (usableEditor,
@@ -105,23 +106,39 @@
   // (the person's last tap on the page, kept across a load: a viewer is offered only when a tap opened it, or a reply
   // in this page did; one the chat reopens by itself (on load, its address) shows old code: Tim, 11-17, "spurious
   // asks to add old code when I open Claude chat")
+  // (and where that tap was: a viewer is offered only when the tap that opened it was inside one of the assistant's
+  // replies (a file card there); a tap on the person's own pasted-text card opens their own text: Tim, 11-18, "When I
+  // paste code into Claude in the app, the app reads it as a mod")
   const TAP_KEY = '__trifTap';
-  let lastTap = 0;
-  try { lastTap = Number(sessionStorage.getItem(TAP_KEY)) || 0; } catch (e) { /* (no storage: this load's taps only) */ }
-  const tapped = (e) => { if (!e.isTrusted) return; lastTap = Date.now(); try { sessionStorage.setItem(TAP_KEY, String(lastTap)); } catch (e) { /* (as above) */ } };
+  let tap = { at: 0, reply: false };
+  try { const t = JSON.parse(sessionStorage.getItem(TAP_KEY) || 'null'); if (t && typeof t.at === 'number') tap = { at: t.at, reply: t.reply === true }; } catch (e) { /* (no storage: this load's taps only) */ }
+  const tapped = (e) => {
+    if (!e.isTrusted) return;
+    let reply = false;
+    try { reply = !!turnOf(e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement); } catch (err) { /* (not known: not a reply's) */ }
+    tap = { at: Date.now(), reply };
+    try { sessionStorage.setItem(TAP_KEY, JSON.stringify(tap)); } catch (err) { /* (as above) */ }
+  };
   for (const t of ['pointerdown', 'touchstart', 'click']) document.addEventListener(t, tapped, { capture: true, passive: true });
+  /** (whether the viewer up now may be offered: decided once, as it opens; '' = yes, else why not) */
+  let viewerWhyNot = null;
   function lookAtViewer() {
     const v = viewer();
-    if (!v) { viewerSeen = ''; return; }
+    if (!v) { viewerSeen = ''; viewerWhyNot = null; return; }
+    if (viewerWhyNot === null) {
+      const now = Date.now();
+      // (a tap a moment ago opened it: offered if the tap was in a reply; no tap: offered only while a reply TRIF saw
+      // arrive is being written or just was (the chat opening a file of its own reply), else it's old)
+      viewerWhyNot = now - tap.at < 6000 ? (tap.reply ? '' : 'opened by a tap outside the assistant\'s replies')
+        : (watch && watch.live.size) || (last && last.live.size && now - last.at < 120000) ? '' : 'opened with no tap and no new reply';
+    }
     const code = viewerCode(v.root);
     const name = ((v.root.innerText || '').match(/[\w.() -]+\.js\b/) || [''])[0].trim();
     const key = `${name}|${code ? code.length : 0}|${(code || '').slice(0, 200)}`;
     if (key === viewerSeen) return;
     viewerSeen = key;
     const path = location.pathname.replace(/[^/]{24,}/g, '…');
-    const now = Date.now();
-    const fresh = now - lastTap < 6000 || !!watch || (!!last && now - last.at < 120000);
-    if (!fresh) { if (code) post({ type: 'viewer', why: v.why, name, path, text: '', skipped: 'opened with no tap and no new reply' }); return; }
+    if (viewerWhyNot) { if (code) post({ type: 'viewer', why: v.why, name, path, text: '', skipped: viewerWhyNot }); return; }
     post({ type: 'viewer', why: v.why, name, path, text: code || '' });
   }
 
@@ -284,7 +301,9 @@
     // (no button while a reply is being written: a mod's header comes before its code, so a button then would
     // hand over half a mod)
     if (replying()) return;
-    for (const { pre, text } of modBlocks()) {
+    // (only under the assistant's code: never in the message box, the person's own message or a pasted preview)
+    for (const { pre, text, reply } of modBlocks()) {
+      if (!reply) continue;
       if (pre.nextElementSibling && pre.nextElementSibling.classList.contains('trif-add')) continue;
       const b = document.createElement('button');
       b.className = 'trif-add';
@@ -375,7 +394,9 @@
   // (ChatGPT's mobile page since 11-16 marks its messages li[data-message-role], the reply's li gets
   // data-message-complete when it's done, and its conversations are /uc/<id> logged out: seen logged out, 11-16)
   const USER = '[data-testid="user-message"], [data-message-author-role="user"], [data-message-role="user"]';
-  const REPLY = '[data-is-streaming], .font-claude-response, [data-message-author-role="assistant"], [data-message-role="assistant"]';
+  const REPLY = '[data-is-streaming], .font-claude-response, .font-claude-message, [data-message-author-role="assistant"], [data-message-role="assistant"]';
+  /** A reply being written, by its own mark (Claude's). */
+  const STREAMING = '[data-is-streaming="true"]';
   /** ChatGPT's last reply hasn't been marked complete yet (its newer page marks each one when it's done). */
   function incomplete() {
     const all = document.querySelectorAll('li[data-message-role="assistant"]');
@@ -409,21 +430,47 @@
     return { text: composerText(), names };
   }
 
-  /** The mod files in code blocks: [{ key: its header, text }], in page order. */
-  function modBlocks(onlyAfter) {
+  // Whose a code block is (Tim, 11-18: "When I paste code into Claude in the app, the app reads it as a mod and wants
+  // to add it"). A positive rule: only code inside one of the assistant's replies is ever offered or gets Add to
+  // TRIF. The nearest message around it is a reply (REPLY), not the person's (USER); the outermost reply there holds
+  // none of the person's messages and not the message box; and the block isn't in anything editable. Everything
+  // else is no one's and never offered: the message box (with pasted code rendered as a block), a pasted-text
+  // preview, the person's own sent message (a code block or a pasted card in it), and markup TRIF doesn't know.
+  // When it can't tell, no.
+  /** The assistant's turn a node is in (its outermost reply element), or null. */
+  function turnOf(el, ed = editor(), box = composerBox()) {
+    if (!el || !el.closest) return null;
+    if (el.closest('[contenteditable]:not([contenteditable="false"]), textarea, input')) return null;
+    const near = el.closest(`${USER}, ${REPLY}`);
+    if (!near || !near.matches(REPLY) || near.closest(USER)) return null;
+    let top = near;
+    for (let p = top.parentElement && top.parentElement.closest(REPLY); p; p = p.parentElement && p.parentElement.closest(REPLY)) top = p;
+    if (top.querySelector(USER) || (ed && top.contains(ed)) || (box && (box.contains(top) || top.contains(box)))) return null;
+    return top;
+  }
+  /** The assistant's turns on the page (outermost), in page order. */
+  function turns() {
+    const ed = editor(), box = composerBox();
     const out = [];
+    for (const el of document.querySelectorAll(REPLY)) { const t = turnOf(el, ed, box); if (t && !out.includes(t)) out.push(t); }
+    return out;
+  }
+
+  /** The mod files in code blocks: [{ key: its header, raw, pre, reply: the assistant's turn it's in or null, text }], in page order. */
+  function modBlocks() {
+    const out = [];
+    const ed = editor(), box = composerBox();
     // (not the code a viewer shows over the chat: that's read as the viewer's, without its line numbers, lookAtViewer)
     const v = viewer();
     const over = v && v.root !== document.body && v.root.localName !== 'main' ? v.root : null;
     // (a code block: a pre, or a code editor's box (CodeMirror's .cm-editor, which some chats use), the outermost)
     for (const pre of document.querySelectorAll(CODE_BLOCKS)) {
       if (pre.parentElement && pre.parentElement.closest(CODE_BLOCKS)) continue;
-      if (onlyAfter && !(onlyAfter.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
       if (pre.closest(VIEWER) || (over && over.contains(pre))) continue;
       const raw = pre.textContent || '';
       const end = raw.search(/==\/WebMod==/);
       if (raw.indexOf('==WebMod==') === -1 || end === -1) continue;
-      out.push({ key: raw.slice(0, end), raw, pre, text: () => blockText(pre) || raw });
+      out.push({ key: raw.slice(0, end), raw, pre, reply: turnOf(pre, ed, box), text: () => blockText(pre) || raw });
     }
     return out;
   }
@@ -454,6 +501,10 @@
     const withInstructions = c.names.some((n) => n.includes('TRIF instruction')) || c.text.includes('--- How TRIF mods are written ---');
     const users = document.querySelectorAll(USER).length;
     const seen = new Set(modBlocks().map((b) => b.raw));
+    // (what was on the page before this send: its messages and replies are never this send's reply)
+    const usersBefore = new Set(document.querySelectorAll(USER));
+    const repliesBefore = new Set(turns());
+    const convo = convoOf(location.pathname);
     sending = true;
     const t0 = Date.now();
     const check = () => {
@@ -462,7 +513,7 @@
       if (went) {
         sending = false;
         post({ type: 'sent', how, withInstructions });
-        startWatch(seen);
+        startWatch(seen, { mode: 'send', usersBefore, repliesBefore, convo });
       } else if (Date.now() - t0 > 2500) sending = false;
       else setTimeout(check, 150);
     };
@@ -479,9 +530,44 @@
   }, true);
   document.addEventListener('submit', (e) => { const ed = editor(); if (ed && e.target && e.target.contains && e.target.contains(ed)) maybeSent('form'); }, true);
 
-  function startWatch(seen) {
+  // Only a reply TRIF saw arrive is the reply (Tim, 11-18: "it's still the case that sometimes opening an old chat
+  // gets spurious pickups of old code as mods"). A positive rule, as the code's owner above: a reply's code is
+  // offered only if that reply came after the person's message sent in this page (one that wasn't on the page at
+  // the send), wasn't on the page at the send, and was seen being written while TRIF watched: Claude's own
+  // streaming mark on it, or its text changing from one look to the next. Anything that was there when the chat
+  // opened, or that renders whole without being written (an old conversation loading in pieces, its messages
+  // late, a re-render when scrolled up), is history and never offered. The watch belongs to its conversation: the
+  // chat going to another one (by its address: /chat/<id>, /c/<id>, /uc/<id>) ends it with nothing offered; a new
+  // chat getting its first address is the same one. When TRIF can't tell, nothing. (The app's memory of what was
+  // offered, ChatOffers.swift, is the second guard.)
+  const CONVO = /\/(?:chat|c|uc)\/[^/?#]+/;
+  const convoOf = (p) => (String(p || '').match(CONVO) || [''])[0];
+  /** The person's message this watch is for: the last in page order of those that weren't there at the send. */
+  function sentMessage(w) {
+    const fresh = [...document.querySelectorAll(USER)].filter((u) => !w.usersBefore.has(u));
+    return fresh[fresh.length - 1] || null;
+  }
+  /** One look: which replies are being written (w.live). (TRIF's own Add to TRIF isn't the reply's writing.) */
+  function track(w) {
+    const anchor = w.mode === 'send' ? sentMessage(w) : latestUser();
+    w.anchored = w.anchored || !!anchor;
+    if (!anchor) return;
+    for (const r of turns()) {
+      if (w.repliesBefore.has(r) || w.live.has(r)) continue;
+      if (!(anchor.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) || anchor.contains(r)) continue;
+      const text = (r.textContent || '').split('Add to TRIF').join('');
+      const prev = w.looks.get(r);
+      if (prev !== undefined && prev !== text) w.grew.set(r, (w.grew.get(r) || 0) + 1);
+      w.looks.set(r, text);
+      // (after a reload (resume) a reply that's merely late to render could change once as it fills in: twice there)
+      if (r.matches(STREAMING) || r.querySelector(STREAMING) || (w.grew.get(r) || 0) >= (w.mode === 'send' ? 1 : 2)) w.live.add(r);
+    }
+  }
+  function startWatch(seen, how) {
     stopWatch();
-    const w = { seen, saw: false, sig: null, at: Date.now(), started: Date.now(), timer: 0, queued: false, mo: null };
+    const w = { seen, saw: false, sig: null, at: Date.now(), started: Date.now(), timer: 0, queued: false, mo: null,
+      mode: how.mode, usersBefore: how.usersBefore || new Set(), repliesBefore: how.repliesBefore || new Set(), convo: how.convo || '',
+      live: new Set(), looks: new WeakMap(), grew: new WeakMap(), anchored: false };
     watch = w;
     w.mo = new MutationObserver(() => {
       if (w.queued) return;
@@ -500,6 +586,10 @@
   function settle(w) {
     if (watch !== w) return;
     clearTimeout(w.timer);
+    // (still the same conversation: a new chat's first address is; any other is the person gone elsewhere)
+    const c = convoOf(location.pathname);
+    if (c !== w.convo) { if (!w.convo) w.convo = c; else return finish(w, 'left'); }
+    track(w);
     const now = Date.now();
     const busy = replying();
     if (busy) w.saw = true;
@@ -518,8 +608,16 @@
   /** The reply's done: told to the app (the dots stop), with its new mod files. */
   function finish(w, why) {
     stopWatch();
-    last = { seen: w.seen, path: location.pathname, at: Date.now() };
-    const mods = autoPickup(w.seen);
+    if (why === 'left') {
+      // (another conversation in front: nothing from it offered, nothing late either)
+      last = null;
+      held(w, why, modBlocks().filter((b) => !w.seen.has(b.raw)));
+      post({ type: 'done', why, mods: [], stop: w.saw });
+      return;
+    }
+    track(w);
+    last = { seen: w.seen, live: w.live, convo: w.convo, at: Date.now() };
+    const mods = autoPickup(w, why);
     // (code in the reply but no mod read from it: said, with what there was, for the diagnostics)
     if (!mods.length) {
       const all = document.querySelectorAll(REPLY);
@@ -530,34 +628,48 @@
     }
     post({ type: 'done', why, mods, stop: w.saw });
   }
-  /** The person's latest message: only code after it is a new reply's. A long conversation's older messages render
-   *  late (claude.ai draws them a little at a time, and again after WebKit ended the page), after the snapshot of
-   *  what was seen: without this their old mods counted as new (Tim, 11-17). */
+  /** The person's latest message (after a reload, resume: a reply still being written comes after it). */
   function latestUser() {
     const users = document.querySelectorAll(USER);
     return users[users.length - 1] || null;
   }
-  /** (AUTO path) The mod files in code blocks that weren't there before the send, the latest of each (by its header);
-   *  all of them then count as seen. Only the latest reply's (after the person's latest message). */
-  function autoPickup(seen) {
+  /** (AUTO path) The mod files in the replies TRIF saw arrive (w.live) that weren't there before the send, the latest
+   *  of each (by its header); every block on the page then counts as seen. */
+  function autoPickup(w, why) {
     // (a mod by its header, ==WebMod== to ==/WebMod==, whatever is around it)
     const keyOf = (t) => { const end = t.search(/==\/WebMod==/); return end === -1 ? t : t.slice(t.indexOf('==WebMod=='), end).replace(/\s+/g, ' '); };
     const byKey = new Map();
-    for (const b of modBlocks(latestUser())) if (!seen.has(b.raw)) { const t = b.text(); byKey.set(keyOf(t), t); }
-    for (const b of modBlocks()) seen.add(b.raw);
+    const all = modBlocks();
+    const notOffered = [];
+    for (const b of all) {
+      if (w.seen.has(b.raw)) continue;
+      if (b.reply && w.live.has(b.reply)) { const t = b.text(); byKey.set(keyOf(t), t); } else notOffered.push(b);
+    }
+    for (const b of all) w.seen.add(b.raw);
+    held(w, why, notOffered);
     return [...byKey.values()];
+  }
+  /** Mod files on the page that weren't offered, and why (for the diagnostics' "chat offers" lines): outside the
+   *  assistant's replies (the person's own, the message box), or in a reply TRIF didn't see arrive (history). */
+  function held(w, why, blocks) {
+    if (!blocks.length) return;
+    const outside = blocks.filter((b) => !b.reply).length;
+    post({ type: 'held', why, outside, history: blocks.length - outside, anchored: w.anchored, live: w.live.size, mode: w.mode,
+      path: location.pathname.replace(/[^/]{20,}/g, '…') });
   }
 
   /** (AUTO path) After a reply, a mod file that turns up later on the same conversation (a chat that paused, a revised block). */
   let lateSig = '';
   let lateTimer = 0;
   function late() {
-    if (!last || watch || sending || replying() || location.pathname !== last.path) return;
-    // (old code rendering late, before the person's latest message: seen, never offered)
-    const after = new Set(modBlocks(latestUser()).map((b) => b.pre));
+    if (!last || watch || sending || replying() || convoOf(location.pathname) !== last.convo) return;
+    // (only more of a reply TRIF saw arrive; anything else (old code rendering late, the person's own, the message
+    // box) is seen, never offered)
+    for (const r of last.live) if (!r.isConnected) last.live.delete(r);
     const all = modBlocks();
-    for (const b of all) if (!after.has(b.pre)) last.seen.add(b.raw);
-    const fresh = all.filter((b) => after.has(b.pre) && !last.seen.has(b.raw));
+    const live = (b) => !!b.reply && last.live.has(b.reply);
+    for (const b of all) if (!live(b)) last.seen.add(b.raw);
+    const fresh = all.filter((b) => live(b) && !last.seen.has(b.raw));
     const sig = fresh.map((b) => b.raw).join('\n');
     // (offered once it's the same on two looks, the second a moment later even if nothing else changes)
     if (!fresh.length || sig !== lateSig) { lateSig = sig; if (fresh.length) { clearTimeout(lateTimer); lateTimer = setTimeout(late, 1500); } return; }
@@ -618,7 +730,8 @@
     const users = document.querySelectorAll(USER);
     const lastUser = users[users.length - 1];
     const seen = new Set(modBlocks().filter((b) => !lastUser || !(lastUser.compareDocumentPosition(b.pre) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.raw));
-    startWatch(seen);
+    // (no send in this page: only a reply after the person's latest message that's still being written now)
+    startWatch(seen, { mode: 'resume', convo: convoOf(location.pathname) });
     return 'watching';
   }
   /** Opened at the reply: the person's last message at the top, the reply under it. */

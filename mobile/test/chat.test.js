@@ -327,3 +327,139 @@ test('the chat script: a long conversation\'s older messages that render late (T
     server.close();
   }
 });
+
+// (a paste into the message box, as the person would: the page's own paste handler takes it)
+const pasteInto = (pg, text) => pg.evaluate((t) => {
+  const ed = document.querySelector('.ProseMirror');
+  ed.focus();
+  const dt = new DataTransfer();
+  dt.setData('text/plain', t);
+  // (Chrome's ClipboardEvent drops a clipboardData given to it: the event's own, as a paste's)
+  const ev = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, 'clipboardData', { value: dt });
+  ed.dispatchEvent(ev);
+}, text);
+const ownMod = (name, lines) => `// ==WebMod==\n// @name        ${name}\n// @match       http://localhost/*\n// @style\n// ==/WebMod==\n${JSON.stringify({ css: '.x { color: red }', hide: Array.from({ length: lines }, (_, i) => `.ad-${i}`) }, null, 2)}`;
+
+test('the chat script: the person\'s own code (Tim, 11-18: "When I paste code into Claude in the app, the app reads it as a mod"): pasted in the message box, sent as a code block or a pasted-text card, never offered nor given Add to TRIF; the assistant\'s mod still is', { skip: browserTestsSkip(), timeout: 120000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    for (const query of ['?pasted', '?pasted&octane&gpt']) {
+      const page = await browser.newPage();
+      await page.goto(`${base}/chat.html${query}`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+      const T = query.includes('octane') ? '[data-message-role="user"]' : '[data-testid="user-message"]';
+      const R = query.includes('octane') ? '[data-message-role="assistant"]' : '.font-claude-response';
+      // (a short paste: a code block in the box; a long one: a pasted-text tile with its preview)
+      await pasteInto(page, ownMod('My pasted mod', 2));
+      await pasteInto(page, ownMod('My long pasted mod', 20));
+      assert.equal(await page.evaluate(() => document.querySelectorAll('.ProseMirror pre').length), 1);
+      assert.equal(await page.evaluate(() => document.querySelectorAll('.tiles .pasted pre').length), 1);
+      await page.waitForTimeout(1200);
+      assert.equal(await page.evaluate(() => document.querySelectorAll('.trif-add').length), 0, 'no Add to TRIF in the message box');
+      await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'make the headings green like this'); });
+      await page.click('button[aria-label="Send message"]');
+      await waitPost(page, 'sent');
+      const [done] = await waitPost(page, 'done');
+      // (the sent message holds the person's code block and pasted card; only the reply's mod is offered)
+      assert.equal(await page.evaluate((t) => document.querySelectorAll(`${t} pre`).length, T), 2, 'the person\'s message has both');
+      assert.deepEqual(done.mods.map((m) => m.match(/@name\s+(.+)/)[1].trim()), ['Calmer feed']);
+      await page.waitForTimeout(800);
+      assert.deepEqual(await page.evaluate((r) => [...document.querySelectorAll('.trif-add')].map((b) => !!b.closest(r)), R), [true], 'Add to TRIF under the reply\'s code only');
+      // (more pasted after the reply: no late offer, no button)
+      await pasteInto(page, ownMod('Another pasted mod', 3));
+      await page.waitForTimeout(4000);
+      assert.equal((await posts(page)).filter((m) => m.type === 'done').length, 1, 'no late offer of the message box\'s code');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('.composer .trif-add').length), 0);
+      // (the person's pasted card tapped: their own text in the viewer, not offered)
+      await page.click('.pasted-card');
+      const [v] = await waitPost(page, 'viewer');
+      assert.equal(v.text, '');
+      assert.match(v.skipped, /outside the assistant/);
+      assert.equal((await posts(page)).filter((m) => m.type === 'mod').length, 0);
+      await page.close();
+    }
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+test('the chat script: an old conversation (Tim, 11-18: "opening an old chat gets spurious pickups of old code"): loading in pieces, its messages late, drawn again on scroll-up, a reload watched again, the chat switched to it mid-reply: none of its mods offered; a new live reply still is, and /new → /chat/<id> keeps the watch', { skip: browserTestsSkip(), timeout: 150000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  const names = (d) => d.mods.map((m) => m.match(/@name\s+(.+)/)[1].trim());
+  const say = (pg, t) => pg.evaluate((x) => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, x); }, t);
+  try {
+    browser = await launch();
+    // (just opened, then scrolled up: nothing)
+    let page = await browser.newPage();
+    await page.goto(`${base}/chat/old-a?oldchat`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await page.waitForTimeout(2600);
+    await page.evaluate(() => window.__standinScrollUp());
+    await page.waitForTimeout(1500);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.history pre').length), 3);
+    assert.deepEqual((await posts(page)).filter((m) => ['done', 'mod', 'viewer'].includes(m.type)), []);
+    await page.close();
+
+    // (the app reloading it while it thinks a reply is being written: resume at once, before the pieces render)
+    page = await browser.newPage();
+    await page.goto(`${base}/chat/old-b?oldchat`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.resume()), 'watching');
+    const [resumed] = await waitPost(page, 'done');
+    assert.deepEqual(resumed.mods, [], 'nothing from a resumed old chat');
+    assert.ok((await posts(page)).some((m) => m.type === 'held' && m.history >= 1 && m.mode === 'resume'));
+    await page.close();
+
+    // (a send while it's still loading in pieces: only the new reply's mod; the re-render after, no late offer)
+    page = await browser.newPage();
+    await page.goto(`${base}/chat/old-c?oldchat`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await say(page, 'make the headings green');
+    await page.click('button[aria-label="Send message"]');
+    const [live] = await waitPost(page, 'done');
+    assert.deepEqual(names(live), ['Calmer feed']);
+    await page.evaluate(() => window.__standinScrollUp());
+    await page.waitForTimeout(4000);
+    assert.equal((await posts(page)).filter((m) => m.type === 'done').length, 1, 'no late offer after the re-render');
+    await page.close();
+
+    // (/new → /chat/<id> at the send: the same watch, offered; then the chat switched to an old conversation in the
+    // middle of a reply: the watch ends, nothing offered, nothing late)
+    page = await browser.newPage();
+    await page.goto(`${base}/new`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await say(page, 'make the headings green');
+    await page.click('button[aria-label="Send message"]');
+    const [first] = await waitPost(page, 'done');
+    assert.match(await page.evaluate(() => location.pathname), /^\/chat\/\w+$/);
+    assert.deepEqual(names(first), ['Calmer feed']);
+    await say(page, 'two please, wait 8');
+    await page.click('button[aria-label="Send message"]');
+    await waitPost(page, 'sent', 2);
+    await page.waitForTimeout(1500);
+    await page.click('#old-chat');
+    const left = (await waitPost(page, 'done', 2))[1];
+    assert.equal(left.why, 'left');
+    assert.deepEqual(left.mods, []);
+    await page.waitForTimeout(9000);
+    assert.equal((await posts(page)).filter((m) => m.type === 'done').length, 2, 'nothing more from the old chat');
+    await page.close();
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

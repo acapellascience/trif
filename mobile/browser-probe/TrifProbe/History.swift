@@ -155,7 +155,7 @@ struct HistoryView: View {
                             }
                             .foregroundStyle(.primary)
                             .contextMenu {
-                                Button("Open in a new tab") { browser.newTab(e.url); dismiss() }
+                                Button("Open in New Tab") { browser.newTab(e.url); dismiss() }
                                 Button("Copy address") { UIPasteboard.general.string = e.url }
                             }
                         }

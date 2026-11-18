@@ -26,6 +26,18 @@
   whole chat (a dialog with the file's name, Download and Close, its code with line numbers a person can't select),
   the message box still there underneath; `?viewerroute` gives the viewer an address of its own (/chat/<id>/files/<name>)
   that Back or Close leaves.
+  `?pasted` (Tim, 11-18: "When I paste code into Claude in the app, the app reads it as a mod"): a paste of several lines
+  goes into the message box as a code block (a pre inside the ProseMirror, as claude.ai renders pasted code), and one
+  of 20 lines or more as a pasted-text tile (PASTED, a preview of the text in a pre); the sent message keeps both (the
+  code block, and the pasted card, which a tap opens in the viewer, as Claude opens pasted text). None of it is ever
+  the assistant's.
+  `?oldchat` (Tim, 11-18: "opening an old chat gets spurious pickups of old code"): the page is an old conversation that
+  loads in pieces, as a long claude.ai one does: the last reply first (an empty box filled in twice, no streaming
+  mark), then the reply before it, then the person's messages late, all in a history box above anything sent here; a
+  scroll to the top of the conversation (or window.__standinScrollUp()) renders an older exchange above and draws the
+  others again (new elements, the same text). Every one of its mods is old. The header's "Older chat" button goes to
+  such a conversation in the page (its address /chat/old-…, no load, as claude.ai's Recents), whatever is going on.
+  /new serves this page too (a new chat there gets /chat/<id> at its first send).
   `?greet`: an empty conversation's greeting heading ("How can I help you today?", as both chats have one) and an
   Upgrade plan button in the header, for TRIF's greeting and upsell hiding (chat.js look).
 -->
@@ -58,11 +70,16 @@
   .viewer header { display: flex; gap: 8px; align-items: center; }
   .viewer header span { flex: 1; }
   .viewer pre { flex: 1; margin: 0; border-radius: 0; overflow: auto; }
+  .pasted { flex-direction: column; align-items: flex-start !important; max-width: 220px; }
+  .pasted small, .pasted-card small { font-size: 10px; letter-spacing: 0.06em; opacity: 0.7; }
+  .pasted pre, .pasted-card pre { max-height: 3.6em; overflow: hidden; margin: 2px 0 0; padding: 4px 6px; font-size: 9px; }
+  .pasted-card { display: inline-flex; flex-direction: column; max-width: 220px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; margin: 0 0 6px; cursor: pointer; white-space: normal; }
+  .ProseMirror pre { white-space: pre; margin: 4px 0; }
   .viewer .linenumber { display: inline-block; width: 2.2em; opacity: 0.45; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
 <body>
-<header>Stand-in chat</header>
+<header>Stand-in chat <button type="button" id="old-chat" style="float: right; font: 13px system-ui; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit;">Older chat</button></header>
 <div id="log"></div>
 <div class="composer">
   <div class="tiles"></div>
@@ -98,7 +115,7 @@
     new MutationObserver(() => { if (log.querySelector('[data-testid="user-message"]')) h.remove(); }).observe(log, { childList: true });
   }
 
-  const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length); };
+  const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length || pastes.length); };
   ed.addEventListener('input', refresh);
   // (?draft: the box's attachments and text kept across a reload and put back a moment after the page loads, as
   // claude.ai keeps a draft)
@@ -151,12 +168,51 @@
         if (gptpaste && !f.type.startsWith('image/')) f.text().then((t) => { document.execCommand('insertText', false, t); refresh(); saveDraft(); });
         else takeFile(f);
       }
+    } else if (pastedMode && /\n/.test(dt.getData('text/plain').trim())) {
+      // (?pasted: several lines as a code block in the box, 20 or more as a pasted-text tile)
+      const t = dt.getData('text/plain');
+      if (t.trim().split('\n').length >= 20) addPasted(t);
+      else {
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.textContent = t;
+        pre.append(code);
+        const after = document.createTextNode('');
+        ed.append(pre, after);
+        getSelection().collapse(after, 0); // (the caret after the block, as an editor leaves it)
+      }
     } else {
       document.execCommand('insertText', false, dt.getData('text/plain'));
     }
     refresh();
     saveDraft();
   });
+  // (?pasted: a pasted-text tile in the box (Claude's PASTED card), its text in a preview; sent, a card in the message)
+  const pastedMode = location.search.includes('pasted');
+  const pastes = [];
+  const pastedPreview = (t, cls) => {
+    const el = document.createElement('div');
+    el.className = cls;
+    const small = document.createElement('small');
+    small.textContent = 'PASTED';
+    const pre = document.createElement('pre');
+    pre.textContent = t;
+    el.append(small, pre);
+    return el;
+  };
+  function addPasted(t) {
+    const entry = { text: t };
+    pastes.push(entry);
+    const tile = pastedPreview(t, 'pasted');
+    tile.setAttribute('data-testid', 'file-thumbnail');
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Remove pasted text');
+    x.textContent = '×';
+    x.addEventListener('click', () => { pastes.splice(pastes.indexOf(entry), 1); tile.remove(); refresh(); });
+    tile.append(x);
+    tiles.append(tile);
+  }
   ed.addEventListener('input', saveDraft);
   const kept = draft ? JSON.parse(sessionStorage.getItem('draft') || 'null') : null; // (the draft from before the load)
   if (draft) setTimeout(() => {
@@ -179,15 +235,19 @@ ${JSON.stringify(body, null, 2)}`;
 
   function go() {
     const text = ed.textContent.trim();
-    if (!text && !files.length) return;
+    if (!text && !files.length && !pastes.length) return;
     const attached = files.map((f) => f.text).join('\n');
     const msg = document.createElement(octane ? 'li' : 'div');
     if (octane) msg.setAttribute('data-message-role', 'user'); else msg.setAttribute('data-testid', 'user-message');
     for (const f of files) { const s = document.createElement('span'); s.className = 'sent-file'; s.textContent = f.name; msg.append(s, document.createElement('br')); }
-    msg.append(text);
+    // (?pasted: the person's pasted cards, a tap opening the text in the viewer, and the box's code blocks as they were)
+    for (const p of pastes) { const card = pastedPreview(p.text, 'pasted-card'); card.setAttribute('role', 'button'); card.addEventListener('click', () => openViewer('Pasted text', p.text)); msg.append(card, document.createElement('br')); }
+    if (pastedMode && ed.querySelector('pre')) msg.append(...[...ed.childNodes].map((n) => n.cloneNode(true)));
+    else msg.append(text);
     log.append(msg);
     ed.textContent = '';
     files.length = 0;
+    pastes.length = 0;
     tiles.textContent = '';
     if (draft) sessionStorage.removeItem('draft');
     if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}${location.search}`);
@@ -232,6 +292,50 @@ ${JSON.stringify(body, null, 2)}`;
   }
   if (older) setTimeout(addOlder, 1500);
   if (location.search.includes('reopen')) setTimeout(() => openViewer('old-feed.js', modFor('http://localhost', 'Calmer feed', { css: '.feed-item h2 { color: #b22222 }' })), 1000);
+
+  // (?oldchat, and the header's Older chat: an old conversation that loads in pieces, all into a history box above
+  // anything sent here; scrolled to the top, an older exchange renders and the rest is drawn again)
+  const oldMod = (n) => modFor('http://localhost', `Old feed ${n}`, { css: `.feed-item h2 { color: #3${n}3${n}a${n} }` });
+  function oldExchange(n) {
+    const u = document.createElement(octane ? 'li' : 'div');
+    if (octane) u.setAttribute('data-message-role', 'user'); else u.setAttribute('data-testid', 'user-message');
+    u.textContent = `an old ask (${n})`;
+    const r = document.createElement(octane ? 'li' : 'div');
+    if (octane) r.setAttribute('data-message-role', 'assistant'); else { r.className = 'font-claude-response'; r.setAttribute('data-is-streaming', 'false'); }
+    return { u, r, fill: () => { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = oldMod(n); pre.append(code); r.append(Object.assign(document.createElement('p'), { textContent: `Old reply ${n}:` }), pre); } };
+  }
+  let oldGen = 0;
+  function loadOld() {
+    const gen = ++oldGen;
+    let hist = log.querySelector('.history');
+    if (!hist) { hist = document.createElement('div'); hist.className = 'history'; log.prepend(hist); }
+    const later = (ms, f) => setTimeout(() => { if (gen === oldGen && hist.isConnected) f(); }, ms);
+    const e2 = oldExchange(2), e1 = oldExchange(1);
+    // (bottom first: the last reply's box, then its text in two goes, no streaming mark)
+    later(300, () => { hist.append(e2.r); });
+    later(450, () => { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = oldMod(2).slice(0, 60); pre.append(code); e2.r.append(Object.assign(document.createElement('p'), { textContent: 'Old reply 2:' }), pre); });
+    later(900, () => { e2.r.querySelector('pre code').textContent = oldMod(2); });
+    later(1300, () => { e1.fill(); hist.prepend(e1.r); });
+    // (the person's messages late, each before its reply)
+    later(2000, () => { e1.r.before(e1.u); e2.r.before(e2.u); });
+    let rerendered = false;
+    const up = () => {
+      if (rerendered || gen !== oldGen) return;
+      rerendered = true;
+      const e0 = oldExchange(0);
+      e0.fill();
+      for (const n of [...hist.children]) n.replaceWith(n.cloneNode(true));
+      hist.prepend(e0.u, e0.r);
+    };
+    window.__standinScrollUp = up;
+    log.addEventListener('scroll', () => { if (log.scrollTop < 10 && hist.childElementCount >= 4) up(); });
+  }
+  document.getElementById('old-chat').addEventListener('click', () => {
+    history.pushState({}, '', `/chat/old-${Math.random().toString(36).slice(2, 8)}${location.search}`);
+    log.textContent = '';
+    loadOld();
+  });
+  if (location.search.includes('oldchat')) loadOld();
 
   // (Claude's file viewer, as far as it matters here: over the whole chat, the message box left underneath)
   function openViewer(name, code) {
@@ -309,10 +413,10 @@ ${JSON.stringify(body, null, 2)}`;
     // ("wait N" in the message: the reply takes about N seconds, written a little at a time)
     const each = seconds ? Math.max(90, (seconds * 1000) / steps.length) : slow ? 220 : 90;
     let i = 0;
-    const pauseAt = octane ? Math.floor(steps.length / 3) : -1;
+    let pauseAt = octane ? Math.floor(steps.length / 3) : -1;
     const tick = () => {
       // (?octane: a 3 s pause partway, with no stop button, as chatgpt.com's while it searches)
-      if (i === pauseAt) { i++; const s2 = stop; s2.replaceWith(send); setTimeout(() => { send.replaceWith(s2); tick(); }, 3000); return; }
+      if (i === pauseAt) { pauseAt = -1; const s2 = stop; s2.replaceWith(send); setTimeout(() => { send.replaceWith(s2); tick(); }, 3000); return; }
       if (i < steps.length) { steps[i++](); log.scrollTop = log.scrollHeight; setTimeout(tick, each); return; }
       if (octane) box.setAttribute('data-message-complete', '');
       if (nostop) { refresh(); return; }

@@ -6,6 +6,21 @@ rest, which goes under "### More" (and on the GitHub release). It's written for 
 `node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
 summary is too long.
 
+## 0.3.1
+
+- **Style mods make every replacement**, not just the first one.
+- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
+- **Claude Code runs on Opus** when you haven't picked a model, and the panel says "Opus (default)".
+- **A paused tab works after your agent reloads it**: the site's own requests go through again.
+- **Sites' own errors** show in the browser's console again where a boxed mod runs.
+
+### More
+
+- A side-panel chat can read only its own site's mods through TRIF, and send TRIF only the commands its
+  `trif` uses (a security review finding).
+- Shorter guides for your agent, so it starts sooner. On scrolling feeds it hides first, and filters what the
+  site sends only when hiding isn't enough.
+
 ## 0.3.0
 
 - **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do

@@ -374,7 +374,9 @@ when the user's copy has the new @version).`,
     usage: 'trif mods',
     summary: 'list mods in the folder: id, matches, file (works without Chrome)',
     details: `When Chrome is reachable, mods the user switched off are marked [off]. Mods TRIF ships say "from
-TRIF, version N", and "update available" when a newer version is waiting (trif mod-update).`,
+TRIF, version N", and "update available" when a newer version is waiting (trif mod-update).
+In the browser, the All mods page lists every mod by site, with its switch and status: the side panel's
+Mods ⋯ menu → All mods…, or Settings → All mods.`,
     examples: ['trif mods', 'trif mods --json'],
   },
   new: {

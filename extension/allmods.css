@@ -1,0 +1,146 @@
+/* The All mods page (allmods.html, allmods.js): the side panel's tokens, rows, switches and cards
+   (sidepanel.css, switch.css), laid out for a whole tab. Light and dark follow the system, as the panel does. */
+
+html, body.allmods { height: auto; min-height: 100%; }
+body.allmods { display: block; overflow-x: hidden; overflow-y: auto; font-size: 13px; }
+
+.am-app { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+
+/* ---- the head ---- */
+.am-bar { position: static; display: flex; align-items: center; gap: 12px; padding: 22px 0 14px; }
+.am-robot svg { display: block; width: 30px; height: 30px; stroke: none; }
+.am-robot .rim { fill: var(--trif-green); }
+.am-robot .face { fill: #18181a; }
+.am-robot .eye { fill: #59dbab; }
+.am-title { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+.am-total { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+.am-away { margin: 0 0 10px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); border-radius: var(--radius); background: var(--bad-bg); color: var(--text); font-size: 12px; }
+
+/* ---- search and filters: they stay at the top as the list scrolls ---- */
+.am-tools { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 -24px; padding: 10px 24px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.am-search { flex: 1 1 280px; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; }
+.am-search:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.am-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.am-select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 12px; }
+.am-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.am-chip:hover { border-color: var(--faint); color: var(--text); }
+.am-chip[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--text); }
+.am-chip.none { opacity: 0.55; }
+.am-chip-n { min-width: 1.4em; padding: 0 5px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 11px; text-align: center; }
+.am-chip[data-filter="waiting"]:not(.none) .am-chip-n { color: var(--warn); }
+.am-chip[data-filter="errors"]:not(.none) .am-chip-n { color: var(--bad); }
+.am-clear { margin-left: 2px; }
+
+/* ---- what's selected, and what can be done with it ---- */
+.am-selbar { position: sticky; top: var(--am-tools-h, 52px); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.am-sel-count { margin-right: 6px; font-weight: 600; }
+.am-selbar .btn { padding: 5px 12px; }
+.am-selbar .btn:disabled { opacity: 0.5; cursor: default; }
+.am-bulk-delete:not(:disabled):hover { border-color: var(--bad); color: var(--bad); }
+.am-sel-none { margin-left: auto; }
+
+.am-line { display: flex; align-items: baseline; gap: 10px; margin: 12px 2px 0; color: var(--muted); font-size: 12px; }
+.am-msg { margin: 8px 2px 0; color: var(--muted); font-size: 12px; }
+.am-msg.error { color: var(--bad); }
+.am-empty { margin: 32px 0; color: var(--muted); text-align: center; }
+
+/* ---- the sections and the sites ---- */
+.am-sections { display: grid; gap: 14px; margin-top: 10px; }
+.am-section-head { margin: 18px 2px -4px; }
+.am-section-title { margin: 0; font-size: 15px; font-weight: 650; }
+.am-section-head .note { margin-top: 2px; }
+/* (each site's box is drawn only when it's near the screen: the browser's own way of keeping a long list fast;
+   it stays in the page for the keyboard, find and screen readers) */
+.am-group { content-visibility: auto; contain-intrinsic-size: auto 260px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.am-ghead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.am-fav { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; overflow: hidden; }
+.am-fav img { width: 16px; height: 16px; display: block; }
+.am-fav.every svg { width: 16px; height: 16px; color: var(--muted); }
+.am-letter { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--raised); color: var(--muted); font-size: 11px; font-weight: 650; }
+.am-gname { margin: 0; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; }
+.am-gname-text { overflow-wrap: anywhere; }
+.am-host { color: var(--muted); font-size: 12px; font-weight: 400; }
+.am-state { padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; line-height: 18px; white-space: nowrap; }
+.am-state.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.am-state.off { color: var(--muted); }
+.am-state.disconnected { color: var(--muted); border-style: dashed; }
+.am-state.blocked { color: var(--blocked); border-color: color-mix(in srgb, var(--blocked) 45%, var(--line)); }
+.am-gcount { color: var(--faint); font-size: 12px; }
+.am-open { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.am-open svg { width: 13px; height: 13px; }
+/* (a site where TRIF is off: its mods don't run there, whatever their switches say) */
+.am-group.site-off .am-list .light.on { background: color-mix(in srgb, var(--switch-on) 40%, transparent); }
+
+/* ---- the rows: the panel's (light, name, icons, tags, description, switch), one line on a wide page ---- */
+.am-list.mod-list { max-height: none; overflow: visible; margin: 0; padding: 0; scrollbar-gutter: auto; }
+.am-list.mod-list li { padding: 0; }
+.am-row { border-top: 1px solid var(--line); }
+.am-row:first-child { border-top: 0; }
+.am-row.picked { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.am-row.busy { opacity: 0.6; }
+.am-mod {
+  display: grid; align-items: center; column-gap: 12px; row-gap: 2px; padding: 9px 14px;
+  grid-template-columns: 18px minmax(200px, 1.15fr) minmax(0, 1.6fr) auto auto 30px;
+  grid-template-areas: "check main desc meta acts switch";
+}
+.am-mod > .am-check { grid-area: check; }
+.am-mod > .am-main-col { grid-area: main; min-width: 0; }
+.am-mod > .am-desc { grid-area: desc; margin: 0; min-width: 0; }
+.am-mod > .am-meta { grid-area: meta; }
+.am-mod > .am-acts { grid-area: acts; }
+.am-mod > .am-right { grid-area: switch; justify-self: end; display: flex; }
+.am-check { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.am-ghead .am-check { margin-right: 2px; }
+.am-name { overflow-wrap: anywhere; }
+.am-tier { padding: 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 500; line-height: 16px; white-space: nowrap; }
+.am-tier.style { color: var(--led-green); background: color-mix(in srgb, var(--led-green) 12%, transparent); }
+.am-tier.boxed { color: var(--led-yellow); background: color-mix(in srgb, var(--led-yellow) 14%, transparent); }
+.am-tier.free { color: var(--led-coral); background: color-mix(in srgb, var(--led-coral) 12%, transparent); }
+.am-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 0; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+.am-offon { color: var(--muted); }
+.am-acts { display: flex; align-items: center; gap: 2px; }
+.am-acts .icon-btn { width: 26px; height: 26px; color: var(--faint); }
+.am-acts .icon-btn:hover:not(:disabled) { color: var(--text); }
+.am-acts .mod-delete:hover:not(:disabled) { color: var(--bad); }
+.am-acts svg { width: 14px; height: 14px; }
+.am-acts .mod-code svg { width: 13px; height: 13px; }
+.am-err { padding: 0 14px 8px 44px; }
+.am-tag-updated { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.am-tag-update { color: var(--muted); }
+.am-held-switch[aria-checked="false"] { background: color-mix(in srgb, var(--warn) 35%, transparent); }
+.am-held-switch:hover { background: color-mix(in srgb, var(--warn) 50%, transparent); }
+
+/* narrower: the description, when it changed and the buttons go under the name */
+@media (max-width: 820px) {
+  .am-app { padding: 0 16px 96px; }
+  .am-tools { margin: 0 -16px; padding: 10px 16px; }
+  .am-mod {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    grid-template-areas: "check main switch" ". desc acts" ". meta meta";
+  }
+  .am-mod > .am-desc { padding-left: 14px; }
+  .am-meta { flex-direction: row; gap: 8px; align-items: baseline; padding-left: 14px; }
+}
+
+/* ---- Recently deleted ---- */
+.am-deleted { margin-top: 22px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.am-deleted-head { cursor: pointer; color: var(--muted); font-weight: 500; }
+.am-deleted-head .count { margin-left: 4px; }
+.am-trash { list-style: none; margin: 8px 0 0; padding: 0; }
+.am-trash-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); }
+.am-trash-row:first-child { border-top: 0; }
+.am-trash-words { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.am-trash-name { font-weight: 500; }
+.am-trash-where { color: var(--faint); font-size: 12px; }
+.am-trash-desc { flex-basis: 100%; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-trash-note { margin-top: 6px; }
+
+/* ---- Undo, at the bottom ---- */
+.am-toast { position: fixed; left: 50%; bottom: 20px; z-index: 4; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; max-width: calc(100% - 32px); padding: 9px 12px 9px 16px; border-radius: 10px; background: var(--text); color: var(--bg); box-shadow: 0 10px 30px rgb(0 0 0 / 0.3); }
+.am-toast .btn { background: transparent; border-color: color-mix(in srgb, var(--bg) 40%, transparent); color: var(--bg); font-weight: 600; }
+
+/* ---- the cards over the page: the panel's, centred ---- */
+body.allmods .approval { width: min(560px, calc(100% - 32px)); margin: 56px auto auto; max-height: calc(100% - 80px); }
+body.allmods .approval.am-code { width: min(860px, calc(100% - 32px)); }
+body.allmods .am-code .cv-code { max-height: min(62vh, 640px); }

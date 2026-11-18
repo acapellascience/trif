@@ -85,6 +85,34 @@ function listTrash(ws) {
   return out.sort((a, b) => b.deletedAt - a.deletedAt);
 }
 
+/**
+ * What the All mods page's "Recently deleted" lists: each mod's newest copy in the trash (the one restoreMod
+ * brings back), newest first, at most `limit`, with its @name and @description read from the copy's header:
+ * [{id, deletedAt, name, description, exists}] (`exists`: a mod of that id is in the folder again, so Restore
+ * would be refused).
+ */
+function trashList(ws, { limit = 200 } = {}) {
+  const { parseHeader } = require('./mods');
+  const out = [];
+  const seen = new Set();
+  for (const t of listTrash(ws)) {
+    if (seen.has(t.id)) continue;
+    seen.add(t.id);
+    let head = '';
+    try {
+      const fd = fs.openSync(t.file, 'r');
+      try { const b = Buffer.alloc(16 * 1024); head = b.subarray(0, fs.readSync(fd, b, 0, b.length, 0)).toString('utf8'); } finally { fs.closeSync(fd); }
+    } catch { /* gone meanwhile */ }
+    let h = {};
+    try { h = parseHeader(head); } catch { /* no header: its id stands for it */ }
+    const [site, mod] = t.id.split('/');
+    out.push({ id: t.id, deletedAt: t.deletedAt, name: String(h.name || mod).slice(0, 200), description: String(h.description || '').slice(0, 300),
+      exists: fs.existsSync(path.join(ws.modsDir, site, `${mod}.js`)) });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 /** Removes trash entries older than `days`. Returns how many went. */
 function emptyTrash(ws, { days = TRASH_DAYS, now = Date.now() } = {}) {
   let removed = 0;
@@ -146,4 +174,4 @@ function restoreMod(ws, id, { scope, splits = [] } = {}) {
   return { id: `${site}/${mod}`, file };
 }
 
-module.exports = { siteInScope, deleteMod, restoreMod, listTrash, emptyTrash, parseId, TrashError, TRASH_DAYS };
+module.exports = { siteInScope, deleteMod, restoreMod, listTrash, trashList, emptyTrash, parseId, TrashError, TRASH_DAYS };

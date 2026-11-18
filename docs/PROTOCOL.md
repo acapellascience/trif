@@ -163,7 +163,9 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated?, rules?, text?, sandboxed?, pageFacts?, style?:{css, values, settings}, codeHash? }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated?, rules?, text?, sandboxed?, pageFacts?, style?:{css, values, settings}, codeHash?, changedAt? }`
+(`changedAt`: the file's last change, in ms, for the All mods page; it comes with any other change to the mod,
+not alone.)
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods
 (`sandboxed` is part of it only when set, so other mods' hashes are as before); `pageFacts`, on a sandboxed
 mod: what its code could do as a free mod (helper/lib/powers.js facts), for a browser without the sandbox;
@@ -1045,6 +1047,22 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
   `{kind: "done", ok: false}` (plus `login: true` for a login).
 
+### The All mods page
+
+`allmods.html` (allmods-page.js, which mounts allmods.js, with its model in allmods-model.js) lists every mod
+by site in a tab of its own: every site first, then the sites from A to Z, then the phone mods (`phone~<site>`),
+each site with its name (Tim's mods' name for it, when there is one), the icon its open tabs show (nothing is
+fetched for it) and whether TRIF is on, off, blocked or disconnected there; each mod with its tier, power icons,
+switch, status (waiting for an OK, errors, "stopped a click", updated, update available) and when its file last
+changed (`changedAt`). Search (names, descriptions, sites, and the code: `{type: "mods.search", text}` answers
+`{ids}` from the code this extension has) and filters; switches (`mod.enable`, the whole mod), Show code
+(`mod.code`, read-only), Export (`mod.export`, and `mod.exportMany` for a selection), Delete (`mod.delete`, with
+Undo: `mod.restore`) and Recently deleted (`mod.trash`, Restore). It talks to the background as the panel does
+(a `panel` port), with no tab: nothing reloads. A held mod's switch opens the approval card (extension/approval.js,
+the panel's own), and a mod switched on there that then waits for an OK opens it too. Opened with `{type:
+"allmods.open", windowId?}` (the panel's Mods ⋯ menu, All mods…, and Settings): an open one comes to the front.
+The component takes its backend as an argument (`mountAllMods(root, api)`), so the phone's list can mount it.
+
 ### Helper
 
 New native request commands (answered with a normal `response`):
@@ -1069,6 +1087,7 @@ New native request commands (answered with a normal `response`):
 | `mod.historyRestore` | `id, stamp` | `{id, restored, at}`: puts that version back, keeping the current one (source `restore`); the next sync judges it like any change from outside. Not from a run |
 | `mod.export` | `id` | `{id, file, dir}`: the mod's file copied to the downloads folder as `<site>-<mod>.js` (a number added if taken) and shown in Finder; found by its id, as `mod.reveal` does (helper/lib/share.js; `TRIF_DOWNLOADS` for tests). Not from a run |
 | `mod.exportSite` | `site` | `{site, dir, ids}`: all of a site's mods into a folder `<site> mods` there, shown. Not from a run |
+| `mod.exportMany` | `ids` | `{dir, ids, where}`: the All mods page's Export of a selection: any sites' mods into one folder `TRIF mods` (a number added if taken), each as `<site>-<mod>.js`, after the same folder chooser; `{cancelled: true}` on a cancel; an unknown id refuses it all (helper/lib/share.js exportMods). Not from a run |
 | `mod.import` | `text, name, site?, choice?` | a mod's text (from a file the user chose or dropped): `{needsSite: [sites]}` when its @match doesn't name one site, `{exists, site, name}` when a mod of that name is there (`choice`: `copy` or `replace`, which keeps the old one in history), else `{id, file, replaced?}`. The header must parse; `@source`/`@version` are taken out; recorded in `imported.json` (the mod is sent with `imported: true`), and held like any mod from outside. Not from a run |
 | `mod.preview` | `text, name?, site?, forTry?` | a mod's text read as TRIF reads it, nothing written (helper/lib/preview.js): `{kind, name, file, description, site, matches, excludes, can, asks}`, and with `forTry`, for a style or boxed mod, `run: {id, kind, code, matches, excludes, style?}`: what "Try it here" runs, built under a name of its own (`<site>/~try-<name>`), with no powers. Throws when TRIF couldn't import it. Not from a run |
 | `downloads.status`, `downloads.setWatch`, `downloads.take`, `downloads.done`, `downloads.ignore` | `on` / `id` / `id, how` / `id` | Mod files in the user's downloads: the state above; the Settings switch (config.json `watchDownloads`, off by default); the offer's file read again, `{text, name}`, only if it's what was offered; Add (`how: added`) or Not now (each file offered once, kept in the private folder's `downloads.json`, which every browser's helper reads); Ignore files from its site. From the extension's connection only (the side panel's clicks), as `agent.withoutSandbox`: refused on the socket |
@@ -1080,6 +1099,7 @@ New native request commands (answered with a normal `response`):
 | `files.list` / `files.remove` / `files.reveal` | `site` (and `name`) | a site's files `{site, files: [{name, size, at}]}`; one moved to `trash/<site>/files/`; the folder shown in Finder |
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
+| `mod.trash` | — | `{trash: [{id, deletedAt, name, description, exists}]}`: the All mods page's Recently deleted: each mod's newest copy in the trash (what `mod.restore` brings back), newest first, at most 200, its @name and @description read from the copy; `exists`: a mod of that id is back in its folder (lib/trash.js trashList). Not from a run |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
 | `shipped.install` | `ids?` or `sites?`, `others?: "none"` | Tim's mods: `ids`, just these (ids from `PREINSTALLED`, anything else refused; a site chosen for the first time this way gets its other mods `skipped`), or every mod not on disk of these sites (left out or deleted before: added fresh) (scopes: x.com, google.com; all of them without either): copied in, TRIF offered on for the sites in `SITES_ON`; `others: "none"` records none for every site not chosen yet. `{added: [ids], sitesOn: [sites newly offered], starter}` (see "Preinstalled mods"); also on the socket, not from a run |
 | `shipped.none` | – | none for every site not chosen yet ("Start with none"): `{starter}`; also on the socket, not from a run |

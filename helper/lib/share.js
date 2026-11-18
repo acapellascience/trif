@@ -91,6 +91,27 @@ function exportSite(ws, list, site, { to = null, ids: only = null, env = process
   return { site: s, dir, ids };
 }
 
+/**
+ * Several mods, any sites', copied into one folder "TRIF mods" in the downloads folder (or `to`), each as
+ * <site>-<mod>.js (the All mods page's Export for a selection): {dir, ids}. Ids it doesn't know are refused.
+ */
+function exportMods(ws, list, ids, { to = null, env = process.env } = {}) {
+  const want = [...new Set((Array.isArray(ids) ? ids : []).map((x) => String(x).trim()).filter(Boolean))];
+  if (!want.length) throw new ShareError('no mods to export');
+  const known = new Set((list || []).map((m) => m.id));
+  const missing = want.filter((id) => !known.has(id));
+  if (missing.length) throw new ShareError(`no mod ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}`);
+  const parent = to ? path.resolve(String(to)) : downloadsDir(env);
+  fs.mkdirSync(parent, { recursive: true });
+  const dir = path.join(parent, freeName(parent, 'TRIF mods'));
+  fs.mkdirSync(dir);
+  for (const id of want) {
+    const [site, mod] = id.split('/');
+    fs.copyFileSync(modFile(ws.modsDir, list, id), path.join(dir, freeName(dir, `${site}-${mod}.js`)));
+  }
+  return { dir, ids: want };
+}
+
 // ---- import
 
 const hostOfMatch = (m) => {
@@ -274,4 +295,4 @@ function revealFiles(ws, site) {
   return revealPath(dir, 'folder', { open: true });
 }
 
-module.exports = { ShareError, SLICE_MAX, DISK_MARGIN, fileBegin, fileSlice, fileEnd, fileAbort, downloadsDir, exportMod, exportSite, sitesOf, stripShipped, importMod, loadImported, addFile, listFiles, removeFile, revealFiles, cleanFileName };
+module.exports = { ShareError, SLICE_MAX, DISK_MARGIN, fileBegin, fileSlice, fileEnd, fileAbort, downloadsDir, exportMod, exportSite, exportMods, sitesOf, stripShipped, importMod, loadImported, addFile, listFiles, removeFile, revealFiles, cleanFileName };

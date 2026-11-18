@@ -17,6 +17,7 @@ import {
 import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS, sandboxModCode } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
+import { modsMatching } from './allmods-model.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createTabLocks, leakGuard } from './tablock.js';
@@ -2009,6 +2010,22 @@ async function loadAndReport(tabId, trigger) {
 
 // ---- onboarding page ----------------------------------------------------------------------------
 
+// The All mods page (allmods.html, allmods.js): one tab of it, brought to the front if it's open, else opened
+// in the window it was asked from (the panel's), next to its tab.
+async function openAllMods(msg = {}) {
+  const url = chrome.runtime.getURL('allmods.html');
+  const [existing] = await chrome.tabs.query({ url: `${url}*` }).catch(() => []);
+  if (existing) {
+    await chrome.tabs.update(existing.id, { active: true });
+    await chrome.windows.update(existing.windowId, { focused: true }).catch(() => {});
+    return { tabId: existing.id, opened: false };
+  }
+  const windowId = Number.isInteger(msg.windowId) ? msg.windowId : undefined;
+  const t = await chrome.tabs.create({ url, ...(windowId !== undefined ? { windowId } : {}) });
+  return { tabId: t.id, opened: true };
+}
+
+
 async function openOnboarding() {
   const url = chrome.runtime.getURL('onboarding.html');
   const [existing] = await chrome.tabs.query({ url });
@@ -2149,6 +2166,7 @@ async function uiStatus() {
       chatWaiting: !!state.chatWaiting[m.id],
       ...(waitsThere(m) ? { waitsThere: true } : {}),
       imported: !!m.imported,
+      changedAt: Number.isFinite(m.changedAt) ? m.changedAt : null, // (the file's last change: the All mods page)
       fixUndo: !!(state.fixes[m.id]?.fixedHash && state.fixes[m.id].fixedHash === m.hash),
       broken: openErrors(state.health, m).map(({ fp, message, line, count, quiet, clickjack }) => ({ fp, message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}), ...(clickjack ? { clickjack: true } : {}) })).slice(0, 10),
     })),
@@ -2511,6 +2529,13 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     // (ten minutes and a bit: the helper asks where first, with the system's folder chooser)
     case 'mod.export': return helperRequest('mod.export', { id: String(msg.id ?? '') }, 11 * 60 * 1000);
     case 'mod.toPhone': return helperRequest('mod.toPhone', { id: String(msg.id ?? '') }, 30000);
+    // The All mods page (allmods.html): Export of a selection, any sites' mods (helper lib/share.js exportMods);
+    // its "Recently deleted" (lib/trash.js trashList); the code search, here, over the mods this extension has
+    // (modsMatching); and opening the page itself from the panel's menu or Settings (openAllMods).
+    case 'mod.exportMany': return helperRequest('mod.exportMany', { ids: (Array.isArray(msg.ids) ? msg.ids : []).slice(0, 5000).map(String) }, 11 * 60 * 1000);
+    case 'mod.trash': return helperRequest('mod.trash', {}, 10000);
+    case 'mods.search': return { ids: modsMatching(state.mods, msg.text) };
+    case 'allmods.open': return openAllMods(msg);
     case 'mod.exportSite': return helperRequest('mod.exportSite', { site: String(msg.site ?? ''), ...(Array.isArray(msg.ids) ? { ids: msg.ids.slice(0, 5000).map(String) } : {}) }, 11 * 60 * 1000);
     case 'mod.import': {
       // Import a mod (the panel's button, or a .js dropped on it): its text; the helper checks and writes it

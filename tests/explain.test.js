@@ -110,7 +110,7 @@ test('the row chips: the words and lines extension/modlevel.js shows', async () 
 test('the panel\'s own labels and lines (tiers, tags, agent levels, faces, chat mods) are in its code', async () => {
   const { GROUP_NAMES } = await import('../extension/lib.js');
   // (the code as its strings read: \' unescaped)
-  const js = ['sidepanel.js', 'lib.js', 'agentsites.js', 'faces.js', 'login.js'].map((f) => read(`extension/${f}`)).join('\n').replace(/\\'/g, '\'');
+  const js = ['sidepanel.js', 'cards.js', 'approval.js', 'lib.js', 'agentsites.js', 'faces.js', 'login.js'].map((f) => read(`extension/${f}`)).join('\n').replace(/\\'/g, '\'');
   const html = read('extension/sidepanel.html');
   const src = `${js}\n${html}`;
   // (each part of a sentence between its placeholders; for the ones the code builds in pieces, the pieces)
@@ -158,8 +158,11 @@ test('the panel\'s "i" in place of "more" (More / Less for screen readers), and 
   const js = read('extension/sidepanel.js');
   assert.match(js, /from '\.\/explain\.js'/);
   assert.match(js, /await loadExplain\(\)/);
-  assert.match(js, /el\('button', 'more-btn'\);\n\s*btn\.type = 'button';\n\s*btn\.append\(iconSvg\('info'\)\)/);
-  assert.match(js, /box\.hidden \? 'More' : 'Less'/);
+  // ("more" itself is in the cards' shared pieces, which the panel and the All mods page use: cards.js addMore)
+  assert.match(js, /addMore[^\n]*from '\.\/cards\.js'/);
+  const cards = read('extension/cards.js');
+  assert.match(cards, /el\('button', 'more-btn'\);\n\s*btn\.type = 'button';\n\s*btn\.append\(iconSvg\('info'\)\)/);
+  assert.match(cards, /box\.hidden \? 'More' : 'Less'/);
   assert.match(js, /function openTierCard\(/);
   // (the cards scroll up and down only)
   const css = read('extension/sidepanel.css');

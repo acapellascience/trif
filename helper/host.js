@@ -306,6 +306,11 @@ function pageFactsOf(m) {
   return pageFactsCache.get(key);
 }
 
+// A mod file's last change, in whole ms (0 when it can't be read).
+function mtimeOf(file) {
+  try { return Math.round(fs.statSync(file).mtimeMs); } catch { return 0; }
+}
+
 function syncMods(reason, force) {
   if (state.shuttingDown) return;
   clearTimeout(debounceTimer);
@@ -395,7 +400,10 @@ function syncMods(reason, force) {
       .map(([s, u]) => siteReachOf(s, u, u, clickWordsOf([m]))) : [];
     const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(siteOk.length ? { siteOk } : {}), ...(siteReach.length ? { siteReach } : {}) }
       : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
-    return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
+    // (when its file last changed, for the All mods page: a sync sends it with any change to the mod)
+    const changedAt = mtimeOf(m.file);
+    const withTime = changedAt ? { ...withFacts, changedAt } : withFacts;
+    return startOff.has(m.id) ? { ...withTime, startOff: true } : withTime;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
@@ -574,7 +582,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.toPhone', 'mod.import',
+const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.exportMany', 'mod.trash', 'mod.toPhone', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.preview']);
@@ -840,6 +848,20 @@ function agentCommand(cmd, args) {
         return { site: r.site, dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };
       });
     }
+    // The All mods page's Export of a selection (lib/share.js exportMods): any sites' mods, one folder chooser,
+    // one folder "TRIF mods" with each mod as <site>-<mod>.js
+    case 'mod.exportMany': {
+      const share = require('./lib/share');
+      const ids = (Array.isArray(args.ids) ? args.ids : []).map(String).slice(0, 5000);
+      if (!ids.length) throw new Error('no mods to export');
+      return require('./lib/choosefolder').chooseFolder(`Where should TRIF save ${ids.length === 1 ? 'this mod' : `these ${ids.length} mods`}?`, { start: share.downloadsDir() }).then((to) => {
+        if (!to) return { cancelled: true };
+        const r = share.exportMods(ws, state.mods, ids, { to });
+        require('./lib/reveal').revealPath(r.dir, 'folder');
+        logger.info(`exported ${r.ids.length} mod(s) to ${r.dir}`);
+        return { dir: path.basename(r.dir), ids: r.ids, where: homeShort(path.dirname(r.dir)) };
+      });
+    }
     // Send to iPhone (lib/tophone.js): a copy of the mod's file to the Mac's AirDrop, which the iPhone app opens
     // ("Add this mod?"); without AirDrop's window, the copy shown in Finder. No server.
     case 'mod.toPhone': {
@@ -967,6 +989,9 @@ function agentCommand(cmd, args) {
       syncMods('mod update', false);
       return args.choice === 'new' ? { id: r.id, choice: 'new', version: r.version, trashed: !!r.trashed } : { id: r.id, choice: 'mine', version: r.version };
     }
+    // The All mods page's "Recently deleted": the newest copy of each mod in the trash (lib/trash.js trashList).
+    // The user's alone, like the panel's Undo: not from a run (a run's helper has no part in this page).
+    case 'mod.trash': return { trash: require('./lib/trash').trashList(ws) };
     case 'mod.restore': {
       const r = restoreMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`restored mod ${r.id}`);

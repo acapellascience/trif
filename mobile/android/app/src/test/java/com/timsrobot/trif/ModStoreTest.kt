@@ -242,6 +242,15 @@ class ModStoreTest {
         assertFalse(s.mods[1].on); assertTrue(s.mods[1].offSites.isEmpty())
     }
 
+    /** Without the shared rules a switch changes nothing (iPhone's ModRuns.setOn / setGroup answering nil). */
+    @Test fun noRulesSwitchesStay() {
+        val s = store()
+        s.addText(mod("A"))
+        s.reader = object : ModReader by FakeReader() { override fun core(name: String, args: String): String? = null }
+        s.setOn("a.com/A", false); s.setGroup("style", false, "a.com")
+        assertTrue(s.mods[0].on); assertTrue(s.groupsOff.isEmpty())
+    }
+
     @Test fun signatureChangesOnlyWithWhatRunsThere() {
         val s = store()
         s.addText(mod("A")); s.addText(mod("B", "site" to "b.com"))

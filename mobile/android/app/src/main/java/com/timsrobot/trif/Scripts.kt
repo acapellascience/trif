@@ -34,8 +34,9 @@ object Scripts {
                        val excludes: List<String> = emptyList())
         /** The mods of this plan that run on a page at `url`. */
         fun runningOn(url: String): List<One> {
-            val site = Site.of(WebAddress.of(url)?.host ?: "")
-            return mods.filter { site !in it.off && MatchPattern.any(it.matches, url) && !MatchPattern.any(it.excludes, url) }
+            val u = WebAddress.of(url)
+            val site = Site.of(u?.host ?: "")
+            return mods.filter { site !in it.off && ModRuns.applies(it.matches, it.excludes, u) }
         }
         /** What runs on a page at `url` under this plan, as one string: a page loaded under one plan whose
          *  signature differs under the next loads again (iPhone's refreshIfStale; docs/MOBILE-BEHAVIOUR.md). */

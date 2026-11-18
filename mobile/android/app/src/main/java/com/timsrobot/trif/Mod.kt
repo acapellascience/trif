@@ -69,7 +69,7 @@ data class InstalledMod(
     /** Its file's name, as desktop keeps it (sites/<site>/<name>.js): read again, it keeps its id. */
     val file get() = "${id.substringAfterLast('/').ifEmpty { "mod" }}.js"
     /** A mod for several sites (or every site) has a switch per site (desktop's isMultiSite). */
-    val multiSite get() = everywhere || sites.map(Site::of).toSet().size > 1
+    val multiSite get() = ModRuns.multiSite(everywhere, sites)
     /** The needs not yet allowed (modfile.js waiting): what a hold waits for. */
     val waiting get() = (needs + extraNeeds).filter { n ->
         val ok = allowed[n.key] ?: return@filter true
@@ -159,52 +159,6 @@ object Site {
     fun hostIsIn(host: String, site: String): Boolean {
         val h = host.lowercase().removePrefix("www.")
         return h == site || h.endsWith(".$site")
-    }
-}
-
-/** An address cut as a page sees it (location): scheme and host lower case, the path and query as written. */
-data class WebAddress(val scheme: String, val host: String, val pathQuery: String) {
-    companion object {
-        fun of(url: String): WebAddress? {
-            val sep = url.indexOf("://").takeIf { it > 0 } ?: return null
-            val scheme = url.substring(0, sep).lowercase()
-            val rest = url.substring(sep + 3).substringBefore('#')
-            val end = rest.indexOfFirst { it == '/' || it == '?' }.let { if (it < 0) rest.length else it }
-            var host = rest.substring(0, end).substringAfterLast('@')
-            host = if (host.startsWith("[")) host.substringBefore(']') + "]" else host.substringBefore(':')
-            val pq = rest.substring(end)
-            return WebAddress(scheme, host.lowercase(), if (pq.startsWith("/")) pq else "/$pq")
-        }
-    }
-}
-
-/** Chrome-style match patterns (https://x.com/ and any path, any scheme on x.com and under it, <all_urls>), as modfile.js matchesUrl tests them. */
-object MatchPattern {
-    private val paths = HashMap<String, Regex>()
-
-    fun any(patterns: List<String>, url: String): Boolean {
-        val u = WebAddress.of(url) ?: return false
-        return patterns.any { one(it, u) }
-    }
-
-    fun one(p: String, u: WebAddress): Boolean {
-        val web = u.scheme == "http" || u.scheme == "https"
-        if (p == "<all_urls>") return web
-        val sep = p.indexOf("://").takeIf { it >= 0 } ?: return false
-        val ps = p.substring(0, sep)
-        val rest = p.substring(sep + 3)
-        val slash = rest.indexOf('/').takeIf { it >= 0 } ?: return false
-        val ph = rest.substring(0, slash).lowercase()
-        val path = rest.substring(slash)
-        if (ps == "*") { if (!web) return false } else if (ps != u.scheme || !(ps == "http" || ps == "https")) return false
-        if (ph != "*") {
-            if (ph.startsWith("*.")) { val base = ph.substring(2); if (u.host != base && !u.host.endsWith(".$base")) return false }
-            else if ('*' in ph || u.host != ph) return false
-        }
-        val re = synchronized(paths) {
-            paths.getOrPut(path) { Regex("^" + path.split('*').joinToString(".*") { Regex.escape(it) } + "$", RegexOption.DOT_MATCHES_ALL) }
-        }
-        return re.matches(u.pathQuery)
     }
 }
 

@@ -116,24 +116,17 @@ class ModStore(
 
     fun groupOff(tier: String, site: String) = groupsOff[site].orEmpty().contains(tier)
 
+    // MARK: what runs: the phones' shared rules (core mod-store.js part 3, match.js). `running`, `isOn`, `off` and
+    // MatchPattern are Kotlin twins (ModRuns, held to mod-runs-cases.json): every page load asks them of every mod.
+
     /** Whether a mod is switched on (for a site: its switch there). */
-    fun isOn(m: InstalledMod, site: String?): Boolean {
-        if (!m.on) return false
-        if (site.isNullOrEmpty()) return true
-        return !(m.multiSite && site in m.offSites)
-    }
+    fun isOn(m: InstalledMod, site: String?) = ModRuns.isOn(m, site)
 
     /** Whether a mod's @match (and @exclude) covers an address. */
-    fun applies(m: InstalledMod, url: String) = MatchPattern.any(m.matches, url) && !MatchPattern.any(m.excludes, url)
+    fun applies(m: InstalledMod, url: String) = ModRuns.applies(m.matches, m.excludes, WebAddress.of(url))
 
     /** The mods switched on, not held (a change on hold: its version before), whose @match covers this address. */
-    fun running(url: String): List<InstalledMod> {
-        if (paused) return emptyList()
-        val site = Site.of(WebAddress.of(url)?.host ?: "")
-        return mods.filter { m ->
-            m.on && !(m.held && m.ran == null) && !groupOff(m.tier, site) && !(m.multiSite && site in m.offSites) && applies(m, url)
-        }
-    }
+    fun running(url: String): List<InstalledMod> = ModRuns.running(mods, paused, groupsOff, url).map { mods[it.first] }
 
     /** What runs on a page at `url`, as one string: a page loaded under another signature loads again to run the
      *  change, once it's the tab shown (docs/MOBILE-BEHAVIOUR.md, "Which tabs load again"). */
@@ -159,7 +152,7 @@ class ModStore(
             world == "box" && (if (m.held) script.contains("\"site-data\"") else "site-data" in m.powers)
         }.map { it.m.matches to it.m.excludes }
         val mods = list.map { (m, script, world, at, style) ->
-            val off = ((if (m.multiSite) m.offSites else emptyList()) + groupsOff.filter { m.tier in it.value }.keys).toSortedSet().toList()
+            val off = ModRuns.off(m, groupsOff)
             Scripts.Plan.One(m.id, script, world, at, style, off, m.matches, m.excludes)
         }
         return Scripts.Plan(mods, reader?.free ?: freeKept, bridged)
@@ -276,21 +269,22 @@ class ModStore(
         return true
     }
 
-    /** A mod's switch: the whole mod, or (a mod for several sites) its switch on one site. */
+    /** A mod's switch: the whole mod, or (a mod for several sites) its switch on one site; switching on clears "new,
+     *  off" (the shared rule, core setOn). No answer: nothing changes (iPhone's ModRuns.setOn). */
     fun setOn(id: String, on: Boolean, site: String? = null) {
-        update(id) { m ->
-            var n = if (!site.isNullOrEmpty() && m.multiSite) {
-                val offs = m.offSites.filter { it != site } + (if (!on) listOf(site) else emptyList())
-                m.copy(offSites = offs, on = m.on || on)
-            } else m.copy(on = on)
-            if (on) n = n.copy(newOff = null)
-            n
-        }
+        val m = mods.firstOrNull { it.id == id } ?: return
+        val r = core("setOn", ModRuns.facts(m), on, site ?: JSONObject.NULL) as? JSONObject ?: return
+        val isOn = r.opt("on") as? Boolean ?: return
+        val offs = (r.opt("offSites") as? JSONArray)?.strings() ?: return
+        val clear = r.opt("clearNewOff") as? Boolean ?: return
+        update(id) { it.copy(on = isOn, offSites = offs, newOff = if (clear) null else it.newOff) }
     }
 
+    /** A tier's switch on a site (the shared rule, core setGroup). No answer: nothing changes. */
     fun setGroup(tier: String, on: Boolean, site: String) {
-        val list = groupsOff[site].orEmpty().filter { it != tier } + (if (!on) listOf(tier) else emptyList())
-        groupsOff = if (list.isEmpty()) groupsOff - site else groupsOff + (site to list)
+        val g = core("setGroup", JSONObject().apply { groupsOff.forEach { (k, v) -> put(k, JSONArray(v)) } }, tier, on, site) as? JSONObject ?: return
+        if (g.keys().asSequence().any { g.opt(it) !is JSONArray }) return
+        groupsOff = g.lists()
         save()
     }
 
@@ -358,10 +352,7 @@ class ModStore(
     // to the same cases (ModStoreTest): `held` is asked of every mod for every page's plan. No answer (no reader): what
     // iPhone's ModHolds does without its Core: nothing more allowed, a change asks about more, never less.
 
-    /** What the rules read of a mod (iPhone's InstalledMod.holdFacts). */
-    private fun facts(m: InstalledMod) = JSONObject().put("tier", m.tier).put("site", m.site).put("matches", JSONArray(m.matches))
-        .put("needs", JSONArray(m.needs.map(ModNeed::json))).put("extraNeeds", JSONArray(m.extraNeeds.map(ModNeed::json)))
-        .put("allowed", JSONObject().apply { m.allowed.forEach { (k, v) -> put(k, JSONArray(v)) } }).put("ran", m.ran != null)
+    private fun facts(m: InstalledMod) = ModRuns.facts(m)
 
     /** A rule's answer: NONE if there was none (no reader, a throw), JSONObject.NULL for the rule's own null. */
     private fun answer(name: String, vararg args: Any): Any {

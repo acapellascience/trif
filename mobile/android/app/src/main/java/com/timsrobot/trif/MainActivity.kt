@@ -380,12 +380,13 @@ class MainActivity : Activity() {
         val here = browser.current?.host ?: ""
         work.execute {
             val r = mods.readNamed(text.trim(), here)
+            val m = r.mod?.copy(cameFrom = Site.of(here))
+            val away = m?.let { ModOffer.elsewhere(it, mods.offerPlace(it)) }
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
-                val m = r.mod?.copy(cameFrom = Site.of(here))
                 if (m == null) { say("That mod can't be added: ${r.error ?: "no reason given"}."); return@runOnUiThread }
-                android.util.Log.i("TRIF", "offer: ${m.id} ${m.tier} from ${m.cameFrom}${ModOffer.elsewhere(m)?.let { ", ${it.title}" } ?: ""}")
-                ModOffer.show(this, m, add = { addOffered(m) }, closed = { android.util.Log.i("TRIF", "offer: ${m.id} declined") })
+                android.util.Log.i("TRIF", "offer: ${m.id} ${m.tier} from ${m.cameFrom}${away?.let { ", ${it.title}" } ?: ""}")
+                ModOffer.show(this, m, away, add = { addOffered(m) }, closed = { android.util.Log.i("TRIF", "offer: ${m.id} declined") })
             }
         }
     }

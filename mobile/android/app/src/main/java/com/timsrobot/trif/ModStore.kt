@@ -355,12 +355,30 @@ class ModStore(
     private fun facts(m: InstalledMod) = ModRuns.facts(m)
 
     /** A rule's answer: NONE if there was none (no reader, a throw), JSONObject.NULL for the rule's own null. */
-    private fun answer(name: String, vararg args: Any): Any {
-        val out = runCatching { reader?.core("modStore.$name", JSONArray(args.toList()).toString()) }.getOrNull() ?: return NONE
+    private fun answer(name: String, vararg args: Any): Any = coreAnswer("modStore.$name", *args)
+    private fun coreAnswer(name: String, vararg args: Any): Any {
+        val out = runCatching { reader?.core(name, JSONArray(args.toList()).toString()) }.getOrNull() ?: return NONE
         return runCatching { JSONTokener(out).nextValue() }.getOrNull() ?: NONE
     }
     private fun core(name: String, vararg args: Any): Any? = answer(name, *args).takeIf { it !== NONE && it != JSONObject.NULL }
     private object NONE
+
+    /**
+     * Add this mod?'s coral box (TrifCore.modOffer.elsewhere, as iPhone's ModOfferRules): the shared rule decides, the
+     * words stay ModOffer's. No answer: the box for every site (a warning too many rather than one missed).
+     */
+    fun offerPlace(m: InstalledMod): ModOffer.Place? {
+        val from = m.cameFrom?.takeIf { it.isNotEmpty() } ?: return null
+        return when (val r = coreAnswer("modOffer.elsewhere", from, m.site, JSONArray(m.sites))) {
+            JSONObject.NULL -> null
+            is JSONObject -> if (r.optBoolean("every")) ModOffer.Place.Every else {
+                val o = r.optJSONArray("others")
+                if (o == null || !r.has("also")) ModOffer.Place.Every
+                else ModOffer.Place.Others(List(o.length()) { o.getString(it) }, r.getBoolean("also"))
+            }
+            else -> ModOffer.Place.Every
+        }
+    }
     private fun allowedOf(v: Any?) = (v as? JSONObject)?.lists()
 
     /** Allow: what the mod waits for, allowed for it. No answer: allowed as it was (it stays held). */

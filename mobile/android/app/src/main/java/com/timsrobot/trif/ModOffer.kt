@@ -31,18 +31,25 @@ object ModOffer {
         .filter { it.key.startsWith("power:together:") && it.fact.isNotEmpty() }.distinctBy { it.fact }
         .map { it.fact to it.key.startsWith("power:together:many:") }
 
-    /** It runs on a site other than the one it came from (or on every site): the warning's words. */
-    fun elsewhere(m: InstalledMod): Away? {
+    /** Where it runs, beside the site it came from: the shared rule's decision (ModStore.offerPlace). */
+    sealed interface Place {
+        data object Every : Place
+        data class Others(val sites: List<String>, val also: Boolean) : Place
+    }
+
+    /** It runs on a site other than the one it came from (or on every site): the warning's words (iPhone's). */
+    fun elsewhere(m: InstalledMod, place: Place?): Away? {
         val from = m.cameFrom?.takeIf { it.isNotEmpty() } ?: return null
-        if (m.everywhere || "all-sites" in m.sites)
-            return Away("It runs on every site", "It came from $from, but it runs on every site you visit, not just $from. Add it only if you meant it to.")
-        val others = m.sites.map(Site::of).filter { it.isNotEmpty() && it != from }.toSortedSet().toList()
-        if (others.isEmpty()) return null
-        val one = others.size == 1
-        val also = m.sites.map(Site::of).contains(from)
-        return Away(if (one) "It runs on another site" else "It runs on other sites",
-            "It came from $from, but it ${if (also) "also " else ""}runs on ${others.joinToString(", ")}. " +
-                "Add it only if you meant it to change ${if (one) "that site" else "those sites"}.")
+        return when (place) {
+            null -> null
+            Place.Every -> Away("It runs on every site", "It came from $from, but it runs on every site you visit, not just $from. Add it only if you meant it to.")
+            is Place.Others -> {
+                val one = place.sites.size == 1
+                Away(if (one) "It runs on another site" else "It runs on other sites",
+                    "It came from $from, but it ${if (place.also) "also " else ""}runs on ${place.sites.joinToString(", ")}. " +
+                        "Add it only if you meant it to change ${if (one) "that site" else "those sites"}.")
+            }
+        }
     }
 
     fun tierName(m: InstalledMod) = when (m.tier) { "style" -> "Style mod"; "boxed" -> "Boxed mod"; else -> "Free mod" }
@@ -52,7 +59,7 @@ object ModOffer {
     private fun colour(m: InstalledMod) = when (m.tier) { "style" -> 0xFF1F8A5B.toInt(); "boxed" -> 0xFF9A7300.toInt(); else -> CORAL }
 
     /** Shows the sheet. `add` on Add it, `closed` on Cancel or back (declined). */
-    fun show(a: Activity, m: InstalledMod, add: () -> Unit, closed: () -> Unit): Dialog {
+    fun show(a: Activity, m: InstalledMod, away: Away?, add: () -> Unit, closed: () -> Unit): Dialog {
         val d = Dialog(a, android.R.style.Theme_DeviceDefault_Light_NoActionBar)
         val dp = a.resources.displayMetrics.density
         val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding((20 * dp).toInt(), (12 * dp).toInt(), (20 * dp).toInt(), (24 * dp).toInt()) }
@@ -69,7 +76,7 @@ object ModOffer {
         text(tierName(m), 12f, bold = true, color = colour(m))
         if (m.description.isNotEmpty()) text(m.description, 14f, color = Color.DKGRAY)
         // (Tim, 11-17: a mod that runs on another site than the one it came from stands out, first thing)
-        elsewhere(m)?.let { w ->
+        away?.let { w ->
             text("⚠ ${w.title}", 14f, bold = true, color = CORAL, top = 16)
             text(w.text, 13f, color = CORAL)
         }

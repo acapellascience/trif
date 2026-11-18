@@ -43,6 +43,11 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
      the Play Store button instead of the browser)
    - [x] default-browser role (round 5: http/https VIEW filter with no host + APP_BROWSER; can hold
      android.app.role.BROWSER; links open in it; the start page = address bar + start words)
+   - [ ] what a WebView doesn't do by itself and WKWebView does (found in round 14's last check): `<input type=file>`
+     (onShowFileChooser → the system picker), fullscreen video (onShowCustomView), a page asking for the camera / mic /
+     location (onPermissionRequest / onGeolocationPermissionsShowPrompt → Android's own permission ask; iPhone's
+     WKWebView asks by itself), downloads (setDownloadListener: a .js file → Add this mod?, iPhone's ModDownloads,
+     2 MB at most; anything else let go, as iPhone)
 3. [x] Script worlds (round 6): TRIF's world + the box (SES + sandbox-runtime.js) at document start; page world
    for free mods; the iPhone's injected scripts (kit.js, start-own/start-page, style-mirror.js, page-bridge.js, the
    free pair) in iPhone's order through `Scripts.kt` + two adapter scripts (js/world-call.js, js/webkit-bridge.js)
@@ -71,27 +76,36 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
      Export all mods for {site} to the share sheet through FileProvider). Not yet: a folder picked as a folder
      (ACTION_OPEN_DOCUMENT_TREE) and history exports (Android has no history yet)
 7. Tests
-   - [ ] unit tests for Kotlin logic (ongoing, one per piece)
-   - [ ] emulator tests, headless, with mobile/shared/pages: style mod (mods.sh), boxed mod, free mod's style
+   - [x] unit tests for Kotlin logic (one per piece; keep adding with each new piece)
+   - [x] emulator tests, headless, with mobile/shared/pages: style mod (mods.sh), boxed mod, free mod's style
      section, held mod (running.sh), popup sign-in stand-in (popups.sh), the Mods tab lists / switches / deletes /
-     restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed)
+     restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed). Round 14: `test/all.sh`
+     runs them all (11 tests, ~7 min, ALL PASS)
 
-## Done this round (round 13, 2026-11-18)
-- Merged origin/ios-poc (shared core round 6). What runs follows the shared core: `ModStore.setOn` / `setGroup` call
-  `TrifCore.modStore.setOn/setGroup` (no answer: nothing changes, as iPhone); `running`, `isOn`, `off` and
-  MatchPattern are Kotlin twins in the new `ModRuns.kt` (MatchPattern's path = core's glob), held to all of
-  mod-runs-cases.json (ModRunsTest: 3135 match answers, isOn, off, running, and the facts Kotlin hands setOn/setGroup).
-- Item 6 done: `ModImport.kt` (zips via java.util.zip, iPhone's limits), Import mod… (picker), Export / Export all
-  (share sheet, FileProvider, cache/export), the ⋯ menu's Import mod… and Export all mods for {site}.
-- Unit tests 53, all pass; emulator: import (zip, picker, exports: new), modstab, running, mods, offer PASS.
+## Done this round (round 14, 2026-11-18)
+- Merged origin/ios-poc (shared core: mod-offer.js). Add this mod?'s coral box now follows the shared rule:
+  `ModStore.offerPlace` calls `TrifCore.modOffer.elsewhere` (no answer: the box for every site, iPhone's fallback);
+  the words stay `ModOffer.elsewhere(m, place)`; ModOfferTest holds it to all 161 of mod-offer-cases.json.
+- `test/all.sh`: builds + unit tests, boots the emulator and both page servers if needed, runs every emulator test,
+  stops what it started. Unit tests all pass; emulator: all 11 PASS (startup tabs popups applinks worlds mods running
+  modstab import offer playing), nothing needed fixing.
+- Last check against ANDROID.md / the iPhone app: found browser basics a WebView lacks that WKWebView has by itself
+  (file inputs, fullscreen video, page permission asks, downloads). Added as item 2's last box; foundation not complete.
 
 ## Next step
-Item 7: finish the tests. Unit tests are per piece already; make one `test/all.sh` that runs every emulator test in
-turn (startup, tabs, popups, applinks, worlds, mods, running, modstab, import, offer, playing) with both servers and
-the emulator, and fix what fails. Then a last check of the checklist against ANDROID.md / the loop prompt and, if
-all is proven, "FOUNDATION COMPLETE". Optional before that: a folder picked as a folder (OPEN_DOCUMENT_TREE).
+Item 2's last box: in `Browser.makeWebView`, onShowFileChooser (the system picker; MainActivity's onActivityResult as
+PICK_IMPORT does), onShowCustomView/onHideCustomView (fullscreen over the browser, Back leaves it), onPermissionRequest
+(camera/mic: Android's runtime permission ask, then grant only what was asked; needs CAMERA/RECORD_AUDIO in the
+manifest) and geolocation (ACCESS_FINE/COARSE_LOCATION, granted per origin for the launch), setDownloadListener (a .js
+≤ 2 MB → the offer, iPhone's ModDownloads; blob:/data: links need a page-side fetch, else let go). A stand-in page in
+mobile/android/test/pages or shared/pages if a shared one fits; one emulator test (downloads.sh / pageasks.sh), added
+to all.sh. Then, if all is proven: "FOUNDATION COMPLETE". Optional: a folder picked as a folder (OPEN_DOCUMENT_TREE).
 
 ## Notes for next round
+- all.sh (round 14): `./test/all.sh [--no-build] [names…]`; per-test logs in $TMPDIR/trif-android-tests/<name>.txt;
+  it clears logcat before each test. Take the device lock before it. Add each new emulator test to its default list.
+- Offer box (round 14): `offerPlace` runs on the store thread (offerText computes `away` there, `ModOffer.show` takes
+  it). `ModStore.coreAnswer(fullName, …)` is the general shared-rule call; `answer` prefixes "modStore.".
 - What runs (round 13): `ModRuns.facts(m)` is what every shared rule reads of a mod (hold facts + on, sites, offSites,
   excludes); ModStore's `facts` is it. `WebAddress` (now in ModRuns.kt) drops an IPv6 host's brackets, as iPhone's URL
   does; its other cuts agree with iPhone's parts for canonical addresses (ModRunsTest.addressesAsIphoneCutsThem;
@@ -210,6 +224,10 @@ all is proven, "FOUNDATION COMPLETE". Optional before that: a folder picked as a
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 14: one script now runs every Android test on the emulator; all 11 pass. Nothing to see or decide, no new words.
+  Before calling the foundation done I checked it against what the iPhone's web view does by itself, and found four
+  things Android's needs added: choosing a file for a page's upload button, fullscreen video, a page asking for the
+  camera, mic or location, and downloads (a downloaded .js mod goes to Add this mod?, as on iPhone). That's next round.
 - Round 13: the Mods tab's ⋯ menu now has Import mod… and Export all mods for {site} (the iPhone's words), and Export in
   a mod's code view works: files go to Android's share sheet. A zip of mods (desktop's site export, zipped) imports
   like single files, so TRIF now offers itself for opening zip files too, as the iPhone app does. Under the hood, the

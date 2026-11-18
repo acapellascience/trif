@@ -23,7 +23,9 @@ change there is a change on both phones. Change this file whenever a rule change
 - Add this mod? and the approval card: the buttons come right after what they agree to (name, site, summary, powers,
   warnings), before the code (11-16: no scrolling past code to approve).
 - A mod that runs beyond the site it came from (the chat's site, or the page it was pasted on; files and codes have
-  none) gets the coral "It runs on another site / other sites / every site" box first (11-17).
+  none) gets the coral "It runs on another site / other sites / every site" box first (11-17): every site when its folder or an
+  @match is all sites; else the sites its @match names (as sites) other than that one, sorted, once each, "also" when
+  it runs there too; no box when there are none. [shared: core/mod-offer.js elsewhere]
 - Full code is first-class; guarantees come from opt-in safe tiers (style, boxed, free); a hold is informed consent: a
   held change keeps running its approved version (with its own style) until the person approves the new one.
 - What a hold waits for: each need (a power, a combination, a finding, a change's own ask) until its key is allowed for
@@ -103,7 +105,7 @@ change there is a change on both phones. Change this file whenever a rule change
   dismissed). Add to TRIF's tap isn't held to this. [shared: core/chat-offers.js]
 - A chat's mods belong to the chat's site (11-18, FeedBook from a Facebook chat said "runs on google.com"): a mod with
   no @match is read for the chat's site (phone~<site> → <site>), the shown page only when the chat has none. A mod
-  whose own @match names another site still warns.
+  whose own @match names another site still warns. [shared: core/mod-offer.js from]
 - A conversation belongs to the site it started on: no follow-ups across sites.
 - Diagnostics "chat offers": one line per hand-over (ids offered, skipped and why, held and why).
 
@@ -282,3 +284,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Mod store, part 1: what a hold waits for, Allow, a change judged, the version kept running | shared/core/mod-store.js | ModHolds.swift → TrifCore.modStore (`waiting` a twin, same cases: every page load) | test/core-modstore.test.js, test/modstore.test.js |
 | Mod store, part 2: adding, History, Recently deleted, Undo, Don't allow's and a restore's carry-over | shared/core/mod-store.js | ModChanges.swift → TrifCore.modStore (the records and the code compare stay Swift) | test/core-modstore.test.js, test/modstore.test.js |
 | Mod store, part 3: what runs (switches, tiers off, Pause all), @match | shared/core/mod-store.js, shared/core/match.js | ModRuns.swift → TrifCore.modStore setOn / setGroup (`running`, `isOn`, `off` and MatchPattern twins, same cases: every page load) | test/core-modruns.test.js, test/modruns.test.js |
+| A chat's offered mod: where it's read, where it came from, the coral box | shared/core/mod-offer.js | ModOfferRules.swift → TrifCore.modOffer (the words stay ModOfferView's) | test/core-modoffer.test.js, test/modoffer.test.js |

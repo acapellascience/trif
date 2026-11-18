@@ -32,6 +32,10 @@ class ModsPanel(
     private val browser: Browser,
     private val mods: ModStore,
     private val work: Executor,
+    /** Import mod…: the activity's file picker. */
+    private val pickImport: () -> Unit,
+    /** Export / Export all: the files to the share sheet. */
+    private val share: (List<java.io.File>) -> Unit,
     private val reader: () -> JsModReader?,
 ) {
     private val main = Handler(Looper.getMainLooper())
@@ -256,8 +260,17 @@ class ModsPanel(
                         log("undid an edit of $id")
                         ok to true
                     }
-                    // (Import mod… and Export come with getting mods in: checklist item 6)
-                    "import", "export", "exportSite" -> { log("$type: not on Android yet"); ok to false }
+                    "export" -> {
+                        val files = ModImport.write(listOf(need()), ModImport.exportDir(activity.cacheDir)) ?: throw Refused("couldn't write the file")
+                        main.post { share(files) }
+                        JSONObject().put("ok", true).put("file", files[0].name) to false
+                    }
+                    "exportSite" -> {
+                        val files = ModImport.exportSite(mods.mods, site, activity.cacheDir) ?: throw Refused("no mods for $site")
+                        main.post { share(files) }
+                        JSONObject().put("ok", true).put("count", files.size) to false
+                    }
+                    "import" -> { main.post { pickImport() }; ok to false }
                     "unhide" -> throw Refused("not hidden any more")
                     else -> throw Refused("unknown message $type")
                 }

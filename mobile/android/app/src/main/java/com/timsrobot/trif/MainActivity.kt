@@ -2,6 +2,7 @@ package com.timsrobot.trif
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.Uri
@@ -20,16 +21,21 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import java.io.File
 
 /**
  * The browser's screen: the address bar, the shown tab's page, and a plain toolbar (back, forward, new tab, tabs).
  * The toolbar's look and the tab list's cards are the UI layer, held until the iPhone app's settles (Tim, 11-18):
  * this is only enough to use and test the tabs.
  */
+/** onActivityResult's request: the Import mod… picker. */
+private const val PICK_IMPORT = 41
+
 class MainActivity : Activity() {
     private lateinit var browser: Browser
     private lateinit var mods: ModStore
@@ -291,44 +297,79 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Files opened in the app or shared to it (iPhone's importFiles): each mod imported (it starts off, and waits for
-     * an OK if its code can do more than change the page); what came in said, then the Mods tab on the mods. The
-     * status strip is UI layer: a toast says it for now. Zips and history exports: not yet.
+     * Files picked with Import mod…, opened in the app or shared to it (iPhone's importFiles): mod files and zips of
+     * them (ModImport); each mod imported (it starts off, and waits for an OK if its code can do more than change the
+     * page); what came in said, then the Mods tab on the mods. The status strip is UI layer: a toast says it for now.
      */
     private fun importFiles(uris: List<Uri>) {
         val here = browser.current?.host ?: ""
         work.execute {
-        val read = uris.map { u ->
-            val name = runCatching {
-                contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                    if (c.moveToFirst()) c.getString(0) else null
-                }
-            }.getOrNull() ?: u.lastPathSegment?.substringAfterLast('/') ?: "mod.js"
-            // (a mod is small: at most 2 MB read of each file)
-            name to runCatching { contentResolver.openInputStream(u)?.use { String(it.readNBytes(2 shl 20)) } }.getOrNull()
-        }
-            val added = mutableListOf<String>(); val said = mutableListOf<String>(); val skipped = mutableListOf<String>()
-            for ((name, text) in read) {
-                if (text == null || !name.lowercase().endsWith(".js")) { skipped += name; continue }
+            val found = ModImport.Found()
+            for (u in uris) {
+                val name = runCatching {
+                    contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) c.getString(0) else null
+                    }
+                }.getOrNull() ?: u.lastPathSegment?.substringAfterLast('/') ?: "mod.js"
+                val data = runCatching { contentResolver.openInputStream(u)?.use { it.readNBytes(found.budget + 1) } }.getOrNull()
+                    ?.takeIf { it.size <= found.budget }
+                data?.let { found.budget -= it.size }
+                ModImport.take(found, name, data)
+            }
+            val added = mutableListOf<String>(); val failed = mutableListOf<String>()
+            for ((name, text) in found.mods) {
                 val r = mods.read(text, name, "", here)
                 val m = r.mod
-                if (m == null) { said += "Couldn't import $name: ${r.error ?: "no reason given"}"; continue }
+                if (m == null) { failed += "Couldn't import $name: ${r.error ?: "no reason given"}"; continue }
                 val kept = mods.add(m, "import")
                 added += kept.name
                 android.util.Log.i("TRIF", "import: $name as ${kept.id}${if (kept.held) ", waiting for an OK" else ""}")
             }
-            val one = added.size == 1
-            if (added.isNotEmpty()) said.add(0, "Imported ${if (one) "1 mod" else "${added.size} mods"}: ${added.joinToString(", ")}. " +
-                "Like any mod from outside, ${if (one) "it starts" else "they start"} off, and ${if (one) "waits" else "each waits"} " +
-                "for your OK if ${if (one) "its" else "its own"} code can do more than change the page.")
-            if (said.isEmpty()) said += if (skipped.isEmpty()) "Nothing to import there." else "Nothing TRIF can import there: ${skipped.take(5).joinToString(", ")}."
+            val said = ModImport.said(added, failed, found.skipped)
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
-                Toast.makeText(this, said.joinToString(" "), Toast.LENGTH_LONG).show()
-                android.util.Log.i("TRIF", "import said: ${said.joinToString(" ")}")
+                Toast.makeText(this, said, Toast.LENGTH_LONG).show()
+                android.util.Log.i("TRIF", "import said: $said")
                 if (added.isNotEmpty()) showMods(true)
             }
         }
+    }
+
+    /** Import mod… (the Mods tab's): the system's file picker, several files at once (mod files, zips of them). */
+    private fun pickImport() {
+        showMods(false)
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/javascript", "text/javascript", "application/x-javascript",
+                "application/zip", "application/x-zip-compressed", "application/octet-stream"))
+        try { startActivityForResult(pick, PICK_IMPORT) } catch (_: ActivityNotFoundException) { say("Nothing to import there.") }
+    }
+
+    @Deprecated("Activity's own; the picker is the only result TRIF asks for")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_IMPORT || resultCode != RESULT_OK || data == null) return
+        val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+        if (uris.isNotEmpty()) importFiles(uris)
+    }
+
+    /** Export all mods for {site} (the ⋯ menu's). */
+    private fun exportSite(site: String) {
+        work.execute {
+            val files = ModImport.exportSite(mods.mods, site, cacheDir)
+            runOnUiThread { if (files != null && !isDestroyed) shareFiles(files) }
+        }
+    }
+
+    /** Export / Export all (the Mods tab's): the files to the share sheet (iPhone's ShareFiles), through FileProvider. */
+    private fun shareFiles(files: List<File>) {
+        val uris = ArrayList(files.map { FileProvider.getUriForFile(this, "$packageName.files", it) })
+        val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+            else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        send.setType("application/javascript").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.clipData = ClipData.newRawUri(files[0].name, uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+        android.util.Log.i("TRIF", "share: ${files.joinToString(", ") { it.name }}")
+        startActivity(Intent.createChooser(send, null))
     }
 
     /**
@@ -410,7 +451,8 @@ class MainActivity : Activity() {
         backChanged()
     }
 
-    /** The Mods tab's sheet: its title (Mods on {site}), ⋯ (Pause all mods / Resume mods) and Done over the page. */
+    /** The Mods tab's sheet: its title (Mods on {site}), ⋯ (Import mod…, Export all mods for {site}, Pause all mods /
+     *  Resume mods) and Done over the page. */
     private fun makeModsSheet(): LinearLayout {
         modsTitle = TextView(this).apply { textSize = 17f; setTextColor(Color.BLACK); gravity = Gravity.CENTER; setSingleLine() }
         pauseButton = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
@@ -418,7 +460,14 @@ class MainActivity : Activity() {
             setOnClickListener { v ->
                 android.widget.PopupMenu(this@MainActivity, v).apply {
                     val paused = mods.paused
-                    menu.add(getString(if (paused) R.string.resume_mods else R.string.pause_all_mods)).setOnMenuItemClickListener {
+                    val site = Site.of(browser.current?.host ?: "")
+                    menu.add(0, 0, 0, getString(R.string.import_mod)).setOnMenuItemClickListener { pickImport(); true }
+                    menu.add(0, 0, 1, getString(R.string.export_all_mods, site)).apply {
+                        isEnabled = site.isNotEmpty() && ModImport.ofSite(mods.mods, site).isNotEmpty()
+                        setOnMenuItemClickListener { exportSite(site); true }
+                    }
+                    // (a group of its own: Android draws no divider in a PopupMenu, iPhone's Divider)
+                    menu.add(1, 0, 2, getString(if (paused) R.string.resume_mods else R.string.pause_all_mods)).setOnMenuItemClickListener {
                         work.execute { mods.setPaused(!paused) }; true
                     }
                 }.show()
@@ -450,7 +499,7 @@ class MainActivity : Activity() {
     private fun showMods(show: Boolean) {
         if (show) {
             if (listShown) showList(false)
-            val p = panel ?: ModsPanel(this, browser, mods, work) { reader }.also { p ->
+            val p = panel ?: ModsPanel(this, browser, mods, work, ::pickImport, ::shareFiles) { reader }.also { p ->
                 panel = p
                 modsSheet.addView(p.web, LinearLayout.LayoutParams(-1, 0, 1f))
             }

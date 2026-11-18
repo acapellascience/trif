@@ -27,6 +27,8 @@
     <string name="add_this_mod">Add this mod?</string>
     <string name="add_it">Add it</string>
     <string name="more">More</string>
+    <string name="import_mod">Import mod…</string>
+    <string name="export_all_mods">Export all mods for %1$s</string>
     <string name="pause_all_mods">Pause all mods</string>
     <string name="resume_mods">Resume mods</string>
     <plurals name="tabs_title">

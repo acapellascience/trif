@@ -52,7 +52,8 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
      edit + restore judged as changes, Recently deleted 30 days + Undo; `ModFiles` keeps it in files)
    - [x] reading mods with mods.js (round 8: `JsModReader`, mods.js in an androidx.javascriptengine JavaScriptSandbox
      isolate on the store thread; what it made of each mod kept in the mod's file, so a start needs no reader)
-   - [x] @match matching (round 7: `MatchPattern` + `WebAddress`, as modfile.js matchesUrl; `ModStore.running/applies`)
+   - [x] @match matching (round 7: `MatchPattern` + `WebAddress`, as modfile.js matchesUrl; `ModStore.running/applies`;
+     round 13: the shared core's what-runs rules, `ModRuns.kt` as iPhone's ModRuns.swift)
    - [x] style sections, boxed and free mods running (round 9: test/running.sh, all through the real reader, on
      strict.html; nothing needed fixing)
    - [x] holds waiting for Allow (round 9: a boxed mod with a power is held and doesn't run; Allow → it runs)
@@ -65,28 +66,46 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
      words in a toast for now (the status strip is UI layer); the Mods tab opens; test/import.sh)
    - [x] "Add this mod?" for a pasted mod (round 12: SEND text/plain with ==WebMod== → `ModOffer.kt`, iPhone's
      ModOfferView's words in a plain full-screen dialog; other shared text opens as an address; test/offer.sh)
-   - [ ] import of desktop exports (zips, folders, history exports; the Mods tab's Import mod… = ACTION_OPEN_DOCUMENT;
-     Export / Export all for a site)
+   - [x] import of desktop exports (round 13: `ModImport.kt`, iPhone's Import.swift: .js files and zips of them, zips
+     in zips, picked with Import mod… (ACTION_OPEN_DOCUMENT, several) or opened with / shared to TRIF; Export and
+     Export all mods for {site} to the share sheet through FileProvider). Not yet: a folder picked as a folder
+     (ACTION_OPEN_DOCUMENT_TREE) and history exports (Android has no history yet)
 7. Tests
    - [ ] unit tests for Kotlin logic (ongoing, one per piece)
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod (mods.sh), boxed mod, free mod's style
      section, held mod (running.sh), popup sign-in stand-in (popups.sh), the Mods tab lists / switches / deletes /
      restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 12, 2026-11-18)
-- Merged origin/ios-poc (shared core round 5). ModStore's add, undoAdd, remove, undoDelete, restoreDeleted, reject and
-  restore now call `TrifCore.modStore` (add/undoAdd/remove/undoDelete/restoreDeleted/reject/restore) as iPhone's
-  ModChanges.swift does: indices + kept field names back, records stay Kotlin's; no answer = iPhone's fallbacks.
-- "Add this mod?" for text shared to TRIF (`ModOffer.kt`, iPhone's ModOfferView words); Add it → iPhone's addMod words.
-- Unit tests 42 (ModStoreTest + noRulesNothingLost, ModOfferTest); emulator: offer (new), modstab, running, import, mods PASS.
+## Done this round (round 13, 2026-11-18)
+- Merged origin/ios-poc (shared core round 6). What runs follows the shared core: `ModStore.setOn` / `setGroup` call
+  `TrifCore.modStore.setOn/setGroup` (no answer: nothing changes, as iPhone); `running`, `isOn`, `off` and
+  MatchPattern are Kotlin twins in the new `ModRuns.kt` (MatchPattern's path = core's glob), held to all of
+  mod-runs-cases.json (ModRunsTest: 3135 match answers, isOn, off, running, and the facts Kotlin hands setOn/setGroup).
+- Item 6 done: `ModImport.kt` (zips via java.util.zip, iPhone's limits), Import mod… (picker), Export / Export all
+  (share sheet, FileProvider, cache/export), the ⋯ menu's Import mod… and Export all mods for {site}.
+- Unit tests 53, all pass; emulator: import (zip, picker, exports: new), modstab, running, mods, offer PASS.
 
 ## Next step
-Item 6 continued: the Mods tab's Import mod… (ACTION_OPEN_DOCUMENT, several files) and the page's `import`/`export`/
-`exportSite` messages (ModsPanel answers ok and does nothing yet): .js files, zips and folders as iPhone's Import.swift
-(`take(name:data:)`: .js mods, history .json exports via HistoryStore.parseExport, nested zips), Export / Export all for
-a site (ACTION_CREATE_DOCUMENT or the share sheet). Unzip with java.util.zip (no new dependency).
+Item 7: finish the tests. Unit tests are per piece already; make one `test/all.sh` that runs every emulator test in
+turn (startup, tabs, popups, applinks, worlds, mods, running, modstab, import, offer, playing) with both servers and
+the emulator, and fix what fails. Then a last check of the checklist against ANDROID.md / the loop prompt and, if
+all is proven, "FOUNDATION COMPLETE". Optional before that: a folder picked as a folder (OPEN_DOCUMENT_TREE).
 
 ## Notes for next round
+- What runs (round 13): `ModRuns.facts(m)` is what every shared rule reads of a mod (hold facts + on, sites, offSites,
+  excludes); ModStore's `facts` is it. `WebAddress` (now in ModRuns.kt) drops an IPv6 host's brackets, as iPhone's URL
+  does; its other cuts agree with iPhone's parts for canonical addresses (ModRunsTest.addressesAsIphoneCutsThem;
+  Chromium hands WebView only canonical ones). The plan's `Scripts.Plan.runningOn` parses the address once.
+- Import / export (round 13): `ModImport` is pure (take, unzip, write, exportSite, said; JVM-tested with real zips).
+  MainActivity.importFiles reads each uri within the 64 MB budget, then `ModImport.take`. The picker result comes in
+  `onActivityResult` (PICK_IMPORT; MainActivity is a plain Activity). Shared files: cache/export/<n>/ (cleared at the
+  next export), FileProvider authority `com.timsrobot.trif.files` (androidx.core's, through androidx.webkit; no new
+  dependency), res/xml/shared_files.xml. Logcat "share: <names>". The VIEW and SEND file filters now take
+  application/zip too. The ModsPanel constructor takes `pickImport` and `share`.
+- import.sh drives the page's own messages with `send '{ type: … }'` then `answer` (trif.panel runs sync code only, so
+  the promise's answer goes into window.__r); reading the answer relaunches TRIF over the share sheet, so the sheet
+  is checked (dumpsys topResumedActivity ~ chooser) before it. The picker itself isn't driven (DocumentsUI); its result
+  goes through the same importFiles as VIEW.
 - Change rules (round 12): `ModStore.answer()` tells "no answer" (`NONE`) from the rule's own null (`JSONObject.NULL`):
   reject's null means "delete it" (a mod that never ran). `pick(idx, list, new)` and `InstalledMod.take(fields, o)`
   mirror ModChanges.pick / InstalledMod.take. `waiting` is still the only Kotlin twin.
@@ -191,6 +210,10 @@ a site (ACTION_CREATE_DOCUMENT or the share sheet). Unzip with java.util.zip (no
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 13: the Mods tab's ⋯ menu now has Import mod… and Export all mods for {site} (the iPhone's words), and Export in
+  a mod's code view works: files go to Android's share sheet. A zip of mods (desktop's site export, zipped) imports
+  like single files, so TRIF now offers itself for opening zip files too, as the iPhone app does. Under the hood, the
+  mod switches and which mods run on a page now follow the shared rules. No new words, no new downloads.
 - Round 12: TRIF now shows in Android's share sheet for text. Shared text with a whole mod in it gets "Add this mod?"
   (the iPhone's sheet and words, plain look for now); any other shared text opens as a page or a search, as Chrome does.
   No new words. Under the hood, adding, History, Recently deleted, Undo and Restore now follow the iPhone's shared rules.

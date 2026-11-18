@@ -112,10 +112,15 @@ the response the feed is built from (a boxed mod with `site-data`, BOXED.md; or 
 keeping pagination cursors. Don't fake the feed's scrolling (`scrollY`, the list's measurements). If neither
 works, say so and ask.
 
+**Hidden isn't stopped.** If what you hide plays, polls, counts down or makes sound (a player, a live
+preview, autoplay), stop it or keep it from loading: its own close or off switch, its setting, or dropping it
+from the response that brings it. `trif record` shows whether it's still sending.
+
 ### A style section in boxed and free mods
 
 Put a boxed or free mod's looks in its **style section**, right after the header: TRIF applies it, and a
-change there alone never makes the mod wait for the user's OK.
+change there alone never makes the mod wait for the user's OK. A style section takes only `css`, `hide` and
+`settings`; `replace` and `filter` are style-mod keys, so in a boxed or free mod do those in code.
 
 ```js
 // ==/WebMod==
@@ -351,6 +356,15 @@ see.
 
 Fix leftovers of what was asked in the same turn rather than asking "want me to hide that too?". Ask only
 about a different change, a real trade-off, or what you can't reach.
+
+**When it's better but still not right, get curious.** A lag, a gap, a thing that comes back: the site is
+reacting to something (a scroll position, a request, a timer, a stored setting). Guess what, look for it
+(`trif record`, the site's code with `--page`), and change that rather than the symptom. Sites are built from
+parts you can find and fake.
+
+**Don't dig in silence.** When an idea hasn't worked and the next one is a long dig, stop and tell the user
+what you tried, what you think is going on, and two or three things you could try next, with the one you'd
+pick. They choose.
 
 ## Techniques, repairs and testing
 

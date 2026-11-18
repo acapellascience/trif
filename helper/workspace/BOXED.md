@@ -43,6 +43,8 @@ works out; `trif.settings` for what the mod keeps as it runs. The code runs insi
 tables, `canvas`, …), `createSvg(tag)`, `on(type, fn)` (input events as plain data; `visibilitychange`,
 `pagehide`, and custom events named in `// @events`), `url`, `title`, `width`, `height`, `scrollX/Y`, `root`,
 `body`, `prefersDark`, `prefersReducedMotion`, `matchMedia(q)`, `elementFromPoint(x, y)`, `styleSheets()`.
+A `<script src>`'s text is empty in the box: to read a site's code, fetch it with `trif run --page` or open
+its URL with `trif navigate`. An empty result doesn't mean the feature isn't there.
 
 **Elements** are stand-ins: `text`, `innerText`, `setText`, `attr`, `setAttr`/`removeAttr` (safe attributes:
 `title`, `role`, `hidden`, `alt`, `aria-*`, `data-trif-box-*`, `trif-box-` ids; links only `#…` or an address

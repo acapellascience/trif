@@ -281,7 +281,7 @@ extension Model {
         // ({"modsstale": 1} each tab: its page, shown or not, and whether the mods running there changed since it loaded)
         if step["modsstale"] != nil {
             out = browser.tabs.enumerated().map { i, t in
-                let stale = t.modsLoaded.map { browser.mods.signature($0.url) != $0.signature }
+                let stale = TabReloadRules.stale(t.modsLoaded?.signature, now: t.modsLoaded.map { browser.mods.signature($0.url) } ?? "")
                 return "\(i) \(t === browser.current ? "shown" : "behind") \(t.webView.url?.absoluteString ?? "-") \(stale == nil ? "not loaded" : stale! ? "stale (loads again when shown)" : "up to date")"
             }.joined(separator: "\n")
         }

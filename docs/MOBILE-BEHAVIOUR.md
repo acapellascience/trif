@@ -87,6 +87,9 @@ change there is a change on both phones. Change this file whenever a rule change
   switches and edits, safe mode, phone sync, imports (no reload).
 - Pause all mods: the shown tab loads again even if playing (the person's own act); tabs behind only when shown.
 - Every reload the app makes says why in Diagnostics ("reload <host>: <cause>"), 11-18.
+- A page that commits while a change isn't in the pages' scripts yet counts as stale; a tab looked at then is looked
+  at again once the scripts are in (if it's still shown); a tab already reloading is left alone. [shared:
+  core/tab-reload.js, the decision; the signature, the playing check and the reload are each app's]
 
 ## Chat offers (what a chat may hand over)
 
@@ -229,6 +232,7 @@ change there is a change on both phones. Change this file whenever a rule change
 - Request Desktop Website / Request Mobile Website (11-18, "a desktop mode like safari has"): websites only; the label
   follows the shown tab's loaded mode. Kept per host without `www.`, every tab, across launches; picking it reloads the
   shown tab only (others change at their next load). Phone mods run unchanged in it. The chat panes are never desktop.
+  The key: the host in lower case, a leading `www.` removed. [shared: core/desktop.js]
 
 ## Icons (Home Screen) and full screen
 
@@ -287,3 +291,5 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Mod store, part 3: what runs (switches, tiers off, Pause all), @match | shared/core/mod-store.js, shared/core/match.js | ModRuns.swift → TrifCore.modStore setOn / setGroup (`running`, `isOn`, `off` and MatchPattern twins, same cases: every page load) | test/core-modruns.test.js, test/modruns.test.js |
 | A chat's offered mod: where it's read, where it came from, the coral box | shared/core/mod-offer.js | ModOfferRules.swift → TrifCore.modOffer (Browser.offerFromChat and the Add to TRIF tap; the words stay ModOfferView's) | test/core-modoffer.test.js, test/modoffer.test.js |
 | The leaving cover's "icon use" (an icon's tab in full screen, or arrived by an icon within 3 s) | shared/core/leaving-cover.js | LeavingCoverRules.swift → TrifCore.leavingCover (the cover, its timing and the scene hooks stay LeavingCover.swift) | test/core-leavingcover.test.js, test/leavingcover.test.js |
+| Which tabs load again when mods change (started or looked at; stale; later, keep, ask whether playing; reload) | shared/core/tab-reload.js | TabReloadRules.swift → TrifCore.tabReload (Browser.select / refreshIfStale; `loaded` and `stale` twins, same cases: every commit; the signature, the playing check and the reload stay Browser's) | test/core-tabreload.test.js, test/tabreload.test.js |
+| Desktop websites' per-site memory (the key, wants, the kept list, can) | shared/core/desktop.js | DesktopRules (TabReloadRules.swift) → TrifCore.desktop `set` (`key`, `wants`, `can` twins, same cases: every page load) | test/core-tabreload.test.js, test/tabreload.test.js |

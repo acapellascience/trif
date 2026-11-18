@@ -225,6 +225,58 @@ function skip(a) {
 module.exports = { normalise, key, keys, outcome, note, skip, LIMIT };
 
 };
+SOURCES["desktop.js"] = function (module, exports, require) {
+// Request Desktop Website's per-site memory (docs/MOBILE-BEHAVIOUR.md, Desktop websites; Tim 11-18, "a desktop mode
+// like safari has"): as Safari's per-website setting, by host without www., in every tab, kept across launches; Request
+// Mobile Website takes the site off. How a page loads as a computer's, and where the list is kept, stay each app's.
+// Both phone apps run this (mobile/shared/gen/core.js: TrifCore.desktop); desktop-cases.json holds the answers the
+// iPhone's Swift gave.
+
+'use strict';
+
+/** Code point order (Swift's sorted(); hosts are punycode, so ASCII in practice). */
+const byCodePoint = (a, b) => {
+  const x = [...a], y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (d) return d;
+  }
+  return x.length - y.length;
+};
+
+/** The key a host is kept by: lower case, a leading www. removed. */
+function key(host) {
+  const h = String(host || '').toLowerCase();
+  return h.startsWith('www.') ? h.slice(4) : h;
+}
+
+/**
+ * A page on `host` loads as a computer's.
+ * @param {string[]} kept the kept keys
+ */
+function wants(kept, host) {
+  const h = String(host || '');
+  return h !== '' && (kept || []).includes(key(h));
+}
+
+/**
+ * The kept list after Request Desktop (on) or Mobile (off) Website on `host`: sorted, once each.
+ * @param {string[]} kept
+ */
+function set(kept, host, on) {
+  const s = new Set(kept || []);
+  if (on) s.add(key(host)); else s.delete(key(host));
+  return [...s].sort(byCodePoint);
+}
+
+/** The page can be asked for as a computer's or a phone's: a website (http or https) with a host. */
+function can(scheme, host) {
+  return ['http', 'https'].includes(String(scheme || '').toLowerCase()) && String(host || '') !== '';
+}
+
+module.exports = { key, wants, set, can };
+
+};
 SOURCES["leaving-cover.js"] = function (module, exports, require) {
 // The leaving cover's "icon use" decision (docs/MOBILE-BEHAVIOUR.md, Icons and full screen; Tim 11-18): as the app
 // leaves while it's used through Home Screen icons, a plain cover goes up so the OS's picture of the app is never
@@ -794,6 +846,75 @@ function chat(site) {
 module.exports = { of, hostIsIn, chat, TWO_PART };
 
 };
+SOURCES["tab-reload.js"] = function (module, exports, require) {
+// Which tabs load again when the mods change (docs/MOBILE-BEHAVIOUR.md, Tabs; Tim 11-18: "when you successfully add
+// the mod to the other tab, your tab reloads. That's quite annoying for watching videos"). After a change to the mods
+// the scripts every page gets are made again; the shown page loads again only if what runs on it changed, and never
+// while it plays (unless the person's own act asks for it: Pause all); tabs behind load again when they're next shown.
+// What runs on a page is a signature each app makes (iPhone: Hasher, per launch); only its equality matters here. The
+// reload itself, the playing check and the scripts stay each app's. Both phone apps run this (mobile/shared/gen/core.js:
+// TrifCore.tabReload); tab-reload-cases.json holds the answers the iPhone's Swift gave.
+
+'use strict';
+
+/** The signature a page keeps as it commits while a change isn't in the scripts yet: it counts as stale. */
+const PENDING = 'pending';
+
+/**
+ * A tab shown: its first load (what was kept of it) or a look at whether its mods changed.
+ * @param {{started: boolean, waitingForFront: boolean}} f waitingForFront: the app isn't in front yet (it starts then)
+ * @returns {'start' | 'refresh'}
+ */
+function shown(f) {
+  return !f.started && !f.waitingForFront ? 'start' : 'refresh';
+}
+
+/**
+ * The signature a page keeps as it commits.
+ * @param {{pending: boolean, signature: string}} f pending: a change to the mods isn't in the scripts yet
+ */
+function loaded(f) {
+  return f.pending ? PENDING : String(f.signature);
+}
+
+/**
+ * Whether the mods running on a page changed since it loaded (null: it hasn't loaded).
+ * @param {string|null} kept what loaded() gave as it committed
+ * @param {string} now the signature for its address now
+ */
+function stale(kept, now) {
+  return kept == null ? null : String(now) !== String(kept);
+}
+
+/**
+ * The shown tab looked at after a change (or as it's shown again).
+ * @param {{pending: boolean, started: boolean, hasPage: boolean, reloading: boolean, loaded: string|null, now: string,
+ *   evenPlaying: boolean}} f hasPage: it has an address; reloading: a reload of it is under way; evenPlaying: Pause all
+ * @returns {'later' | 'keep' | 'ask' | 'next'} later: once the scripts are in, look again (if it's still the tab
+ *   shown); ask: find out whether it plays, then recheck; next: recheck (on the next turn) without asking
+ */
+function refresh(f) {
+  if (f.pending) return 'later';
+  if (!f.started || !f.hasPage || f.reloading || !stale(f.loaded, f.now)) return 'keep';
+  return f.evenPlaying ? 'next' : 'ask';
+}
+
+/**
+ * After refresh's ask (or next): whether it loads again now.
+ * @param {{playing: boolean, shown: boolean, reloading: boolean, pending: boolean, loaded: string|null, now: string}} f
+ *   playing: it plays sound or video (false when not asked); shown: it's still the tab shown
+ * @returns {'playing' | 'keep' | 'reload'} playing: it keeps going as it is, and loads again the next time it's shown
+ *   not playing
+ */
+function recheck(f) {
+  if (f.playing) return 'playing';
+  if (!f.shown || f.reloading || f.pending || !stale(f.loaded, f.now)) return 'keep';
+  return 'reload';
+}
+
+module.exports = { PENDING, shown, loaded, stale, refresh, recheck };
+
+};
 const cache = {};
 function require(name) {
   const f = name.replace(/^\.\//, '');
@@ -806,12 +927,14 @@ function require(name) {
 }
 TrifCore.appLinks = require("app-links.js");
 TrifCore.chatOffers = require("chat-offers.js");
+TrifCore.desktop = require("desktop.js");
 TrifCore.leavingCover = require("leaving-cover.js");
 TrifCore.match = require("match.js");
 TrifCore.modOffer = require("mod-offer.js");
 TrifCore.modStore = require("mod-store.js");
 TrifCore.quickAsk = require("quick-ask.js");
 TrifCore.site = require("site.js");
+TrifCore.tabReload = require("tab-reload.js");
 // name "module.fn", args a JSON array; the answer as JSON (null for undefined)
 TrifCore.call = function (name, argsJSON) {
   const dot = name.indexOf('.');

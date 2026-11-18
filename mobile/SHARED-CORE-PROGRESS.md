@@ -58,8 +58,10 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       ModOfferView.elsewhere; words stay Swift). @match itself was round 6 (core/match.js); trying a mod in More's chat
       (PanelChat.tryMod) uses ModStore.applies, the round-6 twin. Round 8: the Add to TRIF tap (Browser.offer(text:site:))
       takes `from` too (a bug fix: it kept the phone~ prefix, against the spec); mod-offer-cases.json "tap".
-- [ ] Which tabs reload when mods change: signature compare, playing, shown vs behind, Pause all (Browser.refreshIfStale
-      / select).
+- [x] Which tabs reload when mods change → core/tab-reload.js (round 9): shown (start or refresh), loaded (the "pending"
+      signature), stale, refresh (later / keep / ask / next), recheck (playing / keep / reload). Swift: TabReloadRules.swift
+      (Browser.select / refreshIfStale call through; loaded and stale are twins: every commit). The signature (Hasher,
+      per launch), the playing check, the waiting and the reload stay Swift; Pause all's evenPlaying is the caller's.
 - [x] Leaving cover's "icon use" decision → core/leaving-cover.js (round 8): reason (icon tab on its site in full
       screen, or arrived by an icon), arrived (within 3 s). Swift: LeavingCoverRules.swift (LeavingCover.reason /
       willEnterForeground call through; `-nocover`, the browser, UserDefaults "iconTabs" and the words stay Swift).
@@ -67,7 +69,8 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       exists (test/videoresume.test.js; the page's JS videoId already compared). Move decide + videoID.
 - [ ] Dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking). Swift unit check exists
       (test/speechtext.test.js, random walk). Hot path (every partial result): measure; maybe a twin like unread.
-- [ ] Desktop-mode per-site memory (Browser.desktopKey: lower case, no www.; the kept list's add/remove).
+- [x] Desktop-mode per-site memory → core/desktop.js (round 9): key, wants, set, can. Swift: DesktopRules (in
+      TabReloadRules.swift): set calls through (⋯'s Request Desktop / Mobile Website); key, wants, can are twins.
 - [ ] Which tab the tab list snaps to (ClaudePane.chatTabShown + the from-Mods/from-page cases).
 
 ## Done this round
@@ -169,13 +172,33 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   after 53 ms; full screen off → left: covered (came by an icon) → back by the app → left: the real picture kept; no
   "shared rule" line in diagnostics. .ipa built (dSYM 380648BC-59FB-3DA9-A12D-79ABAC4EFFBB).
 
+- Round 9 (11-18): which tabs load again when the mods change (core/tab-reload.js: shown, loaded, stale, refresh,
+  recheck) and desktop websites' per-site memory (core/desktop.js: key, wants, set, can); both in TabReloadRules.swift
+  (DesktopRules beside it). Cases recorded from the old Swift (scratchpad r9/rec.swift: the verbatim guards over facts):
+  4 shown, 8 loaded, 15 stale, 480 refresh, 240 recheck; 18 keys (case, www., www, wwwx, www.www., Ü/É, IPv6, ""), 90
+  wants, 180 sets, 22 cans; the JS passed them at once, then the Swift through JSC (twins compared with the JS). Cost
+  (Mac, unoptimised): refresh + recheck ~29 µs, a request ~20 µs. Tests: all of mobile/test (46 pass, 13 skipped as
+  before), prepare --check, smoke. Simulator (SE, headless, serve.js + serve-media.js): a mod for 127.0.0.1 added with
+  localhost shown → localhost not loaded again, 127.0.0.1 marked stale → shown: loaded again (outline); localhost
+  shown again unchanged → not loaded again; a mod for the shown site → loaded again; Pause all → loaded again without
+  (outline 0), resumed → with; a video playing (unmuted, a silent track) and a mod added → "playing, so not loaded
+  again now", stale; paused, shown again → loaded again; Request Desktop Website → sites [localhost], the tab desktop
+  (Mac agent); Mobile → [] ; no "shared rule" line in diagnostics. .ipa built (dSYM 4551F1E9-7562-327D-9B9C-79900B473811).
+
 ## Next step
 
-Round 9: which tabs reload when mods change (Browser.modsChanged / refreshIfStale / select: the signature compare
-stays Swift (Hasher per launch), the decision moves: started, a page, not already reloading, signature differs, playing
-and evenPlaying, shown vs behind, scriptsPending). Or desktop-mode per-site memory (Browser.desktopKey), small.
+Round 10: video-resume matching (VideoResume.decide + videoID → core/video-resume.js; test/videoresume.test.js's Swift
+check exists, and the page's JS videoId is already compared). Then the dictation accumulator (SpeechText: a hot path,
+maybe a twin) and the tab list's snap (ClaudePane.chatTabShown).
 
 ## Notes for next round
+
+- Round 9: the reload drivers are scratchpad r9/drive.py (tabs by index: the SE has pages, localhost, 127.0.0.1; a
+  page marker `window.__r9` tells a reload; `{"modsstale": 1}`, `{"pause": true}`, `{"desktop": true}` /
+  `{"desktopstate": 1}`) and r9/play.py (serve-media.js 8390 + a copy of a.mp4 with a silent audio track made by
+  ffmpeg anullsrc, deleted after: Browser.playing ignores muted media, and sound must not reach Tim's speakers). A
+  paused test video can come back playing after a tab switch (another feature's resume): check `paused` before
+  reading a reload.
 
 - Round 8: the cover's driver is scratchpad r8/drive.py (`{"offer": text, "site": …}` is the Add to TRIF tap now;
   `{"cover": 1}`; an icon return is `simctl openurl <dev> trif://open?url=http://localhost:8377/`, away is `simctl
@@ -228,6 +251,10 @@ and evenPlaying, shown vs behind, scriptsPending). Or desktop-mode per-site memo
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 9: which tabs load again when a mod changes (never another site's, never one playing; tabs behind when next
+  shown; Pause all even while playing) and Request Desktop Website's per-site memory now decide through the shared
+  rules; they behave as before. A new TRIF.ipa is in iCloud Drive/TRIF.
 
 - Round 8: the Add to TRIF button in a chat from your computer's phone view now treats phone~<site> as <site>, as the
   spec says (it kept "phone~<site>" before); a bug fix, no new decision. The leaving cover (the robot as the app

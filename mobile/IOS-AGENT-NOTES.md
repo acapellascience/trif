@@ -204,7 +204,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). A chat's offered mod: where it's read and came from, and the coral "runs on another site" box's decision (ModOfferRules.swift); the leaving cover's "icon use" (LeavingCoverRules.swift); which tabs load again when the mods change, and desktop websites' per-site memory (TabReloadRules.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -290,6 +290,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   words stay in ModOfferView. Browser.offer(text:site:) (the Add to TRIF tap) takes `from` too since round 8 (before,
   it kept a phone~ twin as the site, against the spec): mod-offer-cases.json "tap"; core-modoffer.test.js also checks
   the tap's Swift calls it. Dev step `{"offer": text, "site": "phone~x.com"}` is that tap; offerstate shows `came`.
+- TabReloadRules.swift (round 9 of the shared core): which tabs load again when the mods change. `starts` (Browser.select:
+  the first load or a look), `refresh` (.later / .keep / .ask / .next; no answer: keep) and `recheck` (.playing / .keep /
+  .reload; no answer: keep) through TrifCore.tabReload; refreshIfStale computes the facts (the signature for the address
+  the tab loaded, ModStore.signature: Hasher, per launch) and does the waiting, the playing check and the reload.
+  `loaded` (didCommit) and `stale` (dev step modsstale) are Swift twins. DesktopRules in the same file: `set` (⋯'s
+  Request Desktop / Mobile Website) through TrifCore.desktop; `key` (Browser.desktopKey), `wants`, `can` twins (every
+  page load). Mac check: `node --test mobile/test/tabreload.test.js` (tabreload-check/main.swift; argv
+  tab-reload-cases.json, desktop-cases.json, gen/core.js; refresh + recheck ~29 µs, a request ~20 µs, unoptimised).
 - LeavingCoverRules.swift (round 8 of the shared core): `reason(fullScreen:host:tab:iconTabs:arrivedByIcon:)` (.iconTab
   site / .arrived / nil; no answer: nil, the real picture) and `arrived(since:)` (< 3 s; no answer: the same here)
   through TrifCore.leavingCover. LeavingCover.reason / willEnterForeground call them; `-nocover`, the browser and

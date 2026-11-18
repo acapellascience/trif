@@ -192,7 +192,7 @@ The tabs and the Mods tab now open over the page with the toolbar showing under 
 ## iOS's permission questions (added 11-16)
 
 A page asking for the camera or microphone (x.com's compose, for a photo) ended the app: iOS requires these words.
-iOS shows them under its own "“TRIF Probe” Would Like to Access the Camera" question.
+iOS shows them under its own "“TRIF” Would Like to Access the Camera" question (“TRIF Probe” before 11-18).
 
 | Key | New |
 |---|---|
@@ -428,14 +428,14 @@ docs/PHONE-LINK-STRINGS.md on branch phone-link.
 | The camera, for a screen reader | The camera, to scan the code |
 | A QR code (or link) that isn't TRIF's pairing code | That isn't a code from TRIF on your computer. |
 | No camera | This iPhone has no camera to scan with. |
-| Camera access off | TRIF can't use the camera. Turn it on in Settings, then TRIF Probe, then Camera. · Open Settings |
+| Camera access off | TRIF can't use the camera. Turn it on in Settings, then TRIF, then Camera. · Open Settings |
 | Looking | Looking for {computer} on your Wi-Fi… |
 | Connecting | Connecting to {computer}… |
 | Done | Connected to {computer}. |
 | Paired, later | Connected to {computer} since {date}. |
 | Not found | Can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. |
 | The code was used, cancelled or is over 5 minutes old | That code didn't work: it may have been used already or be more than 5 minutes old. Show a new one on {computer} and scan it again. |
-| Local Network access off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF Probe, then Local Network. · Open Settings |
+| Local Network access off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF, then Local Network. · Open Settings |
 | An answer that doesn't decrypt (not the code's computer) | Something on your Wi-Fi answered as {computer} but isn't it. TRIF didn't connect. |
 | The Keychain refused | This iPhone couldn't keep the connection's key. Try again. |
 | The encryption's self-test failed | TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect. |
@@ -473,7 +473,7 @@ Web/panel-adapter.js). The same lines are in docs/PHONE-LINK-STRINGS.md on branc
 | Its agent isn't logged in (added 11-17, draft) | {computer}'s coding agent isn't logged in. Log in to it in TRIF on {computer}, then ask again. |
 | Lost touch, given up (or no answer in 20 s) | Lost touch with {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open. What it was doing finishes there. |
 | Removed there, or its link turned off | This iPhone isn't connected to {computer} any more. Connect it again from TRIF's Settings there: Pair with my computer. |
-| Local Network off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF Probe, then Local Network. |
+| Local Network off | TRIF needs Local Network access to find {computer}. Turn it on in Settings, then TRIF, then Local Network. |
 | Already working on the site | {computer} is already working on this site. Try again when it's done. |
 | No agent there | {computer} has no coding agent set up for TRIF yet. |
 | Not a page TRIF makes mods for | TRIF can't make a mod for this page's address. |
@@ -585,7 +585,7 @@ All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names the
 | The robot's long press: the chats' list, its top | — | the box's placeholder **What should change?**; its send arrow (VoiceOver **Ask**); the microphone (VoiceOver **Hold to talk**, hint **Hold, say what should change, then let go**) |
 | While the microphone is held: the glowing pill | — | **Listening…**, then the words as they're heard (VoiceOver **Listening** / **Heard: {words}**) |
 | Under the box, the first time the microphone is held (iOS's two questions up) | — | **Allow TRIF to hear you, then hold the microphone and speak.** |
-| Under the box, the microphone or speech recognition refused (the box still takes typing) | — | **TRIF can't hear you: allow the Microphone and Speech Recognition for TRIF Probe in Settings. You can still type.** |
+| Under the box, the microphone or speech recognition refused (the box still takes typing) | — | **TRIF can't hear you: allow the Microphone and Speech Recognition for TRIF in Settings. You can still type.** |
 | Under the box, where this iPhone can't recognise speech itself (TRIF never sends audio to a server) | — | **This iPhone can't recognise speech in {language} by itself, so TRIF doesn't listen. Type instead, or use the keyboard's dictation.** |
 | Under the box, rarer | — | **Speech recognition isn't available right now. Type instead.** · **The microphone can't be used right now. Type instead.** · **This iPhone has no microphone to use. Type instead.** |
 | The strip (Claude's or ChatGPT's own message box and Send, over the tab), its header | — | **Check it, then tap Send in {Service}**; its buttons (VoiceOver) **Open the whole chat** · **Cancel** |
@@ -636,11 +636,29 @@ nothing and keeps the words in the box.
 
 Drafts for Tim. iOS's public way only (UIApplication.openSettingsURLString: TRIF's own page in Settings; never the
 private prefs: links). In the Simulator (iOS 26.3) it opened Settings' main page, Profile Downloaded right there (one
-tap); on a phone it may open Apps → TRIF Probe instead (then two back taps first), hence the words in brackets.
+tap); on a phone it may open Apps → TRIF instead (then two back taps first), hence the words in brackets.
 
 | Where | Old | New (drafts for Tim) |
 |---|---|---|
-| Steps, the Safari and Files routes, the Settings step | Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management). | **Tap Open Settings, then Profile Downloaded near the top (if TRIF Probe's own page opens, go back to the main Settings page first).** |
+| Steps, the Safari and Files routes, the Settings step | Open the Settings app and tap Profile Downloaded near the top (or General → VPN & Device Management). | **Tap Open Settings, then Profile Downloaded near the top (if TRIF's own page opens, go back to the main Settings page first).** |
 | The steps' button once Safari has the profile (or it's saved to Files) | — | **Open Settings** (the prominent button; Download it again / Save it again below it, plain) |
 | The clip page's own Open Settings (the site's words, Tim's) links to trif://settings | — | the app opens TRIF's page in Settings the same way; no words of its own |
+
+## The quick ask's strip, the list's Send and Cancel, and the app's name (changed 11-18, Tim)
+
+Tim, 11-18: the strip "can be a lot smaller. We don't need to see the chips even; we could just have a very little
+panel that shows the text"; the list's "Done" read as cancelling ("it should say Send"); "Can we just call the iOS app
+TRIF too? I'm getting tired of seeing Probe." Drafts for Tim unless he named the words (Send, TRIF).
+
+| Where | Old | New (drafts for Tim) |
+|---|---|---|
+| The app's name: the Home Screen, Settings, iOS's questions ("“TRIF” Would Like to…"), the "◀" back link from another app | TRIF Probe | **TRIF** (Tim's word; the bundle identifier is unchanged, so the install on the phone updates in place) |
+| Every sentence that named the app in Settings | … in Settings, then TRIF Probe, then Camera / Local Network · … for TRIF Probe in Settings · if TRIF Probe's own page opens … | the same with **TRIF** (see the rows above, already changed in place) |
+| The chats' list (the robot's tap), top right | **Done** (closed the list) | **Send** (Tim's word): sends what's in the box, as its arrow does; while listening by a tap, the stop that asks what was heard; dimmed while the box is empty. VoiceOver hint **Sends what's in the box** |
+| The chats' list, top left | — | **Cancel**: closes the list without sending; the words stay in the box (as a tap on the dimmed page or a swipe down). VoiceOver hint **Closes without sending. Your words stay in the box** |
+| The pill over the toolbar while the request goes into Claude's or ChatGPT's box (before the strip comes up) | — (the strip came up at once, moving as the page loaded) | a spinner and **Putting it in {Service}…** (a tap opens the whole chat) |
+| The strip | its header over 230 points of the page's foot (attachments, the box, the "… can make mistakes." line) | the same header, slimmer, over only the box's text and the site's own Send (about one to four lines); everything else of the page stays in the whole chat |
+
+Not changed (not named by Tim): the box's arrow is still **Ask** for VoiceOver, while the list's button says Send. The
+probe's own developer menu in ⋯ ("The probe", "The probe's own pages") keeps its words.
 

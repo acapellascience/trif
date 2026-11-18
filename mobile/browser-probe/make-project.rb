@@ -72,7 +72,7 @@ target.build_configurations.each do |config|
   s['INFOPLIST_FILE'] = 'TrifProbe/Info.plist'
   s['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
   s.delete('ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME') # (no accent colour in the catalog: the app sets its tint itself)
-  s['INFOPLIST_KEY_CFBundleDisplayName'] = 'TRIF Probe'
+  s['INFOPLIST_KEY_CFBundleDisplayName'] = 'TRIF'
   # (the model on this iPhone: llama.cpp's framework from Vendor/ (fetch-llama.sh), for devices only: it has no
   # Simulator slice)
   s['FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]'] = '$(inherited) $(PROJECT_DIR)/Vendor/llama.xcframework/ios-arm64'

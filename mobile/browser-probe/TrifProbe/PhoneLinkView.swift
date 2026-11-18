@@ -306,7 +306,7 @@ struct PhoneLinkView: View {
                 camera = AVCaptureDevice.authorizationStatus(for: .video)
             }
         default:
-            Text("TRIF can't use the camera. Turn it on in Settings, then TRIF Probe, then Camera.")
+            Text("TRIF can't use the camera. Turn it on in Settings, then TRIF, then Camera.")
             Button("Open Settings") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
         }
     }
@@ -328,7 +328,7 @@ struct PhoneLinkView: View {
         switch f {
         case .notFound: return "Can't find \(computer). It may be asleep, on another Wi-Fi, or have no browser with TRIF open."
         case .refused: return "That code didn't work: it may have been used already or be more than 5 minutes old. Show a new one on \(computer) and scan it again."
-        case .denied: return "TRIF needs Local Network access to find \(computer). Turn it on in Settings, then TRIF Probe, then Local Network."
+        case .denied: return "TRIF needs Local Network access to find \(computer). Turn it on in Settings, then TRIF, then Local Network."
         case .broken: return "Something on your Wi-Fi answered as \(computer) but isn't it. TRIF didn't connect."
         case .keychain: return "This iPhone couldn't keep the connection's key. Try again."
         case .selfTest: return "TRIF's encryption didn't pass its check on this iPhone, so TRIF won't connect."

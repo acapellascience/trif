@@ -943,7 +943,7 @@ struct IconHandoffSteps: View {
         switch handoff.state { case .failed, .timedOut, .wrongBrowser: return true; default: return false }
     }
     private var settingsSteps: [String] {
-        ["Tap Open Settings, then Profile Downloaded near the top (if TRIF Probe's own page opens, go back to the main Settings page first).",
+        ["Tap Open Settings, then Profile Downloaded near the top (if TRIF's own page opens, go back to the main Settings page first).",
          "Tap Install, enter your passcode, then Install again.",
          one ? "The icon appears on your Home Screen." : "The icons appear on your Home Screen."]
     }

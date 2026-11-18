@@ -1,4 +1,4 @@
-// TRIF Probe (browser): a test app that asks what a TRIF made as its own iPhone browser could do.
+// TRIF (the iPhone app; its project and types are still named TrifProbe): a browser with TRIF in it, grown from a test app that asked what TRIF could do as its own iPhone browser.
 // Not TRIF. See mobile/README.md for what each part is for and what to send back.
 
 import AVFoundation
@@ -463,11 +463,12 @@ struct ContentView: View {
                 // its message box, filled, and the site's own Send. Nothing in it is resized or moved)
                 ChatScreen(pane: pane)
                     .modifier(ChatLayer(insets: bars.insets, size: geo.size, strip: stripLayer && !pane.shown, up: stripUp,
+                                        part: pane.stripBody, shift: pane.stripShift,
                                         header: QuickStripHeader(service: pane.quick?.service ?? pane.service.rawValue,
                                                                  expand: { pane.expandStrip() }, cancel: { withAnimation { pane.cancelStrip() } })))
                     .zIndex(pane.shown || stripLayer ? 1 : 0)
-                    .allowsHitTesting(pane.shown || pane.strip)
-                    .accessibilityHidden(!pane.shown && !pane.strip)
+                    .allowsHitTesting(pane.shown || pane.stripIn)
+                    .accessibilityHidden(!pane.shown && !pane.stripIn)
                 column
                     .background(Color(.systemBackground))
                     .zIndex(pane.shown || stripLayer ? 0 : 1)
@@ -533,6 +534,8 @@ struct ContentView: View {
                 }
             }
         }
+        // (while the quick ask's chat is filled behind the tab, a keyboard its box's brief focus starts moves nothing)
+        .ignoresSafeArea(.keyboard, edges: pane.strip && !pane.stripIn && !pane.shown ? .bottom : [])
     }
 
     // (the page reaches from under the compact address bar to the foot; the bars lie over it, the address bar
@@ -598,13 +601,14 @@ struct ContentView: View {
         // (the bars stay full while anything covers the page: its toolbar is how to get back)
         .onChange(of: covered) { _, now in bars.hold(now) }
         .onChange(of: pane.shown) { _, now in if now { pane.settleLayout() } }
-        .onChange(of: pane.strip) { _, now in
+        // (the strip slides in once, when its page has settled (pane.stripIn), and away when it goes)
+        .onChange(of: pane.stripIn) { _, now in
             if now {
                 stripLayer = true
-                Task { @MainActor in try? await Task.sleep(nanoseconds: 30_000_000); if pane.strip { stripUp = true } }
+                Task { @MainActor in try? await Task.sleep(nanoseconds: 30_000_000); if pane.stripIn { stripUp = true } }
             } else {
                 stripUp = false
-                Task { @MainActor in try? await Task.sleep(nanoseconds: 380_000_000); if !pane.strip { stripLayer = false } }
+                Task { @MainActor in try? await Task.sleep(nanoseconds: 380_000_000); if !pane.stripIn { stripLayer = false } }
             }
         }
         .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
@@ -685,8 +689,9 @@ struct ContentView: View {
     private var notes: some View {
         VStack(spacing: 0) {
             // (the quick ask's pill: Working, then Done · Undo or Replied; a tap opens the chat)
-            if let q = pane.quick, ![QuickAsk.State.waitingSend, .card].contains(q.state), !pane.shown {
-                QuickPill(quick: q, open: { closeCovers(); pane.quickOpen() }, undo: { pane.quickUndo() }, dismiss: { if pane.quick?.id == q.id { pane.quick = nil } })
+            // (and while the strip's chat is filled behind the tab: "Putting it in Claude…")
+            if let q = pane.quick, !pane.shown, q.state != .card, q.state != .waitingSend || (pane.strip && !pane.stripIn) {
+                QuickPill(quick: q, preparing: q.state == .waitingSend, open: { closeCovers(); pane.quickOpen() }, undo: { pane.quickUndo() }, dismiss: { if pane.quick?.id == q.id { pane.quick = nil } })
                     .padding(.bottom, 8)
                     .frame(maxWidth: .infinity)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1397,6 +1402,18 @@ final class BarState: NSObject, ObservableObject {
         let overlap = end.isEmpty ? 0 : max(0, screen.maxY - max(end.minY, screen.minY))
         let up = overlap > 150
         guard up != keyboardUp else { return }
+        // (the quick ask's chat being filled behind the tab: its box's focus, a moment long, isn't the person's
+        // keyboard; the toolbar and the layout stay (Tim, 11-18: the strip went "up and down" as Claude's page loaded))
+        if up, Model.pane?.keyboardNotTheirs == true {
+            Diagnostics.shared.log("quick ask", "the keyboard came up while the strip's chat was being filled: left out of the layout")
+            return
+        }
+        // (the person's own keyboard in the strip's box: the whole chat, where the box has room to edit (the strip shows
+        // only a cropped band of a page laid out over the whole tab, which WebKit would scroll under the keyboard))
+        if up, let pane = Model.pane, pane.stripIn, !pane.shown, pane.chatHasFocus {
+            Diagnostics.shared.log("quick ask", "the keyboard came up in the strip: the whole chat opened")
+            pane.expandStrip()
+        }
         withAnimation(.easeOut(duration: max(duration, 0.1))) { keyboardUp = up }
         insets.set(keyboard: up)
         applyInsets()
@@ -1932,30 +1949,38 @@ final class BarInsets: ObservableObject {
     }
 }
 
-/// Room at the foot for the toolbar (the open chat leaves it showing).
-/// The chat's layer: over the page with the toolbar showing under it; or, for a quick ask, only its foot (`strip`),
-/// clipped to QuickStrip.height with the strip's header over it, sliding up (`up`) and away. The chat is laid out at
-/// its full size either way (its page never changes size for the strip).
+/// The chat's layer: over the page with the toolbar showing under it; or, for a quick ask, a strip of it (`strip`): the
+/// header and, under it, `part` points of the chat's page: the box's text and the site's Send (Tim, 11-18: "a very
+/// little panel that shows the text"), the page moved down by `shift` inside it so that part's foot is at the strip's
+/// foot. Slides up (`up`) and away. The chat is laid out at its full size either way (its page never changes size for
+/// the strip: it's only moved and clipped, never restyled).
 struct ChatLayer<Header: View>: ViewModifier {
     @ObservedObject var insets: BarInsets
     let size: CGSize
     let strip: Bool
     let up: Bool
+    let part: CGFloat
+    let shift: CGFloat
     let header: Header
     func body(content: Content) -> some View {
         let bottom = insets.keyboard ? 0 : insets.toolbar
         let h = max(0, size.height - bottom)
+        let tall = strip ? min(QuickStrip.header + part, h) : h
         content
             .frame(width: size.width, height: h)
-            .frame(width: size.width, height: strip ? min(QuickStrip.height, h) : h, alignment: .bottom)
+            .offset(y: strip ? shift : 0)
+            .frame(width: size.width, height: tall, alignment: .bottom)
             .clipped()
-            // (the strip's top, below its header: the chat's page takes no touches above it)
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in ChatWebView.stripTop = strip ? y + QuickStrip.header : nil }
-            .onChange(of: strip) { _, on in if !on { ChatWebView.stripTop = nil } }
+            // (the strip's band, below its header: the chat's page takes no touches outside it, though it's laid out
+            // over the whole tab)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { r in
+                ChatWebView.stripBand = strip ? (r.minY + QuickStrip.header)...max(r.minY + QuickStrip.header, r.maxY) : nil
+            }
+            .onChange(of: strip) { _, on in if !on { ChatWebView.stripBand = nil } }
             .overlay(alignment: .top) { if strip { header } }
             .clipShape(UnevenRoundedRectangle(topLeadingRadius: strip ? 14 : 0, topTrailingRadius: strip ? 14 : 0, style: .continuous))
             .shadow(color: .black.opacity(strip ? 0.22 : 0), radius: 10, y: -2)
-            .offset(y: strip && !up ? QuickStrip.height + 20 : 0)
+            .offset(y: strip && !up ? tall + 20 : 0)
             .animation(.spring(duration: 0.35), value: up)
             .frame(width: size.width, height: h, alignment: .bottom)
             .clipped()
@@ -1963,6 +1988,7 @@ struct ChatLayer<Header: View>: ViewModifier {
     }
 }
 
+/// Room at the foot for the toolbar (the open chat leaves it showing).
 struct ToolbarRoom: ViewModifier {
     @ObservedObject var insets: BarInsets
     func body(content: Content) -> some View { content.padding(.bottom, insets.keyboard ? 0 : insets.toolbar) }

@@ -1,7 +1,9 @@
 # iPhone app (TrifProbe): notes for the next agent
 
 Branch `ios-poc`, worktree `~/WebMods-worktrees/ios-poc`. The app is `mobile/browser-probe` (Xcode project
-`TrifProbe.xcodeproj`, bundle `com.timsrobot.trifprobe.browser`, display name "TRIF Probe"). mobile/README.md has the
+`TrifProbe.xcodeproj`, bundle `com.timsrobot.trifprobe.browser`, display name "TRIF" since 11-18 (Tim: "I'm getting
+tired of seeing Probe"; it was "TRIF Probe"). The bundle identifier stays as it is, so the install on Tim's phone updates
+in place with its tabs, mods and sign-ins: never change it. Internal names (target, folders, types) stay TrifProbe. mobile/README.md has the
 long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is the short version.
 
 ## Standing rules
@@ -17,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (427 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (436 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -76,7 +78,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   exchange with an earlier Calmer feed put at the top 1.5 s after load and 2 s after each reply), `?reopen` (the
   chat reopens a viewer on an old file by itself, no tap), `?gpt` (/c/ addresses), `?slow`, `?nostop`, `?draft`, `?gptpaste`, `?viewerroute`,
   `?octane` (ChatGPT's newer mobile page: li[data-message-role], data-message-complete, a 3 s pause, picture-only
-  inputs), `?cm` (code as .cm-editor/.cm-line), `?slowload`, `?pasted` (a paste of several lines goes into the box as a
+  inputs), `?cm` (code as .cm-editor/.cm-line), `?slowload`, `?late` (the page settles in pieces as claude.ai's does on a
+  phone: the box's tool row at 1 s, a "… can make mistakes." line above it at 1.6 s, more room under it at 2.2 s, each
+  attachment a placeholder first and its tile 0.5 s later: the quick ask's strip measured against it), `?pasted` (a paste of several lines goes into the box as a
   pre inside the ProseMirror, 20+ lines as a PASTED tile with a preview pre; the sent message keeps both, the pasted card
   opening the viewer), `?oldchat` (an old conversation loading in pieces into a .history box: the last reply's box filled
   in twice, the reply before it, the person's messages 2 s late; `window.__standinScrollUp()` or a scroll to the top
@@ -96,8 +100,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (env TRIF_GPU, TRIF_THREADS, TRIF_BATCH, TRIF_CTX). Models are 1.3–2.7 GB: download to the scratchpad, delete after
   (the Mac's disk is at 97%).
 - The .ipa: `xcodebuild … -configuration Release -sdk iphoneos -derivedDataPath <ddev> CODE_SIGNING_ALLOWED=NO DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build`,
-  zip `Payload/TrifProbe.app` to `~/Downloads/TrifProbe.ipa`, copy `TrifProbe.app.dSYM` to ~/Downloads, copy the .ipa to
-  `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/TrifProbe.ipa`, report `dwarfdump --uuid`. Tim sideloads it with iloader.
+  zip `Payload/TrifProbe.app` to `~/Downloads/TRIF.ipa`, copy `TrifProbe.app.dSYM` to `~/Downloads/TRIF.app.dSYM`, copy the
+  .ipa to `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/TRIF.ipa` (named TrifProbe.ipa before 11-18; that one went
+  to the Trash), report `dwarfdump --uuid`. Tim sideloads it with iloader.
 - The mod reader on the Mac: `node --test mobile/test/modfile.test.js` (gen/mods.js in node's vm: a free mod's style
   section, its trif.log lines and start to the app, capped; boxed and style mods). Real WebKit without the Simulator:
   mobile/test/webkit-check (swiftc; an offscreen WKWebView with the scripts as ModStore.userScripts puts them, on
@@ -129,7 +134,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   make them with `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"` and ffmpeg's anullsrc for silences, never the
   live microphone), `-oldspeech` (SFSpeechRecognizer even where iOS 26's SpeechAnalyzer is there), `-speechsession` (the real audio session switch with `-speechfile`), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-stripheight <pt>` (the quick ask's strip, 270), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-exitbelow` (the exit button's old
+  `-nobarshift`, `-stripmax <pt>` (the most of their box's text the strip shows, 112), `-stripheight <pt>` (the strip when no message box is found, 264), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`, `-linkhost 127.0.0.1:<port>` (the phone link pairs there,
   not over Bonjour: a helper's store.js + server.js on loopback in a temp HOME; `simctl openurl` the code's text).
@@ -170,13 +175,25 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   undone/failed, `applied` for Undo; `lookOnly`), `QuickAskBox` (the box at the top of ChatListView; its text is
   `SpeechInput.draft`, so it outlives the sheet), `HeardText` (every word heard, scrolling past a height, the newest
   in view), `HoldTalkPill`, `KeptTalkSlot`/`KeptTalkPill` (a robot hold stopped by something else: the words, a tap
-  opens the list), `QuickPill` (above the toolbar, in ContentView.notes), `QuickStripHeader`, `QuickStrip.height`. ClaudePane: `quick`, `strip`, `quickAsk` (Claude/
+  opens the list), `QuickPill` (above the toolbar, in ContentView.notes; `preparing`: "Putting it in {Service}…" while
+  the strip's chat fills), `QuickStripHeader`, `QuickStrip` (header 34, pad, maxPart, minBody, noBoxBody), `QuickSend` +
+  `QuickSendButton` (the box's arrow and the list's Send: one action). ClaudePane: `quick`, `strip` (on from the ask;
+  its didSet → `stripEnded`), `stripIn` (slid in, once settled), `stripBody`/`stripShift` (the page's part shown, and how
+  far the page is moved down so that part's foot is the strip's foot), `settleStrip` (after the fill: chat.js
+  `stripWatch(true)` + its own `stripBox()` every 60 ms; in when unchanged 0.3 s and loaded (or 3 s), at most 8 s),
+  `stripMeasured` (each "stripbox" message: `place` converts document coordinates to the web view's points with the
+  scroll view's convert; once in, `pin` moves the page with no animation), `slideIn`, `keyboardNotTheirs`,
+  `chatHasFocus`, `quickAsk` (Claude/
   ChatGPT: showFor + prepare/fillContext + the request as text + chat.js `armSend`; More: `quickMore` →
   PanelChat.quickSend), `quickDeliver` (offerFromChat(hold: true), look-only → Browser.addMod(quiet:), the rest
   offerHeld or the done banner), `quickUndo` (ModStore.undoAdd: the version before, or removed; not to Recently
   deleted), `cancelStrip` (chat.js `takeText`), `expandStrip`, `quickOpen`. handleDone's quick branch; "sent" moves
-  waitingSend → working. ContentView: `ChatLayer` (the chat laid out full size; in strip mode clipped to its foot,
-  sliding: `stripLayer`/`stripUp`), `ChatWebView.stripTop` (touches above the strip go to the tab). PanelChat:
+  waitingSend → working. ContentView: `ChatLayer` (the chat laid out full size; in strip mode moved by `shift` and clipped to header +
+  `part`, sliding: `stripLayer`/`stripUp`, driven by `pane.stripIn`), `ChatWebView.stripBand` (touches outside the
+  strip's band go to the tab; the page now reaches below the strip too). chat.js `stripBox` (what shows of the box
+  inside its own scrolling ∪ the SEND button, document coordinates, plus chars, tiles, the box's height, readyState)
+  and `stripWatch(on)` (MutationObserver + ResizeObserver + scroll/resize/visualViewport, once a frame, only changes,
+  and every 250 ms: posts "stripbox"). PanelChat:
   `quickSend` (TRIF's own panel: #input, #composer.requestSubmit(); waits for #site.title == the tab's address;
   `quickPending` marks the next run; refused if startRun never takes it), `Run.quick`, `offerRun` → `quickDone`.
 - SpeechInput.swift (Tim, 11-18, "Don't have the microphone stop listening at any point"): `SpeechInput.shared`
@@ -483,6 +500,27 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   the pill "Done · Undo" (20 s); anything else gets Add this mod? / the approval card (on the chat's tab now, else
   the done banner holds it). One offer per mod (offerFromChat's judge). Follow-ups continue the same chat. The pill
   closed while working: the reply is offered as ever (nothing added by itself). A tap on the pill opens the chat.
+- The strip appears once and stays still, and is small (Tim, 11-18, his recording: it went "up and down and up and
+  down" while Claude's page loaded; "the Claude chat can be a lot smaller. We don't need to see the chips even"; built
+  11-18). The chat fills behind the tab (the pill: "Putting it in Claude…", a tap opens the whole chat); once the box
+  is filled and the page has settled (`settleStrip`: its text, attachments, size and place unchanged 0.3 s), the strip
+  slides in once, at its final size: a slim header (34) over only what shows of their box's text and the site's own
+  Send (one line: 92 pt in all on an SE; at most 112 pt of text: a longer text scrolls in their box, its end and Send in
+  view), never the attachment chips, the "… can make mistakes." line or messages. Cropped by moving and clipping the
+  chat's web view (laid out full size, never resized or restyled); afterwards the page's changes are followed with no
+  animation (`pin`), so nothing in the strip moves. The person's software keyboard in the strip's box (their tap)
+  opens the whole chat (the box focused, the keyboard up: the cropped band can't hold an editor with a keyboard:
+  WebKit scrolled it out of the band, seen before this was added; shot 435 is the whole chat after); a hardware keyboard's bar keeps the strip, re-pinned
+  above it (436). A keyboard coming up while the strip's chat fills behind the tab (the fill's brief focus; no finger on
+  a page) is left out of the layout (`keyboardNotTheirs`, BarState and `.ignoresSafeArea(.keyboard)` on the page
+  while preparing): my reading of the recording's dips (the toolbar went away as the strip jumped), unconfirmed on a
+  phone: Diagnostics "quick ask: the keyboard came up while the strip's chat was being filled" says when it happens.
+- The chats' list (Tim, 11-18: "Done" read as cancelling): top right **Send** = the box's arrow (QuickSend; while
+  listening by a tap, the stop that asks; dimmed when the box is empty); top left **Cancel** closes, the words kept in
+  the box, as a tap on the dimmed page or a swipe down (checked: all three keep the draft).
+- The app is called TRIF (Tim, 11-18): CFBundleDisplayName (pbxproj, make-project.rb); every "TRIF Probe" people see
+  is "TRIF" (Settings sentences, the icon steps). CFBundleName stays TrifProbe (PRODUCT_NAME; the generated plist wins
+  over Info.plist's; Settings and iOS's questions show the display name). The developer menu "The probe" kept its words.
 - The tab list opens at the right card (Tim, 11-18: "it should snap to the tab that I just left"): the shown tab;
   from the chat (or the quick ask's strip), the chat's own tab (`ClaudePane.chatTabShown`: its link's tab while open
   and on its site, else the shown tab; More follows the shown tab); from Mods, the shown tab (Mods always shows the
@@ -574,7 +612,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   on the microphone right as the list opened was missed once (the sheet still moving).
 - Open Settings (11-18): in the Simulator (26.3) openSettingsURLString opens Settings' MAIN page (Profile Downloaded
   right there: 1 tap; shots 424-425), warm and cold by `simctl openurl trif://settings` (422-423). On a phone it may
-  open Apps → TRIF Probe (then 2 back taps): the step's words cover both; Tim to say which his SE does.
+  open Apps → TRIF (then 2 back taps): the step's words cover both; Tim to say which his SE does.
 - Talking and sound (11-18): Simulator only, `-speechsession` (the stand-in recording with the real session switch),
   a silent clip on 127.0.0.1 (media.sh in the batch's scratchpad): plays on after tap+stop, hold+cancel, hold+let go,
   the ✕ with the video in a tab behind, the app leaving mid-listen; left paused after a call-like interruption.
@@ -605,11 +643,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   on another tab; More sends directly, Done · Undo; cancel and a second ask take the earlier words out; the speech
   recognizer on a recorded file (`say -v Samantha`, the default voice made silence) heard it on device (en_CA); the
   microphone revoked → the refused note, typing still works. Not tried: live hold-to-talk with the microphone (the
-  Simulator would record the Mac's room: not done), the real claude.ai / chatgpt.com composers in the strip (their
-  box is taller with tiles; `-stripheight` to tune; claude.ai's new-chat page may centre its box, then the strip
-  shows the page's middle-bottom), the keyboard coming up in the strip (a tap into their box), a phone, iPad, the
+  Simulator would record the Mac's room: not done), the real claude.ai / chatgpt.com composers in the strip (11-18:
+  the strip shows the box's text ∪ the SEND button; if their Send isn't found it shows the text only, and if no box,
+  the page's foot; claude.ai's new-chat page centring its box is fine now, it's cropped by place), a phone, iPad, the
   ChatGPT pane, My computer and API engines (same panel path, untested), a quick ask on a chat already writing a
   reply (its Send is the stop button: the ask waits in the box; chat.js's maybeSent skips while a watch runs).
+- The strip's settling and size (11-18): Simulator only, stand-in `?late&greet` (Claude) and `?late&octane&greet`
+  (ChatGPT), recordings in shots/rec-11-18-strip (before1: the old build, the strip's content changing ~10 times in
+  front of the person; after*: the pill, one slide in, then only the caret blinking: every changed frame listed with
+  ffmpeg mpdecimate). Shots 428-436. Not known: whether real claude.ai settles within 8 s (else it's shown as it is),
+  whether Tim's dips were the keyboard (the new Diagnostics lines say), a software keyboard on a phone in the strip
+  (Simulator: the whole chat opened, 435). Seen on the ChatGPT stand-in (`?octane`, pictures-only: the page's text typed
+  in): the request goes in BEFORE the page's text with no space ("…thanks a lotI'm looking at…", shot 431): the caret
+  sits at the box's start after fillContext's typing. Old (not from this batch); check on logged-out chatgpt.com.
 - Tab list snap (11-18): Simulator only, 21 tabs (shots 378-380): from a page (tab 15 centred), from a chat on
   localhost over a 127.0.0.1 tab (its tab 17 centred and green; the shown tab isn't marked then), from Mods.
 
@@ -696,6 +742,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Gotchas
 
+- Browser tests here: nvm's node 20 (first on PATH) has no global WebSocket, which tests/cdp-page needs ("WebSocket is
+  not defined"): run them with `/usr/local/bin/node` (22), as CI's node 22. node --test runs EVERY .js under a test/
+  folder as a test file (style-demo.js failed CI for a day: it's style-demo.mod now). CI's per-file limit
+  (package.json --test-timeout) counts the browser lock's waits: the browser files run one at a time (tests/cdp-page's
+  lock), chat.test.js alone is ~170 s; hence 600000 there and LOCK_WAIT + n on each browser test (11-18).
 - `-speechsession` (dev): with `-speechfile`, the real audio session switch too (to try what it does to pages'
   sound). In the Simulator the session's .record activation needed no microphone question.
 - Speech in the Simulator (26.3.1, iPhone SE, en_CA, 11-18): `SpeechTranscriber.isAvailable` is false;
@@ -706,7 +757,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   pauses (finals now and then on long speech), one final at the stop.
 
 - Other-app links in the Simulator (26.3): tel: and mailto: have no app (UIApplication.open says false), sms: opens
-  Messages, maps: Maps (both leave a "◀ TRIF Probe" back link). WebKit asks the policy for target=_blank BEFORE
+  Messages, maps: Maps (both leave a "◀ TRIF" back link; "◀ TRIF Probe" before 11-18). WebKit asks the policy for target=_blank BEFORE
   createWebViewWith (targetFrame nil): cancelled there, no window is asked for. A script's `a.click()` arrives as
   .linkActivated, hence the finger check (TouchClock).
 - chat.js: a focus() from the app's JS brought the Simulator's keyboard bar up (shot 402) even with no tap; blur in the

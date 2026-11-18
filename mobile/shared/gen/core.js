@@ -225,23 +225,94 @@ function skip(a) {
 module.exports = { normalise, key, keys, outcome, note, skip, LIMIT };
 
 };
+SOURCES["match.js"] = function (module, exports, require) {
+// Chrome-style match patterns (https://x.com/*, *://*.x.com/*, <all_urls>): whether a mod's @match / @exclude covers an
+// address. docs/MOBILE-BEHAVIOUR.md, Mods and holds. Both phone apps run this (mobile/shared/gen/core.js:
+// TrifCore.match); mod-runs-cases.json holds the answers the iPhone's MatchPattern gave. The iPhone keeps a Swift twin
+// (ModRuns.swift: it's asked on every page load for every mod), held to the same cases. The page's own test is
+// modfile.js matchesUrl.
+//
+// An address arrives as its parts, as the platform's URL parser gives them (parsing stays platform): {scheme, host,
+// path}, scheme and host in lower case (a host without its port; a non-ASCII host as punycode), path the
+// percent-encoded path ("/" when empty) plus "?" and the percent-encoded query when there is one (no fragment).
+// null: an address the platform can't parse (covered by nothing).
+
+'use strict';
+
+const web = (s) => s === 'http' || s === 'https';
+
+/** a whole-string glob: '*' any run of characters (line breaks too), anything else itself (UTF-16 units) */
+function glob(pat, s) {
+  const parts = pat.split('*');
+  if (parts.length === 1) return pat === s;
+  const first = parts[0], last = parts[parts.length - 1];
+  if (s.length < first.length + last.length || !s.startsWith(first) || !s.endsWith(last)) return false;
+  let at = first.length;
+  const end = s.length - last.length;
+  for (let i = 1; i < parts.length - 1; i++) {
+    const j = s.indexOf(parts[i], at);
+    if (j < 0 || j + parts[i].length > end) return false;
+    at = j + parts[i].length;
+  }
+  return true;
+}
+
+/**
+ * Whether one pattern covers an address: <all_urls> any http(s) page; scheme * http or https only, else http or https
+ * exactly (as written: HTTPS:// covers nothing); host * any, *.base base itself or under it, else exactly (in any case;
+ * another * covers nothing; a port covers nothing); the path a whole-string glob over path and query.
+ * @param {string} p
+ * @param {{scheme: string, host: string, path: string} | null} u
+ */
+function one(p, u) {
+  if (!u) return false;
+  p = String(p);
+  const scheme = String(u.scheme || '').toLowerCase(), host = String(u.host || '').toLowerCase();
+  if (p === '<all_urls>') return web(scheme);
+  const sep = p.indexOf('://');
+  if (sep < 0) return false;
+  const ps = p.slice(0, sep), rest = p.slice(sep + 3);
+  const slash = rest.indexOf('/');
+  if (slash < 0) return false;
+  const ph = rest.slice(0, slash).toLowerCase(), path = rest.slice(slash);
+  if (ps === '*') { if (!web(scheme)) return false; } else if (ps !== scheme || !web(ps)) return false;
+  if (ph !== '*') {
+    if (ph.startsWith('*.')) { const base = ph.slice(2); if (host !== base && !host.endsWith(`.${base}`)) return false; }
+    else if (ph.includes('*') || host !== ph) return false;
+  }
+  return glob(path, String(u.path || ''));
+}
+
+/** whether any of the patterns covers the address */
+const any = (patterns, u) => (Array.isArray(patterns) ? patterns : []).some((p) => one(p, u));
+
+/** whether a mod applies to an address: an @match covers it and no @exclude does */
+const applies = (matches, excludes, u) => any(matches, u) && !any(excludes, u);
+
+module.exports = { one, any, applies };
+
+};
 SOURCES["mod-store.js"] = function (module, exports, require) {
 // The mod store's rules (Tim, 11-18: Android had ported them to Kotlin by hand; both phones now run this). Part 1, holds
 // and Allow: what a mod waits for, what Allow allows, what a change asks about beyond its code's needs, what the version
 // before counts as already allowed, and whether the version before keeps running while a change waits. Part 2, changes:
 // what an add keeps of the version before and how its switch starts, History's 30 days and 30 versions, Recently
 // deleted's 30 days and 200 entries, Undo (of an add, of a delete), putting one back, Don't allow's and a restore's
-// carry-over.
+// carry-over. Part 3, what runs: a mod's switch (the whole mod's, or a mod for several sites: its switch on each), the
+// tiers switched off on a site, Pause all, and which mods run on a page (match.js: @match / @exclude).
 // docs/MOBILE-BEHAVIOUR.md, Mods and holds. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.modStore);
 // mod-store-cases.json holds the iPhone's answers. Desktop's own rules: helper/lib/held.js.
 //
 // A mod here is a plain record of what the rules read: {tier, site, matches, needs, extraNeeds, allowed, ran}, where a
 // need is {key, fact, power?, lines?}, allowed is {need key: [line hashes]} (allowed.json's shape), and ran is whether
-// a version before is kept running while a change waits (a change on hold).
+// a version before is kept running while a change waits (a change on hold). What runs also reads {on, sites, offSites,
+// excludes}: on, its switch; sites, the hosts its @match names (its site all-sites: every site); offSites, the sites it's
+// switched off on. groupsOff is {site: [tier]}, the tiers switched off on each site.
 
 'use strict';
 
 const site = require('./site.js');
+const match = require('./match.js');
 
 const list = (a) => (Array.isArray(a) ? a : []);
 
@@ -453,7 +524,78 @@ function restore(cur, source, now) {
   return { keep: ['on', 'offSites', 'source', 'added', 'newOff'], version: version(now, source), history: [-1, ...list(cur && cur.history).map((_, i) => i)] };
 }
 
+// ---- Part 3: what runs
+
+const has = (o, k) => !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+
+/** A mod for several sites (or every site) has a switch per site (desktop's isMultiSite). */
+const multiSite = (m) => m.site === 'all-sites' || new Set(list(m.sites).map(site.of)).size > 1;
+
+/** Whether a mod is switched on; for a site (not null or ''), a mod for several sites: its switch there. */
+function isOn(m, s) {
+  if (!m.on) return false;
+  if (s == null || s === '') return true;
+  return !(multiSite(m) && list(m.offSites).includes(s));
+}
+
+/** whether a tier is switched off on a site */
+const tierOff = (groupsOff, tier, s) => has(groupsOff, s) && list(groupsOff[s]).includes(tier);
+
+/**
+ * The mods that run on a page: none while paused; else each switched on (on the page's site too), not held unless a
+ * version before is kept running, its tier not off on the page's site, and its @match covering the address (no
+ * @exclude). The page's site: site.of(the host).
+ * @param {object[]} mods
+ * @param {{paused?: boolean, groupsOff?: object, url: {scheme: string, host: string, path: string} | null}} at
+ * @returns {[number, boolean][]} each one's index, and whether the version kept runs (a change waits)
+ */
+function running(mods, at) {
+  if (at.paused) return [];
+  const u = at.url || null;
+  const s = site.of(u ? u.host : '');
+  const out = [];
+  list(mods).forEach((m, i) => {
+    const h = held(m);
+    if (!m.on || (h && !m.ran) || tierOff(at.groupsOff, m.tier, s) || (multiSite(m) && list(m.offSites).includes(s))) return;
+    if (!match.applies(m.matches, m.excludes, u)) return;
+    out.push([i, h && !!m.ran]);
+  });
+  return out;
+}
+
+/** The sites a mod's script checks it's off on: its own switch's (a mod for several sites), and its tier's. Sorted. */
+function off(m, groupsOff) {
+  const out = new Set(multiSite(m) ? list(m.offSites) : []);
+  for (const s of Object.keys(groupsOff || {})) if (list(groupsOff[s]).includes(m.tier)) out.add(s);
+  return [...out].sort();
+}
+
+/**
+ * A mod's switch. On a site (not null or ''), a mod for several sites: that site's switch (switched on there, the mod
+ * is on); else the whole mod's. Switching on clears its "new, off" mark.
+ * @returns {{on: boolean, offSites: string[], clearNewOff: boolean}}
+ */
+function setOn(m, on, s) {
+  let isOnNow = !!m.on, offSites = list(m.offSites).slice();
+  if (s != null && s !== '' && multiSite(m)) {
+    offSites = offSites.filter((x) => x !== s);
+    if (!on) offSites.push(s); else if (!isOnNow) isOnNow = true;
+  } else isOnNow = !!on;
+  return { on: isOnNow, offSites, clearNewOff: !!on };
+}
+
+/** A tier's switch on a site: groupsOff after (a site with none off left out). */
+function setGroup(groupsOff, tier, on, s) {
+  const out = Object.create(null);
+  for (const k of Object.keys(groupsOff || {})) out[k] = list(groupsOff[k]).slice();
+  const l = (out[s] || []).filter((t) => t !== tier);
+  if (!on) l.push(tier);
+  if (l.length) out[s] = l; else delete out[s];
+  return out;
+}
+
 module.exports = {
+  multiSite, isOn, running, off, setOn, setGroup,
   waiting, held, allow, approve, changeNeeds, seeded, ranAfter,
   HISTORY_DAYS, HISTORY_MAX, TRASH_DAYS, TRASH_MAX, add, undoAdd, remove, undoDelete, restoreDeleted, reject, restore,
 };
@@ -567,6 +709,7 @@ function require(name) {
 }
 TrifCore.appLinks = require("app-links.js");
 TrifCore.chatOffers = require("chat-offers.js");
+TrifCore.match = require("match.js");
 TrifCore.modStore = require("mod-store.js");
 TrifCore.quickAsk = require("quick-ask.js");
 TrifCore.site = require("site.js");

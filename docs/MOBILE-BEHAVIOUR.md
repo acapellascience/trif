@@ -50,6 +50,17 @@ change there is a change on both phones. Change this file whenever a rule change
 - Recently deleted: every delete, newest first, 30 days and at most 200 entries (pruned again at each start). A delete
   by the person offers Undo (the last one); a sync's doesn't. Restore puts one back unless a mod with its id is here
   now. [shared: core/mod-store.js]
+- What runs on a page: nothing while Pause all is on; else each mod switched on (and on the page's site), not held
+  unless a version before is kept running (then that version runs), its tier (style, boxed, free) not switched off on
+  the page's site, and an @match covering the address with no @exclude covering it. [shared: core/mod-store.js
+  running]
+- A mod for several sites (two sites or more, or every site) has a switch per site: off on a site lists that site;
+  on there takes it off the list and switches the mod on. A mod for one site has one switch. Switching on clears the
+  "new, off" mark. A tier's switch is per site. [shared: core/mod-store.js isOn, setOn, setGroup]
+- @match (Chrome's patterns, as desktop's matchesUrl): <all_urls> any http(s) page; scheme * http or https only, else
+  http or https exactly as written; host * any, *.base base or under it, else exactly (any case; a port or another *
+  covers nothing); the path a whole glob (* anything) over the percent-encoded path ("/" if empty) and ?query, no
+  fragment. Parsing the address is the platform's. [shared: core/match.js]
 - A free mod with a style section gets that CSS at the page's start, as desktop's; its `trif.log/warn/error` and its
   start reach Diagnostics ("mod log", capped 40 a load, 200 characters), never page data.
 - Point-and-hide is gone (11-17: "a resting thumb set it off"). Rules it made stay applied, each with Show again in
@@ -270,3 +281,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Quick ask: look-only, the pill's state, Undo's steps | shared/core/quick-ask.js | QuickAskRules.swift → TrifCore.quickAsk | test/core-quickask.test.js, test/quickask.test.js |
 | Mod store, part 1: what a hold waits for, Allow, a change judged, the version kept running | shared/core/mod-store.js | ModHolds.swift → TrifCore.modStore (`waiting` a twin, same cases: every page load) | test/core-modstore.test.js, test/modstore.test.js |
 | Mod store, part 2: adding, History, Recently deleted, Undo, Don't allow's and a restore's carry-over | shared/core/mod-store.js | ModChanges.swift → TrifCore.modStore (the records and the code compare stay Swift) | test/core-modstore.test.js, test/modstore.test.js |
+| Mod store, part 3: what runs (switches, tiers off, Pause all), @match | shared/core/mod-store.js, shared/core/match.js | ModRuns.swift → TrifCore.modStore setOn / setGroup (`running`, `isOn`, `off` and MatchPattern twins, same cases: every page load) | test/core-modruns.test.js, test/modruns.test.js |

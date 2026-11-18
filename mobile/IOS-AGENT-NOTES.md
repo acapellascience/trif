@@ -149,6 +149,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   ModChanges.swift, Core.swift; argv mod-store-cases.json, gen/core.js; `TRIF_COST=1` prints an edit's two calls, ~190 µs
   unoptimised, 40 holds by the twin, ~85 µs, and an add with 30 versions in History, ~200 µs) and
   `mobile/test/core-modstore.test.js` (the JS alone, and Android's ModStoreTest.kt stories).
+- What runs (ModRuns.swift → core/mod-store.js part 3, core/match.js) on the Mac: `node --test mobile/test/modruns.test.js`
+  (swiftc with mobile/test/modruns-check/main.swift, Site.swift, ModHolds.swift, ModRuns.swift, Core.swift; argv
+  mod-runs-cases.json, gen/core.js; prints running for 40 mods by the twin ~125 µs and the shared rule ~450 µs
+  unoptimised, a switch's call ~30 µs) and `mobile/test/core-modruns.test.js` (the JS alone, and ModStoreTest.kt's
+  matchPatterns and switchesTiersAndPause).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
   won't do). Make a silent clip with ffmpeg (`testsrc` + `anullsrc`, so nothing reaches the Mac's speakers: the
   Simulator plays to them) and serve it with a few lines of node; play by `pagejs` (`await v.play()` works: the app's
@@ -193,7 +198,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Android takes gen/ too). Core.swift: `Core.shared.call("module.fn", args)` (one JSContext made at the first call, a
   lock, JSON in and out through `TrifCore.call`; nil = the rule didn't answer: the caller's safe answer, Diagnostics
   "core" once). Moved so far: AppLinks' kind/decide/isTap/logged; ChatOffers' judge; quick ask's look-only, sort and
-  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift) and its changes (ModChanges.swift). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
+  Undo steps (QuickAskRules.swift); the mod store's holds and Allow (ModHolds.swift), its changes (ModChanges.swift) and what runs (ModRuns.swift: the switches through it; running / isOn / off / MatchPattern twins). core/site.js is Site.of in JS (Site.swift stays a Swift twin: every navigation);
   core modules may `require('./other.js')` (prepare.js bundles them with a small require).
 - AppLinks.swift (Tim, 11-18; no UI in its top half, built for the Mac too): `AppLinks.kind` (web / stay (about, blob,
   data, trifprobe) / never (javascript, file) / own (trif, trifpanel, Info.plist's schemes) / other; http/https answered
@@ -273,6 +278,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   answers: `ModChanges.pick` (indices, -1 the new entry) and `InstalledMod.take` (the field names in `keep`). The code
   compare (`changed`) stays Swift: Swift's String == is canonical, JS's literal. No answer: nothing is lost (History and
   Recently deleted kept whole), a new add is off and marked, Undo / Restore / Don't allow do nothing.
+- ModRuns.swift (round 6 of the shared core): what runs. setOn / setGroup through TrifCore.modStore (a tap; no answer:
+  the switch doesn't move); running, isOn, off (the sites a mod's script checks it's off on) and MatchPattern (moved
+  from Mods.swift; `parts` is the platform's URL parsing the shared rule reads: lower-case scheme and host,
+  percent-encoded path + ?query) stay Swift twins, held to mod-runs-cases.json (every page load × every mod).
+  InstalledMod.runFacts is what it reads; ModStore.running / isOn / applies / setOn / setGroup / scriptPlan use it.
+  Twin quirks kept: Swift's `firstIndex(of: "/")` and `contains("*")` read Characters (a "/" followed by a combining
+  mark isn't a "/"), JS UTF-16 units; hosts arrive as punycode, so String's canonical == makes no difference there.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
   (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
   a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is

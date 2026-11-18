@@ -25,10 +25,10 @@ C. Quick checks
 A. Sign-in (Tim runs it; agents never sign in)
 - [x] A screen built: three user agents × five steps, PASS/FAIL buttons, log
 - [x] `SIGN-IN-TEST.md` written
-- [ ] Tim's results
+- [x] Tim's results (2026-11-18): **all PASS with the `default` WebView user agent** (Tim: "default is all passes"). Google itself, then YouTube signed in; Claude + Google and ChatGPT + Google once the probe supported popups (1dd3fd1: Continue with Google ends on `accounts.google.com/gsi/transform`, which hands the sign-in back to its opener window; with `setSupportMultipleWindows(false)` it sat blank). No `disallowed_useragent`, no "may not be secure". The other two user agents weren't needed.
 
 Decision
-- [x] Written up as far as the results allow (see "Decision so far"; final once Tim has run A)
+- [x] **Final: build on WebView** (A, B and C pass)
 
 ## Done this round (round 2, 2026-11-17)
 - Part C: `CheckActivity` (modes net / video / pin / site) + `MediaService` (mediaPlayback foreground service), pages `net.html` and `video.html`, and serve.js now has a POST echo, a hand-written WebSocket echo and a ranged `clip.mp4` (made locally with ffmpeg into build/, not committed). `run-c.js` drives all of C headless.
@@ -51,14 +51,17 @@ Decision
 
 **Sizes on disk:** SDK 10 GB in all: emulator 1.2 GB, platform-tools 37 MB, platform android-37.0 152 MB, build-tools 37.0.0 192 MB (+ 36.0.0 188 MB that AGP fetched itself), system image android-37.2 google_apis_playstore_ps16k arm64 **8.2 GB** (the 37.0 image, 2.6 GB, was removed). Debug APK 3.8 MB.
 
-## Decision so far
+## Decision (final, 2026-11-18)
+**Build TRIF for Android on the system WebView** (androidx.webkit), as ANDROID.md recommends, with the default user agent. Design rules from the probe: real popup windows (`onCreateWindow`, sign-in needs them); a minimum WebView version check (149+ for script worlds); background media via the always-visible WebView + mediaPlayback service; the tab lock can't see WebSockets or request bodies. GeckoView isn't needed.
+
+### Before the final result
 - **B passes** (the box world works: `lockdown()` and `Compartment` evaluate on strict-CSP and Trusted Types pages, the worlds are separate, frames are covered, lockdown ~5–11 ms). So the "B fails → hidden-WebView box" branch is off.
 - **C passes**, with one design rule found: background media needs the always-visible WebView trick (+ the mediaPlayback service), and the WebSocket gap is real (tab-lock can't see WebSockets or request bodies through `shouldInterceptRequest`).
 - **A is the open question.** If Tim's run passes Google's own sign-in with any of the three user agents: **build on WebView** (ANDROID.md's recommendation), with that user agent. If Google refuses in all three (`disallowed_useragent` / "may not be secure"): run A on a bare GeckoView app (the half-day in §5) before deciding.
 - Caveat: WebView 149 only. The API 37.0 image's WebView 145 lacks `JS_INJECTION_IN_FRAME_AND_WORLD`, so TRIF on Android needs a minimum WebView version check (and a clear message on older ones).
 
 ## Next step
-Nothing automatic left. Waiting on Tim's part A run (SIGN-IN-TEST.md). When his results are in: record them under A, tick the box, and finish the decision. If A fails for Google: a GeckoView sign-in probe (Maven Central `org.mozilla.geckoview`, one activity, the same steps) is the next chunk.
+The probe is done (PROBE COMPLETE). Next is Tim's call: start the real Android app. Earlier: waiting on Tim's part A run (SIGN-IN-TEST.md). When his results are in: record them under A, tick the box, and finish the decision. If A fails for Google: a GeckoView sign-in probe (Maven Central `org.mozilla.geckoview`, one activity, the same steps) is the next chunk.
 
 ## Notes for next round
 - Env: `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`, SDK `~/Library/Android/sdk`. Brew's `sdkmanager` needs `--sdk_root=$HOME/Library/Android/sdk`; brew's `avdmanager` ignores it, so the AVD config was written by hand (~/.android/avd/trif-probe.*).

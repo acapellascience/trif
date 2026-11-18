@@ -1286,7 +1286,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if let code = browser.mods.mods.first(where: { $0.id == a.id })?.code { browser.chatOffers.note(code, .declined) }
             browser.mods.undoAdd(a.id, before: a.before)
         }
-        browser.modsChanged()
+        browser.modsChanged(why: "the quick ask's Undo")
         quick?.applied = []
         quick?.state = .undone
         Diagnostics.shared.log("quick ask", "undone: \(q.applied.map { "\($0.id) \($0.before == nil ? "removed" : "back to its version before")" }.joined(separator: ", "))")

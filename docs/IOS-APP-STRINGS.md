@@ -662,3 +662,12 @@ TRIF too? I'm getting tired of seeing Probe." Drafts for Tim unless he named the
 Not changed (not named by Tim): the box's arrow is still **Ask** for VoiceOver, while the list's button says Send. The
 probe's own developer menu in ⋯ ("The probe", "The probe's own pages") keeps its words.
 
+
+## A video picks up where it was after its page loads again (added 11-18, Tim: "make it remember where it was in the video and reload from that spot")
+
+Drafts for Tim. Nothing else people see is new: a resumed video just carries on (or stays paused) at its spot.
+
+| Where | Old | New (draft for Tim) |
+|---|---|---|
+| The note over the toolbar when a video picked up where it was but iOS let it play only without sound (8 s; a tap turns the sound on) | — | a speaker icon and **Tap for sound** |
+| The model download's note when the server refuses it (403, 404…) | Couldn’t download {model}: the server answered {code}. (the same words as before; only now said at once, not after "100%") | unchanged |

@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (436 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (442 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -61,7 +61,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   go, let go slid away, through ContentView's own robotHold/robotLift); modsstale (each tab: whether the mods running
   on its page changed since it loaded); tabsfocus (the card the tab list last opened at, and the shown tab),
   playing (each tab: WebKit's state,
-  the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not)…
+  the page's, kept or not; the audio session), tabjs + tab (JS in tab n's page, shown or not), reload ("why": the shown
+  tab loaded again by the app, logged with that cause), videos (each tab's video state as kept, and the note shown),
+  rebuild ({"n": 5, "on": true}: every mod on first, then n real changes (one mod switched off/on) in a row: each call's
+  main-thread ms, when all were in, the last rebuild's parts and the hangs meanwhile; an odd n leaves the first mod off), hashtest ("/path", "old": the
+  reading before 11-18: LocalModels.sha256 at .utility with the app's footprint sampled every 0.1 s)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -121,6 +125,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - The microphone's words (SpeechText.swift: segments, restarts, revised partials; committed words never shrink, a
   random walk of 2000 × 40 events) on the Mac: `node --test mobile/test/speechtext.test.js` (swiftc with
   mobile/test/speechtext-check/main.swift; ~3 s).
+- Video resume's rules (VideoResume.swift) on the Mac: `node --test mobile/test/videoresume.test.js` (swiftc with
+  mobile/test/videoresume-check/main.swift; the page's JS videoId compared with the Swift one in node; ~2 s).
 - What a chat may offer (ChatOffers.swift) on the Mac: `node --test mobile/test/chatoffers.test.js` (swiftc with
   mobile/test/chatoffers-check/main.swift; ~20 s).
 - Media checks: a range-serving static server is needed (WebKit asks for media in ranges; `python -m http.server`
@@ -134,7 +140,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   make them with `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"` and ffmpeg's anullsrc for silences, never the
   live microphone), `-oldspeech` (SFSpeechRecognizer even where iOS 26's SpeechAnalyzer is there), `-speechsession` (the real audio session switch with `-speechfile`), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
   choices), `-clipbase <url>`, `-noserver`, `-noopen` (Home Screen hand-off), `-exitrobot`, `-hang100` (log 100 ms hangs),
-  `-nobarshift`, `-stripmax <pt>` (the most of their box's text the strip shows, 112), `-stripheight <pt>` (the strip when no message box is found, 264), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-exitbelow` (the exit button's old
+  `-nobarshift`, `-stripmax <pt>` (the most of their box's text the strip shows, 112), `-stripheight <pt>` (the strip when no message box is found, 264), `-pageletter`, `-tabsfirst` (tabs before Mods, as tried on 11-17), `-nocover` (no leaving cover, as before 11-18, to compare), `-resumemuted` (a resumed video
+  is played muted, as when iOS refuses its sound: the "Tap for sound" note), `-exitbelow` (the exit button's old
   spot), `-exity <pt>`, `-noaudiosession` (iOS's default session), `-nobgresume` (leave WebKit's pause), `-publicflush` (the public cookie flush), `-bare` (no scripts in pages), `-go <url>`,
   `-open <url>`, `-import <path>`, `-autorun …`, `-shottest …`, `-linkhost 127.0.0.1:<port>` (the phone link pairs there,
   not over Bonjour: a helper's store.js + server.js on loopback in a temp HOME; `simctl openurl` the code's text).
@@ -294,6 +301,43 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   launch the app with `-linkhost 127.0.0.1:<port>`, pair with `simctl openurl` of its qr. Driving it from a shell:
   `mkfifo f; tail -f f | node tests/phone-link-computer.js --seconds 900 > log`, then `echo twin > f`. Its first
   look at held.js is at start, so what a sync brings later is judged).
+- VideoResume.swift (Tim, 11-18; no UI, no WebKit: built for the Mac too): `VideoResume.watch` (TRIF's world, every
+  page's start, main frame, in Browser's base scripts; same-origin frames' videos too) posts `videostate` (the playing
+  video, or the last played: an unmuted one wins over a muted preview) on timeupdate every 3 s shown / 8 s hidden or
+  backgrounded (media events, no timers: WebKit keeps them firing while it plays), and at once on play, pause, ended,
+  seeked, rate/volume, pagehide/hidden. At the start it asks `videoplan` (with the navigation type: back_forward is a
+  reload line); no reports until answered, nor while a plan waits for its video. `decide` (30 min, same page = same
+  site video id (`videoID`: YouTube v=/shorts/embed/live/youtu.be, Vimeo) else the address without #, not live, not
+  ended, not a link asking its own time (t=, start=), not the first 5 s / last 10 s). The page applies the plan to the
+  video whose duration is within 1 s (and the same non-blob src), once it has metadata: speed, muted, seek; playing →
+  `videoplay`, the app's own play (`VideoResume.play`, a gesture: sound; refused → muted + the "Tap for sound" note
+  (`Browser.tapForSound`, `soundTab`, `soundOn`), else left paused). A site that moves it in the next 6 s (behind the
+  expected time or past it + 3 s; not after the person's pointerdown/touchstart/keydown) gets it put back once.
+  `videoapplied` → Diagnostics "video: resumed a video at m:ss on <host>" (the only line; reasons not to resume go to
+  report.json "video"). Kept: Tab.video, and `VideoStore` (Application Support/tab-videos.json, written 5 s after a
+  change and as the app leaves the front; loaded in restoreTabs, older than 30 min dropped; a closed tab's removed).
+  Browser.videoMessage handles the messages. The JS videoId mirrors the Swift one (mobile/test/videoresume.test.js
+  checks both).
+- Reload causes (Tim, 11-18: "Various things keep reloading my YouTube window"): every app reload goes through
+  `Browser.reload(tab, cause)` / `reload(cause)` and logs Diagnostics "reload <host>: <cause>[ (a tab behind)]" as it asks
+  (Tab.reloadCause until the commit); decidePolicy's .reload with no cause = "the page reloaded itself"; `start` logs
+  "its tab restored as the app started" or "shown again after its page was let go in the background (<why>)" (Tab.letGoWhy,
+  from discard); the page's back_forward navigation (a real reload, not WebKit's page memory) logs from videoplan.
+  Causes passed: modsChanged(why:) (each caller: "<id> added (chat)", "the Mods tab: enable <id>", "phone sync changed N
+  mod(s)", "Pause all mods", "the quick ask's Undo", …), Request Desktop/Mobile Website, desktop agent fix,
+  pull-to-refresh, More's run, the probe's checks, WebKit ended its page's process (free MB, last memory warning, tabs).
+- The pages' scripts (11-18, Tim's hangs after "making the pages' scripts again"): `Browser.rebuildScripts(then:)`
+  coalesces changes (one build per moment; a change mid-build builds again after), `ModStore.scriptPlan()` on main
+  (each mod's key made again only when its texts changed: `planKeys`), `ModStore.build` off main (texts of new/changed
+  mods only), `userScripts(from:fresh:)` on main (WKUserScripts kept per mod key in `built`; SES, runtime, mirror, free
+  relay, bridge made once), `swapScripts` (remove all + base + mods; skipped when `ScriptPlan.shape` + rules equal the
+  last swap). `scriptsPending`: a tab committing meanwhile records its signature as "pending" (stale), and
+  refreshIfStale waits for the swap. `installScripts()` stays synchronous for the launch and the hide rules. The mark
+  "the pages' scripts made again…" after it, so later hangs aren't blamed on it. A Diagnostics "mods" line when a
+  rebuild takes ≥ 50 ms on main or ≥ 1 s in all.
+- HeavyJob (Safety.swift, 11-18): TRIF's own heavy work (`begin`/`end`/`run`, UserDefaults "safety.heavyJobs", any
+  thread): a model's check (LocalModels), its load and runs (LocalRunner), imports (ModFiles.collect). Safety.init: an
+  unclean end during one logs "safe mode: the app quit while TRIF was <job>; mods left on" and switches nothing off.
 - LeavingCover.swift (Tim, 11-18): the black cover with the robot as the app leaves in icon use (`reason`), a
   UIWindow at .alert + 1 put up in SceneDelegate.sceneDidEnterBackground (Safety.swift), taken off after
   sceneDidBecomeActive once PendingLink.url is taken and the shown tab is `drawn` (cap 0.8 s), 0.2 s fade.
@@ -595,6 +639,18 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   stand-ins, the strip, a reply waiting: activeElement body, scrollY 0, a recording's frames show no keyboard bar
   (before: the Simulator's keyboard bar came up, shot 402).
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
+- A video picks up where it was (Tim, 11-18; built 11-18, VideoResume above): every tab, every site, any reload of the
+  same page within 30 min (a reload, a page process ended, a mod applying, back to it, a relaunch). Background
+  playback keeps the kept time current (8 s reports from tabs behind and with the app in the background, checked).
+  A tab BEHIND whose page process WebKit ends is no longer loaded again at once (my call, 11-18: unseen, into the memory
+  that had just run out, and WebKit loads no media for a page off the screen, so its video stayed paused anyway): it's
+  let go (discard) and loads when shown, its video picked up there. The shown tab still loads again at once.
+- The model's check (Tim's SE crashed and froze, 11-18): LocalModels.sha256 reads with read(2) into ONE 2 MB buffer,
+  F_NOCACHE, a 1 ms pause per piece, at .utility (Task.detached), as HeavyJob. FileHandle.read(upToCount:)'s Data was
+  autoreleased and never let go inside the detached task: +444 MB for a 500 MB file in the Simulator (`hashtest` old),
+  so the 2.74 GB model took the phone's memory. Now 3 GB: +2 MB, 14 s. A model loads only after its check (isReady needs
+  the checked file in place), by mmap (LLAMA_LOAD_MODE_MMAP). A download answered ≥ 300 fails at once (didWriteData:
+  cancelled, "the download failed: the server answered N"), never logged as progress.
 
 ## Open and unverified
 
@@ -653,9 +709,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   front of the person; after*: the pill, one slide in, then only the caret blinking: every changed frame listed with
   ffmpeg mpdecimate). Shots 428-436. Not known: whether real claude.ai settles within 8 s (else it's shown as it is),
   whether Tim's dips were the keyboard (the new Diagnostics lines say), a software keyboard on a phone in the strip
-  (Simulator: the whole chat opened, 435). Seen on the ChatGPT stand-in (`?octane`, pictures-only: the page's text typed
-  in): the request goes in BEFORE the page's text with no space ("…thanks a lotI'm looking at…", shot 431): the caret
-  sits at the box's start after fillContext's typing. Old (not from this batch); check on logged-out chatgpt.com.
+  (Simulator: the whole chat opened, 435). The request after the page's text typed in (ChatGPT
+  `?octane`): fixed 11-18 (chat.js fill: the caret to the box's end, a blank line before, the box scrolled to its end;
+  shot 441; Claude's stand-in attaches the page as a file, its box holds only the request, 440). Not tried on the real
+  chatgpt.com.
 - Tab list snap (11-18): Simulator only, 21 tabs (shots 378-380): from a page (tab 15 centred), from a chat on
   localhost over a 127.0.0.1 tab (its tab 17 centred and green; the shown tab isn't marked then), from Mods.
 
@@ -740,6 +797,26 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   upsell button words, dark mode by the page's own colours (data-trif-tone). Logged-out chatgpt.com checked (shot 241:
   its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
 
+- Video resume (11-18): Simulator only, local stand-ins (scratchpad serve-media.js: video.html?v=a|b|c, alt.html
+  (another clip at the same address), live.html (HLS without an end), seek0.html (seeks to 0 after a seek once),
+  blob.html, frame.html; ffmpeg testsrc + anullsrc, silent). Checked: play 0:37→reload resumes ~0:41 playing; paused
+  0:30 stays paused 0:30; another clip, live: no seek; the seek-to-0 site put back once; the page's own
+  location.reload; blob src; a same-origin iframe's video; full screen; Request Desktop and Mobile Website; a
+  same-site mod changed while paused (reload, resumed paused) and while playing (no reload); other sites' mods (no
+  reload); the robot held to talk (paused and played on); relaunch (tab-videos.json); the shown tab's process killed;
+  tab A playing behind + app backgrounded, its process killed (`kill -9`; find it by making the page hold 90 MB and
+  taking the WebContent process that grew): resumed at the time it had reached; Tap for sound (`-resumemuted`, a
+  real tap). Shots 437-439, 442. NOT tried: real YouTube (its player may move the time after 6 s or ignore a seek
+  before its own start; the public t= fallback isn't built), Picture in Picture, AirPods, a phone, the Now Playing
+  position (the app doesn't track one: WebKit's own), iPad. The 14.5 s hang Tim saw isn't explained: the rebuild
+  measured 5–13 ms a change in the Simulator (32 mods, 587 KB, 7 tabs) before, ~4–5 ms now and 20 quick changes in ~56
+  ms; the mark moved, so his next diagnostics say what really hangs.
+- Speech (Tim's phone 11-18: "SpeechTranscriber en_US: supported; DictationTranscriber en_US: supported →
+  SFSpeechRecognizer"): "supported" = Apple's model not on the phone yet, so the old recognizer is right until it's in.
+  The download starts at a press (choose(download: true)); a press while the list's own look was still running was
+  DROPPED before 11-18 (`choosing` busy): now `downloadAfter` looks again. Look for "talking: getting the speech model"
+  then "the speech model is on this iPhone"; the next look (that run or the next launch) says "→ SpeechTranscriber".
+
 ## Gotchas
 
 - Browser tests here: nvm's node 20 (first on PATH) has no global WebSocket, which tests/cdp-page needs ("WebSocket is
@@ -794,6 +871,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   different content worlds don't start in a fixed order (TRIF's world was after the page's about 1 run in 4): the
   free runtime holds its lines until freeRelay answers its hello. A CustomEvent's string `detail` crosses worlds.
 
+- `os_proc_available_memory()` is 0 in the Simulator ("0 MB left for the app" in its lines): real numbers on a phone only.
+- Task.detached(priority: .background) throttles disk reads hard (~35 MB/s in the Simulator, 80 s for a 3 GB file);
+  .utility read it at ~240 MB/s. FileHandle.read(upToCount:) returns autoreleased Data: in a loop off the main thread
+  without autoreleasepool nothing is freed until the task ends.
+- WebKit loads no media for a page that isn't in a window (a tab behind reloaded: readyState 0 until shown).
 - Simulator screenshots lag ~2 s, so a 2 s note ("Copied.") is usually gone from them: poll `{"status": 1}` instead.
 
 - scenePhase passes through .inactive on the way IN from the background too: before 11-17 the tab shot logged "the app

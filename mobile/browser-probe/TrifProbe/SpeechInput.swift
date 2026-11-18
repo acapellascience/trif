@@ -432,11 +432,15 @@ final class SpeechInput: ObservableObject {
     private var looked = false
     private var downloadTried = false
     private var downloading = false
+    private var downloadAfter = false
 
     /// Finds the best recognizer on this iPhone (once; again after a download). `download`: the person is using the
     /// microphone, so a missing model may be fetched (Apple's, through AssetInventory; no audio goes anywhere).
     func choose(download: Bool = false) {
-        guard choosing == nil else { return }
+        // (a look already going on (the list opening asks without download): the person's press, which may fetch the
+        // model, is looked at again once it's done. Before 11-18 it was dropped, so a first press right after the list
+        // opened never started the download)
+        guard choosing == nil else { if download { downloadAfter = true }; return }
         if looked && !(download && !downloadTried) { return }
         looked = true
         if download { downloadTried = true }
@@ -445,6 +449,7 @@ final class SpeechInput: ObservableObject {
         choosing = Task { @MainActor in
             await self.chooseAnalyzer(download: download)
             self.choosing = nil
+            if self.downloadAfter { self.downloadAfter = false; self.choose(download: true) }
         }
     }
 

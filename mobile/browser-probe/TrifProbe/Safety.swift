@@ -45,7 +45,13 @@ final class Safety: ObservableObject {
         Diagnostics.shared.log("safe mode", session.clean
             ? "the last run ended cleanly (it had left the front\(ago), or never came to it)"
             : "the last run ended while the app was in front (it came to the front\(ago)), with mods running on \(session.sites.keys.sorted().joined(separator: ", ").nonEmpty ?? "no site")")
-        if !session.clean, !session.sites.isEmpty, !args.contains("-nosafe") {
+        // (TRIF's own heavy work was going on as the app died (a model's check or load, a reply from it, a big
+        // import): that, not the pages' mods, is the likely cause, so they're left on. Tim, 11-18: the 4 GB model's
+        // check used up the phone's memory and safe mode switched off all his x.com and youtube.com mods)
+        let jobs = HeavyJob.takeLastRun()
+        if !session.clean, !jobs.isEmpty {
+            Diagnostics.shared.log("safe mode", "the app quit while TRIF was \(jobs.joined(separator: ", ")); mods left on")
+        } else if !session.clean, !session.sites.isEmpty, !args.contains("-nosafe") {
             for (site, ids) in session.sites {
                 let off = store.switchOff(ids, site: site)
                 guard !off.isEmpty else { continue }
@@ -261,5 +267,51 @@ struct SafetyBanner: View {
         }
         .padding(12)
         .background(Color(.secondarySystemBackground))
+    }
+}
+
+
+/// TRIF's own heavy jobs (Tim, 11-18: a model's check froze his phone and safe mode blamed his mods): each one is
+/// written down as it starts and crossed off as it ends, at once (UserDefaults, from any thread), so the next launch
+/// knows the app died during one (Safety.init: mods left on).
+enum HeavyJob {
+    private static let key = "safety.heavyJobs"
+    private static let lock = NSLock()
+    /// The jobs going on now (token → what).
+    private static func read() -> [String: String] { UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:] }
+
+    /// A job starts: its token, for `end`.
+    static func begin(_ what: String) -> String {
+        let token = UUID().uuidString
+        lock.withLock {
+            var all = read()
+            all[token] = what
+            UserDefaults.standard.set(all, forKey: key)
+        }
+        return token
+    }
+
+    static func end(_ token: String) {
+        lock.withLock {
+            var all = read()
+            guard all.removeValue(forKey: token) != nil else { return }
+            UserDefaults.standard.set(all, forKey: key)
+        }
+    }
+
+    /// Runs `body` as a heavy job.
+    static func run<T>(_ what: String, _ body: () throws -> T) rethrows -> T {
+        let t = begin(what)
+        defer { end(t) }
+        return try body()
+    }
+
+    /// At launch: what the last run was doing when it ended, and forgotten.
+    static func takeLastRun() -> [String] {
+        lock.withLock {
+            let all = read()
+            UserDefaults.standard.removeObject(forKey: key)
+            return Array(Set(all.values)).sorted()
+        }
     }
 }

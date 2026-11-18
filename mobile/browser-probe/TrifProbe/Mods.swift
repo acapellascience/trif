@@ -366,48 +366,125 @@ final class ModStore: ObservableObject {
     /// The scripts every page gets for the mods: SES and TRIF's sandbox runtime first in the box world when a boxed
     /// mod may run, then each mod that's on and not held (a change on hold: the version before), behind a check of
     /// the sites it's switched off on, and the sites whose tier is off.
-    func userScripts() -> [WKUserScript] {
-        if paused { return [] }
+    /// Made in two halves (Tim, 11-18: hangs of 14.5 s, 2.9 s… after "making the pages' scripts again"): `scriptPlan`
+    /// (main thread, quick: what runs, each mod's key) and `ModStore.build` (any thread: the scripts' texts, only for
+    /// mods whose key isn't in `built`); `userScripts(from:)` then makes the WKUserScripts on the main thread, each
+    /// mod's kept with its key, so an unchanged mod costs nothing the next time.
+    struct ScriptPlan: Sendable {
+        struct One: Sendable { var key: String; var script: String; var world: String; var at: String; var style: String; var off: [String] }
+        var mods: [One] = []
+        var mirrorTrif = false, free = false, box = false
+        var bridged: [[[String]]] = []
+        /// What it puts in, as one string: the same shape, the same scripts.
+        var shape: String { "\(mirrorTrif)\(free)\(box)|\(bridged)|" + mods.map(\.key).joined(separator: ",") }
+    }
+    /// One mod's texts: (source, at the start, world).
+    typealias BuiltScripts = [(source: String, start: Bool, world: String)]
+    func scriptPlan() -> ScriptPlan {
+        var plan = ScriptPlan()
+        if paused { return plan }
         var list: [(InstalledMod, String, String, String, String)] = []
         for m in mods where m.on {
             if m.held { if let r = m.ran { list.append((m, r.script, r.world, r.at, r.style ?? "")) }; continue }
             list.append((m, m.script, m.world, m.at, m.styleScript))
         }
-        var out: [WKUserScript] = []
-        // (first in each world with a mod: a style element the page's policy refuses still applies: Web/style-mirror.js;
-        // TRIF's world has a free mod's style section too)
-        let mirror = Browser.resource("style-mirror", "js")
-        if list.contains(where: { $0.2 == "trif" || !$0.4.isEmpty }) { out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld)) }
-        // (where a free mod may run: desktop's window.trif.log/warn/error in the page's world, and their way to the
-        // app's Diagnostics in TRIF's ("mod log" lines: a mod's start, its log lines, its errors), before any mod)
-        if list.contains(where: { $0.2 == "page" }), let free = freeScripts {
-            out.append(WKUserScript(source: free.relay, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld))
-            out.append(WKUserScript(source: free.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
-        }
-        if list.contains(where: { $0.2 == "box" }) {
-            out.append(WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
-            out.append(WKUserScript(source: Browser.resource("ses.umd.min", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
-            out.append(WKUserScript(source: Browser.resource("sandbox-runtime", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
-        }
+        plan.mirrorTrif = list.contains(where: { $0.2 == "trif" || !$0.4.isEmpty })
+        plan.free = list.contains(where: { $0.2 == "page" }) && freeScripts != nil
+        plan.box = list.contains(where: { $0.2 == "box" })
         // (the page's side of a boxed mod's site-data power, trif.filterResponse: desktop's own bridge (mobile/shared/gen/
         // page-bridge.js), in the page's world at its start, only on the pages of boxed mods allowed site-data (a held
         // change's version before: the power in the grant its script carries). It wraps fetch and XMLHttpRequest only
         // once such a mod asks for a filter; what a filter gives back is checked in the box world (remove or reorder
         // only), and anything else leaves the site's response as it was.)
-        let bridged = list.filter { m, script, world, _, _ in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
-        if !bridged.isEmpty {
-            let pairs = bridged.map { [$0.0.matches, $0.0.excludes] }
-            out.append(WKUserScript(source: Browser.resource("page-bridge", "js") + "(\(Browser.jsonText(pairs)));", injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
-        }
+        plan.bridged = list.filter { m, script, world, _, _ in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
+            .map { [$0.0.matches, $0.0.excludes] }
+        var seen: [String: PlanKey] = [:]
         for (m, script, world, at, style) in list {
-            let off = (m.multiSite ? m.offSites : []) + groupsOff.filter { $0.value.contains(m.tier) }.map(\.key)
-            let behind = { (s: String) in off.isEmpty ? s : "(function () { const h = location.hostname.replace(/^www\\./, ''); if (\(Browser.jsonText(Array(Set(off)).sorted())).some((s) => h === s || h.endsWith('.' + s))) return;\n\(s)\n})();" }
-            let w: WKContentWorld = world == "box" ? Browser.boxWorld : world == "page" ? .page : Browser.trifWorld
+            let off = Array(Set((m.multiSite ? m.offSites : []) + groupsOff.filter { $0.value.contains(m.tier) }.map(\.key))).sorted()
+            // (a mod's key is made again only when its texts changed: the same strings compare at once, so a change to
+            // another mod costs this one nothing; hashing every script at each change was most of the time, 11-18)
+            let key: String
+            if let k = planKeys[m.id], k.script == script, k.style == style, k.world == world, k.at == at, k.off == off { key = k.key }
+            else {
+                var h = Hasher()
+                h.combine(script); h.combine(world); h.combine(at); h.combine(style); h.combine(off)
+                key = "\(m.id)#\(h.finalize())"
+            }
+            seen[m.id] = PlanKey(script: script, style: style, world: world, at: at, off: off, key: key)
+            plan.mods.append(.init(key: key, script: script, world: world, at: at, style: style, off: off))
+        }
+        planKeys = seen
+        return plan
+    }
+    private struct PlanKey { var script, style, world, at: String; var off: [String]; var key: String }
+    private var planKeys: [String: PlanKey] = [:]
+    /// The texts of the plan's mods not in `have` (any thread).
+    nonisolated static func build(_ plan: ScriptPlan, have: Set<String>) -> [String: BuiltScripts] {
+        var out: [String: BuiltScripts] = [:]
+        for m in plan.mods where !have.contains(m.key) && out[m.key] == nil {
+            let behind = { (s: String) in m.off.isEmpty ? s : "(function () { const h = location.hostname.replace(/^www\\./, ''); if (\(Browser.jsonText(m.off)).some((s) => h === s || h.endsWith('.' + s))) return;\n\(s)\n})();" }
+            var one: BuiltScripts = []
             // (a free mod's style section first, at the page's start whenever its code runs, as desktop's is)
-            if !style.isEmpty { out.append(WKUserScript(source: behind(style), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld)) }
-            out.append(WKUserScript(source: behind(script), injectionTime: at == "start" ? .atDocumentStart : .atDocumentEnd, forMainFrameOnly: true, in: w))
+            if !m.style.isEmpty { one.append((behind(m.style), true, "trif")) }
+            one.append((behind(m.script), m.at == "start", m.world))
+            out[m.key] = one
         }
         return out
+    }
+    /// Each mod's WKUserScripts as last made, by key (only the plan's last mods are kept).
+    private var built: [String: [WKUserScript]] = [:]
+    var builtKeys: Set<String> { Set(built.keys) }
+    private static func world(_ w: String) -> WKContentWorld { w == "box" ? Browser.boxWorld : w == "page" ? .page : Browser.trifWorld }
+    /// The shared scripts, made once.
+    private lazy var mirrorScripts: (trif: WKUserScript, box: WKUserScript) = {
+        let mirror = Browser.resource("style-mirror", "js")
+        return (WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld),
+                WKUserScript(source: mirror, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld))
+    }()
+    private lazy var boxScripts: [WKUserScript] = [
+        WKUserScript(source: Browser.resource("ses.umd.min", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld),
+        WKUserScript(source: Browser.resource("sandbox-runtime", "js"), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.boxWorld),
+    ]
+    private lazy var freeUserScripts: [WKUserScript] = freeScripts.map { free in [
+        WKUserScript(source: free.relay, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Browser.trifWorld),
+        WKUserScript(source: free.page, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page),
+    ] } ?? []
+    private var bridgeScript: (pairs: [[[String]]], script: WKUserScript)?
+
+    /// The WKUserScripts for a plan, with the texts `fresh` built for mods new or changed since (main thread).
+    func userScripts(from plan: ScriptPlan, fresh: [String: BuiltScripts]) -> [WKUserScript] {
+        var out: [WKUserScript] = []
+        // (first in each world with a mod: a style element the page's policy refuses still applies: Web/style-mirror.js;
+        // TRIF's world has a free mod's style section too)
+        if plan.mirrorTrif { out.append(mirrorScripts.trif) }
+        // (where a free mod may run: desktop's window.trif.log/warn/error in the page's world, and their way to the
+        // app's Diagnostics in TRIF's ("mod log" lines: a mod's start, its log lines, its errors), before any mod)
+        if plan.free { out += freeUserScripts }
+        if plan.box { out.append(mirrorScripts.box); out += boxScripts }
+        if !plan.bridged.isEmpty {
+            if bridgeScript?.pairs != plan.bridged {
+                bridgeScript = (plan.bridged, WKUserScript(source: Browser.resource("page-bridge", "js") + "(\(Browser.jsonText(plan.bridged)));", injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+            }
+            out.append(bridgeScript!.script)
+        }
+        var keep: [String: [WKUserScript]] = [:]
+        for m in plan.mods {
+            let scripts: [WKUserScript]
+            if let have = keep[m.key] ?? built[m.key] { scripts = have }
+            else {
+                let texts = fresh[m.key] ?? ModStore.build(ScriptPlan(mods: [m]), have: [])[m.key] ?? []
+                scripts = texts.map { WKUserScript(source: $0.source, injectionTime: $0.start ? .atDocumentStart : .atDocumentEnd, forMainFrameOnly: true, in: ModStore.world($0.world)) }
+            }
+            keep[m.key] = scripts
+            out += scripts
+        }
+        built = keep
+        return out
+    }
+    /// All at once, on the main thread (the app's start: the scripts must be there before any page).
+    func userScripts() -> [WKUserScript] {
+        let plan = scriptPlan()
+        return userScripts(from: plan, fresh: ModStore.build(plan, have: builtKeys))
     }
 
     // MARK: changes

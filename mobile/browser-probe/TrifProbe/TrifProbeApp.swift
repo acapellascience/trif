@@ -191,6 +191,18 @@ extension Model {
             out = r.text ?? "error: \(r.error ?? "?")"
         }
         if let u = step["go"] as? String { browser.go(u) }
+        // ({"reload": "why"}: the shown tab loaded again by the app, as its own reloads are; {"videos": 1}: each tab's
+        // video as last told (VideoResume), and the note shown)
+        if let why = step["reload"] as? String { browser.reload(why) }
+        // ({"hashtest": "/path", "old": false}: LocalModels.sha256 on a big file as a model's check runs it, the app's
+        // memory footprint sampled every 0.1 s: its start, its most, its end; "old": the reading before 11-18)
+        if let path = step["hashtest"] as? String { out = await Model.hashTest(URL(fileURLWithPath: path), old: step["old"] as? Bool ?? false) }
+        if step["videos"] != nil {
+            out = browser.tabs.enumerated().map { i, t in
+                let v = t.video.map { "\(VideoResume.clock($0.time)) (\(String(format: "%.1f", $0.time)) s) \($0.playing ? "playing" : "paused") of \(String(format: "%.0f", $0.duration)) s\($0.live ? " live" : "")\($0.muted ? " muted" : "") \(Int(Date().timeIntervalSince($0.at))) s ago, \($0.url)" } ?? "none"
+                return "\(i)\(t === browser.current ? "*" : " ") \(t.host.nonEmpty ?? "-"): \(v)"
+            }.joined(separator: "\n") + "\nnote: \(browser.status)"
+        }
         if let u = step["newtab"] as? String { browser.newTab(u.isEmpty ? nil : u) }
         if let n = step["select"] as? Int, n < browser.tabs.count { browser.select(browser.tabs[n]) }
         if let n = step["close"] as? Int, n < browser.tabs.count { browser.close(browser.tabs[n]) }
@@ -287,6 +299,9 @@ extension Model {
         if let o = step["iconprofile"] as? [String: Any] { out = await Model.iconProfile(browser: browser, options: o, docs: docs) }
         if let u = step["playcheck"] as? String, let page = URL(string: u) { out = await Model.playCheck(browser: browser, page: page) }
         if step["playing"] != nil { out = await Model.playingStates(browser: browser) }
+        // ({"rebuild": {"n": 5, "on": true}}: every mod switched on first (with "on"), then n changes to the mods in a
+        // row, as the Mods tab's switches make them: the main thread's time for each and the hangs meanwhile)
+        if let o = step["rebuild"] as? [String: Any] { out = await Model.rebuildCheck(browser: browser, n: o["n"] as? Int ?? 5, allOn: o["on"] as? Bool ?? false) }
         // ({"tabjs": "…", "tab": n}: JavaScript in tab n's page, shown or not)
         if let js = step["tabjs"] as? String, let n = step["tab"] as? Int, n < browser.tabs.count {
             do { out = "\(try await browser.tabs[n].webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
@@ -426,7 +441,7 @@ struct ContentView: View {
             // (inactive on the way in too, from the background: "left the front" only on the way out; 11-17, Tim's
             // diagnostics read as if the app had left three times)
             // (the shown tab's picture as the app leaves; not on the way back in, when its page may not have drawn yet)
-            if p != .active { browser.saveTabs(); browser.history.saveNow(); if p == .inactive, was == .active { browser.snapshot(nil, "the app left the front") } }
+            if p != .active { browser.saveTabs(); browser.history.saveNow(); VideoStore.shared.saveNow(); if p == .inactive, was == .active { browser.snapshot(nil, "the app left the front") } }
         }
         // (a link UIKit handed over that onOpenURL never brought: opened once the app has been in front 2 s)
         .onChange(of: phase, initial: true) { _, p in
@@ -444,7 +459,7 @@ struct ContentView: View {
             let name = o.likely.flatMap { id in browser.mods.mods.first { $0.id == id }?.name }
             return Alert(title: Text("\(o.site) keeps this iPhone busy"),
                          message: Text(o.why == "ended" ? "Its page stopped twice in three minutes while mods ran on it. Switch them off?" : "Its page has been busy most of the time for 40 seconds while mods ran on it. Switch them off?\(name.map { " \($0) changed most recently." } ?? "")"),
-                         primaryButton: .destructive(Text("Switch off its mods")) { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged() },
+                         primaryButton: .destructive(Text("Switch off its mods")) { browser.safety.accept(o, only: nil, store: browser.mods); browser.modsChanged(why: "a runaway page's mods switched off") },
                          secondaryButton: .cancel(Text("Not now")) { browser.safety.offer = nil })
         }
     }
@@ -590,7 +605,7 @@ struct ContentView: View {
             bars.pull.act = { [browser] c in
                 switch c {
                 case .newTab: browser.newTab()
-                case .reload: browser.reload()
+                case .reload: browser.reload("pull-to-refresh")
                 case .close: if let t = browser.current { browser.close(t) }
                 }
             }
@@ -698,7 +713,13 @@ struct ContentView: View {
             }
             if !browser.status.isEmpty {
                 // (a mod from a chat added on another tab: the way to its site, Tim 11-18)
-                if let g = browser.statusGo, g.text == browser.status {
+                if browser.status == Browser.tapForSound, browser.soundTab != nil {
+                    // (a video picked up where it was, playing muted: iOS allowed no sound without a tap)
+                    Button { browser.soundOn() } label: {
+                        Label(browser.status, systemImage: "speaker.wave.2.fill").font(.footnote.bold()).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .modifier(NoteStyle(seconds: 8, key: browser.status) { browser.status = "" })
+                } else if let g = browser.statusGo, g.text == browser.status {
                     HStack(spacing: 12) {
                         Text(browser.status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
                         Button("Go to \(g.site)") { browser.status = ""; closeCovers(); pane.goToSite(pane.links.first { $0.site == g.site }?.id ?? "") }

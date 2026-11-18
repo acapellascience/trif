@@ -42,6 +42,12 @@ final class Tab: ObservableObject, Identifiable {
     /// When its page last came back in the other mode's agent and was loaded again (Browser.checkAgent).
     var agentFixedAt: Date?
     var watches: [NSKeyValueObservation] = []
+    /// Its page's video as last told (VideoResume): where a reload, a page process ended or a relaunch picks it up.
+    var video: VideoResume.State?
+    /// Why the app is loading its page again, until that load commits (the Diagnostics "reload" line).
+    var reloadCause: String?
+    /// Why its page was let go in the background (Browser.discard): said when it loads again on being shown.
+    var letGoWhy: String?
 
     init(id: UUID = UUID(), webView: WKWebView, title: String = "", url: URL? = nil) {
         self.id = id

@@ -994,29 +994,30 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         banners.removeAll { $0.id == b.id }
         browser?.offerHeld(b.mods)
     }
-    /// The tab a chat link goes back to now: the one it was sent from while it's still open and on the chat's site.
-    func tabFor(_ l: ChatLink) -> Tab? {
-        guard let browser, let id = l.tab, let t = browser.tabs.first(where: { $0.id == id }), Site.of(t.host) == l.site else { return nil }
-        return t
-    }
     /// Go to <site>: the chat closed and its tab shown; that tab closed (or gone to another site): a new tab at the
     /// page it was on, else the site's home (a new tab, as a link opens one: nothing rewritten). Its held mods, if
-    /// it has a banner with any, then come up there. Returns false for a chat with no site.
+    /// it has a banner with any, then come up there. Returns false for a chat with no site. The shared rule decides
+    /// which (TabListRules: tabList.goTo; a chat not sent from yet: fallbackLink's tab, the same choice).
     @discardableResult
     func goToSite(_ key: String) -> Bool {
-        guard let browser, let l = links.first(where: { $0.id == key }) ?? fallbackLink(key), !l.site.isEmpty else { return false }
+        guard let browser else { return false }
+        let link = links.first(where: { $0.id == key })
+        let chat = link == nil ? views.first(where: { ClaudePane.linkKey($0.service.rawValue, $0.site) == key })?.site : nil
+        guard let site = link?.site ?? chat,
+              let go = TabListRules.goTo(link: link.map { ($0.site, $0.tab, $0.tabURL) }, chat: chat, tabs: browser.tabs.map(\.facts), current: browser.current.id)
+        else { return false }
         if shown { close() }
-        if let t = tabFor(l) {
-            if t !== browser.current { browser.select(t) }
-            Diagnostics.shared.log("chats", "go to \(l.site): its tab")
-        } else {
-            let page = l.tabURL.flatMap(URL.init(string:)).flatMap { Site.of($0.host ?? "") == l.site ? $0.absoluteString : nil }
-            browser.newTab(page ?? "https://\(l.site)/")
-            Diagnostics.shared.log("chats", "go to \(l.site): its tab is closed or on another site, a new tab at \(page == nil ? "the site" : "its page")")
-            if let i = links.firstIndex(where: { $0.id == l.id }) { links[i].tab = browser.current.id; links[i].tabURL = browser.current.webView.url?.absoluteString ?? page; saveLinks() }
+        switch go {
+        case .tab(let id):
+            if let t = browser.tabs.first(where: { $0.id == id }), t !== browser.current { browser.select(t) }
+            Diagnostics.shared.log("chats", "go to \(site): its tab")
+        case .open(let address, let page):
+            browser.newTab(address)
+            Diagnostics.shared.log("chats", "go to \(site): its tab is closed or on another site, a new tab at \(page ? "its page" : "the site")")
+            if let i = links.firstIndex(where: { $0.id == key }) { links[i].tab = browser.current.id; links[i].tabURL = browser.current.webView.url?.absoluteString ?? (page ? address : nil); saveLinks() }
         }
         follow(site: browser.site)
-        if let i = banners.firstIndex(where: { $0.link == l.id }) {
+        if let i = banners.firstIndex(where: { $0.link == key }) {
             let b = banners.remove(at: i)
             browser.offerHeld(b.mods)
         }

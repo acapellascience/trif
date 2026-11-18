@@ -1008,8 +1008,8 @@ module.exports = { words, norm, clean, join, isFresh, start, apply };
 };
 SOURCES["tab-list.js"] = function (module, exports, require) {
 // The tab list's rules (docs/MOBILE-BEHAVIOUR.md, Tabs and Chats and tabs; Tim 11-18: "it should snap to the tab that
-// I just left"): which card it opens at, and each card's robot badge. The list itself, its scrolling and the badges'
-// looks stay each app's. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.tabList); tab-list-cases.json
+// I just left"): which card it opens at, and each card's robot badge; and which tab Go to <site> shows. The list
+// itself, its scrolling and the badges' looks stay each app's. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.tabList); tab-list-cases.json
 // holds the answers the iPhone's Swift gave.
 
 'use strict';
@@ -1040,19 +1040,45 @@ function tabFor(l, tabs) {
 function focus(f) {
   if (!f.open || f.more) return null;
   const tabs = Array.isArray(f.tabs) ? f.tabs : [];
-  let l = f.link && typeof f.link === 'object' ? f.link : null;
-  if (!l && typeof f.chat === 'string') {
-    const cur = tabs.find((x) => x.id === f.current);
-    if (cur) {
-      const s = f.chat;
-      let t = site.of(String(cur.host || '')) === s ? cur : null;
-      if (!t) for (let i = tabs.length - 1; i >= 0 && !t; i--) if (site.of(String(tabs[i].host || '')) === s) t = tabs[i];
-      l = { site: s, tab: t ? t.id : null };
-    }
-  }
+  const l = linkOf(f, tabs);
   if (!l) return null;
   const t = tabFor(l, tabs);
   return t ? t.id : null;
+}
+
+/**
+ * The shown chat's link; a chat not sent from yet has none: one made from the chat, its site's tab (the shown one if
+ * it's on that site, else the last one there), no page.
+ */
+function linkOf(f, tabs) {
+  if (f.link && typeof f.link === 'object') return f.link;
+  if (typeof f.chat !== 'string') return null;
+  const cur = tabs.find((x) => x.id === f.current);
+  if (!cur) return null;
+  const s = f.chat;
+  let t = site.of(String(cur.host || '')) === s ? cur : null;
+  if (!t) for (let i = tabs.length - 1; i >= 0 && !t; i--) if (site.of(String(tabs[i].host || '')) === s) t = tabs[i];
+  return { site: s, tab: t ? t.id : null, page: null };
+}
+
+/**
+ * Go to <site> (a chat's top bar, its banner, the chats' list): the chat's own tab while it's open and on its site;
+ * else a new tab at the page it was on, if that page is on the site, else the site's home (a new tab, as a link opens
+ * one: nothing rewritten). A chat with no site: nothing.
+ * @param {{link: {site: string, tab: string|null, page: {url: string, host: string}|null}|null, chat: string|null,
+ *   tabs: {id: string, host: string}[], current: string}} f
+ *   link: the chat's (page: the address it was on, as the platform parsed it); chat: its site, when it has no link
+ * @returns {{tab: string}|{open: string, page: boolean}|null}
+ */
+function goTo(f) {
+  const tabs = Array.isArray(f.tabs) ? f.tabs : [];
+  const l = linkOf(f, tabs);
+  if (!l || typeof l.site !== 'string' || !l.site) return null;
+  const t = tabFor(l, tabs);
+  if (t) return { tab: t.id };
+  const p = l.page && typeof l.page === 'object' ? l.page : null;
+  const page = p && typeof p.url === 'string' && site.of(String(p.host || '')) === l.site ? p.url : null;
+  return { open: page != null ? page : `https://${l.site}/`, page: page != null };
 }
 
 /**
@@ -1086,7 +1112,7 @@ function badges(f) {
   return out;
 }
 
-module.exports = { focus, marked, badges, activity };
+module.exports = { focus, marked, badges, activity, goTo };
 
 };
 SOURCES["tab-reload.js"] = function (module, exports, require) {

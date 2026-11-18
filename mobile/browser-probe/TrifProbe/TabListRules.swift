@@ -1,7 +1,7 @@
 import Foundation
 
 /// The tab list's rules (docs/MOBILE-BEHAVIOUR.md, Tabs; Chats and tabs): which card it opens at (Tim, 11-18: "it
-/// should snap to the tab that I just left") and each card's robot badge. The phones' shared rule:
+/// should snap to the tab that I just left") and each card's robot badge; and which tab Go to <site> shows. The phones' shared rule:
 /// mobile/shared/core/tab-list.js (TrifCore.tabList), through Core.swift. The list, its scrolling and the badges' looks
 /// stay TabsView's. No UI: the Mac check (mobile/test/tablist.test.js) builds it.
 enum TabListRules {
@@ -30,6 +30,30 @@ enum TabListRules {
         var out: [UUID: String] = [:]
         for (k, v) in r { if let id = UUID(uuidString: k), let b = v as? String { out[id] = b } }
         return out
+    }
+
+    /// Go to <site>'s choice: the chat's own tab, or a new tab at `open` (`page`: the page it was on; else the site's
+    /// home).
+    enum Go: Equatable { case tab(UUID); case open(String, page: Bool) }
+    /// `link`: the chat's (its site, the tab it was sent from, the address it was on), else `chat`: its site (a chat
+    /// not sent from yet). Once a tap. nil: a chat with no site. No answer from the shared rule: the site's home.
+    static func goTo(link: (site: String, tab: UUID?, tabURL: String?)?, chat: String?, tabs: [TabFacts], current: UUID) -> Go? {
+        let l: Any = link.map { l -> [String: Any] in
+            let u = l.tabURL.flatMap(URL.init(string:))
+            let page: Any = u.map { ["url": $0.absoluteString, "host": $0.host ?? ""] } ?? NSNull()
+            return ["site": l.site, "tab": l.tab?.uuidString ?? NSNull(), "page": page]
+        } ?? NSNull()
+        let facts: [String: Any] = ["link": l, "chat": chat ?? NSNull(), "tabs": tabs.map(plain), "current": current.uuidString]
+        switch Core.shared.call("tabList.goTo", [facts]) {
+        case is NSNull: return nil
+        case let r as [String: Any]:
+            if let t = (r["tab"] as? String).flatMap(UUID.init(uuidString:)) { return .tab(t) }
+            if let o = r["open"] as? String { return .open(o, page: r["page"] as? Bool ?? false) }
+            fallthrough
+        default:
+            let s = link?.site ?? chat ?? ""
+            return s.isEmpty ? nil : .open("https://\(s)/", page: false)
+        }
     }
 
     private static func plain(_ t: TabFacts) -> [String: Any] { ["id": t.id.uuidString, "host": t.host] }

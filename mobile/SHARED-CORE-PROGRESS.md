@@ -82,9 +82,13 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
       site, else the last tab there), marked (the card drawn as current; a Swift twin: every card, every drawing), badges
       (each card's robot: working > replied > idle, only links whose tab is open and on their site). Swift:
       TabListRules.swift (TabsView asks badges once a drawing, not once a card).
-- [ ] Optional, found in round 12: Go to <site>'s choice (ClaudePane.goToSite: its tab via tabFor, else a new tab at
-      the page it was on if that page is on the site, else https://site/) → tabList.goTo. Then a last spec audit and
-      CORE COMPLETE.
+- [x] Go to <site>'s choice → tabList.goTo (round 13): the chat's own tab while open and on its site, else a new tab at
+      the page it was on if that page is on the site, else https://site/; a chat not sent from yet: focus's tab choice
+      (linkOf, shared with focus). Swift: TabListRules.goTo (ClaudePane.goToSite; ClaudePane.tabFor removed). The new
+      tab, the link's bookkeeping, follow and the banner's held mods stay Swift.
+- [x] Last spec audit (round 13): every "Tim, 11-xx" decision in IOS-AGENT-NOTES checked against docs/MOBILE-BEHAVIOUR.md;
+      added Copy diagnostics and several icons at once. Left as notes on purpose: looks (icon face, robot size, toolbar
+      glyphs), iOS mechanics (profiles, Open Settings' URL), and the open idea (desktop mode running desktop mods).
 
 ## Done this round
 
@@ -239,12 +243,32 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   tab; More's chat → the shown tab; no "shared rule" line in diagnostics. .ipa built (dSYM
   33188806-1468-3E24-A54D-CC74F1D28B16).
 
+- Round 13 (11-18): Go to <site>'s choice moved (core/tab-list.js goTo, linkOf now shared by focus and goTo;
+  TabListRules.goTo; ClaudePane.goToSite calls it, tabFor gone). Cases recorded from the old Swift (scratchpad r13/m:
+  the old goToSite / fallbackLink / tabFor over Site.swift, 9631 runs packed to 744 distinct: 74 no site, 86 its tab, 48
+  its page, 536 the site's home) over 9 sites (incl. "", IPs, ü and punycode, localhost), 12 hosts, 24 addresses
+  (case, ports, user:pw, a space (Foundation encodes it), "not a url", "", no scheme, about:, javascript:, a trailing
+  dot, IPv6, another site with ours in its query) and tab ids present / gone / none; the JS passed them at once, then
+  the Swift through JSC (the page's parts compared too). Cost (Mac, unoptimised): a Go to ~73 µs (once a tap). Tests:
+  all of mobile/test (58 pass, 13 skipped), prepare --check, smoke. Simulator (SE, headless, serve.js, three chat
+  links seeded through `defaults write … chatLinks`): from the plain page, Go to 127.0.0.1 → its tab (2); a link whose
+  tab is on another site → a new tab at http://127.0.0.1:8377/agent?r13, the link now on it; example.com with no tab and
+  a page on evil.org → a new tab at https://example.com/; Diagnostics "go to …" lines as before, no "shared rule" line.
+  Spec audit (above). .ipa built (dSYM 9F78F478-50FC-3B68-88B2-E43D4F546762).
+
 ## Next step
 
-Round 13: Go to <site>'s choice (ClaudePane.goToSite → tabList.goTo, beside tabFor), then a last audit of
-docs/MOBILE-BEHAVIOUR.md against IOS-AGENT-NOTES (every Tim decision there as a rule), then CORE COMPLETE.
+Core complete for the listed candidates. If more is wanted later (none asked): which tab a Home Screen icon lands on
+(its site's own tab, off-site → a new own tab, a blank one takes the address) and the background tabs' let-go timing
+(20 s, playing kept) are pure decisions still in Swift; Android may want them shared once it has icons.
 
 ## Notes for next round
+
+- Round 13: a link's tabURL crosses as URL(string:)'s parts {url: absoluteString, host} (Foundation now encodes a
+  space, so absoluteString can differ from the stored string; the new tab opens absoluteString, as before). Chat links
+  can be seeded with the app stopped: `simctl spawn <dev> defaults write com.timsrobot.trifprobe.browser chatLinks
+  -data <hex of JSON [{service, site, tab, tabTitle, tabURL, state, at (s since 2001)}]>`; tab ids from Application
+  Support/tabs.json. Driver: scratchpad r13/step.sh ({"links":1}, {"select":0}, {"gosite":n}).
 
 - Round 12: tab ids cross as uuidString (upper case); a chat's site on the SE's localhost pages is "" (Site.of has no
   dot to cut), so the Simulator's chat follows the shown tab; links with real sites need a sent chat, so the cases carry
@@ -326,6 +350,10 @@ docs/MOBILE-BEHAVIOUR.md against IOS-AGENT-NOTES (every Tim decision there as a 
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 13: Go to {site} (from a chat, its banner or the chats' list) now picks its tab through the shared rules
+  Android will use; it behaves as before. The behaviour spec got its last check against the notes (two small rules
+  written down: Copy diagnostics, several icons at once). A new TRIF.ipa is in iCloud Drive/TRIF.
 
 - Round 12: which card the tab list opens at (the tab you just left; from a chat, the chat's own tab) and each card's
   robot badge now decide through the shared rules Android will use; they behave as before. The unread-count rule sits

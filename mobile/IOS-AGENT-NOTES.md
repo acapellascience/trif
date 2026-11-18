@@ -201,7 +201,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   keeps its tab), `remember` follows the conversation, `seen` (shown → read), `modAdded` (Browser.addMod →
   modAddedFrom). `banners` ([ChatBanner], the first shown; ChatBannerView over everything in ContentView.page; a plain
   one goes after 8 s, one with mods stays: they're its offer, ✕ = dismissed). `goToSite(key)`: its tab if open and on
-  its site, else a new tab at the page it was on (else https://site/); then the banner's held mods come up.
+  its site, else a new tab at the page it was on (else https://site/), decided by TabListRules.goTo; then the
+  banner's held mods come up.
   `openChat(key)`: the site's chat shown at its conversation, nothing filled. `badges()` (TabsView asks once a drawing; `badge(for:)` the step's) through TabListRules. The
   robot's tap → ChatListView (Go to chat first; `site` the shown tab's); its hold → hold to talk (ContentView
   robotPress/robotHold/robotLift, HoldTalkPill in QuickAsk.swift) or ChatListView when talking isn't ready.
@@ -313,8 +314,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - TabListRules.swift (round 12 of the shared core): `focus(open:more:link:chat:tabs:current:)` (ClaudePane.chatTabShown:
   the chat's own tab, or nil; no answer: nil, the shown tab) and `badges(links:tabs:)` (no chats: none without a call;
   no answer: none) through TrifCore.tabList; `marked` (the card drawn as current: every card, every drawing) a twin.
-  ClaudePane.tabFor stays Swift for Go to <site> (the same rule as tabList's tabFor). Tab.facts / ChatLink.facts are
-  the records that cross.
+  Round 13: `goTo(link:chat:tabs:current:)` (ClaudePane.goToSite: `.tab(id)` or `.open(address, page:)`; nil, a chat
+  with no site; no answer: the site's home) through TrifCore.tabList; the link's tabURL crosses as URL(string:)'s
+  parts {url: absoluteString, host}. ClaudePane.tabFor is gone. Tab.facts / ChatLink.facts are the records that cross.
 - ModRuns.swift (round 6 of the shared core): what runs. setOn / setGroup through TrifCore.modStore (a tap; no answer:
   the switch doesn't move); running, isOn, off (the sites a mod's script checks it's off on) and MatchPattern (moved
   from Mods.swift; `parts` is the platform's URL parsing the shared rule reads: lower-case scheme and host,

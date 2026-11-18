@@ -1,6 +1,6 @@
 import Foundation
 
-// TabListRules.swift (the tab list's card it opens at and its robot badges: the phones' shared rule
+// TabListRules.swift (the tab list's card it opens at and its robot badges, Go to <site>'s tab: the phones' shared rule
 // mobile/shared/gen/core.js, TrifCore.tabList, called through Core.swift; `marked` a Swift twin), built for the Mac by
 // tablist.test.js. argv: tab-list-cases.json, gen/core.js.
 var failures: [String] = []
@@ -38,7 +38,21 @@ for c in cases["badges"] as? [[Any]] ?? [] {
     let want = Dictionary(uniqueKeysWithValues: (c[1] as! [String: String]).map { (UUID(uuidString: $0.key)!, $0.value) })
     check(got == want, "badges \(f): \(got), want \(want)")
 }
-check(n > 800, "only \(n) cases")
+for c in cases["goTo"] as? [[Any]] ?? [] {
+    n += 1
+    let f = c[0] as! [String: Any]
+    let l = (f["link"] as? [String: Any]).map { (site: $0["site"] as! String, tab: uuid($0["tab"]), tabURL: $0["tabURL"] as? String) }
+    let got = TabListRules.goTo(link: l, chat: f["chat"] as? String, tabs: tabs(f["tabs"]), current: uuid(f["current"])!)
+    var want: TabListRules.Go?
+    if let w = c[1] as? [String: Any] { want = uuid(w["tab"]).map { .tab($0) } ?? .open(w["open"] as! String, page: w["page"] as! Bool) }
+    check(got == want, "goTo \(f): \(String(describing: got)), want \(String(describing: want))")
+    // what crosses: the page's parts as recorded
+    if let lf = f["link"] as? [String: Any], let u = (lf["tabURL"] as? String).flatMap(URL.init(string:)) {
+        let p = lf["page"] as? [String: Any]
+        check(p?["url"] as? String == u.absoluteString && p?["host"] as? String == (u.host ?? ""), "goTo parts \(lf)")
+    }
+}
+check(n > 1500, "only \(n) cases")
 
 // cost: a tap on the tabs button (focus) and the list drawn (badges, 20 tabs, 6 chats)
 let many = (0..<20).map { TabListRules.TabFacts(id: UUID(), host: ["x.com", "m.facebook.com", "news.bbc.co.uk", "claude.ai"][$0 % 4]) }
@@ -50,6 +64,11 @@ for _ in 0..<200 {
     _ = TabListRules.badges(links: chats, tabs: many)
 }
 let us = Date().timeIntervalSince(t0) / 200 * 1e6
+let t1 = Date()
+for _ in 0..<200 { _ = TabListRules.goTo(link: (site: "bbc.co.uk", tab: many[1].id, tabURL: "https://news.bbc.co.uk/news"), chat: nil, tabs: many, current: many[5].id) }
+let goUs = Date().timeIntervalSince(t1) / 200 * 1e6
+if ProcessInfo.processInfo.environment["TRIF_COST"] != nil { print("go to a site: \(Int(goUs)) µs") }
+check(goUs < 5000, "go to a site costs \(Int(goUs)) µs")
 if ProcessInfo.processInfo.environment["TRIF_COST"] != nil { print("tab list opened: \(Int(us)) µs") }
 check(us < 5000, "the tab list opened costs \(Int(us)) µs")
 

@@ -121,8 +121,9 @@ change there is a change on both phones. Change this file whenever a rule change
   own site's tab with nothing over it, Add this mod? comes up at once instead.
 - A tap anywhere on the banner outside its buttons = Open chat (11-18); a mod banner stays over the chat, still
   holding its mods. A plain banner goes after 8 s.
-- Go to {site}: the tab sent from while it's open and on that site; else a new tab at its page (never a tab navigated
-  elsewhere, nothing rewritten).
+- Go to {site}: the tab sent from while it's open and on that site; else a new tab at its page if that page is on the
+  site, else at https://{site}/ (never a tab navigated elsewhere, nothing rewritten); a chat not sent from yet: its
+  site's tab as the tab list picks it [shared: tab-list.js goTo].
 - Tab list robot badges show each tab's chat state (its chats sent from it while it's on their site: working, else a
   reply waiting, else plain) [shared: tab-list.js]; a long press on the toolbar's robot lists the chats.
 - Chat pages read as TRIF (11-16): the robot in their greeting's place, "From TRIF: …" pills, upsells hidden; never
@@ -254,12 +255,16 @@ change there is a change on both phones. Change this file whenever a rule change
   its real picture. Off on return once the icon's tab is drawn (≤ 0.8 s), 0.2 s fade. [shared: core/leaving-cover.js,
   the "icon use" decision]
 - Icons' look, names and batches: Tim's design 11-16/11-17 (see the notes); the profile is named "{Site} for TRIF".
+- Several icons at once (11-16): "Add to Home Screen later" keeps an icon with its choices on a list (up to 20, across
+  launches), added together in one go; the list clears once TRIF is opened from one of them.
 
 ## Safety and privacy
 
 - No private APIs (the sites' or the OS's) and no session tokens; the one exception kept on iPhone is WebKit's cookie
   flush, with a public fallback.
 - Diagnostics never hold cookie values, API keys, page titles with addresses, or a link's address/number.
+- Diagnostics are the person's to send: the Mods tab's Send diagnostics…, and the page menu's Copy diagnostics (11-17,
+  the same text, reachable without scrolling on the smallest phone).
 - API keys stay on the device (Keychain / Keystore), this device only.
 - On-device models download only when asked, with a visible bar; a model runs only after its checksum check.
 
@@ -301,4 +306,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | A video picked up where it was: which load resumes (30 min, same page, live, ended, own time, first 5 s / last 10 s), the sites' video ids | shared/core/video-resume.js | VideoResume.swift → TrifCore.videoResume (an address as its parts: URLComponents; the page's script, the store and the play stay Swift) | test/core-videoresume.test.js, test/videoresume.test.js |
 | Desktop websites' per-site memory (the key, wants, the kept list, can) | shared/core/desktop.js | DesktopRules (TabReloadRules.swift) → TrifCore.desktop `set` (`key`, `wants`, `can` twins, same cases: every page load) | test/core-tabreload.test.js, test/tabreload.test.js |
 | The microphone's words only grow (segments, restarts after a pause, revised partials, a repeated segment) | shared/core/speech-text.js | SpeechText.swift → TrifCore.speechText.apply, every recognizer event (the committed words stay Swift and never cross: the answer says what to add; a Swift copy answers only if the shared rule can't) | test/core-speechtext.test.js, test/speechtext.test.js |
-| The tab list: the card it opens at (the chat's own tab, else the shown tab), each card's robot badge | shared/core/tab-list.js | TabListRules.swift → TrifCore.tabList (ClaudePane.chatTabShown, TabsView's badges; `marked`, the card drawn as current, a twin, same cases: every drawing) | test/core-tablist.test.js, test/tablist.test.js |
+| The tab list: the card it opens at (the chat's own tab, else the shown tab), each card's robot badge; Go to {site}'s tab | shared/core/tab-list.js | TabListRules.swift → TrifCore.tabList (ClaudePane.chatTabShown and goToSite, TabsView's badges; `marked`, the card drawn as current, a twin, same cases: every drawing) | test/core-tablist.test.js, test/tablist.test.js |

@@ -29,11 +29,19 @@ function run(S, where) {
   for (const [ns, al, w] of cases.allow) { assert.deepStrictEqual(plain(S.allow(ns, al)), w, `${where} allow`); n++; }
   for (const [m, o, w] of cases.changeNeeds) { assert.deepStrictEqual(plain(S.changeNeeds(m, o)), w, `${where} changeNeeds ${m.tier} ${m.matches} from ${o.tier} on ${o.site}`); n++; }
   for (const [h, m, how, w] of cases.ranAfter) { assert.equal(S.ranAfter(h, m, how), w, `${where} ranAfter ${h} ${how}`); n++; }
+  // part 2: changes
+  for (const [o, m, src, now, ch, w] of cases.add) { assert.deepStrictEqual(plain(S.add(o, m, src, now, ch)), w, `${where} add ${src} ${JSON.stringify(o)}`); n++; }
+  for (const [ids, id, b, w] of cases.undoAdd) { assert.deepStrictEqual(plain(S.undoAdd(ids, id, b)), w, `${where} undoAdd ${ids} ${b}`); n++; }
+  for (const [t, by, now, w] of cases.remove) { assert.deepStrictEqual(plain(S.remove(t, by, now)), w, `${where} remove ${t.length} ${by}`); n++; }
+  for (const [l, ids, t, w] of cases.undoDelete) { assert.deepStrictEqual(plain(S.undoDelete(l, ids, t)), w, `${where} undoDelete ${l} ${ids} ${t}`); n++; }
+  for (const [e, t, ids, l, w] of cases.restoreDeleted) { assert.deepStrictEqual(plain(S.restoreDeleted(e, t, ids, l)), w, `${where} restoreDeleted ${e} ${ids} ${l}`); n++; }
+  for (const [c, now, w] of cases.reject) { assert.deepStrictEqual(plain(S.reject(c, now)), w, `${where} reject`); n++; }
+  for (const [c, src, now, w] of cases.restore) { assert.deepStrictEqual(plain(S.restore(c, src, now)), w, `${where} restore ${src}`); n++; }
   return n;
 }
 
 test('core/mod-store.js gives the iPhone\'s answers', () => {
-  assert.ok(run(require(path.join(CORE, 'mod-store.js')), 'module') > 300);
+  assert.ok(run(require(path.join(CORE, 'mod-store.js')), 'module') > 900);
 });
 
 test('core/mod-store.js: Android\'s stories (ModStoreTest.kt holdsWaitForAllow, editsAndRestores)', () => {
@@ -58,6 +66,38 @@ test('core/mod-store.js: Android\'s stories (ModStoreTest.kt holdsWaitForAllow, 
   assert.deepStrictEqual(S.waiting(edit).map((n) => n.key), ['match:*://b.com/*']);
   // (becoming a free mod asks)
   assert.deepStrictEqual(S.changeNeeds({ ...ok, tier: 'free', needs: [] }, ok).map((n) => n.key), ['tier:free']);
+});
+
+test('core/mod-store.js: Android\'s stories (ModStoreTest.kt addingAndImporting, deletingAndRecentlyDeleted)', () => {
+  const S = require(path.join(CORE, 'mod-store.js'));
+  const DAY = 86400000;
+  let now = 1763400000000;
+  const free = { tier: 'style', site: 'a.com', matches: [], needs: [], extraNeeds: [], allowed: {}, ran: false };
+  // (from the chat: on; an import: off, marked import)
+  assert.deepStrictEqual(S.add(null, { ...free, on: true }, 'chat', now, true), { source: 'chat', on: true, newOff: null });
+  assert.deepStrictEqual(S.add(null, { ...free, on: true }, 'import', now, true), { source: 'import', on: false, newOff: 'import' });
+  // (a new version: the one before in History; an import of it is off and marked updated)
+  const a = { ...free, on: true, newOff: null, history: [] };
+  now += 1000;
+  const a2 = S.add(a, { ...free, on: true }, 'import', now, true);
+  assert.deepStrictEqual([a2.on, a2.newOff, a2.history, a2.version.source, a2.version.stamp], [false, 'update', [-1], 'import', String(now)]);
+  // (the same code again adds no history; History keeps 30 days)
+  const kept = { ...a, history: [a2.version] };
+  assert.deepStrictEqual(S.add(kept, free, 'chat', now, false).history, [0]);
+  assert.deepStrictEqual(S.add(kept, free, 'chat', now + 31 * DAY, true).history, [-1]);
+  // (deleted by you: Undo; by the computer: none; Recently deleted keeps 30 days)
+  assert.deepStrictEqual(S.remove([], 'you', now), { undo: true, keep: [] });
+  assert.deepStrictEqual(S.remove([{ at: now - 31 * DAY }, { at: now - DAY }], 'computer', now), { undo: false, keep: [1] });
+  assert.deepStrictEqual(S.undoDelete('a.com/A', ['a.com/B'], ['a.com/A']), { append: true, drop: 0 });
+  assert.equal(S.undoDelete(null, [], []), null);
+  // (put back; not while one with its id is here)
+  const trash = [{ id: 'a.com/A@1', modId: 'a.com/A' }];
+  assert.deepStrictEqual(S.restoreDeleted('a.com/A@1', trash, ['a.com/B'], null), { index: 0, clearLast: false });
+  assert.equal(S.restoreDeleted('a.com/A@1', trash, ['a.com/A'], null), null);
+  assert.equal(S.restoreDeleted('gone@1', trash, [], null), null);
+  // (Don't allow a new mod: deleted; a change: the version before back, the change in History as undo)
+  assert.equal(S.reject({ ran: false, history: [] }, now), null);
+  assert.equal(S.reject({ ran: true, history: [{ at: now }] }, now).version.source, 'undo');
 });
 
 test('gen/core.js: TrifCore.modStore in a bare context (JavaScriptCore\'s view)', () => {

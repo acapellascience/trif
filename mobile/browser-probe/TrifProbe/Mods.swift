@@ -82,6 +82,21 @@ struct InstalledMod: Codable, Identifiable, Equatable {
 
     /// The needs not yet allowed (modfile.js waiting): what a hold is waiting for.
     var waiting: [ModNeed] { ModHolds.waiting(needs + extraNeeds, allowed: allowed) }
+    /// The fields a change takes from another version, by the shared rules' names (ModChanges keep).
+    mutating func take(_ fields: Set<String>, from o: InstalledMod) {
+        for f in fields {
+            switch f {
+            case "on": on = o.on
+            case "newOff": newOff = o.newOff
+            case "offSites": offSites = o.offSites
+            case "allowed": allowed = o.allowed
+            case "source": source = o.source
+            case "added": added = o.added
+            default: Core.report("a change keeps \(f), which the app doesn't know")
+            }
+        }
+    }
+
     /// What the hold rules read of it (ModHolds).
     var holdFacts: ModHolds.Facts { .init(tier: tier, site: site, matches: matches, needs: needs, extraNeeds: extraNeeds, allowed: allowed, ran: ran != nil) }
     var held: Bool { !waiting.isEmpty }
@@ -456,69 +471,65 @@ final class ModStore: ObservableObject {
 
     // MARK: changes
 
-    private func stamp() -> String { String(Int(Date().timeIntervalSince1970 * 1000)) }
-
     /// Adds a mod, or a new version of the one with its id (the one before kept in its history). `source`: chat,
     /// import, link or pasted. One from a chat (the user tapped Add it) is on; an import starts off, marked new
     /// (updated, if it replaces one), as on desktop. A new version that needs an OK the one before didn't: the
     /// one before keeps running until the user decides.
+    /// The rules: ModChanges.add (core mod-store.js): History 30 days, 30 versions; from the computer (phone sync D8),
+    /// judged as an edit, its switch kept, or new: off and marked as an import is.
     @discardableResult
     func add(_ new: InstalledMod, source: String) -> InstalledMod {
         var m = new
-        m.source = source
+        let date = Date()
         if let i = mods.firstIndex(where: { $0.id == m.id }) {
             let old = mods[i]
-            m.history = old.history
-            if old.code != m.code { m.history.insert(ModVersion(stamp: stamp(), at: Date(), code: old.code, source: ["import", "edit", "computer"].contains(source) ? source : "chat"), at: 0) }
-            m.history = Array(m.history.filter { $0.at > Date().addingTimeInterval(-30 * 86400) }.prefix(30))
-            m.allowed = old.allowed
-            m.offSites = old.offSites
-            m.added = old.added
-            // (from the computer, phone sync: judged as an edit, its switch kept)
-            if source == "import" { m.on = false; m.newOff = "update" } else if source == "edit" || source == "computer" { m.on = old.on; m.newOff = old.newOff } else { m.on = true; m.newOff = nil }
+            var facts = m.holdFacts
+            facts.allowed = old.allowed
+            let r = ModChanges.add(old: (old.holdFacts, old.on, old.newOff, old.history.map(\.at)), new: (facts, m.on, m.newOff), source: source, at: date, changed: old.code != m.code)
+            m.source = r.source; m.on = r.on; m.newOff = r.newOff
+            m.take(r.keep, from: old)
+            m.history = ModChanges.pick(r.history, from: old.history, new: r.version.map { ModVersion(stamp: $0.stamp, at: date, code: old.code, source: $0.source) })
             // (the version before ran, and this one waits: it keeps running meanwhile)
-            switch ModHolds.ranAfter(held: m.held, old: old.holdFacts, restore: false) {
+            switch r.ran {
             case .ran?: m.ran = old.ran
             case .current?: m.ran = .init(code: old.code, script: old.script, world: old.world, at: old.at, style: old.styleScript)
             case nil: break
             }
             mods[i] = m
         } else {
-            // (new from the computer, phone sync D8: as an import, off and marked new)
-            if source == "import" { m.on = false; m.newOff = "import" } else if source == "computer" { m.on = false; m.newOff = "computer" }
+            let r = ModChanges.add(old: nil, new: (m.holdFacts, m.on, m.newOff), source: source, at: date, changed: true)
+            m.source = r.source; m.on = r.on; m.newOff = r.newOff
             mods.append(m)
         }
         save()
         return m
     }
 
+    /// Recently deleted's days (core mod-store.js TRASH_DAYS; pruned again at each start).
     static let trashDays = 30.0
 
     /// A quick ask's Undo: the mod as it was before it was added (`before`), or gone if it was new; not to Recently
     /// deleted (it never was, as far as the person goes).
     func undoAdd(_ id: String, before: InstalledMod?) {
-        if let before {
-            if let i = mods.firstIndex(where: { $0.id == id }) { mods[i] = before } else { mods.append(before) }
-        } else {
-            mods.removeAll { $0.id == id }
-        }
+        mods = ModChanges.pick(ModChanges.undoAdd(ids: mods.map(\.id), id: id, hasBefore: before != nil), from: mods, new: before)
         save()
     }
 
     /// Deletes a mod: to Recently deleted (30 days). `by`: you (the Mods tab: Undo too) or computer (a sync).
     func remove(_ id: String, by: String = "you") {
         guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
+        let date = Date()
+        let r = ModChanges.remove(trash: trash.map(\.at), by: by, at: date)
         let m = mods.remove(at: i)
-        if by == "you" { lastDeleted = m }
-        trash.insert(DeletedMod(mod: m, at: Date(), by: by), at: 0)
-        trash = Array(trash.filter { $0.at > Date().addingTimeInterval(-ModStore.trashDays * 86400) }.prefix(200))
+        if r.undo { lastDeleted = m }
+        trash = [DeletedMod(mod: m, at: date, by: by)] + ModChanges.pick(r.keep, from: trash, new: nil)
         save()
     }
 
     func undoDelete() {
-        guard let m = lastDeleted else { return }
-        if !mods.contains(where: { $0.id == m.id }) { mods.append(m) }
-        if let i = trash.firstIndex(where: { $0.mod.id == m.id }) { trash.remove(at: i) }
+        guard let m = lastDeleted, let r = ModChanges.undoDelete(last: m.id, ids: mods.map(\.id), trash: trash.map(\.mod.id)) else { return }
+        if r.append { mods.append(m) }
+        if trash.indices.contains(r.drop) { trash.remove(at: r.drop) }
         lastDeleted = nil
         save()
     }
@@ -527,9 +538,10 @@ final class ModStore: ObservableObject {
     /// here now.
     @discardableResult
     func restoreDeleted(_ entry: String) -> Bool {
-        guard let i = trash.firstIndex(where: { $0.id == entry }), !mods.contains(where: { $0.id == trash[i].mod.id }) else { return false }
-        mods.append(trash.remove(at: i).mod)
-        if lastDeleted.map({ m in mods.contains { $0.id == m.id } }) == true { lastDeleted = nil }
+        guard let r = ModChanges.restoreDeleted(entry, trash: trash.map { ($0.id, $0.mod.id) }, ids: mods.map(\.id), last: lastDeleted?.id),
+              trash.indices.contains(r.index) else { return false }
+        mods.append(trash.remove(at: r.index).mod)
+        if r.clearLast { lastDeleted = nil }
         save()
         return true
     }
@@ -566,11 +578,12 @@ final class ModStore: ObservableObject {
     /// Don't allow a change on hold: the version before is back (this one kept in its history). A new mod: deleted.
     func reject(_ id: String) {
         guard let i = mods.firstIndex(where: { $0.id == id }) else { return }
-        guard let ran = mods[i].ran, var back = read(ran.code, file: mods[i].file, site: mods[i].site).mod else { remove(id); return }
-        let now = mods[i]
-        back.on = now.on; back.offSites = now.offSites; back.allowed = now.allowed; back.source = now.source; back.added = now.added
-        back.extraNeeds = []
-        back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: "undo")] + now.history
+        let now = mods[i], date = Date()
+        guard let r = ModChanges.reject(ran: now.ran != nil, history: now.history.count, at: date) else { return }
+        guard case .back(let c) = r, let ran = now.ran, var back = read(ran.code, file: now.file, site: now.site).mod else { remove(id); return }
+        back.take(c.keep, from: now)
+        if let x = c.extraNeeds { back.extraNeeds = x }
+        back.history = ModChanges.pick(c.history, from: now.history, new: ModVersion(stamp: c.version.stamp, at: date, code: now.code, source: c.version.source))
         mods[i] = back
         save()
     }
@@ -617,11 +630,12 @@ final class ModStore: ObservableObject {
     func restore(_ id: String, stamp s: String, as source: String = "restore") -> Bool {
         guard let i = mods.firstIndex(where: { $0.id == id }), let v = mods[i].history.first(where: { $0.stamp == s }),
               var back = read(v.code, file: mods[i].file, site: mods[i].site).mod else { return false }
-        let now = mods[i]
-        back.on = now.on; back.offSites = now.offSites; back.source = now.source; back.added = now.added; back.newOff = now.newOff
+        let now = mods[i], date = Date()
+        guard let c = ModChanges.restore(history: now.history.count, source: source, at: date) else { return false }
+        back.take(c.keep, from: now)
         back.allowed = ModStore.seeded(now)
         back.extraNeeds = ModStore.changeNeeds(back, was: now)
-        back.history = [ModVersion(stamp: stamp(), at: Date(), code: now.code, source: source)] + now.history
+        back.history = ModChanges.pick(c.history, from: now.history, new: ModVersion(stamp: c.version.stamp, at: date, code: now.code, source: c.version.source))
         if ModHolds.ranAfter(held: back.held, old: now.holdFacts, restore: true) == .current { back.ran = .init(code: now.code, script: now.script, world: now.world, at: now.at, style: now.styleScript) }
         mods[i] = back
         save()

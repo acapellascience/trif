@@ -1,5 +1,5 @@
 'use strict';
-// ModHolds.swift + Core.swift (the mod store's hold rules, the shared mobile/shared/core/mod-store.js called through
+// ModHolds.swift + ModChanges.swift + Core.swift (the mod store's hold and change rules, the shared mobile/shared/core/mod-store.js called through
 // JavaScriptCore; `waiting` a Swift twin, compared with the shared held) built for the Mac with swiftc and run with
 // mobile/test/modstore-check/main.swift against mod-store-cases.json: what waits, Allow, what a change asks about, what the
 // version before counts as allowed, which version runs while a change waits. macOS only.
@@ -14,7 +14,7 @@ const { execFileSync } = require('child_process');
 const HERE = __dirname;
 const CORE = path.join(HERE, '..', 'shared', 'core');
 const APP = path.join(HERE, '..', 'browser-probe', 'TrifProbe');
-const SWIFT = [path.join(APP, 'Site.swift'), path.join(APP, 'ModHolds.swift'), path.join(APP, 'Core.swift'), path.join(HERE, 'modstore-check', 'main.swift')];
+const SWIFT = [path.join(APP, 'Site.swift'), path.join(APP, 'ModHolds.swift'), path.join(APP, 'ModChanges.swift'), path.join(APP, 'Core.swift'), path.join(HERE, 'modstore-check', 'main.swift')];
 
 test('ModHolds.swift: what waits, Allow, a change judged, the version kept running', { skip: process.platform !== 'darwin' && 'macOS only', timeout: 180000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-modstore-check-'));

@@ -42,11 +42,11 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   - [x] Part 1 (round 4): holds and Allow: waiting / held (Swift twin: every page load), allow, approve, changeNeeds,
         seeded, ranAfter (add / restore: which version runs while a change waits). Swift: ModHolds.swift (ModNeed moved
         there too).
-  - [ ] Part 2: Recently deleted's 30 days (remove, undoDelete, restoreDeleted, the 200 cap), history (30 days, 30
+  - [x] Part 2 (round 5): Recently deleted's 30 days (remove, undoDelete, restoreDeleted, the 200 cap), history (30 days, 30
         versions), add's rules (chat on; import / computer off and marked new or updated; edit / computer keep the
         switch; allowed, offSites and added carried over), undoAdd, reject's carry-over (on, offSites, allowed, source,
-        added; extraNeeds cleared; the change into History as undo). Likely `add(old|null, new, source, now)` →
-        the record's new fields, `trash(list, entry, now)` etc.; the code reading (ModReader) stays platform.
+        added; extraNeeds cleared; the change into History as undo), restore's carry-over. Swift: ModChanges.swift;
+        answers are field names (`keep`) and indices (-1 the new entry), so no code text crosses into JS.
   - [ ] Part 3: @match (applies: MatchPattern, hot: every page load × every mod, a twin), running (on, not held without
         a version kept, tier switch, per-site switch), signature, tier switches (groupsOff, isOn), Pause all, multiSite.
 - [ ] Which site a chat's mod runs on (chat's site, phone~ twins, @match) and the cross-site warning's decision
@@ -103,12 +103,29 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   the boxed version back, not held, History 4; no "shared rule" line in diagnostics. .ipa built (dSYM
   6D3FE2EE-5C61-35F4-8483-1E1F3923E968).
 
+- Round 5 (11-18): the mod store, part 2 (changes) moved: core/mod-store.js add, undoAdd, remove, undoDelete,
+  restoreDeleted, reject, restore (+ HISTORY_DAYS/MAX, TRASH_DAYS/MAX) and ModChanges.swift; ModStore.add / undoAdd /
+  remove / undoDelete / restoreDeleted / reject / restore apply the answers (InstalledMod.take, ModChanges.pick).
+  Cases recorded from the old Swift (scratchpad rec/main.swift: the verbatim functions over lite records, Date() fixed):
+  342 adds (7 sources × on/newOff × new/unchanged/came-off; 10 Histories incl. 29/30/31/40 entries, ages 30 days ±1 ms,
+  out of order; hold shapes held / ran / allowed / a line more), 10 undoAdds (duplicates), 14 removes (199/200/230
+  entries, ±1 ms, a future one), 24 undoDeletes, 135 restoreDeleteds, 28 rejects, 56 restores; the JS passed all 609
+  at once, then the new Swift through JSC. core-modstore.test.js also runs ModStoreTest.kt's addingAndImporting and
+  deletingAndRecentlyDeleted stories. Cost (Mac, unoptimised): an add with 30 versions ~200 µs. Tests: all of
+  mobile/test (30 pass, 13 skipped as before) and smoke. Simulator (SE, headless, the Mods tab's own messages): a style
+  mod added → v2 (History: chat) → switched off → restore (History: restore, chat; still off) → delete → Undo → back →
+  delete → Restore from Recently deleted → back (again: refused, gone from the list), History kept; a boxed keys mod:
+  Don't allow while new → deleted; again, Allow, an edit adding other.org → pending (asks match:https://other.org/*,
+  History: edit) → Don't allow → the version before, not held, History undo, edit; no "shared rule" line in
+  diagnostics. .ipa built (dSYM F1CC45A7-9944-3ACC-B78D-2D061A6636E8).
+
 ## Next step
 
-Round 5: the mod store, part 2 (Recently deleted, history, add's rules, undoAdd, reject's carry-over) → more functions
-in core/mod-store.js, cases recorded from Mods.swift (ModStore.add / remove / undoDelete / restoreDeleted / undoAdd /
-reject) and checked against ModStoreTest.kt (addingAndImporting, deletingAndRecentlyDeleted). Dates: pass `now` in (ms)
-so the rules stay pure; the 30 days and the caps go in the module.
+Round 6: the mod store, part 3 (@match applies: MatchPattern, a hot path, every page load × every mod: a twin with
+cases; running: on, not held without a version kept, tier switches, per-site switch, Pause all; signature; groupsOff /
+isOn; multiSite) → core/mod-store.js (and maybe core/match.js), cases recorded from Mods.swift (ModStore.applies /
+running / signature / isOn, ModReader.one), checked against ModStoreTest.kt (matchPatterns, switchesTiersAndPause,
+signatureChangesOnlyWithWhatRunsThere). setOn's rule (multiSite: offSites, switching on clears newOff) goes with it.
 
 ## Notes for next round
 
@@ -140,10 +157,20 @@ so the rules stay pure; the 30 days and the caps go in the module.
   window.webkit.messageHandlers.app.postMessage({type:'save'|'approve'|'reject'|'restore'|'history'|'state', id, …}))"}`
   (sheet "mods" first); a boxed mod needs a power that isn't soft (keys) to be held. Helper: scratchpad ms/st.sh <id>.
 
+- Round 5: the change rules' answers are indices and field names, so History's code never crosses into JS (an add
+  sends times only). `changed` (the code differs) stays Swift on purpose: Swift's String == is canonical (é precomposed
+  == decomposed), JS's and Kotlin's literal; Android passes its own compare. History / trash ages in the cases sit 1 ms
+  either side of 30 days: exactly 30 days is float noise in Swift's Date. Simulator drivers: scratchpad r5/drive.py
+  (style mod: add, History, restore, delete, Undo, Restore) and r5/hold.py (boxed keys mod: Don't allow, Allow, an edit
+  that waits); they read the stored mod file (Application Support/mods/<id with __>.json), as the Mods tab's state
+  lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
+
 ## For Tim
 
 - Nothing to decide, no new words. What a mod waits for, what Allow allows, and what an edit or a restore asks about now
-  decide through the shared rules Android will use; they behave as before. A new TRIF.ipa is in iCloud Drive/TRIF.
+  decide through the shared rules Android will use; since round 5 also adding (on or off, marked new or updated),
+  History (30 days, 30 versions), Recently deleted (30 days), Undo, Restore and Don't allow. They behave as before. A
+  new TRIF.ipa is in iCloud Drive/TRIF.
 - One odd corner, kept as it was (a refactor changes nothing): if a change is waiting for your OK and you restore an
   older version that also needs an OK, the mod stops running until you decide (an edit in the same spot keeps the
   last approved version running). Say if you'd like a restore to keep it running too.

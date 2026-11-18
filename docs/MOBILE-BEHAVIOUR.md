@@ -38,6 +38,18 @@ change there is a change on both phones. Change this file whenever a rule change
   before) counts as allowed, unless it was itself held. [shared: core/mod-store.js]
 - While a change waits, the version before keeps running (or the one it was already keeping); a restored version that
   waits keeps the version before running only if that one wasn't waiting itself. [shared: core/mod-store.js]
+- Adding: a mod added from a chat, a link or pasted is on; an import starts off, marked new (updated, if it replaces
+  one); a new one from the computer (phone sync) starts off, marked as from the computer. A new version keeps what was
+  allowed, its per-site switches and when it was first added; an edit or a sync keeps its switch and mark; anything
+  else is on, unmarked. [shared: core/mod-store.js]
+- History: a new version with different code puts the one before first (as import, edit, computer, else chat); a
+  restore puts the current one first (restore, or undo for an edit's Undo), as Don't allow does (undo). On an add,
+  History keeps 30 days and at most 30 versions (the iPhone writes at most 10 to its files). A restore and Don't allow
+  take the current version's switch, per-site switches, how it came and when it was added (a restore also its mark;
+  Don't allow also what was allowed, and asks nothing beyond its code). [shared: core/mod-store.js]
+- Recently deleted: every delete, newest first, 30 days and at most 200 entries (pruned again at each start). A delete
+  by the person offers Undo (the last one); a sync's doesn't. Restore puts one back unless a mod with its id is here
+  now. [shared: core/mod-store.js]
 - A free mod with a style section gets that CSS at the page's start, as desktop's; its `trif.log/warn/error` and its
   start reach Diagnostics ("mod log", capped 40 a load, 200 characters), never page data.
 - Point-and-hide is gone (11-17: "a resting thumb set it off"). Rules it made stay applied, each with Show again in
@@ -257,3 +269,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Sites (a host's site; host in site; a chat's site) | shared/core/site.js | Site.swift (a twin, same cases: every navigation) | test/core-quickask.test.js, test/quickask.test.js |
 | Quick ask: look-only, the pill's state, Undo's steps | shared/core/quick-ask.js | QuickAskRules.swift → TrifCore.quickAsk | test/core-quickask.test.js, test/quickask.test.js |
 | Mod store, part 1: what a hold waits for, Allow, a change judged, the version kept running | shared/core/mod-store.js | ModHolds.swift → TrifCore.modStore (`waiting` a twin, same cases: every page load) | test/core-modstore.test.js, test/modstore.test.js |
+| Mod store, part 2: adding, History, Recently deleted, Undo, Don't allow's and a restore's carry-over | shared/core/mod-store.js | ModChanges.swift → TrifCore.modStore (the records and the code compare stay Swift) | test/core-modstore.test.js, test/modstore.test.js |

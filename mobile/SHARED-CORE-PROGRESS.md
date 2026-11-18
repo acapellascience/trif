@@ -65,8 +65,10 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
 - [x] Leaving cover's "icon use" decision → core/leaving-cover.js (round 8): reason (icon tab on its site in full
       screen, or arrived by an icon), arrived (within 3 s). Swift: LeavingCoverRules.swift (LeavingCover.reason /
       willEnterForeground call through; `-nocover`, the browser, UserDefaults "iconTabs" and the words stay Swift).
-- [ ] Video-resume matching (VideoResume.decide, videoID; 30 min, 5 s / 10 s, live, ended, t=/start=). Swift unit check
-      exists (test/videoresume.test.js; the page's JS videoId already compared). Move decide + videoID.
+- [x] Video-resume matching → core/video-resume.js (round 10): videoID, asksForTime, samePage, decide (30 min, live,
+      ended, same page, own time, first 5 s / last 10 s). Swift: VideoResume.swift calls through (once a page load), an
+      address as its parts (VideoResume.parts: URLComponents). The page's script (its own videoId, compared by
+      videoresume.test.js), the store (VideoStore, its 30-minute drop), the play and the words stay Swift.
 - [ ] Dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking). Swift unit check exists
       (test/speechtext.test.js, random walk). Hot path (every partial result): measure; maybe a twin like unread.
 - [x] Desktop-mode per-site memory → core/desktop.js (round 9): key, wants, set, can. Swift: DesktopRules (in
@@ -185,13 +187,33 @@ docs/MOBILE-BEHAVIOUR.md. Branch ios-poc.
   again now", stale; paused, shown again → loaded again; Request Desktop Website → sites [localhost], the tab desktop
   (Mac agent); Mobile → [] ; no "shared rule" line in diagnostics. .ipa built (dSYM 4551F1E9-7562-327D-9B9C-79900B473811).
 
+- Round 10 (11-18): video resume's matching rules moved (core/video-resume.js: videoID, asksForTime, samePage, decide;
+  VideoResume.swift calls through with an address as its parts, VideoResume.parts). Cases recorded from the old Swift
+  (scratchpad r10: the verbatim file + a recorder): 115 addresses (YouTube hosts, case, ports, user:pw, v= empty /
+  doubled / +, é both ways, /shorts|embed|live|v, youtu.be, Vimeo's last number incl. ١٢, ½, １, 1+mark, a '/' or '#'
+  with a mark after it, t= / start= / time_continue= / %74= / #t=, raw non-ASCII) with their parts, 2261 page pairs,
+  2478 decisions (times 0-700, durations -1-600, live, ended, ages -5 s to 1801 s and 30 min ±1 ms); the old Swift
+  passed them through the new check, then the JS at once, then the new Swift (its parts compared too). Cost (Mac,
+  unoptimised): a load's decide ~62 µs (once a page load). Tests: all of mobile/test (48 pass, 13 skipped as before),
+  prepare --check, smoke. Simulator (SE, headless, serve-media.js on 8392, muted): playing at 0:42 → reload resumed
+  playing (0:43); paused 0:31 → paused 0:31; paused at 0:02.5 → not resumed ("in its first 5 s"); 1:25 of 1:30 → not
+  ("in its last 10 s"); another address → not ("another page or video"); back to ?v=a → resumed at 0:41; no "shared
+  rule" line in diagnostics. .ipa built (dSYM E7C83E32-0828-3E27-A482-7CD200D9D51C).
+
 ## Next step
 
-Round 10: video-resume matching (VideoResume.decide + videoID → core/video-resume.js; test/videoresume.test.js's Swift
-check exists, and the page's JS videoId is already compared). Then the dictation accumulator (SpeechText: a hot path,
-maybe a twin) and the tab list's snap (ClaudePane.chatTabShown).
+Round 11: the dictation accumulator (SpeechText: segments, restarts, revised partials, never shrinking; every partial
+result, so measure, maybe a twin; test/speechtext.test.js's random walk exists). Then the tab list's snap
+(ClaudePane.chatTabShown), then the optional unread-count move, then CORE COMPLETE if the spec is complete.
 
 ## Notes for next round
+
+- Round 10: an address crosses as URLComponents' parts {host, path (decoded), query [[name, value|null]], fragment}
+  (null: unparsable; Foundation now parses "not a url" as a path). The old Swift compared Characters and canonically:
+  video-resume.js does too (NFC compare; a '/' or '#' with a mark after it doesn't split; a number part is \p{N} per
+  grapheme start); Han numerals differ, as in site.js. Recorder: scratchpad r10/m/main.swift over r10/old.swift
+  (verbatim), pack in the round's python. Simulator driver: r10/drive.py (serve-media.js on 8390, muted plays,
+  `{"reload": why}`, `{"videos": 1}`, report.json's "video" lines).
 
 - Round 9: the reload drivers are scratchpad r9/drive.py (tabs by index: the SE has pages, localhost, 127.0.0.1; a
   page marker `window.__r9` tells a reload; `{"modsstale": 1}`, `{"pause": true}`, `{"desktop": true}` /
@@ -251,6 +273,9 @@ maybe a twin) and the tab list's snap (ClaudePane.chatTabShown).
   lists only the shown site's mods. Reoffering the same code is skipped by the chat-offer memory: vary it.
 
 ## For Tim
+
+- Round 10: a video picking up where it was after its page loads again now decides through the shared rules (which
+  load resumes, the YouTube / Vimeo video ids); it behaves as before. A new TRIF.ipa is in iCloud Drive/TRIF.
 
 - Round 9: which tabs load again when a mod changes (never another site's, never one playing; tabs behind when next
   shown; Pause all even while playing) and Request Desktop Website's per-site memory now decide through the shared

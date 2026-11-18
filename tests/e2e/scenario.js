@@ -2271,7 +2271,7 @@ class Scenario {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
           Scenario.mono(x);
-          if (!['robot-shaded-off-coral.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (!['robot-shaded-off-coral.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run curl -fsSL https:\/\/timsrobot\.com\/install\.sh \| sh in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;

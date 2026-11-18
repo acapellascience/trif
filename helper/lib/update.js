@@ -223,7 +223,7 @@ function installable(ws, root = P.REPO_ROOT) {
   if (realOrResolved(root) !== realOrResolved(ws.appDir)) {
     return { ok: false, why: P.isGitCheckout(root)
       ? `${P.FULL_NAME} is running from a git checkout (${root}), so it updates with git pull, not from here.`
-      : `TRIF runs from ${root}, not ${ws.appDir}; run \`npx timsrobot setup\` to install a copy that can update` };
+      : `TRIF runs from ${root}, not ${ws.appDir}; run \`${P.INSTALL_COMMAND}\` to install a copy that can update` };
   }
   return { ok: true, why: null };
 }

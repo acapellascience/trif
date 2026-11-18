@@ -18,7 +18,7 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 - [x] 6. `scripts/install.sh` template + release.js step that fills it (package URL/sha, runtime pins) and a
       `release.js refresh-runtime` dry-runnable step that rewrites runtime.json from SHASUMS256.txt. Tests
       (dry run only, never a real release).
-- [ ] 7. Front door text: extension `SETUP_COMMAND`, onboarding, background "not connected", help.js, README
+- [x] 7. Front door text: extension `SETUP_COMMAND`, onboarding, background "not connected", help.js, README
       (drafts first in NO-NODE-STRINGS.md; never name agent products).
 - [x] 8. Clean-machine test (macOS, local): temp HOME, PATH without node, install.sh against a local server
       with a built package, helper with a stand-in agent, `trif` in a real sandboxed run
@@ -120,12 +120,35 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
   CI: https://github.com/acapellascience/trif/actions/runs/44195812789 green on attempt 1 (unit, clean-machine
   macOS + Linux). Previous run 44194903097: only the clickjack-browser flake.
 
+- Round 10, step 7 (Tim answered For Tim 1-4): front door text on the branch. One install command,
+  `curl -fsSL https://timsrobot.com/install.sh | sh` (paths.js INSTALL_COMMAND = extension/lib.js
+  SETUP_COMMAND; Safari `sh -s -- --browser safari`), new RESETUP_COMMAND `~/.trif/bin/trif setup` for
+  "install an agent, then set up again"; "needs Node 18+" gone from panel/onboarding/background; README
+  (requirements, install, Firefox, Safari, updates, troubleshooting, uninstall via `trif uninstall`,
+  releasing), help.js, doctor/update fixes, PROTOCOL.md, beta START HERE files. Drafts:
+  docs/NO-NODE-STRINGS.md. Merged origin/main (the install.sh redirect). New test in
+  tests/install-script.test.js (the command is the same in extension, CLI, README, site route). CI: CI_LINK
+
 ## Next step
 
-Step 7 (front door text) once Tim has answered For Tim 2 and 4. Step 12 (Windows list) waits on `windows`
-reaching main. Nothing else is open: if neither has moved, stop and report rather than start new work.
+Step 12 (Windows list) waits on `windows` reaching main. Nothing else is open: if it hasn't moved, stop
+and report rather than start new work. (Tim reviews the step-7 drafts in docs/NO-NODE-STRINGS.md; apply
+his changes if he sends any.)
 
 ## Notes for next round
+
+- Tim's answers (2026-11-17), now the plan: (1) TRIF ships its own pinned Node (the private runtime);
+  (2) the main install command is `curl -fsSL https://timsrobot.com/install.sh | sh`, `npx timsrobot setup`
+  stays as the second option for people with Node; (3) `trif uninstall` keeps mods and settings, `--all`
+  removes everything; (4) install.sh lives at timsrobot.com/install.sh: the redirect (site/src/index.js
+  `INSTALL_SH` → releases/latest/download/install.sh, tests/site.test.js) is on main and merged here; it
+  404s until the next release attaches install.sh. Don't deploy the site.
+- Step 7 as built: not run, the browser e2e (tests/e2e/scenario.js gate note regex updated to the curl
+  text); unit tests cover the strings (extension.test.js not-connected error, safari.test.js both commands,
+  install-script.test.js front door). Mergeability with `windows`: it edits README's requirements block (its
+  "Windows 10/11" line sits two lines above the removed Node line) and doctor.js's setupFix lines; Windows
+  will need its own SETUP_COMMAND (an install.ps1 one-liner) and INSTALL_COMMAND, so keep both defined in
+  one place each (lib.js, paths.js) when that lands. README's Windows section says `npx timsrobot setup`.
 
 - Step 11 as built: tests/clean-machine.test.js `PHONE_LINK` (helper/lib/phonelink/noise.js exists, i.e. after
   phone-link merges): the upgrade test then seeds the store's real format (computer key pair in the keyring,
@@ -262,22 +285,20 @@ reaching main. Nothing else is open: if neither has moved, stop and report rathe
 
 ## For Tim
 
-5. **Phone link + firewall** (not a choice yet, a heads-up): with the macOS firewall on, the phone link's
-   listener moves from the computer's node to TRIF's own, which may bring one "accept incoming connections?"
-   prompt after the upgrade. A one-line note in the phone-link guide may be enough; checked once both
-   branches are on main.
+1. **Review the front-door drafts** (step 7, live on the branch, nothing shipped): docs/NO-NODE-STRINGS.md
+   rows marked "step 7". Choices made there you may want to change: the panel shows only the curl
+   command (no npx line); "install an agent, then run `~/.trif/bin/trif setup`" instead of the whole
+   installer again; beta START HERE files lead with curl and keep the .tgz + npx as the with-Node option.
+   No site page needed new text (the home page's Get it links to the README).
+2. **Phone link + firewall, once phone-link and no-node are both on main** (a wording heads-up):
+   docs/PHONE-GUIDE.md step 1.4 on phone-link says "If the Mac asks whether to let `node` accept incoming
+   network connections, click **Allow**. That's TRIF's helper." The dialog still says `node` (macOS shows
+   the program's file name, and TRIF's own is `~/.trif/runtime/node-v<ver>-<os>-<arch>/bin/node`), but it's
+   a different program from any Node the computer had, so someone who allowed their own Node before is
+   asked again, and maybe once more when an update brings a new Node (a new folder). Suggested line:
+   "If the Mac asks whether to let `node` accept incoming network connections, click **Allow**. That's
+   TRIF's helper, on TRIF's own copy of Node. You'll only see this if your Mac's firewall is on, and it
+   may ask again after a TRIF update." Not checked on a Mac with the firewall on yet.
 
-Not blocking steps 2-6 (they follow the recommendation and are easy to change):
-1. **Runtime choice**: private pinned Node (recommended: ~28 MB download, ~110 MB on disk, no signing for
-   you) vs Bun (~2x smaller, but a different JS engine from Chrome's, so syntax checks and Node behaviour
-   differ) vs a Node SEA (one `trif` file, but you'd re-sign every release and updates become full binaries).
-2. **Front door** (needed by step 7): `curl -fsSL https://timsrobot.com/install.sh | sh` shown in the panel
-   and README (recommended), and/or a signed .pkg later (needs your Developer ID Installer certificate and
-   notarization in release.js). Keep `npx timsrobot setup` as the alternative for people with Node?
-3. **Uninstall** (built in step 5, easy to change): `trif uninstall` keeps mods and settings by default;
-   `--all` removes them and the saved API keys, after typing "delete" at a terminal or with `--yes`.
-   Wording drafts in NO-NODE-STRINGS.md.
-4. **Where install.sh lives** (step 6 built it as a release asset): the command can name GitHub's
-   `https://github.com/acapellascience/trif/releases/latest/download/install.sh` directly (works today, no
-   site change), or timsrobot.com/install.sh redirecting there (a site deploy, yours). Recommended: the
-   timsrobot.com address, as a redirect, so the panel text survives a repo move.
+Answered 2026-11-17 (recorded in Notes for next round): runtime choice, front door, uninstall, where
+install.sh lives.

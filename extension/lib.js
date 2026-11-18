@@ -31,8 +31,13 @@ export function setBrowser(name) {
 }
 // What the browser calls TRIF's panel: Chrome's side panel, Firefox's sidebar, Safari's window.
 export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
-// What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
-export const SETUP_COMMAND = SAFARI ? 'npx timsrobot setup --browser safari' : 'npx timsrobot setup';
+// What sets the helper up for this browser: plain setup doesn't install Safari's bridge. The installer
+// (timsrobot.com/install.sh, a redirect to the newest release's) brings TRIF's own Node: no Node needed.
+// (Keep in step with helper/lib/paths.js INSTALL_COMMAND.)
+export const INSTALL_URL = 'https://timsrobot.com/install.sh';
+export const SETUP_COMMAND = SAFARI ? `curl -fsSL ${INSTALL_URL} | sh -s -- --browser safari` : `curl -fsSL ${INSTALL_URL} | sh`;
+// Setup again once TRIF is installed (e.g. after installing a coding agent, so the helper finds it): no download.
+export const RESETUP_COMMAND = SAFARI ? '~/.trif/bin/trif setup --browser safari' : '~/.trif/bin/trif setup';
 export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.

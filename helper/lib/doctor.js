@@ -156,16 +156,17 @@ async function doctor(opts = {}) {
   const ws = P.workspace(opts.home);
   const checks = [];
   const add = (status, title, fix, detail) => checks.push({ status, title, fix, detail });
-  // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
+  // From a git checkout, point at its CLI; otherwise the installer fetches TRIF (and its Node) again if the
+  // install is broken.
   const setupFix = P.isGitCheckout()
     ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
-    : 'run: npx timsrobot setup   (or: trif setup)';
+    : `run: ${P.INSTALL_COMMAND}   (or: trif setup)`;
   let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node
   const major = nodeMajor(process.version);
   if (major >= 18) add('ok', `Node ${process.version}`);
-  else add('fail', `Node ${process.version} is too old (TRIF needs Node 18 or newer)`, 'install a current Node from https://nodejs.org or with your package manager, then run trif setup again');
+  else add('fail', `Node ${process.version} is too old (TRIF needs Node 18 or newer)`, P.isGitCheckout() ? 'install a current Node from https://nodejs.org or with your package manager, then run trif setup again' : setupFix);
 
   // Workspace
   if (fs.existsSync(ws.home) && fs.existsSync(ws.modsDir)) add('ok', `workspace ${ws.home}`);
@@ -225,7 +226,7 @@ async function doctor(opts = {}) {
       const r = spawnSync(w.node, ['--version'], { encoding: 'utf8', timeout: 5000 });
       const v = (r.stdout || '').trim();
       if (nodeMajor(v) < 18) {
-        add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, 'install a current Node, then ' + setupFix);
+        add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, P.isGitCheckout() ? 'install a current Node, then ' + setupFix : setupFix);
       } else {
         wrapperOk = true;
         installRoot = path.resolve(w.script, '..', '..');

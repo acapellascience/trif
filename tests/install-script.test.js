@@ -170,3 +170,19 @@ test('install.sh piped to sh, no node on PATH: checks both downloads, runs setup
     srv.stop();
   }
 });
+
+test('the front door: one install command, the same in the extension, the CLI and the README; the site serves its path', async () => {
+  const P = require('../helper/lib/paths');
+  const lib = await import('../extension/lib.js');
+  assert.strictEqual(P.INSTALL_COMMAND, 'curl -fsSL https://timsrobot.com/install.sh | sh');
+  assert.strictEqual(lib.INSTALL_URL, P.INSTALL_URL);
+  if (!lib.SAFARI) assert.strictEqual(lib.SETUP_COMMAND, P.INSTALL_COMMAND);
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.ok(readme.includes('```sh\n   ' + P.INSTALL_COMMAND + '\n   ```'), 'README install step 1 shows it');
+  assert.doesNotMatch(readme, /^- Node 18 or newer/m, 'Node is no longer a requirement');
+  const site = fs.readFileSync(path.join(__dirname, '..', 'site', 'src', 'index.js'), 'utf8');
+  assert.ok(site.includes(`pathname === '${new URL(P.INSTALL_URL).pathname}'`), 'timsrobot.com redirects that path');
+  const { COMMANDS } = require('../helper/lib/help');
+  assert.match(COMMANDS.setup.details, /^First time: curl -fsSL https:\/\/timsrobot\.com\/install\.sh \| sh /);
+  assert.ok(COMMANDS.setup.examples.includes(P.INSTALL_COMMAND));
+});

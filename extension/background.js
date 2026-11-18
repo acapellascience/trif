@@ -40,7 +40,7 @@ const LOAD_TIMEOUT = 30000;
 const LONG_CHAT_TOKENS = Number.isFinite(globalThis.__trifLongChatTokens) ? globalThis.__trifLongChatTokens : 90000;
 const LONG_CHAT_TEXT = 'This chat is getting long, which makes the agent less sharp. A new chat starts fresh; your mods stay as they are.';
 // (A getter: BROWSER can get a better name after start, from detectBrowser or the helper.)
-const notConnected = () => `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
+const notConnected = () => `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal, then restart ${BROWSER}.`;
 
 const state = {
   health: {},            // mods that break (modhealth.js): errors seen and dismissed, selectors that stopped matching

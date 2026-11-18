@@ -8,21 +8,24 @@ You need
 - Firefox, up to date (Firefox menu > About Firefox).
 - Claude Code (https://claude.com/claude-code) or Codex (https://github.com/openai/codex) installed.
   (Or an open model through Codex, experimental: https://github.com/acapellascience/trif#open-models-experimental)
-- Node 18 or newer. Check in Terminal with:  node --version
-  If that says "command not found", install it from https://nodejs.org (the LTS button).
+- Nothing else: TRIF brings its own copy of Node.js (you don't need to install it).
 
 Already have an earlier beta? (It was called WebMods before version 0.2.0.)
-  Do step 2 again from this folder (your mods and settings are kept; WebMods' folder ~/.webmods moves
+  Do step 2 again (your mods and settings are kept; WebMods' folder ~/.webmods moves
   to ~/.trif, leaving a link behind: don't delete ~/.webmods), then step 4 again to install the
   new add-on over the old one. From this version on, Firefox updates the add-on by itself, and the
   TRIF panel tells you when there's an update for the rest.
 
 Install (about 2 minutes)
 1. Open Firefox once if you haven't yet, so it has a profile.
-2. Open Terminal and paste these two lines (change the path if this folder isn't in Downloads):
+2. Open Terminal and paste this line:
 
+     curl -fsSL https://timsrobot.com/install.sh | sh -s -- --browser firefox
+
+   (Already have Node 18 or newer? You can install from the file in this folder instead: paste these
+   two lines, changing the path if this folder isn't in Downloads:
      cd ~/Downloads/trif-beta-firefox
-     npx --yes --package ./timsrobot-{{VERSION}}.tgz trif setup --browser firefox
+     npx --yes --package ./timsrobot-{{VERSION}}.tgz trif setup --browser firefox  )
 
    It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
    ignore its note about PATH.

@@ -567,6 +567,7 @@ All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names the
 | The same, with several mods | — | **{Service} made {n} mods for {site}** · **Add** · **Go to {site}** |
 | The same, a reply with no mod | — | **{Service} replied about {site}** (no site: **{Service} replied**) · **Open chat** · **Go to {site}** |
 | The banner's ✕ (VoiceOver) | — | **Close** |
+| The banner's words (VoiceOver; Tim 11-18: a tap anywhere on the banner, outside its buttons, opens the chat) | — | hint **Opens the chat** (the chats' list rows' hint), read as a button |
 | The chat's top bar, under the Claude · ChatGPT · More switch | — | **← {site}** (VoiceOver: **Go to {site}**) |
 | The note after a mod is added on another tab than its chat's site | Added {name}. It runs on {sites}. | Added {name}. It runs on {sites}. **Go to {site}** |
 | The tab list: a tab's robot badge (VoiceOver) | — | **Chat, working** · **Chat, reply waiting** · **Chat** |

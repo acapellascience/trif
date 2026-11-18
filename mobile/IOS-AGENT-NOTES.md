@@ -17,7 +17,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (386 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (388 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -375,6 +375,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   top bar's "← {site}" row and the added note's "Go to {site}". Go to: the tab sent from while open AND on that site;
   else a new tab at its page (never a tab navigated elsewhere, nothing rewritten). (3) tab list robot badges.
   (4) long press on the toolbar's 🤖 → the chats' list (nothing else used a long press there; the tap is unchanged).
+  Whole-banner tap (Tim, 11-18, "tapping anywhere on the notification should bring me to the Claude screen"): a tap
+  anywhere on the done banner outside its buttons = Open chat (`onTapGesture` + contentShape on ChatBannerView; its
+  buttons' own taps win; the swipe up still closes it). A mod banner tapped: the chat opens and the banner STAYS over
+  it, still holding its mods for Add / Go to (one offer, never lost: checked, Add after it gave one Add this mod?).
+  VoiceOver: the banner's words read as a button, hint "Opens the chat" (draft). Diagnostics "chats": "done banner:
+  open chat for …". Simulator only (shots 387-388; a plain reply's text tapped, a mod banner's blank area tapped).
 - A chat's mods belong to the chat's site (Tim's bug 11-18: FeedBook, no @match, from a Facebook chat said "runs on
   google.com", the tab shown when it finished): `offerFromChat` reads with `here` = the chat's site (phone~<site> →
   <site>), the page shown only when the chat has none; Add to TRIF taps pass the chat's site (`offer(text:site:)`);

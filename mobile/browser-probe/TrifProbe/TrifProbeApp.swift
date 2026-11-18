@@ -450,7 +450,10 @@ struct ContentView: View {
                     ChatBannerView(banner: b, showGo: !(browser.site == b.site && !covered),
                                    add: { withAnimation { pane.addFromBanner(b) } },
                                    go: { withAnimation { closeCovers(); pane.goToSite(b.link) } },
-                                   openChat: { withAnimation { closeCovers(); pane.openChat(b.link) } },
+                                   openChat: {
+                                       Diagnostics.shared.log("chats", "done banner: open chat for \(b.site.isEmpty ? "no site" : b.site)\(b.mods.isEmpty ? "" : ", \(b.mods.count) mod(s) still held by it")")
+                                       withAnimation { closeCovers(); pane.openChat(b.link) }
+                                   },
                                    dismiss: { withAnimation { pane.dismissBanner(b) } })
                         .id(b.id)
                         .padding(.top, 4)

@@ -1694,7 +1694,9 @@ struct ProjectOffer: View {
 /// The done banner (Tim, 11-18): slides down over whatever is shown when a chat the person isn't looking at finishes
 /// a reply. With mods: "Claude made a mod for {site}" · Add · Go to {site}; without: "Claude replied about {site}" ·
 /// Open chat. As the app's other banner (SafetyBanner): footnote words, the main button bold. ✕ or a swipe up
-/// closes it (its mods dismissed, as a sheet swiped away).
+/// closes it (its mods dismissed, as a sheet swiped away). A tap anywhere else on it opens the chat (Tim, 11-18: "tapping
+/// anywhere on the notification should bring me to the Claude screen"), as Open chat; a mod banner stays up over the
+/// chat, still holding its mods for its Add or Go to (one offer, never lost).
 struct ChatBannerView: View {
     let banner: ChatBanner
     /// Go to {site} is left out when that site's tab is already the one shown, uncovered.
@@ -1716,6 +1718,10 @@ struct ChatBannerView: View {
             ChatGlyph(activity: .idle).frame(width: 20, height: 20).foregroundStyle(Color.trifGreen).padding(.top, 1)
             VStack(alignment: .leading, spacing: 6) {
                 Text(text).font(.footnote.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    // (VoiceOver: the words are the banner's tap, to the chat)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Opens the chat")
+                    .accessibilityAction { openChat() }
                 HStack(spacing: 16) {
                     if banner.mods.isEmpty { Button("Open chat", action: openChat).font(.footnote.bold()) }
                     else { Button("Add", action: add).font(.footnote.bold()) }
@@ -1727,6 +1733,9 @@ struct ChatBannerView: View {
                 .accessibilityLabel("Close")
         }
         .padding(.leading, 12).padding(.vertical, 10).padding(.trailing, 4)
+        // (the whole banner a tap target, its buttons keeping their own: a child's tap wins over this one)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture { openChat() }
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)

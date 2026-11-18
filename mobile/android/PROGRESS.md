@@ -42,8 +42,9 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
      the Play Store button instead of the browser)
    - [x] default-browser role (round 5: http/https VIEW filter with no host + APP_BROWSER; can hold
      android.app.role.BROWSER; links open in it; the start page = address bar + start words)
-3. [ ] Script worlds: TRIF's world + the box (SES + sandbox-runtime.js) at document start, all frames; page world
-   for free mods; the iPhone's injected scripts (page-bridge.js, style-mirror.js, …) through an adapter
+3. [x] Script worlds (round 6): TRIF's world + the box (SES + sandbox-runtime.js) at document start; page world
+   for free mods; the iPhone's injected scripts (kit.js, start-own/start-page, style-mirror.js, page-bridge.js, the
+   free pair) in iPhone's order through `Scripts.kt` + two adapter scripts (js/world-call.js, js/webkit-bridge.js)
 4. The mod engine
    - [ ] mod store (installed, on/off, holds and allowed, history, Recently deleted, as iPhone)
    - [ ] reading mods with mods.js (JavaScriptSandbox or hidden WebView)
@@ -59,24 +60,34 @@ mobile/android-probe), mobile/IOS-AGENT-NOTES.md (the iPhone app's map and Tim's
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
      mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 5, 2026-11-18)
-- WebView check: `WebViewCheck.kt` (pure; 2 unit tests) decides from `getCurrentWebViewPackage` +
-  `isFeatureSupported(JS_INJECTION_IN_FRAME_AND_WORLD)` (the feature decides, 149 is for the words). Too old / none
-  → a plain screen (draft words in STRINGS.md) with "Open the Play Store" (`market://details?id=<webview pkg>`).
-  A debug build can pretend: extra `trif.pretendWebView` = a version or "none".
-- Default browser: VIEW + DEFAULT + BROWSABLE for http/https (no host), APP_BROWSER on the launcher filter.
-  `open()` takes http/https only (the activity is exported: javascript:/file: sent to it are ignored).
-- `test/startup.sh` PASSES (pretend 145/unreadable/none/149, real check, start page, holds the browser role, links
-  open with no -n, 2nd link in a new tab, javascript:/file: ignored; the role is put back). tabs/popups/applinks
-  still PASS; 16 unit tests pass. Tests' flake fixed: see notes (Android 17 relaunches an app updated in front).
+## Done this round (round 6, 2026-11-18)
+- `Scripts.kt` (pure; 5 unit tests): iPhone's base() + ModStore.userScripts(from:) as a list of (world, start/end,
+  text), from a `Scripts.Plan` (iPhone's ScriptPlan: the mod store fills it in item 4). Each guarded to the main
+  frame (`if (window === window.top) {…}`), as desktop/iPhone. `Worlds.kt`: one WebView's worlds
+  (addJavaScriptOnEvent per world, DOCUMENT_START/END; swap = remove the ScriptHandlers, add again), `trifApp`
+  message object in TRIF's world and the box only, `call(world, code)` (iPhone's callAsyncJavaScript(in:)).
+- `test/worlds.sh` PASSES (16 checks on strict.html: start-own's "load" answered, worlds isolated, style mod applies
+  despite the CSP, boxed mod locked down + confined + writes the page, free mod at the end + its style section, no
+  frame gets anything). tabs/popups/applinks/startup still PASS; 21 unit tests pass.
 
 ## Next step
-Item 3, the script worlds: TRIF's world + the box (SES + sandbox-runtime.js) at document start in all frames,
-page world for free mods, the iPhone's injected scripts through an adapter (see "Where the iPhone puts its scripts").
-Start in `Browser.makeWebView` with `WebViewCompat.getExecutionWorld` + `addDocumentStartJavaScript` (the probe's
-ProbeActivity.kt shows the calls).
+Item 4, the mod store: installed mods, on/off, holds and allowed, history, Recently deleted, as iPhone (Mods.swift
+ModStore / ModFilesStore, InstalledMod). Then the reader (mods.js) fills `browser.plan` in place of the debug
+`trif.testMods` extra.
 
 ## Notes for next round
+- Scripts (round 6): `browser.plan = …` puts a plan's scripts into every live WebView (next load) and every new one.
+  Assets by name: `browser.text("web/style-mirror.js")` (web/ = the iPhone app's Web/, gen/, shared/, js/ = ours,
+  ses.umd.min.js). Not ported yet: iPhone's stallWatch, BackgroundPlay.watch, VideoResume.watch (Swift strings;
+  they come with their features), the hide rules (start-own gets `{}`), `freeScripts` (from mods.js, item 4).
+- Debug hooks (MainActivity.debug, debug builds only, base64 extras): `trif.testMods` = JSON
+  [{id, script, world, at, style, off}] → the plan; `trif.call` = "world:code" (an async body; page world: sync
+  only, evaluateJavascript) → logcat "call: <world> ok <value>" / "error <why>". worlds.sh shows the use.
+- Measured: on Android a <style> TRIF's world (or the box) appends IS refused by the page's CSP (strict.html: both
+  sheets null, 2 adopted sheets from style-mirror.js), so style-mirror.js matters here as on iPhone. Eval
+  (AsyncFunction captured before SES) works in both of TRIF's worlds on a no-unsafe-eval page.
+- A world's `call` goes through the page's last hello (world-call.js at its start): a call before the page's first
+  script runs answers "nothing of TRIF's in that world", a stale one times out (5 s).
 - Env: `export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`, SDK `~/Library/Android/sdk`
   (local.properties, not committed). AVD `trif-probe` (API 37.2 Play image, WebView 149). The probe's `emu.sh` is
   reused here as `mobile/android/emu.sh`.
@@ -113,6 +124,7 @@ ProbeActivity.kt shows the calls).
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 6 (the script worlds): nothing to see or decide; no new words.
 - WebView check (round 5): new screen, draft words in STRINGS.md ("TRIF needs a newer Android System WebView" …
   "Open the Play Store"). Shown only on phones whose WebView is older than 149 (or switched off).
 - App links (round 4): the question is always the generic "Open this page in another app?" (Android can't name the

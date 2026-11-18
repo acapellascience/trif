@@ -22,6 +22,8 @@ import java.util.UUID
 class Tab(val id: String = UUID.randomUUID().toString(), var title: String = "", var savedUrl: String? = null,
           var savedState: JSONObject? = null) {
     var web: WebView? = null
+    /** Its WebView's script worlds (Scripts' list in them, messages, calls). */
+    var worlds: Worlds? = null
     /** The tab whose page opened this one as a window (window.open, target=_blank): not kept between launches. */
     var opener: Tab? = null
     /** It's a window a tap opened (its first load counts as tapped if the finger was on the page just now). */
@@ -39,7 +41,7 @@ class Tab(val id: String = UUID.randomUUID().toString(), var title: String = "",
 /**
  * The tabs (as iPhone's Browser: several pages at once, each in a WebView of its own, all sharing one profile, so
  * the same cookies and sign-ins), kept between launches. [changed] tells the screen to redraw what it shows.
- * Every WebView is made in [makeWebView], where later items add the script worlds and the mods.
+ * Every WebView is made in [makeWebView], with its script worlds (Worlds) and the pages' scripts (Scripts).
  */
 class Browser(private val context: Context, private val changed: () -> Unit) {
     val tabs = mutableListOf<Tab>()
@@ -92,7 +94,7 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
         val next = TabOrder.afterClose(i, tabs.size, if (toOpener) tabs.indexOf(tab.opener) else -1)
         tabs.removeAt(i)
         tab.web?.apply { stopLoading(); destroy() }
-        tab.web = null
+        tab.web = null; tab.worlds = null
         tabs.forEach { if (it.opener === tab) it.opener = null }
         when {
             next < 0 -> newTab()
@@ -216,6 +218,36 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
 
     private fun log(what: String, line: String) = Log.i("TRIF", "$what: $line")
 
+    // MARK: the pages' scripts (iPhone: Browser.installScripts / ModStore.userScripts)
+
+    private val texts = mutableMapOf<String, String>()
+    /** An asset's text (web/, gen/, shared/, js/, SES), read once. */
+    fun text(name: String) = texts.getOrPut(name) { context.assets.open(name).bufferedReader().use { it.readText() } }
+    /** What the mods put in (the mod store's, once there is one; a debug build's test mods until then). */
+    var plan = Scripts.Plan()
+        set(p) { field = p; scripts = null; tabs.forEach { t -> t.worlds?.install(scripts()) } }
+    private var scripts: List<Scripts.Injection>? = null
+    private fun scripts() = scripts ?: Scripts.all(plan, ::text).also { scripts = it }
+
+    /** A message from TRIF's world (iPhone's userContentController(didReceive:)): what it answers. */
+    private fun message(body: JSONObject): Any? = when (body.optString("type")) {
+        "ping" -> JSONObject().put("ok", true).put("received", body.optString("pad").length)
+        "load" -> { log("load", body.optString("rec").take(800)); JSONObject().put("ok", true) }
+        "modlog" -> {
+            val cut = { k: String, n: Int -> body.optString(k).take(n) }
+            val kind = cut("kind", 8); val mod = cut("mod", 100); val text = cut("text", 240)
+            log("mod log", if (kind == "start") "$mod started" else "$mod: ${if (kind == "log") "" else "$kind: "}$text")
+            JSONObject().put("ok", true)
+        }
+        else -> throw IllegalArgumentException("unknown message")
+    }
+
+    /** Code run in a world of the shown tab's page, its answer to `done` (Worlds.call). */
+    fun call(world: Scripts.World, code: String, done: (Worlds.Answer) -> Unit) {
+        val w = current?.worlds ?: return done(Worlds.Answer(false, null, "no page"))
+        w.call(world, code, done = done)
+    }
+
     /** Opens what was typed in the address bar in the shown tab. False if it isn't an address or a search. */
     fun go(text: String): Boolean {
         val url = Address.resolve(text) ?: return false
@@ -234,6 +266,8 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
     }
 
     private fun makeWebView(tab: Tab): WebView = WebView(context).apply {
+        // (the worlds and their scripts before anything loads)
+        tab.worlds = Worlds(this, ::message).also { it.install(scripts()) }
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         // (real windows: onCreateWindow below; only from a tap, as in the probe's passing sign-ins)

@@ -81,8 +81,27 @@ class MainActivity : Activity() {
             addView(bar, LinearLayout.LayoutParams(-1, -2))
         })
         browser = Browser(this) { refresh() }
+        debug(intent)
         browser.restore()
         open(intent)
+    }
+
+    /**
+     * A debug build's test hooks (tests: base64 in the extras, so adb's quoting can't spoil them):
+     * `trif.testMods` = a list of mods as JSON (Scripts.planOf), put in as the mod store's will be;
+     * `trif.call` = "world:code" (trif, box or page), run on the shown tab's page, its answer logged ("call: …").
+     */
+    private fun debug(intent: Intent?) {
+        if (intent == null || applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+        val b64 = { k: String -> intent.getStringExtra(k)?.let { String(android.util.Base64.decode(it, android.util.Base64.DEFAULT)) } }
+        b64("trif.testMods")?.let { browser.plan = Scripts.planOf(it) }
+        b64("trif.call")?.let { c ->
+            val world = c.substringBefore(':')
+            browser.call(Scripts.world(world), c.substringAfter(':')) { a ->
+                android.util.Log.i("TRIF", "call: $world ${if (a.ok) "ok ${a.value}" else "error ${a.error}"}")
+            }
+        }
+        intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call")
     }
 
     /**
@@ -145,7 +164,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (::browser.isInitialized) open(intent)
+        if (::browser.isInitialized) { debug(intent); open(intent) }
     }
 
     /**

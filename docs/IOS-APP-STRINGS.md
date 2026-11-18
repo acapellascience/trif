@@ -716,3 +716,60 @@ on a card the count is taken out of the title, so it isn't said twice.
 Not new words, but changed behind them: the chat's and the model download's existing notification questions now ask
 for the badge too (iOS asks only once, and its question already says "alerts, sounds, and icon badges"). Badge
 refused or switched off in iOS's Settings: TRIF says nothing; the cards still show the counts.
+
+## OpenRouter's models: a short list first (added 11-18, Tim: "the Models list is endless")
+
+Only with OpenRouter as More's engine (Settings → Model): the panel's select is replaced by this list on the phone.
+The other engines keep the select as it was; desktop's panel is unchanged. Drafts for Tim.
+
+| Where | Old | New (draft for Tim) |
+|---|---|---|
+| Settings → Model, OpenRouter: the chosen one | a select of every model (hundreds, by name) | the chosen model's name at the right of **Model** (**Auto (OpenRouter picks)** by default) |
+| Its first part | — | **Recommended**: Claude Opus, Claude Sonnet, the GPT flagship, Gemini Pro, Gemini Flash, a strong cheap one, a free one (each only if the account's list has it). Aliases read **Claude Opus Latest (Claude Opus 5.5)**: OpenRouter's own name, then what it is now |
+| Its second part (only once a model has been run, and only ones not in Recommended) | — | **Recent** |
+| The button under them | — | **All models ({n})** / **Hide all models** |
+| All models' search field | — | placeholder **Search models**; nothing found: **No model matches.** |
+| All models, the groups | — | the makers' names as headings (**Anthropic**, **OpenAI**, **Google**, **Meta**, **Mistral**, **Qwen**, **DeepSeek**, **xAI**, **Moonshot AI**, **Z.ai**, **OpenRouter**, then the rest by OpenRouter's names), **Auto (OpenRouter picks)** first |
+| Under each model, small | — | **$3 in, $15 out per million tokens · 200K context**; a free one: **Free · 256K context** and a green **Free** mark beside its name; Auto: **Price varies · 2M context** |
+| The note under Model (the panel's own: the chosen model's description) | (empty for OpenRouter) | the same small line as the model's |
+
+## The quick ask says at once when it can't go (added 11-18, Tim: "only say Working when it's actually working")
+
+A red pill (red text, a red outline, a ›) instead of Working; its tap goes where it says. Drafts for Tim.
+
+| When | Old | New (draft for Tim) | Its tap |
+|---|---|---|---|
+| More, while the request goes into TRIF's own panel | **Working: {request}** at once | a spinner and **Sending to {engine and model}…** (e.g. **Sending to Claude Sonnet 5.5 · OpenRouter…**; **Sending to More…** before it's known) | opens More |
+| More, no engine (None (robotless)) | **Working…**, then **More can't ask yet: open the chat to set it up.** | **Pick a model first** | More's Settings, at Agent / Model |
+| More, an API engine with no key | (the same) | **Add your OpenRouter key** (**Anthropic**, **OpenAI**) | More's Settings, at API keys |
+| More, On this iPhone with no model downloaded | (the same, later) | **Download a model for this iPhone first** | More's Settings, at Model on this iPhone |
+| More, On this iPhone, the picked model not downloaded | (the same, later) | **{Model} isn't downloaded: pick another or download it** | More's Settings, at Model |
+| More, My computer not paired | (the same) | **Pair this iPhone with your computer first** | the My computer screen |
+| The service refused the key (401) | **Not done: open the chat to see why.** (after the run ended) | **{Engine} didn't take your key: check it in Settings** | More's Settings, at API keys |
+| No credits (402; or a 400/403/429 that says credit, quota, billing or balance) | (the same) | **No credits left on your {Engine} account** | the chat |
+| The model isn't there (404) | (the same) | **{Engine} doesn't have that model: pick another** | More's Settings, at Model |
+| Busy (429) | (the same) | **{Engine} is busy: try again in a minute** | the chat |
+| The service's own error (5xx) | (the same) | **{Engine} had a problem ({code}): try again** | the chat |
+| Another refusal | (the same) | **{Engine} refused this request: open the chat** · **{Engine} said no ({code}): open the chat** | the chat |
+| No internet / can't reach it / too slow | (the same) | **No internet connection: {Engine} can't be reached** · **Can't reach {Engine}: check the internet** · **{Engine} didn't answer in time: try again** | the chat |
+| My computer can't be found / lost | (the same) | **Can't reach {computer}: is TRIF open there, on this Wi-Fi?** | the chat |
+| My computer's coding agent | (the same) | **{computer}'s coding agent isn't logged in** · **{computer} has no coding agent ready for TRIF** · **{computer} is already working on this site** · **Allow Local Network for TRIF in Settings** · **{computer} couldn't start it: open the chat** | the chat |
+| Claude / ChatGPT signed out (a sign-in page, no message box) | the strip came up with no box in it, nothing happened | **Sign in to Claude first** / **Sign in to ChatGPT first** (no strip) | the whole chat, on its sign-in page |
+| Claude / ChatGPT, something over the box / no box / not loaded | (the same) | **Close what's open in {Service} first** · **{Service} has no message box: open the chat** · **{Service} didn't load: open the chat** | the whole chat |
+| Working, nothing back at all for 45 s (API engines), 90 s (On this iPhone), 120 s (My computer) | **Working: …** for good | amber: **Still nothing back from {Engine}: open the chat** (the request goes on; words coming back turn it back to Working) | opens More |
+| Claude / ChatGPT, sent, no reply text for 150 s | **Working: …** | amber: **Still nothing back from {Service}: open the chat** | the whole chat |
+| Claude / ChatGPT, sent, and the page never showed a reply at all | **Replied: {request}** | amber: **Nothing back from {Service}: open the chat** | the whole chat |
+| VoiceOver hint on a red pill | Opens the chat | **Opens the chat** · **Opens More's settings** · **Opens Pair with my computer** | |
+| More's chat (the full chat), the same failures | **{Engine}: {the service's words}** | **{the plain words above}. ({Engine}: {the service's words})** | |
+| More's chat, nothing back | — | a step line: **Still nothing back from {Engine} after 45 seconds. It's still asking; Stop ends it.** | |
+
+## Go to chat names what the chat will use (added 11-18, Tim: "More · x.com says nothing useful")
+
+| Where | Old | New (draft for Tim) |
+|---|---|---|
+| The quick ask's list, under **Go to chat** | **More · x.com** / **Claude · x.com** | **Claude Sonnet 5.5 · OpenRouter · x.com** · **Auto · OpenRouter · x.com** · **Qwen3.5 4B · on this iPhone · x.com** · **My computer (Claude Code · Opus) · x.com** (the computer's agent and model as it last said; else **My computer (Stand-in Mac)**) · **Claude Opus 5.5 · Claude API · x.com** · **Claude · claude.ai · x.com** / **ChatGPT · chatgpt.com · x.com**; a reply waiting / working still first (**Reply waiting · …**); up to two lines |
+| The same, nothing set up (red; its tap goes to the fix, not the chat) | — | **No model picked: tap to choose** · **No OpenRouter key: tap to add it** · **No model on this iPhone yet: tap to get one** · **{Model} isn't downloaded: tap to choose** · **My computer isn't paired: tap to pair**; VoiceOver hint **Opens what needs setting up** |
+
+Not changed (my call, for Tim to overrule): the strip's header (**Check it, then tap Send in Claude**) already names
+the service and an SE has no room for more on its one line; the chat's top bar is the Claude · ChatGPT · More switch,
+and More's panel already shows the engine and model on its own line over the box (**OpenRouter · Claude Sonnet 5.5**).

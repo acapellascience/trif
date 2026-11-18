@@ -55,6 +55,19 @@ window.__agent = { host: location.host, sent: ${JSON.stringify(sent)}, nav: navi
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Disposition': `attachment; filename="${fileMatch[1]}.js"`, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
       return res.end(`// ==WebMod==\n// @name        ${title}\n// @description Made by the stand-in chat\n// @match       http://localhost/*\n// @style\n// ==/WebMod==\n${JSON.stringify({ css }, null, 2)}\n`);
     }
+    // (a signed-out chat, as claude.ai sends one to its sign-in page: `?signedout` on the chat's address goes to /login,
+    // a page with no message box and its Log in buttons: the quick ask's "Sign in to … first")
+    if (url.searchParams.has('signedout') && (name === 'chat.html' || name === 'new' || /^(chat|c)\/[\w-]+$/.test(name))) {
+      res.writeHead(302, { Location: '/login', 'Cache-Control': 'no-store' });
+      return res.end();
+    }
+    if (name === 'login') {
+      res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-store' });
+      return res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Log in (stand-in)</title>
+<body style="font: 17px/1.5 -apple-system, sans-serif; padding: 40px 20px; text-align: center"><h1>Log in (stand-in)</h1>
+<p>Signed out: there's no message box here.</p><p><button style="font: inherit; padding: 10px 18px">Continue with Google</button></p>
+<p><input type="email" placeholder="Enter your email" style="font: inherit; padding: 8px"></p><p><button style="font: inherit; padding: 10px 18px">Log in</button></p>`);
+    }
     if (/^c\/[\w-]+$/.test(name)) name = 'chat.html';
     // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)
     if (/^chat\/[\w-]+$/.test(name)) name = 'chat.html';

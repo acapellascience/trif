@@ -32,3 +32,22 @@ textarea#input { font-size: 16px; } /* (under 16 px, iOS zooms the page when the
 body.phone-downloading #notice { display: none !important; }
 /* (the model switches: kept, where desktop's checkboxes in Settings are hidden) */
 #settings label.check.phone-check { display: block !important; margin: 6px 0; }
+/* OpenRouter's models (panel-adapter.js paintPicker): the short list first, then all of them behind a search. The
+   panel's select stays in the page, hidden; the row shows the chosen one's name. */
+body.phone-or-on #model-row select { display: none !important; }
+.phone-or-current { font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-or { margin: 2px 0 8px; }
+.phone-or-title, .phone-or-maker { margin: 10px 0 4px; font-size: 0.85em; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.03em; }
+.phone-or-maker { text-transform: none; letter-spacing: 0; opacity: 0.8; }
+.phone-or-row { display: block; width: 100%; text-align: left; font: inherit; color: inherit; background: none; border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 8px; padding: 7px 10px; margin: 0 0 5px; min-height: 40px; }
+.phone-or-row[aria-pressed="true"] { border-color: var(--trif-green, #2bb673); background: color-mix(in srgb, var(--trif-green, #2bb673) 10%, transparent); }
+.phone-or-row[aria-pressed="true"] .phone-or-name::before { content: "✓ "; color: var(--trif-green, #2bb673); }
+.phone-or-name { display: block; font-weight: 600; }
+.phone-or-line { display: block; font-size: 0.8em; opacity: 0.65; margin-top: 1px; }
+.phone-or-free { font-size: 0.75em; font-weight: 600; padding: 0 5px; border-radius: 4px; color: var(--trif-green, #2bb673); border: 1px solid currentColor; vertical-align: 1px; }
+.phone-or-all { margin: 6px 0 4px; }
+#phone-or-search { display: block; width: 100%; box-sizing: border-box; font-size: 16px; padding: 7px 10px; margin: 4px 0 6px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+.phone-or-flash { animation: phone-or-flash 1.2s ease-out 1; }
+@keyframes phone-or-flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--trif-green, #2bb673) 60%, transparent); border-radius: 8px; } to { box-shadow: none; } }

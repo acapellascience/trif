@@ -248,6 +248,10 @@ extension Model {
             if step["quickcancel"] != nil { pane.cancelStrip() }
             if step["quickexpand"] != nil { pane.expandStrip() }
             if ["quick", "quickstate", "quickundo", "quickopen", "quickcancel", "quickexpand"].contains(where: { step[$0] != nil }) { out = pane.quickDescribe }
+            // ({"enginelabel": 1}: Go to chat's words for what the chat will use, More's looked at again)
+            if step["enginelabel"] != nil {
+                if pane.more, let l = await pane.panel.engineLabel() { out = "engine: \(l.text)\(l.fix.map { " (fix \($0))" } ?? "")" } else { out = "engine: \(pane.engineLabel.text)" }
+            }
         }
         // (talking: {"speech": 1} the permissions and the recognizer; {"speechfile": "/path.wav"} the recognizer on a
         // recorded file; {"micpress": 1} / {"micrelease": 1} the box's microphone pressed and let go)

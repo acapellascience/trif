@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (471 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (489 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -69,7 +69,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   main-thread ms, when all were in, the last rebuild's parts and the hangs meanwhile; an odd n leaves the first mod off), hashtest ("/path", "old": the
   reading before 11-18: LocalModels.sha256 at .utility with the app's footprint sampled every 0.1 s), unread (each
   tab's count from its title, icon tab or not, the card's title, the icon total, the badge set, the permission),
-  unreadanswer (true/false: TRIF's words before iOS's question answered Continue / Not now)…
+  unreadanswer (true/false: TRIF's words before iOS's question answered Continue / Not now), enginelabel (Go to chat's
+  words for what the chat will use; More's looked at again)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -103,6 +104,18 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `-apibase http://localhost:8379` and paste the key `sk-test-not-a-real-key`. Message words: "loop" (15-step cap),
   "slow" (try Stop), "no tools". It refuses a turn that lost Claude's thinking block or OpenAI's reasoning item.
   `/models/<file>` serves 40 MB with ranges (its checksum never matches: tests the refusal); `-modelbase http://localhost:8379`.
+  Failing keys (11-18): `sk-test-no-credits` (OpenRouter 402, Anthropic's 400 "credit balance", OpenAI's 429 quota),
+  `sk-test-never-answers` (the request taken, never answered); any other key 401; a model with "missing" in it 404.
+  OpenRouter's list is mobile/test/openrouter-models.json (a trimmed copy of the real public list, 118 rows, recorded
+  11-18 with no key); `/api/v1/models/user` (fake keys only) is it without xAI's and Meta-Llama's, as a guardrail.
+  `/log` shows each OpenRouter request's `provider`. Keys set from a shell: paneljs
+  `window.webkit.messageHandlers.panel.postMessage({type: 'key.set', engine, key})`, then click #settings-btn twice
+  (the panel lists its agents again, else it still thinks the engine is logged out).
+- Signed-out chat stand-in: serve.js sends `chat.html?signedout` (and /new, /chat/<id> with it) to `/login`, a page with
+  no message box and Log in buttons: launch with `-chathome "http://localhost:8377/chat.html?signedout"`.
+- OpenRouter's picker on the Mac: `node --test mobile/test/openroutermodels.test.js` (swiftc OpenRouterModels.swift
+  with openroutermodels-check/main.swift: the recorded list and made-up rows; fit rules, Recommended, Recent, groups,
+  lines; ~3 s).
 - llama.cpp: `mobile/browser-probe/fetch-llama.sh` (b12428, SHA-256 checked, into `Vendor/`, gitignored; a device build
   needs it). Mac harness: `mobile/local-model/harness.sh <model.gguf> <wikipedia|hn|guardian|testfeed> <styleJSON|file> "<request>" [runs]`
   (env TRIF_GPU, TRIF_THREADS, TRIF_BATCH, TRIF_CTX). Models are 1.3–2.7 GB: download to the scratchpad, delete after
@@ -236,8 +249,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (UIApplication.open; false → the note). Called from decidePolicy (after mod links and the two-finger guard),
   createWebViewWith (no tab), Open in New Tab, the preview's commit, ClaudePane's decidePolicy/createWebViewWith,
   PanelChat's (taps only, never asks). The note shows over the chat too (ContentView.page's bottom overlay).
-- QuickAsk.swift (Tim, 11-18): `QuickAsk` (request, service, site, key, state waitingSend/working/done/replied/card/
-  undone/failed, `applied` for Undo; `lookOnly` → QuickAskRules, `InstalledMod.quickFacts`), `QuickAskBox` (the box at the top of ChatListView; its text is
+- QuickAsk.swift (Tim, 11-18): `QuickAsk` (request, service, site, key, state starting (More, being put in)/waitingSend/
+  working/done/replied/card/undone/failed, `fix` (.chat / .settings("model"|"key"|"iphone"|"computer") / .pair: where a
+  red pill's tap goes, ClaudePane.openFix), `slow` (amber words while working), `engine` (More's label), `applied` for Undo; `lookOnly` → QuickAskRules, `InstalledMod.quickFacts`), `QuickAskBox` (the box at the top of ChatListView; its text is
   `SpeechInput.draft`, so it outlives the sheet), `HeardText` (every word heard, scrolling past a height, the newest
   in view), `HoldTalkPill`, `KeptTalkSlot`/`KeptTalkPill` (a robot hold stopped by something else: the words, a tap
   opens the list), `QuickPill` (above the toolbar, in ContentView.notes; `preparing`: "Putting it in {Service}…" while
@@ -368,6 +382,23 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   ChatView.tellLook passes the site and RobotShape's polygons on each load).
 - PanelChat.swift: More, the desktop side panel in a web view (trifpanel://), runs and tools. Web/panel-adapter.js: the
   panel's chrome.* and background stand-in, API keys and model blocks. Web/panel-phone.css: what the phone hides.
+  OpenRouter's models (11-18): `fetchOpenRouter` (GET /api/v1/models/user with the key, else the public
+  /api/v1/models; Diagnostics "models": counts and which list, never the key) → OpenRouterModels.swift (no UI; built
+  for the Mac too: `unfit`, `read`, `picks` (the Recommended table, `recommended`), `recent`, `groups`, `line`);
+  `models()` adds `phone` {recommended, recent, groups, auto, source} and each model's `free`/`maker`, its line as
+  `description` (the shared panel's note under Model). UserDefaults `openrouterRecent` (startRun). The adapter's
+  `paintPicker` (only when #agent is openrouter: body.phone-or-on hides the select; a tap sets the select and fires
+  its change, so the shared panel saves and shows it). ChatCompletionsConversation sends
+  provider.require_parameters with tools.
+  The quick ask's checks (11-18): `quickSend` → `QuickSent` (.sent(engine) / .problem(words, fix) / busy / nosite /
+  cannot / refused): `quickProblem(agent:model:)` before the submit (also gives Go to chat's red `label`); a 'cannot'
+  with no problem found lists the agents again once. `Run.quickLive`; `quickFail` (once) from go()'s catch
+  (`plainWords`: URLError / PanelError.http codes / messages) and the computer's paths (`linkPlain`); `quickNews`
+  (.progress / .slow / .failed) → ClaudePane.quickMoreNews. `Run.heard` (a lock-guarded time) marked by `emit`
+  (not "session") and by SSE (`SSE.heard`, a @TaskLocal set around conv.step: the answer's headers and every streamed
+  line); `watchSilence` (45 / 90 / 120 s: a step line in the chat, the pill amber; words again clear it).
+  `engineLabel()` (Go to chat's words: the panel's #agent / #model read by JS, names from liveModels / LocalModels /
+  the link's last `hello`).
   PanelEngines.swift: Keychain keys, Anthropic / OpenAI Responses / OpenRouter streaming, the Simulator stand-in.
 - LocalLlama.swift (llama.cpp wrapper), LocalPrompt.swift (guide, grammars, JSON → mod, repairs), LocalModels.swift
   (catalogue, downloads, LocalRunner, LocalConversation). mobile/local-model/: README, local-guide.txt, the research.
@@ -839,6 +870,25 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   still open (Tim, 11-18, as Android): Tab.opener (weak) set in createWebViewWith; webViewDidClose → close(t, showing:
   opener), only when that window was the tab shown. report.json "tabs" line. In docs/MOBILE-BEHAVIOUR.md (Links).
 - Panels and dialogs that can outgrow their space scroll. Short release notes. Wording changes only where Tim names them.
+- Only say Working when it's working (Tim, 11-18; built): the quick ask checks the engine first (More: model, key, the
+  phone's model, paired; Claude/ChatGPT: chat.js `canAsk`, a usable box, else 'signed out' (a /login-like address, or
+  no box and a Log in / Sign in / Continue with … button), 'viewer', 'no box' after 6 s; ClaudePane.askable waits for
+  the page to finish loading first: a sign-in page is often a redirect). Not ready → a red pill at once with what to do
+  and its tap going there (QuickAsk.Fix). The engine's quick refusals → red in plain words; nothing back → amber
+  ("Still nothing back from …: open the chat"), never cancelled. Claude/ChatGPT: chat.js `replyNow` polled every 5 s
+  after the send; only the reply TEXT counts (a stop button shown with no words is still nothing; my call), 150 s;
+  chat.js's done now carries `replies` (live replies seen): a quick ask's done 'quiet' with none and no stop seen is
+  "Nothing back from …", not Replied. More's full chat: the plain words before the service's own, and the silence line.
+- Go to chat says what the chat will use (Tim, 11-18; built): ClaudePane.engineLabel / moreLabel (refreshed as the
+  list appears) → "{model} · {engine} · {site}", "Claude · claude.ai · {site}"; nothing set up → red, its tap = the
+  fix. Two lines at most. Strip header and the chat's top bar left as they were (see the strings doc's note).
+- OpenRouter's picker (Tim, 11-18: "the Models list is endless"; built): the key's own list (/models/user: provider
+  preferences, privacy/data policy, guardrails incl. allowed models and providers; EU host would filter to EU
+  routing), else the public one; fit for mods only (tools, chat completions, text out, ≥ 32K (the smaller of the
+  model's and its top provider's), not expired: 97 of 118 in the recorded list, batch-only rows gone); Recommended
+  (OpenRouterModels.recommended: OpenRouter's ~…-latest aliases first, so it follows new releases by itself; a free
+  one with tools: cohere/north-mini-code:free today), Recent (the ones run, not in Recommended, 5), All models by
+  maker behind a search, Auto first. Phone-only: the adapter swaps the select only for openrouter.
 - A video picks up where it was (Tim, 11-18; built 11-18, VideoResume above): every tab, every site, any reload of the
   same page within 30 min (a reload, a page process ended, a mod applying, back to it, a relaunch). Background
   playback keeps the kept time current (8 s reports from tabs behind and with the app in the background, checked).
@@ -867,6 +917,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- OpenRouter's picker and the quick ask's checks (11-18): Simulator only, the mock (shots 472-489): Recommended (472),
+  search (473), a bad key → red, its tap → API keys (474-475), no credits (476), no key (477), robotless (478), the
+  phone's model not downloaded (479), My computer paired but not found (480: "Can't reach Stand-in Mac…" after the
+  5 s look), never answering → amber at 45 s, the chat's line (481), signed-out Claude → red, its tap → the whole chat
+  on /login (482-483), Go to chat for Claude, OpenRouter, robotless (485-487) and its red tap → Settings (488), a
+  never-answering Claude page (the stand-in's timers frozen by panejs after the strip came up, a real tap on its Send:
+  its stop button shown, no words) → amber at 150 s (489). The "Nothing back" done path ('quiet', no replies) is a code
+  path only (the frozen stand-in keeps its stop button, so its watch never ends).
+  NOT tried: the real OpenRouter (its /models/user with a real key: whether `supported_parameters` there reflects the
+  account's allowed providers; the ~…-latest aliases taking tools through chat completions; require_parameters with
+  Auto), "not paired" (the Simulator's pairing belongs to the phone-sync tests: not forgotten), a computer whose
+  agent isn't logged in (code path: the computer's `error` reason login), the real claude.ai / chatgpt.com sign-in
+  pages (claude.ai/login is by address; chatgpt.com logged out HAS a box and counts as usable, as before).
 - Unread counts (11-18): Simulator only (shots 450-456): stand-in unread.html as an icon tab: TRIF's alert at the first
   count (450), Continue → iOS's question (451) → Allow: badges on, alerts "not supported" (badge only), icon badge 1 → 4
   (452, the Home Screen) → none (0); the cards with the robot's badge and the pill (453), titles without the count

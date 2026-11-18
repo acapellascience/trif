@@ -17,6 +17,8 @@ import SwiftUI
 /// One quick ask: what was asked, of which chat, and where it is.
 struct QuickAsk: Equatable {
     enum State: Equatable {
+        /// More: being put in TRIF's own panel, its engine checked first (not working yet).
+        case starting
         /// Claude / ChatGPT: filled, waiting for the person's own Send in the strip.
         case waitingSend
         /// Sent: a reply being written.
@@ -29,9 +31,19 @@ struct QuickAsk: Equatable {
         case card
         /// Undone.
         case undone
-        /// Not sent (More couldn't take it): why, in the app's words.
+        /// Not sent, or the engine said no at once: what to do, in the app's words (the pill red; its tap: `fix`).
         case failed(String)
     }
+    /// Where a red pill's tap goes (Tim, 11-18: "show at once a clear red note that says what to do and links to where
+    /// to do it"): More's Settings at the model, the keys, the models on this iPhone or My computer; the pairing
+    /// screen; or the chat itself (a sign-in page, the engine's own words).
+    enum Fix: Equatable { case chat, settings(String), pair }
+    var fix: Fix = .chat
+    /// Working, and nothing at all back for a while (no words, no step): the pill turns amber with this; the request
+    /// goes on (never cancelled by it).
+    var slow: String?
+    /// More's engine and model in words (ClaudePane.engineLabel), for the pill while it's put in.
+    var engine: String?
     let id = UUID()
     var request: String
     /// Claude, ChatGPT or More.
@@ -43,7 +55,14 @@ struct QuickAsk: Equatable {
     /// What Done added, for Undo: each mod's id and the version it replaced (nil: it was new).
     var applied: [(id: String, before: InstalledMod?)] = []
     var at = Date()
-    static func == (a: QuickAsk, b: QuickAsk) -> Bool { a.id == b.id && a.state == b.state && a.applied.map(\.id) == b.applied.map(\.id) }
+    static func == (a: QuickAsk, b: QuickAsk) -> Bool { a.id == b.id && a.state == b.state && a.slow == b.slow && a.fix == b.fix && a.applied.map(\.id) == b.applied.map(\.id) }
+    /// A quick ask that can't go: the pill red at once, with what to do.
+    static func problem(_ request: String, service: String, site: String, key: String, _ why: String, fix: Fix) -> QuickAsk {
+        var q = QuickAsk(request: request, service: service, site: site, key: key, state: .failed(why))
+        q.fix = fix
+        return q
+    }
+    var failed: Bool { if case .failed = state { return true } else { return false } }
 
     /// A look-only mod: a style mod (css, hide, settings) with no powers, nothing waiting for an OK, no warnings, and
     /// only the chat's own site. Anything else gets its card. (The shared rule: QuickAskRules.swift.)
@@ -353,9 +372,15 @@ struct QuickPill: View {
     var body: some View {
         HStack(spacing: 8) {
             switch quick.state {
+            case .working where quick.slow != nil:
+                Image(systemName: "clock.badge.exclamationmark").foregroundStyle(Color.orange)
+                Text(quick.slow ?? "").lineLimit(2)
             case .working:
                 ProgressView().controlSize(.mini)
                 Text("Working: \(quick.short)").lineLimit(1)
+            case .starting:
+                ProgressView().controlSize(.mini)
+                Text("Sending to \(quick.engine ?? quick.service)…").lineLimit(1)
             case .done:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.trifGreen)
                 Text("Done").lineLimit(1)
@@ -368,8 +393,9 @@ struct QuickPill: View {
                 Image(systemName: "arrow.uturn.backward").foregroundStyle(.secondary)
                 Text("Undone").lineLimit(1)
             case .failed(let why):
-                Image(systemName: "exclamationmark.circle").foregroundStyle(Color.trifCoral)
-                Text(why).lineLimit(2)
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Color.red)
+                Text(why).lineLimit(2).foregroundStyle(Color.red)
+                Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Color.red.opacity(0.8))
             case .waitingSend where preparing:
                 ProgressView().controlSize(.mini)
                 Text("Putting it in \(quick.service)…").lineLimit(1)
@@ -380,24 +406,38 @@ struct QuickPill: View {
         .font(.footnote)
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Capsule().fill(.regularMaterial))
-        .overlay(Capsule().strokeBorder(Color.trifGreen.opacity(quick.state == .working ? 0.6 : 0.25), lineWidth: 1))
+        .overlay(Capsule().strokeBorder(border, lineWidth: quick.failed || quick.slow != nil ? 1.5 : 1))
         .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
         .contentShape(Capsule())
         .onTapGesture(perform: open)
         .gesture(DragGesture(minimumDistance: 12).onEnded { g in if abs(g.translation.height) > 16 || abs(g.translation.width) > 40 { dismiss() } })
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens the chat")
+        .accessibilityHint(quick.failed ? hint : "Opens the chat")
         .accessibilityAction(named: "Close", dismiss)
         .task(id: quick.state) {
             // (Done and Replied go by themselves after 20 s, Undone after 2; Working stays until the reply is done)
             let wait: Double
             switch quick.state {
-            case .done, .replied, .failed: wait = 20
+            case .done, .replied: wait = 20
+            case .failed: wait = 30
             case .undone: wait = 2
             default: return
             }
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             if !Task.isCancelled { withAnimation(.easeOut(duration: 0.3)) { dismiss() } }
+        }
+    }
+}
+
+extension QuickPill {
+    private var border: Color {
+        quick.failed ? Color.red.opacity(0.7) : quick.slow != nil ? Color.orange.opacity(0.7) : Color.trifGreen.opacity(quick.state == .working ? 0.6 : 0.25)
+    }
+    private var hint: String {
+        switch quick.fix {
+        case .chat: return "Opens the chat"
+        case .settings: return "Opens More's settings"
+        case .pair: return "Opens Pair with my computer"
         }
     }
 }

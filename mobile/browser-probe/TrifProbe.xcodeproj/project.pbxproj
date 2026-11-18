@@ -60,6 +60,7 @@
 		A1C10B0E5EB1C11B00000046 /* core.js in Resources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000047 /* core.js */; };
 		A1C10B0E5EB1C11B00000042 /* UnreadCounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */; };
 		A1C10B0E5EB1C11B0000005A /* ToolbarWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000005B /* ToolbarWatch.swift */; };
+		A1C10B0E5EB1C11B00000090 /* OpenRouterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000091 /* OpenRouterModels.swift */; };
 		A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000039 /* AppLinks.swift */; };
 		A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003B /* SpeechText.swift */; };
 		A1C10B0E5EB1C11B0000003C /* SpeechInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */; };
@@ -136,6 +137,7 @@
 		A1C10B0E5EB1C11B00000047 /* core.js */ = {isa = PBXFileReference; includeInIndex = 1; name = "core.js"; path = "../shared/gen/core.js"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "UnreadCounts.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000005B /* ToolbarWatch.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ToolbarWatch.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000091 /* OpenRouterModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "OpenRouterModels.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000039 /* AppLinks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AppLinks.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000003B /* SpeechText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SpeechText.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SpeechInput.swift"; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				A1C10B0E5EB1C11B00000049 /* Site.swift */,
 				A1C10B0E5EB1C11B00000043 /* UnreadCounts.swift */,
 				A1C10B0E5EB1C11B0000005B /* ToolbarWatch.swift */,
+				A1C10B0E5EB1C11B00000091 /* OpenRouterModels.swift */,
 				A1C10B0E5EB1C11B00000039 /* AppLinks.swift */,
 				A1C10B0E5EB1C11B0000003B /* SpeechText.swift */,
 				A1C10B0E5EB1C11B0000003D /* SpeechInput.swift */,
@@ -432,6 +435,7 @@
 				A1C10B0E5EB1C11B00000048 /* Site.swift in Sources */,
 				A1C10B0E5EB1C11B00000042 /* UnreadCounts.swift in Sources */,
 				A1C10B0E5EB1C11B0000005A /* ToolbarWatch.swift in Sources */,
+				A1C10B0E5EB1C11B00000090 /* OpenRouterModels.swift in Sources */,
 				A1C10B0E5EB1C11B00000038 /* AppLinks.swift in Sources */,
 				A1C10B0E5EB1C11B0000003A /* SpeechText.swift in Sources */,
 				A1C10B0E5EB1C11B0000003C /* SpeechInput.swift in Sources */,

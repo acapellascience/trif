@@ -172,6 +172,8 @@ struct PanelEngine {
 // MARK: streaming
 
 enum SSE {
+    /// Something came back (the answer, each line of its stream): PanelChat's silence watch, for the run's task.
+    @TaskLocal static var heard: (@Sendable () -> Void)?
     /// POSTs `body` and hands each `data:` line's JSON to `onEvent` until the stream ends. An error answer is thrown with
     /// the service's own message (never the request, which has the key).
     static func post(_ url: URL, headers: [String: String], body: [String: Any], onEvent: ([String: Any]) throws -> Void) async throws {
@@ -184,6 +186,7 @@ enum SSE {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
         guard let http = response as? HTTPURLResponse else { throw PanelError.message("no answer from the service") }
+        heard?()
         if http.statusCode != 200 {
             var data = Data()
             for try await b in bytes { data.append(b); if data.count > 20_000 { break } }
@@ -191,6 +194,7 @@ enum SSE {
         }
         for try await line in bytes.lines {
             try Task.checkCancellation()
+            heard?()
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }
@@ -386,7 +390,11 @@ final class ChatCompletionsConversation: PanelConversation {
     func step(system: String, tools: [PanelTool], model: String, effort: String?) async throws -> PanelStep {
         guard let key = APIKeys.get(engine.id) else { throw PanelError.message("no OpenRouter API key yet") }
         var body: [String: Any] = ["model": model, "messages": [["role": "system", "content": system]] + messages, "stream": true]
-        if !tools.isEmpty { body["tools"] = tools.map { ["type": "function", "function": ["name": $0.name, "description": $0.description, "parameters": $0.schema]] } }
+        if !tools.isEmpty {
+            body["tools"] = tools.map { ["type": "function", "function": ["name": $0.name, "description": $0.description, "parameters": $0.schema]] }
+            // (only providers that take every parameter sent: never one that would drop the tools)
+            body["provider"] = ["require_parameters": true]
+        }
         var out = PanelStep()
         var calls: [Int: (id: String, name: String, args: String)] = [:]
         var failure: String?

@@ -75,6 +75,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     var quickDone: (String, [String], Bool, String) async -> Int = { _, _, _, _ in 0 }
     /// A quick ask was just put in the panel's own message box and sent: the next run started is its.
     private var quickPending = false
+    /// A quick ask's run, as it goes (ClaudePane): something came back, nothing for a while, or it can't go (the
+    /// engine's answer in plain words, and where to fix it). Never the key, nor the service's whole answer.
+    enum QuickNews { case progress, slow(String), failed(String, QuickAsk.Fix) }
+    var quickNews: (QuickNews) -> Void = { _ in }
 
     private static let storeFile: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -278,23 +282,82 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     private var liveModels: [String: [PanelModel]] = [:]
     /// The engine's models: its own list where the service gives one (fetched with the person's key, from that
-    /// service only; OpenRouter's is public), else the ones TRIF knows. "Other…" takes any exact name.
+    /// service only; OpenRouter's the key's own list, else its public one), else the ones TRIF knows. "Other…" takes any exact name.
     private func models(_ id: String?, fresh: Bool) async -> [String: Any] {
         guard let e = PanelEngine.named(id) else { return ["models": [], "default": NSNull(), "custom": true] }
         if e.id == "computer" { return ["models": [], "default": NSNull(), "custom": false] } // (the computer's own choice)
         if (fresh || liveModels[e.id] == nil), e.keyName != nil, let list = await fetchModels(e) { liveModels[e.id] = list }
         let list = liveModels[e.id] ?? e.models
         let known = Dictionary(uniqueKeysWithValues: e.models.map { ($0.id, $0) })
-        return [
+        var out: [String: Any] = [
             "models": list.map { m -> [String: Any] in
                 let k = known[m.id]
                 var o: [String: Any] = ["id": m.id, "name": m.name, "description": m.description]
                 let efforts = k?.efforts ?? m.efforts
                 if !efforts.isEmpty { o["efforts"] = efforts.map { ["id": $0, "description": ""] }; o["defaultEffort"] = k?.defaultEffort ?? m.defaultEffort ?? NSNull() }
+                if e.id == "openrouter", let r = openRouter.byId[m.id] { o["free"] = r.free; o["maker"] = r.maker }
                 return o
             },
             "default": e.defaultModel ?? NSNull(), "custom": e.id != "iphone",
         ]
+        // (OpenRouter: the phone's picker (panel-adapter.js): Recommended, Recent, All models by maker; the shared panel
+        // reads none of it)
+        if e.id == "openrouter", !openRouter.byId.isEmpty {
+            let rec = OpenRouterModels.picks(openRouter.models)
+            out["phone"] = [
+                "recommended": rec,
+                "recent": OpenRouterModels.recent(PanelChat.openRouterUsed, models: openRouter.models, shown: rec + [OpenRouterModels.auto]),
+                "groups": OpenRouterModels.groups(openRouter.models).map { ["maker": $0.maker, "ids": $0.ids] },
+                "auto": OpenRouterModels.auto, "source": openRouter.source,
+            ] as [String: Any]
+        }
+        return out
+    }
+
+    /// OpenRouter's list as last read (OpenRouterModels.swift), for the picker's parts.
+    private var openRouter: (models: [OpenRouterModels.Model], byId: [String: OpenRouterModels.Model], source: String) = ([], [:], "")
+    /// The OpenRouter models the person ran, newest first (the picker's Recent).
+    static var openRouterUsed: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "openrouterRecent") ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.prefix(12)), forKey: "openrouterRecent") }
+    }
+    /// OpenRouter: the key's own list (GET /api/v1/models/user: the account's provider preferences, privacy settings
+    /// and guardrails applied), else the public list. Only the fit ones (OpenRouterModels.unfit). Never the key in a log.
+    private func fetchOpenRouter(_ e: PanelEngine) async -> [PanelModel]? {
+        func rows(_ path: String, key: String?) async -> ([[String: Any]]?, String) {
+            var req = URLRequest(url: e.url(path))
+            req.timeoutInterval = 15
+            if let key { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+            guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return (nil, "no answer") }
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code == 200, let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let r = obj["data"] as? [[String: Any]] else { return (nil, "answered \(code)") }
+            return (r, "")
+        }
+        var source = "your account's list"
+        var got: [[String: Any]]?
+        var why = "no key"
+        if let key = APIKeys.get(e.id) { (got, why) = await rows("/api/v1/models/user", key: key) }
+        var fit = got.map { OpenRouterModels.read($0, today: OpenRouterModels.today()) } ?? []
+        if fit.isEmpty {
+            source = "the public list (your account's: \(got == nil ? why : "none fit"))"
+            let (pub, pwhy) = await rows("/api/v1/models", key: nil)
+            guard let pub else { Diagnostics.shared.log("models", "OpenRouter: no list (\(source); the public one \(pwhy))"); return nil }
+            got = pub
+            fit = OpenRouterModels.read(pub, today: OpenRouterModels.today())
+        }
+        guard !fit.isEmpty else { return nil }
+        Diagnostics.shared.log("models", "OpenRouter: \(fit.count) of \(got?.count ?? 0) models listed, from \(source)")
+        openRouter = (fit, Dictionary(fit.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }), source.hasPrefix("your") ? "user" : "public")
+        // (the shared panel's own list: Auto, then Recommended, then the rest by maker, each id once)
+        var order = OpenRouterModels.picks(fit)
+        for g in OpenRouterModels.groups(fit) { for id in g.ids where !order.contains(id) { order.append(id) } }
+        let auto = openRouter.byId[OpenRouterModels.auto]
+        var out = [PanelModel(id: OpenRouterModels.auto, name: e.models[0].name, description: auto.map(OpenRouterModels.line) ?? "", images: false)]
+        for id in order where id != OpenRouterModels.auto {
+            let m = openRouter.byId[id]!
+            out.append(PanelModel(id: id, name: m.name, description: OpenRouterModels.line(m), images: m.images))
+        }
+        return out
     }
     private func fetchModels(_ e: PanelEngine) async -> [PanelModel]? {
         var req: URLRequest
@@ -309,7 +372,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             req = URLRequest(url: e.url("/v1/models"))
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         case "openrouter":
-            req = URLRequest(url: e.url("/api/v1/models"))
+            return await fetchOpenRouter(e)
         default: return nil
         }
         req.timeoutInterval = 15
@@ -325,15 +388,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                 guard id.range(of: "^(gpt-|o\\d|codex)", options: .regularExpression) != nil,
                       id.range(of: "audio|realtime|image|tts|transcribe|search|embedding|instruct", options: .regularExpression) == nil else { continue }
                 out.append(PanelModel(id: id, name: id))
-            default:
-                // (only models that take tools; whether each takes pictures, for the screenshot tool)
-                guard (r["supported_parameters"] as? [String])?.contains("tools") == true else { continue }
-                let inputs = ((r["architecture"] as? [String: Any])?["input_modalities"] as? [String]) ?? []
-                out.append(PanelModel(id: id, name: r["name"] as? String ?? id, images: inputs.contains("image")))
+            default: continue
             }
         }
         guard !out.isEmpty else { return nil }
-        if e.id == "openrouter" { out.sort { $0.name.lowercased() < $1.name.lowercased() }; out.insert(e.models[0], at: 0) }
         if e.id == "openai-api" { out.sort { $0.id < $1.id } }
         return out
     }
@@ -359,6 +417,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         var remoteId: String?
         /// Started by a quick ask (quickSend): its end goes to quickDone.
         var quick = false
+        /// A quick ask's, not yet failed: its failures and silences go to quickNews (once each).
+        var quickLive = false
+        /// When something last came back (an event, the answer's headers, a streamed line): the silence watch.
+        let heard = Heard()
         var heldDone: [String: Any]?
         var sessionIdSeen: String?
         init(site: String, url: String, prompt: String, engine: PanelEngine, model: String, effort: String?, sessionId: String, isNew: Bool, said: [[String: String]], tab: WKWebView?) {
@@ -367,6 +429,13 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         }
     }
     private var runs: [String: Run] = [:]
+    /// (any thread: SSE marks it from the stream's task)
+    final class Heard: @unchecked Sendable {
+        private let lock = NSLock()
+        private var t = Date()
+        func mark() { lock.lock(); t = Date(); lock.unlock() }
+        var at: Date { lock.lock(); defer { lock.unlock() }; return t }
+    }
     /// Each session's conversation (by the panel's sessionId), with its engine.
     private var sessions: [String: (engine: String, conv: PanelConversation, site: String)] = [:]
 
@@ -379,11 +448,12 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             // (the conversation is the computer's: its session id comes back in the run's events, and goes with the next run)
             let run = Run(site: d["site"] as? String ?? "", url: d["url"] as? String ?? "", prompt: d["prompt"] as? String ?? "", engine: e, model: "",
                           effort: nil, sessionId: d["sessionId"] as? String ?? "", isNew: false, said: [], tab: browser.webView)
-            run.quick = quickPending; quickPending = false
+            run.quick = quickPending; run.quickLive = quickPending; quickPending = false
             runs[run.id] = run
             return (["runId": run.id], nil)
         }
         let model = (d["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? e.defaultModel ?? ""
+        if e.id == "openrouter", !model.isEmpty { PanelChat.openRouterUsed = [model] + PanelChat.openRouterUsed.filter { $0 != model } }
         if e.id == "iphone", model != "stand-in", let m = LocalModels.named(model) ?? Optional(LocalModels.suggested), !LocalModels.shared.isReady(m) {
             return (nil, "\(m.name) isn't on this iPhone yet: download it in Settings, under Model on this iPhone.")
         }
@@ -405,12 +475,16 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         }
         let run = Run(site: d["site"] as? String ?? "", url: d["url"] as? String ?? "", prompt: d["prompt"] as? String ?? "", engine: e, model: model,
                       effort: (d["effort"] as? String).flatMap { $0.isEmpty ? nil : $0 }, sessionId: sid, isNew: isNew, said: said, tab: browser.webView)
-        run.quick = quickPending; quickPending = false
+        run.quick = quickPending; run.quickLive = quickPending; quickPending = false
         runs[run.id] = run
         return (["runId": run.id], nil)
     }
 
     private func emit(_ run: Run, _ event: [String: Any]) {
+        if event["kind"] as? String != "session" {
+            run.heard.mark()
+            if run.quickLive, ["text", "tool"].contains(event["kind"] as? String ?? "") { quickNews(.progress) }
+        }
         Task { _ = try? await webView.callAsyncJavaScript("return window.__trifPanelEvent ? window.__trifPanelEvent(id, ev) : false;", arguments: ["id": run.id, "ev": event], in: nil, contentWorld: .page) }
     }
     /// A step's one line in the chat: the panel's tool line, "<first word> <the rest>".
@@ -424,6 +498,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         guard run.task == nil, let conv = sessions[run.sessionId]?.conv else { return }
         onActivity(.working)
         report.log("panel", "\(run.engine.name) (\(run.model)): a run on \(run.site)\(run.isNew ? ", a new chat" : "")")
+        watchSilence(run)
         run.task = Task { @MainActor [weak self] in
             guard let self else { return }
             self.emit(run, ["kind": "session", "sessionId": run.sessionId])
@@ -446,7 +521,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                 var steps = 0
                 while true {
                     try Task.checkCancellation()
-                    let s = try await conv.step(system: system, tools: tools, model: run.model, effort: run.effort)
+                    let heard = run.heard
+                    let s = try await SSE.$heard.withValue({ heard.mark() }) {
+                        try await conv.step(system: system, tools: tools, model: run.model, effort: run.effort)
+                    }
                     lastTokens = s.inputTokens
                     if !s.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { texts.append(s.text); self.emit(run, ["kind": "text", "text": s.text]) }
                     if s.stop == "length" { self.emit(run, ["kind": "error", "message": "The reply was cut off: it reached the model's length limit."]); ok = false; break }
@@ -467,7 +545,10 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                 ok = false
             } catch {
                 ok = false
-                self.emit(run, ["kind": "error", "message": "\(run.engine.name): \(error.localizedDescription)"])
+                // (the plain words first, what to do; then the service's own, for the chat only)
+                let plain = PanelChat.plainWords(error, run.engine)
+                self.emit(run, ["kind": "error", "message": "\(plain.words). (\(run.engine.name): \(error.localizedDescription))"])
+                self.quickFail(run, plain.words, plain.fix)
                 self.report.log("panel", "\(run.engine.name): the run failed: \(error.localizedDescription)")
             }
             await self.undoTry(run)
@@ -492,39 +573,216 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     // MARK: quick ask (QuickAsk.swift): the request into the panel's own message box, and sent. The panel is
     // TRIF's own page, so TRIF sends there (never in Claude's or ChatGPT's).
 
-    /// "sent", or why not: busy (a run going on this site already), nosite, cannot (no engine ready), loading.
-    func quickSend(_ text: String) async -> String {
+    /// What became of a quick ask put in the panel (quickSend).
+    enum QuickSent: Equatable { case sent(engine: String), busy, nosite, loading, cannot, refused, problem(String, QuickAsk.Fix) }
+
+    /// The quick ask into the panel's own box and sent, once its engine is checked (Tim, 11-18: "only say Working
+    /// when it's actually working"): a model chosen, its key here, the model on this iPhone downloaded, the computer
+    /// paired. Else why not: busy (a run going on this site already), nosite, a problem (what to do), loading.
+    func quickSend(_ text: String) async -> QuickSent {
         start()
         pushTab()
         let url = browser?.webView.url?.absoluteString ?? ""
-        let js = """
+        let look = """
         const c = document.querySelector('#composer'), i = document.querySelector('#input'), stop = document.querySelector('#stop'), site = document.querySelector('#site');
-        if (!c || !i || !site) return 'loading';
-        if (site.title !== url) return 'loading';
-        if (stop && !stop.hidden) return 'busy';
-        if (i.disabled) return 'nosite';
-        if (!c.dataset.canSend) return 'cannot';
+        if (!c || !i || !site) return ['loading'];
+        if (site.title !== url) return ['loading'];
+        if (stop && !stop.hidden) return ['busy'];
+        if (i.disabled) return ['nosite'];
+        const a = document.querySelector('#agent'), m = document.querySelector('#model'), other = document.querySelector('#model-custom');
+        const model = m ? (m.value === '__other__' ? (other ? other.value.trim() : '') : m.value) : '';
+        return [c.dataset.canSend ? 'ready' : 'cannot', a ? a.value : '', model, m ? m.value : ''];
+        """
+        let send = """
+        const c = document.querySelector('#composer'), i = document.querySelector('#input');
+        if (!c || !i || !c.dataset.canSend) return 'cannot';
         i.value = t;
         i.dispatchEvent(new Event('input', { bubbles: true }));
         c.requestSubmit();
         return 'sent';
         """
-        var said = "loading"
+        var said: QuickSent = .loading
+        var relisted = false
         for _ in 0..<60 {
-            quickPending = true
-            said = (try? await webView.callAsyncJavaScript(js, arguments: ["t": text, "url": url], in: nil, contentWorld: .page) as? String) ?? "loading"
-            if said == "sent" {
-                // (the run started (startRun took the mark), or the panel refused it (no key, say: its chat says why))
+            let got = (try? await webView.callAsyncJavaScript(look, arguments: ["url": url], in: nil, contentWorld: .page)) as? [Any] ?? []
+            let state = got.first as? String ?? "loading"
+            if state == "busy" { said = .busy; break }
+            if state == "nosite" { said = .nosite; break }
+            if state == "ready" || state == "cannot" {
+                let agent = got.count > 1 ? got[1] as? String ?? "" : ""
+                let model = got.count > 2 ? got[2] as? String ?? "" : ""
+                let picked = got.count > 3 ? got[3] as? String ?? "" : ""
+                if let p = quickProblem(agent: agent, model: model, otherEmpty: picked == "__other__" && model.isEmpty) { said = .problem(p.words, p.fix); break }
+                if state == "cannot" {
+                    // (the engine looks ready here, the panel says not: its agents listed again once (a key saved
+                    // elsewhere), as Settings' key rows do)
+                    if !relisted {
+                        relisted = true
+                        _ = try? await webView.callAsyncJavaScript("const b = document.querySelector('#settings-btn'); if (b) { b.click(); b.click(); } return 1;", arguments: [:], in: nil, contentWorld: .page)
+                        try? await Task.sleep(nanoseconds: 700_000_000)
+                        continue
+                    }
+                    said = .cannot; break
+                }
+                quickPending = true
+                let r = (try? await webView.callAsyncJavaScript(send, arguments: ["t": text], in: nil, contentWorld: .page)) as? String ?? "cannot"
+                guard r == "sent" else { quickPending = false; said = .cannot; break }
+                // (the run started (startRun took the mark), or the panel refused it: its chat says why)
                 for _ in 0..<40 where quickPending { try? await Task.sleep(nanoseconds: 150_000_000) }
-                if quickPending { quickPending = false; said = "refused" }
+                if quickPending { quickPending = false; said = .refused } else { said = .sent(engine: engineName(agent)) }
                 break
             }
-            quickPending = false
-            if said == "busy" { break }
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
         report.log("panel", "quick ask: \(said)")
         return said
+    }
+
+    private func engineName(_ agent: String) -> String { PanelEngine.named(agent.isEmpty ? "iphone" : agent)?.name ?? "More" }
+
+    /// What More will use, in words (Tim, 11-18: Go to chat's "More · x.com" said nothing): "Claude Sonnet 5.5 ·
+    /// OpenRouter", "Qwen3.5 4B · on this iPhone", "My computer (Claude Code · Opus)", "Auto · OpenRouter"; or, with
+    /// nothing set up, what's missing and its fix ("No model picked: tap to choose"). nil: the panel isn't ready.
+    struct EngineLabel: Equatable { let text: String; let fix: QuickAsk.Fix? }
+    func engineLabel() async -> EngineLabel? {
+        start()
+        let js = """
+        const a = document.querySelector('#agent'), m = document.querySelector('#model'), other = document.querySelector('#model-custom');
+        if (!a || a.options.length < 2) return null;
+        const model = m ? (m.value === '__other__' ? (other ? other.value.trim() : '') : m.value) : '';
+        return [a.value, model, m ? m.value : ''];
+        """
+        var got: [Any]?
+        for _ in 0..<40 {
+            got = (try? await webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page)) as? [Any]
+            if got != nil { break }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        guard let got, got.count == 3 else { return nil }
+        let agent = got[0] as? String ?? "", model = got[1] as? String ?? "", picked = got[2] as? String ?? ""
+        if let p = quickProblem(agent: agent, model: model, otherEmpty: picked == "__other__" && model.isEmpty) { return EngineLabel(text: p.label, fix: p.fix) }
+        guard let e = PanelEngine.named(agent.isEmpty ? "iphone" : agent) else { return nil }
+        let id = model.isEmpty ? e.defaultModel ?? "" : model
+        switch e.id {
+        case "computer":
+            let h = link.hello
+            let how = [h?.agent, h?.model.map(PanelChat.shortModel)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+            return EngineLabel(text: "My computer (\(how.isEmpty ? PhoneLinkKeys.shared.computer?.name ?? "paired" : how))", fix: nil)
+        case "iphone":
+            let name = id == "stand-in" ? "Stand-in" : LocalModels.named(id)?.name ?? id
+            return EngineLabel(text: "\(name) · on this iPhone", fix: nil)
+        default:
+            if liveModels[e.id] == nil { _ = await models(e.id, fresh: false) }
+            var name = (liveModels[e.id] ?? e.models).first { $0.id == id }?.name ?? id
+            if id == OpenRouterModels.auto { name = "Auto" }
+            return EngineLabel(text: "\(PanelChat.shortModel(name)) · \(e.name)", fix: nil)
+        }
+    }
+    /// A model's name, short: an alias by what it is now ("Claude Opus Latest (Claude Opus 5.5)" → "Claude Opus 5.5"),
+    /// no maker's prefix, at most 30 characters.
+    static func shortModel(_ name: String) -> String {
+        var n = OpenRouterModels.shortName(name)
+        if let r = n.range(of: #" Latest \((.+)\)$"#, options: .regularExpression) { n = String(n[r]).replacingOccurrences(of: #"^ Latest \(|\)$"#, with: "", options: .regularExpression) }
+        return n.count > 30 ? String(n.prefix(29)) + "…" : n
+    }
+
+    /// Why More's chosen engine can't take a request now (nil: it can), in the pill's words, and where to fix it.
+    /// `agent` as the panel's select has it ("" = the default, On this iPhone; "none" = robotless).
+    /// `label`: the same in Go to chat's words (EngineLabel).
+    func quickProblem(agent: String, model: String, otherEmpty: Bool = false) -> (words: String, fix: QuickAsk.Fix, label: String)? {
+        let pick = ("Pick a model first", QuickAsk.Fix.settings("model"), "No model picked: tap to choose")
+        guard let e = PanelEngine.named(agent.isEmpty ? "iphone" : agent) else { return pick }
+        if otherEmpty { return pick }
+        switch e.id {
+        case "computer":
+            if PhoneLinkKeys.shared.computer == nil { return ("Pair this iPhone with your computer first", .pair, "My computer isn't paired: tap to pair") }
+        case "iphone":
+            let id = model.isEmpty ? e.defaultModel ?? "" : model
+            if id == "stand-in", !PanelEngine.standIn.isEmpty { return nil }
+            if LocalModels.shared.readyModels.isEmpty { return ("Download a model for this iPhone first", .settings("iphone"), "No model on this iPhone yet: tap to get one") }
+            if let m = LocalModels.named(id), !LocalModels.shared.isReady(m) { return ("\(m.name) isn't downloaded: pick another or download it", .settings("model"), "\(m.name) isn't downloaded: tap to choose") }
+        default:
+            if e.keyName != nil, !APIKeys.has(e.id) { return ("Add your \(e.keyName!) key", .settings("key"), "No \(e.keyName!) key: tap to add it") }
+        }
+        return nil
+    }
+
+    /// A service's error, in plain words (what to do) and where to do it; the service's own words go to the chat.
+    static func plainWords(_ error: Error, _ e: PanelEngine) -> (words: String, fix: QuickAsk.Fix) {
+        let n = e.name
+        if let u = error as? URLError {
+            switch u.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed: return ("No internet connection: \(n) can't be reached", .chat)
+            case .timedOut: return ("\(n) didn't answer in time: try again", .chat)
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed: return ("Can't reach \(n): check the internet", .chat)
+            default: return ("Can't reach \(n): \(u.localizedDescription)", .chat)
+            }
+        }
+        if case .http(let code, let m) = error as? PanelError {
+            let said = m.lowercased()
+            let credits = said.contains("credit") || said.contains("quota") || said.contains("billing") || said.contains("balance")
+            switch code {
+            case 401: return ("\(n) didn't take your key: check it in Settings", .settings("key"))
+            case 402: return ("No credits left on your \(n) account", .chat)
+            case 403: return credits ? ("No credits left on your \(n) account", .chat) : ("\(n) refused this request: open the chat", .chat)
+            case 404: return ("\(n) doesn't have that model: pick another", .settings("model"))
+            case 429: return credits ? ("No credits left on your \(n) account", .chat) : ("\(n) is busy: try again in a minute", .chat)
+            case 400 where credits: return ("No credits left on your \(n) account", .chat)
+            case 500...599: return ("\(n) had a problem (\(code)): try again", .chat)
+            default: return ("\(n) said no (\(code)): open the chat", .chat)
+            }
+        }
+        if case .message(let m) = error as? PanelError {
+            if m.lowercased().contains("api key yet") { return ("Add your \(e.keyName ?? n) key", .settings("key")) }
+            if m.lowercased().contains("credit") { return ("No credits left on your \(n) account", .chat) }
+        }
+        return ("\(n) couldn't do it: open the chat", .chat)
+    }
+
+    /// The computer's reasons (linkWords' codes), short, for the pill.
+    static func linkPlain(_ code: String) -> (words: String, fix: QuickAsk.Fix) {
+        let name = PhoneLinkKeys.shared.computer?.name ?? "your computer"
+        switch code {
+        case "notPaired", "removed": return ("Pair this iPhone with your computer first", .pair)
+        case "notFound", "away", "timeout": return ("Can't reach \(name): is TRIF open there, on this Wi-Fi?", .chat)
+        case "login": return ("\(name)'s coding agent isn't logged in", .chat)
+        case "sandbox", "no-agent": return ("\(name) has no coding agent ready for TRIF", .chat)
+        case "denied": return ("Allow Local Network for TRIF in Settings", .chat)
+        case "busy": return ("\(name) is already working on this site", .chat)
+        default: return ("\(name) couldn't start it: open the chat", .chat)
+        }
+    }
+
+    /// A quick ask's run that can't go on: told once (the pill red); the run itself ends as ever.
+    private func quickFail(_ run: Run, _ words: String, _ fix: QuickAsk.Fix) {
+        guard run.quickLive else { return }
+        run.quickLive = false
+        quickNews(.failed(words, fix))
+    }
+
+    /// Nothing back for a while (no event, no streamed line): a line in the chat and, for a quick ask, the pill amber.
+    /// The request goes on; something coming back later clears it. API engines 45 s, the model on this iPhone 90 s
+    /// (loading it and reading the page take a while), My computer 120 s.
+    private func watchSilence(_ run: Run) {
+        let limit: Double = run.engine.id == "computer" ? 120 : run.engine.id == "iphone" ? 90 : 45
+        let name = run.engine.id == "computer" ? PhoneLinkKeys.shared.computer?.name ?? "your computer" : run.engine.name
+        run.heard.mark()
+        Task { @MainActor [weak self, weak run] in
+            var told: Date?
+            while true {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, let run, self.runs[run.id] != nil, !run.stopping else { return }
+                if let t = told {
+                    // (something came back after the line: the pill as it was; the line itself marked `heard`)
+                    if run.heard.at > t { told = nil; if run.quickLive { self.quickNews(.progress) } }
+                } else if Date().timeIntervalSince(run.heard.at) >= limit {
+                    self.step(run, "Still nothing back from \(name) after \(Int(limit)) seconds. It's still asking; Stop ends it.")
+                    told = run.heard.at
+                    if run.quickLive { self.quickNews(.slow("Still nothing back from \(name): open the chat")) }
+                    Diagnostics.shared.log("quick ask", "\(run.engine.name): nothing back for \(Int(limit)) s (still asking)")
+                }
+            }
+        }
     }
 
     // MARK: My computer (the phone link)
@@ -598,6 +856,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     private func goComputer(_ run: Run) {
         guard run.task == nil, run.remoteId == nil else { return }
         onActivity(.working)
+        watchSilence(run)
         report.log("panel", "My computer: a run on \(run.site)")
         run.task = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -617,6 +876,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                         if run.stopping { self.link.stop(rid) }
                     case .failure(let e):
                         self.emit(run, ["kind": "error", "message": PanelChat.linkWords(e.code, e.message)])
+                        let p = PanelChat.linkPlain(e.code)
+                        self.quickFail(run, p.words, p.fix)
                         self.report.log("panel", "My computer: not started (\(e.code))")
                         self.endComputer(run, ["kind": "done", "ok": false, "sessionId": run.sessionId])
                     }
@@ -629,6 +890,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         guard let run = computerRun(rid) else { return }
         // (the computer's own words for these are for its side panel: the iPhone's say what it means here)
         if ev["kind"] as? String == "error", let why = ev["reason"] as? String, why == "sandbox" || why == "login" {
+            let p = PanelChat.linkPlain(why)
+            quickFail(run, p.words, p.fix)
             return emit(run, ["kind": "error", "message": PanelChat.linkWords(why, ev["message"] as? String ?? "")])
         }
         // (the computer's done waits for its result: the mods go to Add this mod? first, as the other engines' do)
@@ -667,6 +930,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     private func computerLost(_ rid: String, _ e: PhoneLinkRemote.RunError) {
         guard let run = computerRun(rid) else { return }
         emit(run, ["kind": "error", "message": PanelChat.linkWords(e.code, e.message)])
+        let p = PanelChat.linkPlain(e.code)
+        quickFail(run, p.words, p.fix)
         Task { @MainActor [weak self] in await self?.undoTry(run); self?.endComputer(run, ["kind": "done", "ok": false, "sessionId": run.sessionIdSeen ?? run.sessionId]) }
     }
 

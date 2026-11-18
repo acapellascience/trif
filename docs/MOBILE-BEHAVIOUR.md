@@ -173,6 +173,23 @@ change there is a change on both phones. Change this file whenever a rule change
 - One offer per mod; follow-ups continue the same chat; the pill closed while working: the reply is offered as ever.
 - The chats' list: top right Send (dimmed when the box is empty), top left Cancel; Cancel, a tap outside and a swipe
   down all keep the box's words.
+- Only say Working when it's working (Tim, 11-18). Before sending, the engine is checked: More's (a model chosen, its
+  key there, the phone's model downloaded, the computer paired) and the chat page's (a usable message box; a sign-in
+  page or no box = not signed in). Not ready: a red pill at once, saying what to do, its tap going there (More's
+  Settings at the model / keys / the phone's models, the pairing screen, or the whole chat on its sign-in page).
+  The engine's quick refusals (401 key, 402 or "credits", 404 model, 429, 5xx, no network) turn the pill red in plain
+  words within seconds. Nothing back at all (no words, no step) for 45 s (API engines), 90 s (the phone's model),
+  120 s (My computer), 150 s of no reply text (Claude/ChatGPT): the pill amber, "Still nothing back from {engine}:
+  open the chat"; the request is never cancelled by it. A Claude/ChatGPT send after which the page never showed a
+  reply is "Nothing back", not "Replied". More's full chat gets the same plain words and a "still nothing back" line.
+- Go to chat names what the chat will use: "{model} · {engine} · {site}" (OpenRouter's, the API's, "on this iPhone",
+  "My computer (agent · model)"), "Claude · claude.ai · {site}" for the web chats; nothing set up: what's missing, red,
+  its tap going to the fix.
+- OpenRouter's models (iPhone, 11-18): the key's own list (GET /api/v1/models/user: the account's provider preferences,
+  privacy settings and guardrails applied), the public list if that fails; only models fit for writing mods (tools,
+  chat completions, text out, 32K context or more, not expired); runs ask for providers that take every parameter
+  (provider.require_parameters). The picker: Recommended (a small table), Recent, then All models by maker behind a
+  search, Auto first; each with its price per million tokens in and out, and context; free ones marked.
 
 ## Voice
 

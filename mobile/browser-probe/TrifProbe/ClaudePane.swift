@@ -16,6 +16,8 @@ import os
 enum ChatService: String, CaseIterable, Identifiable {
     case claude = "Claude", chatgpt = "ChatGPT"
     var id: String { rawValue }
+    /// Its site, as people know it (the stand-in's too).
+    var host: String { self == .claude ? "claude.ai" : "chatgpt.com" }
     var home: String { ChatService.standIn ?? (self == .claude ? "https://claude.ai/new" : "https://chatgpt.com/") }
 
     // MARK: a project for TRIF's chats (Tim, 11-16: they cluttered his history)
@@ -190,6 +192,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         p.isShown = { [weak self] in self?.shown ?? false }
         // (a quick ask's run done: its mods through the quick ask's own way, look-only ones added at once)
         p.quickDone = { [weak self] site, codes, ok, path in await self?.quickMoreDone(site, codes, ok: ok, path: path) ?? 0 }
+        // (its run as it goes: red at once when the engine says no, amber when nothing comes back)
+        p.quickNews = { [weak self] news in self?.quickMoreNews(news) }
         // (Not right? Ask Claude, after the model on this iPhone: the same request in Claude's chat, with the page)
         p.onAskClaude = { [weak self] request in
             guard let self else { return }
@@ -815,6 +819,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             // the pill says it's working)
             if let q = quick, q.key == ClaudePane.linkKey(v.service.rawValue, v.site), q.state == .waitingSend {
                 quick?.state = .working
+                watchReply(v, q.id)
                 Diagnostics.shared.log("quick ask", "\(name): sent by the person (\(d["how"] as? String ?? "?"))")
             }
             if strip && cur === v { strip = false; blur(v) }
@@ -893,6 +898,16 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // (a quick ask's reply: its look-only mods added at once, the rest to their card; the pill says which)
         let isQuick = !late && quick?.key == key && quick?.state == .working
         Task { @MainActor in
+            if isQuick, texts.isEmpty, d["why"] as? String == "quiet", d["stop"] as? Bool != true, d["replies"] as? Int == 0 {
+                // (nothing came back at all: the page never showed a reply being written and nothing changed. Not
+                // "Replied": the pill amber, its tap opening the chat to see)
+                self.quick?.slow = "Nothing back from \(v.service.rawValue): open the chat"
+                v.activity = .idle
+                self.updateLink(v) { $0.state = .read }
+                Diagnostics.shared.log("quick ask", "\(v.service.rawValue): sent, and nothing came back on the page")
+                self.endBackgroundIfIdle()
+                return
+            }
             if isQuick {
                 let offered = await self.quickDeliver(texts, site: v.site, path: "quick", hold: hold, view: v)
                 if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
@@ -1217,6 +1232,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let ready = was != .working && v.site == tabSite ? prepare(v) : nil
         queue(v) { [weak self] in
             guard let self else { return }
+            // (signed in, a message box to fill? Else the pill says so at once, red, and its tap opens the chat there:
+            // Tim, 11-18, "only say Working when it's actually working")
+            if let problem = await self.askable(v), self.quick?.id == id {
+                self.strip = false
+                self.quick = QuickAsk.problem(text, service: v.service.rawValue, site: v.site, key: key, problem, fix: .chat)
+                Diagnostics.shared.log("quick ask", "\(v.service.rawValue) for \(v.site): not filled (\(problem))")
+                return
+            }
             if let prior, prior.key == key { _ = await self.chatCall(v, "takeText(t)", ["t": prior.request]) }
             if let ready { await self.fillContext(v, ready) }
             let said = await self.fill(v, text)
@@ -1228,31 +1251,136 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
     }
 
-    /// More: the panel's own message box, sent (TRIF's own page). Its run's end comes back to quickMoreDone.
+    /// The chat page can't take a request: why, in the pill's words (nil: its message box is there). Waits a little
+    /// for a page still loading (chat.js canAsk: up to 6 s, at once on a sign-in page).
+    private func askable(_ v: ChatView) async -> String? {
+        var said: String?
+        let until = Date().addingTimeInterval(20)
+        while Date() < until {
+            // (a page still on its way (a sign-in page is often a redirect): asked once it's there)
+            if v.webView.isLoading || v.webView.url?.scheme?.hasPrefix("http") != true { try? await Task.sleep(nanoseconds: 200_000_000); continue }
+            let before = v.webView.url
+            said = await chatCall(v, "canAsk(ms)", ["ms": 6000])
+            if said == "box" || said == "signed out" || said == "viewer" { break }
+            // (chat.js not in the page yet, or the page moved on meanwhile: asked again)
+            if said == nil || v.webView.url != before || v.webView.isLoading { try? await Task.sleep(nanoseconds: 250_000_000); continue }
+            break
+        }
+        switch said {
+        case "box": return nil
+        case "signed out": return "Sign in to \(v.service.rawValue) first"
+        case "viewer": return "Close what's open in \(v.service.rawValue) first"
+        case nil: return "\(v.service.rawValue) didn't load: open the chat"
+        default: return "\(v.service.rawValue) has no message box: open the chat"
+        }
+    }
+
+    /// Claude / ChatGPT sent (the person's Send): no reply text growing on the page for 150 s (a stop button alone
+    /// doesn't count), the pill amber; words later, Working again. Looked at every 5 s while working.
+    private func watchReply(_ v: ChatView, _ id: UUID) {
+        Task { @MainActor [weak self, weak v] in
+            var last: String?
+            var since = Date()
+            while true {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self, let v, self.quick?.id == id, self.quick?.state == .working else { return }
+                // (only the reply's text counts: a stop button shown for minutes with no words is still nothing)
+                let now = await self.chatCall(v, "replyNow()", [:]).map { String($0.drop { $0 != ":" }) }
+                if now != last {
+                    if last != nil, self.quick?.slow != nil { self.quick?.slow = nil }
+                    since = Date()
+                    last = now
+                } else if Date().timeIntervalSince(since) >= 150, self.quick?.slow == nil {
+                    self.quick?.slow = "Still nothing back from \(v.service.rawValue): open the chat"
+                    Diagnostics.shared.log("quick ask", "\(v.service.rawValue): no reply text on the page for 150 s (\(now?.isEmpty == false ? "a reply being written shown" : "nothing shown"))")
+                }
+            }
+        }
+    }
+
+    /// More: the panel's own message box, sent (TRIF's own page), once its engine is checked: a model chosen, its key,
+    /// the model on this iPhone downloaded, the computer paired (PanelChat.quickSend). Working only once sent; its
+    /// run's news (quickMoreNews) and end (quickMoreDone) come back.
     private func quickMore(_ text: String) {
         if shown { close() }
         let site = tabSite
-        quick = QuickAsk(request: text, service: "More", site: site, key: "More|\(site)", state: .working)
+        quick = QuickAsk(request: text, service: "More", site: site, key: "More|\(site)", state: .starting)
+        quick?.engine = moreLabel?.fix == nil ? moreLabel?.text : nil
         let id = quick!.id
-        Diagnostics.shared.log("quick ask", "More for \(site): \(text.count) characters, sent by TRIF's panel")
+        Diagnostics.shared.log("quick ask", "More for \(site): \(text.count) characters, to TRIF's panel")
         Task { @MainActor [weak self] in
             guard let self else { return }
             let said = await self.panel.quickSend(text)
-            guard said != "sent", self.quick?.id == id else { return }
+            guard self.quick?.id == id else { return }
             let why: String
+            var fix: QuickAsk.Fix = .chat
             switch said {
-            case "busy": why = "Still working on this site. Ask again when it's done."
-            case "nosite": why = "Open a website first, then ask."
+            case .sent(let engine):
+                if self.quick?.state == .starting { self.quick?.state = .working }
+                Diagnostics.shared.log("quick ask", "More: sent to \(engine)")
+                return
+            case .busy: why = "Still working on this site. Ask again when it's done."
+            case .nosite: why = "Open a website first, then ask."
+            case .problem(let w, let f): why = w; fix = f
             default: why = "More can't ask yet: open the chat to set it up."
             }
             self.quick?.state = .failed(why)
+            self.quick?.fix = fix
             Diagnostics.shared.log("quick ask", "More: not sent (\(said))")
+        }
+    }
+
+    /// Where a red note or Go to chat's red line sends the person: More's Settings at what's missing, or the pairing.
+    func openFix(_ fix: QuickAsk.Fix) {
+        Diagnostics.shared.log("quick ask", "fix opened: \(fix)")
+        switch fix {
+        case .pair: PhoneLinkModel.shared.shown = true
+        case .chat: open()
+        case .settings(let what):
+            choose(more: true)
+            open()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for _ in 0..<20 {
+                    if (try? await self.panel.webView.callAsyncJavaScript("return window.__trifPanelShowSettings ? window.__trifPanelShowSettings(w) : false;", arguments: ["w": what], in: nil, contentWorld: .page)) as? Bool == true { return }
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+            }
+        }
+    }
+
+    /// What the chat will use, in words, for Go to chat (and the quick ask's pill): Claude · claude.ai, ChatGPT ·
+    /// chatgpt.com, or More's engine and model (PanelChat.engineLabel), looked at again each time the list opens.
+    @Published private(set) var moreLabel: PanelChat.EngineLabel?
+    var engineLabel: PanelChat.EngineLabel {
+        if more { return moreLabel ?? PanelChat.EngineLabel(text: "More", fix: nil) }
+        return PanelChat.EngineLabel(text: "\(service.rawValue) · \(service.host)", fix: nil)
+    }
+    func refreshEngineLabel() {
+        guard more else { return }
+        Task { @MainActor [weak self] in
+            guard let self, let l = await self.panel.engineLabel() else { return }
+            if self.moreLabel != l { self.moreLabel = l }
+        }
+    }
+
+    /// A quick ask's More run, as it goes (PanelChat.quickNews).
+    private func quickMoreNews(_ news: PanelChat.QuickNews) {
+        guard quick?.service == "More", quick?.state == .working || quick?.state == .starting else { return }
+        switch news {
+        case .progress: if quick?.slow != nil { quick?.slow = nil }
+        case .slow(let words): quick?.slow = words
+        case .failed(let words, let fix):
+            quick?.state = .failed(words)
+            quick?.fix = fix
+            quick?.slow = nil
+            Diagnostics.shared.log("quick ask", "More: the engine said no (\(words))")
         }
     }
 
     /// A quick ask's More run done (PanelChat.quickDone). Its pill closed meanwhile: offered as ever.
     func quickMoreDone(_ site: String, _ codes: [String], ok: Bool, path: String) async -> Int {
-        guard quick?.service == "More", quick?.state == .working else {
+        guard quick?.service == "More", quick?.state == .working || quick?.state == .starting else {
             guard let browser, !codes.isEmpty else { return 0 }
             return await browser.offerFromChat(codes, from: site, path: path).count
         }
@@ -1304,6 +1432,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func quickOpen() {
         guard let q = quick else { return }
         if q.state == .waitingSend { return expandStrip() }
+        // (a red note: where it says to go)
+        if q.failed, q.fix != .chat {
+            quick = nil
+            return openFix(q.fix)
+        }
         if q.service == "More" { choose(more: true); open() }
         else if !q.key.isEmpty { openChat(q.key) }
         if q.state == .replied || q.state == .undone || { if case .failed = q.state { return true } else { return false } }() { quick = nil }
@@ -1334,7 +1467,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// (development: the quick ask's state, for the dev steps)
     var quickDescribe: String {
         guard let q = quick else { return "quick: none, strip \(strip)" }
-        return "quick: \(q.service) for \(q.site.isEmpty ? "no site" : q.site), \(q.state), applied \(q.applied.map(\.id)), strip \(strip)\(strip ? " (in \(stripIn), body \(Int(stripBody)), shift \(Int(stripShift)), page part \(stripPlace.map { "\(Int($0.top))-\(Int($0.bottom)) of \(Int($0.height))" } ?? "none"))" : ""), shown \(shown)"
+        return "quick: \(q.service) for \(q.site.isEmpty ? "no site" : q.site), \(q.state)\(q.failed ? " fix \(q.fix)" : "")\(q.slow.map { " slow \"\($0)\"" } ?? ""), applied \(q.applied.map(\.id)), strip \(strip)\(strip ? " (in \(stripIn), body \(Int(stripBody)), shift \(Int(stripShift)), page part \(stripPlace.map { "\(Int($0.top))-\(Int($0.bottom)) of \(Int($0.height))" } ?? "none"))" : ""), shown \(shown)"
     }
 
     // MARK: a reply in the background (Tim, 11-15: "a notification when a new mod is ready")
@@ -1900,8 +2033,10 @@ struct ChatListView: View {
     /// (this tab's site's chat, if it has one: its state on Go to chat)
     private var mine: ChatLink? { site.isEmpty ? nil : pane.links.first { $0.site == site } }
     private var goWords: (title: String, line: String) {
-        let service = pane.more ? "More" : pane.service.rawValue
-        let place = site.isEmpty ? service : "\(service) · \(site)"
+        // (what it'll use, Tim 11-18: "Claude Sonnet 5.5 · OpenRouter · x.com"; nothing set up: what's missing, red)
+        let label = pane.engineLabel
+        if label.fix != nil { return ("Go to chat", label.text) }
+        let place = site.isEmpty ? label.text : "\(label.text) · \(site)"
         switch mine?.state {
         case .waiting?: return ("Go to chat", "Reply waiting · \(place)")
         case .working?: return ("Go to chat", "Working… · \(place)")
@@ -1924,13 +2059,13 @@ struct ChatListView: View {
                 Section {
                     QuickAskBox(ask: ask).listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 12))
                     // (Tim, 11-18: the robot's tap opens this list now; the full chat is one tap further, here, first)
-                    Button(action: goToChat) {
+                    Button { if let fix = pane.engineLabel.fix { close(); pane.openFix(fix) } else { goToChat() } } label: {
                         HStack(spacing: 12) {
                             ChatGlyph(activity: mine?.activity ?? .idle).frame(width: 22, height: 22).foregroundStyle(Color.trifGreen)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(goWords.title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.trifGreen)
-                                Text(goWords.line).font(.caption).lineLimit(1)
-                                    .foregroundStyle(mine?.state == .waiting ? Color.trifGreen : .secondary)
+                                Text(goWords.line).font(.caption).lineLimit(2)
+                                    .foregroundStyle(pane.engineLabel.fix != nil ? Color.red : mine?.state == .waiting ? Color.trifGreen : .secondary)
                                     .fontWeight(mine?.state == .waiting ? .semibold : .regular)
                             }
                             Spacer(minLength: 0)
@@ -1941,7 +2076,8 @@ struct ChatListView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(mine?.state == .waiting ? "Go to chat, reply waiting" : "Go to chat")
-                    .accessibilityHint("Opens the whole chat for this page")
+                    .accessibilityValue(goWords.line)
+                    .accessibilityHint(pane.engineLabel.fix != nil ? "Opens what needs setting up" : "Opens the whole chat for this page")
                 }
                 Section {
                 if pane.links.isEmpty {
@@ -1985,6 +2121,8 @@ struct ChatListView: View {
                 ToolbarItem(placement: .confirmationAction) { QuickSendButton(ask: ask) }
             }
         }
+        // (More's engine and model looked at again: a key or a model changed since)
+        .onAppear { pane.refreshEngineLabel() }
         // (the list closed mid-listen (a tap on the microphone): stopped, nothing asked, the words kept in the box)
         .onDisappear { SpeechInput.shared.interrupt(why: "the list closed") }
     }

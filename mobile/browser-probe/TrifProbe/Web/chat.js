@@ -201,6 +201,24 @@
       .map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`.includes(label)).length;
   }
 
+  /** Whether this chat can take a request (Tim, 11-18: the quick ask said nothing when the person wasn't signed in):
+   *  'box' (a usable message box), 'signed out' (a sign-in page: its address, or no box and a Log in / Sign in /
+   *  Continue with … button), 'viewer' (something over the box), or 'no box' after `ms`. Only what the page shows. */
+  async function canAsk(ms) {
+    const until = Date.now() + (ms || 6000);
+    for (;;) {
+      if (usableEditor()) return 'box';
+      if (signInPage()) return 'signed out';
+      if (Date.now() > until) return viewer() ? 'viewer' : 'no box';
+      await wait(150);
+    }
+  }
+  function signInPage() {
+    if (/\/(login|log-in|signin|sign-in|signup|sign-up|auth)(\/|$)/i.test(location.pathname)) return true;
+    if (editor() || document.readyState !== 'complete') return false;
+    return [...document.querySelectorAll('a, button')].some((b) => visible(b) && /^\s*(log ?in|sign ?in|sign ?up|continue with \w+)\b/i.test(b.textContent || ''));
+  }
+
   let settled = false; // (that moment waited once for this page)
   async function fill(text, png, name, pdf, picture) {
     // (the message box, as soon as it's there (every 100 ms, 10 s at most), not the page's whole load: claude.ai
@@ -657,7 +675,7 @@
       const header = !!r && /==WebMod==/.test(r.textContent || '');
       if (blocks || header) post({ type: 'nopickup', blocks, header, kinds: r ? [...new Set([...r.querySelectorAll(`${CODE_BLOCKS}, code`)].map((n) => n.localName + (n.className && typeof n.className === 'string' ? '.' + n.className.split(/\s+/)[0] : '')))].slice(0, 5).join(' ') : '', path: location.pathname.replace(/[^/]{20,}/g, '…') });
     }
-    post({ type: 'done', why, mods, stop: w.saw });
+    post({ type: 'done', why, mods, stop: w.saw, replies: w.live.size });
   }
   /** The person's latest message (after a reload, resume: a reply still being written comes after it). */
   function latestUser() {
@@ -1189,5 +1207,8 @@
     return (box || document.body).outerHTML.slice(0, 60000);
   }
 
-  globalThis.__trifChat = { fill, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, viewer: () => { const v = viewer(); return v ? v.why : null; } };
+  /** For the app's "still nothing back" watch: whether a reply is being written, and how much reply text is on the
+   *  page (it only compares one look with the next). */
+  const replyNow = () => `${replying() || incomplete() ? 1 : 0}:${[...document.querySelectorAll(REPLY)].reduce((n, e) => n + (e.textContent || '').length, 0)}`;
+  globalThis.__trifChat = { fill, canAsk, replyNow, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, viewer: () => { const v = viewer(); return v ? v.why : null; } };
 })();

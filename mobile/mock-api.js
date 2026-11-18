@@ -7,7 +7,11 @@
 //   /openai-api/v1/responses           OpenAI's Responses API, streamed
 //   /openrouter/api/v1/chat/completions OpenRouter's (OpenAI-compatible) chat completions, streamed
 //   …/models                           each one's model list
-// Only the fake key (FAKE_KEY) is taken; anything else gets the service's 401. Each reply follows one script, so a
+// Only the fake key (FAKE_KEY) is taken; anything else gets the service's 401. Two more keys for what fails: NO_CREDITS
+// (every reply a 402, as OpenRouter's "Insufficient credits"; Anthropic's and OpenAI's own words for theirs) and SILENT
+// (the request taken, nothing ever sent back: the app's "still nothing back" note). A model with "missing" in its name: 404.
+// OpenRouter's list is a trimmed copy of its real public one (mobile/test/openrouter-models.json, recorded 11-18, no key);
+// /api/v1/models/user (the key's own list) is that list without xAI's and Meta's models, as an account's guardrail would. Each reply follows one script, so a
 // whole tool loop can be watched: first read_page (h1), then try_mod with a style mod for the page in the first
 // message, then the mod in a code block. A message saying "loop" keeps calling read_page, to see the 15-step cap; "no
 // tools" (or a request without tools) answers at once; "slow" waits 1.5 s before each answer (to try Stop). What a reply needs back (Claude's thinking block and its
@@ -18,6 +22,10 @@
 const http = require('http');
 
 const FAKE_KEY = 'sk-test-not-a-real-key';
+const NO_CREDITS = 'sk-test-no-credits';
+const SILENT = 'sk-test-never-answers';
+const KEYS = [FAKE_KEY, NO_CREDITS, SILENT];
+const OPENROUTER = (() => { try { return require('./test/openrouter-models.json'); } catch { return null; } })();
 const SIGNATURE = 'mock-signature-1';
 
 function modFor(origin) {
@@ -116,7 +124,7 @@ function completions(body, res, log) {
   const results = msgs.filter((m) => m.role === 'tool');
   for (const m of msgs.filter((x) => x.role === 'assistant')) for (const t of m.tool_calls || []) if (!results.some((r) => r.tool_call_id === t.id)) return fail(res, 400, `tool call ${t.id} has no result`);
   if (msgs[0]?.role !== 'system') return fail(res, 400, 'expected the system message first');
-  log.push({ api: 'openrouter', model: body.model, tools: (body.tools || []).map((t) => t.function?.name), results: results.length, images: JSON.stringify(msgs).split('"image_url"').length - 1 });
+  log.push({ api: 'openrouter', model: body.model, provider: body.provider, tools: (body.tools || []).map((t) => t.function?.name), results: results.length, images: JSON.stringify(msgs).split('"image_url"').length - 1 });
   const step = next({ firstUser, results, hasTools: (body.tools || []).length > 0 });
   const ev = [];
   const chunk = (delta, finish = null) => [null, { id: 'gen-mock', choices: [{ index: 0, delta, finish_reason: finish }] }];
@@ -171,19 +179,34 @@ function handler(log = []) {
     const key = engine === 'claude-api' ? req.headers['x-api-key'] : String(req.headers.authorization || '').replace(/^Bearer /, '');
     const shape = engine === 'claude-api' ? 'anthropic' : 'openai';
     if (engine === 'claude-api' && req.headers['anthropic-version'] !== '2026-10-21') return fail(res, 400, 'anthropic-version header missing or not 2026-10-21', shape);
-    if (/\/models$/.test(path) && req.method === 'GET') {
-      if (engine !== 'openrouter' && key !== FAKE_KEY) return fail(res, 401, 'invalid x-api-key', shape);
+    if (engine === 'openrouter' && /\/models\/user$/.test(path) && req.method === 'GET') {
+      if (!KEYS.includes(key)) return fail(res, 401, 'No auth credentials found', shape);
+      const list = OPENROUTER || MODELS.openrouter;
+      const mine = list.data.filter((m) => !/^~?(x-ai|meta-llama)\//.test(m.id));
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(MODELS[engine] || { data: [] }));
+      res.end(JSON.stringify({ data: mine, total_count: mine.length, links: { next: null } }));
       return;
     }
-    if (key !== FAKE_KEY) return fail(res, 401, engine === 'claude-api' ? 'invalid x-api-key' : 'Incorrect API key provided.', shape);
+    if (/\/models$/.test(path) && req.method === 'GET') {
+      if (engine !== 'openrouter' && !KEYS.includes(key)) return fail(res, 401, 'invalid x-api-key', shape);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(engine === 'openrouter' ? OPENROUTER || MODELS.openrouter : MODELS[engine] || { data: [] }));
+      return;
+    }
+    if (!KEYS.includes(key)) return fail(res, 401, engine === 'claude-api' ? 'invalid x-api-key' : engine === 'openrouter' ? 'No auth credentials found' : 'Incorrect API key provided.', shape);
+    if (key === NO_CREDITS) {
+      return engine === 'openrouter' ? fail(res, 402, 'Insufficient credits. Add more using https://openrouter.ai/settings/credits', shape)
+        : engine === 'claude-api' ? fail(res, 400, 'Your credit balance is too low to access the Anthropic API.', shape)
+          : fail(res, 429, 'You exceeded your current quota, please check your plan and billing details.', shape);
+    }
+    if (key === SILENT) { log.push({ api: engine, silent: true }); req.resume(); return; } // (never answered)
     let raw = '';
     req.on('data', (c) => { raw += c; });
     req.on('end', () => {
       let body;
       try { body = JSON.parse(raw); } catch { return fail(res, 400, 'not JSON', shape); }
       if (!body.stream) return fail(res, 400, 'the app always streams', shape);
+      if (/missing/.test(String(body.model || ''))) return fail(res, 404, engine === 'openrouter' ? `No endpoints found for ${body.model}.` : `model: ${body.model}`, shape);
       if (engine === 'claude-api' && path === '/v1/messages') return anthropic(body, res, log);
       if (engine === 'openai-api' && path === '/v1/responses') return responses(body, res, log);
       if (engine === 'openrouter' && path === '/api/v1/chat/completions') return completions(body, res, log);
@@ -196,4 +219,4 @@ if (require.main === module) {
   const port = Number(process.argv[2] || 8378);
   http.createServer(handler()).listen(port, '127.0.0.1', () => console.log(`mock APIs on http://localhost:${port} (key: ${FAKE_KEY})`));
 }
-module.exports = { handler, FAKE_KEY, modFor };
+module.exports = { handler, FAKE_KEY, NO_CREDITS, SILENT, modFor };

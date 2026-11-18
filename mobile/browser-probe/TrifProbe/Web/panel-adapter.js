@@ -182,7 +182,13 @@
     switch (msg.type) {
       case 'status': return status();
       case 'agent.list': return app({ type: 'agent.list' });
-      case 'agent.models': return app({ type: 'agent.models', agent: msg.agent, fresh: !!msg.fresh });
+      case 'agent.models': {
+        const r = await app({ type: 'agent.models', agent: msg.agent, fresh: !!msg.fresh });
+        // (OpenRouter's: the phone's own picker, below; the panel's select stays, hidden, for what it shows elsewhere)
+        lists[msg.agent] = r;
+        setTimeout(paintPicker, 0);
+        return r;
+      }
       case 'agent.start': return startRun(msg);
       case 'agent.stop': { const r = runs.get(msg.runId); if (r) r.stopping = true; return app({ type: 'run.stop', runId: msg.runId }); }
       case 'chat.clear': return clearChat(String(msg.site || ''));
@@ -447,6 +453,102 @@
   }
   window.__trifPanelModelsChanged = () => { refreshModels(); return true; };
 
+  // ---- OpenRouter's models: a short list first (Tim, 11-18: "the Models list is endless") -------------------------
+  // Recommended (the app's small table, OpenRouterModels.swift), Recent (the ones run), then All models behind a
+  // search field, by maker, Auto at the top. Each with its price and context, small. A tap picks it through the
+  // panel's own select (hidden here), so the panel saves it and shows it as ever. Only for OpenRouter: the other
+  // engines keep the panel's select, and desktop's panel never has this file.
+  const lists = {};
+  let allOpen = false;
+  let query = '';
+  const OTHER = '__other__';
+  function paintPicker() {
+    const agent = document.getElementById('agent');
+    const sel = document.getElementById('model');
+    const row = document.getElementById('model-row');
+    const list = lists.openrouter;
+    let box = document.getElementById('phone-or');
+    const on = !!(agent && sel && row && agent.value === 'openrouter' && list && list.phone);
+    document.body.classList.toggle('phone-or-on', on);
+    if (!on) { box?.remove(); row?.querySelector('.phone-or-current')?.remove(); return; }
+    const byId = new Map((list.models || []).map((m) => [m.id, m]));
+    const auto = list.phone.auto;
+    const chosen = sel.value === '' ? auto : sel.value;
+    let cur = row.querySelector('.phone-or-current');
+    if (!cur) { cur = el('span', 'phone-or-current'); row.append(cur); }
+    cur.textContent = chosen === OTHER ? 'Other…' : byId.get(chosen)?.name || chosen;
+    if (!box) { box = el('div', 'phone-or'); box.id = 'phone-or'; row.after(box); }
+    box.replaceChildren();
+    const pick = (id) => {
+      sel.value = id === auto ? '' : id;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      setTimeout(paintPicker, 0);
+    };
+    const item = (m) => {
+      const b = el('button', 'phone-or-row');
+      b.type = 'button';
+      b.dataset.model = m.id;
+      b.setAttribute('aria-pressed', String(m.id === chosen));
+      const top = el('span', 'phone-or-name', m.name);
+      if (m.free) top.append(' ', el('span', 'phone-or-free', 'Free'));
+      b.append(top);
+      if (m.description) b.append(el('span', 'phone-or-line', m.description));
+      b.addEventListener('click', () => pick(m.id));
+      return b;
+    };
+    const section = (title, ids) => {
+      const ms = ids.map((id) => byId.get(id)).filter(Boolean);
+      if (!ms.length) return;
+      box.append(el('p', 'phone-or-title', title), ...ms.map(item));
+    };
+    section('Recommended', list.phone.recommended || []);
+    section('Recent', list.phone.recent || []);
+    const total = (list.models || []).length;
+    const toggle = btn(allOpen ? 'Hide all models' : `All models (${total})`, () => { allOpen = !allOpen; if (!allOpen) query = ''; paintPicker(); });
+    toggle.classList.add('phone-or-all');
+    toggle.setAttribute('aria-expanded', String(allOpen));
+    box.append(toggle);
+    if (!allOpen) return;
+    const search = el('input');
+    Object.assign(search, { type: 'search', id: 'phone-or-search', placeholder: 'Search models', autocomplete: 'off', spellcheck: false, value: query });
+    search.setAttribute('aria-label', 'Search models');
+    box.append(search);
+    const results = el('div', 'phone-or-results');
+    const fill = () => {
+      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const hits = (m) => { const t = `${m.name} ${m.id} ${m.maker || ''} ${m.free ? 'free' : ''}`.toLowerCase(); return words.every((w) => t.includes(w)); };
+      results.replaceChildren();
+      if (byId.get(auto) && hits(byId.get(auto))) results.append(item(byId.get(auto)));
+      let n = 0;
+      for (const g of list.phone.groups || []) {
+        const ms = g.ids.map((id) => byId.get(id)).filter((m) => m && hits(m));
+        if (!ms.length) continue;
+        n += ms.length;
+        results.append(el('p', 'phone-or-maker', g.maker), ...ms.map(item));
+      }
+      if (!n && words.length) results.append(el('p', 'note', 'No model matches.'));
+    };
+    fill();
+    box.append(results);
+    // (only the results change as the person types: the field and its keyboard stay)
+    search.addEventListener('input', () => { query = search.value; fill(); });
+  }
+
+  // The quick ask's red note tapped (ClaudePane.quickOpen): More's Settings, at what needs doing there.
+  window.__trifPanelShowSettings = (what) => {
+    const settings = document.getElementById('settings');
+    if (settings && settings.hidden) document.getElementById('settings-btn')?.click();
+    const target = { model: 'model-row', key: 'phone-keys', iphone: 'phone-models', computer: 'phone-link' }[what];
+    setTimeout(() => {
+      let n = target && document.getElementById(target);
+      // (no model row while robotless: the agent's, where one is picked)
+      if (n && n.hidden) n = document.getElementById('agent')?.closest('label') || n;
+      if (n) n.scrollIntoView({ block: 'start' });
+      if (what === 'model') document.getElementById('phone-or')?.classList.add('phone-or-flash');
+    }, 120);
+    return !!settings;
+  };
+
   document.addEventListener('DOMContentLoaded', () => {
     const settings = document.getElementById('settings');
     const anchor = document.getElementById('model-note');
@@ -466,6 +568,7 @@
     paintLink();
     paintKeys();
     refreshModels();
+    document.getElementById('agent')?.addEventListener('change', () => setTimeout(paintPicker, 0));
     // (Settings opened, the chat's agent changed: the models' state looked at again)
     document.getElementById('settings-btn')?.addEventListener('click', () => setTimeout(() => { refreshModels(); paintLink(); }, 50));
     new MutationObserver(() => { if (lastModels) paintChatBar(lastModels); }).observe(document.getElementById('using') || document.body, { childList: true, characterData: true, subtree: true });

@@ -53,37 +53,41 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
    - [x] reading mods with mods.js (round 8: `JsModReader`, mods.js in an androidx.javascriptengine JavaScriptSandbox
      isolate on the store thread; what it made of each mod kept in the mod's file, so a start needs no reader)
    - [x] @match matching (round 7: `MatchPattern` + `WebAddress`, as modfile.js matchesUrl; `ModStore.running/applies`)
-   - [ ] style sections, boxed and free mods running
-   - [ ] holds waiting for Allow (the store's side done in round 7: a held mod doesn't run, a held change runs
-     the version before; left: proving it on a page once the reader exists)
+   - [x] style sections, boxed and free mods running (round 9: test/running.sh, all through the real reader, on
+     strict.html; nothing needed fixing)
+   - [x] holds waiting for Allow (round 9: a boxed mod with a power is held and doesn't run; Allow → it runs)
 5. [ ] Mods tab: shared mods.html / mods-page.js in a WebView, Android message adapter
 6. Getting mods in
    - [ ] "Add this mod?" for a pasted mod, a .js file opened with/shared to the app
    - [ ] import of desktop exports
 7. Tests
    - [ ] unit tests for Kotlin logic (ongoing, one per piece)
-   - [ ] emulator tests, headless, with mobile/shared/pages: style mod, boxed mod, free mod's style section, held
-     mod, popup sign-in stand-in, Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
+   - [ ] emulator tests, headless, with mobile/shared/pages: style mod (mods.sh), boxed mod, free mod's style
+     section, held mod (running.sh), popup sign-in stand-in (popups.sh) all PASS; left: Mods tab shows/switches; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 8, 2026-11-18)
-- The reader: `JsModReader` (mods.js in a JavaScriptSandbox isolate, javascriptengine 1.1.1; blocking calls, a dead
-  isolate made again once). Every ModStore call now runs on MainActivity's store thread (`work`); plans go to the
-  pages on the main thread. Debug extra `trif.addMod` (a mod file → read → added as pasted).
-- Kept, unlike iPhone: each mod's script/styleScript in its file and the reader's free pair in mods-settings.json,
-  so the tabs start at once; only mods without scripts (or a new reader) are read at the start, the tabs waiting ≤3 s.
-- Measured on the AVD: sandbox up 235–570 ms, mods.js loaded 210–470 ms; a 70 KB free mod read in <0.4 s.
-- Tests: 33 unit tests pass (store tests updated for kept scripts); new test/mods.sh PASS (a pasted style mod read
-  and applied, a non-mod's reason, still applied on the first page after a force-stop); worlds, startup, tabs,
-  applinks PASS.
+## Done this round (round 9, 2026-11-18)
+- Merged origin/ios-poc at bb2a8b9 (shared core round 2: chat-offers.js; its CI is green). The shared core has no
+  mod store rules yet (only app-links.js, chat-offers.js), so ModStore.kt stays the Kotlin port for now.
+- New test/running.sh PASS: a boxed mod's trif.hide applies on strict.html and its trif.log is in the box's log
+  (not the page's); a free mod's ==Style== section applies with its settings, its code sees trif.style in the
+  page's world, its window.trif.log reaches the app ("mod log"); a boxed mod with @powers click is held, doesn't
+  run, and runs after Allow. No app fixes were needed. New debug extra `trif.allow` (a mod id → approve).
+- mods.sh, worlds.sh PASS again; 33 unit tests pass.
 
 ## Next step
-Item 4, "style sections, boxed and free mods running" through the real reader: extend test/mods.sh (or a new
-running.sh) with a boxed mod (its trif.log reaches logcat "mod log", page.find works in the box), a free mod with a
-==Style== section (style from TRIF's world, the code in the page's world, trif.style values) on strict.html, and
-check the plan's free pair (reader.free) is what makes `trif` exist for free mods. Fix whatever doesn't run. Then
-holds (item 4's last): a mod with a power waiting → not running until `approve` (a debug extra for Allow).
+Item 5, the Mods tab: the shared mods.html / mods-page.js / panel in a WebView with an Android adapter for its
+messages (in place of the iPhone's WKScriptMessageHandler: read how the iPhone app loads it and what it posts,
+Mods tab in mobile/browser-probe/TrifProbe, Web/panel-adapter.js). Prove it with an emulator test: it lists the
+store's mods and switching one off stops it on the page. **Whenever** `mobile/shared/core` gains the mod store's
+rules (shared-core loop, rounds 3–4; check `ls mobile/shared/core` after the merge), first switch ModStore.kt to
+call them (as Swift's Core.swift calls TrifCore) and drop the Kotlin port, keeping ModStoreTest green.
 
 ## Notes for next round
+- running.sh (round 9) is the pattern for mod tests: `add` (trif.addMod, logs "add mod: <id> <tier> <world>
+  runs|held"), `extra trif.allow <id>` ("allow: <id> runs|held"), `call box …` reads `__trifSandbox.logs` (a
+  boxed mod's trif.log stays in the box, as on iPhone; only free mods' lines go to the app as "mod log").
+  A click power needs its target in the header (`// @click the close button: button.banner-close`), else
+  the reader refuses the mod. Mod ids are `localhost/<name-kebab>`.
 - Threads (round 8): ModStore is touched only on MainActivity's `work` executor (`work.execute { mods.… }`); its
   onChange posts the plan to the main thread (`showPlan`). JsModReader throws on the main thread. Startup: if
   `mods.needsReading` is false the plan and tabs go at once (scripts kept); else `started()` waits for the reader
@@ -149,6 +153,8 @@ holds (item 4's last): a mod with a power waiting → not running until `approve
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 9 (mods running): nothing to see or decide; no new words, no downloads. Boxed, free and style mods and
+  holds all work on Android as on iPhone, tested on a strict page.
 - Round 8 (the mod reader): nothing to see or decide; no new words, no new downloads beyond Google's Maven
   (androidx.javascriptengine). One storage difference from iPhone: Android keeps what the reader made of each mod
   in the mod's file, so the app opens without waiting about a second for the reader.

@@ -133,7 +133,8 @@ class MainActivity : Activity() {
      * A debug build's test hooks (tests: base64 in the extras, so adb's quoting can't spoil them):
      * `trif.testMods` = a list of mods as JSON (Scripts.planOf), put in as the mod store's will be;
      * `trif.addMod` = a mod file, read by the reader and added as pasted ("add mod: <id> <tier> <world> runs|held");
-     * `trif.call` = "world:code" (trif, box or page), run on the shown tab's page, its answer logged ("call: …").
+     * `trif.call` = "world:code" (trif, box or page), run on the shown tab's page, its answer logged ("call: …");
+     * `trif.allow` = a mod's id: Allow on its hold, as the Mods tab's button ("allow: <id> runs|held").
      */
     private fun debug(intent: Intent?) {
         if (intent == null || applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
@@ -146,13 +147,20 @@ class MainActivity : Activity() {
                 android.util.Log.i("TRIF", "add mod: " + (m?.let { "${it.id} ${it.tier} ${it.world} ${if (it.held) "held" else "runs"}" } ?: "error ${r.error}"))
             }
         }
+        b64("trif.allow")?.let { id ->
+            work.execute {
+                mods.approve(id)
+                val m = mods.mods.firstOrNull { it.id == id }
+                android.util.Log.i("TRIF", "allow: $id " + (m?.let { if (it.held) "held" else "runs" } ?: "no such mod"))
+            }
+        }
         b64("trif.call")?.let { c ->
             val world = c.substringBefore(':')
             browser.call(Scripts.world(world), c.substringAfter(':')) { a ->
                 android.util.Log.i("TRIF", "call: $world ${if (a.ok) "ok ${a.value}" else "error ${a.error}"}")
             }
         }
-        intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call"); intent.removeExtra("trif.addMod")
+        intent.removeExtra("trif.testMods"); intent.removeExtra("trif.call"); intent.removeExtra("trif.addMod"); intent.removeExtra("trif.allow")
     }
 
     /**

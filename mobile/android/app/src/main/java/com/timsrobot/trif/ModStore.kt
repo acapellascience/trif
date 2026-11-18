@@ -2,6 +2,7 @@ package com.timsrobot.trif
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -20,6 +21,9 @@ interface ModReader {
     fun check(text: String, file: String, site: String): String
     /** freePageScript and freeRelayScript, when the reader has them. */
     val free: Pair<String, String>? get() = null
+    /** A shared rule (mobile/shared/gen/core.js, `TrifCore.call(name, args)`: args a JSON array, the answer as JSON),
+     *  run where the reader runs; null when there's no answer (iPhone: Core.swift's call). */
+    fun core(name: String, args: String): String? = null
 }
 
 /**
@@ -184,7 +188,10 @@ class ModStore(
                 "edit", "computer" -> m.copy(on = old.on, newOff = old.newOff)
                 else -> m.copy(on = true, newOff = null)
             }
-            if (m.held && (!old.held || old.ran != null)) m = m.copy(ran = old.ran ?: RanVersion(old.code, old.script, old.world, old.at, old.styleScript))
+            when (ranAfter(m.held, old, restore = false)) {
+                "ran" -> m = m.copy(ran = old.ran)
+                "current" -> m = m.copy(ran = RanVersion(old.code, old.script, old.world, old.at, old.styleScript))
+            }
             list[i] = m
         } else {
             if (source == "import") m = m.copy(on = false, newOff = "import")
@@ -251,7 +258,7 @@ class ModStore(
     }
 
     /** Allow: what it waits for is allowed for it (a later version that needs nothing more runs without asking). */
-    fun approve(id: String) = update(id) { it.copy(allowed = allow(it.waiting, it.allowed), ran = null) }
+    fun approve(id: String) = update(id) { it.copy(allowed = holdsApprove(it), ran = null) }
 
     /** Don't allow a change on hold: the version before is back (this one kept in its history). A new mod: deleted. */
     fun reject(id: String) {
@@ -295,10 +302,44 @@ class ModStore(
         back = back.copy(on = cur.on, offSites = cur.offSites, source = cur.source, added = cur.added, newOff = cur.newOff,
             allowed = seeded(cur), history = listOf(ModVersion(stamp(), now(), cur.code, source)) + cur.history)
         back = back.copy(extraNeeds = changeNeeds(back, cur))
-        if (back.held && !cur.held) back = back.copy(ran = RanVersion(cur.code, cur.script, cur.world, cur.at, cur.styleScript))
+        back = back.copy(ran = if (ranAfter(back.held, cur, restore = true) == "current") RanVersion(cur.code, cur.script, cur.world, cur.at, cur.styleScript) else null)
         replace(id, back)
         return true
     }
+
+    // MARK: holds and Allow: the phones' shared rules (mobile/shared/core/mod-store.js, TrifCore.modStore), run where
+    // the reader runs (an add, an edit, a restore, Allow: not hot paths). `InstalledMod.waiting` stays a Kotlin twin, held
+    // to the same cases (ModStoreTest): `held` is asked of every mod for every page's plan. No answer (no reader): what
+    // iPhone's ModHolds does without its Core: nothing more allowed, a change asks about more, never less.
+
+    /** What the rules read of a mod (iPhone's InstalledMod.holdFacts). */
+    private fun facts(m: InstalledMod) = JSONObject().put("tier", m.tier).put("site", m.site).put("matches", JSONArray(m.matches))
+        .put("needs", JSONArray(m.needs.map(ModNeed::json))).put("extraNeeds", JSONArray(m.extraNeeds.map(ModNeed::json)))
+        .put("allowed", JSONObject().apply { m.allowed.forEach { (k, v) -> put(k, JSONArray(v)) } }).put("ran", m.ran != null)
+
+    private fun core(name: String, vararg args: Any): Any? {
+        val out = runCatching { reader?.core("modStore.$name", JSONArray(args.toList()).toString()) }.getOrNull() ?: return null
+        return runCatching { JSONTokener(out).nextValue() }.getOrNull()?.takeIf { it != JSONObject.NULL }
+    }
+    private fun allowedOf(v: Any?) = (v as? JSONObject)?.lists()
+
+    /** Allow: what the mod waits for, allowed for it. No answer: allowed as it was (it stays held). */
+    private fun holdsApprove(m: InstalledMod) = allowedOf(core("approve", facts(m))) ?: m.allowed
+
+    /** What a change asks about beyond its code's needs, judged against the version before. No answer: becoming a free
+     *  mod, and every @match if it can act. */
+    fun changeNeeds(m: InstalledMod, was: InstalledMod): List<ModNeed> =
+        (core("changeNeeds", facts(m), facts(was)) as? JSONArray)?.objects()?.map(ModNeed::of)
+            ?: ((if (m.tier == "free" && was.tier != "free") listOf(ModNeed("tier:free", "is now a free mod, so it can do anything the page can do")) else emptyList()) +
+                (if (m.needs.isEmpty()) emptyList() else m.matches.map { ModNeed("match:$it", "runs on $it, outside ${Site.of(was.site)}") }))
+
+    /** What the person had allowed plus what the version that ran already did. No answer: only what was allowed. */
+    fun seeded(old: InstalledMod) = allowedOf(core("seeded", facts(old))) ?: old.allowed
+
+    /** Which version runs while a change waits: "ran" (the one the version before kept), "current" (the version
+     *  before), or null. No answer: null (nothing runs until the person decides). */
+    private fun ranAfter(changeHeld: Boolean, old: InstalledMod, restore: Boolean) =
+        core("ranAfter", changeHeld, facts(old), if (restore) "restore" else "add") as? String
 
     private fun update(id: String, f: (InstalledMod) -> InstalledMod) {
         if (mods.none { it.id == id }) return
@@ -311,35 +352,6 @@ class ModStore(
     companion object {
         const val TRASH_DAYS = 30L
         const val DAY = 86_400_000L
-
-        fun allow(needs: List<ModNeed>, allowed: Map<String, List<String>>): Map<String, List<String>> {
-            val out = allowed.toMutableMap()
-            for (n in needs) out[n.key] = (out[n.key].orEmpty() + n.lines.orEmpty()).toSortedSet().toList()
-            return out
-        }
-
-        /** What a change asks about beyond its code's needs (held.js): a @match for another site, when the mod can do
-         *  something there (it has needs); and becoming a free mod. */
-        fun changeNeeds(m: InstalledMod, was: InstalledMod): List<ModNeed> {
-            val out = mutableListOf<ModNeed>()
-            if (m.tier == "free" && was.tier != "free") out += ModNeed("tier:free", "is now a free mod, so it can do anything the page can do")
-            if (m.needs.isNotEmpty() && !was.everywhere) {
-                val home = Site.of(was.site)
-                for (p in m.matches) {
-                    val host = if (p == "<all_urls>") "*" else p.substringAfter("://", "").substringBefore('/')
-                    if (host != "*" && Site.hostIsIn(host.replace("*.", ""), home)) continue
-                    out += ModNeed("match:$p", "runs on $p, outside $home")
-                }
-            }
-            return out
-        }
-
-        /** What the person had allowed, plus what the version that ran already did (its sites, its tier). */
-        fun seeded(old: InstalledMod): Map<String, List<String>> {
-            if (old.held) return old.allowed
-            val keys = old.matches.map { ModNeed("match:$it", "") } + (if (old.tier == "free") listOf(ModNeed("tier:free", "")) else emptyList())
-            return allow(keys + old.extraNeeds, old.allowed)
-        }
 
         /** The reader's answer (JSON) as the mod the app keeps, or why it can't be one (iPhone's ModStore.build). */
         fun build(out: String): Read {

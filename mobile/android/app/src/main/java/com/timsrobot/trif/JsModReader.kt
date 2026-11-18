@@ -21,7 +21,8 @@ import java.util.concurrent.TimeUnit
  * (149+, WebViewCheck) has it. [connect] answers null where it hasn't (the store then says "the mod reader didn't
  * start", as iPhone's does without its context).
  */
-class JsModReader private constructor(private val sandbox: JavaScriptSandbox, private val source: String) : ModReader {
+class JsModReader private constructor(private val sandbox: JavaScriptSandbox, private val source: String,
+                                      private val coreSource: String?) : ModReader {
     override val version: String = MessageDigest.getInstance("SHA-256").digest(source.toByteArray())
         .joinToString("") { "%02x".format(it) }
 
@@ -46,7 +47,11 @@ class JsModReader private constructor(private val sandbox: JavaScriptSandbox, pr
     private fun newIsolate(): JavaScriptIsolate {
         val p = IsolateStartupParameters()
         if (sandbox.isFeatureSupported(JavaScriptSandbox.JS_FEATURE_ISOLATE_MAX_HEAP_SIZE)) p.maxHeapSizeBytes = HEAP
-        return sandbox.createIsolate(p).also { it.evaluateJavaScriptAsync(source).get(TIMEOUT_S, TimeUnit.SECONDS) }
+        return sandbox.createIsolate(p).also { i ->
+            i.evaluateJavaScriptAsync(source).get(TIMEOUT_S, TimeUnit.SECONDS)
+            // (the shared rules beside it: TrifCore; a failure leaves the rules unanswered, not the reader)
+            coreSource?.let { c -> runCatching { i.evaluateJavaScriptAsync(c).get(TIMEOUT_S, TimeUnit.SECONDS) } }
+        }
     }
 
     private fun withInput(text: String, opts: JSONObject, call: String) =
@@ -65,6 +70,14 @@ class JsModReader private constructor(private val sandbox: JavaScriptSandbox, pr
         if (page.startsWith("(") && relay.startsWith("(")) page to relay else null
     }
 
+    /** A shared rule (gen/core.js, loaded beside mods.js): its answer as JSON, or null. */
+    override fun core(name: String, args: String): String? {
+        if (coreSource == null) return null
+        val out = eval("typeof TrifCore === 'object' ? '\\u0001' + TrifCore.call(${JSONObject.quote(name)}, ${JSONObject.quote(args)}) : 'none'")
+        // (a rule that threw answers its message instead, without the mark: no answer)
+        return out.takeIf { it.startsWith("\u0001") }?.substring(1)
+    }
+
     /** What changed from one text to another (helper/lib/diff.js), as JSON [{…}]. */
     fun diff(before: String, after: String): String =
         eval("globalThis.__a = ${JSONObject.quote(before)}; globalThis.__b = ${JSONObject.quote(after)}; JSON.stringify(__trifMods.lineDiff(__a, __b))")
@@ -78,14 +91,15 @@ class JsModReader private constructor(private val sandbox: JavaScriptSandbox, pr
         const val READ = "JSON.stringify((function () { const f = __trifMods.findMod(__input); return f ? __trifMods.readMod(f, __opts) : { error: 'there is no mod file (a ==WebMod== header) in it' }; })())"
         const val CHECK = "JSON.stringify(__trifMods.checkMod(__input, __opts))"
 
-        /** Starts the sandbox and loads mods.js (blocking: off the main thread); null when this phone can't. */
-        fun connect(context: Context, source: String): JsModReader? {
+        /** Starts the sandbox and loads mods.js and the shared rules (blocking: off the main thread); null when this
+         *  phone can't. */
+        fun connect(context: Context, source: String, core: String? = null): JsModReader? {
             if (!JavaScriptSandbox.isSupported()) return null
             return runCatching {
                 val t0 = System.nanoTime()
                 val s = JavaScriptSandbox.createConnectedInstanceAsync(context.applicationContext).get(TIMEOUT_S, TimeUnit.SECONDS)
                 val t1 = System.nanoTime()
-                JsModReader(s, source).also { r ->
+                JsModReader(s, source, core).also { r ->
                     check(r.eval("typeof __trifMods") == "object") { "mods.js didn't load" }
                     android.util.Log.i("TRIF", "mod reader: sandbox ${(t1 - t0) / 1_000_000} ms, mods.js ${(System.nanoTime() - t1) / 1_000_000} ms")
                 }

@@ -95,13 +95,14 @@ class MainActivity : Activity() {
         // every page gets is made again after each change. What the reader made of each mod is kept, so the tabs
         // start at once; only mods without it (or a new reader) wait for the reader, a few seconds at most.
         mods = ModStore(ModFiles(java.io.File(filesDir, "modstore"))).apply {
-            onChange = { val p = plan(); val paused = paused; runOnUiThread { showPlan(p, now = true); pausedChanged(paused) } }
+            onChange = { val p = plan(); val paused = paused; runOnUiThread { showPlan(p, now = true, pausing = paused != wasPaused); wasPaused = paused; pausedChanged(paused) } }
         }
+        wasPaused = mods.paused
         debug(intent)
-        if (!mods.needsReading) { showPlan(mods.plan(), now = true); started() }
         val t0 = System.nanoTime()
         work.execute {
-            val r = JsModReader.connect(this, assets.open("gen/mods.js").bufferedReader().use { it.readText() })
+            val asset = { n: String -> assets.open(n).bufferedReader().use { it.readText() } }
+            val r = JsModReader.connect(this, asset("gen/mods.js"), runCatching { asset("gen/core.js") }.getOrNull())
             reader = r
             mods.reader = r
             mods.reread()
@@ -110,6 +111,8 @@ class MainActivity : Activity() {
                 "${(System.nanoTime() - t0) / 1_000_000} ms")
             runOnUiThread { showPlan(p, now = true); started() }
         }
+        // (after the reader is queued on the store thread, so whatever the first link brings (a mod file) finds it)
+        if (!mods.needsReading) { showPlan(mods.plan(), now = true); started() }
         page.postDelayed(::started, 3000)
     }
 
@@ -120,9 +123,12 @@ class MainActivity : Activity() {
     private var testPlan: Scripts.Plan? = null
     private var tabsShown = false
 
-    /** The store's plan to every page (from any thread). */
-    private fun showPlan(p: Scripts.Plan, now: Boolean = false) {
-        val put = { if (testPlan == null && !isDestroyed) browser.plan = p }
+    /** Pause all mods as last put in (its change reloads the shown page even if it plays). */
+    private var wasPaused = false
+
+    /** The store's plan to every page (from any thread). `pausing`: Pause all mods or Resume did it. */
+    private fun showPlan(p: Scripts.Plan, now: Boolean = false, pausing: Boolean = false) {
+        val put = { if (testPlan == null && !isDestroyed) browser.put(p, evenPlaying = pausing) }
         if (now) put() else runOnUiThread(put)
     }
 
@@ -151,7 +157,7 @@ class MainActivity : Activity() {
     private fun debug(intent: Intent?) {
         if (intent == null || applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
         val b64 = { k: String -> intent.getStringExtra(k)?.let { String(android.util.Base64.decode(it, android.util.Base64.DEFAULT)) } }
-        b64("trif.testMods")?.let { testPlan = Scripts.planOf(it); browser.plan = testPlan!! }
+        b64("trif.testMods")?.let { testPlan = Scripts.planOf(it); browser.put(testPlan!!) }
         b64("trif.addMod")?.let { text ->
             work.execute {
                 val r = mods.read(text)
@@ -165,6 +171,9 @@ class MainActivity : Activity() {
                 val m = mods.mods.firstOrNull { it.id == id }
                 android.util.Log.i("TRIF", "allow: $id " + (m?.let { if (it.held) "held" else "runs" } ?: "no such mod"))
             }
+        }
+        b64("trif.pause")?.let { on ->
+            work.execute { mods.setPaused(on == "on"); android.util.Log.i("TRIF", "pause: ${if (mods.paused) "on" else "off"}") }
         }
         b64("trif.call")?.let { c ->
             val world = c.substringBefore(':')
@@ -251,11 +260,65 @@ class MainActivity : Activity() {
      * other scheme (javascript:, file:, intent:…) sent to it is ignored.
      */
     private fun open(intent: Intent?) {
+        files(intent)?.let { uris -> intent?.data = null; intent?.removeExtra(Intent.EXTRA_STREAM); importFiles(uris); return }
         val url = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data
             ?.takeIf { it.scheme == "http" || it.scheme == "https" }?.toString() ?: return
         intent.data = null
         showList(false)
         if (browser.current?.url == null) browser.go(url) else browser.newTab(url)
+    }
+
+    /** The files an intent brings: a file opened with TRIF (VIEW content:), or shared to it (SEND, SEND_MULTIPLE). */
+    private fun files(intent: Intent?): List<Uri>? {
+        intent ?: return null
+        val out = when (intent.action) {
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data?.takeIf { it.scheme == "content" })
+            Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java))
+            Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+            else -> emptyList()
+        }
+        return out.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Files opened in the app or shared to it (iPhone's importFiles): each mod imported (it starts off, and waits for
+     * an OK if its code can do more than change the page); what came in said, then the Mods tab on the mods. The
+     * status strip is UI layer: a toast says it for now. Zips and history exports: not yet.
+     */
+    private fun importFiles(uris: List<Uri>) {
+        val here = browser.current?.host ?: ""
+        work.execute {
+        val read = uris.map { u ->
+            val name = runCatching {
+                contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+            }.getOrNull() ?: u.lastPathSegment?.substringAfterLast('/') ?: "mod.js"
+            // (a mod is small: at most 2 MB read of each file)
+            name to runCatching { contentResolver.openInputStream(u)?.use { String(it.readNBytes(2 shl 20)) } }.getOrNull()
+        }
+            val added = mutableListOf<String>(); val said = mutableListOf<String>(); val skipped = mutableListOf<String>()
+            for ((name, text) in read) {
+                if (text == null || !name.lowercase().endsWith(".js")) { skipped += name; continue }
+                val r = mods.read(text, name, "", here)
+                val m = r.mod
+                if (m == null) { said += "Couldn't import $name: ${r.error ?: "no reason given"}"; continue }
+                val kept = mods.add(m, "import")
+                added += kept.name
+                android.util.Log.i("TRIF", "import: $name as ${kept.id}${if (kept.held) ", waiting for an OK" else ""}")
+            }
+            val one = added.size == 1
+            if (added.isNotEmpty()) said.add(0, "Imported ${if (one) "1 mod" else "${added.size} mods"}: ${added.joinToString(", ")}. " +
+                "Like any mod from outside, ${if (one) "it starts" else "they start"} off, and ${if (one) "waits" else "each waits"} " +
+                "for your OK if ${if (one) "its" else "its own"} code can do more than change the page.")
+            if (said.isEmpty()) said += if (skipped.isEmpty()) "Nothing to import there." else "Nothing TRIF can import there: ${skipped.take(5).joinToString(", ")}."
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                Toast.makeText(this, said.joinToString(" "), Toast.LENGTH_LONG).show()
+                android.util.Log.i("TRIF", "import said: ${said.joinToString(" ")}")
+                if (added.isNotEmpty()) showMods(true)
+            }
+        }
     }
 
     private fun toolButton(glyph: String, label: String, tap: () -> Unit) =

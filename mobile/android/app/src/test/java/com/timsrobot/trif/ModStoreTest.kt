@@ -31,6 +31,7 @@ class ModStoreTest {
         override fun check(text: String, file: String, site: String) =
             JSONObject().put("ok", !text.contains("broken")).toString()
         override val free = "P" to "R"
+        override fun core(name: String, args: String) = NodeCore.call(name, args)
     }
 
     private var clock = 1_000_000_000_000L
@@ -155,6 +156,29 @@ class ModStoreTest {
         assertTrue(s.mods.none { it.id == "a.com/N" }); assertEquals("a.com/N", s.trash[0].mod.id)
     }
 
+    /** The Kotlin twin of the shared `waiting` (asked of every mod for every plan) gives the shared cases' answers. */
+    @Test fun waitingTwinMatchesTheSharedCases() {
+        val cases = JSONObject(generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "mobile/shared/core/mod-store-cases.json") }.first { it.isFile }.readText())
+        val list = cases.getJSONArray("mods")
+        assertTrue(list.length() > 5)
+        for (i in 0 until list.length()) {
+            val c = list.getJSONArray(i)
+            val o = c.getJSONObject(0)
+            val m = InstalledMod.of(JSONObject(o.toString()).put("id", "x/y").put("name", "y").put("code", ""))
+            val want = c.getJSONArray(1).objects().map { it.getString("key") }
+            assertEquals("waiting $o", want, m.waiting.map { it.key })
+        }
+    }
+
+    /** Without the shared rules (no reader): Allow allows nothing more, so what waits still waits (as iPhone). */
+    @Test fun noRulesNoAllow() {
+        val s = store(object : ModReader by FakeReader() { override fun core(name: String, args: String): String? = null })
+        s.addText(mod("H", "tier" to "boxed", "needs" to need("power:net", "l1")))
+        s.approve("a.com/H")
+        assertTrue(s.mods[0].held)
+    }
+
     @Test fun deletingAndRecentlyDeleted() {
         val s = store()
         s.addText(mod("A")); s.addText(mod("B"))
@@ -254,6 +278,6 @@ class ModStoreTest {
         assertEquals("run(1)", r.script); assertFalse(r.held); assertEquals("restore", r.history[0].source)
         assertFalse(s.restore("a.com/E", "nope"))
         // (becoming a free mod asks)
-        assertEquals(listOf("tier:free"), ModStore.changeNeeds(r.copy(tier = "free", needs = emptyList()), r).map { it.key })
+        assertEquals(listOf("tier:free"), s.changeNeeds(r.copy(tier = "free", needs = emptyList()), r).map { it.key })
     }
 }

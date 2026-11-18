@@ -15,9 +15,10 @@ import org.json.JSONTokener
  * world at the page's start or end; the app's message object `trifApp` in TRIF's world and the box (never the
  * page's: a page could post to it); TRIF's world's posts (window.webkit.messageHandlers.trif) to `onPost`; and
  * `call`, code run in a world with its answer back (iPhone's callAsyncJavaScript(in:)).
- * Only the main frame's messages count: the scripts run there only.
+ * Only the main frame's messages count (the scripts run there only), but for `playingWatch` (js/playing-watch.js), put
+ * in TRIF's world of every frame for good: each frame's "playing" / "not playing", so [playing] says if the page plays.
  */
-class Worlds(private val web: WebView, private val onPost: (JSONObject) -> Any?) {
+class Worlds(private val web: WebView, playingWatch: String, private val onPost: (JSONObject) -> Any?) {
     private val main = Handler(Looper.getMainLooper())
     private val world = Scripts.World.entries.associateWith {
         WebViewCompat.getExecutionWorld(web, if (it == Scripts.World.PAGE) JavaScriptExecutionWorld.PAGE_WORLD_NAME else it.id)
@@ -27,15 +28,31 @@ class Worlds(private val web: WebView, private val onPost: (JSONObject) -> Any?)
     private val back = mutableMapOf<Scripts.World, JavaScriptReplyProxy>()
     private val waiting = mutableMapOf<Int, (Answer) -> Unit>()
     private var n = 0
+    /** The page's frames (this page load's) that say they play sound. */
+    private val playingFrames = mutableSetOf<String>()
+    /** The page plays sound (a video or audio not muted, in any of its frames): a change to the mods doesn't reload it. */
+    val playing get() = playingFrames.isNotEmpty()
 
     data class Answer(val ok: Boolean, val value: Any?, val error: String?)
 
     init {
         for (w in listOf(Scripts.World.TRIF, Scripts.World.BOX)) {
             WebViewCompat.addWebMessageListener(web, "trifApp", ANY, world.getValue(w)) { _, message, _, isMain, reply ->
-                if (isMain) message.data?.let { heard(w, it, reply) }
+                val data = message.data ?: return@addWebMessageListener
+                if (isMain) heard(w, data, reply) else if (w == Scripts.World.TRIF) heardPlaying(data)
             }
         }
+        WebViewCompat.addJavaScriptOnEvent(web, playingWatch, WebViewCompat.INJECTION_EVENT_DOCUMENT_START, ANY, world.getValue(Scripts.World.TRIF))
+    }
+
+    /** A new page in the main frame: none of its frames has said it plays yet. */
+    fun newPage() = playingFrames.clear()
+
+    private fun heardPlaying(data: String): Boolean {
+        val m = runCatching { JSONObject(data) }.getOrNull()?.takeIf { it.has("playing") } ?: return false
+        val frame = m.optString("frame").take(40)
+        if (m.optBoolean("playing")) playingFrames += frame else playingFrames -= frame
+        return true
     }
 
     /** Puts in `list` in place of what's there (for the next page loaded). */
@@ -51,6 +68,7 @@ class Worlds(private val web: WebView, private val onPost: (JSONObject) -> Any?)
     private fun heard(w: Scripts.World, data: String, reply: JavaScriptReplyProxy) {
         val m = runCatching { JSONObject(data) }.getOrNull() ?: return
         when {
+            w == Scripts.World.TRIF && heardPlaying(data) -> {}
             m.has("hello") -> back[w] = reply
             m.has("reply") -> waiting.remove(m.optInt("reply"))?.invoke(
                 Answer(m.optBoolean("ok"), m.opt("value"), m.optString("error").takeIf { !m.optBoolean("ok") }))

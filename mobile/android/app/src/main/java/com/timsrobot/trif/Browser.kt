@@ -234,17 +234,30 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
     fun text(name: String) = texts.getOrPut(name) { context.assets.open(name).bufferedReader().use { it.readText() } }
     /** What the mods put in (the mod store's, once there is one; a debug build's test mods until then). */
     var plan = Scripts.Plan()
-        set(p) { field = p; scripts = null; tabs.forEach { t -> t.worlds?.install(scripts()) }; current?.let(::reloadIfStale) }
+        private set
+
+    /** The plan put in every page; the shown tab loads again if what runs there changed ([reloadIfStale]).
+     *  `evenPlaying`: even if it plays (Pause all mods, or Resume: the person's own act on it). */
+    fun put(p: Scripts.Plan, evenPlaying: Boolean = false) {
+        plan = p
+        scripts = null
+        tabs.forEach { t -> t.worlds?.install(scripts()) }
+        current?.let { reloadIfStale(it, evenPlaying) }
+    }
 
     /**
-     * `tab` (shown) loaded again if the mods that run on its page under the plan now aren't the ones it loaded with
-     * (iPhone's refreshIfStale; docs/MOBILE-BEHAVIOUR.md "Which tabs load again"). Not ported yet: iPhone's
-     * exception for a page that's playing (it comes with background play).
+     * `tab` (shown) loaded again if the mods that run on its page under the plan now aren't the ones it loaded with,
+     * unless it's playing sound: then it keeps going as it is, and loads again the next time it's shown not playing
+     * (iPhone's refreshIfStale; docs/MOBILE-BEHAVIOUR.md "Which tabs load again").
      */
-    private fun reloadIfStale(tab: Tab) {
+    private fun reloadIfStale(tab: Tab, evenPlaying: Boolean = false) {
         val url = tab.loadedUrl ?: return
         val wv = tab.web ?: return
         if (wv.url == null || plan.signature(url) == tab.loadedSig) return
+        if (!evenPlaying && tab.worlds?.playing == true) {
+            log("mods", "${Uri.parse(url).host}: its mods changed but it's playing, so not loaded again now")
+            return
+        }
         log("mods", "${Uri.parse(url).host}: its mods changed, loading it again")
         wv.reload()
     }
@@ -289,7 +302,7 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
 
     private fun makeWebView(tab: Tab): WebView = WebView(context).apply {
         // (the worlds and their scripts before anything loads)
-        tab.worlds = Worlds(this, ::message).also { it.install(scripts()) }
+        tab.worlds = Worlds(this, text("js/playing-watch.js"), ::message).also { it.install(scripts()) }
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         // (real windows: onCreateWindow below; only from a tap, as in the probe's passing sign-ins)
@@ -301,7 +314,7 @@ class Browser(private val context: Context, private val changed: () -> Unit) {
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = takeLink(tab, view, request)
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                tab.askedThisLoad = false; tab.droppedLine = null
+                tab.askedThisLoad = false; tab.droppedLine = null; tab.worlds?.newPage()
                 tab.loadedUrl = url; tab.loading = true; tab.finishedAt = null
                 tab.loadedSig = url?.let(plan::signature); tab.loadedIds = url?.let { u -> plan.runningOn(u).map { it.id }.toSet() }
                 if (tab === current) pageChanged?.invoke()

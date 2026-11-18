@@ -23,3 +23,4 @@ app/src/main/res/values/strings.xml.
 | The Mods tab's buttons | ⋯ (More) · Done | iPhone |
 | The Mods tab's ⋯ menu | Pause all mods · Resume mods | iPhone (Send diagnostics… comes with diagnostics; Import mod… and Export with item 6) |
 | The Mods tab's page itself (rows, tiers, cards, Recently deleted…) | the iPhone app's own page (mods.html / mods-page.js), its words as they are | iPhone. One says "iPhone": "Can't run here on iPhone: this page didn't let it start." (a free mod a page refuses): see For Tim in PROGRESS.md |
+| After a mod file is opened with / shared to TRIF (a toast for now; iPhone's status strip is UI layer) | Imported 1 mod: {name}. Like any mod from outside, it starts off, and waits for your OK if its code can do more than change the page. (Imported {n} mods: … they start off, and each waits … its own …) · Couldn't import {file}: {why} · Nothing to import there. · Nothing TRIF can import there: {files}. | iPhone (importFiles) |

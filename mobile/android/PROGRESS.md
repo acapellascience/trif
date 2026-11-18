@@ -61,34 +61,46 @@ mobile/shared/core → gen/core.js (`TrifCore`: shared rules such as the link po
    js/webkit-bridge.js as `webkit.messageHandlers.app`; state = `ModsState.kt` (iPhone's modsState); a changed plan
    loads the shown tab again when what runs there changed (`Browser.reloadIfStale`, iPhone's refreshIfStale)
 6. Getting mods in
-   - [ ] "Add this mod?" for a pasted mod, a .js file opened with/shared to the app
-   - [ ] import of desktop exports
+   - [x] a .js file opened with / shared to the app (round 11: imported as iPhone's importFiles, off at first; iPhone's
+     words in a toast for now (the status strip is UI layer); the Mods tab opens; test/import.sh)
+   - [ ] "Add this mod?" for a pasted mod (SEND text/plain with ==WebMod==; iPhone's offer(text:) + ModOfferView)
+   - [ ] import of desktop exports (zips, folders, history exports; the Mods tab's Import mod… = ACTION_OPEN_DOCUMENT;
+     Export / Export all for a site)
 7. Tests
    - [ ] unit tests for Kotlin logic (ongoing, one per piece)
    - [ ] emulator tests, headless, with mobile/shared/pages: style mod (mods.sh), boxed mod, free mod's style
      section, held mod (running.sh), popup sign-in stand-in (popups.sh), the Mods tab lists / switches / deletes /
      restores (modstab.sh) all PASS; screenshots in mobile/android/shots/ (not committed)
 
-## Done this round (round 10, 2026-11-18)
-- Merged origin/ios-poc (shared core round 3: quick-ask.js, site.js; still no mod store rules in core).
-- Item 5, the Mods tab: `ModsPanel.kt` (the page, its messages: state, enable, group, delete, undoDelete,
-  restoreDeleted, approve, reject, code, diff, history, historyCode/Diff, restore, check, save, undoEdit, copy,
-  resume), `ModsState.kt` (pure; iPhone's modsState incl. running / errors / starting / nextLoad / cant), a Mods
-  button and a sheet (Mods on {site}, ⋯ Pause all mods / Resume mods, Done; Back closes it).
-- `Scripts.Plan.One` carries matches/excludes, `Plan.signature(url)`: tabs load again when their mods changed.
-- New test/modstab.sh PASS (lists both mods, page says both running, a real tap on a switch → off in the store,
-  page reloads, mod gone, other kept; on again; bin → Recently deleted → Restore; Done). All 7 older emulator tests
-  PASS again; unit tests 37 (4 new in ModsStateTest).
+## Done this round (round 11, 2026-11-18)
+- Merged origin/ios-poc (shared core round 4: core/mod-store.js). ModStore's holds now call it (`TrifCore.modStore`
+  allow/approve/changeNeeds/seeded/ranAfter, gen/core.js loaded beside mods.js in the reader's isolate,
+  `ModReader.core`); `waiting` stays a Kotlin twin, tested against mod-store-cases.json; no answer = iPhone's fallbacks.
+- "Never reload a page that's playing": js/playing-watch.js (TRIF's world, every frame) tells the app; reloadIfStale
+  skips a playing tab; Pause all / Resume reload even so. test/playing.sh PASS.
+- .js files opened with / shared to TRIF are imported (test/import.sh PASS). Unit tests 39 (ModStoreTest via Node);
+  emulator: running, modstab, mods, startup, tabs, worlds, playing, import PASS.
 
 ## Next step
-Item 6, getting mods in: "Add this mod?" (plain, native) for a pasted mod and for a .js file opened with or shared
-to TRIF (ACTION_VIEW / ACTION_SEND intent filters for text/javascript and text/plain; read through the reader,
-added with source "pasted"/"import"; iPhone: Import.swift, ModOfferView), and the Mods tab's Import mod… (the page
-posts `import`: answer it with the system file picker, ACTION_OPEN_DOCUMENT) + desktop exports (read Import.swift
-for the export's shape). Export / Export all mods for a site (share sheet, a FileProvider) fit there too. Then
-the file route lets tests add big mods (am extras stop at ~93 KB).
+Item 6 continued: "Add this mod?" for a pasted mod: SEND text/plain with ==WebMod== (and the clipboard, if the iPhone's
+paste route has a place on Android), read with `mods.readNamed(text, here)`, cameFrom = the shown site; a plain native
+sheet with ModOfferView's words (Mods.swift `struct ModOfferView`: name, tier name, description, the other-site warning,
+Runs on, Asks for these powers, the findings, the free-mod warning, Add it · Cancel, Its code). Then the Mods tab's
+Import mod… / Export, zips and desktop exports.
 
 ## Notes for next round
+- Shared core (round 11): `ModReader.core(name, argsJson)` runs `TrifCore.call` (gen/core.js, loaded into the
+  reader's isolate after mods.js; JsModReader marks answers with \u0001 to tell them from a thrown message). JVM tests
+  run the same file in Node (test/NodeCore.kt: one `node` process, found on PATH / NVM_BIN / ~/.nvm / Homebrew).
+  Port further core rules the same way: Kotlin calls `core(…)` with iPhone's fallback for no answer.
+- Playing (round 11): `Worlds.playing` = any frame's TRIF world said it plays (a media element playing, not muted);
+  cleared at each main-frame onPageStarted. `Browser.put(plan, evenPlaying)` replaces the old `plan =` setter;
+  MainActivity passes evenPlaying when `paused` changed. Debug extra `trif.pause` on|off → "pause: on|off".
+  An emulator with -no-audio still plays <audio> (a tap starts it: mediaPlaybackRequiresUserGesture is on).
+- Import (round 11): `MainActivity.importFiles` on the store thread; onCreate now queues the reader before
+  `started()`, so a file in the launching intent finds it. Tests feed files through the media store
+  (content://media/external/file/<id>; am grants -d only, so SEND tests pass the uri as -d too; am can't send
+  SEND_MULTIPLE's uri list).
 - Mods tab (round 10): `ModsPanel` is made on first use (MainActivity.showMods) and kept; `shown` gates asking the
   page; `pageChanged` (Browser.pageChanged, the shown tab started/finished) refreshes it. It doesn't ask the page while
   the tab is loading (calls to the page being replaced go unanswered: 2 s lost). Debug extra `trif.panel` = code run in
@@ -98,7 +110,7 @@ the file route lets tests add big mods (am extras stop at ~93 KB).
 - Reload when mods change (round 10): each tab records at onPageStarted its url, `plan.signature(url)` and the ids
   that run (`loadedIds`, for the tab's nextLoad); `Browser.plan = …` and `select` reload the shown tab when the
   signature there changed. So `trif.addMod` now reloads the shown page by itself (tests still `open` again: harmless).
-  Not ported: iPhone's "not while playing" exception (comes with background play).
+  A playing tab isn't reloaded (round 11, Worlds.playing).
 - uiautomator: WebView content is in the dump (text="Outlined"; the panel's switches are class android.widget.Switch).
   Borderless Buttons are all caps unless `isAllCaps = false` (Mods, Done have it).
 - running.sh (round 9) is the pattern for mod tests: `add` (trif.addMod, logs "add mod: <id> <tier> <world>
@@ -171,6 +183,9 @@ the file route lets tests add big mods (am extras stop at ~93 KB).
 - A WebView swapped into the page takes the focus from the field (else the field keeps focus and stops updating).
 
 ## For Tim
+- Round 11: nothing new to decide. Mod files opened with or shared to TRIF are imported with the iPhone's words
+  (said in a small pop-up note for now; the iPhone's status strip comes with the UI layer). Mod changes no longer
+  reload a page playing sound, as on iPhone. The "Can't run here on iPhone" line is left as you asked.
 - Round 10 (the Mods tab): it's the iPhone's own Mods page, unchanged, in a sheet with Mods on {site}, ⋯ and Done.
   No new words (all iPhone's; STRINGS.md lists them). One shared line names iPhone: a free mod a page won't let start
   says "Can't run here on iPhone: this page didn't let it start." (mods-page.js, ios-poc's file, so I left it). Fine to

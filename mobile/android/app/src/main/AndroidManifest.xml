@@ -24,6 +24,24 @@
                 <data android:scheme="http" />
                 <data android:scheme="https" />
             </intent-filter>
+            <!-- A mod file (.js) opened with TRIF or shared to it: imported (MainActivity.importFiles, as iPhone's
+                 importFiles: it starts off, held if its code can do more than change the page). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/javascript" />
+                <data android:mimeType="application/javascript" />
+                <data android:mimeType="application/x-javascript" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/javascript" />
+                <data android:mimeType="application/javascript" />
+                <data android:mimeType="application/x-javascript" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

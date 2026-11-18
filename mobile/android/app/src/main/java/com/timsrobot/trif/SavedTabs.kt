@@ -56,6 +56,13 @@ data class SavedTabs(val tabs: List<One>, val selected: String?) {
 object TabOrder {
     fun insertAt(current: Int, count: Int): Int = if (current in 0 until count) current + 1 else count
 
-    /** After closing the tab at [closed] (of [count] before closing): the index to show, or -1 for "make a new tab". */
-    fun afterClose(closed: Int, count: Int): Int = if (count <= 1) -1 else minOf(closed, count - 2)
+    /**
+     * After closing the tab at [closed] (of [count] before closing): the index to show, or -1 for "make a new tab".
+     * [opener] (its index before closing, else -1): a window the page closed itself goes back to its opener.
+     */
+    fun afterClose(closed: Int, count: Int, opener: Int = -1): Int = when {
+        count <= 1 -> -1
+        opener in 0 until count && opener != closed -> if (opener > closed) opener - 1 else opener
+        else -> minOf(closed, count - 2)
+    }
 }

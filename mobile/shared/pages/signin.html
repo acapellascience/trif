@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign-in stand-in</title>
+<body style="font: 18px sans-serif; margin: 16px">
+<!-- A stand-in for "Continue with Google": a tap opens the sign-in in a window of its own on another origin
+     (signin-popup.html, served on the next port), which hands the result back to this page through
+     window.opener and closes itself, as accounts.google.com/gsi/transform does. Also: a target=_blank link,
+     and a window.open as the page loads, with no tap behind it, which a browser blocks. (A tap lets a page open
+     a window for a few seconds after it, in Chromium 5 s, so a delayed open after a tap isn't a test of this.) -->
+<h2 id="state">Signed out</h2>
+<p><button id="go" style="font-size: 20px; padding: 12px">Continue with Stand-in</button></p>
+<p><a id="blank" href="plain.html" target="_blank" style="font-size: 20px">Plain page in a new window</a></p>
+<p id="note"></p>
+<script>
+  const other = location.protocol + '//127.0.0.1:' + (Number(location.port) + 1) + '/signin-popup.html';
+  document.getElementById('go').onclick = () => { window.open(other, 'signin', 'width=500,height=600'); };
+  const w = window.open('plain.html');
+  document.getElementById('note').textContent = w ? 'untapped window opened' : 'untapped window blocked';
+  addEventListener('message', (e) => {
+    if (e.data && e.data.signedIn) {
+      document.getElementById('state').textContent = 'Signed in as ' + e.data.signedIn;
+      document.title = 'Signed in';
+    }
+  });
+</script>

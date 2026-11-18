@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stand-in sign-in window</title>
+<body style="font: 18px sans-serif; margin: 16px">
+<!-- signin.html's window: Choose hands the account to the page that opened it, then closes this window. -->
+<h2 id="who">Choose an account</h2>
+<p><button id="pick" style="font-size: 20px; padding: 12px">Test Person</button></p>
+<script>
+  document.getElementById('who').textContent = window.opener ? 'Choose an account' : 'No opener';
+  document.getElementById('pick').onclick = () => {
+    window.opener.postMessage({ signedIn: 'Test Person' }, '*');
+    window.close();
+  };
+</script>

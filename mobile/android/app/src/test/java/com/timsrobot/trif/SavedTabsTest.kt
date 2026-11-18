@@ -50,4 +50,15 @@ class SavedTabsTest {
         assertEquals(1, TabOrder.afterClose(2, 3))
         assertEquals(1, TabOrder.afterClose(1, 3))
     }
+
+    @Test fun aClosedWindowGoesBackToItsOpener() {
+        // opener 0, window 1, another tab 2: back to 0, not 2
+        assertEquals(0, TabOrder.afterClose(1, 3, opener = 0))
+        // opener after the window (moved): its index shifts down by one
+        assertEquals(1, TabOrder.afterClose(0, 3, opener = 2))
+        // opener gone or none: the usual
+        assertEquals(1, TabOrder.afterClose(1, 3, opener = -1))
+        assertEquals(1, TabOrder.afterClose(1, 3, opener = 7))
+        assertEquals(-1, TabOrder.afterClose(0, 1, opener = 0))
+    }
 }

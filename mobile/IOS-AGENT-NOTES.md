@@ -136,7 +136,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   server keeps them; the app drops the query on resume, hence the k-). Message words: "full code" (a free mod setting
   html[data-standin-free] to the ask words), "broken" (rules not valid JSON), "everywhere" (@match *://*/*), "modid <x>"
   (an @id line: updates), "long" (12 paragraphs before the mod; with "wait N"); "two" now puts the ask words in the
-  second mod too.
+  second mod too. mock-api.js: "ask <words>" in the first message goes into its mod's CSS as a comment (the matrix's A6:
+  More's Claude API engine, key set by paneljs key.set, #agent chosen by script).
 - What the browser says it is: serve.js's `/agent` (`?nometa`: no width=device-width viewport): the user agent sent,
   navigator's, platform, width; `window.__agent` for pagejs. localhost vs 127.0.0.1 are two sites.
 - Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner).
@@ -301,6 +302,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   robotDown still set (a cancelled touch: stop = interrupt, words kept), scenePhase leaving .active, SpeechInput's
   phase leaving listening/finishing (SpeechInput stopped it itself: UI state only). robotPress calls
   `SpeechInput.lookAhead()` at touch-down.
+- The done banner when the reply's mod couldn't be read (11-19, the matrix's C7): Browser.offerFromChat keeps
+  `lastUnreadable` (why, when none of a hand-over could be read); handleDone passes it to `banner(unreadable:)`;
+  ChatBanner.unreadable → "{Service}'s mod for {site} can't be added" · Open chat, kept until closed (draft words).
 - ToolbarWatch.swift (11-18, Tim's dead toolbar): `WindowTouchWatch` (a do-nothing recognizer on every window, as
   TouchWatch) hands every touch to `ToolbarWatch.saw`; each toolbar button reports its frame and enabled state
   (`WatchSlot`) and calls `fired(name)` in its action. A short tap on an enabled button whose action didn't run in

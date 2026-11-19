@@ -250,6 +250,33 @@ add('A4', 'start', 'Voice (the robot held, a recording as the microphone): the s
 
 add('A5', 'start', 'The Mods sheet\'s "make a mod"', async () => ['BLOCKED', 'there is no such entry in the Mods tab (its empty state says to open the chat); the robot\'s list (Go to chat, the box) is the page\'s way in']);
 
+add('A6', 'start', 'More (the Claude API engine, against mobile/mock-api.js): a quick ask sent directly, the style mod added at once', async () => {
+  const mock = spawn(process.execPath, [path.join(__dirname, '..', 'mock-api.js'), '8379'], { stdio: 'ignore' });
+  servers.push(mock);
+  await sleep(800);
+  await launch(['-apibase', 'http://localhost:8379']);
+  await step({ select: 0 });
+  await step({ more: true });
+  await step({ sheet: 'chat' });
+  await sleep(3500);
+  const k = await step({ paneljs: `window.webkit.messageHandlers.panel.postMessage({ type: 'key.set', engine: 'claude-api', key: 'sk-test-not-a-real-key' });
+    await new Promise((r) => setTimeout(r, 600)); const b = document.getElementById('settings-btn'); if (b) { b.click(); await new Promise((r) => setTimeout(r, 400)); b.click(); }
+    await new Promise((r) => setTimeout(r, 800)); const a = document.getElementById('agent'); if (!a) return 'no #agent';
+    a.value = 'claude-api'; a.dispatchEvent(new Event('change', { bubbles: true })); await new Promise((r) => setTimeout(r, 600)); return a.value;` });
+  await step({ closechat: 1 });
+  const label = await step({ enginelabel: 1 });
+  await step({ quick: words('A6') });
+  const done = await until(async () => { const s = await step({ quickstate: 1 }); return { ok: /done|card|failed/i.test(s), s }; }, 45000, 1000);
+  const ran = (await until(async () => ({ ok: await runsHere(`${TAG} A6`) }), 10000)).ok;
+  shot('A6-more-done');
+  const qh = (await modlist('localhost')).find((m) => m.id === 'localhost/quieter-headings');
+  if (qh) await step({ panelmsg: { type: 'delete', id: qh.id } });
+  await step({ more: false });
+  await launch();
+  mock.kill();
+  return [/done/i.test(done.s || '') && ran ? 'PASS' : 'FAIL', `agent ${k}; ${label}; ${(done.s || '').slice(0, 140)}; runs ${ran}`];
+});
+
 add('B2', 'where', 'Arrives while on another tab of the same site: offered there at once', async () => {
   const r = await ask(words('B2', 'wait 8'));
   if (!r.ok) return ['FAIL', `send: ${r.why}`];

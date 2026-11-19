@@ -28,19 +28,22 @@ const KEYS = [FAKE_KEY, NO_CREDITS, SILENT];
 const OPENROUTER = (() => { try { return require('./test/openrouter-models.json'); } catch { return null; } })();
 const SIGNATURE = 'mock-signature-1';
 
-function modFor(origin) {
-  return `// ==WebMod==\n// @name        Quieter headings\n// @description Makes the main heading grey (from the mock API)\n// @match       ${origin}/*\n// @style\n// ==/WebMod==\n{\n  "css": "h1 { color: #777 !important }",\n  "hide": ["#siteNotice"]\n}\n`;
+// ("ask <words>" in the first message (the mod matrix, 11-19): those words in its CSS as a comment, so each run's mod is
+// code of its own, never skipped as offered before)
+function modFor(origin, said = '') {
+  const asked = ((String(said).match(/ask ([\w ]{1,40})/i) || [])[1] || '').trim();
+  return `// ==WebMod==\n// @name        Quieter headings\n// @description Makes the main heading grey (from the mock API)\n// @match       ${origin}/*\n// @style\n// ==/WebMod==\n{\n  "css": "h1 { color: #777 !important }${asked ? ` /* ${asked} */` : ''}",\n  "hide": ["#siteNotice"]\n}\n`;
 }
 const originOf = (text) => ((String(text).match(/https?:\/\/[^\s/)]+/) || [])[0] || 'https://example.com');
 
 /** What the script says next, from what's been said: { tool: [name, input] } or { text }. */
 function next({ firstUser, results, hasTools }) {
   const origin = originOf(firstUser);
-  if (!hasTools || /no tools/i.test(firstUser)) return { text: `Here is a mod:\n\n\`\`\`js\n${modFor(origin)}\`\`\`\n` };
+  if (!hasTools || /no tools/i.test(firstUser)) return { text: `Here is a mod:\n\n\`\`\`js\n${modFor(origin, firstUser)}\`\`\`\n` };
   if (/loop/i.test(firstUser)) return { tool: ['read_page', { selector: `h${(results.length % 6) + 1}` }] };
   if (results.length === 0) return { tool: ['read_page', { selector: 'h1' }] };
-  if (results.length === 1) return { tool: ['try_mod', { code: modFor(origin) }] };
-  return { text: `I tried it on the page: the heading matched. Here it is:\n\n\`\`\`js\n${modFor(origin)}\`\`\`\n` };
+  if (results.length === 1) return { tool: ['try_mod', { code: modFor(origin, firstUser) }] };
+  return { text: `I tried it on the page: the heading matched. Here it is:\n\n\`\`\`js\n${modFor(origin, firstUser)}\`\`\`\n` };
 }
 
 const send = (res, events, slow = false) => {

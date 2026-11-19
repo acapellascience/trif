@@ -1,11 +1,11 @@
 {
-  "version": "0.3.0",
-  "published": "2026-11-15",
-  "signed": "2026-11-15T07:01:39.760Z",
-  "notes": "- **Three kinds of mods.** Style mods only change how a page looks; boxed mods run in TRIF's sandbox and do only what you allow; free mods can do anything. Most of Tim's mods are now style or boxed.\n- **TRIF asks for each site**, not every site at once. Block a site to keep TRIF away; sensitive sites, like email and banking, start blocked.\n- **Safer agents.** A mod that can post or send for you waits for your OK, and a tab your agent ran code in can't post as you until it reloads.\n- **Mods from outside your chat start off**, Tim's too, until you turn them on.\n- **Every mod's code and history**, with Restore; export, import, and mods that break offer a fix.\n\n[All of what's new in 0.3.0](https://github.com/acapellascience/trif/releases/tag/v0.3.0)",
+  "version": "0.3.1",
+  "published": "2026-11-19",
+  "signed": "2026-11-19T00:01:43.126Z",
+  "notes": "- **Style mods make every replacement**, not just the first one.\n- **Your agent stops what it hides**: something that keeps playing or loading, like a live preview, is stopped instead of left running out of sight.\n- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.\n- **Claude Code runs on Opus** when you haven't picked a model, and the panel says \"Opus (default)\".\n- **A paused tab works after your agent reloads it**: the site's own requests go through again.\n\n[All of what's new in 0.3.1](https://github.com/acapellascience/trif/releases/tag/v0.3.1)",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.3.0/timsrobot-0.3.0.tgz",
-    "sha256": "f4dacf736d725214b6dfdc2bf7d2c9872ffb0b38547a8f2260cf49369b92179e",
-    "size": 2572834
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.3.1/timsrobot-0.3.1.tgz",
+    "sha256": "4a9442f59732fce1481d91224dea1b0f558d11c7472d2f8ba3298c0994625fac",
+    "size": 2552419
   }
 }

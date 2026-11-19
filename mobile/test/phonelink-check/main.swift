@@ -318,6 +318,41 @@ if args.count > 1, args[1] == "syncunit" {
         expect(got.suffix(2) == ["front ok", "now ok"], "the person's during one waits and keeps its reason: \(got)")
     }
 
+    // the app's launch (Tim's phone, 11-19, 7 s after launch: "not synced (nudge): busy one sync a second"): the
+    // front sync's begin reaches the computer only once the link is found (0.8 s of the 1.2 s gap; here all scaled
+    // by 1/4), and the computer's nudge comes while that sync runs, or just after it. The nudge's sync begins a gap
+    // after the front sync's answer, so the computer's second (counted from the begin it got) is over: nothing
+    // refused, nothing tried again, nothing said
+    for nudgeAt in ["during", "after"] {
+        var lastBegin = -100.0, busy = 0, begins = 0, linkOpen = false
+        var reported: [String] = [], ended: [String] = []
+        weak var schRef: PhoneSync.Scheduler?
+        let clock = { ProcessInfo.processInfo.systemUptime }
+        let sch = PhoneSync.Scheduler(changeDelay: 0.75, gap: 0.3, files: { [:] }) { done in
+            let connect = linkOpen ? 0.0 : 0.2 // (Bonjour, the handshake, hello)
+            DispatchQueue.main.asyncAfter(deadline: .now() + connect) {
+                linkOpen = true
+                let now = clock()
+                begins += 1
+                if now - lastBegin < 0.25 { busy += 1; return done(.failure(.init(code: "busy", message: "one sync a second"))) }
+                lastBegin = now
+                let first = begins == 1
+                if first && nudgeAt == "during" { DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { schRef?.now("nudge") } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+                    done(.success(.init()))
+                    if first && nudgeAt == "after" { DispatchQueue.main.async { schRef?.now("nudge") } }
+                }
+            }
+        }
+        schRef = sch
+        sch.finished = { r, why in ended.append(why); if case .failure(let f) = r { reported.append("\(why): \(f.code)") } }
+        sch.now("front")
+        wait { ended.count == 2 }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        expect(reported.isEmpty && ended == ["front", "nudge"], "launch, the nudge \(nudgeAt) the front sync: both synced, nothing said: \(ended) \(reported)")
+        expect(busy == 0 && sch.retried == 0, "launch, the nudge \(nudgeAt) the front sync: its begin past the computer's second: \(busy) refused, \(sch.retried) tried again")
+    }
+
     // the toast's pill (Tim, 11-19: swiped up and away, or a tap; smaller, shorter, never over the top bar)
     do {
         let se = ToastPill.place(safeTop: 20)
@@ -516,6 +551,8 @@ if args.count > 3, args[1] == "pair" {
 //   run <site> <prompt>   run.start for https://<site>/home with a page copy and a small JPEG
 //   drop                  the connection lost as a suspended app loses it (no reconnection until `wake`)
 //   wake                  reconnect now (run.resume for the followed runs)
+//   keep on|off           keepOpen (the app active / in the background): kept open with nothing using it, found
+//                         again quietly after a drop (keepRetry 0.2, 0.4, 0.8 s here)
 //   close                 the app closed (PhoneLinkRemote.close: the computer keeps the runs)
 //   reopen                a new PhoneLinkRemote with the same keys, connected ("hello …")
 //   pickup                pickUp for each of its hello's pending runs ("pending <chat> done <bool>")
@@ -598,6 +635,7 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
         let r = PhoneLinkRemote(keys: keys, phoneName: "Check phone", device: ["name": "iPhone", "width": 375, "height": 667], app: "check", endpoints: at,
                                 defaults: shownStore)
         r.retry = []
+        r.keepRetry = [0.2, 0.4, 0.8] // (the app's 2, 5, 15, 30, 60 s, shortened)
         r.onState = { s in say("state \(s)") }
         r.onEvent = { _, n, ev in
             let kind = ev["kind"] as? String ?? "?"
@@ -654,6 +692,7 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
                         }
                     case "drop": remote?.drop()
                     case "wake": remote?.wake()
+                    case "keep" where w.count == 2: remote?.keepOpen = w[1] == "on"
                     case "close": remote?.close(); remote = nil
                     case "reopen": open()
                     case "pickup":

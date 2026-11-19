@@ -257,6 +257,16 @@ extension Model {
             out = a.1.map { "refused: \($0)" } ?? "ok"
         }
         if step["toast"] != nil { out = AppToast.shared.describe }
+        // ({"panelmsg": {"type": "delete", "id": …}}: any Mods tab message, as its page sends it (the mod matrix's clean-up);
+        // {"modlist": "site or empty"}: each mod's id, name, site, on, held, history count and its code's length)
+        if let m = step["panelmsg"] as? [String: Any] {
+            let a = await panel.handle(m)
+            out = a.1.map { "refused: \($0)" } ?? "ok"
+        }
+        if let s = step["modlist"] as? String {
+            out = browser.mods.mods.filter { s.isEmpty || $0.site == s || $0.sites.contains(s) }
+                .map { "\($0.id)\t\($0.name)\t\($0.site)\t\($0.on ? "on" : "off")\($0.held ? " held" : "")\thistory \($0.history.count)\t\($0.code.count)" }.joined(separator: "\n")
+        }
         // ({"rename": [id, "New name"]}: the Mods tab's Rename, as its Save sends it; {"modcode": id}: a mod's file now;
         // {"modreads": [text, here]}: what readNamed makes of a chat's code (the id it'd be kept under, its @id))
         if let r = step["rename"] as? [String], r.count == 2 {
@@ -386,7 +396,7 @@ extension Model {
         if let p = Model.pane {
             if step["links"] != nil {
                 out = p.links.map { l in "\(l.service) \(l.site) \(l.state.rawValue) tab \(browser.tabs.firstIndex { t in t.id == l.tab }.map(String.init) ?? "closed") \(l.conv?.suffix(12) ?? "-") \(l.tabTitle)" }.joined(separator: "\n")
-                out += "\nbanners: " + p.banners.map { "\($0.site) \($0.mods.map(\.id))" }.joined(separator: "; ")
+                out += "\nbanners: " + p.banners.map { "\($0.site) \($0.mods.map(\.id))\($0.unreadable.map { " unreadable: \($0)" } ?? "")\($0.inChat > 0 ? " in chat \($0.inChat)" : "")" }.joined(separator: "; ")
                 out += "\nshown tab \(browser.tabs.firstIndex { $0 === browser.current } ?? -1) \(browser.site), covers \(ContentView.coversNow), offer \(browser.modOffer.map { "\($0.id) runs on \($0.sites) came from \($0.cameFrom ?? "-")" } ?? "none")"
             }
             if let n = step["gosite"] as? Int, n < p.links.count { p.goToSite(p.links[n].id) }
@@ -594,8 +604,8 @@ struct ContentView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .task(id: b.id) {
                             // (a plain reply's banner goes by itself after 8 s; one with mods stays: it is their offer; so
-                            // does one saying the reply has a mod to add in the chat, 11-18)
-                            guard b.mods.isEmpty, b.inChat == 0 else { return }
+                            // does one saying the reply has a mod to add in the chat, 11-18, or one TRIF couldn't read, 11-19)
+                            guard b.mods.isEmpty, b.inChat == 0, b.unreadable == nil else { return }
                             try? await Task.sleep(nanoseconds: 8_000_000_000)
                             if !Task.isCancelled, pane.banners.first?.id == b.id { withAnimation { pane.dismissBanner(b) } }
                         }

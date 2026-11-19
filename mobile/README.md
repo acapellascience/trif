@@ -175,7 +175,7 @@ Built on the probe, toward something to use every day:
   too, .cm-editor/.cm-line); Add to TRIF hands over on the press itself. A reply with code but no mod read from it is
   noted in the diagnostics ("chat"). The stand-in has it: `?octane` (and `?cm` for editor lines).
 - **The chat reads as TRIF** (Web/chat.js look, ChatView.tellLook; Tim, 11-16). In an empty conversation, TRIF's robot
-  (RobotShape's polygons, passed by the app on each load) and "Hello, this is TRIF / What would you like to fix on
+  (RobotShape's polygons, passed by the app on each load) and "The robot is in. / What would you like to fix on
   {site}?" go in the service's own greeting's place (that heading kept in the layout, invisible; only an h1/h2 with words,
   no link, logo or the service's name), or above the message box; a layer of TRIF's on the body, outside the page's
   tree, taking no touches, placed again on scroll, resize and changes; with little room, the robot beside two lines;

@@ -121,7 +121,7 @@ Drawn by TRIF over the chat's page (Web/chat.js look); nothing it adds is sent. 
 
 | Where | Old | New |
 |---|---|---|
-| A new, empty conversation: TRIF's greeting, in the chat's own greeting's place (theirs hidden), or above the message box | (the chat's own: How can I help you today? · What are you working on?) | TRIF's robot, then **Hello, this is TRIF** · **What would you like to fix on {site}?** ({site} in TRIF's green; without a site: What would you like to fix on this site?) · once TRIF's attachments are in the box: TRIF has attached the page below. Say what bothers you, then send. With little room (the keyboard up on the SE): the robot beside the first two lines only |
+| A new, empty conversation: TRIF's greeting, in the chat's own greeting's place (theirs hidden), or above the message box | (the chat's own: How can I help you today? · What are you working on?) | TRIF's robot, then **The robot is in.** (Tim, 11-19; was "Hello, this is TRIF") · **What would you like to fix on {site}?** ({site} in TRIF's green; without a site: What would you like to fix on this site?) · once TRIF's attachments are in the box: TRIF has attached the page below. Say what bothers you, then send. With little room (the keyboard up on the SE): the robot beside the first two lines only |
 | What TRIF attached, as pills in the message box (the robot before the words) | TRIF instruction · TRIF follow-up · TRIF screenshot · TRIF full page · TRIF pointer | From TRIF: page & guide · From TRIF: the page now · From TRIF: screenshot · From TRIF: full page · From TRIF: your pick (the files keep their names, which the chat and the model see) |
 | An attachment of TRIF's in markup TRIF doesn't know | its tile as the chat draws it | the same, on TRIF's green tint with the robot before its name |
 | The chats' upsells | Upgrade · Upgrade plan · Get Plus · Try Go… · See plans and pricing | (hidden: only buttons and links with exactly such words; their names, logos, Log in, terms, privacy and "can make mistakes" lines stay) |
@@ -855,3 +855,13 @@ in Mods." (the runaway offer's banner keeps it for now: asked above).
 brief had "from {computer}"; with the name already at the start ("Synced with Tim's MacBook Pro · 2 from Tim's
 MacBook Pro, …") it read twice, so "from the computer" for now: say if the name is wanted there.
 
+
+## The done banner when the reply's mod can't be read (added 11-19, the mod matrix, draft)
+
+Found by the mod matrix (docs/IOS-MOD-MATRIX.md, C7): a reply whose mod is broken (its rules not valid JSON, say) gave
+only the 2-second note "The reply's mod can't be added: {why}." and, if you were elsewhere, "{Service} replied about
+{site}", which hides that anything went wrong. The banner now says so; the note (with the reason) is unchanged.
+
+| Where | Before | Now (draft) |
+|---|---|---|
+| The done banner, a reply with a mod TRIF couldn't read (stays until closed, as one with mods; Open chat opens the chat) | **{Service} replied about {site}** · **Open chat** | **{Service}'s mod for {site} can't be added** · **Open chat** · **Go to {site}** |

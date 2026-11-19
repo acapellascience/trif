@@ -1164,7 +1164,7 @@
   let lookSite = '';
   let robot = null; // { rim, face, eyes: [..], colours } from the app (RobotShape), so it's TRIF's own shape
   const GREETING = {
-    hello: 'Hello, this is TRIF',
+    hello: 'The robot is in.',
     ask: (site) => site ? `What would you like to fix on ${site}?` : 'What would you like to fix on this site?',
     attached: 'TRIF has attached the page below. Say what bothers you, then send.',
   };
@@ -1252,6 +1252,35 @@
       const r = h.getBoundingClientRect();
       if (r.height < 14 || r.width < 60 || r.bottom > boxTop || r.top < minTop - 4) continue;
       return h;
+    }
+    return displayGreeting(boxTop, minTop);
+  }
+  /** (claude.ai signed in, 11-19: its greeting, "Hello, night owl" with its starburst, is no heading: a div of big
+   *  display type around a span) Short words in type well above the page's own, between the top bar and the box, not
+   *  in a menu, the side bar, a dialog, a link or a button: the greeting, with what only decorates it (a picture, no
+   *  other words) hidden too. Looked for at most once a second while none is found. */
+  let displayLooked = 0;
+  function displayGreeting(boxTop, minTop) {
+    if (Date.now() - displayLooked < 1000) return null;
+    displayLooked = Date.now();
+    const base = parseFloat(getComputedStyle(document.body).fontSize) || 16;
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(), seen = 0; n && seen < 4000; n = walk.nextNode(), seen++) {
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      if (t.length < 3 || t.length > 80) continue;
+      const el = n.parentElement;
+      if (!el || el.closest('nav, aside, header, [role="dialog"], [role="menu"], [role="banner"], a, button, [role="button"], [contenteditable], [data-trif], script, style')) continue;
+      if (parseFloat(getComputedStyle(el).fontSize) < Math.max(22, base * 1.3) || BRAND.test(t) || !shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.height < 14 || r.bottom > boxTop || r.top < minTop - 4) continue;
+      // (the block that is only this greeting: its words and no others, nothing to tap or type in)
+      let block = el;
+      for (let p = el.parentElement, i = 0; p && p !== document.body && i < 3; p = p.parentElement, i++) {
+        if ((p.textContent || '').replace(/\s+/g, ' ').trim() !== t || p.querySelector('a, button, input, textarea, [contenteditable], [role="button"]')) break;
+        if (p.getBoundingClientRect().height > Math.max(160, r.height * 3)) break;
+        block = p;
+      }
+      return block;
     }
     return null;
   }

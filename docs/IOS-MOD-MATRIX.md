@@ -1,0 +1,84 @@
+# The iPhone app's mod matrix
+
+Tim (11-19): "try a range of behaviours: making mods from the chat screens, making mods from the page screens, being
+on another page when a mod comes in … be systematic." One row per case. Run in the iOS Simulator (iPhone SE, iOS 26.3)
+against the stand-in chats: TRIF never sends on claude.ai or chatgpt.com, so what needs a real reply is on Tim's list,
+mobile/TIM-SENDS.md.
+
+Re-run: `node mobile/test/ios-matrix.js` (Node 22; `--only A1,B3`, `--list`, `--shots <dir>`): see
+mobile/IOS-AGENT-NOTES.md, "THE MOD MATRIX". Rows marked *by hand* were done with the iOS Simulator tool (LOCK/HOME,
+dark mode, the software keyboard, rotation). Screenshots: mobile/browser-probe/shots/530-549 (not committed).
+
+Before the matrix, the stand-ins were brought up to the real signed-in pages (Tim's accounts in the Simulator, nothing
+sent, only new chats): claude.ai's composer, Send, file cards, upload input and model selector; its greeting; chatgpt.com's
+signed-in composer (a form's submit "Send", "Attach files" for any file, its file tile, "Select ChatGPT model"). Not
+comparable without a send: reply and streaming markers, code blocks, a sent message's attachments (Tim's list).
+
+**Totals: 38 rows: 35 PASS, 2 FAIL → fixed (now PASS), 1 BLOCKED.** The script's last run (merged with origin/ios-poc
+784a3e9): 32 cases, 31 PASS, 1 BLOCKED (A5); the rest by hand.
+
+| # | Case | Result | What was seen |
+|---|---|---|---|
+| | **Where the request starts** | | |
+| A1 | Claude: Go to chat on the page, sent, mod offered on its own tab, added, runs | PASS | offered for localhost, came from localhost; the page reloaded and runs it; the chat link "added", tab 0 |
+| A2 | ChatGPT (signed-in stand-in `?gptin`): the same | PASS | |
+| A3 | The quick ask (the robot's box): the strip filled, the person's Send in the strip, the style mod added at once, Undo | PASS | Done · Undo; Undo took the mod away |
+| A4 | Voice: the robot held, a recording as the microphone (`-speechfile`): the strip has the words heard, Send, added | PASS | "Make the headings green ask voice 271" in Claude's box (shot 549) |
+| A5 | The Mods sheet's "make a mod" | BLOCKED | no such entry in the Mods tab (its empty state says to open the chat); the robot's list is the page's way in |
+| A6 | More (Claude API engine, mock-api.js): a quick ask sent directly, added | PASS | engine "Claude Opus 5.5 · Claude API"; Done; the mod runs (mock-api.js now puts the message's "ask" words in its CSS, so a run's mod is new code) |
+| A8 | A chat on the computer (the stand-in computer's desktop phone-view chat edits the phone's mod): arrives by sync while the phone is on another site; that page left alone; runs on its site | PASS | after merging origin/ios-poc 784a3e9 too |
+| | **Where the person is when it arrives** | | |
+| B2 | Another tab of the same site | PASS | Add this mod? there at once |
+| B3 | Another site | PASS | no sheet over that site; the banner "Claude made a mod for localhost"; Go to localhost → its tab and the offer (shot 542) |
+| B4 | The robot view on another service's chat for another site | PASS | the banner over the chat; Add → Add this mod? over the chat; the note "Added … It runs on localhost." (shot 543) |
+| B5 | The robot view on the same service's chat for another site | PASS | banner; Go to localhost closes the chat |
+| B6 | Its own tab, the Mods sheet open | PASS | the banner (no sheet over the sheet); after closing it, Add → the offer, once |
+| B6b | …and the banner's Add tapped with the Mods sheet still open | PASS | Add this mod? comes up (shot 544) |
+| B7 | Its own tab, the tabs sheet open | PASS | as B6 |
+| B8 | Its own tab, the history sheet open | PASS | as B6 |
+| B9 | The app in the background (Settings in front 14 s) | PASS | offered once on return |
+| B10 | The phone locked mid-reply, unlocked 30 s later (*by hand*) | PASS | the reply finished in background time ("background time given back after 23 s"); Add this mod? waiting on return, once. A 6 s main-thread hang was logged while locked (open, below) |
+| B11 | The app killed mid-reply and launched again | PASS (after a stand-in fix) | the link "read", no stale working badge; the chat shows the finished reply with Add to TRIF; not offered by itself (by design: a reply TRIF didn't see finish) (shot 547) |
+| | **What arrives** | | |
+| C2 | Full code (a free mod) | PASS | offered as free; added; runs |
+| C3 | An every-site mod | PASS | the offer says every site; runs on 127.0.0.1 too (shot 545) |
+| C4 | An update of an added mod (same @id) | PASS | offered under the same id; one mod of that name, its history 1; the new version runs |
+| C5 | Two mods in one reply | PASS | one after the other (the second queued), both added |
+| C6 | A mod that needs an OK (powers) | PASS | added on hold, the approval card (shot 546); Allow → not held |
+| C7 | Broken code | FAIL → fixed in f034043 and b20935f | before: a 2 s note only, and from another tab "Claude replied about localhost": nothing said it failed. Now the banner says "Claude's mod for localhost can't be added", stays until closed (draft words in IOS-APP-STRINGS.md; shot 536) |
+| C8 | A long reply written slowly (40 s) | PASS | the tab's badge "working" meanwhile; nothing early; offered once at the end |
+| C9 | Two chats replying at once (Claude for localhost, ChatGPT for 127.0.0.1) | PASS | each for its own site: the shown tab's as Add this mod?, the other as its banner (shot 548) |
+| | **After it arrives** | | |
+| D1 | Shown once: a dismissed banner stays dismissed; the chat opened again (its conversation drawn again) offers nothing | PASS | |
+| D2 | The banner names the right site | PASS | B3, B4, C9 |
+| D3 | Added on its own tab: the page loads again and runs it | PASS | |
+| D4 | Added while the page plays sound: not loaded again | PASS | runs from the next load |
+| D5 | Switched off and on again (Mods tab) | PASS | the page follows both ways |
+| D6 | Badges: the tab sent from shows working, then plain; another tab of the site none | PASS | |
+| D7 | It syncs to the computer (the stand-in computer, paired over -linkhost) | PASS | the computer's phone~example.com twin has it; re-run after merging origin/ios-poc 784a3e9 |
+| D8 | The chat remembers its site: the same conversation from the site's tab, another for another site | PASS | |
+| | **Looks** (*by hand*) | | |
+| E1 | Dark mode: the banner, Add this mod?, the added note, the can't-be-added banner | PASS | shots 533-536 |
+| E2 | The keyboard up in another chat when a mod arrives | PASS | the banner over the chat, the keyboard left alone (shot 537) |
+| E3 | Rotation with Add this mod? up | PASS (note) | landscape on the SE: the sheet is all there, but Add it is below the fold (scroll) (shot 538) |
+| E4 | claude.ai's own greeting, signed in | FAIL → fixed in 8cc1965 | TRIF's greeting sat above "Hello, night owl"; now in its place, Claude's hidden, light and dark (shots 530-532) |
+
+## What broke and what was fixed
+
+- **claude.ai's greeting** (E4, 8cc1965): its "Hello, night owl" is no heading; chat.js now finds a greeting in display
+  type and stands in for it.
+- **A broken mod said nothing** (C7, f034043 and b20935f): the done banner says the mod can't be added.
+- Stand-in, not the app: ChatGPT's signed-in composer and file tile, Claude's tiles and composer, conversations kept by
+  the server (B11 needed a conversation that survives the app being killed, as a real one does).
+- Test-only: C5 failed once because C4's words said "two" (the stand-in's two-mod word); fixed in the script.
+
+## Still open
+
+- B10's log: "the app's main thread was blocked 5988 ms (last: opening the chat: the chat's page)" while the phone was
+  locked, and several 0.6-1.1 s blocks marked "opening the chat" in the Simulator. Possibly the watchdog counting a
+  suspended app; not looked into here.
+- E3: on the SE in landscape, Add it is below the fold of Add this mod? (as in portrait for a long code view: the
+  buttons come before the code, not before the name and sites).
+- A reply that finished while the app was killed is left in the chat with its Add to TRIF (by design, B11): nothing in
+  the robot's list says a mod is waiting there.
+- Everything that needs a real reply: mobile/TIM-SENDS.md.

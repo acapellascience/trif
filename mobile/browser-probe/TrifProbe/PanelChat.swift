@@ -828,8 +828,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
                 guard case .success(let hello) = r else { return self.report.log("panel", "My computer: kept runs not asked (\(r))") }
                 let kept = hello.pending.filter { !$0.chat.isEmpty && self.link.following[$0.runId] == nil && self.computerRun($0.runId) == nil }
                 if kept.isEmpty {
-                    // (nothing to follow: the link isn't kept open for nothing)
-                    if self.runs.values.allSatisfy({ $0.remoteId == nil }), !PhoneSyncModel.shared.syncing { self.link.close() }
+                    // (nothing to follow: the link isn't kept open for nothing, unless the phone sync keeps it while the app is active)
+                    if self.runs.values.allSatisfy({ $0.remoteId == nil }), !PhoneSyncModel.shared.syncing, !self.link.keepOpen { self.link.close() }
                     return
                 }
                 for p in kept { Task { @MainActor in await self.adopt(p) } }

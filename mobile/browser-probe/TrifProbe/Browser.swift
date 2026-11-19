@@ -865,12 +865,16 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             if let why { parts.append("unreadable (\(why))") }
             Diagnostics.shared.log("chat offers", "\(path) from \(chatSite.isEmpty ? "no site" : chatSite): \(parts.joined(separator: "; "))")
         }
+        lastUnreadable = found.isEmpty && skipped.isEmpty ? why : nil
         if found.isEmpty, skipped.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
         guard !found.isEmpty else { return [] }
         for m in found { chatOffers.note(m.code, .offered) }
         if !hold { offerHeld(found) }
         return found
     }
+    /// Why the last hand-over's code couldn't be read, when none of it could (the done banner says so: the note alone
+    /// is gone in 2 s, and isn't seen at all from another tab: the mod matrix, 11-19).
+    private(set) var lastUnreadable: String?
     /// Mods a chat handed over that wait elsewhere (the done banner's), for the judge's "queued": never offered twice.
     var offersHeld: () -> [InstalledMod] = { [] }
     /// Mods judged and noted as offered, into Add this mod? one after another (now, or once no sheet is up).

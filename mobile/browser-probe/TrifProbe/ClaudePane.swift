@@ -18,7 +18,7 @@ enum ChatService: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     /// Its site, as people know it (the stand-in's too).
     var host: String { self == .claude ? "claude.ai" : "chatgpt.com" }
-    var home: String { ChatService.standIn ?? (self == .claude ? "https://claude.ai/new" : "https://chatgpt.com/") }
+    var home: String { (self == .chatgpt ? ChatService.gptStandIn : nil) ?? ChatService.standIn ?? (self == .claude ? "https://claude.ai/new" : "https://chatgpt.com/") }
 
     // MARK: a project for TRIF's chats (Tim, 11-16: they cluttered his history)
     /// The project TRIF's new chats start in, picked by the person (Use this project for TRIF chats), or nil.
@@ -32,7 +32,7 @@ enum ChatService: String, CaseIterable, Identifiable {
     /// Where a new chat starts: the project's page (its message box starts a chat in it), else a new chat.
     var start: String { project?.absoluteString ?? home }
     /// Where the person makes a project.
-    var projectsPage: String { ChatService.standIn ?? (self == .claude ? "https://claude.ai/projects" : "https://chatgpt.com/") }
+    var projectsPage: String { (self == .chatgpt ? ChatService.gptStandIn : nil) ?? ChatService.standIn ?? (self == .claude ? "https://claude.ai/projects" : "https://chatgpt.com/") }
     /// A project's own page: claude.ai/project/<id>; chatgpt.com/g/g-p-<id>-<name>/project.
     func isProjectPage(_ url: URL?) -> Bool {
         guard let url, let h = URL(string: home)?.host, url.host == h else { return false }
@@ -43,6 +43,12 @@ enum ChatService: String, CaseIterable, Identifiable {
     static let standIn: String? = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-chathome"), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }()
+    /// (development) `-gpthome <address>`: ChatGPT's own stand-in (e.g. chat.html?gpt&gptin), Claude's staying -chathome's.
+    static let gptStandIn: String? = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-gpthome"), i + 1 < args.count else { return nil }
         return args[i + 1]
     }()
 }
@@ -179,7 +185,9 @@ struct ChatBanner: Identifiable, Equatable {
     /// Mods in the reply that TRIF didn't see being written (the app was in the background): not offered by
     /// themselves; the chat opens at the first, its Add to TRIF in view (11-18).
     var inChat = 0
-    static func == (a: ChatBanner, b: ChatBanner) -> Bool { a.id == b.id && a.mods.map(\.id) == b.mods.map(\.id) && a.inChat == b.inChat }
+    /// The reply had a mod, and TRIF couldn't read it (broken code): why (the mod matrix, 11-19).
+    var unreadable: String?
+    static func == (a: ChatBanner, b: ChatBanner) -> Bool { a.id == b.id && a.mods.map(\.id) == b.mods.map(\.id) && a.inChat == b.inChat && a.unreadable == b.unreadable }
 }
 
 @MainActor
@@ -963,6 +971,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 return
             }
             let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto", hold: hold)
+            let unreadable = offered.isEmpty && !texts.isEmpty ? browser.lastUnreadable : nil
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
             if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) } // (not inactive: an alert of the system's over the app)
@@ -977,7 +986,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let inChat = texts.isEmpty ? d["waiting"] as? Int ?? 0 : 0
             v.waitingMods = looking ? 0 : inChat
             if inChat > 0 { Diagnostics.shared.log("chat offers", "\(v.service.rawValue) for \(v.site.isEmpty ? "no site" : v.site): \(inChat) mod(s) in the reply, not seen being written: left in the chat for its Add to TRIF\(looking ? "" : ", the done banner says so")") }
-            if !looking && (hold || offered.isEmpty) { self.banner(v, hold ? offered : [], inChat: inChat) }
+            if !looking && (hold || offered.isEmpty) { self.banner(v, hold ? offered : [], inChat: inChat, unreadable: unreadable) }
             self.endBackgroundIfIdle()
         }
     }
@@ -1041,12 +1050,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         links[i].state = .added
         saveLinks()
     }
-    private func banner(_ v: ChatView, _ mods: [InstalledMod], inChat: Int = 0) {
+    private func banner(_ v: ChatView, _ mods: [InstalledMod], inChat: Int = 0, unreadable: String? = nil) {
         let key = ClaudePane.linkKey(v.service.rawValue, v.site)
         // (one per chat: a later reply's joins it, mods and all)
-        if let i = banners.firstIndex(where: { $0.link == key }) { banners[i].mods += mods; banners[i].inChat += inChat; return }
+        if let i = banners.firstIndex(where: { $0.link == key }) { banners[i].mods += mods; banners[i].inChat += inChat; banners[i].unreadable = unreadable ?? banners[i].unreadable; return }
         var b = ChatBanner(link: key, service: v.service.rawValue, site: v.site, mods: mods)
         b.inChat = inChat
+        b.unreadable = unreadable
         banners.append(b)
         Diagnostics.shared.log("chats", "done banner for \(v.site.isEmpty ? "no site" : v.site): \(mods.isEmpty ? "a reply" : "\(mods.count) mod(s) held for it")")
     }
@@ -2035,6 +2045,8 @@ struct ChatBannerView: View {
         // (draft, 11-18: mods TRIF didn't see being written, to add from the chat)
         if banner.inChat == 1 { return "\(banner.service) replied with a mod\(s)" }
         if banner.inChat > 1 { return "\(banner.service) replied with \(banner.inChat) mods\(s)" }
+        // (draft, 11-19: the reply's mod couldn't be read: broken code; the chat to ask again)
+        if banner.unreadable != nil { return "\(banner.service)'s mod\(s) can't be added" }
         return banner.site.isEmpty ? "\(banner.service) replied" : "\(banner.service) replied about \(banner.site)"
     }
 

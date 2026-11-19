@@ -40,6 +40,9 @@
   /new serves this page too (a new chat there gets /chat/<id> at its first send).
   `?greet`: an empty conversation's greeting heading ("How can I help you today?", as both chats have one) and an
   Upgrade plan button in the header, for TRIF's greeting and upsell hiding (chat.js look).
+  `?suggest` (Tim, 11-19, chatgpt.com signed in): ChatGPT's own suggestions, a list of buttons just above the box
+  (two; four once something is attached: "Extract the text", "Describe the image"…), so a taller box pushes them up
+  into the empty conversation's middle, where TRIF's greeting goes.
   `?late` (Tim, 11-18: the quick ask's strip bounced while claude.ai loaded): the page settles in pieces, as claude.ai's
   does on a phone: the box's tool row (+, the model, Manual) comes 1 s after load, the "… can make mistakes." line above
   the box 1.6 s after, the page's own box grows a little at 2.2 s, and each attachment's tile shows 0.5 s after it's
@@ -128,6 +131,31 @@
     up.style.cssText = 'float: right; font: 13px system-ui; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit;';
     document.querySelector('header').append(up);
     new MutationObserver(() => { if (log.querySelector('[data-testid="user-message"]')) h.remove(); }).observe(log, { childList: true });
+  }
+
+  // (?suggest: ChatGPT's suggestions above the box, more of them once something is attached)
+  if (/[?&]suggest\b/.test(location.search)) {
+    const list = document.createElement('div');
+    list.className = 'suggest';
+    list.style.cssText = 'display: flex; flex-direction: column; gap: 2px; padding: 4px 14px;';
+    const draw = () => {
+      const rows = tiles.children.length ? ['Give me a short practical dialog…', 'Extract the text', 'Describe the image', 'Create a site to practice everyday…']
+        : ['Create a site to practice everyday…', 'Give me a short practical dialog…'];
+      if (list.getAttribute('data-rows') === rows.join('|')) return;
+      list.setAttribute('data-rows', rows.join('|'));
+      list.textContent = '';
+      for (const t of rows) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = t;
+        b.style.cssText = 'text-align: left; font: 16px/1.3 system-ui; padding: 10px 6px; border: 0; background: none; color: inherit; opacity: 0.6;';
+        list.append(b);
+      }
+    };
+    draw();
+    document.querySelector('.composer').before(list);
+    new MutationObserver(draw).observe(tiles, { childList: true });
+    new MutationObserver(() => { if (log.querySelector('[data-testid="user-message"], [data-message-role="user"]')) list.remove(); }).observe(log, { childList: true });
   }
 
   const late = location.search.includes('late');

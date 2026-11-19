@@ -707,3 +707,50 @@ test('the chat script: claude.ai\'s code blocks as they are now (11-18, "pre.cod
     server.close();
   }
 });
+
+test('the chat script: TRIF\'s greeting never drawn over the chat\'s own suggestions (Tim, 11-19, chatgpt.com signed in: a screenshot attached made the box taller and pushed ChatGPT\'s suggestions up under the greeting); placed in free space, small, or not at all; light and dark', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 90000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const shape = { rim: '10,10 118,10 118,118 10,118', face: '24,24 104,24 104,104 24,104', eyes: ['40,50 56,50 56,70 40,70', '72,50 88,50 88,70 72,70'], colours: { rim: '#34d399', face: '#18181b', eye: '#34d399' } };
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  // (where the greeting is and what of the page's it covers: each suggestion, the box, the header)
+  const where = (pg) => pg.evaluate(() => {
+    const c = document.getElementById('trif-greeting');
+    if (!c || c.hidden) return { shown: false };
+    const r = c.getBoundingClientRect();
+    const over = [...document.querySelectorAll('.suggest button, .composer, header')].filter((e) => { const q = e.getBoundingClientRect(); return q.bottom > r.top && q.top < r.bottom; }).map((e) => e.textContent.trim().slice(0, 30) || e.className);
+    return { shown: true, tight: c.classList.contains('trif-tight'), top: Math.round(r.top), bottom: Math.round(r.bottom), over };
+  });
+  let browser;
+  try {
+    browser = await launch();
+    for (const [w, h] of [[375, 471], [393, 640]]) {
+      for (const scheme of ['light', 'dark']) {
+        const page = await browser.newPage();
+        await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+        await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+        await page.goto(`${base}/chat.html?greet&suggest&octane`);
+        await page.addScriptTag({ content: STUB });
+        await page.addScriptTag({ content: CHAT });
+        await page.evaluate((s) => globalThis.__trifChat.look('facebook.com', s), shape);
+        await page.waitForTimeout(300);
+        const before = await where(page);
+        assert.equal(before.shown, true, `${w}x${h} ${scheme}: the greeting in an empty chat`);
+        assert.deepEqual(before.over, [], `${w}x${h} ${scheme}: nothing of the page's under it: ${JSON.stringify(before)}`);
+        assert.match(await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.png'), png), /picture pasted/);
+        await page.waitForTimeout(800);
+        assert.equal(await page.evaluate(() => document.querySelectorAll('.suggest button').length), 4, 'the image suggestions came');
+        const after = await where(page);
+        assert.deepEqual(after.shown ? after.over : [], [], `${w}x${h} ${scheme}: with the picture attached, nothing of the page's under it: ${JSON.stringify(after)}`);
+        assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-trif-tone')), scheme);
+        // (the heading the greeting stands in for: hidden only while the greeting shows)
+        assert.equal(await page.evaluate(() => document.querySelector('h1.greet').hasAttribute('data-trif-greeting-hidden')), after.shown);
+        await page.close();
+      }
+    }
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

@@ -1275,6 +1275,44 @@
     document.body.append(card);
     return card;
   }
+  /** Whether the page draws something at this point: words, a picture, a control, or a box of its own (a suggestion,
+   *  a card). Not a wrapper around the message box or around the service's hidden greeting, not TRIF's own. */
+  const CLEAR = /^transparent$|rgba\([^)]*,\s*0\)$/;
+  function drawnAt(x, y, ed) {
+    const e = document.elementFromPoint(x, y); // (skips TRIF's greeting (no touches) and the hidden heading)
+    if (!e || e === document.body || e === document.documentElement || e.closest('[data-trif]')) return false;
+    if (e.closest('svg, img, picture, video, canvas, input, textarea, select, button, [role="button"], [role="option"], [role="menuitem"]')) return true;
+    for (const t of e.childNodes) if (t.nodeType === 3 && t.textContent.trim()) return true;
+    for (let n = e, i = 0; n && n !== document.body && i < 4; n = n.parentElement, i++) {
+      if ((ed && n.contains(ed)) || (hiddenHeading && n.contains(hiddenHeading))) return false;
+      const r = n.getBoundingClientRect();
+      if (r.height > 160 || r.width > innerWidth * 0.96) continue;
+      if (n.matches('a, li, [role="listitem"]')) return true;
+      const cs = getComputedStyle(n);
+      if (parseFloat(cs.borderTopWidth) > 0 && !CLEAR.test(cs.borderTopColor)) return true;
+      if (!CLEAR.test(cs.backgroundColor)) {
+        let under = null;
+        for (let p = n.parentElement; p && !under; p = p.parentElement) { const pb = getComputedStyle(p).backgroundColor; if (!CLEAR.test(pb)) under = pb; }
+        if (cs.backgroundColor !== under) return true;
+      }
+    }
+    return false;
+  }
+  /** The stretches from `top` to `bottom` (window coordinates) where the page draws nothing across the greeting's
+   *  width, each [from, to]: sampled every 6 px down, at 8 points across. */
+  function freeGaps(top, bottom, ed) {
+    const width = Math.min(innerWidth, 420), left = (innerWidth - width) / 2;
+    const xs = [0.06, 0.19, 0.32, 0.44, 0.56, 0.68, 0.81, 0.94].map((f) => left + width * f);
+    const gaps = [];
+    let from = null, last = null;
+    for (let y = Math.ceil(top); y <= bottom; y += 6) {
+      if (xs.some((x) => drawnAt(x, y, ed))) { if (from !== null) gaps.push([from, last]); from = null; continue; }
+      if (from === null) from = y;
+      last = y;
+    }
+    if (from !== null) gaps.push([from, bottom]);
+    return gaps;
+  }
   /** Where the greeting goes, and whether at all: an empty conversation, the message box usable, nothing over it. */
   function placeGreeting() {
     const ed = usableEditor();
@@ -1308,15 +1346,24 @@
       if (r.top <= 8 && r.height > 0 && r.height < 160 && r.bottom > minTop && shown(hd)) minTop = r.bottom + 8;
     }
     const h = serviceGreeting(b.top, minTop);
+    if (h && h !== hiddenHeading) { unhideHeading(); hiddenHeading = h; h.setAttribute('data-trif-greeting-hidden', ''); }
+    if (!h) unhideHeading();
+    // (Tim, 11-19, signed in to chatgpt.com with a screenshot attached: the taller box pushed ChatGPT's own suggestions
+    // up into the greeting's place and TRIF drew over them. So the greeting goes only where the page draws nothing:
+    // the free stretches between the top bar and the box, measured as they show, the one nearest its usual place)
+    const gaps = freeGaps(minTop, b.top - 4, ed);
     const fit = (tight) => {
       c.classList.toggle('trif-tight', tight);
       const height = c.getBoundingClientRect().height;
-      let top = h ? (() => { const r = h.getBoundingClientRect(); return r.top + r.height / 2 - height / 2; })() : b.top - height - 20;
-      top = Math.max(minTop, Math.min(top, b.top - height - 8));
-      return top + height <= b.top - 4 ? top : null;
+      const want = h ? (() => { const r = h.getBoundingClientRect(); return r.top + r.height / 2 - height / 2; })() : b.top - height - 20;
+      let best = null;
+      for (const [from, to] of gaps) {
+        if (to - from < height + 8) continue;
+        const top = Math.max(from + 4, Math.min(want, to - 4 - height));
+        if (best === null || Math.abs(top - want) < Math.abs(best - want)) best = top;
+      }
+      return best;
     };
-    if (h && h !== hiddenHeading) { unhideHeading(); hiddenHeading = h; h.setAttribute('data-trif-greeting-hidden', ''); }
-    if (!h) unhideHeading();
     let top = fit(false);
     if (top === null) top = fit(true);
     // (no room even for that: nothing, and the service's own greeting shown again)

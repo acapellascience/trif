@@ -67,6 +67,11 @@
 	</array>
 	<!-- (sound and video go on with the app in the background or the phone locked: Browser.swift
 	     BackgroundPlay. Tim, 11-16: YouTube with his Background Play mod) -->
+	<!-- (export compliance, Tim 11-19: "None of the algorithms mentioned above": the only encryption is iOS's own, HTTPS
+	     in WebKit and CryptoKit under the phone link's Noise_IK_25519_ChaChaPoly_SHA256; nothing proprietary, no
+	     cipher of our own. A move to pinned TLS was offered as the unarguable option, before the public launch if wanted) -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

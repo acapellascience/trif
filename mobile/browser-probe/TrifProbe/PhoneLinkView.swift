@@ -14,8 +14,11 @@ import UIKit
 
 /// The phone sync in the app (PhoneSync.swift; docs/PHONE-SYNC.md section 8 on branch phone-link): the app's one
 /// link to the paired computer (More's engine uses it too), and when the phone syncs: the app in front, 3 s after a
-/// mod's file changed, the computer's nudge, Sync now. Only with a paired computer; quiet when it isn't there. A link
-/// opened for a sync alone is closed after 30 s of nothing. The Mods tab's line and Sync now: S7.
+/// mod's file changed, the computer's nudge, Sync now. Only with a paired computer; quiet when it isn't there.
+/// While the app is active the link stays open (PhoneLinkRemote.keepOpen: found again quietly after a drop), so the
+/// computer's nudge and the Mac's Sync now reach the phone (Tim, 11-19: "isn't connected just now" with TRIF open).
+/// In the background it's closed once a sync in flight ends (unless More follows a run on it); a link opened while
+/// the app isn't active is closed after 30 s of nothing. The Mods tab's line and Sync now: S7.
 @MainActor
 final class PhoneSyncModel: ObservableObject {
     static let shared = PhoneSyncModel()
@@ -39,6 +42,10 @@ final class PhoneSyncModel: ObservableObject {
     private var scheduler: PhoneSync.Scheduler?
     private var watch: AnyCancellable?
     private var idle: DispatchWorkItem?
+    /// In the background with a sync in flight: the link is closed when it ends (iOS's few seconds to finish it).
+    private var closeWhenDone = false
+    private var inBackground = false
+    private var finishing: UIBackgroundTaskIdentifier = .invalid
     /// After a sync that changed mods here, with their ids (the app: Browser.syncApplied, so pages run the change).
     var applied: (([String]) -> Void)?
 
@@ -58,6 +65,8 @@ final class PhoneSyncModel: ObservableObject {
         // (a file, a switch or an Allow that differs from the last sync's: a sync 3 s later; the sync itself reads the store)
         let s = PhoneSync.Scheduler(files: { store.syncSignature() }) { [weak self] done in
             guard PhoneLinkKeys.shared.computer != nil else { return done(.failure(.init(code: "notPaired", message: ""))) }
+            // (in the background no new sync opens the link again: the front sync on the way back covers it)
+            guard self?.inBackground != true else { return done(.failure(.init(code: "background", message: ""))) }
             self?.syncing = true
             sync.run(done)
         }
@@ -66,17 +75,73 @@ final class PhoneSyncModel: ObservableObject {
         link.onSyncChanged = { [weak self] in MainActor.assumeIsolated { self?.scheduler?.now("nudge") } }
         watch = store.$mods.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.scheduler?.changed() } }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduler?.now("front") }
+            MainActor.assumeIsolated { self?.front() }
         }
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.background() }
+        }
+        if UIApplication.shared.applicationState == .active { link.keepOpen = PhoneLinkKeys.shared.computer != nil }
+    }
+
+    /// The app active: the front sync, and the link kept open while the app stays so (paired only).
+    private func front() {
+        inBackground = false
+        closeWhenDone = false
+        endFinishing()
+        idle?.cancel(); idle = nil
+        link.keepOpen = PhoneLinkKeys.shared.computer != nil
+        scheduler?.now("front")
+    }
+
+    /// The app in the background (the screen off, another app): the link isn't kept; it's closed now, or once the
+    /// sync in flight ends (iOS suspends the app soon anyway). A run More follows keeps it as before (its drop is
+    /// picked up when the app is back).
+    private func background() {
+        inBackground = true
+        link.keepOpen = false
+        idle?.cancel(); idle = nil
+        if syncing {
+            closeWhenDone = true
+            if finishing == .invalid {
+                finishing = UIApplication.shared.beginBackgroundTask(withName: "TRIF: finishing a sync") { [weak self] in
+                    MainActor.assumeIsolated { self?.closeIdle(); self?.endFinishing() }
+                }
+            }
+        } else {
+            closeIdle()
+        }
+    }
+
+    private func closeIdle() {
+        guard link.following.isEmpty, link.state != .idle else { return }
+        link.close()
+    }
+
+    private func endFinishing() {
+        guard finishing != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(finishing)
+        finishing = .invalid
     }
 
     /// Sync now (the Mods tab's button, S7; the dev step `sync`).
     func syncNow() { scheduler?.now("now") }
     /// The first sync after pairing (the pairing screen, a scanned code): the person's, as Sync now.
-    func syncAfterPairing() { scheduler?.now("pair") }
+    /// The link to a computer paired before (if any) closed first, then kept open to this one while the app is active.
+    func syncAfterPairing() {
+        link.keepOpen = false
+        closeIdle()
+        link.keepOpen = UIApplication.shared.applicationState == .active
+        scheduler?.now("pair")
+    }
+    /// The computer forgotten here (My computer's Forget): the link closed, not kept.
+    func unpaired() {
+        link.keepOpen = false
+        closeIdle()
+    }
 
     private func finished(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) {
         syncing = false
+        if r.failureCode == "background" { return } // (not tried: nothing to say or keep)
         if r.failureCode != "notPaired" {
             lastFailed = PhoneSync.Toast.failed(r)
             UserDefaults.standard.set(lastFailed, forKey: "phoneSync.lastFailed")
@@ -101,10 +166,18 @@ final class PhoneSyncModel: ObservableObject {
             Diagnostics.shared.log("sync", "not synced (\(why)): \(f.code) \(f.message)")
             toast(r, why)
         }
-        // (a link nobody else uses: closed after 30 s of nothing)
-        idle?.cancel()
+        // (in the background: closed now that the sync is over; else, kept open while the app is active, or a link
+        // nobody else uses closed after 30 s of nothing)
+        idle?.cancel(); idle = nil
+        if closeWhenDone {
+            closeWhenDone = false
+            closeIdle()
+            endFinishing()
+            return
+        }
+        guard !link.keepOpen else { return }
         let w = DispatchWorkItem { [weak self] in
-            guard let self, !self.syncing, self.link.following.isEmpty, Date().timeIntervalSince(self.link.lastUse) >= 29 else { return }
+            guard let self, !self.syncing, !self.link.keepOpen, self.link.following.isEmpty, Date().timeIntervalSince(self.link.lastUse) >= 29 else { return }
             if self.link.state == .open { self.link.close() }
         }
         idle = w
@@ -242,6 +315,7 @@ final class PhoneLinkModel: ObservableObject {
     func forget() {
         pairer?.cancel(); pairer = nil
         PhoneLinkKeys.shared.forget()
+        PhoneSyncModel.shared.unpaired()
         computer = nil
         step = nil
     }

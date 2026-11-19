@@ -344,6 +344,85 @@ test('PhoneLinkRemote.swift (My computer) against the real helper (Store, Server
   }
 });
 
+test('PhoneLinkRemote.swift kept open (the app active, 11-19) against the real helper: an idle link the computer can nudge; a drop found again quietly; not kept in the background; removed there: not tried again; the helper gone: tried again, further apart', { skip: noComputer, timeout: 180000 }, async () => {
+  build();
+  const comp = spawn(process.execPath, [computerFixture, '--seconds', '150'], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const C = lineReader(comp, 'computer');
+  let phone = null;
+  try {
+    const { port, qr } = JSON.parse(await C.next((l) => l.startsWith('{"port"')));
+    phone = spawn(bin, ['remote', String(port), qr], { stdio: ['pipe', 'pipe', 'inherit'] });
+    const P = lineReader(phone, 'phone');
+    const say = (l) => phone.stdin.write(l + '\n');
+    const quiet = async (ms) => { const from = P.all.length; await new Promise((r) => setTimeout(r, ms)); await P.next(() => false, 1).catch(() => {}); return P.all.slice(from); };
+    assert.equal(await P.next((l) => l.startsWith('paired') || l.includes('failed')), 'paired Stand-in Mac');
+    assert.equal(await P.next((l) => l.startsWith('hello') || l.includes('failed')), 'hello Stand-in Mac agent Stand-in agent pending 0');
+    say('keep on');
+
+    // 1. Open with nothing using it: the computer's nudge reaches the phone (as the Mac's Sync now does), again after
+    // a while.
+    comp.stdin.write('nudge\n');
+    assert.equal(await C.next((l) => l.startsWith('{"nudged"')), '{"nudged":1}');
+    await P.next((l) => l === 'nudged');
+    await quiet(2200); // (the computer nudges a phone at most every 2 s)
+    comp.stdin.write('nudge\n');
+    assert.equal(await C.next((l) => l.startsWith('{"nudged"')), '{"nudged":1}');
+    await P.next((l) => l === 'nudged');
+
+    // 2. Dropped (a Wi-Fi blip): found again by itself, nothing said (no lost run, no failure).
+    const mark = P.all.length;
+    say('drop');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state away');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state finding');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state open');
+    assert.deepEqual(P.all.slice(mark).filter((l) => !l.startsWith('state')), []);
+    await quiet(2200);
+    comp.stdin.write('nudge\n');
+    assert.equal(await C.next((l) => l.startsWith('{"nudged"')), '{"nudged":1}');
+
+    // 3. In the background (keep off): a drop stays down; back in front (keep on): found at once.
+    say('keep off');
+    say('drop');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state away');
+    assert.deepEqual(await quiet(1200), [], 'not found again in the background');
+    say('keep on');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state finding');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state open');
+
+    // 4. Removed on the computer (a pairing window open there, so it still listens): refused, and not tried again.
+    comp.stdin.write('pair\n');
+    await C.next((l) => l.startsWith('{"qr"'));
+    comp.stdin.write('remove\n');
+    await C.next((l) => l.startsWith('{"removed"'));
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state away');
+    assert.equal(await P.next((l) => l.startsWith('state')), 'state finding');
+    assert.match(await P.next((l) => l.startsWith('state')), /^state failed\(.*removed\)$/);
+    assert.deepEqual((await quiet(2000)).filter((l) => l.startsWith('state')), [], 'removed: not tried again');
+
+    // 5. The helper gone (quit: nothing listens; the app back in front): tried again quietly, each wait longer up to
+    // the last (0.2, 0.4, 0.8, 0.8 s here).
+    comp.stdin.write('quit\n');
+    await new Promise((r) => (comp.exitCode !== null ? r() : comp.on('exit', r)));
+    say('keep off');
+    say('keep on');
+    const at = [];
+    for (let i = 0; i < 5; i++) {
+      assert.equal(await P.next((l) => l.startsWith('state'), 5000), 'state finding');
+      at.push(Date.now());
+      assert.match(await P.next((l) => l.startsWith('state')), /^state failed\(.*notFound\)$/);
+    }
+    const waits = at.slice(1).map((t, i) => t - at[i]);
+    assert.ok(waits[0] < waits[1] && waits[1] < waits[2] && waits[2] > 600 && Math.abs(waits[3] - waits[2]) < 300, `the waits grow, then stay: ${waits}`);
+    assert.ok(!P.all.some((l) => l.startsWith('lost') || l.includes('connect failed')), 'nothing said');
+  } finally {
+    if (phone) phone.kill('SIGKILL');
+    if (comp.exitCode === null) {
+      comp.stdin.write('quit\n');
+      await new Promise((r) => { const t = setTimeout(() => { comp.kill('SIGKILL'); r(); }, 5000); comp.on('exit', () => { clearTimeout(t); r(); }); });
+    }
+  }
+});
+
 test('PhoneSync.swift against the real helper (Store, Server and the sync session of helper/lib/phonelink, a temp HOME): a phone mod comes over and waits there, a desktop edit nudges the phone and comes back, a conflict keeps both, deletes both ways go to a trash; switches both ways (the later change wins, a new mod takes the computer\'s) and the approval hint on the computer\'s hold', { skip: noComputer, timeout: 180000 }, async () => {
   build();
   const comp = spawn(process.execPath, [computerFixture, '--seconds', '150'], { stdio: ['pipe', 'pipe', 'inherit'] });

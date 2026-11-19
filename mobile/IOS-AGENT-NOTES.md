@@ -533,10 +533,20 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Application Support/mods-deleted.json, `restoreDeleted`; every delete goes there now). PhoneSyncModel
   (PhoneLinkView.swift) owns the app's ONE PhoneLinkRemote (PanelChat's `link` is it: one session per phone) and
   syncs on didBecomeActive ("front"), `$mods` changes ("change"), `sync.changed` ("nudge"), syncNow ("now") and
-  `syncAfterPairing` ("pair": PhoneLinkModel's `.paired` step); closes a sync-only link after 30 s unused (`lastUse`).
+  `syncAfterPairing` ("pair": PhoneLinkModel's `.paired` step). The link's lifetime (11-19, Tim: the Mac's Sync now
+  said "isn't connected" with TRIF open): `link.keepOpen` true while the app is active (didBecomeActive `front()`;
+  paired only; pairing restarts it toward the new computer, Forget → `unpaired()`): PhoneLinkRemote keeps it open
+  idle and finds it again quietly after a drop or a failed find (`keepRetry` 2, 5, 15, 30, 60 s, the last repeated;
+  not after removed/denied/notPaired/keychain/selfTest), alive by the 30 s ping (the helper's idle limit is 120 s).
+  didEnterBackground `background()`: keepOpen false, the link closed now or when the sync in flight ends
+  (`closeWhenDone`, a background task "TRIF: finishing a sync"), never while More follows a run. A link used while
+  the app isn't active is closed after 30 s unused (`lastUse`), as before. PanelChat's pickUpKept doesn't close a
+  kept link. Tested: phonelink.test.js "kept open" (driver `keep on|off`, keepRetry 0.2/0.4/0.8 there).
   The person's reasons are `PhoneSync.Toast.asked` (now, pair); one pressed during a running sync replaces a queued
   automatic reason in the Scheduler. Scheduler (11-19): `pending` (one reason waiting), never two in flight, never
-  two begun closer than `gap` (1.2 s; the helper refuses a sync.begin within 1 s: `busy`), a `busy` answer tried
+  one begun within `gap` of the last one's start or its answer (1.2 s; the helper refuses a sync.begin within 1 s
+  of the begin it got: `busy`; at launch the begin arrives after the link is found, so a nudge during the front sync
+  was refused once and tried again before the answer counted; syncunit "launch, the nudge during/after"), a `busy` answer tried
   again quietly after the gap (`busyTries`, 3 at most; `retried`, `started` for tests), a change 3 s after the last
   of a burst. The toast (11-19, Tim: "every time you hit a switch … just noise"): `PhoneSync.Toast` (an enum in
   PhoneSync.swift, so the Mac check tests it): `after(r, why:)` is nil for every automatic reason (front, change,

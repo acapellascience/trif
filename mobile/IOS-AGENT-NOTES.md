@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (512 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (529 now; ios-chatgpt used 520-529): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -106,14 +106,34 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `standin-draft`, text only, saved on every change, cleared at a send), put back 0.8 s (or ms) after any chat page
   loads, replacing the box: seed it with panejs `localStorage.setItem('standin-draft', …)` from any chat view, then open
   another site's chat. (`?draft`, Claude's kind, per web view with attachments, no longer matches "gptdraft".)
+  (11-19, checked signed in: the real draft is the box's words only, back within 2 s, attachments dropped: as
+  `?gptdraft`.) `?suggest` (11-19): ChatGPT's suggestion buttons just above the box, four once something is attached
+  (the greeting-overlap check). `?octane` pictures (11-19) are ChatGPT's signed-in tile: div[role=button]
+  .composer-attachment-surface[aria-label] > span > img[alt] + "Remove …" button, a repeated name gets "(n)".
   `?nested[=inline]` (11-18): each finished code block redrawn as claude.ai's (pre.code-block__code >
   code.language-js > a code column of line numbers, user-select none; `=inline`: each line's number at its start).
   Message word "whole": the reply drawn at once, finished, no stop button or streaming mark (a reply that finished
   while the app's page was suspended): held, `waiting` in done, the "replied with a mod" banner.
 - What the browser says it is: serve.js's `/agent` (`?nometa`: no width=device-width viewport): the user agent sent,
   navigator's, platform, width; `window.__agent` for pagejs. localhost vs 127.0.0.1 are two sites.
-- Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner) and is the best check of
-  ChatGPT's markup; claude.ai needs a sign-in, so it's stand-in only.
+- Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner).
+- SIGNED IN (since 11-19): the SE Simulator's app has Tim's OWN ChatGPT and Claude accounts signed in. Hard rules: never
+  press send (tap, key, script, form submit); fill, attach, look, nothing more. Work only in new chats; never open his
+  past conversations, the sidebar's history, Claude's "Recent artifacts", settings, memory or custom instructions.
+  Never `simctl erase`, uninstall, or clear the app's website data (signs him out); `simctl install` over it is fine.
+  Close menus with Escape (panejs keydown), not by tapping around. Anything that needs a real reply goes on a list for
+  Tim. `{"chatjs": "return …"}` runs JS in chat.js's world (`__trifChat.state()`, `canAsk(3000)`); `{"chatlook": 1}`
+  calls look() as the app does. The Simulator tool's set_keyboard toggles with a keypress that can type a letter
+  into the focused box: clear it after.
+- chatgpt.com signed in (11-19, shots 520-529): new chat `https://chatgpt.com/` (Chat | Work switch in its top bar), a
+  "What's on the agenda today?"-style h1 (two h1s, one sr-only) and a suggestion list (div.group/home-suggestion-list-item >
+  button) above the box, more items with a picture attached ("Extract the text", "Improve this image"), none while the
+  box has words or focus. Files: span.group/composer-attachment (named "TRIF instruction(20261119-062044).txt": ChatGPT
+  renames uploads with "(n)" or a timestamp); pictures: div[role=button].composer-attachment-surface[aria-label] > span
+  (img alt) + button "Remove …". The box keeps its WORDS as one draft for the site (back within 2 s of a new chat) but
+  DROPS attachments on any load. Model button `ModelPickerTrigger…` "Medium" → a Thinking effort slider. No upsell
+  buttons showed. claude.ai signed in (11-19, shot 526): pills are group/tile with data-cds-card-body; its greeting
+  ("Hello, night owl") isn't an h1/h2, so TRIF's greeting sits above it, not in its place (follow-up's call).
 - Mock APIs (More's engines): `node mobile/mock-api.js 8379` (`MOCK_MODEL_MS=125` for 2 MB/s model downloads), launch with
   `-apibase http://localhost:8379` and paste the key `sk-test-not-a-real-key`. Message words: "loop" (15-step cap),
   "slow" (try Stop), "no tools". It refuses a turn that lost Claude's thinking block or OpenAI's reasoning item.
@@ -1037,6 +1057,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- Signed-in ChatGPT, needs a real reply (Tim sends, 11-19 list): the send told once and back to the tab; the reply
+  watched to done (no streaming mark there); a mod in the reply offered / Add to TRIF; the conversation remembered for
+  the site (lastChat) and a follow-up in it; the picture pill in the SENT message; a reply finished in the background.
+
 - Safe mode's snapshot and the sync toast (11-18), checked in the Simulator only (shots 501-511): kill in front →
   snapshot (localhost + 127.0.0.1, a two-site mod already off on 127.0.0.1); the banner's Turn them back on (a real
   tap) put back exactly the earlier switches (the two-site mod back to off on 127.0.0.1 only), left alone a mod the
@@ -1264,10 +1288,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - The exit button's new spot: its taps only proven in the Simulator through the window recognizer; never on a phone.
   On the SE it slightly covers a site's top bar under the clock's right (Wikipedia's logo row); the target stops short of
   the right-hand buttons. The SE stayed light after `simctl ui appearance dark` (shots 251/252 are light).
-- The chat look, logged in (can't be checked here): Claude's greeting heading (an h1/h2 with words only? its spark
-  logo must stay), Claude's and ChatGPT's pill markup (data-cds card, group/thumbnail, composer-attachment span),
-  upsell button words, dark mode by the page's own colours (data-trif-tone). Logged-out chatgpt.com checked (shot 241:
-  its greeting sits in a footer inside a form; the instructions go in as text there, pictures-only inputs).
+- The chat look, signed in (11-19, Simulator, Tim's accounts, no send): ChatGPT's pills (file and picture) and
+  greeting checked light and dark, keyboard up, landscape, the model menu open (shots 520-529); Claude's pills and robot
+  (shot 526). Not checked: a bigger iPhone signed in (the greeting's free-space placement is tested in Chrome at 375x471
+  and 393x640 against stand-in `?greet&suggest&octane`), Claude's own greeting heading (not an h1/h2: left visible),
+  upsell words signed in (none seen). On the SE with the keyboard up and two pills, ChatGPT's own box runs under the
+  keyboard's bar (its layout in 252 px; shot 528). Logged-out chatgpt.com: shot 241.
 
 - Video resume (11-18): Simulator only, local stand-ins (scratchpad serve-media.js: video.html?v=a|b|c, alt.html
   (another clip at the same address), live.html (HLS without an end), seek0.html (seeks to 0 after a seek once),
@@ -1474,6 +1500,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Simulator toggles (SwiftUI Toggle) often ignore a quick tool tap: tap with duration 0.15. After `simctl ui
   appearance dark` a running app sometimes stays light (11-16): relaunch, or darken the stand-in page itself (panejs
   setting --bg/--fg) to check TRIF's tone logic.
+- chat.js greeting placement (11-19): `freeGaps` samples elementFromPoint (6 across, every 8 px) between the top bar and
+  the box; `drawnAt` counts words, pictures, controls, li/a and boxes with their own border or background, never a
+  wrapper of the box or of the hidden heading, never [data-trif]. The greeting goes in the free stretch nearest its
+  usual place, tight if needed, else hidden (and the service's heading shown again). chatgpt.com's new chat mutates a
+  few times a second, so this runs ~2x/s there (~8 ms in the Simulator).
+- chat.js on claude.ai signed in: the app's look call at didFinish came before chat.js ran (no robot, no greeting);
+  chat.js now posts `ready` and ClaudePane answers with tellLook.
+- The browser suite (mobile/test/chat.test.js) needs Node 22 (`/usr/local/bin/node`; nvm's 20 has no WebSocket) and
+  TRIF_E2E_CHROME (a worktree's tests/e2e/.browsers Chrome for Testing). Its viewer test failed once in a full run and
+  passed 4 times alone (timing under load).
 - chat.js look: chatgpt.com's mobile page wraps its message box in display:contents boxes (zero size): composerRect
   takes the outermost ancestor with a size that holds no messages and no heading. Headings in a footer or form are
   allowed (ChatGPT's is), not ones with a link, logo or the service's name in them.

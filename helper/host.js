@@ -582,7 +582,8 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore']);
+// (agent.inject: a message the user sent from the panel while its run works, written into that run.)
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'agent.inject', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore']);
 // Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
@@ -1255,8 +1256,10 @@ function onExtensionRequest(msg) {
  * agent.withoutSandbox {agent, allow}: "Use <agent> anyway" (allow: true) or Settings' "Stop allowing"
  * (false). Returns {agents: [ids allowed]}. agent.logout {agent}: Settings' Log out (agents/index.js
  * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
+ * agent.inject {runId, text, id}: "Send now" on a message the user queued while the run works (runs.js inject).
  */
 function panelCommand(cmd, args) {
+  if (cmd === 'agent.inject') return runs.inject(typeof args.runId === 'string' ? args.runId : '', { text: args.text, id: args.id });
   if (cmd === 'agent.logout') {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
@@ -1472,7 +1475,7 @@ function onClientLine(sock, line) {
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
-  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
+  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)' : cmd === 'agent.inject' ? 'only TRIF\'s side panel sends messages into a run while it works' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {

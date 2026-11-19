@@ -1007,7 +1007,19 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     plain `login` line ("Claude Code needs you to log in again.") instead of an error, and none of the
     agent's own text about it; the panel shows its login notice, and the message that run was sent goes
     back in the text box (unless something was typed there meanwhile), to send again once logged in.
-    While running: a working indicator, the Stop button.
+    While running: a working indicator, the Stop button, and the text box still usable: Send (or Enter)
+    then *queues* the message (`chat:<site>` `queue: [{id, text, time, opts, now?}]`, `opts` the agent,
+    model, effort and tab it would have started with). Queued messages show under the conversation, each
+    with its text (a click puts it back in the box), when it goes, **Send now** and ×. When the run is done
+    (not stopped, nothing failed) every queued message goes, joined into one message in order, as the next
+    run in the same conversation, whether a panel is open or not; stopped or failed, they wait (with Send
+    now). Send now while a run works: Claude Code takes it in the run itself (`agent.inject`, below), at its
+    next step, and it shows in the chat as sent there; other agents (Codex) can't, so the run is stopped
+    (what it did is kept) and the message sent as soon as it has stopped, resuming the conversation. A
+    message written into a run that the run never took (stopped first: `done.notTaken`) leaves the chat and
+    is sent again. After a background restart queued messages wait, never sent by themselves. Only the
+    panel page may queue or send them (`chat.queue`, `chat.sendNow`, `chat.unqueue`; lib.js
+    `queuedMessage`, `queueAfterRun`).
   - **Slash commands.** The panel handles `/model [name|default]` (sets the model setting: each message
     is a new agent process, so the agent's own `/model` would last one message), `/clear` or `/new`
     (New chat) and `/help`, answering with a tool-style line (`chat.note`). Any other `/…` goes to the
@@ -1039,7 +1051,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}`, `{type: "downloads.setWatch", on}`, `{type: "downloads.take" | "downloads.done" | "downloads.ignore", id, how?}`, `{type: "mod.preview", text, name}`, `{type: "mod.try", text, name?, tabId}` and `{type: "mod.untry", tabId}` (the panel page only: "Try it here" runs a style mod's rules in the page's world, or a boxed mod in TRIF's sandbox with no powers, once, in that tab, if TRIF is on there and the mod's @match covers it; never a free mod; `mod.untry` reloads the tab; background.js tryMod) and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`, `{type: "chat.queue", site, text, tabId, url, agent?, model?, effort?}` (→ `{id, sent?}`: with no run going it goes at once, with any waiting), `{type: "chat.unqueue", site, id}` (→ `{text}`), `{type: "chat.sendNow", site, id}` (→ `{how: "sent" | "pushed" | "stopping" | "next" | "waiting"}`; these three from the panel page only). Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -1054,6 +1066,7 @@ New native request commands (answered with a normal `response`):
 | `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, loginExpired?, canLogin, loginFix}], default}` |
 | `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?, openModel?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods"). `openModel`: codex-oss only, this run's `{provider, model, baseUrl}` over the stored defaults (see "Open models") |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
+| `agent.inject` | `runId, text, id` | `{injected: true}` or `{injected: false, why}`. The extension's connection only (never the socket or a run). A message the user sent while the run works, written into it: only a run started with `live: true` (`agent.start`; the background sets it) of an agent that can take one (`liveInput`: Claude Code, run with `--input-format stream-json --replay-user-messages`, its stdin open until its first `result`). Each message taken comes back as `{kind: "taken", id}`; `done.notTaken` lists the ids it never took |
 | `agent.running` | – | `{runIds}`: the runs still going. In Safari the helper outlives the connection (the bridge keeps the host and queues its messages), so a chat's run survives a lost connection or a restarted background there instead of being marked interrupted; after reconnecting, the background finishes the ones that ended meanwhile (background.js `settleOrphans`) |
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |

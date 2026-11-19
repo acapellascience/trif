@@ -231,6 +231,8 @@
   </div>
   <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions"></ol>
   <div id="working" class="working" hidden role="status"><span class="pulse" aria-hidden="true"></span>Working…</div>
+  <!-- Messages typed while the agent works, waiting to go (sidepanel.js renderQueue). -->
+  <ol id="queue" class="queue" aria-label="Waiting to send" hidden></ol>
 </main>
 
 <!-- Over the message box: which agent and model this chat uses (sidepanel.js renderUsing; a click opens

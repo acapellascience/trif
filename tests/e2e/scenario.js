@@ -1430,6 +1430,7 @@ class Scenario {
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
       await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
       await r.check('Settings → Mods your chat makes → Wait for me: what the chat makes waits, with Show code and Turn on in its card; what it changes waits while the version before runs; Start on again', () => this.chatWaitCheck(win));
+      await r.check('messages typed while the agent works (a stand-in Claude Code): they wait under the conversation and go as one message when it is done, kept across a panel reload; Send now goes into the working run; after Stop they wait, "Not sent", and a click puts one back in the box', () => this.queueCheck(win));
       await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
       await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
@@ -5198,6 +5199,140 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     }
   }
 
+  // Messages typed while the agent works (sidepanel.js renderQueue, background.js queueMessage and sendNow), with a
+  // stand-in Claude Code that reads its messages as stream-json, as the real one does: one written into the run
+  // comes back (isReplay) at its next step, 400 ms apart; LONG in a message: 20 steps, else 3.
+  async queueCheck(win) {
+    const site = '127.0.0.1';
+    const dir = path.join(this.work, 'standin-queue');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const session = 'e2e-queue';
+let buf = '', closed = false, busy = false;
+const waiting = [];
+const take = (m) => { say({ type: 'user', message: { role: 'user', content: m.message.content }, session_id: session, isReplay: true }); return m.message.content; };
+const turn = (first) => {
+  busy = true;
+  const text = take(first);
+  say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'Working on: ' + text }] } });
+  let n = 0;
+  const steps = text.includes('LONG') ? 20 : 3;
+  const next = () => {
+    for (const m of waiting.splice(0)) say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'Also: ' + take(m) }] } });
+    if (++n < steps) return setTimeout(next, 400);
+    say({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: session });
+    busy = false;
+    setTimeout(after, 50);
+  };
+  setTimeout(next, 400);
+};
+const after = () => { if (busy) return; if (waiting.length) return turn(waiting.shift()); if (closed) process.exit(0); };
+say({ type: 'system', subtype: 'init', session_id: session });
+let started = false;
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => {
+  buf += d;
+  let nl;
+  while ((nl = buf.indexOf('\\n')) !== -1) {
+    const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (!started) { started = true; turn(m); } else waiting.push(m);
+  }
+});
+process.stdin.on('end', () => { closed = true; after(); });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const base = `http://${site}:${this.o.servers.port}`;
+    const chat = async () => (await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`])) || { messages: [] };
+    const users = async () => (await chat()).messages.filter((m) => m.role === 'user').map((m) => m.text);
+    const reopen = async () => { await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {}); await sleep(800); this.panelCtx = await this.d.findPage('sidepanel.html'); };
+    const type = async (text) => {
+      await this.panel(`async (t) => { const i = document.getElementById('input'); i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [text]);
+      await this.panelClick('#send');
+    };
+    const box = () => this.panel(`async () => {
+      const shown = (e) => !!e && e.getClientRects().length > 0;
+      const q = document.getElementById('queue');
+      return { send: shown(document.getElementById('send')), sendTitle: document.getElementById('send').title, stop: shown(document.getElementById('stop')),
+        input: document.getElementById('input').value, disabled: document.getElementById('input').disabled,
+        queue: shown(q) ? [...q.querySelectorAll('li.queued')].map((li) => ({ text: li.querySelector('.q-text').textContent, note: li.querySelector('.q-note').textContent, now: li.querySelector('.q-now').disabled })) : [] };
+    }`);
+    const running = (on) => waitFor(on ? 'the run' : 'the run to end', async () => { const c = await chat(); return !!c.run === on ? c : null; }, { timeoutMs: 30000, intervalMs: 200 });
+    const queued = (n) => waitFor(`${n} waiting`, async () => { const b = await box(); return b.queue.length === n ? b : null; }, { timeoutMs: 10000, intervalMs: 150 });
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=queue`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+
+      // 1. Typed while it works: it waits, under the conversation; Send and Stop both there; two join into one.
+      await type('LONG first');
+      await running(true);
+      await type('queued one');
+      let b = await queued(1);
+      if (!b.send || !b.stop || b.disabled || b.input) problems.push(`while it works, the box: ${JSON.stringify(b)}`);
+      if (b.queue[0].note !== 'Sends when your agent is done' || b.sendTitle !== 'Send when your agent is done') problems.push(`the waiting line: ${JSON.stringify(b)}`);
+      await type('queued two');
+      b = await queued(2);
+      await themes('queue-waiting');
+      // (the panel closed and opened again: still there)
+      await reopen();
+      b = await queued(2);
+      await waitFor('the queued pair sent as one', async () => (await users()).includes('queued one\n\nqueued two') || null, { timeoutMs: 30000, intervalMs: 300 });
+      await running(false);
+      const said = (await chat()).messages.filter((m) => m.role === 'assistant').map((m) => m.text);
+      if (!said.includes('Working on: queued one\n\nqueued two')) problems.push(`the next run: ${JSON.stringify(said)}`);
+      if ((await box()).queue.length) problems.push('the queue isn\'t empty after it went');
+
+      // 2. Send now: written into the run, shown as sent there, and the same run goes on with it.
+      await type('LONG second');
+      const c2 = await running(true);
+      await type('push me now');
+      await queued(1);
+      await this.panelClick('#queue li.queued .q-now');
+      await queued(0);
+      await waitFor('the run took it', async () => (await chat()).messages.some((m) => m.role === 'assistant' && m.text === 'Also: push me now') || null, { timeoutMs: 15000, intervalMs: 200 });
+      const c2b = await chat();
+      if (c2b.run?.runId !== c2.run.runId) problems.push('Send now started another run: it should go into the one working');
+      if (!c2b.messages.some((m) => m.role === 'user' && m.text === 'push me now' && m.pushed)) problems.push('the pushed message isn\'t in the chat as sent');
+      await themes('queue-pushed');
+
+      // 3. Stopped: what waits stays, "Not sent", Send now still there; a click on it puts it back in the box.
+      await type('after the stop');
+      await queued(1);
+      await this.panelClick('#stop');
+      await running(false);
+      b = await queued(1);
+      if (b.queue[0].note !== 'Not sent: your agent stopped first' || b.queue[0].now) problems.push(`stopped, the waiting one: ${JSON.stringify(b.queue)}`);
+      if ((await users()).includes('after the stop')) problems.push('it was sent after a stop');
+      await themes('queue-stopped');
+      await this.panelClick('#queue li.queued .q-text');
+      await queued(0);
+      if ((await box()).input !== 'after the stop') problems.push(`clicked, the box has: ${JSON.stringify((await box()).input)}`);
+      // and sent from there, with nothing running: it goes at once
+      await this.panelClick('#send');
+      await waitFor('sent from the box', async () => (await users()).includes('after the stop') || null, { timeoutMs: 15000, intervalMs: 200 });
+      await running(false);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return 'two waiting went as one when the run was done (kept across a panel reload); Send now went into the working run; stopped, the waiting one stayed, back in the box with a click';
+    } finally {
+      if ((await chat().catch(() => null))?.run) await this.panelClick('#stop').catch(() => {});
+      fs.writeFileSync(cfgFile, saved);
+    }
+  }
+
   // "Mods your chat makes: Wait for me", with a stand-in Claude Code that writes a mod, then changes it
   async chatWaitCheck(win) {
     const site = '127.0.0.1';
@@ -5304,8 +5439,10 @@ if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0
 if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 say({ type: 'system', subtype: 'init', session_id: 'e2e-fix' });
+// (the message: a side-panel run's comes as one stream-json line, its stdin left open for more: the first line)
 let input = '';
-try { input = fs.readFileSync(0, 'utf8'); } catch { /* none */ }
+try { const b = Buffer.alloc(65536); for (;;) { const n = fs.readSync(0, b, 0, b.length, null); if (!n) break; input += b.toString('utf8', 0, n); if (input.includes('\\n')) break; } } catch { /* none */ }
+try { const m = JSON.parse(input.split('\\n')[0]); if (m && m.type === 'user') input = String(m.message.content); } catch { /* plain text */ }
 fs.writeFileSync(${JSON.stringify(promptFile)}, a.join('\\n') + '\\n---\\n' + input);
 fs.writeFileSync('sites/127.0.0.1/e2e-broke.js', ${JSON.stringify(head('E2E Broke'))} + "document.documentElement.dataset.e2eBroke = 'fixed';\\n");
 const text = 'Fixed it: the element it wanted is gone, so it checks first now.';

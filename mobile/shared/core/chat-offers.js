@@ -14,17 +14,30 @@ const OUTCOMES = ['offered', 'added', 'declined', 'dismissed'];
 
 /**
  * The code as compared: line ends as \n, no trailing spaces or tabs on a line (non-breaking spaces as spaces), no
- * blank lines at either end. (A page's innerText, a viewer's lines and the stored file differ only in those.)
+ * blank lines at either end. (A page's innerText, a viewer's lines and the stored file differ only in those.) The
+ * header's `@id` lines are left out (Tim, 11-18: a mod's stable id, docs/PHONE-SYNC.md 2a): TRIF adds one to a mod it
+ * keeps, so the installed copy is still "installed as it is" for the chat's copy without it. Code with no `@id` line
+ * in its header keeps the key it had.
  * @param {string} code
  */
 function normalise(code) {
-  const lines = String(code).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/ /g, ' ')
-    .split('\n').map((l) => l.replace(/[ \t]+$/, ''));
+  const lines = withoutIds(String(code).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/ /g, ' ')
+    .split('\n').map((l) => l.replace(/[ \t]+$/, '')));
   let a = 0;
   let z = lines.length;
   while (a < z && lines[a] === '') a++;
   while (z > a && lines[z - 1] === '') z--;
   return lines.slice(a, z).join('\n');
+}
+
+/** The lines without the `@id` lines of the first whole ==WebMod== block (core/mod-id.js's header rule). */
+function withoutIds(lines) {
+  const start = lines.findIndex((l) => /^\s*\/\/\s*==WebMod==\s*$/i.test(l.replace(/^\uFEFF/, '')));
+  if (start === -1) return lines;
+  let end = -1;
+  for (let i = start + 1; i < lines.length; i++) if (/^\s*\/\/\s*==\/WebMod==\s*$/i.test(lines[i])) { end = i; break; }
+  if (end === -1) return lines;
+  return lines.filter((l, i) => !(i > start && i < end && /^\s*\/\/\s*@id(?:\s|$)/i.test(l)));
 }
 
 /**

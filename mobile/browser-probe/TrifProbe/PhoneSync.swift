@@ -23,7 +23,16 @@ import CryptoKit
 // approval hint); the plan's `switches` (set here after the gets, so a new mod takes the computer's switch, D8) and
 // `allowed` (the computer's hints, kept by the store); sync.end's `switches` (every mod's now). An older computer
 // sends neither: nothing changes here. A hint never approves: it only words the approval card. Every switch and hint
-// is keyed by `PhoneSync.key` (the mod's id today; a stable id later).
+// is kept by `PhoneSync.key` (D16: `<site>#<stable id>`, else the file id); the wire names mods by file id.
+//
+// Stable ids (11-18; docs/PHONE-SYNC.md 2a, 3, 4 and 7 "Ids and renames"): `ids: true` in sync.begin, each row's `uid`
+// (the mod's `@id`, where it keeps one), `body` and `meta` (SHA-256 of the text without the header's @name and @id
+// lines, and of `<name>\n<id>`: ModID.revs, the shared core's mod-id.js). The plan's `renames` are applied first
+// (`syncRename`: the mod moves to the computer's file id, its text as it is; one that can't, `to` taken here, ends the
+// sync before sync.end, `unfinished`, and the next one decides again); a `give` with `merge: true` (a rename on one side,
+// an edit on the other) has no `rev`: whatever sync.get gives is taken; a `give` with `apart: <id>` is the computer's mod
+// of another's name, moved beside it ("… (from your computer)"): new here, and told. Every-site mods (all-sites/…)
+// sync like any (D10). An older computer sends none of it: nothing changes here.
 
 /// The mods the sync reads and writes.
 protocol PhoneSyncStore: AnyObject {
@@ -43,6 +52,11 @@ protocol PhoneSyncStore: AnyObject {
     func syncAllowed() -> [String: PhoneSync.Hint]
     /// The computer's hints (the plan's `allowed`), by sync key: kept for the approval card's words.
     func syncHints(_ hints: [String: PhoneSync.Hint])
+    /// Each mod's stable id where it keeps one (the first by file name in its folder): file id → id.
+    func syncUids() -> [String: String]
+    /// The computer's rename (the plan's `renames`): the mod `from` moves to `to`, its text as it is, everything kept by
+    /// it following. False: it couldn't (`to` taken here, or no such mod).
+    func syncRename(_ from: String, _ to: String) -> Bool
 }
 
 /// (an older store, or a stand-in that doesn't keep them: no switches or hints, as before 11-18)
@@ -51,6 +65,8 @@ extension PhoneSyncStore {
     func syncSetSwitch(_ key: String, _ s: PhoneSync.Switch) -> Bool { false }
     func syncAllowed() -> [String: PhoneSync.Hint] { [:] }
     func syncHints(_ hints: [String: PhoneSync.Hint]) {}
+    func syncUids() -> [String: String] { [:] }
+    func syncRename(_ from: String, _ to: String) -> Bool { false }
 }
 
 /// A request over the paired computer's session (connecting first when needed); the answer, or an `error` message.
@@ -61,9 +77,12 @@ protocol PhoneSyncLink: AnyObject {
 final class PhoneSync {
     enum Taken: Equatable { case taken(held: Bool), refused(String) }
 
-    /// A mod's sync key: the ONE place a mod is keyed for its switch and its hint (D16). Today its id
-    /// (`<site>/<name>`); a stable id separate from its name replaces it here later.
-    static func key(_ id: String) -> String { id }
+    /// A mod's sync key: the ONE place a mod is keyed for its switch and its hint (D16): `<site>#<stable id>` where it
+    /// keeps one (docs/PHONE-SYNC.md 2a), else its file id (`<site>/<name>`), so a renamed mod keeps both.
+    static func key(_ id: String, uid: String? = nil) -> String {
+        guard let uid, ModID.isId(uid), let cut = id.firstIndex(of: "/") else { return id }
+        return "\(id[..<cut])#\(uid)"
+    }
 
     /// A mod's switch as the sync carries it: on, the sites it's off on (sorted), and when the person last changed it
     /// (ms since 1970; 0: never). Two are the same switch when `on` and `off` are, whatever `at`.
@@ -123,14 +142,24 @@ final class PhoneSync {
         var cameBack: [String] = []
         /// Not taken here (the reader refused it) or not taken there (`sync.put`'s error code): tried next time.
         var refused: [(id: String, why: String)] = []
-        /// Left out by the computer (a bad id, over 1 MB, every-site mods) or for later (a run working on its site).
+        /// Left out by the computer (a bad id, over 1 MB) or for later (a run working on its site). Every-site mods sync (D10).
         var skipped: [(id: String, why: String)] = []
         var later: [String] = []
         /// Switched here to the computer's switch (it changed there, or the mod is new here).
         var switched: [String] = []
-        var changedAnything: Bool { !(taken.isEmpty && removed.isEmpty && sent.isEmpty && conflicts.isEmpty && refused.isEmpty && switched.isEmpty) }
+        /// Renamed here as the computer said (from, to): applied first.
+        var renamed: [(from: String, to: String)] = []
+        /// The computer's mods moved beside one of the same name (its id, the phone's mod's): new here.
+        var apart: [(id: String, of: String)] = []
+        /// Ended before sync.end (a rename that couldn't be done here): the next sync decides again.
+        var unfinished = false
+        var changedAnything: Bool { !(taken.isEmpty && removed.isEmpty && sent.isEmpty && conflicts.isEmpty && refused.isEmpty && switched.isEmpty && renamed.isEmpty) }
     }
     struct Failure: Error { let code: String; let message: String }
+
+    /// (Mac checks only: false plays an app from before 11-18, which says nothing of ids: no `ids`, no row `uid`,
+    /// `body` or `meta`. The app never changes it.)
+    nonisolated(unsafe) static var sendIds = true
 
     static func rev(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
 
@@ -141,43 +170,61 @@ final class PhoneSync {
     /// One whole sync. done: what it did, or why it couldn't (the link's or the computer's `error`: off, busy, …).
     func run(_ done: @escaping (Result<Summary, Failure>) -> Void) {
         let files = store.syncFiles()
-        let switches = store.syncSwitches(), allowed = store.syncAllowed()
+        let switches = store.syncSwitches(), allowed = store.syncAllowed(), uids = store.syncUids()
         let manifest: [[String: Any]] = files.keys.sorted().map { id in
-            let rev = Self.rev(files[id]!)
+            let rev = Self.rev(files[id]!), k = Self.key(id, uid: uids[id])
             var row: [String: Any] = ["id": id, "rev": rev]
-            if let sw = switches[Self.key(id)] { row["sw"] = sw.wire }
-            if let ok = allowed[Self.key(id)], ok.rev == rev { row["ok"] = ok.wire }
+            if let sw = switches[k] { row["sw"] = sw.wire }
+            if let ok = allowed[k], ok.rev == rev { row["ok"] = ok.wire }
+            if Self.sendIds, let u = uids[id], ModID.isId(u) { row["uid"] = u }
+            if Self.sendIds, let r = ModID.revs(files[id]!) { row["body"] = r.body; row["meta"] = r.meta }
             return row
         }
-        link.syncRequest(["t": "sync.begin", "switches": true, "mods": manifest]) { [self] plan in
+        var begin: [String: Any] = ["t": "sync.begin", "switches": true, "mods": manifest]
+        if Self.sendIds { begin["ids"] = true }
+        link.syncRequest(begin) { [self] plan in
             guard plan["t"] as? String == "sync.plan", let syncId = plan["syncId"] as? String else { return done(.failure(Self.failure(plan))) }
-            let want = (plan["want"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
-            let give = (plan["give"] as? [[String: Any]] ?? []).filter { $0["id"] is String && $0["rev"] is String }
-            let remove = plan["remove"] as? [String] ?? []
             var s = Summary()
+            // (renames first: the rest of the plan names the new ids. One that can't be done here ends this sync
+            // before sync.end, so the computer's base doesn't move; the next sync decides again)
+            for r in plan["renames"] as? [[String: Any]] ?? [] {
+                guard let from = r["from"] as? String, let to = r["to"] as? String, from != to else { continue }
+                if self.store.syncRename(from, to) { s.renamed.append((from, to)); continue }
+                s.refused.append((from, "rename to \(to): can't here"))
+                s.unfinished = true
+                s.at = Date()
+                return done(.success(s))
+            }
+            let want = (plan["want"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+            // (a merge's give has no rev: the text both keep, made by the computer at sync.put)
+            let give = (plan["give"] as? [[String: Any]] ?? []).filter { $0["id"] is String && ($0["rev"] is String || $0["merge"] as? Bool == true) }
+            let remove = plan["remove"] as? [String] ?? []
             s.later = plan["later"] as? [String] ?? []
             s.skipped = (plan["skipped"] as? [[String: Any]] ?? []).map { ($0["id"] as? String ?? "", $0["why"] as? String ?? "") }
             for g in give where g["back"] as? Bool == true { s.cameBack.append(g["id"] as! String) }
             for g in give { if let of = g["conflict"] as? String { s.conflicts.append((of, g["id"] as! String)) } }
+            for g in give { if let of = g["apart"] as? String { s.apart.append((g["id"] as! String, of)) } }
             self.puts(want[...], syncId, s) { s in
                 self.gets(give[...], syncId, s) { s in
                     var s = s
                     for id in remove where self.store.syncFiles()[id] != nil { self.store.syncRemove(id); s.removed.append(id) }
                     // (the computer's switches: after the gets, so a mod new here takes its switch; an older computer has none)
+                    // (keys by the ids the mods keep now: a new one took its id with its text)
+                    let uidsNow = self.store.syncUids()
                     for x in plan["switches"] as? [[String: Any]] ?? [] {
                         guard let id = x["id"] as? String, let sw = Switch(x), self.store.syncFiles()[id] != nil else { continue }
-                        if self.store.syncSetSwitch(Self.key(id), sw) { s.switched.append(id) }
+                        if self.store.syncSetSwitch(Self.key(id, uid: uidsNow[id]), sw) { s.switched.append(id) }
                     }
                     if let list = plan["allowed"] as? [[String: Any]] {
                         var hints: [String: Hint] = [:]
-                        for x in list { if let id = x["id"] as? String, let h = Hint(x) { hints[Self.key(id)] = h } }
+                        for x in list { if let id = x["id"] as? String, let h = Hint(x) { hints[Self.key(id, uid: uidsNow[id])] = h } }
                         self.store.syncHints(hints)
                     }
                     let now = self.store.syncFiles()
                     let ids = Set(want + give.map { $0["id"] as! String } + remove)
                     let have = ids.sorted().compactMap { id in now[id].map { ["id": id, "rev": Self.rev($0)] } }
-                    let swNow = self.store.syncSwitches()
-                    let swList: [[String: Any]] = now.keys.sorted().compactMap { id in swNow[Self.key(id)].map { var d = $0.wire; d["id"] = id; return d } }
+                    let swNow = self.store.syncSwitches(), uidsEnd = self.store.syncUids()
+                    let swList: [[String: Any]] = now.keys.sorted().compactMap { id in swNow[Self.key(id, uid: uidsEnd[id])].map { var d = $0.wire; d["id"] = id; return d } }
                     self.link.syncRequest(["t": "sync.end", "syncId": syncId, "have": have, "switches": swList]) { end in
                         guard end["t"] as? String == "sync.done" else { return done(.failure(Self.failure(end))) }
                         s.waitingThere = (end["waiting"] as? [[String: Any]] ?? []).map { ($0["id"] as? String ?? "", $0["name"] as? String ?? "") }
@@ -201,11 +248,12 @@ final class PhoneSync {
 
     private func gets(_ list: ArraySlice<[String: Any]>, _ syncId: String, _ s: Summary, _ next: @escaping (Summary) -> Void) {
         guard let g = list.first else { return next(s) }
-        let id = g["id"] as! String, want = g["rev"] as! String
+        let id = g["id"] as! String, want = g["rev"] as? String
         link.syncRequest(["t": "sync.get", "syncId": syncId, "mod": id]) { [self] a in
             var t = s
-            // (the computer's file changed since its plan: not taken, the next sync decides)
-            if a["t"] as? String == "sync.mod", let code = a["code"] as? String, Self.rev(code) == want {
+            // (the computer's file changed since its plan: not taken, the next sync decides; a merge has no rev: the
+            // text the computer made, whatever it is)
+            if a["t"] as? String == "sync.mod", let code = a["code"] as? String, want == nil || Self.rev(code) == want {
                 let isNew = store.syncFiles()[id] == nil
                 switch store.syncTake(id, code: code, isNew: isNew) {
                 case .taken(let held): t.taken.append(id); if held { t.waitingHere.append(id) }
@@ -250,7 +298,7 @@ final class PhoneSync {
             sync { [weak self] r in
                 guard let self else { return }
                 self.running = false
-                if case .success = r { self.known = self.revs() }
+                if case .success(let s) = r, !s.unfinished { self.known = self.revs() }
                 self.finished?(r, why)
                 if let w = self.again { self.again = nil; self.now(w) }
             }

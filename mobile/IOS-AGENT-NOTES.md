@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (494 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (499 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -28,6 +28,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `xcodebuild -project TrifProbe.xcodeproj -scheme TrifProbe -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath <dd> build CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS=<sim.entitlements>`
   (the entitlements file, application-identifier + keychain-access-groups `SIMTEST.com.timsrobot.trifprobe.browser`, only
   so the Keychain works there: unsigned it answers -34018). Then `simctl install`, and launch with flags (below).
+  Launch with `-nosafe` when a test terminates the app while it's in front: else safe mode switches off the mods that
+  were running (a terminate in front is an unclean end).
 - Driving it: the app reads `Documents/step.json` when it gets the Darwin notification `com.trif.probe.step`
   (`xcrun simctl spawn <dev> notifyutil -p com.trif.probe.step`) and writes `Documents/step-out.txt`. Steps (TrifProbeApp
   `Model.step`): go, newtab, select, sheet ("chat" opens the robot view), chat, closechat, newchat, chats, showchat,
@@ -70,7 +72,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   reading before 11-18: LocalModels.sha256 at .utility with the app's footprint sampled every 0.1 s), unread (each
   tab's count from its title, icon tab or not, the card's title, the icon total, the badge set, the permission),
   unreadanswer (true/false: TRIF's words before iOS's question answered Continue / Not now), enginelabel (Go to chat's
-  words for what the chat will use; More's looked at again)…
+  words for what the chat will use; More's looked at again), rename ([id, "New name"]: the Mods tab's Rename through
+  ModsPanel.handle), modcode (id: the mod's file now), modreads ([text, here]: the file id and @id readNamed gives a
+  chat's code); syncstate also prints each mod's `uid` and `hint` (a hint kept by its sync key)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -166,6 +170,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`?n=4`, `window.__count(n | "whole title")`, `?cycle=s`); serve.js on 8377 and 8378 (127.0.0.1:8378 = another tab
   on the same host). An icon tab: `simctl openurl 'trif://open?url=http%3A%2F%2Flocalhost%3A8377%2Funread.html%3Fn%3D1&app=1'`.
   Notification permission: `simctl privacy` has no notifications; uninstall resets it, the question is tapped.
+- Mod ids and renames (ModID.swift → core/mod-id.js, 11-18) on the Mac: `node --test mobile/test/core-modid.test.js`
+  (the JS against mod-id-cases.json, a copy of phone-link's tests/fixtures/mod-id-cases.json: it also checks the copy is
+  unchanged while that worktree is there; revs by node's SHA-256) and `mobile/test/modid.test.js` (swiftc ModID.swift +
+  Core.swift + PhoneSync.swift with modid-check/main.swift: the cases through Swift, CryptoKit's revs, the isId twin,
+  `kept`, `stamp`, `same`, `place`, `renamed`; `TRIF_COST=1`: a 100 KB mod's revs ~6 ms unoptimised). The reader's
+  `uid`: modfile.test.js's last test (stamping or renaming never changes the needs).
 - What a chat may offer (ChatOffers.swift → core/chat-offers.js) on the Mac: `node --test mobile/test/chatoffers.test.js`
   (swiftc with mobile/test/chatoffers-check/main.swift, Core.swift, argv chat-offers-cases.json + gen/core.js; ~20 s;
   prints the judge's cost) and `mobile/test/core-chatoffers.test.js` (the JS alone).
@@ -379,6 +389,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   InstalledMod.runFacts is what it reads; ModStore.running / isOn / applies / setOn / setGroup / scriptPlan use it.
   Twin quirks kept: Swift's `firstIndex(of: "/")` and `contains("*")` read Characters (a "/" followed by a combining
   mark isn't a "/"), JS UTF-16 units; hosts arrive as punycode, so String's canonical == makes no difference there.
+- ModID.swift (11-18; no UI, built for the Mac): stable mod ids (`// @id`, docs/PHONE-SYNC.md 2a on phone-link). Text
+  rules through TrifCore.modId (parts, withMeta, fileFor, checkName); `isId` a twin; `kept` (one id per folder: the
+  first by file name), `stamp` (never `computer`; an update keeps the replaced mod's id), `same` (by id on its site,
+  then by @name), `place` (an update, its own, or beside another of its name: `-2`), `renamed` (a rename's file id),
+  `revs` (sync's body/meta, CryptoKit). ModStore (Mods.swift): `InstalledMod.uid` (the reader's, stored; old records
+  get it at the reread when mods.js changes), `keptUids` (cached, cleared on every change of `mods`), `syncKey`,
+  `placement`/`placed` (readNamed, readNamedInBackground and add: by id first, the id stamped), `stamped` (saveEdit and
+  restore stamp the text before reading), `rename` / `syncRename` → `move` (re-read at the new file id, the record's
+  state carried by `InstalledMod.carry`, the kept-running version's script made again, the hint moved to the new key,
+  `renamedTo` + `current(id)` for old ids, `onRename` → Browser.modRenamed: lastAdded, tabs' modsLoadedIds, the page's
+  last answer, Safety.renamed, `renamedForPanel` for the open code card). No id is ever written at launch.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
   (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
   a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is
@@ -387,7 +408,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   own `style`. Where a free mod may run: `freePageScript` (page world: desktop's window.trif.log/warn/error, expect a
   no-op) tells TRIF's world's `freeRelayScript` by a CustomEvent with a JSON string, which caps (40 a load, 200
   characters) and posts "modlog" → Browser → Diagnostics "mod log" (start, log, warn, error: the wrapper's catch). ModsPanel.swift + Web/mods.html,
-  mods-page.js/css: the Mods tab.
+  mods-page.js/css: the Mods tab. Since 11-18: every-site mods in their own section (`sectionHeading`, `everyOf`: an
+  app that doesn't send `everywhere` (Android) is read by folder), rows' `whole` (the mod's own switch) and the details'
+  two switches (`switchRows`: only when the state has `whole`), the Name row (`nameRow`, Rename only when the state
+  says `rename: true`; message `rename` → ModStore.rename, refusals in ModsPanel.renameWords; the state's `renamed`
+  moves the open card to the new id), All mods (ModsPanel.showAll, ⋯ menu; message `showAll`; modsState(all:): every
+  mod, no site, `multi` false so each row is the whole switch; holds' cards don't open by themselves there). Section
+  rows carry `data-section`; the tiers' collapse CSS is overridden for them in mods-page.css (`sec-hidden`).
 - chat.js's box (11-18, Tim's stale ChatGPT fill): `boxModel` (the box's text with a "\n" per paragraph/line break and
   where each piece is), `trifBlocks` (TRIF's text: from OUR_HEAD, "I'm looking at {url} in TRIF" / "Here's {url} in
   TRIF now:" (with the "(This is a different site: …)" line before it), to OUR_END = Browser.fillEnd "--- End of what
@@ -473,7 +500,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (`syncAllowed`: mods not held, ran nil); the plan's `switches` set after the gets (`syncSetSwitch`: the computer's
   time kept, the mark kept: D8) and `allowed` kept as `syncHintsKept` (UserDefaults "syncHints"; ModsPanel's hold gets
   `allowedOn` when `allowedOnComputer`: the card says "You allowed this on {computer}."); sync.end's `switches`. Every
-  switch and hint keyed by `PhoneSync.key` (the id; a stable id later). The scheduler compares `syncSignature` (file,
+  switch and hint keyed by `PhoneSync.key(id, uid:)` (D16, 11-18: `<site>#<uid>` where the mod keeps one, else the file id;
+  the wire's `switches`/`allowed`/`have` stay by file id). Since 11-18 (D17): `ids: true`, rows' `uid`/`body`/`meta`
+  (ModID.revs), the plan's `renames` applied first (`syncRename`; one refused: `Summary.unfinished`, no sync.end, the
+  scheduler's `known` not moved), `give` with `merge` (no rev check) and `apart` (`Summary.apart` → a notice). Every-site
+  mods sync (D10). The scheduler compares `syncSignature` (file,
   switch, allowed) so a switch or an Allow syncs 3 s later. Tiers and Pause all never sync. The Mods tab (S7): PhoneSyncModel's `line` (syncing, the
   last sync's counts or why not; paired only) and Sync now under Import mod…; `notices` (conflict, came back, couldn't
   read, too big) at the top until OK (`seen`); Recently deleted (all sites, folded) with Restore; newOff "computer"
@@ -1200,6 +1231,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while another tab is shown, real Google sign-in.
 
 ## Gotchas
+
+- (11-18) Foundation's JSONSerialization drops a U+FEFF that starts a string value it reads (`["\u{FEFF}ab"]` → "ab"),
+  so a Core.swift answer (or a fixture read in a Mac check) loses a leading BOM. ModID puts it back for parts and
+  withMeta (`bom`); modid-check gives the "bom" case its BOM back by hand.
+- (11-18) The Write tool turns `\uXXXX` escapes in what it writes into the characters themselves: a JS regex literal
+  with `\u2028` became a real line separator ("Invalid regular expression: missing /"). Write such files with escapes
+  checked (python with `\\u`), or grep for non-ASCII after writing.
+- (11-18) A style mod's body after `@style` is JSON (`{"css": …}`), not CSS: the reader refuses CSS there ("the rules
+  aren't valid JSON").
 
 - The worktree is shared with the phone-sync loop: its uncommitted edits (11-18: Diagnostics.swift mid-change) can
   break a build. Build the .ipa from what's committed: `git archive HEAD mobile extension | tar -x -C <dir>`, copy

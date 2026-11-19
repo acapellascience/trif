@@ -69,10 +69,10 @@ final class PhoneSyncModel: ObservableObject {
         case .success(let s):
             last = s; lastProblem = nil
             tell(s)
-            let here = s.taken + s.removed + s.cameBack + s.conflicts.map(\.sibling) + s.switched
+            let here = s.taken + s.removed + s.cameBack + s.conflicts.map(\.sibling) + s.switched + s.renamed.map(\.to)
             if !here.isEmpty { applied?(here) }
             if s.changedAnything || !s.skipped.isEmpty {
-                Diagnostics.shared.log("sync", "synced (\(why)): \(s.switched.count) switched here, \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
+                Diagnostics.shared.log("sync", "synced (\(why))\(s.unfinished ? ", ended before its end (a rename that can't be done here)" : ""): \(s.renamed.count) renamed here, \(s.apart.count) kept apart, \(s.switched.count) switched here, \(s.taken.count) taken here (\(s.waitingHere.count) waiting), \(s.removed.count) deleted here, \(s.sent.count) sent (\(s.waitingThere.count) waiting there), \(s.conflicts.count) conflicts, \(s.refused.count) refused, \(s.skipped.count) skipped, \(s.later.count) later")
             }
         case .failure(let f):
             guard f.code != "notPaired" else { return }
@@ -131,7 +131,9 @@ final class PhoneSyncModel: ObservableObject {
         var add: [String] = []
         for (id, sib) in s.conflicts { add.append("\(name(id)) changed on both. Both are kept: “\(name(sib))” is beside it.") }
         for id in s.cameBack { add.append("\(name(id)) came back: it was changed on \(c).") }
-        for (id, why) in s.refused {
+        // (two different mods with one name: the computer's kept beside the phone's, under " (from your computer)")
+        for (id, of) in s.apart { add.append("\(name(of)): two different mods had this name. The one from \(c) is now “\(name(id))”.") }
+        for (id, why) in s.refused where !why.hasPrefix("rename to ") {
             if why == "computer: too-big" { add.append("\(name(id)) is too big to sync.") }
             else if why == "computer: bad-mod" { add.append("\(name(id)) didn't go to \(c): TRIF there can't read it.") }
             else if !why.hasPrefix("computer:") { add.append("\(name(id)) on \(c) has an error, so it isn't on this iPhone yet.") }
@@ -145,7 +147,7 @@ final class PhoneSyncModel: ObservableObject {
     /// (development) the last sync, as the dev step `syncstate` says it.
     var describe: String {
         guard let s = last else { return "no sync yet\(lastProblem.map { " (\($0))" } ?? "")" }
-        return "taken \(s.taken.sorted()) waitingHere \(s.waitingHere.sorted()) removed \(s.removed.sorted()) sent \(s.sent.sorted()) waitingThere \(s.waitingThere.map(\.id).sorted()) conflicts \(s.conflicts.map { "\($0.id)>\($0.sibling)" }) cameBack \(s.cameBack) switched \(s.switched.sorted()) refused \(s.refused.map(\.id)) skipped \(s.skipped.map(\.id)) later \(s.later)\(lastProblem.map { " problem \($0)" } ?? "")"
+        return "renamed \(s.renamed.map { "\($0.from)>\($0.to)" })\(s.unfinished ? " unfinished" : "") apart \(s.apart.map { "\($0.id)~\($0.of)" }) taken \(s.taken.sorted()) waitingHere \(s.waitingHere.sorted()) removed \(s.removed.sorted()) sent \(s.sent.sorted()) waitingThere \(s.waitingThere.map(\.id).sorted()) conflicts \(s.conflicts.map { "\($0.id)>\($0.sibling)" }) cameBack \(s.cameBack) switched \(s.switched.sorted()) refused \(s.refused.map(\.id)) skipped \(s.skipped.map(\.id)) later \(s.later)\(lastProblem.map { " problem \($0)" } ?? "")"
     }
 }
 

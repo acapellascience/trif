@@ -789,3 +789,32 @@ YouTube that chatgpt.com had kept as its draft and put back (fixed 11-18: TRIF t
 | The pill for TRIF instruction.txt | **From TRIF: page & guide** | A: **From TRIF: this page & how mods work** · B: **From TRIF: page outline & mod guide** · C: keep |
 | The pill for TRIF follow-up.txt (a conversation that has the guide) | **From TRIF: the page now** | keep (or with A: **From TRIF: this page now**) |
 
+
+## Mod ids, renaming, every-site mods and All mods (added 11-18, drafts; Tim: "Knowing it's the same mod should use a separate ID", every-site mods on the iPhone)
+
+A mod keeps a stable id (its header's `// @id` line, docs/PHONE-SYNC.md 2a on branch phone-link), so it can be renamed
+in its details, here and on the computer; every-site mods have their own group; the ⋯ menu lists every mod.
+ModsPanel.swift, Web/mods-page.js (the shared mods page), PhoneLinkView.swift (the sync notice). The switches' own
+titles are the desktop panel's, unchanged (modswitch.js: "On on {site}: click to switch it off there", "Off on
+{site}: click to switch it on there", "On: click to switch this mod off", "Off: click to switch this mod on").
+
+| Where | Old | New |
+|---|---|---|
+| The code card's Details, first row | (none) | Name {name} · Rename |
+| Rename's field and buttons | (none) | (the name, editable) · Cancel · Save |
+| Rename refused: empty | (none) | Give it a name. |
+| Rename refused: line breaks | (none) | A name fits on one line. |
+| Rename refused: too long | (none) | A name can be up to 80 characters. |
+| Rename refused: the mod is gone | (none) | That mod isn't here any more. |
+| Rename refused: anything else | (none) | TRIF couldn't rename it. Try again. |
+| The Mods tab: every-site mods' own group (on every site's list, after the site's tiers) | (each in its tier's group) | Every site · These run on every site you visit. |
+| Details of a mod for several sites (or every site), on a site's list: its two switches | (only the row's switch: off on this site) | On {site} [switch] · On every site [switch] (a mod for several sites: On all its sites) |
+| Under them, every site | (none) | Off on {site}: it still runs on every other site. Off on every site: it runs nowhere until you switch it on. |
+| Under them, several sites | (none) | Off on {site}: it still runs on its other sites. Off on all its sites: it runs nowhere until you switch it on. |
+| The Mods tab's ⋯ menu, first item | (none) | All mods |
+| …while All mods shows | (none) | Mods on {site} (no site: Mods for this page) |
+| All mods: the title | Mods on {site} | All mods |
+| All mods: the groups | (none) | Every site · These run on every site you visit.; then each site's name |
+| All mods: no mods | (none) | No mods yet. Open a site, open the chat, say what to fix, and add the mod it writes. |
+| All mods: a row's light (no page to run on) | (Running on this page / Not running on this page) | Switched on / Switched off |
+| A sync notice: two different mods had one name (the computer's moved beside the phone's) | (none) | {name}: two different mods had this name. The one from {computer} is now “{name} (from your computer)”. |

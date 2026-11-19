@@ -120,6 +120,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         config.userContentController.addScriptMessageHandler(self, contentWorld: Browser.trifWorld, name: "trif")
         // (before any page: a launch after the app quit in front starts with those sites' mods switched off)
         safety = Safety(store: mods)
+        // (a mod renamed (the Mods tab, or a sync): what keeps its id here follows it)
+        mods.onRename = { [weak self] from, to in self?.modRenamed(from, to) }
         NotificationCenter.default.addObserver(forName: .trifPauseAll, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.pauseAll(true) }
         }
@@ -575,6 +577,23 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if let from = m.cameFrom, !from.isEmpty { modAddedFrom(from) }
         if source == "chat" { lastAdded = (added.id, added.name) }
     }
+
+    /// A mod renamed (ModStore.rename, syncRename): its old file id, where it's kept here, becomes the new one (the
+    /// last mod added for the chat's words, what each tab loaded with and the page's last answer, safe mode's lists,
+    /// the Mods tab's card to open). Recently deleted keeps its entries as they were.
+    func modRenamed(_ from: String, _ to: String) {
+        if lastAdded?.id == from { lastAdded?.id = to }
+        for t in tabs where t.modsLoadedIds.contains(from) { t.modsLoadedIds.remove(from); t.modsLoadedIds.insert(to) }
+        if var a = lastPageAnswer {
+            if a.ran.remove(from) != nil { a.ran.insert(to) }
+            if let e = a.errors.removeValue(forKey: from) { a.errors[to] = e }
+            lastPageAnswer = a
+        }
+        safety.renamed(from, to)
+        renamedForPanel = (from, to)
+    }
+    /// The last rename, for the Mods tab's page (its open card follows the mod to its new id).
+    var renamedForPanel: (from: String, to: String)?
 
     /// After any change to the mods: the scripts every page gets are made again. The shown page loads again to run
     /// them only if what runs on it changed (a mod for its site: added, updated, undone, switched, synced), and never

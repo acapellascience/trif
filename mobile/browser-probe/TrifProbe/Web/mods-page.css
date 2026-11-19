@@ -64,3 +64,20 @@ dialog.approval { margin: 12px; max-height: calc(100% - 24px); width: calc(100% 
 .deleted-box summary { cursor: pointer; }
 .deleted-list .del-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deleted-list .del-where { flex: none; font-size: 12px; opacity: .7; }
+/* (sections without a tier switch: Every site on each site's list, All mods' sites. A tier collapsed doesn't hide
+   their rows; the section's own collapse does: mods-page.js applyCollapsed) */
+.mod-list[data-collapsed] > li[data-section][data-mod]:not(.mod-group) { display: list-item; }
+.mod-list > li.sec-hidden { display: none !important; }
+.mod-section .mod-group-row { justify-content: flex-start; }
+/* (the code card's details: the Name row and its Rename; a mod for several sites' two switches) */
+.cv-d-name { margin: 0 0 12px; }
+.cv-d-name-show { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cv-d-label { font-weight: 600; flex: none; }
+.cv-d-name-value { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cv-d-rename { flex: none; }
+.cv-d-name-edit { display: flex; flex-direction: column; gap: 8px; }
+.cv-d-name-input { font: inherit; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); width: 100%; box-sizing: border-box; }
+.cv-d-name-acts { display: flex; justify-content: flex-end; gap: 8px; }
+.cv-d-switches { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); }
+.cv-d-switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; min-height: 40px; }
+.cv-d-switch-note { margin: 6px 0 0; font-size: 13px; color: var(--muted); }

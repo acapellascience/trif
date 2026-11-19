@@ -108,6 +108,21 @@ final class Safety: ObservableObject {
 
     func dismiss(site: String) { switchedOff[site] = nil; saveOff() }
 
+    /// A mod renamed: its lists here follow it (what's switched off, what was running for a crash's check).
+    func renamed(_ from: String, _ to: String) {
+        var changed = false
+        for (site, var s) in switchedOff where s.ids.contains(from) {
+            s.ids = s.ids.map { $0 == from ? to : $0 }
+            switchedOff[site] = s
+            changed = true
+        }
+        if changed { saveOff() }
+        if session.sites.values.contains(where: { $0.contains(from) }) {
+            session.sites = session.sites.mapValues { $0.map { $0 == from ? to : $0 } }
+            saveSession()
+        }
+    }
+
     /// A stall report from a page (Diagnostics.stallWatch): busy, in tenths, over the last ten seconds.
     func busy(site: String, percent: Int, mods: [InstalledMod]) {
         guard !mods.isEmpty else { busyRuns[site] = 0; return }

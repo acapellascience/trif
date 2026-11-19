@@ -96,6 +96,52 @@ change there is a change on both phones. Change this file whenever a rule change
   export) is <name> under <site>; `<name>.js` is <name>; a name the computer couldn't have is cleaned up (lower case,
   dashes). A mod from a chat or pasted is named by its @name, as before. Mods already here keep their names (11-18).
 
+## Mod ids and renames
+
+(Tim, 11-18: "Knowing it's the same mod should use a separate ID, instead of relying on equivalent names"; the design:
+docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
+
+- A mod's stable id is its header's `// @id <id>` line (after @name): 8 to 64 lower-case letters, digits and
+  hyphens, starting with a letter or digit; TRIF makes a random UUID in lower case. The first @id line counts; one
+  that isn't an id is a header warning, left as it is. It's identity only: never part of what a mod can do or of an
+  approval, so adding it never makes a mod wait. [shared: core/mod-id.js, the desktop's helper/lib/modid.js
+  algorithm, held to its cases]
+- One device: a mod is its folder (site) and its id. Two in one folder with one id (a copied file): the first by file
+  name keeps it, the others count as having none. A mod without an id is its file id, as before.
+- When TRIF gives one: whenever it writes a mod for the person: a chat's add, a paste, a link, an import, an edit
+  saved in the code card, a restore, a rename. Never when it copies one from the computer (a sync's copy is the
+  other side's bytes), never as a mass rewrite at launch: mods already here get one the next time TRIF writes them.
+- The same mod: an offered or imported mod whose id is a mod's on its site is a new version of that mod (whatever
+  its name or file: export then import is the same mod); else (a chat's or a paste's code) the mod with its @name on
+  that site, as before. An update without @id gets the installed mod's id. A mod whose file id is another's but whose
+  id isn't that one's (two mods, one name) goes beside it, `<name>-2`.
+- A chat's offer memory and its judge leave the header's @id lines out, so an installed mod with an id is still
+  "installed as it is" for the chat's copy without it. Code with no @id keeps the key it had. [shared:
+  core/chat-offers.js normalise]
+- Renaming (each mod's details, the shared mods page: Name · Rename → a field → Save / Cancel): the header's @name set
+  (1 to 80 characters, one line), its @id added if it has none, nothing else in the text changed; the file follows the
+  name (`<slug>.js`, `-2`… past another mod's file in the folder, any case; the same slug: the file stays). A rename
+  is never held and never marked new: its switches, approvals, History, the version kept running and its marks stay.
+  Everything keyed by its id follows (its stored file, its sync hint, safe mode's lists, the tabs' loaded mods, a
+  quick ask's Undo, the open code card). Recently deleted keeps old entries as they were. A rename is a change that
+  syncs. [shared: core/mod-id.js checkName, withMeta, fileFor]
+- Phone sync (docs/PHONE-SYNC.md 3, 4, 7 on branch phone-link): each row carries its id and two part revisions
+  (`body`: the text without the header's @name and @id lines; `meta`: `<name>\n<id>`), so the computer can tell a
+  rename from an edit and merge one with the other; the computer's renames are applied on the phone first, as moves
+  (the text as it is, everything keyed by the mod following). Switches and hints are kept by sync key: `<site>#<id>`
+  with an id, else the file id; the wire names mods by file id. Every-site mods sync like any other (D10).
+
+## Every-site mods
+
+- Their own group in the Mods tab, "Every site", on every site's list, after the site's own tiers (Tim, 11-18). A
+  tier's collapse doesn't hide them; the group's own does.
+- A mod for several sites or every site has a switch per site: the row's switch is its switch on this site (off here
+  only: it still runs elsewhere), as on desktop. Its details show both: "On {site}" and "On every site" (several
+  sites: "On all its sites"), the whole mod's switch; switching it on here switches the whole mod on too.
+- All mods (the Mods tab's ⋯ menu): every mod, by where it runs (Every site first, then each site A to Z), each with
+  its whole switch, no page asked; a hold's card opens from its "on hold" only. Closing the tab goes back to the
+  site's list.
+
 ## Which tabs load again when mods change
 
 - A mod change never reloads a tab whose mods didn't change (11-18: "you're watching a YouTube video, when you
@@ -363,6 +409,7 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 |---|---|---|---|
 | Unread count from a title | shared/core/unread-count.js (TrifCore.unreadCount) | UnreadTitle.swift (a twin, same cases: every title change) | test/unreadcount.test.js |
 | Links to other apps | shared/core/app-links.js | AppLinks.swift → TrifCore.appLinks | test/core-applinks.test.js, test/applinks.test.js |
+| Mod ids and renames: the @id line, the part revisions' texts, a name's file, a name's check | shared/core/mod-id.js (TrifCore.modId; the desktop's helper/lib/modid.js, its cases copied) | ModID.swift → TrifCore.modId (isId a twin; which mod keeps an id in a folder, stamping, the same mod, a rename's file: Swift decisions held by the Mac check) | test/core-modid.test.js, test/modid.test.js |
 | What a chat may offer (memory, key, judge) | shared/core/chat-offers.js | ChatOffers.swift → TrifCore.chatOffers (storage and a key cache stay Swift) | test/core-chatoffers.test.js, test/chatoffers.test.js |
 | Sites (a host's site; host in site; a chat's site) | shared/core/site.js | Site.swift (a twin, same cases: every navigation) | test/core-quickask.test.js, test/quickask.test.js |
 | Quick ask: look-only, the pill's state, Undo's steps | shared/core/quick-ask.js | QuickAskRules.swift → TrifCore.quickAsk | test/core-quickask.test.js, test/quickask.test.js |

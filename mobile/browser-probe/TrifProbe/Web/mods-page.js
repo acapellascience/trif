@@ -135,6 +135,43 @@
       li.classList.toggle('collapsed', collapsed.has(g));
       li.querySelector('.group-toggle')?.setAttribute('aria-expanded', String(!collapsed.has(g)));
     }
+    // (a section's rows, by its key: Every site, All mods' sites)
+    for (const li of ui.list.children) if (li.dataset.mod) li.classList.toggle('sec-hidden', !!li.dataset.section && collapsed.has(li.dataset.section));
+  }
+
+  // ---- sections without a tier switch (Tim, 11-18): Every site, on every site's list; All mods' sites --------
+  const EVERY = 'everywhere';
+  // (an app that doesn't say `everywhere` (Android before it does): its folder says)
+  const everyOf = (m) => (typeof m.everywhere === 'boolean' ? m.everywhere : m.site === 'all-sites');
+  const sectionOf = (m) => (everyOf(m) ? EVERY : `at-${m.site}`);
+  function sectionHeading(key, title, note) {
+    let li = headings.get(key);
+    if (!li) {
+      li = el('li', 'mod-group mod-section');
+      li.dataset.section = key;
+      const name = el('h3', 'mod-group-name');
+      name.id = `mod-section-${++labelSeq}`;
+      const toggle = el('button', 'group-toggle');
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.append(el('span', 'group-name-text'), el('span', 'group-count'));
+      toggle.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>');
+      toggle.addEventListener('click', () => {
+        if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+        try { localStorage.setItem('groupsCollapsed', JSON.stringify([...collapsed])); } catch { /* this time only */ }
+        applyCollapsed();
+      });
+      name.append(toggle);
+      const row = el('div', 'mod-group-row');
+      row.append(name);
+      li.append(row, el('p', 'mod-group-note'));
+      headings.set(key, li);
+    }
+    li.querySelector('.group-name-text').textContent = title;
+    const p = li.querySelector('.mod-group-note');
+    p.textContent = note || '';
+    p.hidden = !note;
+    return li;
   }
   function groupHeading(g) {
     let li = headings.get(g);
@@ -351,7 +388,7 @@
     light.classList.toggle('on', running);
     // (switched on since the page loaded: it starts when the page loads again, which the app does at once unless the
     // page is playing; loaded with it, not started yet: starting. Neither is an error)
-    light.title = running ? 'Running on this page' : !on ? 'Switched off'
+    light.title = view.state?.all ? (on ? 'Switched on' : 'Switched off') : running ? 'Running on this page' : !on ? 'Switched off'
       : m.nextLoad || shownEnabled(m.id, m.on, switchSite(m)) !== !!m.on ? 'Starts when this page loads again'
       : m.starting ? 'Starting on this page' : 'Not running on this page';
     const tag = li.querySelector('.tag');
@@ -389,33 +426,58 @@
     $('mods-loading').hidden = !!st;
     if (!st) return;
     const mods = GROUPS.flatMap((g) => (st?.mods || []).filter((m) => modGroup(m) === g));
+    const all = !!st.all;
     if (view.foldFor !== st?.site) { view.foldFor = st?.site; view.foldOpen = false; }
     // (the ones whose @match doesn't cover this page fold into one line at the bottom, as on desktop)
     const other = st?.url ? mods.filter((m) => !m.applies) : [];
     const otherIds = new Set(other.map((m) => m.id));
     const shown = view.foldOpen ? mods : mods.filter((m) => !otherIds.has(m.id));
     ui.empty.hidden = mods.length > 0;
-    ui.empty.textContent = st?.site ? `No mods for ${st.site} yet. Open the chat, say what to fix, and add the mod it writes.` : 'Open a site to see its mods.';
+    ui.empty.textContent = all ? 'No mods yet. Open a site, open the chat, say what to fix, and add the mod it writes.'
+      : st?.site ? `No mods for ${st.site} yet. Open the chat, say what to fix, and add the mod it writes.` : 'Open a site to see its mods.';
     const rows = new Map();
     for (const m of mods) {
-      const key = JSON.stringify([st.site, m.name, m.description, m.held || null, m.pending || null, m.powers, m.powerInfo, m.risk || null, m.errors, m.matches, m.multi, m.sandboxed, m.rules]);
+      const key = JSON.stringify([st.site, all, m.name, m.description, m.held || null, m.pending || null, m.powers, m.powerInfo, m.risk || null, m.errors, m.matches, m.multi, m.sandboxed, m.rules]);
       const old = view.rows.get(m.id);
       rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
     }
     view.rows = rows;
     const want = [];
-    for (const g of GROUPS) {
-      const inGroup = shown.filter((m) => modGroup(m) === g);
-      if (!inGroup.length && !(groupOff(g) && mods.some((m) => modGroup(m) === g))) continue;
-      want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
+    // (each heading's mods, for its count)
+    const members = new Map();
+    const place = (m, section) => { const li = rows.get(m.id).li; if (section) li.dataset.section = section; else delete li.dataset.section; return li; };
+    if (all) {
+      // (All mods: every mod, by where it runs: every site first, then each site A to Z; each its whole switch)
+      const keys = [...new Set(mods.map(sectionOf))].sort((a, b) => (a === EVERY ? -1 : b === EVERY ? 1 : a.localeCompare(b)));
+      for (const k of keys) {
+        const inSec = mods.filter((m) => sectionOf(m) === k);
+        const h = sectionHeading(k, k === EVERY ? 'Every site' : k.slice(3), k === EVERY ? 'These run on every site you visit.' : '');
+        members.set(h, inSec);
+        want.push(h, ...inSec.map((m) => place(m, k)));
+      }
+    } else {
+      for (const g of GROUPS) {
+        const inGroup = shown.filter((m) => modGroup(m) === g && !everyOf(m));
+        if (!inGroup.length && !(groupOff(g) && mods.some((m) => modGroup(m) === g && !everyOf(m)))) continue;
+        const h = groupHeading(g);
+        members.set(h, mods.filter((m) => modGroup(m) === g && !everyOf(m)));
+        want.push(h, ...inGroup.map((m) => place(m, null)));
+      }
+      // (every-site mods: their own group, on every site's list, after the site's own)
+      const every = shown.filter(everyOf);
+      if (every.length) {
+        const h = sectionHeading(EVERY, 'Every site', 'These run on every site you visit.');
+        members.set(h, mods.filter(everyOf));
+        want.push(h, ...every.map((m) => place(m, EVERY)));
+      }
     }
     if (other.length) want.push(foldLine(other.length));
     want.forEach((li, i) => { if (ui.list.children[i] !== li) ui.list.insertBefore(li, ui.list.children[i] || null); });
     while (ui.list.children.length > want.length) ui.list.lastElementChild.remove();
     const byId = new Map(mods.map((m) => [m.id, m]));
     for (const li of ui.list.children) if (li.dataset.mod) updateModItem(li, byId.get(li.dataset.mod));
-    for (const [g, li] of headings) {
-      const inGroup = mods.filter((m) => modGroup(m) === g);
+    applyCollapsed();
+    for (const [li, inGroup] of members) {
       const on = inGroup.filter((m) => !m.held && shownEnabled(m.id, m.on, switchSite(m))).length;
       const count = li.querySelector('.group-count');
       count.replaceChildren(el('span', 'gc-on', String(on)), el('span', 'gc-all', `/${inGroup.length}`));
@@ -532,7 +594,8 @@
       const cur = approval.queue.findIndex((m) => holdKey(m) === approval.shownKey);
       approval.at = cur >= 0 ? cur : Math.min(approval.at, approval.queue.length - 1);
       if (!approval.queue.length) closeApproval(); else renderApproval();
-    } else if (fresh.length && !document.querySelector('dialog[open]')) {
+    } else if (fresh.length && !view.state?.all && !document.querySelector('dialog[open]')) {
+      // (All mods: a hold's card opens from its "on hold", not by itself: the list is for looking through)
       approval.at = approval.queue.indexOf(fresh[0]);
       showApproval();
     }
@@ -743,7 +806,7 @@
     x.addEventListener('click', () => d.close());
     d.append(top, who, tabs, versions, errorBox, hTools, eTools, codeBox, editor, problems, saved, details, historyBox, note, err, acts);
     wireEditor(area, gutter);
-    d.addEventListener('close', () => setTimeout(() => renderMods(), 0));
+    d.addEventListener('close', () => { codeView.renaming = false; setTimeout(() => renderMods(), 0); });
     document.body.append(d);
     codeView.dialog = d;
     codeView.parts = { name, where, details, detailsTab, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, note, err, copy,
@@ -756,6 +819,7 @@
     const m = modById(id);
     if (!m) return;
     const P = codeViewDialog();
+    if (codeView.id !== id) codeView.renaming = false;
     codeView.id = id;
     codeView.dialog.dataset.mod = id;
     codeView.dialog.dataset.group = modGroup(m);
@@ -827,8 +891,100 @@
     'boxed-mods': ['Boxed mod:', ' can do what you\'ve allowed.'],
     'free-mods': ['Free mod:', ' can do anything code can do.'],
   };
+  // The details' Name row (docs/PHONE-SYNC.md 2a, Tim 11-18): Rename → a field → Save / Cancel. Its file follows the
+  // name; nothing else changes, so it never waits for an OK. Kept while the card is open, so a state that comes
+  // meanwhile doesn't take the words being typed.
+  function nameRow(P, m) {
+    let r = P.nameRow;
+    if (!r) {
+      const box = el('div', 'cv-d-name');
+      const label = el('span', 'cv-d-label', 'Name');
+      label.id = 'cv-d-name-label';
+      const value = el('span', 'cv-d-name-value');
+      const rename = button('Rename', 'link-btn cv-d-rename', () => startRename());
+      const show = el('div', 'cv-d-name-show');
+      show.append(label, value, rename);
+      const form = el('form', 'cv-d-name-edit');
+      form.hidden = true;
+      const input = el('input', 'cv-d-name-input');
+      for (const [k, v] of [['type', 'text'], ['maxlength', '80'], ['autocapitalize', 'sentences'], ['autocomplete', 'off'], ['enterkeyhint', 'done'], ['aria-labelledby', label.id]]) input.setAttribute(k, v);
+      const save = button('Save', 'go cv-d-name-save', () => {});
+      save.type = 'submit';
+      const cancel = button('Cancel', 'cv-d-name-cancel', () => endRename());
+      const acts = el('div', 'cv-d-name-acts');
+      acts.append(cancel, save);
+      form.append(input, acts);
+      const err = el('p', 'ap-err cv-d-name-err');
+      err.setAttribute('role', 'alert');
+      err.hidden = true;
+      form.addEventListener('submit', (e) => { e.preventDefault(); saveRename(); });
+      box.append(show, form, err);
+      r = P.nameRow = { box, value, rename, show, form, input, save, err };
+    }
+    r.value.textContent = m.name || m.id;
+    // (Rename only where the app takes it: its state says `rename`)
+    r.rename.hidden = !view.state?.rename;
+    if (!codeView.renaming) { r.form.hidden = true; r.show.hidden = false; }
+    return r.box;
+  }
+  function startRename() {
+    const r = codeView.parts.nameRow;
+    const m = modById(codeView.id);
+    if (!r || !m) return;
+    codeView.renaming = true;
+    r.input.value = m.name || '';
+    r.err.hidden = true;
+    r.show.hidden = true;
+    r.form.hidden = false;
+    r.input.focus();
+    r.input.select();
+  }
+  function endRename() {
+    const r = codeView.parts.nameRow;
+    codeView.renaming = false;
+    if (!r) return;
+    r.form.hidden = true;
+    r.show.hidden = false;
+    r.err.hidden = true;
+  }
+  async function saveRename() {
+    const r = codeView.parts.nameRow;
+    const m = modById(codeView.id);
+    if (!r || !m) return;
+    const name = r.input.value.trim();
+    if (name === m.name) { endRename(); return; }
+    r.save.disabled = true;
+    r.err.hidden = true;
+    try {
+      await ask({ type: 'rename', id: m.id, name });
+      endRename();
+      r.input.blur();
+    } catch (e) { r.err.textContent = errText(e); r.err.hidden = false; } finally { r.save.disabled = false; }
+  }
+
+  // A mod for several sites (or every site), on a site's list: its switch here and its whole switch, apart (Tim,
+  // 11-18), with the desktop panel's words on each switch (modswitch.js setSwitch).
+  function switchRows(m) {
+    if (!m.multi || m.held || !site() || typeof m.whole !== 'boolean') return null;
+    const box = el('div', 'cv-d-switches');
+    const row = (text, s, enabled) => {
+      const p = el('p', 'cv-d-switch');
+      const label = el('span', 'cv-d-switch-label', text);
+      label.id = `cv-d-sw-${++labelSeq}`;
+      p.append(label, modSwitch(document, { id: m.id, site: s, enabled, labelId: label.id, apply: (id, on, x) => ask({ type: 'enable', id, enabled: on, ...(x ? { site: x } : {}) }) }));
+      return p;
+    };
+    const every = everyOf(m);
+    box.append(row(`On ${site()}`, site(), m.on), row(every ? 'On every site' : 'On all its sites', undefined, m.whole !== false));
+    box.append(el('p', 'cv-d-switch-note', every ? `Off on ${site()}: it still runs on every other site. Off on every site: it runs nowhere until you switch it on.`
+      : `Off on ${site()}: it still runs on its other sites. Off on all its sites: it runs nowhere until you switch it on.`));
+    return box;
+  }
+
   function renderDetails(P, m) {
-    const out = [];
+    const out = [nameRow(P, m)];
+    const sw = switchRows(m);
+    if (sw) out.push(sw);
     const tierId = m.rules ? 'style-mods' : m.sandboxed ? 'boxed-mods' : 'free-mods';
     const tierTerm = term('tiers', tierId);
     const tierLine = el('p', 'cv-d-tier');
@@ -1140,8 +1296,18 @@
     renderMods();
     showUndo(state.deleted ? `Deleted ${state.deleted}.` : '', true);
     if (codeView.dialog?.open && codeView.id) {
+      // (renamed: the card follows its mod to its new id)
+      if (!modById(codeView.id) && state.renamed && state.renamed.from === codeView.id && modById(state.renamed.to)) {
+        codeView.id = state.renamed.to;
+        codeView.dialog.dataset.mod = codeView.id;
+      }
       const m = modById(codeView.id);
-      if (!m) codeView.dialog.close(); else renderDetails(codeView.parts, m);
+      if (!m) codeView.dialog.close();
+      else {
+        codeView.parts.name.textContent = m.name || m.id;
+        codeView.parts.where.textContent = `${m.site} · ${m.file}`;
+        renderDetails(codeView.parts, m);
+      }
     }
     if (openId) openApproval(openId);
   };

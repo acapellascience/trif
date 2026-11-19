@@ -1465,8 +1465,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard let q = quick, q.state == .done, let browser else { return }
         for step in QuickAskRules.undo(state: "done", applied: q.applied.map { ($0.id, $0.before != nil) }) {
             guard let a = q.applied.last(where: { $0.id == step.id }) else { continue }
-            if let code = browser.mods.mods.first(where: { $0.id == a.id })?.code { browser.chatOffers.note(code, .declined) }
-            browser.mods.undoAdd(a.id, before: step.back ? a.before : nil)
+            // (renamed since: the mod under its id now)
+            let now = browser.mods.current(a.id)
+            if let code = browser.mods.mods.first(where: { $0.id == now })?.code { browser.chatOffers.note(code, .declined) }
+            browser.mods.undoAdd(now, before: step.back ? a.before : nil)
         }
         browser.modsChanged(why: "the quick ask's Undo")
         quick?.applied = []

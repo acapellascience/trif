@@ -18,6 +18,9 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     @Published var share: ShareFiles?
     /// Set when the tab should close by itself: a hold that came from the chat, now decided (Browser.holdFromChat).
     @Published var wantsClose = false
+    /// The ⋯ menu's All mods (Tim, 11-18: every-site mods seen in one list without visiting a site): every mod, by
+    /// where it runs, each with its whole switch; off: the shown site's mods.
+    @Published var showAll = false
 
     /// After Allow or Don't allow: if the tab was opened for a hold from the chat and nothing else on the site
     /// waits, it closes, so the page (reloaded with the mod) shows.
@@ -71,7 +74,10 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         guard ready, let browser else { return }
         let open = openingApproval ?? openApproval
         openApproval = nil
-        await send(browser.modsState(askPage: false), open: open)
+        let all = showAll
+        await send(browser.modsState(askPage: false, all: all), open: open)
+        // (All mods: no page to ask)
+        if all { return }
         let full: [String: Any]? = await Browser.within(2, nil) { await browser.modsState(askPage: true) }
         if let full { await send(full, open: nil) } else { Diagnostics.shared.log("slow", "the Mods tab asked \(Diagnostics.place(browser.webView.url)) which mods started there, and it didn't answer within 2 s") }
         // (a mod still starting: asked again once its grace is over; one wait at a time)
@@ -112,7 +118,7 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "state":
             // (from the app's own store at once: never waits for the page, which may be busy or gone. Tim, 11-15:
             // on x.com the tab showed nothing at all, as this waited on the page)
-            return (Browser.jsonText(await browser.modsState(askPage: false)), nil)
+            return (Browser.jsonText(await browser.modsState(askPage: false, all: showAll)), nil)
         case "enable":
             let on = d["enabled"] as? Bool ?? false
             store.setOn(id, on, site: d["site"] as? String)
@@ -208,6 +214,16 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         case "import":
             wantsImport = true
             return (["ok": true], nil)
+        case "rename":
+            // (the details' Name row: docs/PHONE-SYNC.md 2a. Never held, never marked new; everything keyed by its id follows)
+            let r = store.rename(id, to: d["name"] as? String ?? "")
+            guard let m = r.mod else { return (nil, ModsPanel.renameWords(r.error)) }
+            if m.id != id || m.name != mod?.name { browser.report.log("mods", "renamed \(id) to \(m.id) (\(m.name))") }
+            return await done()
+        case "showAll":
+            showAll = d["on"] as? Bool ?? !showAll
+            await refresh()
+            return (["ok": true], nil)
         case "unhide":
             guard let r = browser.report.rules.first(where: { $0.id.uuidString == id }) else { return (nil, "not hidden any more") }
             await browser.unhide(r)
@@ -215,6 +231,19 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             return (["ok": true], nil)
         default:
             return (nil, "unknown message \(type)")
+        }
+    }
+}
+
+extension ModsPanel {
+    /// A rename's refusal in the person's words (ModStore.rename's reasons: ModID.checkName's, or the store's).
+    static func renameWords(_ why: String?) -> String {
+        switch why {
+        case "a name can't be empty"?: return "Give it a name."
+        case "a name is one line"?: return "A name fits on one line."
+        case "a name can be up to 80 characters"?: return "A name can be up to 80 characters."
+        case "gone"?: return "That mod isn't here any more."
+        default: return "TRIF couldn't rename it. Try again."
         }
     }
 }
@@ -243,11 +272,16 @@ struct ModsPanelView: View {
         NavigationStack {
             WebViewHost(webView: panel.webView)
                 .background(Color(.systemBackground))
-                .navigationTitle(browser.site.isEmpty ? "Mods" : "Mods on \(browser.site)")
+                .navigationTitle(panel.showAll ? "All mods" : browser.site.isEmpty ? "Mods" : "Mods on \(browser.site)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
+                            // (every mod, wherever it runs: every-site mods without visiting a site)
+                            Button(panel.showAll ? (browser.site.isEmpty ? "Mods for this page" : "Mods on \(browser.site)") : "All mods") {
+                                Task { _ = await panel.handle(["type": "showAll", "on": !panel.showAll]) }
+                            }
+                            Divider()
                             Button("Import mod…") { panel.wantsImport = true }
                             Button("Export all mods for \(browser.site)") {
                                 Task { _ = await panel.handle(["type": "exportSite"]) }
@@ -268,6 +302,8 @@ struct ModsPanelView: View {
                 }
         }
         .task { await panel.refresh() }
+        // (All mods is for this look only: the tab opens on the site's mods next time)
+        .onDisappear { if panel.showAll { panel.showAll = false; Task { await panel.refresh() } } }
         .onChange(of: browser.pageChanged) { _, _ in Task { await panel.refresh() } }
         // (a sync started, finished or has news: the line, the list, Recently deleted)
         .onReceive(PhoneSyncModel.shared.objectWillChange) { _ in Task { await panel.refresh() } }
@@ -290,10 +326,11 @@ extension Browser {
     /// What the Mods tab shows for the shown tab's site, in the shape the desktop panel's status has its mods:
     /// every mod for the site (its domain, or every site), whether it started on this page, its errors here, its hold.
     /// `askPage`: ask the page which mods started and their errors (else the last answer for this page is used).
-    func modsState(askPage: Bool) async -> [String: Any] {
-        let url = webView.url?.absoluteString ?? ""
-        let site = self.site
-        let listed = mods.mods.filter { m in
+    /// `all`: every mod (the ⋯ menu's All mods), as no site's: each with its whole switch, nothing asked of a page.
+    func modsState(askPage: Bool, all: Bool = false) async -> [String: Any] {
+        let url = all ? "" : webView.url?.absoluteString ?? ""
+        let site = all ? "" : self.site
+        let listed = all ? mods.mods : mods.mods.filter { m in
             m.everywhere || Site.of(m.site) == site || m.sites.contains { Site.of($0) == site } || (!url.isEmpty && mods.applies(m, to: url))
         }
         let ran: Set<String>, errors: [String: [String]]
@@ -305,7 +342,7 @@ extension Browser {
             lastPageAnswer = (url, ran, errors, asked)
             askedAt = asked
             for (id, list) in errors where !list.isEmpty {  Diagnostics.shared.logOnce("mod error", "\(id) on \(Diagnostics.place(webView.url)): \(list.prefix(3).joined(separator: " | "))") }
-        } else if let last = lastPageAnswer, last.url == url {
+        } else if !all, let last = lastPageAnswer, last.url == url {
             ran = last.ran; errors = last.errors; askedAt = last.at
         } else { ran = []; errors = [:] }
         // (the page's answer counts as the last word on which mods started only once it was asked a while after the
@@ -318,14 +355,16 @@ extension Browser {
         var starting = false
         let rows: [[String: Any]] = listed.map { m in
             let applies = !url.isEmpty && mods.applies(m, to: url)
-            let on = mods.isOn(m, site: site)
+            let on = mods.isOn(m, site: all ? nil : site)
             let tierOff = mods.groupOff(m.tier, on: site)
             var row: [String: Any] = [
                 "id": m.id, "name": m.name, "description": m.description, "tier": m.tier,
                 "rules": m.tier == "style", "sandboxed": m.tier == "boxed",
                 "powers": m.powers, "powerInfo": ["facts": m.facts.map { ["power": $0.power, "fact": $0.fact] }, "warnings": m.warnings],
                 "matches": m.matches, "sites": m.sites, "site": m.site, "file": "\(m.id.split(separator: "/").last ?? "mod").js",
-                "multi": m.multiSite, "on": on, "applies": applies, "running": ran.contains(m.id),
+                // (`whole`: the mod's own switch, apart from its switch on this site; `everywhere`: an every-site mod,
+                // in its own group on every site. All mods: one switch each, the whole one)
+                "multi": m.multiSite && !all, "on": on, "whole": m.on, "everywhere": m.everywhere, "applies": applies, "running": ran.contains(m.id),
                 "errors": errors[m.id] ?? [], "imported": m.source == "import", "history": m.history.count,
             ]
             if let r = m.risk { row["risk"] = ["tier": r.tier, "why": r.why ?? ""] }
@@ -340,7 +379,7 @@ extension Browser {
             // (one that should be running here and isn't said to be: switched on since this page loaded, so it starts at
             // the next load; or loaded with it and not settled yet: starting; or loaded with it, settled, and a free mod:
             // the page's own world wouldn't run it. Only that last is an error)
-            if on, !tierOff, !m.held, applies, !mods.paused, !ran.contains(m.id) {
+            if !all, on, !tierOff, !m.held, applies, !mods.paused, !ran.contains(m.id) {
                 if !(tab?.modsLoadedIds.contains(m.id) ?? false) { row["nextLoad"] = true }
                 else if !settled { row["starting"] = true; starting = true }
                 else if m.tier == "free" { row["cant"] = true }
@@ -350,10 +389,12 @@ extension Browser {
         modsStateSeq += 1
         let tiers = ["style": "rules", "boxed": "sandboxed", "free": "page"]
         return [
-            "site": site, "host": host, "url": url, "loading": loading,
+            "site": site, "host": all ? "" : host, "url": url, "loading": loading, "all": all, "rename": true,
+            // (a rename: the open code card follows its mod to its new id)
+            "renamed": renamedForPanel.map { ["from": $0.from, "to": $0.to] } ?? NSNull(),
             "mods": rows,
             "groupsOff": (mods.groupsOff[site] ?? []).compactMap { tiers[$0] },
-            "hidden": report.rules.filter { $0.host == host }.map { ["id": $0.id.uuidString, "selector": $0.selector] },
+            "hidden": all ? [] : report.rules.filter { $0.host == host }.map { ["id": $0.id.uuidString, "selector": $0.selector] },
             "deleted": mods.lastDeleted?.name ?? NSNull(),
             "sync": PhoneSyncModel.shared.line.map { ["line": $0, "syncing": PhoneSyncModel.shared.syncing, "notices": PhoneSyncModel.shared.notices] as [String: Any] } ?? NSNull(),
             "trash": mods.trash.map { ["entry": $0.id, "name": $0.mod.name, "site": $0.mod.everywhere ? "every site" : $0.mod.site] },

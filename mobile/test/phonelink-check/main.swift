@@ -17,6 +17,9 @@ func hex(_ s: String) -> Data {
 }
 
 func say(_ s: String) { print(s); fflush(stdout) }
+// (ModID's text rules: the repository's shared core, as the app's bundle has it)
+Core.source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../shared/gen/core.js").standardized
+Core.report = { say("core: \($0)") }
 
 let args = CommandLine.arguments
 if args.count > 1, args[1] == "selftest" {
@@ -79,7 +82,7 @@ if args.count > 1, args[1] == "syncunit" {
                         ["id": "a.com/held", "rev": PhoneSync.rev(giveH)], ["id": "a.com/both-from-computer", "rev": PhoneSync.rev(giveS), "conflict": "a.com/both"],
                         ["id": "a.com/back", "rev": PhoneSync.rev(giveB), "back": true], ["id": "a.com/bad", "rev": PhoneSync.rev(giveX)],
                         ["id": "a.com/stale", "rev": PhoneSync.rev("// older")]],
-               "remove": ["a.com/gone", "a.com/never"], "later": ["b.com/busy"], "skipped": [["id": "all-sites/x", "why": "every-site mods stay on the phone for now"]],
+               "remove": ["a.com/gone", "a.com/never"], "later": ["b.com/busy"], "skipped": [["id": "a.com/huge", "why": "over 1 MB"]],
                // (beside the text, 11-18: the computer's switches to set here, and what it allows as it is)
                "switches": [["id": "a.com/new", "on": true, "off": [String](), "at": 7000], ["id": "a.com/same", "on": true, "off": ["m.a.com"], "at": 9000],
                             ["id": "a.com/gone", "on": true, "off": [String](), "at": 1], ["id": "a.com/nothere", "on": true, "off": [String](), "at": 1], ["id": "a.com/bad-switch", "on": "yes"]],
@@ -114,7 +117,7 @@ if args.count > 1, args[1] == "syncunit" {
     expect(st.files["a.com/gone"] == nil && st.trash["a.com/gone"] == "// gone here" && s.removed == ["a.com/gone"], "remove goes to the trash")
     expect(s.conflicts.count == 1 && s.conflicts[0].id == "a.com/both" && s.conflicts[0].sibling == "a.com/both-from-computer" && st.files["a.com/both-from-computer"] == giveS, "conflict: the sibling taken")
     expect(s.cameBack == ["a.com/back"] && st.files["a.com/back"] == giveB, "came back")
-    expect(s.later == ["b.com/busy"] && s.skipped.first?.id == "all-sites/x", "later and skipped")
+    expect(s.later == ["b.com/busy"] && s.skipped.first?.id == "a.com/huge", "later and skipped")
     expect(s.waitingThere.first?.name == "Up", "waiting there")
     // the plan's switches: set after the gets (a new mod takes the computer's: D8), not for a removed or missing mod
     expect(st.switches["a.com/new"] == PhoneSync.Switch(on: true, off: [], at: 7000) && st.setAt["a.com/new"] == st.takes.count, "a new mod arrives with the computer's switch, after it's taken")
@@ -149,7 +152,7 @@ if args.count > 1, args[1] == "syncunit" {
     expect(PhoneSync.Hint(["rev": "x", "tier": "boxed"]) == nil && PhoneSync.Hint(["rev": PhoneSync.rev("a"), "tier": "god"]) == nil, "bad hints refused")
     expect(PhoneSync.Switch(on: true, off: ["b", "a", "a"], at: 5.7) == PhoneSync.Switch(on: true, off: ["a", "b"], at: 5), "a switch's sites sorted once, its time whole")
     expect(PhoneSync.Switch(on: true, off: [], at: 1).same(.init(on: true, off: [], at: 99)) && !PhoneSync.Switch(on: true, off: [], at: 1).same(.init(on: false, off: [], at: 1)), "same: without the time")
-    expect(PhoneSync.key("a.com/x") == "a.com/x", "the sync key is the id today")
+    expect(PhoneSync.key("a.com/x") == "a.com/x", "the sync key of a mod without a stable id is its file id")
     expect(PhoneSync.Switch(on: false, off: [], at: 0, fresh: true).wire["fresh"] as? Bool == true && PhoneSync.Switch(on: false, off: [], at: 9, fresh: true).wire["fresh"] == nil
            && PhoneSync.Switch(on: true, off: [], at: 0, fresh: true).wire["fresh"] == nil, "fresh: an off never switched only")
 
@@ -182,6 +185,141 @@ if args.count > 1, args[1] == "syncunit" {
     finish?(.failure(.init(code: "notFound", message: ""))); RunLoop.main.run(until: Date().addingTimeInterval(0.02))
     st.files["a.com/up"] = "// up v4"; sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
     expect(runs == 4, "after a failed sync the change rule still compares with the last good one")
+    // ---- stable ids (11-18, docs/PHONE-SYNC.md 2a, 3, 4, 7): rows with uid, body and meta; renames applied first; a
+    // rename that can't be done ends the sync before sync.end; merge and apart; switches and hints kept by uid
+    var events: [String] = []
+    final class IdStore: PhoneSyncStore {
+        var files: [String: String] = [:], switches: [String: PhoneSync.Switch] = [:], hints: [String: PhoneSync.Hint]?
+        var log: (String) -> Void = { _ in }
+        func syncFiles() -> [String: String] { files }
+        func syncUids() -> [String: String] {
+            ModID.kept(files.map { id, code in
+                let p = id.split(separator: "/", maxSplits: 1).map(String.init)
+                return ModID.Entry(id: id, site: p[0], file: "\(p[1]).js", uid: ModID.parts(code)?.uid)
+            })
+        }
+        func key(_ id: String) -> String { PhoneSync.key(id, uid: syncUids()[id]) }
+        func syncSwitches() -> [String: PhoneSync.Switch] { Dictionary(files.keys.compactMap { id in switches[key(id)].map { (key(id), $0) } }, uniquingKeysWith: { a, _ in a }) }
+        func syncSetSwitch(_ k: String, _ s: PhoneSync.Switch) -> Bool {
+            guard files.keys.contains(where: { key($0) == k }) else { return false }
+            let changed = !(switches[k].map { $0.same(s) } ?? false)
+            switches[k] = s
+            return changed
+        }
+        func syncAllowed() -> [String: PhoneSync.Hint] { [:] }
+        func syncHints(_ h: [String: PhoneSync.Hint]) { hints = h }
+        func syncTake(_ id: String, code: String, isNew: Bool) -> PhoneSync.Taken {
+            log("take \(id)")
+            files[id] = code
+            if isNew { switches[key(id)] = .init(on: false, off: [], at: 0, fresh: true) }
+            return .taken(held: false)
+        }
+        func syncRemove(_ id: String) { files[id] = nil }
+        func syncRename(_ from: String, _ to: String) -> Bool {
+            log("rename \(from)>\(to)")
+            guard let code = files[from], files[to] == nil else { return false }
+            let was = key(from)
+            files[from] = nil
+            files[to] = code
+            if was != key(to), let sw = switches.removeValue(forKey: was) { switches[key(to)] = sw }
+            return true
+        }
+    }
+    final class LogComputer: PhoneSyncLink {
+        var sent: [[String: Any]] = [], plan: [String: Any] = [:], code: [String: String] = [:]
+        var log: (String) -> Void = { _ in }
+        func syncRequest(_ m: [String: Any], _ done: @escaping ([String: Any]) -> Void) {
+            sent.append(m)
+            let t = m["t"] as! String
+            log("\(t) \(m["mod"] as? String ?? "")")
+            DispatchQueue.main.async { [self] in
+                if t == "sync.begin" { return done(plan) }
+                if t == "sync.get" { return done(["t": "sync.mod", "mod": m["mod"]!, "name": "x", "code": code[m["mod"] as! String] ?? ""]) }
+                if t == "sync.put" { return done(["t": "ok", "mod": m["mod"]!, "rev": PhoneSync.rev(m["code"] as! String), "held": false]) }
+                if t == "sync.end" { return done(["t": "sync.done", "synced": 1, "waiting": [[String: Any]](), "conflicts": [[String: Any]]()]) }
+            }
+        }
+    }
+    let U1 = "11111111-aaaa-4aaa-8aaa-111111111111", U2 = "22222222-bbbb-4bbb-8bbb-222222222222", U3 = "33333333-cccc-4ccc-8ccc-333333333333", U4 = "44444444-dddd-4ddd-8ddd-444444444444"
+    let mod = { (name: String, uid: String?, body: String) in "// ==WebMod==\n// @name \(name)\n\(uid.map { "// @id \($0)\n" } ?? "")// @match *://x.com/*\n// ==/WebMod==\n\(body)\n" }
+    let oldName = mod("Old name", U2, "a();"), editHere = mod("Edit here", U1, "b(); // edited on the phone"), calmer = mod("Calmer feed", U3, "c();")
+    let plainOne = mod("Plain", nil, "p();"), dup = mod("Copy", U3, "d();")
+    let ids = IdStore()
+    ids.files = ["x.com/old-name": oldName, "x.com/edit-here": editHere, "x.com/calmer-feed": calmer, "x.com/plain": plainOne, "x.com/zz-copy": dup]
+    ids.switches = [PhoneSync.key("x.com/old-name", uid: U2): .init(on: true, off: ["m.x.com"], at: 50)]
+    let newName = ModID.withMeta(oldName, name: "New name")!
+    let merged = mod("Merged", U1, "b(); // edited on the phone")
+    let apart = mod("Calmer feed (from your computer)", U4, "c2();"), every = "// ==WebMod==\n// @name Dark\n// @id 55555555-eeee-4eee-8eee-555555555555\n// ==/WebMod==\nbody { filter: invert(1) }\n"
+    let lc = LogComputer()
+    lc.code = ["x.com/new-name": newName, "x.com/merged": merged, "x.com/calmer-feed-from-computer": apart, "all-sites/dark": every]
+    lc.plan = ["t": "sync.plan", "syncId": "i1",
+               "renames": [["from": "x.com/old-name", "to": "x.com/new-name"], ["from": "x.com/edit-here", "to": "x.com/merged"]],
+               "want": [["id": "x.com/merged", "merge": true]],
+               "give": [["id": "x.com/new-name", "rev": PhoneSync.rev(newName)], ["id": "x.com/merged", "merge": true],
+                        ["id": "x.com/calmer-feed-from-computer", "rev": PhoneSync.rev(apart), "apart": "x.com/calmer-feed"],
+                        ["id": "all-sites/dark", "rev": PhoneSync.rev(every)]],
+               "remove": [String](),
+               "switches": [["id": "x.com/new-name", "on": true, "off": ["m.x.com", "x.com"], "at": 90], ["id": "all-sites/dark", "on": true, "off": [String](), "at": 70]],
+               "allowed": [["id": "x.com/new-name", "rev": PhoneSync.rev(newName), "tier": "style", "powers": [String]()]]]
+    events = []
+    ids.log = { events.append($0) }; lc.log = { events.append($0) }
+    var got4: Result<PhoneSync.Summary, PhoneSync.Failure>?
+    PhoneSync(store: ids, link: lc).run { got4 = $0 }
+    wait { got4 != nil }
+    guard case .success(let s4)? = got4 else { say("FAIL ids: no summary \(String(describing: got4))"); exit(1) }
+    let b4 = lc.sent.first!, rows4 = b4["mods"] as! [[String: Any]]
+    let row4 = { (id: String) in rows4.first { $0["id"] as? String == id } ?? [:] }
+    expect(b4["ids"] as? Bool == true && b4["switches"] as? Bool == true, "begin says ids: true")
+    expect(row4("x.com/old-name")["uid"] as? String == U2 && row4("x.com/plain")["uid"] == nil, "a row's uid where it has one")
+    expect(row4("x.com/zz-copy")["uid"] == nil && row4("x.com/calmer-feed")["uid"] as? String == U3, "one id in a folder twice: the first by file name keeps it")
+    let r4 = ModID.revs(oldName)!
+    expect(row4("x.com/old-name")["body"] as? String == r4.body && row4("x.com/old-name")["meta"] as? String == r4.meta && r4.body == ModID.sha(oldName.replacingOccurrences(of: "// @name Old name\n// @id \(U2)\n", with: "")), "body and meta: SHA-256 of the text without @name/@id and of name\\nid")
+    expect(r4.meta == ModID.sha("Old name\n\(U2)") && ModID.revs(plainOne)!.meta == ModID.sha("Plain\n"), "meta's text")
+    expect((row4("x.com/old-name")["sw"] as? [String: Any]).flatMap(PhoneSync.Switch.init) == PhoneSync.Switch(on: true, off: ["m.x.com"], at: 50), "a switch kept by the id's key goes in its row")
+    let firstReq = events.firstIndex { $0.hasPrefix("sync.put") || $0.hasPrefix("sync.get") } ?? -1
+    let lastRename = events.lastIndex { $0.hasPrefix("rename") } ?? Int.max
+    expect(lastRename < firstReq, "renames before puts and gets: \(events)")
+    expect(s4.renamed.map { "\($0.from)>\($0.to)" } == ["x.com/old-name>x.com/new-name", "x.com/edit-here>x.com/merged"], "renamed: \(s4.renamed)")
+    expect(ids.files["x.com/old-name"] == nil && ids.files["x.com/new-name"] == newName, "the computer's rename: moved, then its text (the new @name) taken")
+    expect(lc.sent.contains { $0["t"] as? String == "sync.put" && $0["mod"] as? String == "x.com/merged" && $0["code"] as? String == editHere }, "merge: the phone's file put under the new id, its text as it was")
+    expect(ids.files["x.com/merged"] == merged && events.contains("take x.com/merged"), "merge: the give has no rev, whatever sync.get gives is taken")
+    expect(s4.apart.count == 1 && s4.apart[0].id == "x.com/calmer-feed-from-computer" && s4.apart[0].of == "x.com/calmer-feed" && ids.files["x.com/calmer-feed-from-computer"] == apart && ids.files["x.com/calmer-feed"] == calmer, "apart: the computer's mod beside the phone's, both here")
+    expect(ids.files["all-sites/dark"] == every && s4.taken.contains("all-sites/dark"), "an every-site mod comes over (D10)")
+    expect(ids.switches[PhoneSync.key("x.com/new-name", uid: U2)] == PhoneSync.Switch(on: true, off: ["m.x.com", "x.com"], at: 90) && s4.switched.contains("x.com/new-name"), "the plan's switch (by file id) set by the id's key after the rename")
+    expect(ids.switches[PhoneSync.key("all-sites/dark", uid: "55555555-eeee-4eee-8eee-555555555555")]?.on == true, "a new every-site mod takes the computer's switch")
+    expect(ids.hints?.keys.sorted() == ["x.com#\(U2)"], "hints kept by the id's key: \(String(describing: ids.hints))")
+    let end4 = lc.sent.last!
+    expect(end4["t"] as? String == "sync.end", "a sync with renames ends with sync.end")
+    let have4 = (end4["have"] as? [[String: String]] ?? []).map { $0["id"]! }
+    expect(have4.contains("x.com/new-name") && have4.contains("x.com/merged") && !have4.contains("x.com/old-name"), "have names the new ids: \(have4)")
+    let endSw4 = (end4["switches"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+    expect(endSw4.contains("x.com/new-name") && !endSw4.contains { $0.contains("#") }, "end's switches by file id on the wire: \(endSw4)")
+    expect(!s4.unfinished && s4.changedAnything, "finished")
+
+    // a rename that can't be done here (another mod has `to`): no puts, no gets, no sync.end; the next sync decides
+    let ids2 = IdStore(); ids2.files = ["x.com/a": mod("A", U1, "a();"), "x.com/b": mod("B", nil, "b();")]
+    let lc2 = LogComputer(); lc2.plan = ["t": "sync.plan", "syncId": "i2", "renames": [["from": "x.com/a", "to": "x.com/b"]], "want": [["id": "x.com/b"]], "give": [["id": "x.com/a", "rev": "x"]], "remove": [String]()]
+    var got5: Result<PhoneSync.Summary, PhoneSync.Failure>?
+    PhoneSync(store: ids2, link: lc2).run { got5 = $0 }
+    wait { got5 != nil }
+    if case .success(let s5)? = got5 {
+        expect(s5.unfinished && s5.refused.first?.id == "x.com/a" && s5.renamed.isEmpty, "a rename refused: unfinished, said as refused")
+    } else { expect(false, "a refused rename is a sync that ended early, not a failure") }
+    expect(lc2.sent.map { $0["t"] as! String } == ["sync.begin"] && ids2.files.count == 2, "nothing more sent or changed: \(lc2.sent.map { $0["t"]! })")
+    // (the scheduler keeps comparing with the last finished sync: an unfinished one doesn't count)
+    var runs6 = 0, finish6: ((Result<PhoneSync.Summary, PhoneSync.Failure>) -> Void)?
+    var f6 = ["x.com/a": "1"]
+    let sch6 = PhoneSync.Scheduler(changeDelay: 0.05, files: { f6 }, sync: { runs6 += 1; finish6 = $0 })
+    sch6.now("front"); var un = PhoneSync.Summary(); un.unfinished = true; finish6?(.success(un))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    expect(sch6.known == nil, "an unfinished sync isn't the last good one")
+    f6["x.com/a"] = "1"
+    sch6.now("now"); finish6?(.success(.init())); RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    expect(sch6.known != nil && runs6 == 2, "a finished one is")
+
+    // the sync key (D16)
+    expect(PhoneSync.key("x.com/a", uid: U1) == "x.com#\(U1)" && PhoneSync.key("x.com/a") == "x.com/a" && PhoneSync.key("all-sites/d", uid: U1) == "all-sites#\(U1)", "the sync key: <site>#<id>, else the file id")
+
     say(fails == 0 ? "sync unit: ok" : "sync unit: \(fails) failed")
     exit(fails == 0 ? 0 : 1)
 }
@@ -241,6 +379,8 @@ if args.count > 3, args[1] == "pair" {
 // <what>", "tool <tool> <input JSON, code cut to its first line>" (answered at once: canned words, a JPEG), "result
 // <mod ids> removed <n>", "state <state>", "lost <code>".
 if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let code = PairCode.parse(args[3]) {
+    // (CHECK_OLD_PHONE: an app from before 11-18, which says nothing of stable ids)
+    if ProcessInfo.processInfo.environment["CHECK_OLD_PHONE"] != nil { PhoneSync.sendIds = false }
     let keys = PhoneLinkKeys(vault: MemoryVault())
     // (what the app's chats show, kept across a close and reopen as across launches; this process's own)
     let shownSuite = "trif.phonelink-check.\(getpid())"
@@ -253,27 +393,54 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
     var remote: PhoneLinkRemote?
     final class MemStore: PhoneSyncStore {
         var files: [String: String] = [:], trash: [String: String] = [:]
+        // (switches and hints by sync key: a mod's stable id where it has one, as the app keeps them)
         var switches: [String: PhoneSync.Switch] = [:], allowedRevs: [String: String] = [:], hints: [String: PhoneSync.Hint] = [:]
         func syncFiles() -> [String: String] { files }
+        func syncUids() -> [String: String] {
+            ModID.kept(files.map { id, code in
+                let p = id.split(separator: "/", maxSplits: 1).map(String.init)
+                return ModID.Entry(id: id, site: p[0], file: "\(p.count > 1 ? p[1] : id).js", uid: ModID.parts(code)?.uid)
+            })
+        }
+        func key(_ id: String) -> String { PhoneSync.key(id, uid: syncUids()[id]) }
         func syncTake(_ id: String, code: String, isNew: Bool) -> PhoneSync.Taken {
             guard code.contains("==WebMod==") else { return .refused("not a mod") }
-            if files[id] == nil { switches[id] = .init(on: false, off: [], at: 0) } // (new: off, as an import, until the plan's switch)
+            let new = files[id] == nil
             files[id] = code
+            if new { switches[key(id)] = .init(on: false, off: [], at: 0) } // (new: off, as an import, until the plan's switch)
             return .taken(held: code.contains("fetch("))
         }
-        func syncRemove(_ id: String) { trash[id] = files.removeValue(forKey: id); switches[id] = nil }
-        func syncSwitches() -> [String: PhoneSync.Switch] { switches.filter { files[$0.key] != nil } }
-        func syncSetSwitch(_ key: String, _ s: PhoneSync.Switch) -> Bool {
-            guard files[key] != nil else { return false }
-            let changed = !(switches[key].map { $0.same(s) } ?? false)
-            switches[key] = s
+        func syncRemove(_ id: String) { switches[key(id)] = nil; trash[id] = files.removeValue(forKey: id) }
+        func syncSwitches() -> [String: PhoneSync.Switch] { Dictionary(files.keys.compactMap { id in switches[key(id)].map { (key(id), $0) } }, uniquingKeysWith: { a, _ in a }) }
+        func syncSetSwitch(_ k: String, _ s: PhoneSync.Switch) -> Bool {
+            guard files.keys.contains(where: { key($0) == k }) else { return false }
+            let changed = !(switches[k].map { $0.same(s) } ?? false)
+            switches[k] = s
             return changed
         }
         // (`pok`: allowed here as it is then, a free mod's hint; a later change isn't, as the app's approval goes)
         func syncAllowed() -> [String: PhoneSync.Hint] {
-            Dictionary(uniqueKeysWithValues: allowedRevs.compactMap { id, rev in files[id].flatMap { PhoneSync.rev($0) == rev ? (id, PhoneSync.Hint(rev: rev, tier: "free", powers: [])) : nil } })
+            Dictionary(allowedRevs.compactMap { id, rev in files[id].flatMap { PhoneSync.rev($0) == rev ? (key(id), PhoneSync.Hint(rev: rev, tier: "free", powers: [])) : nil } }, uniquingKeysWith: { a, _ in a })
         }
         func syncHints(_ h: [String: PhoneSync.Hint]) { hints = h }
+        /// The computer's rename (as ModStore.syncRename): moved, its text as it is, its switch following.
+        func syncRename(_ from: String, _ to: String) -> Bool {
+            guard let code = files[from], files[to] == nil else { return false }
+            let was = key(from)
+            files[from] = nil; files[to] = code
+            if was != key(to), let sw = switches.removeValue(forKey: was) { switches[key(to)] = sw }
+            if let a = allowedRevs.removeValue(forKey: from) { allowedRevs[to] = a }
+            return true
+        }
+        /// The phone's own rename (as ModStore.rename): @name set, @id added if none, the file following.
+        func rename(_ from: String, _ to: String, _ name: String) -> Bool {
+            guard let code = files[from], from == to || files[to] == nil,
+                  let text = ModID.withMeta(code, name: name, uid: syncUids()[from] ?? ModID.newId()) else { return false }
+            let was = key(from)
+            files[from] = nil; files[to] = text
+            if was != key(to), let sw = switches.removeValue(forKey: was) { switches[key(to)] = sw }
+            return true
+        }
     }
     let mem = MemStore()
     func json(_ o: Any) -> String { String(data: try! JSONSerialization.data(withJSONObject: o, options: .sortedKeys), encoding: .utf8)! }
@@ -346,8 +513,12 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
                     case "pdel" where w.count == 2:
                         mem.trash[w[1]] = mem.files.removeValue(forKey: w[1]); say("pdel \(w[1])")
                     case "files": say("files \(json(mem.files))"); say("trash \(json(mem.trash.keys.sorted()))")
+                    // (`pren <from> <to> <name…>`: the phone renames a mod, as the Mods tab's Rename does)
+                    case "pren" where w.count == 3:
+                        let rest = w[2].split(separator: " ", maxSplits: 1).map(String.init)
+                        say(rest.count == 2 && mem.rename(w[1], rest[0], rest[1]) ? "pren \(w[1]) \(rest[0])" : "pren failed")
                     case "psw" where w.count == 3:
-                        if let d = try? JSONSerialization.jsonObject(with: Data(w[2].utf8)) as? [String: Any], let sw = PhoneSync.Switch(d) { mem.switches[w[1]] = sw; say("psw \(w[1])") }
+                        if let d = try? JSONSerialization.jsonObject(with: Data(w[2].utf8)) as? [String: Any], let sw = PhoneSync.Switch(d) { mem.switches[mem.key(w[1])] = sw; say("psw \(w[1])") }
                     case "pok" where w.count == 2: if let f = mem.files[w[1]] { mem.allowedRevs[w[1]] = PhoneSync.rev(f) }; say("pok \(w[1])")
                     case "sws":
                         say("switches \(json(mem.switches.mapValues { $0.wire }))")
@@ -357,7 +528,7 @@ if args.count > 3, args[1] == "remote", let port = NWEndpoint.Port(args[2]), let
                         PhoneSync(store: mem, link: r).run { res in
                             switch res {
                             case .success(let s):
-                                say("synced taken \(json(s.taken.sorted())) held \(json(s.waitingHere.sorted())) removed \(json(s.removed.sorted())) sent \(json(s.sent.sorted())) waitingThere \(json(s.waitingThere.map(\.id).sorted())) conflicts \(json(s.conflicts.map { "\($0.id)>\($0.sibling)" })) cameBack \(json(s.cameBack)) refused \(json(s.refused.map { "\($0.id): \($0.why)" })) skipped \(json(s.skipped.map(\.id))) later \(json(s.later)) switched \(json(s.switched.sorted()))")
+                                say("synced taken \(json(s.taken.sorted())) held \(json(s.waitingHere.sorted())) removed \(json(s.removed.sorted())) sent \(json(s.sent.sorted())) waitingThere \(json(s.waitingThere.map(\.id).sorted())) conflicts \(json(s.conflicts.map { "\($0.id)>\($0.sibling)" })) cameBack \(json(s.cameBack)) refused \(json(s.refused.map { "\($0.id): \($0.why)" })) skipped \(json(s.skipped.map(\.id))) later \(json(s.later)) switched \(json(s.switched.sorted())) renamed \(json(s.renamed.map { "\($0.from)>\($0.to)" })) apart \(json(s.apart.map { "\($0.id)~\($0.of)" }))\(s.unfinished ? " unfinished" : "")")
                             case .failure(let f): say("sync failed \(f.code)")
                             }
                         }

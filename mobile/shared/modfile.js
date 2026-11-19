@@ -154,6 +154,8 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
     sites: s === 'all-sites' ? ['all-sites'] : codePowers.modSites(mod), runAt: mod.runAt, powers: mod.powers || [], powerArgs: mod.powerArgs || {},
     powerInfo: mod.sandboxed ? boxPowers.powerInfo(mod) : null, risk: mod.risk || null, hash: mod.hash,
     needs: needsOf(mod), code: code, script, world, at, styleScript,
+    // (its stable id, the header's first valid @id line, or null: docs/PHONE-SYNC.md 2a)
+    uid: mod.uid || null,
   };
 }
 

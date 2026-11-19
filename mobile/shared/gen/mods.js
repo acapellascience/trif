@@ -1921,6 +1921,13 @@ function parseHeader(code) {
       case 'version':
         if (value) out.version = value;
         break;
+      // `@id <id>`: the mod's stable id (lib/modid.js, docs/PHONE-SYNC.md 2a): the first @id line counts
+      case 'id':
+        if (out.uid === undefined) {
+          out.uid = /^[a-z0-9][a-z0-9-]{7,63}$/.test(value) ? value : null;
+          if (!out.uid) out.warnings.push(`@id should be 8 to 64 lower-case letters, digits and hyphens (got "${value.slice(0, 80)}")`);
+        }
+        break;
       // `@style` (or `@rules`, its name before): a style mod (lib/rules.js): data after the header, run by
       // TRIF's own code. Inside TRIF it's still a "rules" mod (`rules: true`).
       case 'style':
@@ -2009,6 +2016,7 @@ function buildMod({ site, file, code }) {
     risk: header.risk, // {tier, why} or null when the header doesn't say
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
+    ...(header.uid ? { uid: header.uid } : {}),
   };
   // (`sandboxed` only when it is: the hashes of every other mod stay as they were. The code is hashed with its
   // header's new names spelled the old way, so a mod that only changes `@rules` to `@style`, or `@sandboxed` to
@@ -3295,6 +3303,8 @@ function readMod(text, { file = '', site = '', here = '', shipped = false } = {}
     sites: s === 'all-sites' ? ['all-sites'] : codePowers.modSites(mod), runAt: mod.runAt, powers: mod.powers || [], powerArgs: mod.powerArgs || {},
     powerInfo: mod.sandboxed ? boxPowers.powerInfo(mod) : null, risk: mod.risk || null, hash: mod.hash,
     needs: needsOf(mod), code: code, script, world, at, styleScript,
+    // (its stable id, the header's first valid @id line, or null: docs/PHONE-SYNC.md 2a)
+    uid: mod.uid || null,
   };
 }
 

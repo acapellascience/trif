@@ -52,6 +52,7 @@
 		A1C10B0E5EB1C11B0000004C /* ModHolds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000004D /* ModHolds.swift */; };
 		A1C10B0E5EB1C11B0000004E /* ModChanges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B0000004F /* ModChanges.swift */; };
 		A1C10B0E5EB1C11B00000050 /* ModRuns.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000051 /* ModRuns.swift */; };
+		A1C10B0E5EB1C11B00000060 /* ModID.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000061 /* ModID.swift */; };
 		A1C10B0E5EB1C11B00000052 /* ModOfferRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000053 /* ModOfferRules.swift */; };
 		A1C10B0E5EB1C11B00000054 /* LeavingCoverRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000055 /* LeavingCoverRules.swift */; };
 		A1C10B0E5EB1C11B00000056 /* TabReloadRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10B0E5EB1C11B00000057 /* TabReloadRules.swift */; };
@@ -129,6 +130,7 @@
 		A1C10B0E5EB1C11B0000004D /* ModHolds.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModHolds.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B0000004F /* ModChanges.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModChanges.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000051 /* ModRuns.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModRuns.swift"; sourceTree = "<group>"; };
+		A1C10B0E5EB1C11B00000061 /* ModID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModID.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000053 /* ModOfferRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModOfferRules.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000055 /* LeavingCoverRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LeavingCoverRules.swift"; sourceTree = "<group>"; };
 		A1C10B0E5EB1C11B00000057 /* TabReloadRules.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "TabReloadRules.swift"; sourceTree = "<group>"; };
@@ -284,6 +286,7 @@
 				A1C10B0E5EB1C11B0000004D /* ModHolds.swift */,
 				A1C10B0E5EB1C11B0000004F /* ModChanges.swift */,
 				A1C10B0E5EB1C11B00000051 /* ModRuns.swift */,
+				A1C10B0E5EB1C11B00000061 /* ModID.swift */,
 				A1C10B0E5EB1C11B00000053 /* ModOfferRules.swift */,
 				A1C10B0E5EB1C11B00000055 /* LeavingCoverRules.swift */,
 				A1C10B0E5EB1C11B00000057 /* TabReloadRules.swift */,
@@ -428,6 +431,7 @@
 				A1C10B0E5EB1C11B0000004C /* ModHolds.swift in Sources */,
 				A1C10B0E5EB1C11B0000004E /* ModChanges.swift in Sources */,
 				A1C10B0E5EB1C11B00000050 /* ModRuns.swift in Sources */,
+				A1C10B0E5EB1C11B00000060 /* ModID.swift in Sources */,
 				A1C10B0E5EB1C11B00000052 /* ModOfferRules.swift in Sources */,
 				A1C10B0E5EB1C11B00000054 /* LeavingCoverRules.swift in Sources */,
 				A1C10B0E5EB1C11B00000056 /* TabReloadRules.swift in Sources */,

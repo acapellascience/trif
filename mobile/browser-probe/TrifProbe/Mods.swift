@@ -71,6 +71,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// (offered, not kept) The site it came from: the chat's, or the page it was pasted on (Add this mod? warns when it
     /// runs on another). nil: from a file or a code, which has no site of its own.
     var cameFrom: String? = nil
+    /// Its stable id: the header's first valid `@id` line (docs/PHONE-SYNC.md 2a; ModID), as the reader found it; nil:
+    /// none. Two in one folder with one id: only the first by file name keeps it (ModStore.keptUids).
+    var uid: String? = nil
 
     struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String; var style: String? = nil }
 
@@ -108,7 +111,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// A change on hold: the version before runs meanwhile.
     var pending: Bool { held && ran != nil }
 
-    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, switchAt, allowed, source, newOff, added, history, ran, extraNeeds }
+    enum CodingKeys: String, CodingKey { case id, site, name, description, tier, sites, matches, excludes, powers, powerArgs, facts, warnings, risk, hash, needs, code, script, world, at, on, offSites, switchAt, allowed, source, newOff, added, history, ran, extraNeeds, uid }
 
     init(id: String, site: String, name: String, description: String, tier: String, sites: [String], matches: [String], powers: [String], code: String, script: String, world: String, at: String) {
         self.id = id; self.site = site; self.name = name; self.description = description; self.tier = tier; self.sites = sites
@@ -127,6 +130,7 @@ struct InstalledMod: Codable, Identifiable, Equatable {
         try c.encode(world, forKey: .world); try c.encode(at, forKey: .at); try c.encode(on, forKey: .on); try c.encode(offSites, forKey: .offSites); try c.encodeIfPresent(switchAt, forKey: .switchAt)
         try c.encode(allowed, forKey: .allowed); try c.encode(source, forKey: .source); try c.encodeIfPresent(newOff, forKey: .newOff); try c.encode(added, forKey: .added)
         try c.encode(Array(history.prefix(10)), forKey: .history); try c.encodeIfPresent(ran, forKey: .ran); try c.encode(extraNeeds, forKey: .extraNeeds)
+        try c.encodeIfPresent(uid, forKey: .uid)
     }
 
     init(from d: Decoder) throws {
@@ -160,12 +164,25 @@ struct InstalledMod: Codable, Identifiable, Equatable {
         history = try c.decodeIfPresent([ModVersion].self, forKey: .history) ?? []
         ran = try c.decodeIfPresent(RanVersion.self, forKey: .ran)
         extraNeeds = try c.decodeIfPresent([ModNeed].self, forKey: .extraNeeds) ?? []
+        uid = try c.decodeIfPresent(String.self, forKey: .uid)
+    }
+
+    /// What identity reads of it (ModID): its file id, folder, file, the id its text has, its name.
+    var idEntry: ModID.Entry { .init(id: id, site: site, file: file, uid: uid, name: name) }
+
+    /// Another reading of the same mod (its text changed by TRIF: an id stamped, a rename, a move to another file
+    /// id) with this record's own state: its switches, approvals, History, the version kept running, its marks.
+    func carry(to again: InstalledMod) -> InstalledMod {
+        var m = again
+        m.on = on; m.offSites = offSites; m.switchAt = switchAt; m.allowed = allowed; m.source = source; m.newOff = newOff
+        m.added = added; m.history = history; m.ran = ran; m.extraNeeds = extraNeeds; m.cameFrom = cameFrom
+        return m
     }
 }
 
 @MainActor
 final class ModStore: ObservableObject {
-    @Published private(set) var mods: [InstalledMod] = []
+    @Published private(set) var mods: [InstalledMod] = [] { didSet { keptCache = nil } }
     /// The tiers switched off on a site (the Mods tab's On / Off on each tier): site → [style, boxed, free].
     @Published private(set) var groupsOff: [String: [String]] = [:]
     /// The last mod deleted, for Undo (this launch only).
@@ -182,7 +199,7 @@ final class ModStore: ObservableObject {
     }
     /// The computer allowed this version as it is, asking nothing beyond what it allowed there (the hint fits).
     func allowedOnComputer(_ m: InstalledMod) -> Bool {
-        guard let h = syncHintsKept[PhoneSync.key(m.id)] else { return false }
+        guard let h = syncHintsKept[syncKey(m)] else { return false }
         return h.fits(rev: PhoneSync.rev(m.code), tier: m.tier, powers: m.tier == "boxed" ? m.powers : [])
     }
     private let key = "installedMods"
@@ -254,6 +271,54 @@ final class ModStore: ObservableObject {
         save()
     }
 
+    // MARK: ids (ModID; docs/PHONE-SYNC.md 2a)
+
+    private var keptCache: [String: String]?
+    /// File id → the stable id it keeps: its text's, unless an earlier file in its folder has the same one.
+    var keptUids: [String: String] {
+        if let k = keptCache { return k }
+        let k = ModID.kept(mods.map(\.idEntry))
+        keptCache = k
+        return k
+    }
+    /// The mods as identity reads them, each with the id it keeps.
+    private var idEntries: [ModID.Entry] { let k = keptUids; return mods.map { var e = $0.idEntry; e.uid = k[$0.id]; return e } }
+    /// A mod's sync key (D16): `<site>#<id>` with a stable id, else its file id.
+    func syncKey(_ m: InstalledMod) -> String { PhoneSync.key(m.id, uid: keptUids[m.id]) }
+    /// Renames this launch (old file id → new), so what held an old id (a quick ask's Undo) finds the mod.
+    private var renamedTo: [String: String] = [:]
+    /// A mod's file id now, after any renames this launch.
+    func current(_ id: String) -> String {
+        var id = id, seen = Set<String>()
+        while let to = renamedTo[id], seen.insert(id).inserted { id = to }
+        return id
+    }
+    /// Told of each rename (old file id, new): Browser passes it to what keeps ids (Safety, tabs, the Mods tab).
+    var onRename: ((String, String) -> Void)?
+
+    /// Where a mod just read is kept and with which text: under the installed mod it's a new version of (the one with
+    /// its stable id on its site; `byName`: else the one with its @name, as before), and its id stamped in when it has
+    /// none (that mod's, else a new one; never for `computer`). nil: as it was read.
+    private func placement(_ m: InstalledMod, byName: Bool, source: String) -> (file: String, site: String, text: String)? {
+        let p = ModID.place(m.idEntry, among: idEntries, byName: byName)
+        // (an id of its own: one no mod on its site has, or the one it updates, which it then keeps)
+        let u = ModID.stamp(has: ModID.isId(m.uid) ? m.uid : nil, before: p.replaces.flatMap { keptUids[$0] }, source: source)
+        let text = u.flatMap { ModID.withMeta(m.code, uid: $0) } ?? m.code
+        guard p.file != m.file || p.site != m.site || text != m.code else { return nil }
+        return (p.file, p.site, text)
+    }
+    /// `placement` applied (read again on this thread; nil: the same).
+    private func placed(_ m: InstalledMod, byName: Bool, source: String) -> InstalledMod {
+        guard let p = placement(m, byName: byName, source: source), let again = read(p.text, file: p.file, site: p.site).mod else { return m }
+        return m.carry(to: again)
+    }
+    /// A text with its stable id: its own, else `keep`, else a new one (an edit, a restore: TRIF writes it).
+    private func stamped(_ text: String, keep: String?, source: String) -> String {
+        guard source != "computer", let u = ModID.stamp(has: nil, before: keep, source: source) else { return text }
+        guard let p = ModID.parts(text), p.header, !ModID.isId(p.uid) else { return text }
+        return ModID.withMeta(text, uid: u) ?? text
+    }
+
     // MARK: reading
 
     /// A mod file, or a chat's reply with one in it: the mod, ready to add, or why it can't be. `file`: the file's
@@ -284,6 +349,7 @@ final class ModStore: ObservableObject {
         }
         if let r = d["risk"] as? [String: Any], let t = r["tier"] as? Int { m.risk = ModRisk(tier: t, why: r["why"] as? String) }
         m.needs = (d["needs"] as? [[String: Any]] ?? []).map { ModNeed(key: $0["key"] as? String ?? "", fact: $0["fact"] as? String ?? "", power: $0["power"] as? String, lines: $0["lines"] as? [String]) }
+        m.uid = ModID.isId(d["uid"] as? String) ? d["uid"] as? String : nil
         return (m, nil)
     }
 
@@ -297,18 +363,20 @@ final class ModStore: ObservableObject {
     /// readNamed, off the main thread.
     func readNamedInBackground(_ text: String, here: String) async -> (mod: InstalledMod?, error: String?) {
         let r = await readInBackground(text, here: here)
-        guard let m = r.mod, !mods.contains(where: { $0.id == m.id }),
-              let same = mods.first(where: { $0.name == m.name && $0.site == m.site }) else { return r }
-        return await readInBackground(text, file: same.file, site: same.site, here: here)
+        guard let m = r.mod, let p = placement(m, byName: true, source: "chat") else { return r }
+        let again = await readInBackground(p.text, file: p.file, site: p.site, here: here)
+        return again.mod == nil ? r : again
     }
 
-    /// A mod from a chat or the clipboard: as `read`, and when one kept here has its @name and site (the chat's
-    /// new version of it: "the same @name replaces that mod"), under that one's id, whatever its file is called.
+    /// A mod from a chat or the clipboard: as `read`, and when one kept here is the same mod, under that one's id,
+    /// whatever its file is called: the one with its stable id on its site first (11-18, docs/PHONE-SYNC.md 2a), else
+    /// the one with its @name ("the same @name replaces that mod"). Its id is stamped in when it has none (the mod
+    /// it replaces keeps its own).
     func readNamed(_ text: String, here: String) -> (mod: InstalledMod?, error: String?) {
         let r = read(text, here: here)
-        guard let m = r.mod, !mods.contains(where: { $0.id == m.id }),
-              let same = mods.first(where: { $0.name == m.name && $0.site == m.site }) else { return r }
-        return read(text, file: same.file, site: same.site, here: here)
+        guard let m = r.mod, let p = placement(m, byName: true, source: "chat") else { return r }
+        let again = read(p.text, file: p.file, site: p.site, here: here)
+        return again.mod == nil ? r : again
     }
 
     /// What changed from one text to another, as desktop's "See differences" shows it (helper/lib/diff.js).
@@ -487,9 +555,12 @@ final class ModStore: ObservableObject {
     /// one before keeps running until the user decides.
     /// The rules: ModChanges.add (core mod-store.js): History 30 days, 30 versions; from the computer (phone sync D8),
     /// judged as an edit, its switch kept, or new: off and marked as an import is.
+    /// Every add but the computer's and an edit's: under the mod it's a new version of by stable id (an import or an offer whose id
+    /// is a mod's on its site), with an id stamped in when it has none (docs/PHONE-SYNC.md 2a "When TRIF gives one").
     @discardableResult
     func add(_ new: InstalledMod, source: String) -> InstalledMod {
-        var m = new
+        // (an edit is the record it edits: saveEdit stamped its text already; the computer's copy is never moved or stamped)
+        var m = source == "computer" || source == "edit" ? new : placed(new, byName: false, source: source)
         let date = Date()
         if let i = mods.firstIndex(where: { $0.id == m.id }) {
             let old = mods[i]
@@ -625,7 +696,8 @@ final class ModStore: ObservableObject {
     func saveEdit(_ id: String, _ text: String) -> (mod: InstalledMod?, stamp: String?, check: [String: Any]) {
         guard let old = mods.first(where: { $0.id == id }) else { return (nil, nil, ["ok": false, "errors": [["message": "that mod isn't here any more"]]]) }
         let checked = check(text, for: old)
-        guard checked["ok"] as? Bool == true, var m = read(text, file: old.file, site: old.site).mod else { return (nil, nil, checked) }
+        // (an edit saved keeps the mod's id; one with none gets one: TRIF writes it)
+        guard checked["ok"] as? Bool == true, var m = read(stamped(text, keep: keptUids[id], source: "edit"), file: old.file, site: old.site).mod else { return (nil, nil, checked) }
         guard m.code != old.code else { return (old, nil, checked) }
         m.allowed = ModStore.seeded(old)
         m.extraNeeds = ModStore.changeNeeds(m, was: old)
@@ -639,7 +711,7 @@ final class ModStore: ObservableObject {
     /// Restore a kept version: it becomes the mod (the current one kept in History), judged again like any change.
     func restore(_ id: String, stamp s: String, as source: String = "restore") -> Bool {
         guard let i = mods.firstIndex(where: { $0.id == id }), let v = mods[i].history.first(where: { $0.stamp == s }),
-              var back = read(v.code, file: mods[i].file, site: mods[i].site).mod else { return false }
+              var back = read(stamped(v.code, keep: keptUids[id], source: source), file: mods[i].file, site: mods[i].site).mod else { return false }
         let now = mods[i], date = Date()
         guard let c = ModChanges.restore(history: now.history.count, source: source, at: date) else { return false }
         back.take(c.keep, from: now)
@@ -655,6 +727,61 @@ final class ModStore: ObservableObject {
         }
         mods[i] = back
         save()
+        return true
+    }
+
+    // MARK: renaming (docs/PHONE-SYNC.md 2a "Renaming")
+
+    /// Renames a mod (the Mods tab's details): its @name set (and its @id added if it has none), its file following
+    /// the name (`<slug>.js`, `-2`… past the others in its folder), nothing else in its text changed, so it never
+    /// waits for an OK and isn't marked new: its switches, approvals, History, the version kept running and its marks
+    /// stay. Everything keyed by its id follows (its file here, its sync key's hint, what Browser keeps: onRename).
+    /// Answer: the mod as it is now, or why not (ModID.checkName's words, or the reader's).
+    func rename(_ id: String, to name: String) -> (mod: InstalledMod?, error: String?) {
+        guard let old = mods.first(where: { $0.id == id }) else { return (nil, "gone") }
+        let r = ModID.renamed(old.idEntry, to: name, folder: idEntries)
+        guard let to = r.id else { return (nil, r.why ?? "no answer") }
+        let uid = keptUids[id] ?? ModID.newId()
+        guard let text = ModID.withMeta(old.code, name: name.trimmingCharacters(in: .whitespacesAndNewlines), uid: uid) else { return (nil, "no answer") }
+        if text == old.code && to == id { return (old, nil) }
+        return move(id, to: to, text: text, why: "renamed") ? (mods.first { $0.id == to }, nil) : (nil, "unreadable")
+    }
+
+    /// The phone sync's rename (the computer's plan: `renames`, applied first): the mod moves to the computer's file
+    /// id, its text as it is (the new @name arrives with the plan's give), everything keyed by it following. False:
+    /// not here, another mod has that id here, or another folder.
+    func syncRename(_ from: String, _ to: String) -> Bool {
+        guard from != to, let old = mods.first(where: { $0.id == from }), !mods.contains(where: { $0.id == to }),
+              let cut = to.firstIndex(of: "/"), String(to[..<cut]) == old.site else { return false }
+        return move(from, to: to, text: old.code, why: "renamed on the computer")
+    }
+
+    /// One mod moved to another file id with this text (read there again), its record's state kept.
+    private func move(_ id: String, to: String, text: String, why: String) -> Bool {
+        guard let i = mods.firstIndex(where: { $0.id == id }), let cut = to.firstIndex(of: "/") else { return false }
+        let old = mods[i]
+        let file = "\(to[to.index(after: cut)...]).js"
+        guard let again = read(text, file: file, site: old.site).mod, again.id == to else { return false }
+        var m = old.carry(to: again)
+        // (the version kept running while a change waits: its script names the mod's id, so it's made again there)
+        if let ran = old.ran, let back = read(ran.code, file: file, site: old.site).mod {
+            m.ran = .init(code: ran.code, script: back.script, world: back.world, at: back.at, style: back.styleScript)
+        }
+        let oldKey = syncKey(old)
+        mods[i] = m
+        let newKey = syncKey(m)
+        if oldKey != newKey, let h = syncHintsKept[oldKey] {
+            var hints = syncHintsKept
+            hints[oldKey] = nil
+            hints[newKey] = h
+            syncHints(hints)
+        }
+        if to != id {
+            renamedTo[id] = to
+            onRename?(id, to)
+        }
+        save()
+        Diagnostics.shared.log("mods", "\(why): \(id) → \(to)")
         return true
     }
 }
@@ -830,13 +957,16 @@ extension ModStore: @preconcurrency PhoneSyncStore {
 
     /// Each mod's switch (docs/PHONE-SYNC.md 4b): on, the sites it's off on, when the person last changed it.
     func syncSwitches() -> [String: PhoneSync.Switch] {
-        Dictionary(mods.filter { $0.id.contains("/") }.map { (PhoneSync.key($0.id), PhoneSync.Switch(on: $0.on, off: $0.offSites, at: $0.switchAt ?? 0, fresh: $0.newOff != nil)) }, uniquingKeysWith: { a, _ in a })
+        Dictionary(mods.filter { $0.id.contains("/") }.map { (syncKey($0), PhoneSync.Switch(on: $0.on, off: $0.offSites, at: $0.switchAt ?? 0, fresh: $0.newOff != nil)) }, uniquingKeysWith: { a, _ in a })
     }
+
+    /// Each mod's stable id, where it keeps one (the first by file name in its folder): file id → id.
+    func syncUids() -> [String: String] { keptUids.filter { $0.key.contains("/") } }
 
     /// The computer's switch, set as it is (its time kept, so both sides agree); the "from your computer" mark stays
     /// (D8: a new mod arrives with the computer's switch, still marked).
     func syncSetSwitch(_ key: String, _ s: PhoneSync.Switch) -> Bool {
-        guard let i = mods.firstIndex(where: { PhoneSync.key($0.id) == key }) else { return false }
+        guard let i = mods.firstIndex(where: { syncKey($0) == key }) else { return false }
         let was = mods[i]
         mods[i].on = s.on
         mods[i].offSites = s.off
@@ -851,7 +981,7 @@ extension ModStore: @preconcurrency PhoneSyncStore {
     /// and powers (D13: a hint the computer words its card with; never an approval there).
     func syncAllowed() -> [String: PhoneSync.Hint] {
         Dictionary(mods.filter { $0.id.contains("/") && !$0.held && $0.ran == nil }.map {
-            (PhoneSync.key($0.id), PhoneSync.Hint(rev: PhoneSync.rev($0.code), tier: $0.tier, powers: $0.tier == "boxed" ? $0.powers : []))
+            (syncKey($0), PhoneSync.Hint(rev: PhoneSync.rev($0.code), tier: $0.tier, powers: $0.tier == "boxed" ? $0.powers : []))
         }, uniquingKeysWith: { a, _ in a })
     }
 
@@ -866,7 +996,7 @@ extension ModStore: @preconcurrency PhoneSyncStore {
     func syncSignature() -> [String: String] {
         let sw = syncSwitches(), ok = syncAllowed()
         return Dictionary(mods.filter { $0.id.contains("/") }.map { m in
-            let k = PhoneSync.key(m.id)
+            let k = syncKey(m)
             let s = sw[k].map { "\($0.on)|\($0.off.joined(separator: ","))" } ?? ""
             return (m.id, "\(m.code)\u{0}\(s)\u{0}\(ok[k] != nil)")
         }, uniquingKeysWith: { a, _ in a })

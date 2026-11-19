@@ -5254,7 +5254,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
 
   // Messages typed while the agent works (sidepanel.js renderQueue, background.js queueMessage and sendNow), with a
   // stand-in Claude Code that reads its messages as stream-json, as the real one does: one written into the run
-  // comes back (isReplay) at its next step, 400 ms apart; LONG in a message: 20 steps, else 3.
+  // comes back (isReplay) at its next step, 400 ms apart; LONG in a message: 40 steps, else 3.
   async queueCheck(win) {
     const site = '127.0.0.1';
     const dir = path.join(this.work, 'standin-queue');
@@ -5273,7 +5273,7 @@ const turn = (first) => {
   const text = take(first);
   say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'Working on: ' + text }] } });
   let n = 0;
-  const steps = text.includes('LONG') ? 20 : 3;
+  const steps = text.includes('LONG') ? 40 : 3;
   const next = () => {
     for (const m of waiting.splice(0)) say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'Also: ' + take(m) }] } });
     if (++n < steps) return setTimeout(next, 400);
@@ -5319,11 +5319,13 @@ process.stdin.on('end', () => { closed = true; after(); });
         input: document.getElementById('input').value, disabled: document.getElementById('input').disabled,
         queue: shown(q) ? [...q.querySelectorAll('li.queued')].map((li) => ({ text: li.querySelector('.q-text').textContent, note: li.querySelector('.q-note').textContent, now: li.querySelector('.q-now').disabled })) : [] };
     }`);
-    const running = (on) => waitFor(on ? 'the run' : 'the run to end', async () => { const c = await chat(); return !!c.run === on ? c : null; }, { timeoutMs: 30000, intervalMs: 200 });
+    const running = (on) => waitFor(on ? 'the run' : 'the run to end', async () => { const c = await chat(); return (on ? !!c.run?.runId : !c.run) ? c : null; }, { timeoutMs: 30000, intervalMs: 200 });
     const queued = (n) => waitFor(`${n} waiting`, async () => { const b = await box(); return b.queue.length === n ? b : null; }, { timeoutMs: 10000, intervalMs: 150 });
     const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
     const problems = [];
     try {
+      // (TRIF's own page to ask the browser from, again if a check skipped before left it elsewhere: TRIF_E2E_ONLY)
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.storage)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=queue`]);
       await reopen();
@@ -5343,7 +5345,7 @@ process.stdin.on('end', () => { closed = true; after(); });
       // (the panel closed and opened again: still there)
       await reopen();
       b = await queued(2);
-      await waitFor('the queued pair sent as one', async () => (await users()).includes('queued one\n\nqueued two') || null, { timeoutMs: 30000, intervalMs: 300 });
+      await waitFor('the queued pair sent as one', async () => (await users()).includes('queued one\n\nqueued two') || null, { timeoutMs: 60000, intervalMs: 300 });
       await running(false);
       const said = (await chat()).messages.filter((m) => m.role === 'assistant').map((m) => m.text);
       if (!said.includes('Working on: queued one\n\nqueued two')) problems.push(`the next run: ${JSON.stringify(said)}`);
@@ -5363,6 +5365,9 @@ process.stdin.on('end', () => { closed = true; after(); });
       await themes('queue-pushed');
 
       // 3. Stopped: what waits stays, "Not sent", Send now still there; a click on it puts it back in the box.
+      await running(false);
+      await type('LONG third');
+      await running(true);
       await type('after the stop');
       await queued(1);
       await this.panelClick('#stop');

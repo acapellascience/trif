@@ -1625,6 +1625,42 @@ export function capChat(chat) {
   return chat;
 }
 
+// ---- messages sent while the agent works (chat.queue) -----------------------------------------------
+//
+// Typed while a run works, a message waits in the chat's queue (chat:<site> `queue`: [{id, text, time, opts,
+// now?}], `opts` what the panel would have started the run with) and goes when the run is done, in the same
+// conversation. Several waiting go as one message, in order, as Claude Code's terminal joins what's typed
+// while it works into its next turn. A run that failed or was stopped leaves them waiting. "Send now" (`now`)
+// writes it into the run if the agent can take it there (background.js sendNow), else stops the run and
+// sends it as soon as it has stopped.
+export const QUEUE_MAX = 20; // messages waiting per chat
+
+/** The queue as stored, cleaned: only well-formed items, at most QUEUE_MAX. */
+export function normalizeQueue(queue) {
+  if (!Array.isArray(queue)) return [];
+  return queue.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id && typeof x.text === 'string' && x.text.trim())
+    .slice(0, QUEUE_MAX);
+}
+
+/** The messages to send (`ids`: those only; else every one) and the one message they make, or null. */
+export function queuedMessage(queue, ids = null) {
+  const items = normalizeQueue(queue).filter((x) => !ids || ids.includes(x.id));
+  if (!items.length) return null;
+  return { items, ids: items.map((x) => x.id), text: items.map((x) => x.text.trim()).join('\n\n'), opts: { ...(items[items.length - 1].opts || {}) } };
+}
+
+/**
+ * A run ended: what waits now and what goes. `finished`: it was done (not stopped, nothing failed), so every
+ * waiting message goes; else only those the user sent now (`now`). `back`: messages written into the run that
+ * it never took (runs.js notTaken), waiting again first, as sent now. Returns {queue, send: ids or null}.
+ */
+export function queueAfterRun(queue, { finished = false, back = [] } = {}) {
+  const q = [...normalizeQueue(back).map((x) => ({ ...x, now: true })), ...normalizeQueue(queue)].slice(0, QUEUE_MAX);
+  const send = finished ? q.map((x) => x.id) : q.filter((x) => x.now).map((x) => x.id);
+  // (those going are marked so, `now`, until the next run takes them: background.js sendQueue)
+  return { queue: q.map((x) => (send.includes(x.id) ? { ...x, now: true } : x)), send: send.length ? send : null };
+}
+
 /** Hosts whose sign-in pages the side panel may open for an agent login (and their subdomains). */
 export const LOGIN_HOSTS = ['claude.com', 'claude.ai', 'anthropic.com'];
 

@@ -595,6 +595,21 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 @keyframes pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
 
+/* Messages typed while the agent works, waiting to go (sidepanel.js renderQueue): a quieter user bubble,
+   its line and Send now and × under it. */
+.queue { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.queue[hidden] { display: none; }
+.queued { align-self: flex-end; max-width: 88%; display: grid; gap: 4px; justify-items: end; }
+.q-text { max-width: 100%; padding: 7px 11px; border: 1px dashed color-mix(in srgb, var(--faint) 60%, transparent);
+  border-radius: 12px 12px 4px 12px; background: color-mix(in srgb, var(--user) 55%, transparent); color: var(--muted);
+  font: inherit; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.q-text:hover { color: var(--text); border-color: var(--faint); }
+.q-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; color: var(--faint); font-size: 11.5px; }
+.q-foot .btn { padding: 1px 9px; font-size: 11.5px; }
+.q-remove { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--faint);
+  font-size: 15px; line-height: 1; cursor: pointer; }
+.q-remove:hover { background: var(--raised); color: var(--text); }
+
 
 /* ---- composer -------------------------------------------------------------------------------- */
 
@@ -659,6 +674,9 @@ body:is(.site-off, .no-site) .robotless-line { display: none; }
 .send:disabled { background: var(--raised); color: var(--faint); }
 .send svg { width: 14px; height: 14px; stroke-width: 2; }
 .stop { background: var(--text); color: var(--bg); }
+/* While the agent works (.busy): Send (it queues) beside Stop. */
+.composer.busy .send:not(.stop) { right: 36px; }
+.composer.busy textarea { padding-right: 72px; }
 .stop svg { fill: currentColor; stroke: none; }
 
 /* Settings: automatic updates. */

@@ -638,7 +638,8 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore', ...PHONE_COMMANDS]);
+// (agent.inject: a message the user sent from the panel while its run works, written into that run.)
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'agent.inject', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore', ...PHONE_COMMANDS]);
 
 // The phone link (lib/phonelink/link.js; docs/PHONE-LINK.md). Every helper has the store; the listener, the
 // announcer and the phones' runs are in the helper that owns helper.sock alone (becomePrimary), and nothing
@@ -1466,9 +1467,11 @@ function onExtensionRequest(msg) {
  * agent.withoutSandbox {agent, allow}: "Use <agent> anyway" (allow: true) or Settings' "Stop allowing"
  * (false). Returns {agents: [ids allowed]}. agent.logout {agent}: Settings' Log out (agents/index.js
  * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
+ * agent.inject {runId, text, id}: "Send now" on a message the user queued while the run works (runs.js inject).
  */
 function panelCommand(cmd, args) {
   if (PHONE_COMMANDS.includes(cmd)) { linkWatched = true; return phoneCommand(cmd, args); }
+  if (cmd === 'agent.inject') return runs.inject(typeof args.runId === 'string' ? args.runId : '', { text: args.text, id: args.id });
   if (cmd === 'agent.logout') {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
@@ -1693,6 +1696,7 @@ function onClientLine(sock, line) {
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
   if (PANEL_COMMANDS.has(cmd)) {
     const error = cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)'
+      : cmd === 'agent.inject' ? 'only TRIF\'s side panel sends messages into a run while it works'
       : cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)'
         : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)';
     return reply(sock, { id, ok: false, error });

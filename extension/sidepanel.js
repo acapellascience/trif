@@ -22,6 +22,19 @@ const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
+// Wording for messages typed while the agent works (drafts: docs/CHAT-QUEUE-STRINGS.md).
+const QUEUE_WORDS = {
+  sendTitle: 'Send when your agent is done',
+  waits: 'Sends when your agent is done',
+  stopping: 'Sends as soon as your agent has stopped',
+  stopped: 'Not sent: your agent stopped first',
+  sending: 'Sending…',
+  sendNow: 'Send now',
+  remove: 'Don’t send this',
+  edit: 'Click to edit',
+  pushed: 'Sent while your agent was working',
+};
+
 const ui = {
   modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), pasteMod: document.getElementById('paste-mod'), exportSite: document.getElementById('export-site'),
   siteFilesBox: document.getElementById('site-files-box'), siteFilesSummary: document.getElementById('site-files-summary'),
@@ -51,7 +64,7 @@ const ui = {
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
-  chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
+  chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'), queue: $('#queue'),
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -666,6 +679,7 @@ function messageNode(m) {
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
+  if (m.role === 'user' && m.pushed) li.title = QUEUE_WORDS.pushed; // (Send now, while it worked)
   if (m.role === 'tool') li.title = m.text;
   // "x.js was deleted." from the panel's trash icon: Undo until it's used (the restore adds its own line).
   if (m.undo && !m.undone) {
@@ -796,6 +810,7 @@ function render() {
   renderStarter();
   renderSiteStarter();
   renderMessages();
+  renderQueue();
   renderNoSandbox();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -811,10 +826,69 @@ function render() {
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
   ui.input.disabled = !site;
   ui.input.placeholder = site ? `What should I fix on ${site}?` : 'Open a website to fix it';
-  ui.send.hidden = running;
+  // While the agent works the box stays usable: Send (and Enter) queue the message (renderQueue), Stop beside it.
+  ui.composer.classList.toggle('busy', running);
+  if (running && !waitsForLogin) ui.send.title = QUEUE_WORDS.sendTitle;
+  ui.send.setAttribute('aria-label', ui.send.title);
   ui.stop.hidden = !running;
   ui.stop.disabled = !chat.run?.runId;
   ui.send.disabled = !canSend;
+}
+
+/**
+ * The messages waiting to go (chat.queue, background.js queueMessage), under the conversation: each one's
+ * text (a click puts it back in the box to edit), a quiet line saying when it goes, Send now and ×. Rebuilt
+ * only when what it shows changes, so a click isn't lost to a redraw.
+ */
+function renderQueue() {
+  const queue = view.site && Array.isArray(view.chat.queue) ? view.chat.queue.filter((x) => x && typeof x.id === 'string') : [];
+  const running = !!view.chat.run;
+  const key = JSON.stringify([view.site, running, queue.map((x) => [x.id, x.text, !!x.now])]);
+  if (ui.queue.dataset.key === key) return;
+  ui.queue.dataset.key = key;
+  ui.queue.hidden = !queue.length;
+  const nearBottom = ui.chat.scrollHeight - ui.chat.scrollTop - ui.chat.clientHeight < 60;
+  ui.queue.replaceChildren(...queue.map((item) => {
+    const li = el('li', 'queued');
+    li.dataset.id = item.id;
+    const text = el('button', 'q-text', item.text);
+    text.type = 'button';
+    text.title = QUEUE_WORDS.edit;
+    text.addEventListener('click', () => editQueued(item.id));
+    const note = el('span', 'q-note', item.now ? (running ? QUEUE_WORDS.stopping : QUEUE_WORDS.sending) : running ? QUEUE_WORDS.waits : QUEUE_WORDS.stopped);
+    const now = button(QUEUE_WORDS.sendNow, '', () => sendQueuedNow(item.id, now));
+    now.classList.add('q-now');
+    now.disabled = !!item.now;
+    const remove = el('button', 'q-remove', '×');
+    remove.type = 'button';
+    remove.title = QUEUE_WORDS.remove;
+    remove.setAttribute('aria-label', QUEUE_WORDS.remove);
+    remove.addEventListener('click', () => request({ type: 'chat.unqueue', site: chatSite(), id: item.id }).catch(() => {}));
+    const foot = el('div', 'q-foot');
+    foot.append(note, now, remove);
+    li.append(text, foot);
+    return li;
+  }));
+  if (queue.length && nearBottom) ui.chat.scrollTop = ui.chat.scrollHeight;
+}
+
+/** A waiting message back in the box to edit (before what's there), out of the queue. */
+async function editQueued(id) {
+  try {
+    const { text } = await request({ type: 'chat.unqueue', site: chatSite(), id });
+    const rest = ui.input.value.trim();
+    ui.input.value = rest ? `${text}\n${rest}` : text;
+    ui.input.focus();
+  } catch (e) { console.warn('[TRIF] edit failed', e); }
+}
+
+async function sendQueuedNow(id, btn) {
+  btn.disabled = true;
+  try { await request({ type: 'chat.sendNow', site: chatSite(), id }); }
+  catch (e) {
+    btn.disabled = false;
+    request({ type: 'chat.note', site: chatSite(), text: `Couldn't send it now: ${e?.message ?? e}` }).catch(() => {});
+  }
 }
 
 // Red (mods can't run): the helper isn't connected, or user scripts are off. Yellow, the rest: the agent
@@ -4332,12 +4406,20 @@ async function panelCommand(text) {
 
 async function send() {
   const text = ui.input.value.trim();
-  if (!text || !view.site || view.chat.run || !ui.composer.dataset.canSend) return;
+  if (!text || !view.site || !ui.composer.dataset.canSend) return;
   if (text.startsWith('/')) {
     ui.input.value = '';
     try { if (await panelCommand(text)) return; } catch (e) { console.warn('[TRIF] command failed', e); }
   }
   ui.input.value = '';
+  // While the agent works (or messages wait already): it waits too, and goes when the agent is done.
+  if (view.chat.run || view.chat.queue?.length) {
+    try { await queueMessage(text); } catch (e) {
+      if (!ui.input.value) ui.input.value = text;
+      request({ type: 'chat.note', site: chatSite(), text: `Couldn't keep that message: ${e?.message ?? e}` }).catch(() => {});
+    }
+    return;
+  }
   const tabId = view.tab.id;
   try {
     const runId = await startRun(text);
@@ -4348,6 +4430,16 @@ async function send() {
     if (!inChat && !ui.input.value) ui.input.value = text;
     console.warn('[TRIF] agent.start failed', e);
   }
+}
+
+/** `text` waits for the run going (or, with none, goes now with the others waiting): background.js queueMessage. */
+async function queueMessage(text) {
+  const { id: agent } = currentAgent();
+  await keepSettings();
+  return request({
+    type: 'chat.queue', site: chatSite(), text, tabId: view.tab.id, url: view.tab.url,
+    agent: agent || undefined, model: chosenModel(agent) || undefined, effort: chosenEffort(agent) || undefined,
+  });
 }
 
 /** Starts an agent run in this chat with `text` as the user's message; `extra` goes along (e.g. merge). */
@@ -4392,7 +4484,7 @@ ui.input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     if (e.isComposing || e.keyCode === 229) return; // IME confirming a candidate
-    if (!view.chat.run) ui.composer.requestSubmit();
+    ui.composer.requestSubmit(); // (while the agent works, the message waits: send)
   }
 });
 ui.stop.addEventListener('click', stop);

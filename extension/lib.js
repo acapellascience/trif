@@ -1291,10 +1291,14 @@ export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [
   return out;
 }
 
-/** The site a mod's folder is: its id's first part, as a site (all-sites: null). */
+/**
+ * The site a mod's folder is: its id's first part, as a site (all-sites: null). A phone twin's (phone~x.com) is
+ * its site's, x.com: its pages are the site's (so a sensitive site's twin, phone~claude.ai, is that sensitive
+ * site's own, and its mods run there and only there: limitToSites, background.js waitsThere).
+ */
 export function modHome(mod, sensitive = null) {
-  const folder = String(mod?.id || '').split('/')[0] || String(mod?.site || '');
-  if (!folder || folder === 'all-sites' || folder === 'phone~all-sites') return null; // (the phone view's every-site folder too: D10)
+  const folder = phoneBase(String(mod?.id || '').split('/')[0] || String(mod?.site || ''));
+  if (!folder || folder === 'all-sites') return null; // (the phone view's every-site folder too, phone~all-sites: D10)
   return sensitive ? sensitive.scopeOf(folder) : scopeFor(folder);
 }
 

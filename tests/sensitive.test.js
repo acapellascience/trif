@@ -103,6 +103,34 @@ test('which mods run on a sensitive site: only its own, and they run only there;
   assert.match(guard('https://mail.google.com/', 'google.com', ['google.com'], null, ['mail.google.com']), /a site of its own, and this agent run is limited to google\.com/);
 });
 
+// A sensitive site's phone twin (sites/phone~claude.ai/: Tim, 11-19, a phone mod synced for claude.ai that the
+// phone view's panel didn't list and didn't run): its home is the site itself, so its mods run there, and only
+// there, as the site's own do; a phone mod of the parent doesn't reach a sensitive site apart under it.
+test('a sensitive site\'s phone twin: its mods run on the site, only there; its home is the site; the parent\'s twin skips it', async () => {
+  const L = await lib();
+  const m = L.sensitiveSites();
+  const mod = (id, matches) => ({ id, matches, hash: 'h' });
+  assert.ok(m.isSensitive('claude.ai'), 'claude.ai is a sensitive site (TRIF\'s list)');
+  const meadow = mod('phone~claude.ai/meadow', ['https://claude.ai/*', 'https://*.claude.ai/*']);
+  assert.equal(L.modHome(meadow, m), 'claude.ai', 'a phone twin\'s home is its site');
+  const lm = L.limitToSites(meadow, ['claude.ai'], m);
+  assert.ok(lm, 'it runs on claude.ai (it was null: listed nowhere, registered nowhere)');
+  assert.deepEqual(lm.matches, ['https://*.claude.ai/*', 'https://claude.ai/*']);
+  assert.deepEqual(lm.usedSites, ['claude.ai']);
+  assert.deepEqual(L.limitToSites(mod('phone~claude.ai/wide', ['*://*/*']), ['claude.ai', 'x.com'], m).usedSites, ['claude.ai'], 'a sensitive twin\'s mod: only on its site');
+  // a sensitive host under a registrable domain: the twin of mail.google.com is its own, google.com's twin skips it
+  const on = ['google.com', 'mail.google.com'];
+  const gmail = L.limitToSites(mod('phone~mail.google.com/calm', ['*://*.google.com/*']), on, m);
+  assert.deepEqual(gmail.matches, ['*://*.mail.google.com/*', '*://mail.google.com/*'], 'the sensitive twin\'s mod: only its site');
+  assert.equal(gmail.excludes, undefined, 'its own site isn\'t excluded from it');
+  const parent = L.limitToSites(mod('phone~google.com/dark', ['*://*.google.com/*']), on, m);
+  assert.ok(parent.excludes.includes('*://mail.google.com/*'), 'the parent\'s twin skips the site apart');
+  assert.equal(L.limitToSites(mod('phone~google.com/gmail', ['*://mail.google.com/*']), on, m), null, 'and a parent twin\'s mod for it: nowhere');
+  // a twin of a site that isn't sensitive: as before
+  assert.deepEqual(L.limitToSites(mod('phone~x.com/a', ['*://*.x.com/*']), ['x.com'], m).usedSites, ['x.com']);
+  assert.equal(L.modHome(mod('phone~all-sites/a', ['*://*/*']), m), null);
+});
+
 test('the upgrade\'s plan: a new user\'s sensitive sites are blocked; one the user\'s mods reach is asked about; one in use is left; once each', async () => {
   const L = await lib();
   const hosts = L.sensitiveListSites();

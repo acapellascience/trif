@@ -167,6 +167,9 @@ switches: the app's `offSites`, the extension's `offSites`), and `at`, when the 
 only for the person's own change: the Mods tab's switch on the phone (and safe mode, D15), the panel's switch, `trif
 enable` or a chat's on the computer (background.js `mod.enable`); a mod switched off because it's new, or a sync's
 own setting (which takes the other side's `at`), isn't a change of the person's.
+On a sensitive site (claude.ai, mail.google.com: its twin, `phone~claude.ai`, is that site's own, lib.js `modHome`)
+a synced mod starts off as any new mod does, and the person's switch on the phone counts as their choice there: it
+comes over like any other (consent that waits per device is a hold's, D13, not a switch's).
 
 The computer keeps the switches' base beside the files' (section 3), per sync key. For each mod both sides have once
 the sync's files are done (not one removed, not a conflict's sibling, which starts as a new mod does), with P, C, B
@@ -301,9 +304,20 @@ folder (not a link, `lstat`), made if missing, and the file is never followed if
 
 ## 8. When it syncs
 
-The phone starts every sync (D9): when the app comes to the front and has a paired computer (a short connection
-if More isn't using one: hello, sync, closed after 30 s of nothing); 3 seconds after its last change to a mod; on
-`sync.changed`; on Sync now. No record of the computer, no sync: nothing waits, nothing is said but the line's
+The phone starts every sync (D9): when the app comes to the front and has a paired computer; 3 seconds after its
+last change to a mod; on `sync.changed`; on Sync now.
+
+The link's lifetime (11-19; iOS and Android alike): while the app is active (in front, screen on) the phone keeps
+its link to the paired computer open with nothing using it, so `sync.changed` and the computer's Sync now / Sync
+with phone (`nudge`) reach it at once. Dropped (Wi-Fi, the helper restarting), the phone finds the computer again
+by itself, quietly, after 2, 5, 15, 30 s and then every 60 s while it stays active; not after a failure a retry
+can't mend (removed, Local Network off, not paired): its next return to the front tries again. The app's `ping`
+every 30 s keeps it inside the helper's 2-minute idle limit (the helper's TCP keepalive is 30 s too); no helper
+change was needed. Going to the background (screen off, another app), the phone closes the link once a sync in
+flight ends, unless a My computer run follows on it; a link opened while the app isn't active is closed after
+30 s of nothing. So the computer's "{phone} isn't connected just now. It syncs when TRIF is open on it." is said
+only when the app is closed or in the background, the phone asleep, or on another Wi-Fi. Battery: one idle TCP
+connection on the Wi-Fi and a small message every 30 s, only while the app is in front with the screen on. No record of the computer, no sync: nothing waits, nothing is said but the line's
 "last synced". While a sync runs, more changes wait for the next one.
 
 ## 9. What must hold

@@ -98,14 +98,21 @@ change there is a change on both phones. Change this file whenever a rule change
   once.
 - Phone sync with the computer: a change synced in makes the pages' scripts again; a delete goes to Recently deleted
   (30 days, Restore).
-- After each sync (automatic or Sync now), while the app is open, a short toast in front of everything, moving
-  nothing and taking no touches, no notification or sound (Tim, 11-18): "Synced with {computer} · {n} from the
-  computer, {m} to it[, {k} waiting for your OK]" or "· nothing new". The counts mean what the computer's own toast
+- After a sync, while the app is open, a short toast in front of everything, moving nothing and taking no touches,
+  no notification or sound (Tim, 11-18): "Synced with {computer} · {n} from the computer, {m} to it[, {k} waiting for
+  your OK]" after any sync that moved something, automatic or not. A sync that moved nothing says "Synced with
+  {computer} · nothing new" only when the person started it on the phone (Sync now; the sync that runs right after pairing works); an
+  automatic one (the app coming to the front, a change, the computer's nudge) shows no toast (Tim, 11-18: it showed
+  all the time). The computer does the same from its side (only its Sync now / Sync with phone says "nothing new"); a
+  sync the computer's button started is automatic on the phone. A Sync now pressed during an automatic sync runs
+  once after it, as the person's. The counts mean what the computer's own toast
   means from its side: {n} mods taken here (new or changed) plus mods deleted there; {m} mods sent to it; {k} of
   those taken that wait here for an OK. Switches aren't counted (the computer doesn't count them either). A sync that
   didn't happen says why in plain words (syncing off there, the computer not found: asleep, another Wi-Fi, no
   browser with TRIF open; this phone removed there; Local Network off; anything else: TRIF tries again): always
-  after Sync now, after an automatic sync only when the reason is new since the last toast or sync. The pairing
+  after a sync the person started; after automatic syncs once, then not again until a sync works or the reason
+  changes, across launches too (a computer asleep isn't said each time the app comes to the front). "Last synced" lines update after
+  every sync that worked, toast or not. The pairing
   screen and Settings' My computer block say "Last synced just now / {n} min ago / at {time} / {date} at {time}",
   kept across launches.
 - Phone sync's switches (Tim, 11-18; docs/PHONE-SYNC.md 4b on branch phone-link): a mod's on/off and its per-site

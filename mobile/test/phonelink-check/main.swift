@@ -177,14 +177,54 @@ if args.count > 1, args[1] == "syncunit" {
     finish?(.success(.init())); wait { runs == 2 }
     expect(runs == 2 && reasons == ["front"], "what came during one runs once after it: \(runs) \(reasons)")
     finish?(.success(.init())); RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    expect(reasons == ["front", "nudge"] && !sch.running, "then idle: \(reasons)")
+    expect(reasons == ["front", "now"] && !sch.running, "then idle; the one after is the person's Sync now (its toast says nothing new too): \(reasons)")
+    sch.now("front"); sch.now("pair"); sch.now("change")
+    finish?(.success(.init())); wait { runs == 4 }; finish?(.success(.init())); RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    expect(reasons.suffix(2) == ["front", "pair"], "an automatic reason after the person's doesn't replace it: \(reasons)")
     sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
-    expect(runs == 2, "a change that leaves every file as the last sync did (a switch) is no sync")
+    expect(runs == 4, "a change that leaves every file as the last sync did (a switch) is no sync")
     st.files["a.com/up"] = "// up v3"; sch.changed(); sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
-    expect(runs == 3, "a file changed: one sync after the delay: \(runs)")
+    expect(runs == 5, "a file changed: one sync after the delay: \(runs)")
     finish?(.failure(.init(code: "notFound", message: ""))); RunLoop.main.run(until: Date().addingTimeInterval(0.02))
     st.files["a.com/up"] = "// up v4"; sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
-    expect(runs == 4, "after a failed sync the change rule still compares with the last good one")
+    expect(runs == 6, "after a failed sync the change rule still compares with the last good one")
+    // the toast after a sync (Tim, 11-18): "nothing new" only after one the person started; automatic problems once
+    do {
+        var t = PhoneSync.Toast()
+        let C = "Tim's Mac"
+        var moved = PhoneSync.Summary(); moved.taken = ["a.com/x"]; moved.sent = ["a.com/y", "a.com/z"]
+        var waits = PhoneSync.Summary(); waits.taken = ["a.com/x"]; waits.waitingHere = ["a.com/x"]
+        var switchedOnly = PhoneSync.Summary(); switchedOnly.switched = ["a.com/x"]
+        let nothing = PhoneSync.Summary()
+        let off = PhoneSync.Failure(code: "notFound", message: "")
+        func said(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) -> String {
+            guard let x = t.after(r, why: why, computer: C) else { return "-" }
+            return (x.problem ? "! " : "") + x.text
+        }
+        for why in ["front", "change", "nudge"] { expect(said(.success(nothing), why) == "-", "automatic, nothing moved: no toast (\(why))") }
+        expect(said(.success(switchedOnly), "front") == "-", "automatic, only switches (not counted, as on the computer): no toast")
+        expect(said(.success(nothing), "now") == "Synced with \(C) · nothing new", "Sync now, nothing moved: nothing new")
+        expect(said(.success(nothing), "pair") == "Synced with \(C) · nothing new", "pairing's first sync, nothing moved: nothing new")
+        expect(said(.success(moved), "front") == "Synced with \(C) · 1 from the computer, 2 to it", "automatic with changes: the counts")
+        expect(said(.success(waits), "nudge") == "Synced with \(C) · 1 from the computer, 0 to it, 1 waiting for your OK", "automatic, waiting here: the counts and the wait")
+        expect(said(.success(moved), "now") == "Synced with \(C) · 1 from the computer, 2 to it", "Sync now with changes: the counts")
+        let notFound = "! Not synced: can't find \(C). It may be asleep, on another Wi-Fi, or have no browser with TRIF open"
+        expect(said(.failure(off), "front") == notFound, "an automatic failure: said once")
+        expect(said(.failure(off), "front") == "-" && said(.failure(off), "change") == "-" && said(.failure(off), "nudge") == "-", "the same failure again, automatic: not said again")
+        expect(said(.failure(off), "now") == notFound, "Sync now: said every time")
+        expect(said(.failure(off), "front") == "-", "after Sync now said it, an automatic one still doesn't repeat it")
+        expect(said(.failure(.init(code: "off", message: "")), "front") == "! Not synced: syncing phone mods is off on \(C)", "another reason: said")
+        expect(said(.failure(.init(code: "notFound", message: "")), "front") == notFound, "back to the first reason: news again")
+        expect(said(.success(nothing), "front") == "-", "a sync that works: no toast for nothing")
+        expect(said(.failure(off), "front") == notFound, "after a sync worked the failure is news again")
+        var un = PhoneSync.Summary(); un.unfinished = true
+        expect(said(.success(un), "front") == "! Not synced with \(C) this time. TRIF tries again", "an unfinished sync: a problem, once")
+        expect(said(.success(un), "front") == "-", "…not twice")
+        expect(said(.failure(.init(code: "notPaired", message: "")), "now") == "-", "not paired: never said")
+        var kept = PhoneSync.Toast(told: "notFound") // (as the app keeps it across launches)
+        expect(kept.after(.failure(off), why: "front", computer: C) == nil, "a problem told before a relaunch isn't news after it")
+    }
+
     // ---- stable ids (11-18, docs/PHONE-SYNC.md 2a, 3, 4, 7): rows with uid, body and meta; renames applied first; a
     // rename that can't be done ends the sync before sync.end; merge and apart; switches and hints kept by uid
     var events: [String] = []

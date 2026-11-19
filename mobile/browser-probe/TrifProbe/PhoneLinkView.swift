@@ -28,9 +28,9 @@ final class PhoneSyncModel: ObservableObject {
         let t = UserDefaults.standard.double(forKey: "phoneSync.lastAt")
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
     }()
-    /// The problem the toast last said for an automatic sync: the same one isn't said again until a sync works
-    /// (a Mac asleep would otherwise be said each time the app comes to the front).
-    private var toldProblem: String?
+    /// The toast after each sync (PhoneSync.Toast: "nothing new" only after one the person started; an automatic
+    /// sync's problem once until a sync works or it changes).
+    private var toastRule = PhoneSync.Toast(told: UserDefaults.standard.string(forKey: "phoneSync.toldProblem"))
     /// What the Mods tab tells the person until they tap OK: conflicts, mods that came back, ones that couldn't
     /// come over (S7; drafts in docs/IOS-APP-STRINGS.md, "Phone sync").
     @Published private(set) var notices: [String] = []
@@ -71,6 +71,8 @@ final class PhoneSyncModel: ObservableObject {
 
     /// Sync now (the Mods tab's button, S7; the dev step `sync`).
     func syncNow() { scheduler?.now("now") }
+    /// The first sync after pairing (the pairing screen, a scanned code): the person's, as Sync now.
+    func syncAfterPairing() { scheduler?.now("pair") }
 
     private func finished(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) {
         syncing = false
@@ -81,9 +83,8 @@ final class PhoneSyncModel: ObservableObject {
             if !s.unfinished {
                 lastAt = s.at
                 UserDefaults.standard.set(s.at.timeIntervalSince1970, forKey: "phoneSync.lastAt")
-                toldProblem = nil
-                AppToast.shared.show(toastWords(s))
-            } else { toast(problem: "unfinished", why) }
+            }
+            toast(r, why)
             let here = s.taken + s.removed + s.cameBack + s.conflicts.map(\.sibling) + s.switched + s.renamed.map(\.to)
             if !here.isEmpty { applied?(here) }
             if s.changedAnything || !s.skipped.isEmpty {
@@ -93,7 +94,7 @@ final class PhoneSyncModel: ObservableObject {
             guard f.code != "notPaired" else { return }
             lastProblem = f.code
             Diagnostics.shared.log("sync", "not synced (\(why)): \(f.code) \(f.message)")
-            toast(problem: f.code, why)
+            toast(r, why)
         }
         // (a link nobody else uses: closed after 30 s of nothing)
         idle?.cancel()
@@ -134,31 +135,12 @@ final class PhoneSyncModel: ObservableObject {
 
     func seen() { notices = [] }
 
-    /// The toast after a sync (Tim, 11-18), the computer's own toast seen from the phone's side: what came from the
-    /// computer (taken here, new or changed, and deleted there), what went to it, and what waits here for an OK.
-    /// Switches aren't counted, as on the computer. Drafts in docs/IOS-APP-STRINGS.md.
-    func toastWords(_ s: PhoneSync.Summary) -> String {
-        let c = computerName ?? "your computer"
-        let n = s.taken.count + s.removed.count, m = s.sent.count, k = s.waitingHere.count
-        guard n + m + k > 0 else { return "Synced with \(c) · nothing new" }
-        return "Synced with \(c) · \(n) from the computer, \(m) to it" + (k > 0 ? ", \(k) waiting for your OK" : "")
-    }
-
-    /// A sync that didn't happen, in the toast: always after Sync now; after an automatic one only when it's news.
-    private func toast(problem code: String, _ why: String) {
-        guard why == "now" || code != toldProblem else { return }
-        toldProblem = code
-        AppToast.shared.show(Self.problemWords(code, computerName ?? "your computer"), problem: true, seconds: 6)
-    }
-
-    static func problemWords(_ code: String, _ c: String) -> String {
-        switch code {
-        case "off": return "Not synced: syncing phone mods is off on \(c)"
-        case "notFound": return "Not synced: can't find \(c). It may be asleep, on another Wi-Fi, or have no browser with TRIF open"
-        case "removed": return "Not synced: this iPhone isn't connected to \(c) any more"
-        case "denied": return "Not synced: TRIF needs Local Network access to find \(c)"
-        default: return "Not synced with \(c) this time. TRIF tries again"
-        }
+    /// The toast after a sync (Tim, 11-18; the rule and words: PhoneSync.Toast).
+    private func toast(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) {
+        let t = toastRule.after(r, why: why, computer: computerName ?? "your computer")
+        UserDefaults.standard.set(toastRule.told, forKey: "phoneSync.toldProblem")
+        guard let t else { return }
+        if t.problem { AppToast.shared.show(t.text, problem: true, seconds: 6) } else { AppToast.shared.show(t.text) }
     }
 
     /// "Last synced just now / 5 min ago / at 2:05 PM / Nov 17 at 2:05 PM" (nil: never), as the computer's phone line
@@ -248,7 +230,10 @@ final class PhoneLinkModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.pairer === p else { return }
                 self.step = s
-                if case .paired = s { self.computer = PhoneLinkKeys.shared.computer }
+                if case .paired = s {
+                    self.computer = PhoneLinkKeys.shared.computer
+                    PhoneSyncModel.shared.syncAfterPairing() // (the first sync: its toast is the person's, "nothing new" too)
+                }
             }
         }
         pairer = p

@@ -450,7 +450,7 @@ struct SafetyBanner: View {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(Color.trifYellow)
             VStack(alignment: .leading, spacing: 6) {
                 Text(off.why == "quit"
-                     ? "The app quit while mods were running on \(site), so TRIF switched \(off.ids.count == 1 ? "it" : "them") off. Switch them back on one at a time in Mods."
+                     ? "The app quit while mods were running on \(site), so TRIF switched \(off.ids.count == 1 ? "it" : "them") off."
                      : "TRIF switched off \(off.ids.count == 1 ? "a mod" : "\(off.ids.count) mods") on \(site) that kept this iPhone busy. Switch them back on one at a time in Mods.")
                     .font(.footnote)
                 HStack(spacing: 16) {

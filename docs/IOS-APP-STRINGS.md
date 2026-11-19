@@ -78,8 +78,8 @@ readers read them on the phone. Worth a phone wording, or leave.
 | The app icon's long-press menu | Pause all mods |
 | Mods tab, all paused | **All mods are paused:** none runs on any site. **Resume mods** |
 | Toolbar's Mods button while paused (accessibility; its robot shows two bars for eyes, STYLE.md's paused face) | Mods, all paused |
-| Over the page after safe mode | The app quit while mods were running on {site}, so TRIF switched it/them off. Switch them back on one at a time in Mods. **Mods** · **OK** |
-| Over the page after a runaway offer was taken | TRIF switched off a mod / {n} mods on {site} that kept this iPhone busy. Switch them back on one at a time in Mods. **Mods** · **OK** |
+| Over the page after safe mode | The app quit while mods were running on {site}, so TRIF switched it/them off. ~~Switch them back on one at a time in Mods.~~ (removed, Tim 11-18: "drop the line") **Turn them back on** · **Mods** · **OK** |
+| Over the page after a runaway offer was taken | TRIF switched off a mod / {n} mods on {site} that kept this iPhone busy. Switch them back on one at a time in Mods. **Turn them back on** · **Mods** · **OK** (the same banner, the same line: kept, as only safe mode's was named 11-18; drop it here too?) |
 | Mods tab, after safe mode | The app quit while these were running on {site}, so TRIF switched them off: **{names}**. Switch each back on to try it. **OK** |
 | Mods tab, after a runaway offer | These kept this iPhone busy on {site}, so TRIF switched them off: … / The page on {site} stopped twice while these ran, so TRIF switched them off: … |
 | The runaway offer (an alert) | **{site} keeps this iPhone busy** — Its page has been busy most of the time for 40 seconds while mods ran on it. Switch them off? {name} changed most recently. / Its page stopped twice in three minutes while mods ran on it. Switch them off? — **Switch off its mods** · **Not now** |
@@ -824,8 +824,8 @@ titles are the desktop panel's, unchanged (modswitch.js: "On on {site}: click to
 Safety.swift (the banner's button, the toast after a restore, the ⋯ menu's lines), ModsPanel.swift (the menu),
 Toast.swift (the toast itself: a pill at the top for 4 s, 6 s for a problem or a restore, over everything, no
 touches), PhoneLinkView.swift (the sync toast, Last synced), Web/panel-adapter.js (Settings' line). The banner's
-own words are unchanged (only its button is new); with the button there, "Switch them back on one at a time in Mods"
-may want changing too: say if so.
+own words were unchanged (only its button is new); 11-18 Tim dropped safe mode's "Switch them back on one at a time
+in Mods." (the runaway offer's banner keeps it for now: asked above).
 
 | Where | Old | New |
 |---|---|---|
@@ -834,10 +834,10 @@ may want changing too: say if so.
 | …its items, newest first (the last 5) | (none) | {time} · {sites} (another day: {date, time} · {sites}; one put back already: "… (put back)") |
 | The toast after a restore | (none) | {n} mods back on as before / 1 mod back on as before; then, each only when not 0: " · 1 you changed since is left as it is" / " · {c} you changed since are left as they are"; " · 1 still waits for your OK" / " · {w} still wait for your OK" |
 | …nothing came back | (none) | Nothing to put back: you've switched those mods since (all deleted since: "Nothing to put back: those mods were deleted since") |
-| The toast after a sync (automatic or Sync now) | (none) | Synced with {computer} · {n} from the computer, {m} to it (no full stop: a passing line, as the computer's) |
+| The toast after a sync that moved something (automatic or Sync now) | (none) | Synced with {computer} · {n} from the computer, {m} to it (no full stop: a passing line, as the computer's) |
 | …with mods waiting here for an OK | (none) | Synced with {computer} · {n} from the computer, {m} to it, {k} waiting for your OK |
-| …nothing moved | (none) | Synced with {computer} · nothing new |
-| The toast, not synced: syncing off there | (none) | Not synced: syncing phone mods is off on {computer} |
+| …nothing moved, after a sync the person started (Sync now, the first sync after pairing) | (none) | Synced with {computer} · nothing new (11-18, Tim: an automatic sync that moved nothing shows no toast) |
+| The toast, not synced (always after Sync now or pairing; after automatic syncs once, until a sync works or the reason changes): syncing off there | (none) | Not synced: syncing phone mods is off on {computer} |
 | …the computer not found | (none) | Not synced: can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open |
 | …this iPhone removed there | (none) | Not synced: this iPhone isn't connected to {computer} any more |
 | …Local Network off | (none) | Not synced: TRIF needs Local Network access to find {computer} |

@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (511 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (512 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -506,11 +506,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   changed as saveEdit judges, history source computer; `syncRemove` → `trash`, Recently deleted, 30 days,
   Application Support/mods-deleted.json, `restoreDeleted`; every delete goes there now). PhoneSyncModel
   (PhoneLinkView.swift) owns the app's ONE PhoneLinkRemote (PanelChat's `link` is it: one session per phone) and
-  syncs on didBecomeActive, `$mods` changes, `sync.changed` (onSyncChanged), syncNow; closes a sync-only link after
-  30 s unused (`lastUse`). After each sync (11-18): `AppToast` with `toastWords` (n = taken + removed, m = sent,
-  k = waitingHere: the computer's fromPhone/toPhone seen from here; switches not counted, as there) or
-  `problemWords(code)` (always after Sync now, else only a code not told since the last good sync: `toldProblem`);
-  an `unfinished` sync is a problem toast. `lastAt` (UserDefaults "phoneSync.lastAt") → `lastLine()` ("Last synced
+  syncs on didBecomeActive ("front"), `$mods` changes ("change"), `sync.changed` ("nudge"), syncNow ("now") and
+  `syncAfterPairing` ("pair": PhoneLinkModel's `.paired` step); closes a sync-only link after 30 s unused (`lastUse`).
+  The person's reasons are `PhoneSync.Toast.asked` (now, pair); one pressed during a running sync replaces a queued
+  automatic reason in the Scheduler. After each sync (11-18): `PhoneSync.Toast` (in PhoneSync.swift, so the Mac
+  check tests it) decides the toast: counts (n = taken + removed, m = sent, k = waitingHere: the computer's
+  fromPhone/toPhone seen from here; switches not counted, as there) after any sync that moved something; "nothing
+  new" only for asked reasons, nothing for automatic ones; `problemWords(code)` always when asked, else only a code
+  not told since the last good sync (`told`, kept in UserDefaults "phoneSync.toldProblem" across launches); an
+  `unfinished` sync is a problem toast. `lastAt` (UserDefaults "phoneSync.lastAt") → `lastLine()` ("Last synced
   just now / n min ago / at …"), in PhoneLinkView (`lastSynced`, a TimelineView) and in link.status's `synced` for
   Settings' block (panel-adapter.js paintLink; `__trifPanelSynced` repaints it, PanelChat.syncedChanged on $lastAt).
   Dev steps `sync`, `syncstate` (each mod: off, off on sites, held, its mark, allowed-there
@@ -611,9 +615,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   a restore is the person's switch (fresh time, syncs); holds still hold. Runaway offers' switch-offs get a
   snapshot too (same banner). Tiers and Pause all are recorded, never restored (safe mode doesn't touch them).
   Desktop has no crash switch-off: nothing to match there.
-- Sync toast, 11-18 (Tim: "some kind of visible 'successfully synced' message"): every sync while the app is open,
-  "nothing new" too; counts mean what the computer's toast means (phone-link a5f0cf4, PHONE-LINK-STRINGS.md); no
-  notification, no sound.
+- Sync toast, 11-18 (Tim: "some kind of visible 'successfully synced' message"): counts mean what the computer's
+  toast means (phone-link a5f0cf4, PHONE-LINK-STRINGS.md); no notification, no sound. Later 11-18 (it showed all the
+  time): "nothing new" only after a sync the person started on the phone (Sync now, pairing's first sync); an
+  automatic sync that moved nothing shows no toast; one that moved something still does; an automatic sync's
+  failure is said once until a sync works or the reason changes (kept across launches). The Mac matches
+  (phonelink.js `syncToast(done, { asked })`). "Last synced" updates after every good sync.
+- Safe mode's banner: "Switch them back on one at a time in Mods." dropped (Tim 11-18: "drop the line"). The runaway
+  offer's banner (the same SafetyBanner, `why` not "quit") still has it: asked in IOS-APP-STRINGS.md.
 - Phone sync, 11-18: a mod's switches follow the last change on either side (the later change wins); tiers and Pause
   all stay per device; a mod new from the computer arrives with its switch there (D8), still marked; approvals stay
   per device, the other side's only a hint for "You allowed this on {computer}." (draft). A mod imported from a file
@@ -1020,10 +1029,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   record: fromPhone 13, toPhone 0), "1 from the computer, 0 to it" after an edit there, "nothing new", and "can't
   find" when not reachable. Never on a phone. Dark mode of the toast not looked at. In full screen (an icon launch)
   the banner, and so Turn them back on, doesn't show (as before): the ⋯ menu still does it.
-- The toast for "nothing new" comes after every automatic sync (each time the app comes to the front, and 3 s after
-  any switch): Tim may find it too chatty; `toastWords` is the one place to quiet it.
-- Safe mode's banner words still say "Switch them back on one at a time in Mods." beside the new button: not
-  changed (only the named spot); asked in docs/IOS-APP-STRINGS.md.
+- The quiet sync toast (11-18): the rule is unit-tested on the Mac (phonelink.test.js test 2: automatic nothing →
+  none, asked nothing → "nothing new", counts, a repeated automatic failure once, kept across a relaunch) and seen in
+  the Simulator only for failures (no computer running: the first automatic "can't find" shown, two more fronts and a
+  relaunch said nothing, Sync now said it again). "Nothing new" after Sync now / pairing, and an automatic sync's
+  counts, not looked at in the app against the real helper; pairing's first sync ("pair", new) not run on a real
+  pairing. Shot 512: safe mode's banner without the line.
 
 - Stable ids and renames (11-18): phonelink.test.js test 9 passes against phone-link eb138f8 (rename on the phone moves
   the computer's file with nothing in its trash; the computer's rename arrives as one; rename vs edit merge; same name,

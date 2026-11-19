@@ -268,13 +268,64 @@ final class PhoneSync {
         Failure(code: a["code"] as? String ?? "failed", message: a["message"] as? String ?? "no answer")
     }
 
+    /// The toast after a sync (Tim, 11-18), the computer's own toast seen from the phone's side: what came from the
+    /// computer (taken here, new or changed, and deleted there), what went to it, and what waits here for an OK;
+    /// switches aren't counted, as on the computer (extension/phonelink.js `syncToast(done, { asked })` on branch
+    /// phone-link). A sync that moved nothing says "nothing new" only when the person started it on the phone (Sync now,
+    /// the first sync after pairing); an automatic one (the app in front, a change, the computer's nudge) says
+    /// nothing. A sync that didn't happen says why: always when the person started it; for an automatic one only
+    /// when it's news (`told`: the problem last said, until a sync works or the problem changes), so a Mac asleep
+    /// isn't said each time the app comes to the front. Drafts in docs/IOS-APP-STRINGS.md.
+    struct Toast {
+        /// The reasons the person started (the Scheduler's `why`): Sync now and pairing's first sync.
+        static func asked(_ why: String) -> Bool { why == "now" || why == "pair" }
+        /// The problem the toast last said (nil: none since the last good sync). The app keeps it across launches, so
+        /// iOS ending the app in the background doesn't make the same problem news again.
+        private(set) var told: String?
+        init(told: String? = nil) { self.told = told }
+
+        /// What to show after a sync (nil: no toast). A failure "notPaired" is never said.
+        mutating func after(_ r: Result<Summary, Failure>, why: String, computer c: String) -> (text: String, problem: Bool)? {
+            switch r {
+            case .success(let s) where !s.unfinished:
+                told = nil
+                return Self.words(s, c, asked: Self.asked(why)).map { ($0, false) }
+            case .success: return problem("unfinished", why, c)
+            case .failure(let f): return f.code == "notPaired" ? nil : problem(f.code, why, c)
+            }
+        }
+
+        private mutating func problem(_ code: String, _ why: String, _ c: String) -> (text: String, problem: Bool)? {
+            guard Self.asked(why) || code != told else { return nil }
+            told = code
+            return (Self.problemWords(code, c), true)
+        }
+
+        /// The counts' words, "nothing new" (asked only), or nil.
+        static func words(_ s: Summary, _ c: String, asked: Bool) -> String? {
+            let n = s.taken.count + s.removed.count, m = s.sent.count, k = s.waitingHere.count
+            guard n + m + k > 0 else { return asked ? "Synced with \(c) · nothing new" : nil }
+            return "Synced with \(c) · \(n) from the computer, \(m) to it" + (k > 0 ? ", \(k) waiting for your OK" : "")
+        }
+
+        static func problemWords(_ code: String, _ c: String) -> String {
+            switch code {
+            case "off": return "Not synced: syncing phone mods is off on \(c)"
+            case "notFound": return "Not synced: can't find \(c). It may be asleep, on another Wi-Fi, or have no browser with TRIF open"
+            case "removed": return "Not synced: this iPhone isn't connected to \(c) any more"
+            case "denied": return "Not synced: TRIF needs Local Network access to find \(c)"
+            default: return "Not synced with \(c) this time. TRIF tries again"
+            }
+        }
+    }
+
     /// When the phone syncs (D9). `sync` runs one (PhoneSync.run with the app's store and link); its answer comes
     /// back through `finished`. Callbacks and calls on one queue (main in the app).
     final class Scheduler {
         let changeDelay: Double
         private let files: () -> [String: String]
         private let sync: (@escaping (Result<Summary, Failure>) -> Void) -> Void
-        /// Each sync's answer, and its reason (front, change, nudge, now).
+        /// Each sync's answer, and its reason (front, change, nudge; the person's: now, pair).
         var finished: ((Result<Summary, Failure>, String) -> Void)?
         private(set) var running = false
         private var again: String?
@@ -290,10 +341,11 @@ final class PhoneSync {
 
         private func revs() -> [String: String] { files().mapValues(PhoneSync.rev) }
 
-        /// Sync now (or once the one running ends).
+        /// Sync now (or once the one running ends). What comes during one runs once after it, with the person's
+        /// reason if one of them was theirs (`Toast.asked`: the toast after it says "nothing new" too).
         func now(_ why: String) {
             changeTimer?.cancel(); changeTimer = nil
-            guard !running else { again = again ?? why; return }
+            guard !running else { if again == nil || Toast.asked(why) && !Toast.asked(again!) { again = why }; return }
             running = true
             sync { [weak self] r in
                 guard let self else { return }

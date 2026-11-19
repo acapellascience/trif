@@ -586,7 +586,7 @@ const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloa
 // Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
-// The page commands a run's `trif` sends (cli.js; AGENTS.md "Commands"): the only ones that go on from a run
+// The page commands a run's `trif` sends (cli.js; AGENTS.md "The CLI"): the only ones that go on from a run
 // to the extension, which holds each to the run's site (args.scope: background.js scopedTab, checkScopeUrl).
 const RUN_PAGE_COMMANDS = new Set(['status', 'tabs', 'run', 'reload', 'navigate', 'open', 'close', 'text', 'sweep', 'screenshot',
   'record', 'requests', 'request', 'errors', 'logs', 'mod.enable']);

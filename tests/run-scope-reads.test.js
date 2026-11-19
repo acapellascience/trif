@@ -223,7 +223,7 @@ test('a run\'s ping: its own mods and itself, not the other sites\' mods or the 
   assert.deepEqual(res.result.runs.map((r) => r.runId), [runs.desktop.runId]);
   assert.equal(res.result.login, null);
   const text = JSON.stringify(res);
-  for (const leak of ['victim.com', 'phonesite.org', 'example.com', runs.phone.runId, runs.sensitive.runId]) assert.ok(!text.includes(leak), `the run's ping names ${leak}`);
+  for (const leak of ['victim.com', 'phonesite.org', 'example.com', runs.phone.runId, runs.parent.runId, runs.sensitive.runId]) assert.ok(!text.includes(leak), `the run's ping names ${leak}`);
   assert.ok(res.result.helper && res.result.pid && res.result.modsDir, 'what `trif status` reads of the helper is there');
   // a phone view's run: its twin's alone (all-sites/ isn't a folder it may change)
   const phone = await forge(runs.phone.box, 'ping', {});

@@ -3499,7 +3499,10 @@ document.addEventListener('drop', async (e) => {
 // each goes in the site's files and is attached to the message being written, as a dropped file is while
 // typing. Pasted text stays ordinary text.
 ui.input?.addEventListener('paste', (e) => {
-  const files = [...(e.clipboardData?.files || [])];
+  const cd = e.clipboardData;
+  let files = [...(cd?.files || [])];
+  // (where a browser lists a pasted image only as an item)
+  if (!files.length) files = [...(cd?.items || [])].filter((it) => it.kind === 'file').map((it) => it.getAsFile()).filter(Boolean);
   if (!files.length) return;
   e.preventDefault();
   if (!view.site || !view.status?.helper?.connected) return;

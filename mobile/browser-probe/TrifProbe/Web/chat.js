@@ -1164,7 +1164,7 @@
   let lookSite = '';
   let robot = null; // { rim, face, eyes: [..], colours } from the app (RobotShape), so it's TRIF's own shape
   const GREETING = {
-    hello: 'Hello, this is TRIF',
+    hello: 'The robot is in.',
     ask: (site) => site ? `What would you like to fix on ${site}?` : 'What would you like to fix on this site?',
     attached: 'TRIF has attached the page below. Say what bothers you, then send.',
   };

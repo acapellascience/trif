@@ -350,20 +350,25 @@ test('the phone line: Connect a phone with none paired; Syncing with {phone} and
   assert.equal(TEXT.elsewhereNamed.includes('{browser}'), true);
 });
 
-// Tim, 11-18: a sync that worked showed nothing. A sync the phone starts (on its own, or its Sync now) reached the
-// panel only as a status, whose one trace was Settings' "Synced {time}" row: now every open panel shows a toast
-// for each sync that ends, whoever started it, and the phone view's line says when it last synced.
-test('a sync done: a toast with what it moved, "nothing new" only after Sync now here; none for the first status a panel gets', async () => {
+// Tim, 11-18: a sync that worked showed nothing; 11-19: toasts after every switch were noise. A toast now only
+// after a sync started here (Sync now, Sync with phone); the phone's own syncs show none, even when they moved
+// mods, and the phone view's line and Settings' row say when it last synced.
+test('a sync done: a toast only after Sync now here (what it moved, or nothing new); none for the phone\'s own syncs or the first status a panel gets', async () => {
   const mod = await load();
   const { syncToast, ago } = mod;
   const rec = (over = {}) => ({ at: 2000, fromPhone: 2, toPhone: 1, waiting: 0, conflicts: [], skipped: 0, ...over });
+  const asked = { asked: true };
   assert.equal(syncToast([]), '');
-  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }]), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it');
-  // (Tim, 11-18: "nothing new" only after a sync started here; automatic ones nothing moved in say nothing)
+  assert.equal(syncToast([], asked), '');
+  // (automatic: none, whatever it did)
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }]), '');
   assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }]), '');
-  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }], { asked: true }), 'Synced with Tim’s iPhone · nothing new');
-  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ waiting: 1 }) }]), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it, 1 waiting for your OK');
-  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }, { phone: 'iPad', synced: rec({ fromPhone: 1 }) }]), 'Synced with Tim’s iPhone and iPad · 3 from the phone, 2 to it');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ waiting: 1 }) }]), '');
+  // (started here)
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }], asked), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }], asked), 'Synced with Tim’s iPhone · nothing new');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ waiting: 1 }) }], asked), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it, 1 waiting for your OK');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }, { phone: 'iPad', synced: rec({ fromPhone: 1 }) }], asked), 'Synced with Tim’s iPhone and iPad · 3 from the phone, 2 to it');
   assert.equal(ago(1000, 30000), 'just now');
   assert.equal(ago(0, 5 * 60000 + 10), '5 min ago');
   assert.equal(ago(0, 2 * 3600000, () => '14:05'), 'at 14:05');
@@ -376,18 +381,20 @@ test('a sync done: a toast with what it moved, "nothing new" only after Sync now
   s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1500, fromPhone: 0, toPhone: 0 }) }] });
   assert.deepStrictEqual(s.toasts, [], 'an automatic sync that moved nothing: no toast');
   s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1600 }) }] });
-  assert.deepStrictEqual(s.toasts, ['Synced with Tim’s iPhone · 2 from the phone, 1 to it'], 'one that moved something: a toast');
+  assert.deepStrictEqual(s.toasts, [], 'one the phone started that moved something: no toast either (11-19)');
+  assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone · last synced just now.', '…the phone line says it');
   s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1600 }), online: false }] });
-  assert.equal(s.toasts.length, 1, 'the same sync again (another change): no second toast');
+  assert.equal(s.toasts.length, 0, 'the same sync again (another change): none');
   // (Sync now, pressed here: its sync says "nothing new" too)
   s.answers['phoneLink.syncNow'] = { told: [PHONE.id], ...on, phones: [{ ...PHONE, synced: rec({ at: 1600 }) }] };
   await s.link.syncNow();
   s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1700, fromPhone: 0, toPhone: 0 }) }] });
-  assert.deepStrictEqual(s.toasts.at(-1), 'Synced with Tim’s iPhone · nothing new', 'a sync the person asked for');
-  // (and a later automatic one, past the wait, that moved nothing: none)
+  assert.deepStrictEqual(s.toasts, ['Synced with Tim’s iPhone · nothing new'], 'a sync the person asked for');
+  // (and later automatic ones, past the wait, whether they moved something or not: none)
   await s.advance(mod.ASK_MS + 10000);
   s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1000 + mod.ASK_MS + 10000, fromPhone: 0, toPhone: 0 }) }] });
-  assert.equal(s.toasts.length, 2, 'an automatic sync long after Sync now: no toast');
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1000 + mod.ASK_MS + 11000 }) }] });
+  assert.equal(s.toasts.length, 1, 'automatic syncs long after Sync now: no toast');
   // (the phone view's line, between syncs)
   s.link.forgetAsked();
   assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone · last synced just now.');
@@ -407,4 +414,10 @@ test('connect a phone: every string the panel shows is in docs/PHONE-LINK-STRING
   assert.ok(settings.includes('<div id="phone-link" class="phone-link" hidden></div>'));
   const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.css'), 'utf8');
   assert.match(css, /\.settings \{[^}]*overflow-y: auto/);
+  // (the toast closes on a click, Tim 11-19: it takes clicks, and the panel listens for one)
+  const toastCss = css.match(/\n\.toast \{[^}]*\}/)[0];
+  assert.doesNotMatch(toastCss, /pointer-events: none/);
+  const js = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  assert.match(js, /ui\.toast\?\.addEventListener\('click', hideToast\)/);
+  assert.match(js, /function hideToast\(\) \{[^}]*clearTimeout[\s\S]*?ui\.toast\.hidden = true;/);
 });

@@ -54,8 +54,8 @@ export const TEXT = {
   justNow: 'just now',
   minutesAgo: '{n} min ago',
   atTime: 'at {time}',
-  // The toast when a sync with a phone is done, whoever started it (syncToast): every open panel shows it;
-  // "nothing new" only after a sync started here
+  // The toast when a sync started here is done (syncToast: Sync now, Sync with phone); syncs the phone starts show
+  // none (Tim, 11-19), the phone line and Settings' Synced row say when
   toastSynced: 'Synced with {phone} · {n} from the phone, {m} to it',
   toastSyncedWaiting: 'Synced with {phone} · {n} from the phone, {m} to it, {k} waiting for your OK',
   toastNothing: 'Synced with {phone} · nothing new',
@@ -182,17 +182,18 @@ export function ago(at, now = Date.now(), time = shortTime) {
 
 /**
  * The toast for syncs that just ended (`done`: [{phone: its name, synced: the helper's record}]), or '' for none:
- * what came from the phones and went to them, summed; "nothing new" when nothing moved, but only after a sync the
- * person started here (`asked`: Sync now, Sync with phone). Automatic syncs nothing moved in say nothing (Tim,
- * 2026-11-18: the phone syncs every time it comes to the front, so "nothing new" would show all the time).
+ * only after a sync the person started here (`asked`: Sync now, Sync with phone), what came from the phones and
+ * went to them, summed, or "nothing new". A sync the phone started (it in front, a switch, a change, its own Sync
+ * now) shows none, even when it moved mods (Tim, 2026-11-19: "every time you hit a switch … they're just noise");
+ * the phone line and Settings' Synced row still say when it last synced.
  */
 export function syncToast(done, { asked = false } = {}) {
   const list = (Array.isArray(done) ? done : []).filter((d) => d && d.synced && typeof d.synced === 'object');
-  if (!list.length) return '';
+  if (!list.length || !asked) return '';
   const name = phonesName(list.map((d) => ({ name: String(d.phone || '') })));
   const sum = (k) => list.reduce((n, d) => n + (Number.isInteger(d.synced[k]) ? d.synced[k] : 0), 0);
   const n = sum('fromPhone'); const m = sum('toPhone'); const k = sum('waiting');
-  if (!n && !m && !k) return asked ? fill(TEXT.toastNothing, { phone: name }) : '';
+  if (!n && !m && !k) return fill(TEXT.toastNothing, { phone: name });
   return fill(k > 0 ? TEXT.toastSyncedWaiting : TEXT.toastSynced, { phone: name, n, m, k });
 }
 

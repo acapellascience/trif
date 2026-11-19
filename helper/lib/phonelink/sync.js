@@ -294,6 +294,30 @@ function readSwitch(v) {
 /** What a switch is, without when: two equal keys are the same switch. */
 const switchKey = (s) => `${s.on ? 'on' : 'off'}|${s.off.join(',')}`;
 
+/**
+ * Whether the extension's report of the phone twins' switches is news for the phones, so they're nudged (host.js):
+ * a mod in both reports whose on/off changed, unless it changed to what the phone sync itself just sent it (`sent`:
+ * mod id -> {key: switchKey, when}), which is the phone's own switch arriving: the phone has it already. Nudging
+ * for that echo made every switch on the phone a second sync begun within a second of the first, refused `busy`
+ * (Tim, 11-19: "half the time they say not synced"). A mod that appears or goes is its file's change (host.js
+ * twinStamp nudges for that). `sent` loses each entry a report confirmed, and those older than a minute.
+ */
+function switchNews(was, next, sent = new Map(), now = Date.now()) {
+  for (const [id, s] of sent) if (!(now - s.when <= 60000)) sent.delete(id);
+  if (!was || !next) return false;
+  let news = false;
+  for (const [id, v] of next) {
+    if (!was.has(id)) continue;
+    const a = readSwitch(was.get(id));
+    const b = readSwitch(v);
+    const kb = b ? switchKey(b) : null;
+    const s = sent.get(id);
+    if (s && s.key === kb) { sent.delete(id); continue; }
+    if ((a ? switchKey(a) : null) !== kb) news = true;
+  }
+  return news;
+}
+
 /** A switch as sent (no `fresh`: it's only for deciding). */
 const sent = ({ id, on, off, at }) => ({ id, on, off, at });
 /**
@@ -417,6 +441,6 @@ function deleteBase(privateDir, phoneId) {
 
 module.exports = {
   parseId, idOf, rev, readManifest, plan, byParts, pairUp, siblingId, renameHeader, loadBase, saveBase, deleteBase, basePath, loadSwitchBase, loadBaseMeta,
-  syncKey, keyOfModId, modIdOf, readSwitch, switchKey, planSwitches, readHint, hintFits, tierOf, TIERS,
+  syncKey, keyOfModId, modIdOf, readSwitch, switchKey, switchNews, planSwitches, readHint, hintFits, tierOf, TIERS,
   SyncError, MAX_MODS, MOD_MAX, NAME_MAX, SIBLING, SIBLING_NAME, ALL_SITES,
 };

@@ -226,3 +226,30 @@ test('the approval hint: the very revision, and nothing beyond what was allowed 
   assert.strictEqual(S.syncKey('a.com/x', '3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01'), 'a.com#3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01', 'a mod with a stable id is keyed by it (D16)');
   assert.strictEqual(S.keyOfModId('phone~a.com/x', 'abcdefgh'), 'a.com#abcdefgh');
 });
+
+// Tim, 11-19 ("half the time they say not synced"): the extension's report of a switch the phone sync just sent it
+// nudged the phone back, and that second sync, begun within a second, was refused busy. Only other changes nudge.
+test('the switches\' report: news for the phones only when a switch changed that the phone sync didn\'t just send', () => {
+  const { switchNews } = S;
+  const m = (o) => new Map(Object.entries(o));
+  const a = { 'phone~x.com/a': { on: true, off: [], at: 1 }, 'phone~x.com/b': { on: false, off: [], at: 1 } };
+  assert.equal(switchNews(null, m(a)), false, 'the first report: how things are');
+  assert.equal(switchNews(m(a), m(a)), false, 'the same');
+  assert.equal(switchNews(m(a), m({ ...a, 'phone~x.com/a': { on: true, off: [], at: 5 } })), false, 'only when: no news');
+  assert.equal(switchNews(m(a), m({ ...a, 'phone~x.com/a': { on: false, off: [], at: 5 } })), true, 'switched here: news');
+  assert.equal(switchNews(m(a), m({ ...a, 'phone~x.com/a': { on: true, off: ['m.x.com'], at: 5 } })), true, 'off on a site here: news');
+  assert.equal(switchNews(m(a), m({ ...a, 'phone~x.com/c': { on: true, off: [], at: 5 } })), false, 'a mod that appears: its file\'s change, not the switches\'');
+  const sent = new Map([['phone~x.com/a', { key: 'off|', when: 1000 }]]);
+  const next = m({ ...a, 'phone~x.com/a': { on: false, off: [], at: 9 } });
+  assert.equal(switchNews(m(a), m(a), sent, 1100), false, 'a report before it arrived');
+  assert.equal(sent.size, 1, '…keeps waiting for it');
+  assert.equal(switchNews(m(a), next, sent, 1200), false, 'the phone\'s own switch arriving: no news');
+  assert.equal(sent.size, 0, '…and it\'s confirmed');
+  const sent2 = new Map([['phone~x.com/a', { key: 'off|', when: 1000 }]]);
+  assert.equal(switchNews(m(a), m({ ...a, 'phone~x.com/a': { on: false, off: [], at: 9 }, 'phone~x.com/b': { on: true, off: [], at: 9 } }), sent2, 1200), true, 'with another switch changed here: news');
+  const sent3 = new Map([['phone~x.com/a', { key: 'off|', when: 1000 }]]);
+  assert.equal(switchNews(m(a), m({ ...a, 'phone~x.com/a': { on: true, off: ['y.x.com'], at: 9 } }), sent3, 1200), true, 'changed to something else than was sent: news');
+  const old = new Map([['phone~x.com/a', { key: 'off|', when: 1000 }]]);
+  assert.equal(switchNews(m(a), next, old, 1000 + 61000), true, 'a minute later it\'s no echo');
+  assert.equal(old.size, 0);
+});

@@ -101,6 +101,7 @@ const state = {
   twinStamp: undefined, // (the phone twins' files as syncMods last saw them: a change nudges a connected phone to sync)
   syncWriting: false, // (syncMods for the phone sync's own write: no nudge for it)
   phoneSwitches: null, // (the phone twins' switches as the extension last said: Map mod id -> {on, off, at}; null: never said)
+  phoneSwitchesSent: new Map(), // (the phone's switches sent to the extension: mod id -> {key, when}, until its report has them)
   modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
   resentFor: null, // the signature of the last set re-sent because the extension asked (modsResend)
   sentMods: null, // id -> hash of the last set sent to this extension, for 'modsSame' (null: send every mod whole)
@@ -278,10 +279,10 @@ function onExtensionMessage(msg) {
       if (msg.phoneSwitches && typeof msg.phoneSwitches === 'object' && !Array.isArray(msg.phoneSwitches)) {
         const next = new Map();
         for (const [id, v] of Object.entries(msg.phoneSwitches).slice(0, 2000)) if (/^phone~/.test(id) && v && typeof v === 'object') next.set(id, v);
-        const shape = (m) => JSON.stringify([...m].map(([k, v]) => [k, !!v.on, Array.isArray(v.off) ? [...v.off].sort() : []]).sort());
+        // (not for the phone's own switches arriving: switchNews; that echo made each switch a second sync, refused busy)
         const was = state.phoneSwitches;
         state.phoneSwitches = next;
-        if (was && shape(was) !== shape(next)) { try { link.syncChanged(); } catch (e) { logger.warn(`phone sync: ${e.message}`); } }
+        if (require('./lib/phonelink/sync').switchNews(was, next, state.phoneSwitchesSent)) { try { link.syncChanged(); } catch (e) { logger.warn(`phone sync: ${e.message}`); } }
       }
       break;
     case 'log': {
@@ -660,6 +661,8 @@ const link = new Link({
     set: (list) => {
       if (!state.stdoutOpen || state.shuttingDown) return false;
       sendToExtension({ type: 'phoneSwitches', set: list.map((x) => ({ id: x.modId, on: x.on, off: x.off, at: x.at })) });
+      const { switchKey, readSwitch } = require('./lib/phonelink/sync');
+      for (const x of list) { const v = readSwitch({ on: x.on, off: x.off }); if (v) state.phoneSwitchesSent.set(x.modId, { key: switchKey(v), when: Date.now() }); }
       logger.info(`phone sync: ${list.length} switch(es) from the phone: ${list.map((x) => `${x.modId} ${x.on ? 'on' : 'off'}${x.off.length ? ` (off on ${x.off.join(', ')})` : ''}`).join('; ').slice(0, 500)}`);
       return true;
     },

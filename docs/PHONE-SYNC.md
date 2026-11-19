@@ -282,9 +282,9 @@ Computer → phone:
 
 | `t` | Fields |
 |---|---|
-| `sync.changed` | none. A phone twin's file changed on the computer (a desktop phone-view chat, an edit, a restore), or a phone twin mod's switch did (the extension's report). Sent to that phone's live session, at most every 2 seconds; the phone answers with `sync.begin` when it's ready. It carries no mod and names none. |
+| `sync.changed` | none. A phone twin's file changed on the computer (a desktop phone-view chat, an edit, a restore), or a phone twin mod's switch did (the extension's report; since 11-19 not for the phone's own switch arriving there, `sync.js switchNews`: that echo made each switch on the phone a second sync begun within a second, refused `busy`). Sent to that phone's live session, at most every 2 seconds; the phone answers with `sync.begin` when it's ready. It carries no mod and names none. |
 
-Error codes: `bad-mod`, `too-big`, `changed`, `no-sync`, `busy` (more than one `sync.begin` a second), `off`
+Error codes: `bad-mod`, `too-big`, `changed`, `no-sync`, `busy` (more than one `sync.begin` a second; the app keeps 1.2 s between its begins and tries a `busy` again quietly, never saying it), `off`
 (syncing is switched off on the computer: `PhoneSync`'s `enabled`, every `sync.*` answered so, nothing read or
 written).
 
@@ -364,8 +364,14 @@ Exact drafts: docs/PHONE-LINK-STRINGS.md, "Phone sync".
   mods both ways (D8), an older app and an extension that hasn't said; the hint on a hold (still held), changed
   code or more powers without it, the plan's `allowed`.
 - End to end (11-18, tests/phone-sync-e2e.test.js's second test): a new phone gets the twin's mods with the
-  computer's switches, its switch goes to the extension (`phoneSwitches`), the extension's report nudges it, the
-  later change wins; the hint on the side panel's hold.
+  computer's switches, its switch goes to the extension (`phoneSwitches`), the extension's report of it nudges
+  nobody (11-19) and the next sync agrees, the later change wins; the hint on the side panel's hold. Third test
+  (11-19, Tim: "half the time they say not synced"): a phone scheduling as the app does (3 s after the last switch,
+  a nudge at once) and an extension answering as background.js does: a burst of 5 switches in 2 s is one sync, at
+  the browser within a few seconds, nothing refused; the front and a switch together, nothing refused; switched
+  back before another sync, the phone's change stands. Before the fix the burst gave 2 syncs and 1 refused `busy`.
+  A switch the computer takes is agreed into the switches' base at the sync that sent it (no second sync comes to
+  confirm it).
 - Unit (phone): the plan applied to `ModStore` (new as an import, changed as an edit, held keeps the version
   before running, removed to Recently deleted, a refused file).
 - End to end: the stand-in phone (`tests/phone-link-client.js`) syncs with the real helper in a temp HOME on

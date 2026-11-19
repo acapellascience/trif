@@ -515,12 +515,21 @@ class PhoneSync {
     }
     // The switches: what the computer takes goes to the browser now; the base moves where both sides agree as last
     // seen (the phone's now, the extension's last report: a switch sent now is confirmed by its next report).
+    // A switch sent now is agreed now too (11-19): the extension's report of it is no news (sync.js switchNews), so
+    // no second sync comes to confirm it; were it left out of the base, the phone switching it back before the
+    // next sync would read as the computer's change and be undone.
     let swBase;
     let switched = 0;
+    const sentKeys = new Map();
     if (sync.knows && this.switches) {
       const takes = sync.swToComputer.filter((x) => { try { return !!this._current(ws, x.id); } catch { return false; } });
       if (takes.length) {
-        try { if (this.switches.set(takes.map((x) => ({ modId: S.modIdOf(x.id), on: x.on, off: x.off, at: x.at })))) switched = takes.length; } catch (e) { this.log(`phone sync: couldn't send the switches to the browser (${e.message})`); }
+        try {
+          if (this.switches.set(takes.map((x) => ({ modId: S.modIdOf(x.id), on: x.on, off: x.off, at: x.at })))) {
+            switched = takes.length;
+            for (const x of takes) { const v = S.readSwitch(x); if (v) sentKeys.set(x.id, S.switchKey(v)); }
+          }
+        } catch (e) { this.log(`phone sync: couldn't send the switches to the browser (${e.message})`); }
       }
       const report = this.switches.get();
       if (report && Array.isArray(msg.switches)) {
@@ -538,7 +547,7 @@ class PhoneSync {
         for (const [key, [id, v]] of phoneNow) {
           const c = report.get(S.modIdOf(id));
           const cv = c ? S.readSwitch(c) : null;
-          if (cv && S.switchKey(cv) === S.switchKey(v)) swBase[key] = S.switchKey(v);
+          if ((cv && S.switchKey(cv) === S.switchKey(v)) || sentKeys.get(id) === S.switchKey(v)) swBase[key] = S.switchKey(v);
           if (key !== id) delete swBase[id]; // (an older base's entry by file id: the key has it now)
         }
         // (a mod on neither side any more: out of the switches' base)

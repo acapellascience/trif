@@ -3485,8 +3485,16 @@ async function checkPhoneHint() {
 }
 ui.phoneHintClose?.addEventListener('click', () => { phoneHint = null; renderPhoneHint(); });
 
-/** A short-lived line over the panel's bottom edge (a sync done, a phone address that went nowhere). */
+/** A short-lived line over the panel's bottom edge (a sync done, a phone address that went nowhere); a click closes it. */
 let toastTimers = [];
+function hideToast() {
+  for (const t of toastTimers) clearTimeout(t);
+  toastTimers = [];
+  if (!ui.toast) return;
+  ui.toast.hidden = true;
+  ui.toast.classList.remove('fading');
+}
+ui.toast?.addEventListener('click', hideToast);
 function showToast(text, ms = 6000) {
   if (!ui.toast || !text) return;
   for (const t of toastTimers) clearTimeout(t);

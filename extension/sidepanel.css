@@ -1033,7 +1033,7 @@ body.phone-view .phone-sync { padding-top: 0; margin-top: -1px; border-top: 0; }
 .phone-sync-close:hover { color: var(--text); }
 .phone-hint[hidden] { display: none; }
 /* The toast: over the panel's bottom edge, above the composer, moving nothing; gone after a few seconds. */
-.toast { position: fixed; left: 50%; bottom: 84px; z-index: 60; transform: translateX(-50%); max-width: calc(100% - 24px); width: max-content; box-sizing: border-box; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgb(0 0 0 / 0.14); opacity: 1; transition: opacity 0.25s ease; pointer-events: none; }
+.toast { position: fixed; left: 50%; bottom: 84px; z-index: 60; transform: translateX(-50%); max-width: calc(100% - 24px); width: max-content; box-sizing: border-box; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgb(0 0 0 / 0.14); opacity: 1; transition: opacity 0.25s ease; cursor: pointer; }
 .toast[hidden] { display: none; }
 .toast.fading { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }

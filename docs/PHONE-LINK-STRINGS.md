@@ -62,17 +62,19 @@ test above checks them here too; the menu's are in sidepanel.js `PHONE_MENU`.
 
 ## Desktop: a sync done, and the phone view's window (11-18, branch phone-view2, drafts)
 
-Tim, 11-18: "it should have some kind of visible 'successfully synced' message". Every open TRIF panel (the side
-panel, the phone view's, a panel window) shows a toast for a few seconds when a sync with a phone ends, whoever
-started it (the phone on its own, the phone's Sync now, or Sync now here); not when the phone line under the bar
-already says what that sync did (after Sync now there). The toast's words are in phonelink.js `TEXT`; the phone
+Tim, 11-18: "it should have some kind of visible 'successfully synced' message"; 11-19: "they happen every time you
+hit a switch … either way they're just noise". Every open TRIF panel (the side panel, the phone view's, a panel
+window) shows a toast for a few seconds when a sync started on this computer ends (Sync now, the 📱 menu's Sync with
+phone); not when the phone line under the bar already says what that sync did (after Sync now there). A sync the
+phone starts (it comes to the front, a switch, a change, its own Sync now) shows no toast, even when it moved mods:
+the phone view's line and Settings' Synced row still say when it last synced. A click on the toast closes it. The toast's words are in phonelink.js `TEXT`; the phone
 view's are in sidepanel.js `PHONE_VIEW_TEXT`.
 
 | Where | String | Notes |
 |---|---|---|
-| The toast, after a sync that moved something | Synced with {phone} · {n} from the phone, {m} to it | {phone} as the phone line's (two: "{phone} and {other}"). No full stop: it's a passing line |
+| The toast, after a sync started here that moved something | Synced with {phone} · {n} from the phone, {m} to it | {phone} as the phone line's (two: "{phone} and {other}"). No full stop: it's a passing line |
 | The same, with mods waiting for an OK | Synced with {phone} · {n} from the phone, {m} to it, {k} waiting for your OK | |
-| The same, nothing moved (only after a sync started here: Sync now, Sync with phone; automatic syncs that moved nothing show no toast. Tim, 11-18) | Synced with {phone} · nothing new | |
+| The same, nothing moved (11-19: no toast at all after a sync the phone started) | Synced with {phone} · nothing new | |
 | The phone view just opened without TRIF's panel beside it (Firefox always; Chrome if the side panel couldn't open): in the panel the phone view was opened from, with a × | The phone view is in a window of its own. Click TRIF's button there to open TRIF beside the phone. | until TRIF's panel is open in the phone window, or the phone view ends. Firefox can't open its sidebar in another window from a click in this one (sidebarAction.open has no window, and only works inside the click itself) |
 | The phone view's banner, when the page is wider than the phone's because the browser won't make the window narrower | This page is {w} px wide, wider than an iPhone's 390: the browser won't make this window narrower. | {w}: the page's width in CSS px. Headless Chrome 156 keeps a window with its side panel open at 792 px or wider, so a 406 px page; Tim's Chrome to be checked. Not shown at 390 (± 2) |
 | The popup route's address field, when going there failed (a toast) | Couldn't go there: {error} | {error}: the browser's words, as they come. Before 11-18 the failure went to the console only |

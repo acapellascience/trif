@@ -325,7 +325,9 @@ test('phone sync end to end, beside the text: switches both ways (the later chan
   assert.deepEqual(told.set, [{ id: 'phone~example.com/no-ads', on: true, off: ['m.example.com'], at: sw['example.com/no-ads'].at }]);
   nudges(C);
   tell({ ...report, 'phone~example.com/no-ads': { on: true, off: ['m.example.com'], at: sw['example.com/no-ads'].at } });
-  await nudged(C); // (the report changed: a nudge; the sync then finds them the same)
+  // (11-19: the report has the phone's own switch, which the phone has already: no nudge, so no second sync begun
+  // within a second of the first to be refused busy; the switch was agreed at that sync's end)
+  await noNudge(C, 1500);
   const r3 = await sync(C, onC, { switches: sw });
   assert.deepEqual(r3.plan.switches, []);
 
@@ -360,4 +362,103 @@ test('phone sync end to end, beside the text: switches both ways (the later chan
   const noHint = await ext.nextMods((ms) => ms.some((m) => m.id === 'phone~example.com/clicker' && m.held && !m.held.allowedOn), { since, timeout: 10000 });
   assert.ok(noHint.find((m) => m.id === 'phone~example.com/clicker').held, 'still waiting');
   assert.equal(read('phone~example.com/clicker.js'), onC['example.com/clicker']);
+});
+
+// Tim, 11-19: "half the time they say not synced". The phone syncs 3 s after its last switch (PhoneSync.Scheduler) and
+// at once on the computer's nudge; the extension's report of the phone's own switch nudged it back, so a second sync
+// began within a second of the first and was refused `busy`. Here a stand-in phone schedules as the app does (3 s
+// after the last change, a nudge at once, one at a time) and the stand-in extension answers each phoneSwitches as
+// the real one does (background.js onPhoneSwitches: its report a moment later).
+test('phone sync end to end, switched like the phone does: a burst of switches is one sync, nothing refused, at the computer within a few seconds', async (t) => {
+  assert.ok(ext, 'after the first test');
+  const report = {};
+  let seen = ext.messages.length;
+  const arrived = []; // [when, set] each phoneSwitches the extension got
+  const extLoop = setInterval(() => {
+    for (; seen < ext.messages.length; seen++) {
+      const m = ext.messages[seen];
+      if (m.type !== 'phoneSwitches') continue;
+      arrived.push([Date.now(), m.set]);
+      for (const e of m.set) report[e.id] = { on: e.on, off: e.off, at: e.at };
+      setTimeout(() => ext.send({ type: 'modsApplied', registered: [], errors: [], phoneSwitches: { ...report } }), 80);
+    }
+  }, 10);
+  const w = await panel('phone.pair.start');
+  const { key: computerKey } = qrOf(w.qr);
+  const D = await PhoneClient.connect({ port: w.port, computerKey, keys: generateKeyPair(), name: 'Phone D', pair: qrOf(w.qr).secret });
+  phones.push(D);
+  await D.request(HELLO);
+  const onD = {};
+  const sw = {};
+  await sleep(1100);
+  await sync(D, onD, { switches: sw });
+  lastBegin.set(D, Date.now());
+  // (the browser's switches as the phone now has them, then quiet)
+  for (const [id, v] of Object.entries(sw)) report[`phone~${id}`] = v;
+  ext.send({ type: 'modsApplied', registered: [], errors: [], phoneSwitches: { ...report } });
+  await sleep(2200);
+  nudges(D);
+  // (the app's Scheduler as it was: no wait between syncs, a refusal counted as a failure)
+  const log = { syncs: 0, refused: [] };
+  let running = false; let again = null; let timer = null;
+  const run = async (why) => {
+    clearTimeout(timer); timer = null;
+    if (running) { again = again || why; return; }
+    running = true; log.syncs++;
+    try {
+      const r = await D.sync(onD, { switches: sw });
+      if (r.plan.t !== 'sync.plan') log.refused.push(`${why}: ${r.plan.code}`);
+    } finally { running = false; }
+    if (again) { const a = again; again = null; run(a); }
+  };
+  const nudgeLoop = setInterval(() => { if (D.kept.some((m) => m.t === 'sync.changed')) { D.kept = D.kept.filter((m) => m.t !== 'sync.changed'); run('nudge'); } }, 10);
+  const changed = () => { clearTimeout(timer); timer = setTimeout(() => run('change'), 3000); };
+  const idle = () => !running && !timer && !again;
+  try {
+    // Five switches in 2 s.
+    let last = 0;
+    for (let i = 0; i < 5; i++) {
+      sw['example.com/desk'] = { on: i % 2 === 1, off: [], at: Date.now() }; // (ending off: it was on)
+      last = Date.now();
+      changed();
+      await sleep(450);
+    }
+    await waitFor(() => idle() && arrived.length > 0, { timeout: 10000 });
+    await sleep(3000); // (an echo would come and be synced meanwhile)
+    await waitFor(idle, { timeout: 5000 });
+    assert.deepEqual(log.refused, [], 'nothing refused');
+    assert.ok(log.syncs >= 1 && log.syncs <= 2, `one or two syncs for the burst: ${log.syncs}`);
+    const [when, set] = arrived[0];
+    assert.deepEqual(set.map((x) => [x.id, x.on]), [['phone~example.com/desk', false]]);
+    assert.ok(when - last < 4500, `at the computer within a few seconds of the last switch: ${when - last} ms`);
+    // The app comes to the front and a switch follows at once (the front's sync and the switch's).
+    const before = log.syncs;
+    run('front');
+    sw['example.com/desk'] = { on: true, off: [], at: Date.now() };
+    changed();
+    await sleep(500);
+    await waitFor(idle, { timeout: 10000 });
+    await sleep(2500);
+    await waitFor(idle, { timeout: 5000 });
+    assert.deepEqual(log.refused, [], 'nothing refused after the front and a switch');
+    assert.ok(log.syncs - before <= 2, `the front's and the switch's: ${log.syncs - before}`);
+    assert.equal(report['phone~example.com/desk'].on, true, 'the last switch is in the browser');
+    // The next sync agrees: the switch isn't sent back (the base moved at the sync that sent it).
+    await sleep(1100);
+    const r = await D.sync(onD, { switches: sw });
+    assert.deepEqual(r.plan.switches, []);
+    assert.equal(sw['example.com/desk'].on, true);
+    // Switched back before any other sync: the phone's change, not undone by the computer's older one.
+    await sleep(1100);
+    const n = arrived.length;
+    sw['example.com/desk'] = { on: false, off: [], at: Date.now() };
+    const back = await D.sync(onD, { switches: sw });
+    assert.deepEqual(back.plan.switches, [], 'nothing sent back to the phone');
+    assert.equal(sw['example.com/desk'].on, false);
+    await waitFor(() => arrived.length > n, { timeout: 5000 });
+    assert.equal(arrived.at(-1)[1][0].on, false, 'the browser gets it');
+  } finally {
+    t.diagnostic(`syncs ${log.syncs}, refused ${JSON.stringify(log.refused)}, switches at the browser ${arrived.length}, running ${running}`);
+    clearInterval(extLoop); clearInterval(nudgeLoop); clearTimeout(timer);
+  }
 });

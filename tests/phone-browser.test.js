@@ -550,16 +550,24 @@ test('the phone view\'s panel: its navigation bar, the phone line and the phone 
     await desk.shot('sync-result-desktop-dark.png', true);
     await desk.ev('document.getElementById("phone-sync-close").click()');
     assert.equal((await desk.ev(LINE)).shown, false, 'closed');
-    // A sync the phone started (11-18: Tim saw nothing): a toast in the panel, over it, for a few seconds
-    const TOAST = `(() => { const t = document.getElementById('toast'); return t.hidden ? null : { text: t.textContent, fixed: getComputedStyle(t).position }; })()`;
+    // A sync the phone started (Tim, 11-19: toasts after every switch were noise): no toast, even when it moved mods
+    const TOAST = `(() => { const t = document.getElementById('toast'); return t.hidden ? null : { text: t.textContent, fixed: getComputedStyle(t).position, events: getComputedStyle(t).pointerEvents }; })()`;
     assert.equal(await desk.ev(TOAST), null);
     await desk.ev(`window.__news(${JSON.stringify({ ...paired, phones: [{ ...PHONE, synced: { at: Date.now() + 5000, fromPhone: 1, toPhone: 0, waiting: 0, conflicts: [], skipped: 0 } }] })}); 0`);
-    assert.deepEqual(await desk.ev(TOAST), { text: 'Synced with Tim’s iPhone · 1 from the phone, 0 to it', fixed: 'fixed' });
+    await sleep(300);
+    assert.equal(await desk.ev(TOAST), null, 'the phone\'s own sync: no toast');
+    // A sync started here whose line isn't showing (the line hidden as if elsewhere): the toast, and a click closes it
+    await desk.ev('document.getElementById("phone-btn").click(); document.getElementById("phone-menu-sync").click()');
+    await waitFor('the line again', async () => (await desk.ev(LINE)).shown && (await desk.ev('window.__asked.filter((t) => t === "phoneLink.syncNow").length')) === 2);
+    await sleep(200);
+    await desk.ev('document.getElementById("phone-sync").hidden = true; 0');
+    await desk.ev(`window.__news(${JSON.stringify({ ...paired, phones: [{ ...PHONE, synced: { at: Date.now() + 9000, fromPhone: 1, toPhone: 0, waiting: 0, conflicts: [], skipped: 0 } }] })}); 0`);
+    assert.deepEqual(await desk.ev(TOAST), { text: 'Synced with Tim’s iPhone · 1 from the phone, 0 to it', fixed: 'fixed', events: 'auto' });
     await desk.shot('synced-toast-light.png');
     await desk.shot('synced-toast-dark.png', true);
-    await desk.ev(`window.__news(${JSON.stringify({ ...paired, phones: [{ ...PHONE, synced: { at: Date.now() + 9000, fromPhone: 0, toPhone: 0, waiting: 0, conflicts: [], skipped: 0 } }] })}); 0`);
-    assert.equal((await desk.ev(TOAST)).text, 'Synced with Tim’s iPhone · nothing new');
-    await waitFor('the toast gone', async () => (await desk.ev(TOAST)) === null, 10000);
+    await desk.ev('document.getElementById("toast").click(); 0');
+    assert.equal(await desk.ev(TOAST), null, 'a click closes it at once');
+    await desk.ev('document.getElementById("phone-sync-close").click(); 0');
 
     // Switch to phone view, from the menu: the phone's own panel window
     await desk.ev('document.getElementById("phone-btn").click(); document.getElementById("phone-menu-view").click()');

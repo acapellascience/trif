@@ -155,6 +155,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   needs it). Mac harness: `mobile/local-model/harness.sh <model.gguf> <wikipedia|hn|guardian|testfeed> <styleJSON|file> "<request>" [runs]`
   (env TRIF_GPU, TRIF_THREADS, TRIF_BATCH, TRIF_CTX). Models are 1.3–2.7 GB: download to the scratchpad, delete after
   (the Mac's disk is at 97%).
+- TestFlight (11-19, Tim's account): `sh mobile/browser-probe/testflight.sh` archives (build number = UTC date+time)
+  and uploads to App Store Connect through the Apple account signed in to Xcode; Tim's phone gets it from TestFlight.
+  Build 1 (version 0.1) uploaded 11-19 02:15. Upload warnings seen: llama.framework has no dSYM (harmless); Xcode 27 SDK
+  needed from April 2027. Until Tim says otherwise, still also copy the .ipa to iCloud as below.
 - The .ipa: `xcodebuild … -configuration Release -sdk iphoneos -derivedDataPath <ddev> CODE_SIGNING_ALLOWED=NO DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build`,
   zip `Payload/TrifProbe.app` to `~/Downloads/TRIF.ipa`, copy `TrifProbe.app.dSYM` to `~/Downloads/TRIF.app.dSYM`, copy the
   .ipa to `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/TRIF.ipa` (named TrifProbe.ipa before 11-18; that one went

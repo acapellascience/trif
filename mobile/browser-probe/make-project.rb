@@ -59,7 +59,9 @@ embed.always_out_of_date = '1'
 
 target.build_configurations.each do |config|
   s = config.build_settings
-  s['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.timsrobot.trifprobe.browser'
+  # (the App Store id, Tim 11-19; permanent once App Store Connect has it. Before 11-19: com.timsrobot.trifprobe.browser)
+  s['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.timsrobot.trif'
+  s['DEVELOPMENT_TEAM'] = 'RB8R3JGQST'
   s['PRODUCT_NAME'] = '$(TARGET_NAME)'
   s['MARKETING_VERSION'] = '0.1'
   s['CURRENT_PROJECT_VERSION'] = '1'

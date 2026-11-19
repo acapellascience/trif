@@ -356,7 +356,7 @@ extension ModStore {
 /// The app's icon's long-press menu: Pause all mods (Info.plist's UIApplicationShortcutItems), handled here as the
 /// scene starts or is brought back by it.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    static let pauseShortcut = "com.timsrobot.trifprobe.pause"
+    static let pauseShortcut = "com.timsrobot.trif.pause"
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self

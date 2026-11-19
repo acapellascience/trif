@@ -266,7 +266,7 @@ Core complete for the listed candidates. If more is wanted later (none asked): w
 
 - Round 13: a link's tabURL crosses as URL(string:)'s parts {url: absoluteString, host} (Foundation now encodes a
   space, so absoluteString can differ from the stored string; the new tab opens absoluteString, as before). Chat links
-  can be seeded with the app stopped: `simctl spawn <dev> defaults write com.timsrobot.trifprobe.browser chatLinks
+  can be seeded with the app stopped: `simctl spawn <dev> defaults write com.timsrobot.trif chatLinks
   -data <hex of JSON [{service, site, tab, tabTitle, tabURL, state, at (s since 2001)}]>`; tab ids from Application
   Support/tabs.json. Driver: scratchpad r13/step.sh ({"links":1}, {"select":0}, {"gosite":n}).
 

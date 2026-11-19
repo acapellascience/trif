@@ -1,9 +1,10 @@
 # iPhone app (TrifProbe): notes for the next agent
 
 Branch `ios-poc`, worktree `~/WebMods-worktrees/ios-poc`. The app is `mobile/browser-probe` (Xcode project
-`TrifProbe.xcodeproj`, bundle `com.timsrobot.trifprobe.browser`, display name "TRIF" since 11-18 (Tim: "I'm getting
-tired of seeing Probe"; it was "TRIF Probe"). The bundle identifier stays as it is, so the install on Tim's phone updates
-in place with its tabs, mods and sign-ins: never change it. Internal names (target, folders, types) stay TrifProbe. mobile/README.md has the
+`TrifProbe.xcodeproj`, bundle `com.timsrobot.trif` since 11-19 (Tim's Apple Developer account, team `RB8R3JGQST`,
+automatic signing; it was `com.timsrobot.trifprobe.browser`, so the first build with the new id installed as a NEW app
+beside the old one: mods/switches/pairing came back by sync and pairing again), display name "TRIF" since 11-18 (Tim: "I'm getting
+tired of seeing Probe"; it was "TRIF Probe"). The bundle identifier is now the App Store's: never change it again. Internal names (target, folders, types) stay TrifProbe. mobile/README.md has the
 long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is the short version.
 
 ## Standing rules
@@ -26,7 +27,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 - Simulator: iPhone SE (3rd gen) `531D07B3-0AE6-4010-B14F-B79E9DF95CBE`. Build:
   `xcodebuild -project TrifProbe.xcodeproj -scheme TrifProbe -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath <dd> build CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS=<sim.entitlements>`
-  (the entitlements file, application-identifier + keychain-access-groups `SIMTEST.com.timsrobot.trifprobe.browser`, only
+  (the entitlements file, application-identifier + keychain-access-groups `SIMTEST.com.timsrobot.trif` (before 11-19 `SIMTEST.com.timsrobot.trifprobe.browser`), only
   so the Keychain works there: unsigned it answers -34018). Then `simctl install`, and launch with flags (below).
   Launch with `-nosafe` when a test terminates the app while it's in front: else safe mode switches off the mods that
   were running (a terminate in front is an unclean end).

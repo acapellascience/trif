@@ -234,7 +234,29 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
   whose own @match names another site still warns. Add to TRIF's tap under a chat's code block the same (11-18; it
   kept phone~<site> as the site until round 8 of the shared core). [shared: core/mod-offer.js from]
 - A conversation belongs to the site it started on: no follow-ups across sites.
-- Diagnostics "chat offers": one line per hand-over (ids offered, skipped and why, held and why).
+- Edit blocks (11-19, Tim: "so they could just change the necessary lines and then we parse that on the app side"): a
+  chat changes a mod it was given by edit blocks, not the whole file again. Every mod TRIF gives a chat comes with a
+  line `TRIF edit <file id> <version>` (version: FNV-1a 32 of its code, UTF-8, line ends as \n, 8 hex digits); the
+  chat's reply starts a code block with that line, then for each change `<<<<<<< SEARCH` / lines quoted from the mod
+  / `=======` / the new lines / `>>>>>>> REPLACE` (5-9 marker characters, each marker on a line of its own). A block
+  applies only where its SEARCH lines are exactly once: exactly first, else ignoring whitespace (line ends, trailing
+  spaces, indentation; the replacement then gets the mod's extra indentation). Blocks apply in order, each to the
+  text the ones before it made. Inserting keeps an anchor line; deleting is an empty replacement; an empty SEARCH is
+  refused (a new mod is a whole file). A reply's edit blocks go to the app together (several code blocks of one
+  reply are one hand-over). All or nothing: a version that isn't the mod's code now, a block that matches no place or
+  more than one, a missing version or mod, and nothing of that hand-over is applied; the note says so and the chat's
+  own message box gets a message asking again (for a changed mod, with its code now and its new edit line), never
+  sent. Edits whose result is the mod now (an Add tapped again) are "in already", nothing offered. The result goes
+  through every check a whole mod does (the header, the sites box, holds, the chat-offers memory). Add this mod?
+  becomes "Change this mod?" with each change compact (its line, − taken out, + put in, one unchanged line around)
+  and "Add N changes"; the chat's button under the last edit block reads "Add N changes to TRIF". A whole file still
+  works as before (a new mod, or a change to most of one). [shared: core/mod-edit.js; chat.js groups and labels]
+- Shortened files (11-19): a whole file offered for a mod that's here already is refused when a line in it is only a
+  placeholder comment ("// rest unchanged", "// ... existing code ...", "/* same as before */", "// ...") that the
+  mod's code now doesn't have, and lines the mod has now are missing where it stands. A real comment in working code
+  never trips it (Tim's 224 mods as a corpus: none does). The same check runs on an edit's result. Refused as edits
+  are: the note, and a message in the chat's box asking for the whole file or edit blocks. [shared: core/mod-edit.js]
+- Diagnostics "chat offers": one line per hand-over (ids offered, skipped and why, held and why, refused and why).
 
 ## Chats and tabs
 
@@ -481,3 +503,4 @@ mods.js) is shared already. Progress: mobile/SHARED-CORE-PROGRESS.md.
 | Desktop websites' per-site memory (the key, wants, the kept list, can) | shared/core/desktop.js | DesktopRules (TabReloadRules.swift) → TrifCore.desktop `set` (`key`, `wants`, `can` twins, same cases: every page load) | test/core-tabreload.test.js, test/tabreload.test.js |
 | The microphone's words only grow (segments, restarts after a pause, revised partials, a repeated segment) | shared/core/speech-text.js | SpeechText.swift → TrifCore.speechText.apply, every recognizer event (the committed words stay Swift and never cross: the answer says what to add; a Swift copy answers only if the shared rule can't) | test/core-speechtext.test.js, test/speechtext.test.js |
 | The tab list: the card it opens at (the chat's own tab, else the shown tab), each card's robot badge; Go to {site}'s tab | shared/core/tab-list.js | TabListRules.swift → TrifCore.tabList (ClaudePane.chatTabShown and goToSite, TabsView's badges; `marked`, the card drawn as current, a twin, same cases: every drawing) | test/core-tablist.test.js, test/tablist.test.js |
+| A chat's edit blocks for a mod (version tag, parse, the mod named, applied all or nothing, "in already"); a shortened whole file | shared/core/mod-edit.js (TrifCore.modEdit) | ModEdits.swift → TrifCore.modEdit (Browser.prepare / shortened: every chat hand-over, the Add to TRIF tap and paste; the words stay Swift: ChatRefusal, ModOfferView) | test/core-modedit.test.js, test/modedit.test.js |

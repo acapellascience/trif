@@ -573,7 +573,12 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     private func offerRun(_ run: Run, _ codes: [String], ok: Bool, path: String) async -> Int {
         if run.quick { run.quick = false; return await quickDone(run.site, codes, ok, path) }
         guard let browser, !codes.isEmpty else { return 0 }
-        return await browser.offerFromChat(codes, from: run.site, path: path).count
+        return await browser.offerFromChat(codes, from: run.site, path: path, refuse: { [weak self] r in self?.fillInput(r.request) }).count
+    }
+
+    /// Puts words in the panel's own message box for the person to send (a refusal's message, ChatRefusal): never sent.
+    func fillInput(_ text: String) {
+        Task { _ = try? await webView.callAsyncJavaScript("const i = document.querySelector('#input'); if (!i) return 0; i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); return 1;", arguments: ["t": text], in: nil, contentWorld: .page) }
     }
 
     // MARK: quick ask (QuickAsk.swift): the request into the panel's own message box, and sent. The panel is
@@ -1009,13 +1014,21 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         return true
     }
 
-    /// The whole mod files in a reply: its code blocks with a header, else the header to the end.
+    /// The whole mod files in a reply: its code blocks with a header, else the header to the end. And its edit blocks
+    /// (Tim, 11-19: changes to a mod, ModEdits): all of the reply's together as one text, where the first was (an edit
+    /// block that quotes a mod's header lines is an edit, not a mod); none in code blocks: the reply itself if it has some.
     nonisolated static func modFiles(_ text: String) -> [String] {
         var out: [String] = []
-        let fence = try! NSRegularExpression(pattern: "```[a-zA-Z]*\\n([\\s\\S]*?)```")
+        var edits: Int?
+        let fence = try! NSRegularExpression(pattern: "```[a-zA-Z-]*\\n([\\s\\S]*?)```")
         for m in fence.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            if let r = Range(m.range(at: 1), in: text), text[r].contains("==WebMod=="), text[r].contains("==/WebMod==") { out.append(String(text[r])) }
+            guard let r = Range(m.range(at: 1), in: text) else { continue }
+            let block = String(text[r])
+            if ModEdits.has(block) {
+                if let i = edits { out[i] += "\n\n" + block } else { edits = out.count; out.append(block) }
+            } else if block.contains("==WebMod=="), block.contains("==/WebMod==") { out.append(block) }
         }
+        if out.isEmpty, ModEdits.has(text) { return [text] }
         if out.isEmpty, let a = text.range(of: "// ==WebMod=="), text.contains("==/WebMod==") { out.append(String(text[a.lowerBound...])) }
         return out
     }
@@ -1026,7 +1039,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         var s = """
         You make TRIF mods: small changes to websites, which run in TRIF, an iPhone browser, every time the site loads. The person is looking at a page in TRIF and tells you what to change; you write the mod.
 
-        Reply with the whole mod file in one code block (```js), nothing to fill in: a style mod if it can do the job, otherwise a boxed mod. A free mod only if it really needs the page's own code, and then say why. Its @match must cover the page's address (for the whole site, all of its subdomains too). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). Keep what you say around it short: what the mod does, and anything the person should check.
+        For a new mod, reply with the whole mod file in one code block (```js), nothing to fill in: a style mod if it can do the job, otherwise a boxed mod. A free mod only if it really needs the page's own code, and then say why. Its @match must cover the page's address (for the whole site, all of its subdomains too). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). To change a mod the message gives you, use edit blocks as it says, not the whole file again. Keep what you say around it short: what the mod does, and anything the person should check.
 
         """
         if conv.usesTools {

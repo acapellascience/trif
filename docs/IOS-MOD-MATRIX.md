@@ -14,7 +14,8 @@ sent, only new chats): claude.ai's composer, Send, file cards, upload input and 
 signed-in composer (a form's submit "Send", "Attach files" for any file, its file tile, "Select ChatGPT model"). Not
 comparable without a send: reply and streaming markers, code blocks, a sent message's attachments (Tim's list).
 
-**Totals: 38 rows: 35 PASS, 2 FAIL → fixed (now PASS), 1 BLOCKED.** The script's last run (merged with origin/ios-poc
+**Totals: 46 rows: 43 PASS, 2 FAIL → fixed (now PASS), 1 BLOCKED.** 11-19, edit blocks: F1-F8 added, and A1, A2, A3,
+A6, B3, C2, C4, C5, C6, C7 run again on that build: all PASS (A6 after a test fix, below). The script's last run (merged with origin/ios-poc
 784a3e9): 32 cases, 31 PASS, 1 BLOCKED (A5); the rest by hand.
 
 | # | Case | Result | What was seen |
@@ -57,6 +58,15 @@ comparable without a send: reply and streaming markers, code blocks, a sent mess
 | D6 | Badges: the tab sent from shows working, then plain; another tab of the site none | PASS | |
 | D7 | It syncs to the computer (the stand-in computer, paired over -linkhost) | PASS | the computer's phone~example.com twin has it; re-run after merging origin/ios-poc 784a3e9 |
 | D8 | The chat remembers its site: the same conversation from the site's tab, another for another site | PASS | |
+| | **Edit blocks** (11-19: a chat changes a mod by SEARCH/REPLACE blocks, not its whole file; script rows) | | |
+| F1 | Claude: the run's mod, then changed by an edit block: "Change this mod?" with 1 change, added, the new code runs, its History has the old | PASS | edits 1; runs; history 1 (shot 551) |
+| F2 | ChatGPT (`?gptin`): two edit blocks in two code blocks of one reply: one offer, 2 changes | PASS | edits 2; both in; runs (shot 550) |
+| F3 | A stale version: nothing applied; the note; the can't-be-added banner; Claude's box asks again with the mod's code now and its new edit line, never sent | PASS (after a script fix: the note is gone in 2 s, the banner keeps its words) | shots 552-553 |
+| F4 | A shortened whole file ("// ... rest unchanged ..."): refused; the note; the box asks for the whole file | PASS | shots 554-555 |
+| F5 | An edit block whose SEARCH isn't in the mod: nothing applied; the box asks again ("Change 1 … doesn't match") | PASS | shot 556 |
+| F6 | Pasted edit blocks (the clipboard path, the dev step `offer`): offered with 1 change; pasted stale ones: "… is copied", nothing offered | PASS | |
+| F7 | More (Claude API, mock-api.js "mock edit"): a quick ask's reply is an edit block: applied, added at once (look-only), Done | PASS | |
+| F8 | More: a stale edit: nothing changed; the message in the panel's own box (never sent) | PASS | shot 557 |
 | | **Looks** (*by hand*) | | |
 | E1 | Dark mode: the banner, Add this mod?, the added note, the can't-be-added banner | PASS | shots 533-536 |
 | E2 | The keyboard up in another chat when a mod arrives | PASS | the banner over the chat, the keyboard left alone (shot 537) |
@@ -64,6 +74,11 @@ comparable without a send: reply and streaming markers, code blocks, a sent mess
 | E4 | claude.ai's own greeting, signed in | FAIL → fixed in 8cc1965 | TRIF's greeting sat above "Hello, night owl"; now in its place, Claude's hidden, light and dark (shots 530-532) |
 
 ## What broke and what was fixed
+
+- **A6 on a re-run** (11-19, the edit-blocks batch): the panel keeps its More chat across launches, so mock-api.js
+  read the ask words from an old first message and the mod was the earlier run's code (skipped: in Recently deleted);
+  with a new chat, the mock's @match kept the page's port (http://localhost:8377/*: two sites, so not look-only).
+  Test-only: A6 clicks #new-chat, the mock drops the port as the stand-in chat does.
 
 - **claude.ai's greeting** (E4, 8cc1965): its "Hello, night owl" is no heading; chat.js now finds a greeting in display
   type and stands in for it.

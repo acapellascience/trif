@@ -865,3 +865,34 @@ only the 2-second note "The reply's mod can't be added: {why}." and, if you were
 | Where | Before | Now (draft) |
 |---|---|---|
 | The done banner, a reply with a mod TRIF couldn't read (stays until closed, as one with mods; Open chat opens the chat) | **{Service} replied about {site}** · **Open chat** | **{Service}'s mod for {site} can't be added** · **Open chat** · **Go to {site}** |
+
+## A chat changes a mod with edit blocks, not the whole file again (added 11-19, Tim: "do you think it would be worth it to make an editing protocol?" → "yeah"; drafts)
+
+| Where | Old | New |
+|---|---|---|
+| The chat's button under a reply's edit blocks (after the last of them) | Add to TRIF (under a whole mod: unchanged) | Add 1 change to TRIF · Add {n} changes to TRIF |
+| Add this mod?, for edits: its title | Add this mod? | Change this mod? |
+| Add this mod?, for edits: the changes' header | — | 1 change · {n} changes |
+| Add this mod?, for edits: each change | — | Line {n}, then the line above (grey), each line taken out ("− …", coral), each put in ("+ …", green), the line below (grey) |
+| Add this mod?, for edits: the button | Add it | Add 1 change · Add {n} changes |
+| The note when the changes don't fit (the mod changed since the chat saw it, a change matching nowhere or more than once, no version) | — | Those changes don't fit {mod name} as it is now, so nothing was changed. (no mod found: "… fit a mod here as it is now …") |
+| … then, from a chat (the message box filled, never sent) | — | The message box asks the chat again. |
+| … then, from a paste (the message copied) | — | A message asking the chat again is copied. |
+| The note when changes are in the mod already (Add tapped again) | — | Those changes are in already. |
+| The note for a shortened file ("// rest unchanged") | — | The chat's new {mod name} leaves out part of the mod, so it wasn't added. (then the same "The message box asks the chat again." / "… is copied.") |
+| The done banner for either, when the chat isn't shown | (as 11-19's: "{Service}'s mod for {site} can't be added" · Open chat) | unchanged: it now also comes up for these |
+
+The messages put in the chat's box (the person sends them, so they're listed; the model reads them):
+
+| Why | The message |
+|---|---|
+| The mod changed since the chat saw it | Your changes to {mod name} were for an earlier version of it: it has changed since, so TRIF changed nothing. Here it is now. Send the changes again as edit blocks against this text, or the whole file. (then its "TRIF edit {file} {version}" line and its code in a code block) |
+| Change k matches nowhere | Change {k} of your edits to {mod name} doesn't match the mod: its SEARCH lines aren't in it exactly, so TRIF changed nothing. Send the changes again with SEARCH lines copied exactly from the mod (TRIF edit {file} {version}), or the whole file. |
+| Change k matches more than once | Change {k} of your edits to {mod name} matches more than one place in the mod, so TRIF changed nothing. Send the changes again with enough SEARCH lines that each matches one place (TRIF edit {file} {version}), or the whole file. |
+| No version line | Your edits to {mod name} don't say which version they're for, so TRIF changed nothing. Start them with this line: TRIF edit {file} {version}. Or send the whole file. |
+| No mod named, or one TRIF hasn't | Your edits don't name a mod TRIF has (each needs the TRIF edit line given with the mod's code), so TRIF changed nothing. Send them again with that line, or the whole file. |
+| Markers unreadable | TRIF couldn't read your edits (each needs <<<<<<< SEARCH, ======= and >>>>>>> REPLACE on lines of their own), so it changed nothing. Send them again (TRIF edit {file} {version}), or the whole file. |
+| A shortened file | Your file for {mod name} leaves part of the mod out (line {n}: {the placeholder}), so TRIF didn't use it. Send the whole file with nothing left out, or just the changes as edit blocks (TRIF edit {file} {version}). |
+
+The instructions to the model (how to write edit blocks, the "edit with:" line beside each mod) are agent-facing:
+Browser.editHowTo, not listed.

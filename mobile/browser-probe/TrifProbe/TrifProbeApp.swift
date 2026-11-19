@@ -379,7 +379,7 @@ extension Model {
             let got = await browser.offerFromChat(texts, from: step["site"] as? String ?? "", path: step["path"] as? String ?? "auto")
             out = "offered: \(got.map(\.id).joined(separator: ", ").nonEmpty ?? "none")"
         }
-        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count) \($0.tier) sites \($0.sites) powers \($0.powers) held \($0.held) warnings \($0.warnings) everywhere \($0.everywhere) came \($0.cameFrom ?? "-")" } ?? "none"), queued: \(browser.offerQueue.count)" }
+        if step["offerstate"] != nil { out = "shown: \(browser.modOffer.map { "\($0.id) \($0.code.count) \($0.tier) sites \($0.sites) powers \($0.powers) held \($0.held) warnings \($0.warnings) everywhere \($0.everywhere) came \($0.cameFrom ?? "-") edits \($0.edits.map { "\($0.count)" } ?? "-")" } ?? "none"), queued: \(browser.offerQueue.count)" }
         if step["bodies"] != nil { out = "\(Diagnostics.shared.bodies) bodies" }
         if step["addOffer"] != nil, let m = browser.modOffer { browser.modOffer = nil; browser.addMod(m) }
         if step["status"] != nil { out = browser.status }

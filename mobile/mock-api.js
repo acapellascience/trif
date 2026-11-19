@@ -34,11 +34,22 @@ function modFor(origin, said = '') {
   const asked = ((String(said).match(/ask ([\w ]{1,40})/i) || [])[1] || '').trim();
   return `// ==WebMod==\n// @name        Quieter headings\n// @description Makes the main heading grey (from the mock API)\n// @match       ${origin}/*\n// @style\n// ==/WebMod==\n{\n  "css": "h1 { color: #777 !important }${asked ? ` /* ${asked} */` : ''}",\n  "hide": ["#siteNotice"]\n}\n`;
 }
-const originOf = (text) => ((String(text).match(/https?:\/\/[^\s/)]+/) || [])[0] || 'https://example.com');
+// (a match pattern has no port: http://localhost:8377 → http://localhost, as the stand-in chat does)
+const originOf = (text) => ((String(text).match(/https?:\/\/[^\s/)]+/) || [])[0] || 'https://example.com').replace(/:\d+$/, '');
 
 /** What the script says next, from what's been said: { tool: [name, input] } or { text }. */
 function next({ firstUser, results, hasTools }) {
   const origin = originOf(firstUser);
+  // ("mock edit" (11-19, edit blocks): the first mod TRIF gave ("· edit with: TRIF edit <file> <version>" and its code)
+  // changed by an edit block: the ask words as a comment at the start of its "css" string; "stale": another version)
+  if (/mock edit/i.test(firstUser)) {
+    const m = /edit with: TRIF edit (\S+) ([0-9a-f]{8})[^\n]*\n```js\n([\s\S]*?)\n```/.exec(String(firstUser));
+    const line = m && m[3].split('\n').find((l) => l.includes('"css": "'));
+    if (!line) return { text: 'There is no mod of yours here to change.' };
+    const asked = ((String(firstUser).match(/ask ([\w ]{1,40})/i) || [])[1] || 'edited').trim();
+    const v = /stale/i.test(firstUser) ? 'deadbeef' : m[2];
+    return { text: `Here is the change:\n\n\`\`\`\nTRIF edit ${m[1]} ${v}\n<<<<<<< SEARCH\n${line}\n=======\n${line.replace('"css": "', `"css": "/* ${asked} */ `)}\n>>>>>>> REPLACE\n\`\`\`\n` };
+  }
   if (!hasTools || /no tools/i.test(firstUser)) return { text: `Here is a mod:\n\n\`\`\`js\n${modFor(origin, firstUser)}\`\`\`\n` };
   if (/loop/i.test(firstUser)) return { tool: ['read_page', { selector: `h${(results.length % 6) + 1}` }] };
   if (results.length === 0) return { tool: ['read_page', { selector: 'h1' }] };

@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (549 now; ios-chatgpt used 520-529, the mod matrix 530-549): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (557 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -251,6 +251,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - A chat's offered mod (ModOfferRules.swift → core/mod-offer.js) on the Mac: `node --test mobile/test/modoffer.test.js`
   (swiftc with mobile/test/modoffer-check/main.swift, Site.swift, ModOfferRules.swift, Core.swift; argv
   mod-offer-cases.json, gen/core.js; an offer's two calls ~50 µs unoptimised) and `mobile/test/core-modoffer.test.js`.
+- Edit blocks and shortened files (ModEdits.swift → core/mod-edit.js, 11-19) on the Mac: `node --test
+  mobile/test/core-modedit.test.js` (the JS: version, parse, apply, target, take, elided; `TRIF_EDIT_CORPUS=<a
+  read-only copy of mods>` runs Tim's mods as the shortened-file detector's negatives and round-trips an edit through
+  each: copy ~/.trif/sites' *.js into the scratchpad with rsync, never point it at ~/.trif) and `mobile/test/modedit.test.js`
+  (swiftc ModEdits.swift + Core.swift with modedit-check/main.swift: resolve's outcomes, ChatRefusal's words, a
+  5,000-line mod with 20 edits ~45 ms unoptimised). chat.test.js's last test: a reply's edit blocks in two code blocks
+  handed over as one, "Add 2 changes to TRIF" after the last, on Claude's and ChatGPT's (?octane&cm) stand-ins.
 - The leaving cover's icon use (LeavingCoverRules.swift → core/leaving-cover.js) on the Mac: `node --test
   mobile/test/leavingcover.test.js` (swiftc with leavingcover-check/main.swift, LeavingCoverRules.swift, Core.swift;
   argv leaving-cover-cases.json, gen/core.js; leaving and back ~33 µs unoptimised) and `core-leavingcover.test.js`.
@@ -305,6 +312,31 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - The done banner when the reply's mod couldn't be read (11-19, the matrix's C7): Browser.offerFromChat keeps
   `lastUnreadable` (why, when none of a hand-over could be read); handleDone passes it to `banner(unreadable:)`;
   ChatBanner.unreadable → "{Service}'s mod for {site} can't be added" · Open chat, kept until closed (draft words).
+- Edit blocks (Tim, 11-19: "an editing protocol … so they could just change the necessary lines"): ModEdits.swift (no
+  UI; built for the Mac) → core/mod-edit.js (TrifCore.modEdit: `version` FNV-1a 32 of the code, `has`, `parse`,
+  `apply`, `target` (file id, case, .js, phone~, @name; one only), `take` (stale → "already" when an earlier version
+  in History plus the edits is the code now, ignoring `// @id` lines), `elided`, `placeholder`). `ModEdits.resolve(text,
+  mods:)` → whole / edited([(id, code, changes)]) / already / refused(id, why, block): all or nothing per text; two
+  edits for one mod in a text chain. `ChatRefusal` (same file: note, request, log; the words, drafts) `.edits(why,
+  mod:block:)` / `.shortened`, `editLine(id, code)` = "TRIF edit <id> <version>". Browser: `prepare(text)` (→
+  [Prepared(text, edits, on)] / already / refused), `shortened(text, m)` (an installed mod by id, ModEdits.elided on
+  the read code), `tellRefusal` (box via `refuse`, else the clipboard). `offerFromChat(…, refuse:)` reads an edit's
+  result with `readInBackground(code, file: on.file, site: on.site)` (its own id, no placement by name), runs
+  `shortened` on every text, then the judge as ever; refusals → `refuse(first)`, the note, `lastUnreadable` = the note
+  (the can't-be-added banner). `offer(text:site:refuse:)` (Add to TRIF's tap / paste) the same. InstalledMod.`edits`
+  ([ModEdits.Change], offered only: addMod drops it). ModOfferView: "Change this mod?", the changes (EditChangeView:
+  Line n, above, − coral, + green, below; lines wrap), "Add N changes". The prompt: `Browser.editHowTo` in alreadyHere
+  (each mod's "### Name (tier) · edit with: TRIF edit <id> <version>" line, also on "unchanged since you last saw"
+  lines), pageForChat / feedbackForChat / projectInstructions / PanelChat.system say "for a new mod, the whole file;
+  to change one, edit blocks". Callers' `refuse`: ClaudePane.fillRefusal(v, r) (chat.js fill: a paste, never sent) for
+  auto/late/viewer/tap/quick; PanelChat.fillInput (#input) for More's runs. PanelChat.modFiles: a reply's edit code
+  blocks joined into one text. chat.js: `isEdit` (markers on lines of their own, read through blockText for
+  .cm-line editors), `editCount`, modBlocks' `edit`, `handOver` (a reply's edit blocks joined), mark()'s one
+  "Add N changes to TRIF" (data-trif-edit) after a reply's last edit block (an earlier one removed, relabelled as
+  more come), autoPickup/late through handOver. Dev: offerstate's `edits N`. Stand-in words: "edit" / "editing
+  <Name>" (the mod from TRIF's fill: its first colour → #b5179e + the ask words), "two" (a second code block adding
+  "#standin-edited" to its hide list), "stale" (version deadbeef), "nomatch", "shortened" (the file with
+  "// ... rest unchanged ..." for its middle). Matrix rows F1-F6.
 - ToolbarWatch.swift (11-18, Tim's dead toolbar): `WindowTouchWatch` (a do-nothing recognizer on every window, as
   TouchWatch) hands every touch to `ToolbarWatch.saw`; each toolbar button reports its frame and enabled state
   (`WatchSlot`) and calls `fired(name)` in its action. A short tap on an enabled button whose action didn't run in
@@ -713,6 +745,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 - Mods from a reply are picked up automatically (and Add to TRIF stays under each block). Instructions ask for code
   blocks, never attached files.
+- Edit blocks (Tim 11-19, "yeah" to the design): a chat changes a mod by SEARCH/REPLACE blocks under a "TRIF edit
+  <file id> <version>" line; exact match first, then whitespace-tolerant, each exactly once; in order against the
+  running result; any failure or a stale version → nothing applied, the note, and a message in the chat's own box
+  asking again (with the code now when it changed), never sent. A whole file still works. My calls: the format is the
+  coding tools' `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` (5-9 markers) with the header inside the code block (the
+  file line outside a fence is lost when a code block is copied); version = FNV-1a 32 hex over the code (line ends
+  evened); a text's edits are all or nothing (several mods' too); an empty SEARCH is refused (new mods are whole
+  files); "already" (the result equals the code now via History) is said, not refused; the review lines wrap; a
+  paste's refusal message goes on the clipboard (there's no box). The shortened-file check: a placeholder comment
+  (short, sameness words + what stays, or dots alone) not in the mod now, with lines of the mod now missing where it
+  stands; Tim's 224 mods (33,667 lines): none trips it.
 - No private APIs or tokens for the chat sites. The one private call kept: WebKit's `_flushCookiesToDisk`, with the
   public fallback behind `-publicflush`.
 - An icon's own tab (`iconTabs`) counts only while it's on the icon's site (11-17: Tim's YouTube icon opened his Google
@@ -1102,7 +1145,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
-- Real replies (11-19): mobile/TIM-SENDS.md is Tim's one-sitting list (12 steps, Claude and ChatGPT: the send told once,
+- Edit blocks (11-19), unverified with real models: whether Claude and ChatGPT follow Browser.editHowTo (the "TRIF
+  edit" line inside the code block, whole lines quoted, one code block or several), how claude.ai / chatgpt.com draw
+  `<<<<<<<` lines in a code block (the stand-ins' pre/code and .cm-line read fine), and a long mod's edits on a real
+  phone: TIM-SENDS.md 12-14. Not covered: the model on this iPhone (its grammar writes whole files; it never sees the
+  edit line), a computer's run (whole files over the phone link); a quick ask's edit to a look-only mod is added at
+  once with Done · Undo, as a whole-file update is (no review). The refusal note goes in 2 s; from another tab the
+  can't-be-added banner stays (its words are the generic "{Service}'s mod for {site} can't be added").
+- Real replies (11-19): mobile/TIM-SENDS.md is Tim's one-sitting list (15 steps since the edit blocks; Claude and ChatGPT: the send told once,
   the reply watched to done, offered on its tab / the banner elsewhere / the background, nothing twice, an update, the
   picture pill in ChatGPT's sent message, a follow-up in the remembered conversation, the quick ask's real strip, two
   chats at once, killed mid-reply, then Copy diagnostics). A follow-up agent checks his answers and diagnostics.

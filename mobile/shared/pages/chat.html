@@ -444,6 +444,7 @@ ${JSON.stringify(body, null, 2)}`;
   function go() {
     const text = ed.textContent.trim();
     if (!text && !files.length && !pastes.length) return;
+    const lined = ed.innerText || text; // (the box's text with its line breaks: what "edit" reads TRIF's mods from)
     const attached = files.map((f) => f.text).join('\n');
     const msg = document.createElement(octane ? 'li' : 'div');
     if (octane) msg.setAttribute('data-message-role', 'user'); else msg.setAttribute('data-testid', 'user-message');
@@ -491,6 +492,36 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
 // @description Marks the page (from the stand-in chat)${origin ? `\n// @match       ${origin}/*` : ''}
 // ==/WebMod==
 document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(asked.trim() || 'yes')});`]];
+    }
+    // (edit blocks, 11-19: "edit" (or "editing <Name>") changes the first mod TRIF sent (or that one) ("· edit with: TRIF edit <file> <version>" and its
+    // code) by edit blocks: its first colour to #b5179e (with the ask words in that CSS); "two" also a second code
+    // block that adds "#standin-edited" to its hide list; "stale" names another version; "nomatch" quotes a line the
+    // mod hasn't; "shortened" gives its whole file back with "// ... rest unchanged ..." for its middle lines)
+    else if (/\b(edit|editing|shortened)\b/i.test(text)) {
+      const all = `${attached}\n${lined}`;
+      // ("editing <Name>": that mod of those TRIF sent, else the first)
+      const named = (text.match(/\bediting (\w+)/i) || [])[1];
+      const re = /### ([^\n(]+?) \([^\n]*?edit with: (TRIF edit (\S+) ([0-9a-f]{8}))[^\n]*\n```js\n([\s\S]*?)\n```/g;
+      const found = [...all.matchAll(re)].map((x) => [x[0], x[2], x[3], x[4], x[5], x[1]]);
+      const m = (named && found.find((x) => x[5].toLowerCase() === named.toLowerCase())) || found[0];
+      const asked = (text.match(/ask ([\w ]{1,40})/i) || [])[1] || '';
+      if (!m) parts = [['p', 'I don\'t see a mod of yours to change.']];
+      else if (/shortened/i.test(text)) {
+        const ls = m[4].split('\n');
+        const end = ls.findIndex((l) => /==\/WebMod==/.test(l));
+        parts = [['p', 'Here is the updated mod:'], ['pre', [...ls.slice(0, end + 2), '  // ... rest unchanged ...', ...ls.slice(-1)].join('\n')]];
+      } else {
+        const lines = m[4].split('\n');
+        const at = lines.findIndex((l) => /#[0-9a-f]{6}\b/i.test(l));
+        const head = /stale/i.test(text) ? `TRIF edit ${m[2]} ${m[3] === 'deadbeef' ? 'feedbead' : 'deadbeef'}` : m[1];
+        const one = at === -1 ? null : [lines[at], lines[at].replace(/#[0-9a-f]{6}\b/i, `#b5179e${asked ? ` /* ${asked.trim()} */` : ''}`)];
+        const search = /nomatch/i.test(text) ? ['  "css": "this line is not in the mod",'] : one ? [one[0]] : [lines[lines.length - 1]];
+        const replace = one && !/nomatch/i.test(text) ? [one[1]] : [lines[lines.length - 1]];
+        parts = [['p', 'Here are the changes:'], ['pre', [head, '<<<<<<< SEARCH', ...search, '=======', ...replace, '>>>>>>> REPLACE'].join('\n')]];
+        const h = lines.findIndex((l) => /"hide": \[/.test(l));
+        if (/two/i.test(text) && h !== -1) parts.push(['p', 'And the second change:'], ['pre', ['<<<<<<< SEARCH', lines[h], '=======', lines[h], '    "#standin-edited",', '>>>>>>> REPLACE'].join('\n')]);
+        parts.push(['p', 'Add them, and tell me if anything looks wrong.']);
+      }
     }
     else if (/broken/i.test(text)) parts = [['p', 'Try this:'], ['pre', `// ==WebMod==
 // @name        Broken one

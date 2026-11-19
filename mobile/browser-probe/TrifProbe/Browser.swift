@@ -556,6 +556,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// for it, with TRIF's approval card in the Mods tab, and doesn't run until then.
     /// `quiet`: no note (a quick ask's look-only mod: its pill says Done · Undo).
     func addMod(_ m: InstalledMod, source: String = "chat", quiet: Bool = false) {
+        var m = m
+        if let e = m.edits { Diagnostics.shared.log("chat offers", "\(m.id): \(e.count) change(s) from edit blocks added") }
+        m.edits = nil
         Diagnostics.shared.mark("adding \(m.id) (\(source))")
         chatOffers.note(m.code, .added)
         hideChat += 1
@@ -832,8 +835,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// mod's current or earlier version, a mod's in Recently deleted.
     /// `hold`: read and judged as ever, but not shown: the caller holds them (the chat's done banner, Tim 11-18: its
     /// Add, or Go to <site>, hands them to `offerHeld`); the same offer, never a second one.
+    /// `refuse`: where a refusal's message for the chat goes (the chat's own box, filled, never sent); nil: nowhere
+    /// (the note alone). Edit blocks (Tim, 11-19) are applied first, all or nothing (`prepare`); a whole file that
+    /// leaves parts of the mod here out ("// rest unchanged") is refused (`shortened`).
     @discardableResult
-    func offerFromChat(_ texts: [String], from chatSite: String = "", path: String, hold: Bool = false) async -> [InstalledMod] {
+    func offerFromChat(_ texts: [String], from chatSite: String = "", path: String, hold: Bool = false, refuse: ((ChatRefusal) -> Void)? = nil) async -> [InstalledMod] {
         // (the chat's site: a mod with no @match of its own is that site's, as desktop takes it from its folder, never
         // the page that happens to be shown (Tim, 11-18: FeedBook from a Facebook chat said "runs on google.com", the
         // tab he was on when it finished). The page shown only when the chat has no site. A computer's phone twin
@@ -845,9 +851,24 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         var why: String?
         var skipped: [String] = []
         let known = { (m: InstalledMod) in ChatOfferJudge.Known(id: m.id, code: m.code, history: m.history.map(\.code)) }
-        for t in texts {
-            let r = await mods.readNamedInBackground(t, here: here)
+        var refusals: [ChatRefusal] = []
+        // (each text: a whole file, or edit blocks applied first (all of a text's, or none))
+        var ready: [Prepared] = []
+        for whole in texts {
+            switch prepare(whole) {
+            case .texts(let list): ready += list
+            case .already(let ids): skipped += ids.map { "\($0) (its changes are in already)" }
+            case .refused(let r): refusals.append(r)
+            }
+        }
+        for p in ready {
+            let t = p.text
+            let r: (mod: InstalledMod?, error: String?)
+            if let on = p.on { r = await mods.readInBackground(t, file: on.file, site: on.site, here: here) } else { r = await mods.readNamedInBackground(t, here: here) }
             guard var m = r.mod else { why = why ?? r.error ?? "no reason given"; continue }
+            // (a file that leaves parts of the mod here out, or edits that do: refused, the chat asked again)
+            if let no = shortened(t, m) { refusals.append(no); continue }
+            m.edits = p.edits
             if let no = ChatOfferJudge.skip(id: m.id, code: m.code, installed: mods.mods.map(known), deleted: mods.trash.map { known($0.mod) },
                                             queued: (offerQueue + found + [modOffer].compactMap { $0 } + offersHeld()).map(known), memory: chatOffers) {
                 skipped.append("\(m.id) (\(no))")
@@ -858,15 +879,21 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             found.append(m)
         }
         // (a line for each hand-over, so a report shows what a chat offered and why not: ids and reasons only)
-        if !found.isEmpty || !skipped.isEmpty || why != nil {
+        if !found.isEmpty || !skipped.isEmpty || why != nil || !refusals.isEmpty {
             var parts: [String] = []
-            if !found.isEmpty { parts.append("offered \(found.map(\.id).joined(separator: ", "))") }
+            if !found.isEmpty { parts.append("offered \(found.map { "\($0.id)\($0.edits.map { " (\($0.count) change(s) from edit blocks)" } ?? "")" }.joined(separator: ", "))") }
             if !skipped.isEmpty { parts.append("skipped \(skipped.joined(separator: ", "))") }
             if let why { parts.append("unreadable (\(why))") }
+            if !refusals.isEmpty { parts.append("refused \(refusals.map(\.log).joined(separator: ", "))") }
             Diagnostics.shared.log("chat offers", "\(path) from \(chatSite.isEmpty ? "no site" : chatSite): \(parts.joined(separator: "; "))")
         }
-        lastUnreadable = found.isEmpty && skipped.isEmpty ? why : nil
-        if found.isEmpty, skipped.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
+        // (changes that didn't fit, a shortened file: said, and the chat asked again in its own box, never sent)
+        if let r = refusals.first {
+            refuse?(r)
+            status = r.note + (refuse == nil ? "" : ChatRefusal.inBox)
+        }
+        lastUnreadable = found.isEmpty && skipped.isEmpty ? (refusals.first?.note ?? why) : nil
+        if found.isEmpty, skipped.isEmpty, refusals.isEmpty, let why { status = "The reply's mod can't be added: \(why)." }
         guard !found.isEmpty else { return [] }
         for m in found { chatOffers.note(m.code, .offered) }
         if !hold { offerHeld(found) }
@@ -912,9 +939,42 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     /// What was pasted (iOS's own Paste button hands it over without asking), or an Add to TRIF tap: a whole mod.
-    func offer(text pasted: String?, site chatSite: String = "") {
+    /// `refuse`: where a refusal's message goes (an Add to TRIF tap: its chat's box); nil (a paste): the clipboard.
+    func offer(text pasted: String?, site chatSite: String = "", refuse: ((ChatRefusal) -> Void)? = nil) {
         guard let text = pasted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             status = "Nothing on the clipboard."
+            return
+        }
+        // (edit blocks (Tim, 11-19): applied to the mod they name, all or nothing, then offered as its new version)
+        if ModEdits.has(text) {
+            let (here, came) = ModOfferRules.from(chatSite: chatSite, shown: host)
+            Task { @MainActor in
+                switch prepare(text) {
+                case .already:
+                    status = ChatRefusal.alreadyNote
+                case .refused(let r):
+                    Diagnostics.shared.log("chat offers", "\(refuse == nil ? "pasted" : "Add to TRIF") edits refused: \(r.log)")
+                    tellRefusal(r, refuse)
+                case .texts(let list):
+                    guard let p = list.first, let on = p.on else { return }
+                    let r = await mods.readInBackground(p.text, file: on.file, site: on.site, here: here)
+                    guard var m = r.mod else { status = "That mod can't be added: \(r.error ?? "no reason given")."; return }
+                    if let no = shortened(p.text, m) { tellRefusal(no, refuse); return }
+                    m.cameFrom = came
+                    m.edits = p.edits
+                    Diagnostics.shared.log("chat offers", "\(refuse == nil ? "pasted" : "Add to TRIF"): \(m.id), \(p.edits?.count ?? 0) change(s) from edit blocks")
+                    // (several mods' edits in one text: the first now, the rest after it, as a reply's mods)
+                    modOffer = m
+                    if list.count > 1 {
+                        var rest: [InstalledMod] = []
+                        for q in list.dropFirst() {
+                            guard let o = q.on, var n = (await mods.readInBackground(q.text, file: o.file, site: o.site, here: here)).mod else { continue }
+                            n.cameFrom = came; n.edits = q.edits; rest.append(n)
+                        }
+                        offerQueue += rest
+                    }
+                }
+            }
             return
         }
         // (a whole mod: a chat's reply with a ==WebMod== file in it, or the file)
@@ -924,11 +984,50 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             let (here, came) = ModOfferRules.from(chatSite: chatSite, shown: host)
             Task { @MainActor in
                 let r = await mods.readNamedInBackground(text, here: here)
-                if var m = r.mod { m.cameFrom = came; modOffer = m } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
+                if var m = r.mod {
+                    // (a whole file that leaves parts of the mod here out: refused, the chat asked for all of it)
+                    if let no = shortened(text, m) { Diagnostics.shared.log("chat offers", "\(refuse == nil ? "pasted" : "Add to TRIF"): refused \(no.log)"); tellRefusal(no, refuse); return }
+                    m.cameFrom = came; modOffer = m
+                } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
             }
             return
         }
         status = "The clipboard has no mod."
+    }
+
+    // MARK: edit blocks and shortened files (Tim, 11-19; the rule: mobile/shared/core/mod-edit.js)
+
+    /// A text ready to read: a whole file (`on` nil), or a mod's new code from edit blocks (`on`: the mod, `edits`:
+    /// the changes).
+    struct Prepared { var text: String; var edits: [ModEdits.Change]?; var on: InstalledMod? }
+    enum PrepareOutcome { case texts([Prepared]), already([String]), refused(ChatRefusal) }
+
+    /// A chat's text before it's read as a mod: edit blocks applied to the mods they name (all of them, or none), or
+    /// why not; a whole file as it is.
+    func prepare(_ text: String) -> PrepareOutcome {
+        let here = mods.mods.map { ModEdits.Mod(id: $0.id, name: $0.name, code: $0.code, history: $0.history.map(\.code)) }
+        switch ModEdits.resolve(text, mods: here) {
+        case .whole: return .texts([Prepared(text: text, edits: nil, on: nil)])
+        case .already(let ids): return .already(ids)
+        case .edited(let list):
+            return .texts(list.compactMap { e in mods.mods.first { $0.id == e.id }.map { Prepared(text: e.code, edits: e.changes, on: $0) } })
+        case .refused(let id, let why, let block):
+            let m = id.flatMap { i in mods.mods.first { $0.id == i } }
+            return .refused(ChatRefusal.edits(why, mod: m.map { ($0.id, $0.name, $0.code) }, block: block))
+        }
+    }
+
+    /// A text offered for a mod here that leaves parts of it out (a chat's "// rest unchanged"): the refusal, or nil.
+    func shortened(_ text: String, _ m: InstalledMod) -> ChatRefusal? {
+        guard let now = mods.mods.first(where: { $0.id == m.id }), let e = ModEdits.elided(m.code, current: now.code) else { return nil }
+        return ChatRefusal.shortened((now.id, now.name, now.code), line: e.line, text: e.text)
+    }
+
+    /// A refusal said: the note, and the message for the chat in its box (`refuse`), else on the clipboard.
+    func tellRefusal(_ r: ChatRefusal, _ refuse: ((ChatRefusal) -> Void)?) {
+        if let refuse { refuse(r); status = r.note + ChatRefusal.inBox; return }
+        UIPasteboard.general.string = r.request
+        status = r.note + ChatRefusal.copied
     }
 
     // MARK: hiding (what point-and-hide hid before 11-17: still hidden, each shown again from the Mods tab)
@@ -1055,7 +1154,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
-        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet).
+        I'll say what I want changed. For a new mod, reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). To change a mod already here, use edit blocks, as below.
 
         A screenshot of what I see is attached. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 
@@ -1086,10 +1185,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if others.isEmpty && hidden.isEmpty && errors.isEmpty { return "" }
         var t = "\n--- \(except == nil ? "Already changing this page (build on these)" : "Also changing this page") ---\n"
         if !others.isEmpty {
-            t += "Mods switched on here. To change one, give back its whole file with the same @name (it replaces that mod); a new @name adds a mod beside them. If one of them is what's in the way, fix that one rather than adding a mod that works around it.\n"
+            t += "Mods switched on here. A new @name adds a mod beside them. If one of them is what's in the way, fix that one rather than adding a mod that works around it.\n\(Browser.editHowTo)"
             for m in others {
-                if let conv, chatHas(m, conv) { t += "\n### \(m.name) (\(m.tierName.lowercased())): unchanged since you last saw its code in this chat\n"; continue }
-                t += "\n### \(m.name) (\(m.tierName.lowercased()))\n```js\n\(m.code)\n```\n"
+                // (each with the line its edit blocks start with: its file and the version of the code given here)
+                let line = ChatRefusal.editLine(m.id, m.code).map { " · edit with: \($0)" } ?? ""
+                if let conv, chatHas(m, conv) { t += "\n### \(m.name) (\(m.tierName.lowercased()))\(line): unchanged since you last saw its code in this chat\n"; continue }
+                t += "\n### \(m.name) (\(m.tierName.lowercased()))\(line)\n```js\n\(m.code)\n```\n"
                 if let conv { noteChatHas(m.code, conv) }
             }
         }
@@ -1101,6 +1202,19 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
         return t
     }
+
+    /// How a chat changes a mod it was given (agent-facing; Tim, 11-19): edit blocks, not the whole file again
+    /// (mobile/shared/core/mod-edit.js reads them). Short: models follow a short format best.
+    static let editHowTo = """
+    To change one, reply with edit blocks in one code block: first its "edit with" line, then for each change
+    <<<<<<< SEARCH
+    a few whole lines copied exactly from the mod
+    =======
+    the lines that replace them
+    >>>>>>> REPLACE
+    Each SEARCH must match exactly one place in the mod. To add lines, keep an anchor line in both parts; to delete, leave the replacement empty. Send its whole file with the same @name instead only when the change touches most of it, and never leave parts out of a whole file ("// rest unchanged").
+
+    """
 
     /// The page's parts and sizes now, to say next time what disappeared since (once the chat has its text: it
     /// isn't needed for this one).
@@ -1171,7 +1285,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let here = await alreadyHere(conv: conv)
         sw?.lap("mods and their errors", "\(on.count) mods")
         text += here.isEmpty ? "\nNo TRIF mods are running on this page, and nothing on it is hidden.\n" : here
-        text += "\nI'll say what I want changed. As before: reply with the whole mod file in one code block, nothing to fill in, never as an attached file; to change a mod above, give back its whole file with the same @name. Work from what I've attached; don't open the page in a browser or another tool.\n"
+        text += "\nI'll say what I want changed. As before: a new mod as its whole file in one code block, nothing to fill in, never as an attached file; to change a mod above, edit blocks as described there. Work from what I've attached; don't open the page in a browser or another tool.\n"
         text += "\n--- The page now: \(page) ---\n\(o.text)\n\(Browser.fillEnd)\n"
         report.log("outline", "\(host): the follow-up, \(text.count) characters")
         return text

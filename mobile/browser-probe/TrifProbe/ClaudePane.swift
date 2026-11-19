@@ -849,7 +849,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "mod":
             guard let text = d["text"] as? String else { return }
             report.log("claude", "\(name): Add to TRIF tapped (\(text.count) characters)")
-            browser?.offer(text: text, site: v.site)
+            browser?.offer(text: text, site: v.site, refuse: { [weak self, weak v] r in if let self, let v { self.fillRefusal(v, r) } })
         case "sent":
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
             report.log("claude", "\(name): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
@@ -921,7 +921,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             report.log("claude", "\(name): \(what): its code read (\(text.count) characters), to Add this mod?")
             guard let browser else { return }
             Task { @MainActor in
-                let offered = await browser.offerFromChat([text], from: v.site, path: "viewer")
+                let offered = await browser.offerFromChat([text], from: v.site, path: "viewer", refuse: { [weak self, weak v] r in if let self, let v { self.fillRefusal(v, r) } })
                 if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             }
         default: break
@@ -970,7 +970,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 self.endBackgroundIfIdle()
                 return
             }
-            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto", hold: hold)
+            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto", hold: hold, refuse: { [weak self, weak v] r in if let self, let v { self.fillRefusal(v, r) } })
             let unreadable = offered.isEmpty && !texts.isEmpty ? browser.lastUnreadable : nil
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
             // (the app in the background: a notification says so, then iOS's background time is given back)
@@ -1443,7 +1443,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func quickMoreDone(_ site: String, _ codes: [String], ok: Bool, path: String) async -> Int {
         guard quick?.service == "More", quick?.state == .working || quick?.state == .starting else {
             guard let browser, !codes.isEmpty else { return 0 }
-            return await browser.offerFromChat(codes, from: site, path: path).count
+            return await browser.offerFromChat(codes, from: site, path: path, refuse: { [weak self] r in self?.panel.fillInput(r.request) }).count
         }
         if codes.isEmpty && !ok {
             quick?.state = .failed("Not done: open the chat to see why.")
@@ -1457,7 +1457,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// done banner when the person is elsewhere (`hold`). The pill says Done, Replied, or goes for the card.
     private func quickDeliver(_ texts: [String], site: String, path: String, hold: Bool, view v: ChatView?) async -> [InstalledMod] {
         guard let browser else { return [] }
-        let offered = await browser.offerFromChat(texts, from: site, path: path, hold: true)
+        let offered = await browser.offerFromChat(texts, from: site, path: path, hold: true, refuse: { [weak self, weak v] r in
+            guard let self else { return }
+            if let v { self.fillRefusal(v, r) } else { self.panel.fillInput(r.request) }
+        })
         let sorted = QuickAskRules.sort(offered.map(\.quickFacts), chatSite: site)
         let s = sorted.site
         // (offered ids are one each: offerFromChat keeps a mod's last block)
@@ -1663,6 +1666,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
     }
 
+    /// Changes or a file TRIF didn't take from this chat (ChatRefusal, Tim 11-19): its message asking again put in the
+    /// chat's box, for the person to send (never sent).
+    func fillRefusal(_ v: ChatView, _ r: ChatRefusal) {
+        Diagnostics.shared.log("chat offers", "\(v.service.rawValue) for \(v.site.isEmpty ? "no site" : v.site): refused \(r.log); a message asking again put in its box")
+        Task { @MainActor in await self.fill(v, r.request) }
+    }
+
     /// Puts text (and a PNG) into the shown chat's message box as a paste, for the person to send (Web/chat.js fill).
     @discardableResult
     func fill(_ text: String, png: Data? = nil, pdf: Data? = nil, picture: String = "TRIF screenshot.png", as file: String? = nil) async -> String {
@@ -1763,7 +1773,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         """
         This project is for making TRIF mods: small changes to websites, made in the TRIF app. Each chat starts with a page I'm looking at in TRIF: its address, a screenshot, and an outline of the page in which each line starts with a CSS selector for a part of it.
 
-        I'll say what I want changed. Reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Everything you need is in what I send: don't open the page in a browser or any other tool.
+        I'll say what I want changed. For a new mod, reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. To change a mod I send you, use edit blocks as my message says, not the whole file again. Everything you need is in what I send: don't open the page in a browser or any other tool.
 
         --- How TRIF mods are written ---
         \(Browser.resource("mod-guide", "txt"))

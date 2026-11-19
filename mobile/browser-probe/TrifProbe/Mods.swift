@@ -74,6 +74,9 @@ struct InstalledMod: Codable, Identifiable, Equatable {
     /// Its stable id: the header's first valid `@id` line (docs/PHONE-SYNC.md 2a; ModID), as the reader found it; nil:
     /// none. Two in one folder with one id: only the first by file name keeps it (ModStore.keptUids).
     var uid: String? = nil
+    /// (offered, not kept) The changes a chat's edit blocks made to the mod here (Tim, 11-19), for Add this mod?'s
+    /// review; nil: a whole file. Browser.addMod drops it before the mod is kept.
+    var edits: [ModEdits.Change]? = nil
 
     struct RanVersion: Codable, Equatable { var code: String; var script: String; var world: String; var at: String; var style: String? = nil }
 
@@ -868,22 +871,60 @@ struct ModOfferView: View {
                 if mod.tier == "free" {
                     Section { Text("A free mod can do anything the page can do, including posting or sending as you. Only enable free mods that you trust.").font(.footnote).foregroundStyle(Color.trifCoral) }
                 }
+                // (a chat's edit blocks (Tim, 11-19): each change, compact, before Add: what it takes out and puts in)
+                if let changes = mod.edits, !changes.isEmpty {
+                    Section {
+                        // (long lines wrap, so what changed in a line shows without scrolling sideways)
+                        ScrollView(.vertical) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(Array(changes.enumerated()), id: \.offset) { _, c in EditChangeView(change: c) }
+                            }.padding(.vertical, 2).frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(maxHeight: 320)
+                    } header: { Text(ModOfferView.changesWord(changes.count)).textCase(nil) }
+                }
                 // (the buttons before the code (Tim, 11-16: "sometimes you don't wanna read the code and you have to
                 // scroll down"), after all that says what Add it agrees to: name, what it does, sites, powers, warning)
                 Section {
-                    Button("Add it") { browser.addMod(mod); dismiss() }.bold()
+                    Button(mod.edits.map { ModOfferView.addChanges($0.count) } ?? "Add it") { browser.addMod(mod); dismiss() }.bold()
                     Button("Cancel", role: .cancel) { browser.offerClosed(declined: true); dismiss() }
                 }
                 Section("Its code") {
                     ScrollView(.horizontal) { Text(mod.code).font(.caption2.monospaced()).textSelection(.enabled) }.frame(maxHeight: 260)
                 }
             }
-            .navigationTitle("Add this mod?")
+            .navigationTitle(mod.edits == nil ? "Add this mod?" : "Change this mod?")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
+
+extension ModOfferView {
+    /// (drafts for Tim, docs/IOS-APP-STRINGS.md)
+    static func changesWord(_ n: Int) -> String { n == 1 ? "1 change" : "\(n) changes" }
+    static func addChanges(_ n: Int) -> String { n == 1 ? "Add 1 change" : "Add \(n) changes" }
+}
+
+/// One change of a chat's edit blocks, as Add this mod? shows it: its line, the unchanged line above, the lines taken
+/// out (−, coral) and put in (+, green), the unchanged line below.
+struct EditChangeView: View {
+    let change: ModEdits.Change
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("Line \(change.line)").font(.caption2.bold()).foregroundStyle(.secondary)
+            if let a = change.above { row(" ", a, .secondary, nil) }
+            ForEach(Array(change.removed.enumerated()), id: \.offset) { _, l in row("−", l, Color.trifCoral, Color.trifCoral.opacity(0.12)) }
+            ForEach(Array(change.added.enumerated()), id: \.offset) { _, l in row("+", l, Color.green, Color.green.opacity(0.12)) }
+            if let b = change.below { row(" ", b, .secondary, nil) }
+        }
+        .accessibilityElement(children: .combine)
+    }
+    private func row(_ mark: String, _ line: String, _ colour: Color, _ back: Color?) -> some View {
+        Text("\(mark) \(line.isEmpty ? " " : line)").font(.caption2.monospaced()).foregroundStyle(colour)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(back ?? .clear)
+    }
+}
 
 /// The mod reader (shared/gen/mods.js) in a JavaScriptCore context of its own, on a queue of its own: reading a mod
 /// off the main thread.

@@ -1,4 +1,4 @@
-# Real sends for Tim (one sitting, ~25 minutes)
+# Real sends for Tim (one sitting, ~35 minutes)
 
 The mod matrix (docs/IOS-MOD-MATRIX.md) ran against stand-in chats in the Simulator: TRIF never presses send on
 claude.ai or chatgpt.com, so these need your own Send. Use the new build on your iPhone, signed in to both. Any site
@@ -56,5 +56,24 @@ For each: do the steps, then note what you saw against "Look for" (a word is eno
     Look for: nothing stuck "working"; the finished reply in the chat with "Add to TRIF" under its code (TRIF doesn't
     offer a reply it didn't see finish); tapping it brings up "Add this mod?".
 
-12. **Diagnostics.** ⋯ → Copy diagnostics, paste it to me. (Its "chat offers" and "chats" lines say what TRIF saw for
+12. **Claude, changes not the whole file (edit blocks, 11-19).** On a site where a mod of yours runs (a long one if
+    you have one), tap the robot → Go to chat (Claude, a new chat). Ask for a small change to that mod by its name
+    ("in <mod name>, make the buttons a bit smaller") and press send.
+    Look for: the reply starts a code block with "TRIF edit <site>/<name> <8 letters and digits>" and has
+    "<<<<<<< SEARCH … ======= … >>>>>>> REPLACE" (not the whole file again); under its last code block the button
+    says "Add 1 change to TRIF" (or N changes); "Change this mod?" comes up with the change (− the old line, + the new),
+    and "Add 1 change"; after it, the mod has the change and its History the old version. Say if Claude wrote the
+    whole file instead, or left parts out ("// rest unchanged").
+
+13. **ChatGPT, the same.** As 12 with ChatGPT.
+    Look for: the same; ChatGPT often splits changes into several code blocks: still one "Add N changes to TRIF",
+    after the last.
+
+14. **A stale edit.** After 12, change that mod in the Mods tab (switch it off and on is not enough: edit a line, or
+    let a sync from the computer change it), then in the chat from 12 press the "Add 1 change to TRIF" button again.
+    Look for: nothing changed; the note "Those changes don't fit … as it is now"; Claude's message box now has a
+    message asking for the changes again, with the mod's code in it. Don't send it unless you want to; if you do,
+    the new reply's changes should apply.
+
+15. **Diagnostics.** ⋯ → Copy diagnostics, paste it to me. (Its "chat offers" and "chats" lines say what TRIF saw for
     each of the above.)

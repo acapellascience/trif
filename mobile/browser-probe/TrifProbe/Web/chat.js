@@ -2,7 +2,10 @@
 // chatgpt.com, run in a world of its own beside their page (ClaudePane.chatWorld), so their code can't reach
 // it. What it does, and nothing else:
 //   - an "Add to TRIF" button under each code block that holds a whole mod file (==WebMod== … ==/WebMod==):
-//     a tap hands the block's text to the app, which shows its Add this mod? sheet (the BUTTON path);
+//     a tap hands the block's text to the app, which shows its Add this mod? sheet (the BUTTON path); and under a
+//     reply's edit blocks (Tim, 11-19: changes to a mod, not the whole file again: "TRIF edit <file> <version>",
+//     <<<<<<< SEARCH … ======= … >>>>>>> REPLACE; mobile/shared/core/mod-edit.js reads them), one "Add N changes to
+//     TRIF" after the last, handing all of that reply's edit blocks over together;
 //   - fill(text, png): puts text (and a picture) into the message box, as a paste, for the person to send;
 //   - the person's send (the send button, or Return in the message box) told to the app, which goes back to
 //     the tab; then the reply watched until it's done (for the chat button's dots and its replied mark), and the mod
@@ -378,19 +381,41 @@
     // hand over half a mod)
     if (replying()) return;
     // (only under the assistant's code: never in the message box, the person's own message or a pasted preview)
-    for (const { pre, text, reply } of modBlocks()) {
-      if (!reply) continue;
+    const all = modBlocks();
+    // (a reply's edit blocks: one button, after the last, for all of them; one put earlier, before more came, goes)
+    const groups = new Map();
+    for (const x of all) if (x.reply && x.edit) { if (!groups.has(x.reply)) groups.set(x.reply, []); groups.get(x.reply).push(x); }
+    for (const [reply, list] of groups) {
+      const lastPre = list[list.length - 1].pre;
+      const text = () => handOver(list)[0];
+      const n = list.reduce((k, x) => k + editCount(x.raw), 0);
+      const label = n === 1 ? 'Add 1 change to TRIF' : `Add ${n} changes to TRIF`;
+      for (const old of reply.querySelectorAll('button.trif-add[data-trif-edit]')) if (old.previousElementSibling !== lastPre) old.remove();
+      const there = lastPre.nextElementSibling && lastPre.nextElementSibling.classList.contains('trif-add') ? lastPre.nextElementSibling : null;
+      if (there) { if (there.textContent !== label) there.textContent = label; there.__trifText = text; continue; }
+      addButton(lastPre, label, text, true);
+    }
+    for (const { pre, text, reply, edit } of all) {
+      if (!reply || edit) continue;
       if (pre.nextElementSibling && pre.nextElementSibling.classList.contains('trif-add')) continue;
+      addButton(pre, 'Add to TRIF', text, false);
+    }
+  }
+  /** An Add to TRIF button after a code block: its tap hands `text()` to the app (an edit group's: the latest). */
+  function addButton(pre, label, text, edit) {
+    {
       const b = document.createElement('button');
       b.className = 'trif-add';
       b.type = 'button';
-      b.textContent = 'Add to TRIF';
+      if (edit) b.setAttribute('data-trif-edit', '');
+      b.__trifText = text;
+      b.textContent = label;
       b.setAttribute('style', 'all:initial;display:inline-block;margin:6px 0 10px;padding:6px 14px;border-radius:999px;' +
         'background:#34d399;color:#04291c;font:600 14px -apple-system,system-ui,sans-serif;cursor:pointer;');
       // (handed over on the press itself, before the page's own handlers can swallow the click: some take the
       // pointer events of everything inside a reply)
       let handed = 0;
-      const hand = (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() - handed < 800) return; handed = Date.now(); post({ type: 'mod', text: text() }); };
+      const hand = (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() - handed < 800) return; handed = Date.now(); post({ type: 'mod', text: b.__trifText() }); };
       b.addEventListener('click', hand, true);
       b.addEventListener('touchend', hand, true);
       pre.after(b);
@@ -542,7 +567,14 @@
     return out;
   }
 
-  /** The mod files in code blocks: [{ key: its header, raw, pre, reply: the assistant's turn it's in or null, text }], in page order. */
+  // (an edit block's markers, each on a line of its own: mod-edit.js's, 5 to 9 of the character)
+  const EDIT_OPEN = /^\s*<{5,9}\s*SEARCH\s*$/im, EDIT_CLOSE = /^\s*>{5,9}\s*REPLACE\s*$/im;
+  const isEdit = (t) => EDIT_OPEN.test(t) && EDIT_CLOSE.test(t);
+  /** How many changes edit blocks make (their SEARCH markers). */
+  const editCount = (t) => (t.match(/<{5,9}[ \t]*SEARCH\b/gi) || []).length; // (not by lines: a code editor's textContent runs them together)
+  /** The mod files and edit blocks in code blocks: [{ key: its header (an edit: its text), raw, pre, reply: the
+   *  assistant's turn it's in or null, text, edit }], in page order. An edit block that quotes a mod's header lines is
+   *  an edit, not a mod. */
   function modBlocks() {
     const out = [];
     const ed = editor(), box = composerBox();
@@ -554,21 +586,37 @@
       if (pre.parentElement && pre.parentElement.closest(CODE_BLOCKS)) continue;
       if (pre.closest(VIEWER) || (over && over.contains(pre))) continue;
       const raw = pre.textContent || '';
+      // (its markers on lines of their own: a code editor's lines (.cm-line) run together in textContent, so its lines are read)
+      if (/<{5,9}\s*SEARCH/i.test(raw) && /REPLACE/i.test(raw) && isEdit(blockText(pre, true))) { out.push({ key: raw, raw, pre, reply: turnOf(pre, ed, box), text: () => blockText(pre, true) || raw, edit: true }); continue; }
       const end = raw.search(/==\/WebMod==/);
       if (raw.indexOf('==WebMod==') === -1 || end === -1) continue;
-      out.push({ key: raw.slice(0, end), raw, pre, reply: turnOf(pre, ed, box), text: () => blockText(pre) || raw });
+      out.push({ key: raw.slice(0, end), raw, pre, reply: turnOf(pre, ed, box), text: () => blockText(pre) || raw, edit: false });
     }
     return out;
   }
   const CODE_BLOCKS = 'pre, .cm-editor, [data-code-block]';
   /** A code block's text, line by line: its lines as shown (a code editor puts each in an element of its own, so
    *  textContent runs them together); from the mod's header on. */
-  function blockText(el) {
+  function blockText(el, edit) {
     const lines = el.querySelectorAll('.cm-line');
     let t = lines.length ? [...lines].map((l) => l.textContent || '').join('\n') : codeText(el.querySelector('code') || el);
+    if (edit) return t;
     const a = t.search(/^.*==WebMod==/m);
     if (a > 0) t = t.slice(t.lastIndexOf('\n', a) + 1);
     return t;
+  }
+  /** Blocks as the app takes them: each mod file on its own; a reply's edit blocks together, as one text (a chat
+   *  often puts each change in a block of its own), at the place of the first. */
+  function handOver(blocks) {
+    const out = [];
+    const edits = new Map(); // reply (or null) → its index in out
+    for (const b of blocks) {
+      if (!b.edit) { out.push(b.text()); continue; }
+      const k = b.reply || b.pre;
+      if (edits.has(k)) out[edits.get(k)] += `\n\n${b.text()}`;
+      else { edits.set(k, out.length); out.push(b.text()); }
+    }
+    return out;
   }
   /** What tells a reply is still changing: the last reply's text (or, without one, how much text the page has). */
   function signature() {
@@ -641,7 +689,7 @@
     for (const r of turns()) {
       if (w.repliesBefore.has(r) || w.live.has(r)) continue;
       if (!(anchor.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) || anchor.contains(r)) continue;
-      const text = (r.textContent || '').split('Add to TRIF').join('');
+      const text = (r.textContent || '').replace(/Add (?:\d+ changes? )?to TRIF/g, '');
       const prev = w.looks.get(r);
       if (prev !== undefined && prev !== text) w.grew.set(r, (w.grew.get(r) || 0) + 1);
       w.looks.set(r, text);
@@ -729,14 +777,17 @@
    *  of each (by its header); every block on the page then counts as seen. */
   function autoPickup(w, why) {
     // (a mod by its header, ==WebMod== to ==/WebMod==, whatever is around it)
-    const keyOf = (t) => { const end = t.search(/==\/WebMod==/); return end === -1 ? t : t.slice(t.indexOf('==WebMod=='), end).replace(/\s+/g, ' '); };
+    // (an edit hand-over, a reply's edit blocks together: by its whole text)
+    const keyOf = (t) => { if (isEdit(t)) return t; const end = t.search(/==\/WebMod==/); return end === -1 ? t : t.slice(t.indexOf('==WebMod=='), end).replace(/\s+/g, ' '); };
     const byKey = new Map();
     const all = modBlocks();
     const notOffered = [];
+    const fresh = [];
     for (const b of all) {
       if (w.seen.has(b.raw)) continue;
-      if (b.reply && w.live.has(b.reply)) { const t = b.text(); byKey.set(keyOf(t), t); } else notOffered.push(b);
+      if (b.reply && w.live.has(b.reply)) fresh.push(b); else notOffered.push(b);
     }
+    for (const t of handOver(fresh)) byKey.set(keyOf(t), t);
     for (const b of all) w.seen.add(b.raw);
     held(w, why, notOffered);
     return { mods: [...byKey.values()], notOffered };
@@ -768,7 +819,7 @@
     lateSig = '';
     const byKey = new Map();
     for (const b of fresh) { byKey.set(b.key, b); last.seen.add(b.raw); }
-    post({ type: 'done', why: 'late', mods: [...byKey.values()].map((b) => b.text()), stop: false });
+    post({ type: 'done', why: 'late', mods: handOver([...byKey.values()]), stop: false });
   }
 
   /** Whether this conversation already has TRIF's instructions in it (sent before, outside the message box). */

@@ -262,7 +262,11 @@ add('A6', 'start', 'More (the Claude API engine, against mobile/mock-api.js): a 
   const k = await step({ paneljs: `window.webkit.messageHandlers.panel.postMessage({ type: 'key.set', engine: 'claude-api', key: 'sk-test-not-a-real-key' });
     await new Promise((r) => setTimeout(r, 600)); const b = document.getElementById('settings-btn'); if (b) { b.click(); await new Promise((r) => setTimeout(r, 400)); b.click(); }
     await new Promise((r) => setTimeout(r, 800)); const a = document.getElementById('agent'); if (!a) return 'no #agent';
-    a.value = 'claude-api'; a.dispatchEvent(new Event('change', { bubbles: true })); await new Promise((r) => setTimeout(r, 600)); return a.value;` });
+    a.value = 'claude-api'; a.dispatchEvent(new Event('change', { bubbles: true })); await new Promise((r) => setTimeout(r, 600));
+    // (a new chat: mock-api.js reads the ask words from a conversation's first message, and the panel keeps its chat
+    // across launches, so a second run's mod was the first run's code: skipped as in Recently deleted, 11-19)
+    const n = document.getElementById('new-chat'); if (n) { n.click(); await new Promise((r) => setTimeout(r, 500)); }
+    return a.value;` });
   await step({ closechat: 1 });
   const label = await step({ enginelabel: 1 });
   await step({ quick: words('A6') });
@@ -610,6 +614,155 @@ add('D8', 'after', 'The chat remembers its site: the same conversation again fro
   await step({ closechat: 1 });
   return [conv && /\/chat\//.test(conv) && again === conv && other !== conv ? 'PASS' : 'FAIL', `sent in ${conv}; again from localhost ${again}; from 127.0.0.1 ${other}; offer ${o.id}`];
 });
+
+// ---- edit blocks (Tim, 11-19: a chat changes a mod by edit blocks, not the whole file again; a shortened file caught).
+// F1 makes the run's mod MxF1<tag>; the others change it. Each starts a new conversation, so TRIF's fill gives the mod's
+// code with its "edit with: TRIF edit <file> <version>" line (the stand-in's "editing <Name>" picks it).
+const EDIT = require(path.join(__dirname, '..', 'shared', 'core', 'mod-edit.js'));
+const boxText = async () => panejs("const ed = document.querySelector('.ProseMirror'); return ed ? ed.innerText : 'no box'");
+/** A new conversation on the service, the request sent from the shown tab. */
+const askNew = async (w, service = 'Claude') => { await step({ service }); await step({ newchat: 1 }); await sleep(2500); await step({ closechat: 1 }); return ask(w, service); };
+/** The refusal: no offer, the note, the banner over the tab; then the chat opened (Open chat: nothing filled) and the
+ *  message TRIF put in its box. Never sent. */
+async function refused(name) {
+  const b = await gotBanner('localhost', 25000);
+  const o = await offer();
+  const note = await step({ status: 1 });
+  shot(`${name}-banner`);
+  await step({ banner: 'open' });
+  await sleep(1800);
+  const box = await boxText();
+  shot(`${name}-box`);
+  await step({ closechat: 1 });
+  await step({ banner: 'dismiss' });
+  // (the note goes after 2 s: the banner keeps its words)
+  return { ok: b.ok && !o.id, note, box, o: o.text, banners: (b.banners || []).join('; ') };
+}
+const f1 = () => modId('F1');
+
+add('F1', 'edit', 'Claude: a mod of the run\'s, then changed by an edit block: "Change this mod?" with 1 change, added, the new code runs, its History has the old', async () => {
+  const r0 = await ask(words('F1'));
+  if (!r0.ok) return ['FAIL', `send: ${r0.why}`];
+  const o0 = await gotOffer();
+  if (o0.id !== f1()) return ['FAIL', `first offer ${o0.id}`];
+  if (!(await addAndRun(`${TAG} F1`))) return ['FAIL', 'the first version doesn\'t run'];
+  const r = await askNew(`editing MxF1${TAG} edit ask ${TAG} F1e`);
+  if (!r.ok) return ['FAIL', `send (edit): ${r.why}`];
+  const o = await gotOffer();
+  shot('F1-change-review');
+  const edits = (/edits (\w+)/.exec(o.text) || [])[1];
+  const ran = await addAndRun(`${TAG} F1e`);
+  const m = (await modlist()).find((x) => x.id === f1());
+  return [o.id === f1() && edits === '1' && ran && m && m.history >= 1 ? 'PASS' : 'FAIL', `offered ${o.id} edits ${edits}; runs: ${ran}; history ${m && m.history}`];
+});
+
+add('F2', 'edit', 'ChatGPT (signed-in stand-in): two edit blocks in two code blocks of one reply: one offer, 2 changes, added, runs', async () => {
+  const r = await askNew(`editing MxF1${TAG} edit two ask ${TAG} F2e`, 'ChatGPT');
+  await step({ service: 'Claude' });
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  const o = await gotOffer();
+  shot('F2-two-changes');
+  const edits = (/edits (\w+)/.exec(o.text) || [])[1];
+  const ran = await addAndRun(`${TAG} F2e`);
+  const code = await step({ modcode: f1() });
+  return [o.id === f1() && edits === '2' && ran && code.includes('#standin-edited') ? 'PASS' : 'FAIL', `offered ${o.id} edits ${edits}; runs: ${ran}; second change in: ${code.includes('#standin-edited')}`];
+});
+
+add('F3', 'edit', 'A stale version (the mod changed since the chat saw it): nothing applied; the note; the banner; the chat\'s box asks again with the mod\'s code now (never sent)', async () => {
+  const before = await step({ modcode: f1() });
+  const r = await askNew(`editing MxF1${TAG} stale edit ask ${TAG} F3e`);
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  const x = await refused('F3-stale');
+  const same = (await step({ modcode: f1() })) === before;
+  const v = EDIT.version(before);
+  const asks = /were for an earlier version/.test(x.box) && x.box.includes(`TRIF edit ${f1()} ${v}`) && x.box.includes('#b5179e');
+  return [x.ok && same && /don't fit/.test(x.note + x.banners) && asks ? 'PASS' : 'FAIL', `no offer ${!x.o.includes('shown: ' + f1())}; mod unchanged ${same}; note "${x.note}"; box asks again with the code ${asks}; banners ${x.banners}`];
+});
+
+add('F4', 'edit', 'A shortened whole file ("// ... rest unchanged ..."): refused; the note; the chat\'s box asks for the whole file', async () => {
+  const before = await step({ modcode: f1() });
+  const r = await askNew(`editing MxF1${TAG} shortened ${TAG} F4`);
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  const x = await refused('F4-shortened');
+  const same = (await step({ modcode: f1() })) === before;
+  return [x.ok && same && /leaves out part/.test(x.note + x.banners) && /leaves part of the mod out/.test(x.box) ? 'PASS' : 'FAIL', `mod unchanged ${same}; note "${x.note}"; box "${x.box.slice(0, 140)}"`];
+});
+
+add('F5', 'edit', 'An edit block whose SEARCH isn\'t in the mod: nothing applied; the box asks again', async () => {
+  const before = await step({ modcode: f1() });
+  const r = await askNew(`editing MxF1${TAG} edit nomatch ${TAG} F5`);
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  const x = await refused('F5-nomatch');
+  const same = (await step({ modcode: f1() })) === before;
+  return [x.ok && same && /doesn't match the mod/.test(x.box) ? 'PASS' : 'FAIL', `mod unchanged ${same}; note "${x.note}"; box "${x.box.slice(0, 140)}"`];
+});
+
+add('F6', 'edit', 'Pasted edit blocks (the clipboard path): offered with its changes; pasted stale ones: the message copied, nothing changed', async () => {
+  const code = await step({ modcode: f1() });
+  const line = code.split('\n').find((l) => /#[0-9a-f]{6}/i.test(l));
+  if (!line) return ['FAIL', `no colour line in ${code.slice(0, 200)}`];
+  const blk = `<<<<<<< SEARCH\n${line}\n=======\n${line.replace(/#[0-9a-f]{6}/i, '#123456')}\n>>>>>>> REPLACE`;
+  await step({ offer: `\`\`\`\nTRIF edit ${f1()} ${EDIT.version(code)}\n${blk}\n\`\`\`` });
+  const o = await until(async () => { const y = await offer(); return { ok: !!y.id, ...y }; }, 8000);
+  const edits = (/edits (\w+)/.exec(o.text || '') || [])[1];
+  await step({ cancelOffer: 1 });
+  await step({ offer: `TRIF edit ${f1()} 00000000\n${blk}` });
+  await sleep(1500);
+  const note = await step({ status: 1 });
+  const o2 = await offer();
+  return [o.id === f1() && edits === '1' && /copied/.test(note) && !o2.id ? 'PASS' : 'FAIL', `pasted: offered ${o.id} edits ${edits}; stale paste: note "${note}", offer ${o2.id || 'none'}`];
+});
+
+/** More with the Claude API engine against mock-api.js (as A6), a new chat; `then` runs; More switched off after. */
+async function withMore(then) {
+  const mock = spawn(process.execPath, [path.join(__dirname, '..', 'mock-api.js'), '8379'], { stdio: 'ignore' });
+  servers.push(mock);
+  await sleep(800);
+  try {
+    await launch(['-apibase', 'http://localhost:8379']);
+    await step({ select: 0 });
+    await step({ more: true });
+    await step({ sheet: 'chat' });
+    await sleep(3500);
+    await step({ paneljs: `window.webkit.messageHandlers.panel.postMessage({ type: 'key.set', engine: 'claude-api', key: 'sk-test-not-a-real-key' });
+      await new Promise((r) => setTimeout(r, 600)); const b = document.getElementById('settings-btn'); if (b) { b.click(); await new Promise((r) => setTimeout(r, 400)); b.click(); }
+      await new Promise((r) => setTimeout(r, 800)); const a = document.getElementById('agent'); if (!a) return 'no #agent';
+      a.value = 'claude-api'; a.dispatchEvent(new Event('change', { bubbles: true })); await new Promise((r) => setTimeout(r, 600));
+      const n = document.getElementById('new-chat'); if (n) { n.click(); await new Promise((r) => setTimeout(r, 500)); }
+      return a.value;` });
+    await step({ closechat: 1 });
+    return await then();
+  } finally {
+    await step({ more: false });
+    await launch();
+    mock.kill();
+  }
+}
+
+add('F7', 'edit', 'More (the Claude API engine, mock-api.js): a quick ask whose reply is an edit block: applied to the mod, added at once (a look-only change), Done', async () => withMore(async () => {
+  const before = (await modlist('localhost')).map((m) => [m.id, m.len]);
+  await step({ quick: `mock edit ask ${TAG} F7` });
+  const done = await until(async () => { const q = await step({ quickstate: 1 }); return { ok: /done|card|failed/i.test(q), s: q }; }, 45000, 1000);
+  const after = await modlist('localhost');
+  const changed = [];
+  for (const m of after) { const b = before.find(([id]) => id === m.id); if (b && b[1] !== m.len) changed.push(m.id); }
+  const code = changed.length ? await step({ modcode: changed[0] }) : '';
+  return [/done/i.test(done.s || '') && changed.length === 1 && code.includes(`/* ${TAG} F7 */`) ? 'PASS' : 'FAIL', `${(done.s || '').slice(0, 120)}; changed ${changed.join(', ') || 'none'}`];
+}));
+
+add('F8', 'edit', 'More: a stale edit: nothing changed; the message asking again in the panel\'s own box (never sent)', async () => withMore(async () => {
+  const before = (await modlist('localhost')).map((m) => `${m.id} ${m.len}`).join('\n');
+  await step({ quick: `mock edit stale ask ${TAG} F8` });
+  await sleep(9000);
+  const after = (await modlist('localhost')).map((m) => `${m.id} ${m.len}`).join('\n');
+  await step({ sheet: 'chat' });
+  await sleep(1500);
+  const input = await step({ paneljs: `const i = document.querySelector('#input'); return i ? i.value : 'no input'` });
+  shot('F8-more-stale');
+  await step({ paneljs: `const i = document.querySelector('#input'); if (i) { i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); } return 1;` });
+  await step({ closechat: 1 });
+  return [before === after && /were for an earlier version/.test(input) ? 'PASS' : 'FAIL', `mods unchanged ${before === after}; the panel's box: "${input.slice(0, 120)}"`];
+}));
 
 // ---- the phone link (phone-link's tests/phone-link-computer.js: the real helper's Store, Server, Runs and sync with a
 // stand-in agent, in a temp home; --computer <phone-link worktree>, default ~/WebMods-worktrees/phone-link)

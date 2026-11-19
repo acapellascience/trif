@@ -835,3 +835,54 @@ test('the chat script: chatgpt.com\'s picture tile signed in (11-19: a div[role=
     server.close();
   }
 });
+
+test('the chat script: edit blocks (Tim, 11-19: changes to a mod, not its whole file again): a reply\'s edit blocks, two code blocks, handed over together; one "Add 2 changes to TRIF" after the last; an edit quoting a header isn\'t a mod; Claude\'s and ChatGPT\'s pages', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const mod = '// ==WebMod==\n// @name        Calmer feed\n// @match       http://127.0.0.1/*\n// @style\n// ==/WebMod==\n{\n  "css": ".feed-item h2 { color: #1f8a5b }",\n  "hide": [\n    "#promo-banner"\n  ]\n}';
+  const fill = `I'm looking at ${base}/plain.html in TRIF\n--- Already changing this page (build on these) ---\n### Calmer feed (style mod) · edit with: TRIF edit 127.0.0.1/calmer-feed 1a2b3c4d\n\`\`\`js\n${mod}\n\`\`\`\n--- End of what TRIF sent ---`;
+  let browser;
+  try {
+    browser = await launch();
+    for (const query of ['', '?octane&cm&gpt']) {
+      const page = await browser.newPage();
+      await page.goto(`${base}/chat.html${query}`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+      await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF follow-up.txt', null, null), fill);
+      await page.evaluate(() => { const ed = document.querySelector('.ProseMirror, #prompt-textarea, [contenteditable="true"]'); ed.focus(); document.execCommand('insertText', false, ' edit two ask blue'); });
+      await page.evaluate(() => document.querySelector('.ProseMirror, #prompt-textarea, [contenteditable="true"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      await waitPost(page, 'sent');
+      const [done] = await waitPost(page, 'done');
+      assert.equal(done.mods.length, 1, `${query}: one hand-over for the reply's edits`);
+      const t = done.mods[0];
+      assert.match(t, /^TRIF edit 127\.0\.0\.1\/calmer-feed 1a2b3c4d\n<<<<<<< SEARCH\n {2}"css": "\.feed-item h2 \{ color: #1f8a5b \}",\n=======\n {2}"css": "\.feed-item h2 \{ color: #b5179e \/\* blue \*\/ \}",\n>>>>>>> REPLACE/, query);
+      assert.match(t, /\n\n<<<<<<< SEARCH\n {2}"hide": \[\n=======\n {2}"hide": \[\n {4}"#standin-edited",\n>>>>>>> REPLACE$/, query);
+      // (the button: one, after the last edit block, its count of changes)
+      await page.waitForFunction(() => (document.querySelector('.trif-add') ? [1] : null), {}, { timeoutMs: 8000 });
+      const buttons = await page.evaluate(() => [...document.querySelectorAll('.trif-add')].map((b) => [b.textContent, b.hasAttribute('data-trif-edit'), b.previousElementSibling === [...document.querySelectorAll('pre, .cm-editor')].pop()]));
+      assert.deepEqual(buttons, [['Add 2 changes to TRIF', true, true]], query);
+      await page.click('.trif-add');
+      const [tap] = await waitPost(page, 'mod');
+      assert.equal(tap.text, t, `${query}: the tap hands over the same text`);
+      await page.close();
+    }
+    // (an edit block quoting a mod's header lines (==WebMod== in its SEARCH) is an edit, not a mod; a whole mod beside it is a mod)
+    const page = await browser.newPage();
+    await page.goto(`${base}/chat.html`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await page.evaluate((m) => {
+      const r = document.createElement('div'); r.setAttribute('data-is-streaming', 'false'); r.className = 'font-claude-response';
+      const pre = (t) => { const p = document.createElement('pre'); const c = document.createElement('code'); c.textContent = t; p.append(c); return p; };
+      r.append(pre(`TRIF edit a.com/b 0000aaaa\n<<<<<<< SEARCH\n// ==WebMod==\n// @name        B\n// ==/WebMod==\n=======\n// ==WebMod==\n// @name        B2\n// ==/WebMod==\n>>>>>>> REPLACE`), pre(m));
+      document.querySelector('main, body').append(r);
+    }, mod);
+    await page.waitForFunction(() => (document.querySelectorAll('.trif-add').length >= 2 ? [1] : null), {}, { timeoutMs: 8000 });
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.trif-add')].map((b) => b.textContent)), ['Add 1 change to TRIF', 'Add to TRIF']);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

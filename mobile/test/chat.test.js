@@ -754,3 +754,49 @@ test('the chat script: TRIF\'s greeting never drawn over the chat\'s own suggest
     server.close();
   }
 });
+
+test('the chat script: chatgpt.com\'s picture tile signed in (11-19: a div[role=button] named by its aria-label, "(n)" on a name used before): TRIF\'s screenshot counted as TRIF\'s, made a pill (its × kept), and taken out with the rest', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 60000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    await page.goto(`${base}/chat.html?octane`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    const state = async () => JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
+    assert.match(await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.jpg'), png), /picture pasted/);
+    let s = await state();
+    assert.equal(s.trif, 1, 'the picture is TRIF\'s');
+    assert.equal(s.has, true);
+    // (the person's own picture beside it: theirs, kept)
+    await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'IMG_0001.png', { type: 'image/png' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change', { bubbles: true })); });
+    await page.waitForTimeout(600);
+    // (a second screenshot, as an old fill's: its name gets "(2)", still TRIF's)
+    assert.match(await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.jpg'), png), /picture pasted/);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('[role=button][aria-label]')].map((t) => t.getAttribute('aria-label'))), ['TRIF screenshot.jpg', 'IMG_0001.png', 'TRIF screenshot(2).jpg']);
+    s = await state();
+    assert.equal(s.trif, 2);
+    assert.equal(s.others, true, 'the person\'s picture is theirs');
+    // (TRIF's made a pill (Tim, 11-19: "the ChatGPT page still doesn't condense the screenshot into a pill"): its
+    // words, no picture, a pill's height; its remove button still there and working; the person's picture untouched)
+    await page.waitForTimeout(600);
+    const look = await page.evaluate(() => {
+      const t = document.querySelector('[aria-label="TRIF screenshot.jpg"]'), r = t.getBoundingClientRect(), x = t.querySelector('button').getBoundingClientRect();
+      const mine = document.querySelector('[aria-label="IMG_0001.png"]').getBoundingClientRect();
+      return { chip: t.getAttribute('data-trif-chip'), words: getComputedStyle(t, '::before').content, pill: r.height < 40 && r.width > 120, img: getComputedStyle(t.querySelector('img')).display,
+        xShown: x.width > 0 && document.elementFromPoint(x.left + x.width / 2, x.top + x.height / 2) === t.querySelector('button'), mine: [Math.round(mine.width), Math.round(mine.height)] };
+    });
+    assert.deepEqual(look, { chip: 'TRIF screenshot', words: '"From TRIF: screenshot"', pill: true, img: 'none', xShown: true, mine: [80, 80] });
+    await page.click('[aria-label="Remove TRIF screenshot(2).jpg"]');
+    assert.equal((await state()).trif, 1, 'the pill\'s × takes it out');
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.clearTrif()), 0, 'all of TRIF\'s taken out');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('[role=button][aria-label]')].map((t) => t.getAttribute('aria-label'))), ['IMG_0001.png']);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

@@ -175,7 +175,11 @@
   // (each attachment's own tile: never the row they sit in, Claude's [data-cds="MessageAttachments"], whose label
   // would cover every tile in it: Tim, 11-14, saw the instruction labelled "TRIF screenshot", the row marked
   // while only the picture was in it)
-  const TILES = '[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]:not([data-cds="MessageAttachments"]), span[class*="group/composer-attachment"]';
+  // (11-19, chatgpt.com signed in: a picture's tile is a div[role=button].composer-attachment-surface named by its
+  // aria-label and its img's alt; a file's is still the span. Without it TRIF never saw its own screenshot in the box:
+  // a second fill added a second one, and an old page's screenshot was never taken out)
+  const PIC_TILE = '[class*="composer-attachment-surface"][role="button"][aria-label]';
+  const TILES = `[data-testid="file-thumbnail"], [data-cds^="MessageAttachments"]:not([data-cds="MessageAttachments"]), span[class*="group/composer-attachment"], ${PIC_TILE}`;
   /** The page's own file input for the message box: one that takes any file or text (not pictures only). */
   function fileInput(file) {
     const box = composerBox();
@@ -406,7 +410,7 @@
     'TRIF pointer': 'From TRIF: your pick',
   };
   const pillWords = Object.entries(PILLS).map(([k, w]) => `
-    span[data-trif-chip="${k}"][class*="composer-attachment"]::before,
+    span[data-trif-chip="${k}"][class*="composer-attachment"]::before, div[data-trif-chip="${k}"]${PIC_TILE}::before,
     [data-trif-chip="${k}"] [data-cds-card-body]::after,
     [data-trif-chip="${k}"][class*="group/thumbnail"] > div:first-child::before { content: "${w}"; }`).join('');
   const style = document.createElement('style');
@@ -430,6 +434,16 @@
     [data-trif-chip] { width: auto !important; height: auto !important; min-width: 0 !important; align-self: flex-start; }
     [data-trif-chip] [data-cds-card-body] { padding: 6px 14px !important; flex-direction: row !important; align-items: center !important; }
     [data-trif-chip] [data-cds-card-body] > div, [data-trif-chip] img, [data-trif-chip] picture { display: none !important; }
+    /* (ChatGPT's picture tile, signed in (Tim, 11-19: "the ChatGPT page still doesn't condense the screenshot into a
+       pill"): a fixed box with the picture on a layer inside it and the remove button over its corner; the box made a
+       pill (no fixed size, nothing clipped), the picture's layer hidden, the remove button kept) */
+    div[data-trif-chip]${PIC_TILE} { min-height: 0 !important; max-width: none !important; max-height: none !important; overflow: visible !important;
+      background: none !important; box-shadow: none !important; border: 0 !important; }
+    div[data-trif-chip]${PIC_TILE} > span { display: none !important; }
+    div[data-trif-chip]${PIC_TILE}::before {
+      display: inline-block; padding: 7px 16px; border-radius: 999px; background: #e3f7ee; color: #0f6b4a;
+      font: 600 13px/1.2 -apple-system, system-ui, sans-serif; white-space: nowrap;
+    }
     [data-trif-chip] [data-cds-card-body]::after {
       font: 600 13px/1.2 -apple-system, system-ui, sans-serif; color: #0f6b4a; white-space: nowrap;
     }
@@ -446,7 +460,7 @@
        on a dark phone. data-trif-tone, set by lookUpdate) */
     :root[data-trif-tone="dark"] [data-trif-chip] .cds-card-fill { background: rgba(52, 211, 153, 0.16) !important; }
     :root[data-trif-tone="dark"] [data-trif-chip] [data-cds-card-body]::after { color: #34d399; }
-    :root[data-trif-tone="dark"] span[data-trif-chip][class*="composer-attachment"]::before { background-color: rgba(52, 211, 153, 0.16); color: #34d399; }
+    :root[data-trif-tone="dark"] :is(span[data-trif-chip][class*="composer-attachment"], div[data-trif-chip]${PIC_TILE})::before { background-color: rgba(52, 211, 153, 0.16); color: #34d399; }
     :root[data-trif-tone="dark"] [data-trif-chip][class*="group/thumbnail"] > div:first-child { background: rgba(52, 211, 153, 0.16) !important; color: #34d399; }`;
   (document.head || document.documentElement).append(style);
 
@@ -1299,13 +1313,14 @@
     return false;
   }
   /** The stretches from `top` to `bottom` (window coordinates) where the page draws nothing across the greeting's
-   *  width, each [from, to]: sampled every 6 px down, at 8 points across. */
+   *  width, each [from, to]: sampled every 8 px down, at 6 points across (~150 hit tests on a phone: about 8 ms in the
+   *  Simulator; chatgpt.com's new chat changes a few times a second, and each change looks again). */
   function freeGaps(top, bottom, ed) {
     const width = Math.min(innerWidth, 420), left = (innerWidth - width) / 2;
-    const xs = [0.06, 0.19, 0.32, 0.44, 0.56, 0.68, 0.81, 0.94].map((f) => left + width * f);
+    const xs = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92].map((f) => left + width * f);
     const gaps = [];
     let from = null, last = null;
-    for (let y = Math.ceil(top); y <= bottom; y += 6) {
+    for (let y = Math.ceil(top); y <= bottom; y += 8) {
       if (xs.some((x) => drawnAt(x, y, ed))) { if (from !== null) gaps.push([from, last]); from = null; continue; }
       if (from === null) from = y;
       last = y;
@@ -1404,11 +1419,11 @@
       const u = robotURL();
       pillRobot.textContent = `
         :root { --trif-robot: ${u}; }
-        span[data-trif-chip][class*="composer-attachment"]::before, [data-trif-chip] [data-cds-card-body]::after,
+        span[data-trif-chip][class*="composer-attachment"]::before, div[data-trif-chip]${PIC_TILE}::before, [data-trif-chip] [data-cds-card-body]::after,
         [data-trif-chip][class*="group/thumbnail"] > div:first-child::before {
           display: inline-block; background-image: ${u}; background-repeat: no-repeat; background-size: 16px 16px;
           background-position: 0 center; padding-left: 22px !important; }
-        span[data-trif-chip][class*="composer-attachment"]::before { background-position: 12px center; padding-left: 34px !important; }`;
+        span[data-trif-chip][class*="composer-attachment"]::before, div[data-trif-chip]${PIC_TILE}::before { background-position: 12px center; padding-left: 34px !important; }`;
     }
     lookUpdate();
     return 'ok';
@@ -1438,4 +1453,7 @@
    *  page (it only compares one look with the next). */
   const replyNow = () => `${replying() || incomplete() ? 1 : 0}:${[...document.querySelectorAll(REPLY)].reduce((n, e) => n + (e.textContent || '').length, 0)}`;
   globalThis.__trifChat = { fill, canAsk, replyNow, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, viewer: () => { const v = viewer(); return v ? v.why : null; } };
+  // (the app's look (the site and TRIF's robot) asked for once this script is in: on claude.ai signed in (11-19) the
+  // app's call at the page's load came before this script ran, so its greeting and pills had no robot)
+  post({ type: 'ready' });
 })();

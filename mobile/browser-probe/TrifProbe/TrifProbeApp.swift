@@ -414,6 +414,14 @@ extension Model {
         if let js = step["panejs"] as? String, let wv = Model.pane?.webView {
             do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
         }
+        // ({"chatjs": "…"}: in the shown chat page's TRIF world, where Web/chat.js runs: `return __trifChat.state()`;
+        // {"chatlook": 1}: chat.js look() called as ChatView.tellLook calls it, its answer or error)
+        if let js = step["chatjs"] as? String, let wv = Model.pane?.webView {
+            do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld) ?? "nil")" } catch { out = "error: \(error)" }
+        }
+        if step["chatlook"] != nil, let p = Model.pane {
+            do { out = "\(try await p.webView.callAsyncJavaScript("return globalThis.__trifChat && globalThis.__trifChat.look ? globalThis.__trifChat.look(site, shape) : 'no __trifChat';", arguments: ["site": p.site, "shape": ChatView.robotShape], in: nil, contentWorld: ClaudePane.chatWorld) ?? "nil")" } catch { out = "error: \(error)" }
+        }
         // (the robot view's More: chosen, and JavaScript in the side panel's page)
         if let m = step["more"] as? Bool { Model.pane?.choose(more: m, service: m ? nil : .claude) }
         if let sv = step["service"] as? String, let s = ChatService(rawValue: sv) { Model.pane?.choose(more: false, service: s) }

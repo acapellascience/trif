@@ -18,7 +18,9 @@
   attachments and text across a reload and puts them back 0.8 s after the page loads, as claude.ai keeps a draft;
   `?gptpaste` takes a pasted text file as its text, as chatgpt.com did on Tim's iPhone (11-16), while its hidden file
   input (the paper clip's) still makes tiles.
-  `?octane`: as chatgpt.com's mobile page (logged out, 11-16): messages are li[data-message-role], the reply's li gets
+  `?octane`: as chatgpt.com's mobile page (logged out, 11-16; signed in, 11-19: a picture's tile is a
+  div[role=button].composer-attachment-surface named by its aria-label and img alt, and a name used before gets "(n)"
+  before its extension): messages are li[data-message-role], the reply's li gets
   data-message-complete when it's done, and in the middle of writing it pauses 3 s with no stop button (as it does
   while it searches); its file inputs take pictures only (a text file given to one: "The selected file is not a supported
   image."); `?cm` writes code blocks as a code editor's lines (div.cm-editor > div.cm-line), not a pre.
@@ -193,15 +195,39 @@
     const entry = { name, text: text || '' };
     files.push(entry);
     const tile = document.createElement('div');
-    tile.setAttribute('data-testid', 'file-thumbnail');
-    const label = document.createElement('span');
-    label.textContent = name;
     const x = document.createElement('button');
     x.type = 'button';
-    x.setAttribute('aria-label', `Remove ${name}`);
     x.textContent = '×';
     x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); saveDraft(); });
-    tile.append(label, x);
+    if (location.search.includes('octane') && /^image\//.test(type || '')) {
+      // (?octane, a picture, as chatgpt.com signed in draws it (11-19): a div[role=button].composer-attachment-surface
+      // named only by its aria-label and its img's alt, no data-testid; a name used before gets "(n)" before its
+      // extension, as its uploads do)
+      const used = files.filter((f) => f !== entry && f.base === name).length;
+      entry.base = name;
+      if (used) { entry.name = name.replace(/(\.[^.]*)?$/, `(${used + 1})$1`); name = entry.name; }
+      tile.className = 'composer-attachment-surface';
+      tile.setAttribute('role', 'button');
+      tile.setAttribute('aria-label', name);
+      tile.style.cssText = 'position: relative; display: inline-block; width: 80px; height: 80px; border-radius: 10px; overflow: hidden; background: var(--tile);';
+      // (the picture on a layer of its own, the remove button over the tile's corner, as chatgpt.com's)
+      const layer = document.createElement('span');
+      layer.className = 'composer-attachment-surface';
+      layer.style.cssText = 'position: absolute; inset: 0; overflow: hidden; border-radius: 10px;';
+      const img = document.createElement('img');
+      img.alt = name;
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+      layer.append(img);
+      x.setAttribute('aria-label', `Remove ${name}`);
+      x.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: inherit;';
+      tile.append(layer, x);
+    } else {
+      tile.setAttribute('data-testid', 'file-thumbnail');
+      const label = document.createElement('span');
+      label.textContent = name;
+      x.setAttribute('aria-label', `Remove ${name}`);
+      tile.append(label, x);
+    }
     if (late) {
       // (a placeholder first, the real tile 0.5 s later, as claude.ai's upload card does)
       const ph = document.createElement('div');

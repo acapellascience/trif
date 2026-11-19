@@ -615,6 +615,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func home() {
         let v = cur!
         UserDefaults.standard.removeObject(forKey: lastKey(v.service, v.site))
+        // (and the record of the last fill: a new chat gets the page whatever happened to the last one (11-19,
+        // chatgpt.com signed in: a new chat keeps the box's words as its draft but drops attachments, so the record
+        // read "the person took TRIF's fill out" and New chat came up with nothing of the page in it))
+        setLastFill(v, nil)
         v.activity = .idle
         v.started = true
         guard let url = URL(string: v.service.start) else { return }
@@ -830,6 +834,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard let d = message.body as? [String: Any], let type = d["type"] as? String, let wv = message.webView, let v = view(of: wv) else { return }
         let name = v.service.rawValue
         switch type {
+        case "ready":
+            v.tellLook()
         case "stripbox":
             if strip, cur === v { stripMeasured(v, d["box"] as? [String: Any]) }
         case "mod":

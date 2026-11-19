@@ -4476,7 +4476,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       // a screenshot pasted into the chat box: in the site's files under a name of its own, attached to the message
       // being written ("[attached: files/pasted-….png]"); pasted text stays text
       const filesBefore = new Set(fs.readdirSync(path.join(dir, 'files')));
-      await this.panel(`async () => { const i = document.getElementById('input'); i.value = 'look at this'; const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], 'image.png', { type: 'image/png' })); i.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true; }`);
+      await this.panel(`async () => { const i = document.getElementById('input'); i.value = 'look at this'; const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], 'image.png', { type: 'image/png' })); /* (Firefox's ClipboardEvent constructor takes no clipboardData: a paste event carrying it, as a real paste does) */ const ev = new Event('paste', { bubbles: true, cancelable: true }); Object.defineProperty(ev, 'clipboardData', { value: dt }); i.dispatchEvent(ev); return true; }`);
       const pastedShot = await waitFor('the pasted screenshot', () => fs.readdirSync(path.join(dir, 'files')).find((n) => !filesBefore.has(n) && /^pasted-\d{4}-\d\d-\d\d-\d{6}\.png$/.test(n)) || null, { timeoutMs: 10000, intervalMs: 200 }).catch(() => null);
       if (!pastedShot) problems.push('a pasted screenshot wasn\'t saved in the site\'s files');
       else {

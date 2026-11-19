@@ -554,8 +554,9 @@ struct ContentView: View {
                         .padding(.top, 4)
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .task(id: b.id) {
-                            // (a plain reply's banner goes by itself after 8 s; one with mods stays: it is their offer)
-                            guard b.mods.isEmpty else { return }
+                            // (a plain reply's banner goes by itself after 8 s; one with mods stays: it is their offer; so
+                            // does one saying the reply has a mod to add in the chat, 11-18)
+                            guard b.mods.isEmpty, b.inChat == 0 else { return }
                             try? await Task.sleep(nanoseconds: 8_000_000_000)
                             if !Task.isCancelled, pane.banners.first?.id == b.id { withAnimation { pane.dismissBanner(b) } }
                         }

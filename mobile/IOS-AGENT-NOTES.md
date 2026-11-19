@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (489 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (494 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -95,7 +95,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   in twice, the reply before it, the person's messages 2 s late; `window.__standinScrollUp()` or a scroll to the top
   draws an older exchange and redraws the rest). The header's "Older chat" button switches the page to such a
   conversation (pushState /chat/old-…, no load), mid-reply or not. `/project/<id>` serves it as a project page, `/new`
-  as claude.ai's new-chat page.
+  as claude.ai's new-chat page. `?gptdraft[=ms]` (11-18): chatgpt.com's draft, ONE for the whole origin (localStorage
+  `standin-draft`, text only, saved on every change, cleared at a send), put back 0.8 s (or ms) after any chat page
+  loads, replacing the box: seed it with panejs `localStorage.setItem('standin-draft', …)` from any chat view, then open
+  another site's chat. (`?draft`, Claude's kind, per web view with attachments, no longer matches "gptdraft".)
+  `?nested[=inline]` (11-18): each finished code block redrawn as claude.ai's (pre.code-block__code >
+  code.language-js > a code column of line numbers, user-select none; `=inline`: each line's number at its start).
+  Message word "whole": the reply drawn at once, finished, no stop button or streaming mark (a reply that finished
+  while the app's page was suspended): held, `waiting` in done, the "replied with a mod" banner.
 - What the browser says it is: serve.js's `/agent` (`?nometa`: no width=device-width viewport): the user agent sent,
   navigator's, platform, width; `window.__agent` for pagejs. localhost vs 127.0.0.1 are two sites.
 - Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner) and is the best check of
@@ -132,9 +139,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   browser-checks.json, mods.js, panel-kit.js, mod-guide.txt, page-bridge.js, RobotShape.swift, and the side panel folder
   `shared/gen/panel`. Never edit those by hand.
 - Browser tests (headless Chrome, muted): `TRIF_BROWSER_TESTS=1 TRIF_E2E_CHROME="/Users/tim/WebMods/tests/e2e/.browsers/chrome/mac_arm-156.0.8078.80/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" node --test mobile/test/chat.test.js`
-  (10 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
+  (13 tests: fill, send, watch, pickup, viewers, ChatGPT's new page, old code rendering late, the person's own pasted
   code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply; the quick ask: never a
-  scripted send, the person's Send told once, their message appearing as the send, takeText). One browser suite at a time; small payloads.
+  scripted send, the person's Send told once, their message appearing as the send, takeText; the strip; an earlier TRIF
+  fill put back as the chat's draft (before / after the fill, as a file / as text, the person's words around it,
+  Claude-style tiles); claude.ai's nested code and a reply found finished). One browser suite at a time; small payloads.
+- After talking (Browser.talkResume / talkNudge, 11-18) on the Mac: `node --test mobile/test/talknudge.test.js` (the
+  scripts read out of Browser.swift with Swift's escapes undone, run in node's vm on stand-in players and a virtual
+  clock: plays on, refused, deaf until pause+play, a gap, a seek that never ends, a leap, a blob: source, dead; <1 s).
 - Links to other apps on the Mac: `node --test mobile/test/core-applinks.test.js` (the shared rule, mobile/shared/core/app-links.js,
   and gen/core.js, against app-links-cases.json) and `node --test mobile/test/applinks.test.js` (swiftc: AppLinks.swift +
   Core.swift + mobile/test/applinks-check/main.swift, calling through gen/core.js: the same cases, the words, and the cost
@@ -376,6 +388,22 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   no-op) tells TRIF's world's `freeRelayScript` by a CustomEvent with a JSON string, which caps (40 a load, 200
   characters) and posts "modlog" → Browser → Diagnostics "mod log" (start, log, warn, error: the wrapper's catch). ModsPanel.swift + Web/mods.html,
   mods-page.js/css: the Mods tab.
+- chat.js's box (11-18, Tim's stale ChatGPT fill): `boxModel` (the box's text with a "\n" per paragraph/line break and
+  where each piece is), `trifBlocks` (TRIF's text: from OUR_HEAD, "I'm looking at {url} in TRIF" / "Here's {url} in
+  TRIF now:" (with the "(This is a different site: …)" line before it), to OUR_END = Browser.fillEnd "--- End of what
+  TRIF sent ---", or without it (older fills) to the next block or the box's end), `dropText` (a range delete, as the
+  person would; the box emptied when only space is left), `trifTiles`/`dropTile`, `clearTrif` (all TRIF tiles and text
+  blocks; the person's own kept), `state()` `pages` (the addresses TRIF's text names). The fill's guard (`guardFill`,
+  `guardCheck`): 8 s after a fill's last piece, a MutationObserver takes out TRIF text not this fill's (`g.line`: its
+  first line, null when it went as a file), extra tiles of a label this fill put (`g.put`; this fill's marked
+  `data-trif-fill`), and types this fill's text again once if the page's draft replaced it; posts `fillguard` →
+  Diagnostics "chat". ClaudePane.fillContext: TRIF text naming another page (`samePage`) is never "already in";
+  TRIF's earlier things go, the person's stay, the page goes in (a recorded fill the person took out isn't put back).
+  `showSwitched` (Claude · ChatGPT · More's switch, `use` and back from More): shown and filled as Go to chat.
+- Claude's code blocks (11-18): chat.js `codeText` (line numbers hidden for the read: classes linenumber/gutter,
+  user-select none, aria-hidden) for blockText, viewers and late. finish posts `waiting` (held mods in replies after the
+  person's message) and `nopickup` only when nothing was held. ClaudePane: `ChatView.waitingMods`, `ChatBanner.inChat`
+  (the "replied with a mod" banner; TrifProbeApp keeps it past 8 s), `showReply(true)` (the first such mod in view).
 - ClaudePane.swift: the robot view: ChatService, up to 3 ChatViews (Claude/ChatGPT pages), fills, reply watching,
   conversations' sites, projects, notifications, the switch Claude · ChatGPT · More. Web/chat.js: TRIF inside those pages
   (fill, send, done-detection, pickup, Add to TRIF, viewers, and `look`: the greeting, the pills' words, upsells hidden;
@@ -674,6 +702,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   google.com", the tab shown when it finished): `offerFromChat` reads with `here` = the chat's site (phone~<site> →
   <site>), the page shown only when the chat has none; Add to TRIF taps pass the chat's site (`offer(text:site:)`);
   More's panel runs pass `run.site`. A mod whose own @match names another site still warns.
+- Only the page in front in a chat's box (Tim, 11-18, his x.com screenshot: ChatGPT's own draft put an old YouTube
+  fill back beside x.com's attachments): TRIF's earlier fill always goes (tiles and text, wherever in the box), the
+  person's own words and files stay and the page is added to them (before 11-18 a box with anything of theirs was left
+  alone, unfilled), and what the page puts back in the 8 s after is taken out again. My calls, for Tim: switching the
+  Claude · ChatGPT · More switch to a chat fills it for the tab's page, as Go to chat does (it did already for the other
+  service; now back from More too, and the old service's chat is no longer loaded for nothing on the way); a reply's
+  mods TRIF didn't see being written stay unoffered, but its banner says "replied with a mod" and stays.
 - Desktop Website / Mobile Website (Tim approved 11-18, "Request" dropped). The address screen's Cancel closes an
   empty new tab and goes back to the tab it came from (Browser.newTabFrom / leaveEmptyNewTab, as the + again; any
   way the new tab was made); never the last tab.
@@ -958,10 +993,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   right there: 1 tap; shots 424-425), warm and cold by `simctl openurl trif://settings` (422-423). On a phone it may
   open Apps → TRIF (then 2 back taps): the step's words cover both; Tim to say which his SE does.
 - Talking and sound (11-18): Simulator only, `-speechsession` (the stand-in recording with the real session switch),
-  a silent clip on 127.0.0.1 (media.sh in the batch's scratchpad): plays on after tap+stop, hold+cancel, hold+let go,
+  a silent clip on 127.0.0.1 (a range server in the batch's scratchpad): plays on after tap+stop, hold+cancel, hold+let go,
   the ✕ with the video in a tab behind, the app leaving mid-listen; left paused after a call-like interruption.
-  The stall Tim saw wasn't reproduced in the Simulator (not tried with the old build); never on a phone, nor with
-  AirPods, nor YouTube's own player (main-frame <video>, should work; iframes not reached).
+  A stuck video WAS reproduced (11-18, later batch): a seek issued right after a reload, as VideoResume was putting
+  the time back, left `seeking` true for good (time standing still, `paused` false); talking over it ended "still
+  stuck" with the old one nudge. Of own time, pause+play, a seek on, only the media element's `load()` at its time
+  cleared it: talkNudge's step 5, and the Simulator's talk then logged "playing after loaded again at its time". The
+  other steps each kept a real playing video playing (run by pagejs). Tim's reuters.com player is unknown (native HLS
+  or a blob: MSE stream; for blob: step 5 is skipped and the line says so): his next "after talking" line names the
+  step that worked. Never on a phone, nor with AirPods, nor YouTube's own player; iframes not reached.
 - The microphone's tap on Tim's SE (11-18, "just listens for a moment and then doesn't record anything and then
   exits"): CAUSE FOUND in the Simulator with real touches (iOS Simulator tool taps on the box's microphone, the stand-in
   recording with `-speechsession` and a silent video playing): a 0.1 s tap was logged "let go 518 ms after the press":
@@ -1063,6 +1103,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   example.test's offered, shot 319); their pasted card tapped → viewer `skipped (opened by a tap outside the
   assistant's replies)`; code pasted after the reply: no late offer; "Older chat" tapped mid-reply → done `left`, idle,
   nothing; an old chat opened cold, scrolled up: nothing (Add to TRIF under its replies).
+- The stale fill (11-18): Simulator only, stand-ins: `?octane&gptdraft=1500` (text typed; an old YouTube fill put back
+  1.5 s after the 127.0.0.1 chat loaded: taken out, this page's typed again, shot 490), `?gptdraft=200` after a
+  relaunch, More → ChatGPT (the switch filled; the person's words around an old fill kept, shot 491), Claude's
+  `?draft` tiles (unit test). Not known: whether chatgpt.com puts its draft back before or after TRIF looks (either is
+  handled), whether it keeps attachments in it, whether its ProseMirror takes TRIF's range delete across paragraphs as
+  the stand-in's plain box does (it took selectAll+delete before), and claude.ai's own draft. The "fillguard" and
+  "TRIF's text for … was in the message box" Diagnostics "chat" lines say what happened on Tim's phone.
+- Claude's replies (11-18): Tim's "no mod was read … (pre.code-block__code code.language-js code)" lines came with
+  "held … 2 in replies not seen arriving": the blocks WERE found; nothing was offered because those replies finished
+  while the app was in the background (fail closed, by design). The nopickup line no longer comes when the held line
+  explains it. The read now hides line numbers (react-syntax-highlighter's column or per line; stand-in `?nested`,
+  real WebKit: offered 252 characters, shot 494); claude.ai's real markup inside that inner code isn't known. The
+  banner "replied with a mod" and the chat opened at it: shots 492-493.
 - On the real claude.ai / chatgpt.com (signed in, can't be checked here): that Claude's reply wrapper
   ([data-is-streaming], .font-claude-response/.font-claude-message) holds its code blocks and never the person's
   message; that USER still matches (without it NOTHING is picked up now: fail closed, `held … no sent message found`);
@@ -1253,6 +1306,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   with the app in front (no snapshot) to compare. Icon test without a real icon: `simctl openurl` of
   `trif://open?url=<site>&app=1` (a loopback site on another host name than the tab left in front).
 - `simctl openurl` cuts URLs at about 2 KB (UIApplication.open doesn't).
+- JS inside Swift """ strings: `\'` is Swift's escape for `'`, so the page gets a bare quote (a SyntaxError there,
+  11-18). Use ’ or `\\'`; talknudge.test.js undoes Swift's escapes so it catches this.
+- Diagnostics' cookie lines (11-18, the coordinator: they buried everything): "cookies"/"cookie names" in full at
+  launch; on each trip to the background only sites whose counts or names changed; nothing new → one "cookies:
+  unchanged since HH:mm" at most every 30 min. "cookie changes" lines unchanged. Checked: 4 trips, 1 line.
+- The Simulator's WebKit can leave a video in a seek for good (`seeking` true, time still, not paused) when a seek
+  comes while another is applying (a reload's VideoResume): only `load()` cleared it.
 - The app opening its own trif:// with UIApplication.open gets iOS's "Open in …?" prompt (and it can linger over a
   later screen): in-app checks call the handler (ContentView.openForCheck); `simctl openurl` has no prompt.
 - iOS 26 has `x-safari-https://` but no `x-safari-http://`; Chrome as default browser needs the Files route.

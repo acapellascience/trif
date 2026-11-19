@@ -571,6 +571,7 @@ All drafts for Tim. {Service} is Claude or ChatGPT, as the app already names the
 | The done banner (slides down over the tab, the tab list, Mods or another chat when a chat not being looked at finishes a reply), with one mod | — | **{Service} made a mod for {site}** · **Add** · **Go to {site}** |
 | The same, with several mods | — | **{Service} made {n} mods for {site}** · **Add** · **Go to {site}** |
 | The same, a reply with no mod | — | **{Service} replied about {site}** (no site: **{Service} replied**) · **Open chat** · **Go to {site}** |
+| The same, a reply with a mod TRIF didn't see being written (it finished while the app was in the background: never offered by itself; the banner stays until closed, and Open chat opens the chat at the mod, its **Add to TRIF** in view) (added 11-18) | **{Service} replied about {site}** · **Open chat** (gone after 8 s) | **{Service} replied with a mod for {site}** / **{Service} replied with {n} mods for {site}** · **Open chat** · **Go to {site}** |
 | The banner's ✕ (VoiceOver) | — | **Close** |
 | The banner's words (VoiceOver; Tim 11-18: a tap anywhere on the banner, outside its buttons, opens the chat) | — | hint **Opens the chat** (the chats' list rows' hint), read as a button |
 | The chat's top bar, under the Claude · ChatGPT · More switch | — | **← {site}** (VoiceOver: **Go to {site}**) |
@@ -773,3 +774,18 @@ A red pill (red text, a red outline, a ›) instead of Working; its tap goes whe
 Not changed (my call, for Tim to overrule): the strip's header (**Check it, then tap Send in Claude**) already names
 the service and an SE has no room for more on its one line; the chat's top bar is the Claude · ChatGPT · More switch,
 and More's panel already shows the engine and model on its own line over the box (**OpenRouter · Claude Sonnet 5.5**).
+
+## The chat's "From TRIF: page & guide" pill (11-18, a proposal only: nothing changed)
+
+Tim asked (his x.com screenshot, 11-18) what the green pill is next to the picture. The pill is TRIF's file
+**TRIF instruction.txt**, attached to the message: how TRIF mods are written (the guide) and an outline of the page
+(each part of it with a CSS selector). The picture under it is the screenshot of the tab (**TRIF screenshot.jpg**,
+shown by ChatGPT as its picture; on Claude as the pill **From TRIF: screenshot**). The text that came with them in his
+screenshot ("I'm looking at https://m.youtube.com/…") wasn't from that fill at all: it was an old TRIF fill for
+YouTube that chatgpt.com had kept as its draft and put back (fixed 11-18: TRIF takes it out again).
+
+| Where | Now | Proposed (for Tim to pick or leave) |
+|---|---|---|
+| The pill for TRIF instruction.txt | **From TRIF: page & guide** | A: **From TRIF: this page & how mods work** · B: **From TRIF: page outline & mod guide** · C: keep |
+| The pill for TRIF follow-up.txt (a conversation that has the guide) | **From TRIF: the page now** | keep (or with A: **From TRIF: this page now**) |
+

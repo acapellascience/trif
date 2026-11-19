@@ -41,8 +41,8 @@ final class Diagnostics {
         // (a few seconds in: asked at once, WebKit's store answers 0 before it has read its file)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
-            await Diagnostics.shared.cookieCensus("just after launch")
-            await CookieKeeper.shared.names("just after launch")
+            await Diagnostics.shared.cookieCensus("just after launch", full: true)
+            await CookieKeeper.shared.names("just after launch", full: true)
         }
         CookieKeeper.shared.start()
         // (going to the background: a few seconds held, so WebKit can write down what the pages stored, and the count)
@@ -76,7 +76,11 @@ final class Diagnostics {
 
     /// How many cookies each site has in the app's one store (the tabs' and the chat's), and how many of them last
     /// only while the app runs (a sign-in kept in those ends with the app, by design).
-    func cookieCensus(_ when: String) async {
+    /// (11-18, Tim's diagnostics were mostly these lines, unchanged on every trip to the background: `full` (launch)
+    /// says every site; otherwise only the sites whose counts changed since the last line, and nothing when none did.)
+    /// Whether it said anything.
+    @discardableResult
+    func cookieCensus(_ when: String, full: Bool = false) async -> Bool {
         let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
         var count: [String: Int] = [:], session: [String: Int] = [:]
         for c in cookies {
@@ -84,8 +88,35 @@ final class Diagnostics {
             count[site, default: 0] += 1
             if c.isSessionOnly { session[site, default: 0] += 1 }
         }
-        let list = count.sorted { $0.value > $1.value }.prefix(25).map { "\($0.key) \($0.value)\(session[$0.key].map { " (\($0) for this run only)" } ?? "")" }
-        log("cookies", "\(when): \(cookies.count) cookies\(list.isEmpty ? "" : ": " + list.joined(separator: ", "))")
+        let said = { (site: String) in "\(site) \(count[site] ?? 0)\(session[site].map { " (\($0) for this run only)" } ?? "")" }
+        let now = Dictionary(uniqueKeysWithValues: count.keys.map { ($0, said($0)) })
+        defer { censusLast = now }
+        guard !full, let before = censusLast else {
+            let list = count.sorted { $0.value > $1.value }.prefix(25).map { said($0.key) }
+            log("cookies", "\(when): \(cookies.count) cookies\(list.isEmpty ? "" : ": " + list.joined(separator: ", "))")
+            cookiesChanged()
+            return true
+        }
+        var changed = now.filter { before[$0.key] != $0.value }.sorted { $0.key < $1.key }.map { before[$0.key] == nil ? "\($0.value) (new)" : $0.value }
+        changed += before.keys.filter { now[$0] == nil }.sorted().map { "\($0) none" }
+        if changed.isEmpty { return false }
+        log("cookies", "\(when): \(cookies.count) cookies; changed: \(changed.prefix(25).joined(separator: ", "))")
+        cookiesChanged()
+        return true
+    }
+    /// (each site's last count, as said; when a cookie line last said something new; the last "unchanged" line)
+    private var censusLast: [String: String]?
+    private var cookiesSaidAt = Date()
+    private var quietSaidAt: Date?
+    func cookiesChanged() { cookiesSaidAt = Date(); quietSaidAt = nil }
+    /// Nothing new in the cookie lines: one short line at most every 30 minutes, so a sign-in cookie's going is still
+    /// placed in time.
+    func cookiesQuiet() {
+        if let q = quietSaidAt, Date().timeIntervalSince(q) < 30 * 60 { return }
+        quietSaidAt = Date()
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        log("cookies", "unchanged since \(f.string(from: cookiesSaidAt)) (the counts, and x.com's, twitter.com's and instagram.com's names)")
     }
 
     private var holdTask: UIBackgroundTaskIdentifier = .invalid
@@ -97,8 +128,10 @@ final class Diagnostics {
         }
         CookieKeeper.shared.flush("going to the background")
         Task { @MainActor in
-            await self.cookieCensus("going to the background")
-            await CookieKeeper.shared.names("going to the background")
+            // (only what changed since the last lines: counts, then names; both quiet → at most one short line)
+            let counts = await self.cookieCensus("going to the background")
+            let names = await CookieKeeper.shared.names("going to the background")
+            if !counts && !names { self.cookiesQuiet() }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             self.endHold()
         }
@@ -367,17 +400,33 @@ final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
     private func snapshot() async -> [HTTPCookie] { await store.allCookies().filter(CookieKeeper.watched) }
 
     /// The watched sites' cookies by name, domain and expiry (never a value), for the diagnostics.
-    func names(_ when: String) async {
+    /// `full` (launch): every site's line; otherwise only a site whose names changed since its last line (Tim, 11-18:
+    /// three unchanged lines on every trip to the background buried the rest).
+    @discardableResult
+    func names(_ when: String, full: Bool = false) async -> Bool {
         let list = await snapshot()
         remember(list)
         let bySite = Dictionary(grouping: list) { Site.of($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }
+        var lines: [String: String] = [:]
+        for site in bySite.keys { lines[site] = bySite[site]!.sorted { $0.name < $1.name }.map { "\($0.name) (\($0.domain), \(CookieKeeper.when($0)))" }.joined(separator: ", ") }
+        defer { namesLast = lines }
+        let before = full ? nil : namesLast
+        var said = false
         // (a line a site: the log keeps 1500 characters a line)
-        if bySite.isEmpty { Diagnostics.shared.log("cookie names", "\(when): none for x.com, twitter.com, instagram.com") }
-        for site in bySite.keys.sorted() {
-            let names = bySite[site]!.sorted { $0.name < $1.name }.map { "\($0.name) (\($0.domain), \(CookieKeeper.when($0)))" }
-            Diagnostics.shared.log("cookie names", "\(when), \(site): \(names.joined(separator: ", "))")
+        if bySite.isEmpty, before == nil || before?.isEmpty == false { Diagnostics.shared.log("cookie names", "\(when): none for x.com, twitter.com, instagram.com"); said = true }
+        for site in lines.keys.sorted() where before?[site] != lines[site] {
+            Diagnostics.shared.log("cookie names", "\(when), \(site): \(lines[site]!)")
+            said = true
         }
+        for site in (before ?? [:]).keys.sorted() where lines[site] == nil && !bySite.isEmpty {
+            Diagnostics.shared.log("cookie names", "\(when), \(site): none now")
+            said = true
+        }
+        if said { Diagnostics.shared.cookiesChanged() }
+        return said
     }
+    /// (each watched site's names as last said)
+    private var namesLast: [String: String]?
 
     /// The first page load of a launch: the names then too.
     func firstPageLoaded() {

@@ -88,18 +88,22 @@
    *  aria-hidden, or named for line numbers, hidden for the moment of reading). */
   function viewerCode(root) {
     const blocks = [...root.querySelectorAll('pre, code, [class*="code" i], [data-testid*="code" i]')].filter((n) => !n.parentElement.closest('pre, code'));
-    const texts = [];
-    for (const b of blocks.length ? blocks : [root]) {
-      const nums = [...b.querySelectorAll('*')].filter((n) => /line-?num|linenumber|gutter/i.test(`${n.className && n.className.baseVal !== undefined ? n.className.baseVal : n.className} ${n.getAttribute('data-testid') || ''}`)
-        || getComputedStyle(n).userSelect === 'none' || n.getAttribute('aria-hidden') === 'true');
-      const was = nums.map((n) => n.style.display);
-      nums.forEach((n) => { n.style.display = 'none'; });
-      try { texts.push(b.innerText || b.textContent || ''); } finally { nums.forEach((n, i) => { n.style.display = was[i]; }); }
-    }
-    const all = texts.join('\n');
+    const all = (blocks.length ? blocks : [root]).map(codeText).join('\n');
     const a = all.search(/^.*==WebMod==/m), z = all.search(/==\/WebMod==/);
     if (a === -1 || z === -1) return null;
     return all.slice(all.lastIndexOf('\n', a) + 1);
+  }
+  /** A code element's text as a person would select it: without line numbers (elements a person can't select,
+   *  aria-hidden, or named for line numbers, hidden for the moment of reading). (11-18: claude.ai's code blocks are now
+   *  pre.code-block__code > code.language-js with a code inside it, react-syntax-highlighter's shape, whose line
+   *  numbers, when shown, are spans in a code of their own or at each line's start) */
+  function codeText(b) {
+    const nums = [...b.querySelectorAll('*')].filter((n) => /line-?num|linenumber|gutter/i.test(`${n.className && n.className.baseVal !== undefined ? n.className.baseVal : n.className} ${n.getAttribute('data-testid') || ''}`)
+      || getComputedStyle(n).userSelect === 'none' || n.getAttribute('aria-hidden') === 'true');
+    const was = nums.map((n) => n.style.getPropertyValue('display'));
+    const pri = nums.map((n) => n.style.getPropertyPriority('display'));
+    nums.forEach((n) => { n.style.setProperty('display', 'none', 'important'); });
+    try { return b.innerText || b.textContent || ''; } finally { nums.forEach((n, i) => { if (was[i]) n.style.setProperty('display', was[i], pri[i]); else n.style.removeProperty('display'); }); }
   }
   /** (each viewer once: what it showed, by its text) */
   let viewerSeen = '';
@@ -231,11 +235,18 @@
     settled = true;
     // (no focus held here: each paste focuses the box and blurs it again at once, inBox)
     const said = [];
+    // (TRIF's own page text, by its first line; its attachments by their names: the guard keeps the box to this fill's)
+    const line = text ? trifLine(text) : null;
+    const label = (n) => String(n || '').replace(/\.[^.]*$/, '');
+    const ours = line || (name && OUR_FILE.test(name)) || (png && OUR_FILE.test(picture || 'TRIF screenshot')) || pdf;
+    const g = ours ? guardFill(() => {}) : null;
     if (png) {
       const dt = new DataTransfer();
       const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
       const pic = new File([bytes], picture || 'TRIF screenshot.png', { type: /\.jpe?g$/i.test(picture || '') ? 'image/jpeg' : 'image/png' });
       dt.items.add(pic);
+      const before = new Set(trifTiles(label(pic.name)));
+      if (g) g.put[label(pic.name)] = (g.put[label(pic.name)] || 0) + 1;
       if (inBox(ed, () => paste(ed, dt))) said.push('picture pasted');
       else {
         // (not taken as a paste: given to the page's own picture input, as its picker would)
@@ -246,6 +257,7 @@
         } else said.push('picture not taken (no input for pictures)');
       }
       await wait(300);
+      if (g) await markTiles(g, label(pic.name), before, 2000);
     }
     if (pdf) {
       // (the whole page, after the screenshot of the screen, on its own as the picture is)
@@ -253,6 +265,7 @@
       const bytes = Uint8Array.from(atob(pdf), (c) => c.charCodeAt(0));
       dt.items.add(new File([bytes], 'TRIF full page.pdf', { type: 'application/pdf' }));
       pdfPastedAt = Date.now();
+      if (g) g.put['TRIF full page'] = (g.put['TRIF full page'] || 0) + 1;
       const box = editor() || ed;
       said.push(inBox(box, () => paste(box, dt)) ? 'PDF pasted' : 'PDF not taken');
       await wait(300);
@@ -266,6 +279,8 @@
       // input comes second, given the file as a person picking it would (its files, then its change event), then the
       // file dropped on the box as a drag would, then one more paste)
       const label = name.replace(/\.[^.]*$/, '');
+      const tilesBefore = new Set(trifTiles(label));
+      const attached = () => { if (g) { g.put[label] = (g.put[label] || 0) + 1; if (line) g.line = null; for (const t of trifTiles(label)) if (!tilesBefore.has(t)) t.setAttribute('data-trif-fill', String(g.id)); } };
       for (const how of ['paste', 'file input', 'drop', 'paste']) {
         const before = tiles(label);
         const dt = new DataTransfer();
@@ -289,17 +304,26 @@
         // looked for 2.5 s; a paste the page cancelled with neither seen counts as taken, as before)
         const snippet = text.slice(0, 60);
         for (let i = 0; i < 25 && tiles(label) <= before && !composerText().includes(snippet); i++) await wait(100);
-        if (tiles(label) > before) { said.push(`text attached (${how})`); return said.join(', '); }
-        if (how === 'paste' && took && !composerText().includes(snippet)) { said.push('text attached (paste, no tile seen)'); return said.join(', '); }
-        // (the page took the paste as text after all: that text out again before the next try)
-        if (composerText().includes(text.slice(0, 60))) { await clearTrif(); said.push(`${how}: went in as text, taken out`); }
+        if (tiles(label) > before) { attached(); said.push(`text attached (${how})`); return said.join(', '); }
+        if (how === 'paste' && took && !composerText().includes(snippet)) { attached(); said.push('text attached (paste, no tile seen)'); return said.join(', '); }
+        // (the page took the paste as text after all: that text out again before the next try (only it: the person's
+        // own words stay))
+        if (composerText().includes(text.slice(0, 60))) { if (line) await dropText((b) => b.line === line); else await clearTrif(); said.push(`${how}: went in as text, taken out`); }
         else said.push(`${how}: file not taken`);
         await wait(300);
       }
       said.push('so as text');
     }
     if (text) {
-      const box = editor() || ed;
+      if (g && line) { g.line = line; g.text = text; }
+      typeText(editor() || ed, text, said);
+    }
+    return said.join(', ') || 'nothing';
+  }
+  /** Text into the box after what's there (a blank line between), as a paste, else typed. */
+  function typeText(box, text, said) {
+    if (!box) return;
+    {
       // (text already in the box (the page's details typed in where the page takes no file, as ChatGPT's): this goes
       // after it, a blank line between, never run into its start: 11-18, the quick ask's "thanks a lot" went in
       // before "I'm looking at…" with no space on the ChatGPT stand-in, the caret at the box's start)
@@ -328,7 +352,6 @@
         }
       }
     }
-    return said.join(', ') || 'nothing';
   }
 
   /** (BUTTON path) Under each finished mod file in a code block, an Add to TRIF button (once): the person's tap hands it over. */
@@ -528,7 +551,7 @@
    *  textContent runs them together); from the mod's header on. */
   function blockText(el) {
     const lines = el.querySelectorAll('.cm-line');
-    let t = lines.length ? [...lines].map((l) => l.textContent || '').join('\n') : ((el.querySelector('code') || el).innerText || '');
+    let t = lines.length ? [...lines].map((l) => l.textContent || '').join('\n') : codeText(el.querySelector('code') || el);
     const a = t.search(/^.*==WebMod==/m);
     if (a > 0) t = t.slice(t.lastIndexOf('\n', a) + 1);
     return t;
@@ -666,16 +689,22 @@
     }
     track(w);
     last = { seen: w.seen, live: w.live, convo: w.convo, at: Date.now() };
-    const mods = autoPickup(w, why);
-    // (code in the reply but no mod read from it: said, with what there was, for the diagnostics)
-    if (!mods.length) {
+    const { mods, notOffered } = autoPickup(w, why);
+    // (mods in replies after the person's message that TRIF didn't see being written (the app was in the background,
+    // 11-18: "held from reuters.com…: 2 in replies not seen arriving"): never offered by themselves, but their Add to
+    // TRIF is there, and the app's done banner says so and opens the chat at the first of them)
+    const anchor = w.mode === 'send' ? sentMessage(w) : latestUser();
+    const waiting = anchor ? notOffered.filter((b) => b.reply && (anchor.compareDocumentPosition(b.pre) & Node.DOCUMENT_POSITION_FOLLOWING)).length : 0;
+    // (code in the reply but no mod read from it, and none held (the held line says why those weren't): said, with
+    // what there was, for the diagnostics)
+    if (!mods.length && !notOffered.length) {
       const all = document.querySelectorAll(REPLY);
       const r = all[all.length - 1];
       const blocks = r ? r.querySelectorAll(`${CODE_BLOCKS}, code`).length : 0;
       const header = !!r && /==WebMod==/.test(r.textContent || '');
       if (blocks || header) post({ type: 'nopickup', blocks, header, kinds: r ? [...new Set([...r.querySelectorAll(`${CODE_BLOCKS}, code`)].map((n) => n.localName + (n.className && typeof n.className === 'string' ? '.' + n.className.split(/\s+/)[0] : '')))].slice(0, 5).join(' ') : '', path: location.pathname.replace(/[^/]{20,}/g, '…') });
     }
-    post({ type: 'done', why, mods, stop: w.saw, replies: w.live.size });
+    post({ type: 'done', why, mods, stop: w.saw, replies: w.live.size, waiting });
   }
   /** The person's latest message (after a reload, resume: a reply still being written comes after it). */
   function latestUser() {
@@ -696,7 +725,7 @@
     }
     for (const b of all) w.seen.add(b.raw);
     held(w, why, notOffered);
-    return [...byKey.values()];
+    return { mods: [...byKey.values()], notOffered };
   }
   /** Mod files on the page that weren't offered, and why (for the diagnostics' "chat offers" lines): outside the
    *  assistant's replies (the person's own, the message box), or in a reply TRIF didn't see arrive (history). */
@@ -725,7 +754,7 @@
     lateSig = '';
     const byKey = new Map();
     for (const b of fresh) { byKey.set(b.key, b); last.seen.add(b.raw); }
-    post({ type: 'done', why: 'late', mods: [...byKey.values()].map((b) => (b.pre.querySelector('code') || b.pre).innerText || b.raw), stop: false });
+    post({ type: 'done', why: 'late', mods: [...byKey.values()].map((b) => b.text()), stop: false });
   }
 
   /** Whether this conversation already has TRIF's instructions in it (sent before, outside the message box). */
@@ -734,46 +763,191 @@
     const box = composerBox();
     return count(document.body ? document.body.textContent || '' : '') > count(box ? box.textContent || '' : '');
   }
-  /** For the app: is there a message box, is anything in it, does the chat have TRIF's instructions, is it replying. */
+  /** For the app: is there a message box, is anything in it, does the chat have TRIF's instructions, is it replying;
+   *  and the pages TRIF's own text in the box is about (`pages`: their addresses), and whether the person's own words
+   *  or files are there too (`others`). */
   function state() {
     const c = composer();
     const ours = trifInBox(c);
     const v = viewer();
-    return JSON.stringify({ editor: !!editor(), usable: !!usableEditor(), viewer: v ? v.why : null, has: !!(c.text || c.names.length), trif: ours.count, others: ours.others, context: hasContext(), working: replying() || !!watch, replying: replying() });
+    return JSON.stringify({ editor: !!editor(), usable: !!usableEditor(), viewer: v ? v.why : null, has: !!(c.text || c.names.length), trif: ours.count, others: ours.others, pages: ours.pages, context: hasContext(), working: replying() || !!watch, replying: replying() });
   }
 
   // ---- what TRIF put in the message box (11-16: the page went in twice after leaving the chat and coming back) ----
+  // (11-18, Tim's iPhone: chatgpt.com keeps an unsent message as a draft, one for the whole site, and put an old TRIF
+  // fill for a YouTube page back into the box of a chat opened on x.com, beside x.com's own attachments. So TRIF's text
+  // is found wherever it is in the box (each fill's text starts with its own first line and, since 11-18, ends with
+  // OUR_END), taken out as a block, and the person's own words around it are kept)
   const OUR_FILE = /TRIF (instruction|follow-up|screenshot|full page)/;
-  const OUR_TEXT = /^(I'm looking at \S+ in TRIF, an app|Here's .{1,300} in TRIF now:)/;
-  /** How many of TRIF's things are in the box (its files' tiles, its text typed in), and whether anything else is. */
+  const OUR_HEAD = /(^|\n)[ \t]*((?:\(This is a different site: [^\n]*\)\s*)?(?:I'm looking at (\S+) in TRIF\b|Here's (\S+) in TRIF now:))/g;
+  const OUR_END = '--- End of what TRIF sent ---';
+  /** The message box's text as lines (a paragraph or line break a "\n"), with where each piece of it is in the page. */
+  function boxModel(ed = editor()) {
+    if (!ed) return { s: '', parts: [] };
+    if (ed.localName === 'textarea') return { s: ed.value, parts: null, ed };
+    const parts = [];
+    let s = '';
+    const walk = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (n.nodeType === 1) { if (/^(p|div|pre|li|h[1-6]|blockquote|br)$/.test(n.localName) && s && !s.endsWith('\n')) s += '\n'; continue; }
+      parts.push({ node: n, at: s.length });
+      s += n.data;
+    }
+    return { s, parts, ed };
+  }
+  /** TRIF's text blocks in the box: [{start, end, line: its first line, page: the address it names, ended: OUR_END
+   *  found}]. Without OUR_END (a fill from before 11-18) a block runs to the next one or the box's end. */
+  function trifBlocks(m = boxModel()) {
+    const heads = [];
+    const re = new RegExp(OUR_HEAD.source, 'g');
+    for (let x = re.exec(m.s); x; x = re.exec(m.s)) {
+      const at = x.index + x[0].length - x[2].length;
+      heads.push({ at, page: (x[3] || x[4] || '').replace(/[.,;:)]+$/, '') });
+      if (re.lastIndex === x.index) re.lastIndex++;
+    }
+    return heads.map((h, i) => {
+      const next = i + 1 < heads.length ? heads[i + 1].at : m.s.length;
+      const e = m.s.indexOf(OUR_END, h.at);
+      const ended = e !== -1 && e < next;
+      const nl = m.s.indexOf('\n', h.at);
+      return { start: h.at, end: ended ? e + OUR_END.length : next, line: m.s.slice(h.at, nl === -1 ? undefined : nl).slice(0, 300), page: h.page, ended };
+    });
+  }
+  /** The first line of TRIF's text in a fill's text (null: not TRIF's page text, a quick ask's request say). */
+  function trifLine(text) {
+    const b = trifBlocks({ s: String(text || '') })[0];
+    return b ? b.line : null;
+  }
+  /** How many of TRIF's things are in the box (its files' tiles, its text blocks), the pages its text is about, and
+   *  whether anything else is (another file, or words outside TRIF's text). */
   function trifInBox(c = composer()) {
     const mine = c.names.filter((n) => OUR_FILE.test(n)).length;
-    const text = OUR_TEXT.test(c.text);
-    return { count: mine + (text ? 1 : 0), others: c.names.length - mine > 0 || (!!c.text && !text) };
+    const m = boxModel();
+    const blocks = trifBlocks(m);
+    let rest = m.s;
+    for (const b of [...blocks].reverse()) rest = rest.slice(0, b.start) + rest.slice(b.end);
+    return { count: mine + blocks.length, others: c.names.length - mine > 0 || !!rest.trim(), pages: blocks.map((b) => b.page) };
   }
-  /** Takes TRIF's things out of the box, as the person would: each tile's own remove button; TRIF's typed text
-   *  cleared only when the box holds nothing else. Returns how many are left. */
-  async function clearTrif() {
+  /** A DOM position for a place in boxModel's text. */
+  function placeOf(m, i) {
+    for (let k = m.parts.length - 1; k >= 0; k--) if (m.parts[k].at <= i) return { node: m.parts[k].node, offset: Math.min(i - m.parts[k].at, m.parts[k].node.data.length) };
+    return m.parts.length ? { node: m.parts[0].node, offset: 0 } : null;
+  }
+  /** One of TRIF's text blocks out of the box, as the person would delete it (with the blank lines it leaves); the box
+   *  emptied when nothing but space is left. */
+  function dropBlock(m, b) {
+    const ed = m.ed;
+    let { start, end } = b;
+    while (end < m.s.length && /\s/.test(m.s[end])) end++;
+    if (end >= m.s.length) while (start > 0 && /\s/.test(m.s[start - 1])) start--;
+    const rest = m.s.slice(0, start) + m.s.slice(end);
+    inBox(ed, () => {
+      if (!m.parts) { ed.value = rest; ed.dispatchEvent(new Event('input', { bubbles: true })); return; }
+      if (!rest.trim()) { document.execCommand('selectAll'); document.execCommand('delete'); return; }
+      const a = placeOf(m, start), z = placeOf(m, end);
+      if (!a || !z) return;
+      const r = document.createRange();
+      r.setStart(a.node, a.offset);
+      r.setEnd(z.node, z.offset);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      document.execCommand('delete');
+    });
+  }
+  /** TRIF's text blocks for which `which(block)` says so out of the box (looked at again after each: the page may
+   *  draw its box again). The pages they named. */
+  async function dropText(which) {
+    const gone = [];
+    for (let i = 0; i < 6; i++) {
+      const m = boxModel();
+      const b = trifBlocks(m).find(which);
+      if (!b || !m.ed) break;
+      dropBlock(m, b);
+      gone.push(b.page);
+      await wait(60);
+    }
+    return gone;
+  }
+  /** TRIF's things in the box: its tiles, each with its own remove button. */
+  function trifTiles(label) {
     const box = composerBox();
-    if (!box) return 0;
-    for (const t of [...box.querySelectorAll(TILES)].filter((x) => !x.querySelector(TILES))) {
-      const label = `${t.textContent || ''} ${t.getAttribute('data-trif-chip') || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
-      if (!OUR_FILE.test(label)) continue;
-      const buttons = [...t.querySelectorAll('button')];
-      const x = buttons.find((b) => /remove|delete|close/i.test(`${b.getAttribute('aria-label') || ''} ${b.title || ''}`)) || buttons[buttons.length - 1];
-      if (x) { x.click(); await wait(150); }
-    }
-    const c = composer();
-    if (OUR_TEXT.test(c.text) && !c.names.some((n) => !OUR_FILE.test(n))) {
-      const ed = editor();
-      if (ed) {
-        inBox(ed, () => {
-          if (ed.localName === 'textarea') { ed.value = ''; ed.dispatchEvent(new Event('input', { bubbles: true })); }
-          else { document.execCommand('selectAll'); document.execCommand('delete'); }
-        });
-      }
-    }
+    if (!box) return [];
+    return [...box.querySelectorAll(TILES)].filter((x) => !x.querySelector(TILES)).filter((t) => {
+      const l = `${t.textContent || ''} ${t.getAttribute('data-trif-chip') || ''} ${[...t.querySelectorAll('img[alt], [aria-label]')].map((i) => i.alt || i.getAttribute('aria-label')).join(' ')}`;
+      return label ? l.includes(label) : OUR_FILE.test(l);
+    });
+  }
+  async function dropTile(t) {
+    const buttons = [...t.querySelectorAll('button')];
+    const x = buttons.find((b) => /remove|delete|close/i.test(`${b.getAttribute('aria-label') || ''} ${b.title || ''}`)) || buttons[buttons.length - 1];
+    if (x) { x.click(); await wait(150); }
+  }
+  /** Takes TRIF's earlier things out of the box, as the person would: each tile's own remove button, and each of
+   *  TRIF's text blocks (the person's own words around them stay). Returns how many are left. */
+  async function clearTrif() {
+    if (!composerBox()) return 0;
+    for (const t of trifTiles()) await dropTile(t);
+    await dropText(() => true);
     return trifInBox().count;
+  }
+
+  // ---- the fill's guard (11-18): a page that puts its saved draft back after TRIF has started filling (chatgpt.com
+  // restores its draft when its box is ready, which can be after TRIF looked) is watched for 8 s after the fill's last
+  // piece: TRIF's text for another page (or any of TRIF's text, when this fill's went in as a file) is taken out again,
+  // and so is a second tile of what TRIF attached once. If that took this fill's own typed text with it, it's typed
+  // again once. Each time: a "fillguard" message (the app's diagnostics). Ends at a send.
+  let guard = null;
+  let fillN = 0;
+  function guardFill(set) {
+    if (!guard) {
+      const g = { id: ++fillN, line: undefined, text: '', put: {}, until: 0, mo: null, timer: 0, queued: false, retyped: false };
+      g.mo = new MutationObserver(() => { if (!g.queued) { g.queued = true; setTimeout(() => { g.queued = false; guardCheck(g); }, 150); } });
+      g.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      guard = g;
+    }
+    set(guard);
+    guard.until = Date.now() + 8000;
+    clearTimeout(guard.timer);
+    const g = guard;
+    g.timer = setTimeout(() => guardCheck(g), 8100);
+    return guard;
+  }
+  function guardEnd(g) { if (guard === g) { g.mo.disconnect(); clearTimeout(g.timer); guard = null; } }
+  async function guardCheck(g) {
+    if (guard !== g || g.busy) return;
+    if (Date.now() > g.until || sending || watch) { guardEnd(g); return; }
+    g.busy = true;
+    try {
+      const gone = [];
+      // (text: only when this fill had TRIF's page text; line null = it went in as a file, so any of TRIF's text is old)
+      if (g.line !== undefined) {
+        const pages = await dropText((b) => g.line === null || b.line !== g.line);
+        for (const p of pages) gone.push(`TRIF's text for ${hostOf(p)}`);
+        // (a page that swapped its whole box for its draft took this fill's own text too: typed again, once)
+        if (pages.length && g.line && !g.retyped && !trifBlocks().some((b) => b.line === g.line)) {
+          g.retyped = true;
+          typeText(editor(), g.text, []);
+          gone.push('this fill\'s own text typed again');
+        }
+      }
+      for (const [label, n] of Object.entries(g.put)) {
+        const list = trifTiles(label);
+        if (list.length <= n) continue;
+        const extra = [...list.filter((t) => t.getAttribute('data-trif-fill') !== String(g.id)), ...list].slice(0, list.length - n);
+        for (const t of new Set(extra)) { await dropTile(t); gone.push(`a second ${label}`); }
+      }
+      if (gone.length) post({ type: 'fillguard', gone });
+    } finally { g.busy = false; }
+  }
+  const hostOf = (u) => { try { return new URL(u).host || u; } catch (e) { return String(u || '').slice(0, 60); } };
+  /** Marks the tiles of `label` that weren't there before as this fill's (looked for up to `ms`). */
+  async function markTiles(g, label, before, ms) {
+    for (let i = 0; i <= ms / 100; i++) {
+      const fresh = trifTiles(label).filter((t) => !before.has(t));
+      if (fresh.length) { for (const t of fresh) t.setAttribute('data-trif-fill', String(g.id)); return; }
+      if (i < ms / 100) await wait(100);
+    }
   }
   // ---- quick ask (Tim, 11-18): the request in the box, the person's own Send ------------------------------------
   // TRIF never sends here (Claude's and ChatGPT's terms): no click, no Enter, no submit. The person taps the site's own
@@ -917,9 +1091,15 @@
     return 'watching';
   }
   /** Opened at the reply: the person's last message at the top, the reply under it. */
-  function showReply() {
+  /** `toMod`: at the first mod after it instead (its Add to TRIF in view: a reply TRIF didn't see arrive). */
+  function showReply(toMod) {
     const users = document.querySelectorAll(USER);
     const lastUser = users[users.length - 1];
+    if (toMod) {
+      mark();
+      const b = modBlocks().find((x) => x.reply && (!lastUser || (lastUser.compareDocumentPosition(x.pre) & Node.DOCUMENT_POSITION_FOLLOWING)));
+      if (b) { (b.pre.nextElementSibling && b.pre.nextElementSibling.classList.contains('trif-add') ? b.pre.nextElementSibling : b.pre).scrollIntoView({ block: 'center' }); return 'shown at its mod'; }
+    }
     if (lastUser) lastUser.scrollIntoView({ block: 'start' });
     return lastUser ? 'shown' : 'no message';
   }

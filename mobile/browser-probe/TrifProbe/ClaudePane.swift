@@ -91,6 +91,8 @@ final class ChatView: Identifiable {
     var fillGeneration = 0
     var lastPrepared: ClaudePane.Prepared?
     var refill: ClaudePane.Prepared?
+    /// Mods in the last reply that TRIF didn't see being written (chat.js done's `waiting`): the chat opens at them.
+    var waitingMods = 0
     var workingSince = Date.distantPast
     /// The conversation the person sent from (nil: a new chat with no address yet): a reload onto another one while
     /// .working isn't that reply (Tim, 11-18: old chats' code picked up).
@@ -174,7 +176,10 @@ struct ChatBanner: Identifiable, Equatable {
     let service: String
     let site: String
     var mods: [InstalledMod]
-    static func == (a: ChatBanner, b: ChatBanner) -> Bool { a.id == b.id && a.mods.map(\.id) == b.mods.map(\.id) }
+    /// Mods in the reply that TRIF didn't see being written (the app was in the background): not offered by
+    /// themselves; the chat opens at the first, its Add to TRIF in view (11-18).
+    var inChat = 0
+    static func == (a: ChatBanner, b: ChatBanner) -> Bool { a.id == b.id && a.mods.map(\.id) == b.mods.map(\.id) && a.inChat == b.inChat }
 }
 
 @MainActor
@@ -210,9 +215,19 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             more = m
             UserDefaults.standard.set(m, forKey: "chatMore")
             report.log("claude", m ? "switched to More (the side panel's chat)" : "switched back to \(s?.rawValue ?? service.rawValue)")
-            if m { panel.start() } else if shown { showFor(tabSite) }
+            // (back from More to the same service: as a switch to it, shown for this tab and its page filled in if idle;
+            // to the other service, `use` does that, so the old service's chat isn't loaded for nothing first (11-18))
+            if m { panel.start() } else if shown, s == nil || s == service { showSwitched() }
         }
         if let s, !m { use(s) }
+    }
+    /// A switch to a chat (Claude · ChatGPT · More's switch): its chat for the shown tab's site, and, if that chat is
+    /// idle and the tab's, this page's details in its box, as the robot's Go to chat does (Tim, 11-18: fine to fill on
+    /// a switch, but only ever the page in front: fillContext takes out any earlier page's).
+    private func showSwitched() {
+        showFor(tabSite)
+        let v = cur!
+        if shown, v.activity == .idle, v.site == tabSite, let ready = prepare(v) { queue(v) { [weak self] in await self?.fillContext(v, ready) } }
     }
     /// The shown tab changed: the side panel follows it, as on desktop.
     func tabChanged() { if more { panel.pushTab() } }
@@ -575,7 +590,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         Diagnostics.shared.mark("opening the chat: the chat's page")
         queue(v) { [weak self] in
             guard let self else { return }
-            if was == .replied { _ = await self.chatJS(v, "showReply()") }
+            if was == .replied { _ = await self.chatJS(v, "showReply(\(v.waitingMods > 0))"); v.waitingMods = 0 }
             else if let ready { await self.fillContext(v, ready) }
             if let extra { await extra() } // (chat.js fill waits for the message box itself)
         }
@@ -665,6 +680,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private func setLastFill(_ v: ChatView, _ r: FillRecord?) {
         UserDefaults.standard.set(r.flatMap { try? JSONEncoder().encode($0) }, forKey: "lastFill.\(v.service.rawValue).\(v.site)")
     }
+    /// Whether an address TRIF's text in a chat's box names is the tab's page (both without the fragment).
+    nonisolated static func samePage(_ named: String, _ url: URL?) -> Bool {
+        let strip = { (s: String) in String(s.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? "") }
+        guard let url else { return false }
+        return strip(named) == strip(url.absoluteString)
+    }
     /// The tab and its page (its address without the fragment): another tab or another page is a new fill.
     static func pageKey(_ b: Browser) -> String {
         var c = b.webView.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
@@ -742,15 +763,28 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             st = (Browser.parse(await chatJS(v, "state()")) as? [String: Any]) ?? st
             ours = st["trif"] as? Int ?? 0
         }
+        // (Tim, 11-18: chatgpt.com put its draft back, TRIF's unsent fill for a YouTube page, into a chat opened on
+        // x.com, beside x.com's attachments. TRIF's text names its page: one naming another page isn't this fill's,
+        // whatever the record says. Old TRIF things go, this page's go in; the person's own words and files stay;
+        // never two pages' at once)
+        let pages = st["pages"] as? [String] ?? []
+        let otherPage = pages.first { !ClaudePane.samePage($0, browser.webView.url) }
+        let others = st["others"] as? Bool == true
         if ours > 0 {
-            if same { report.log("claude", "\(name): the page is already in the message box, unsent: not again"); return }
-            if st["others"] as? Bool == true { report.log("claude", "\(name): the message box has the person's own things too: left as it is"); return }
+            if same && otherPage == nil { report.log("claude", "\(name): the page is already in the message box, unsent: not again"); return }
             let r = try? await v.webView.callAsyncJavaScript("return globalThis.__trifChat ? await globalThis.__trifChat.clearTrif() : 1;", arguments: [:], in: nil, contentWorld: ClaudePane.chatWorld)
             let left = (r as? NSNumber)?.intValue ?? 1
-            report.log("claude", "\(name): the tab changed since the last fill: the old one taken out\(left > 0 ? " (not all of it: \(left) left, so nothing added)" : "")")
+            let why = otherPage.map { "TRIF's text for \(URL(string: $0)?.host ?? "another page") was in the message box" } ?? "the tab changed since the last fill"
+            report.log("claude", "\(name): \(why): TRIF's earlier things taken out\(others ? ", the person's own kept" : "")\(left > 0 ? " (not all of it: \(left) left, so nothing added)" : "")")
+            if otherPage != nil || left > 0 {
+                Diagnostics.shared.log("chat", "\(name) for \(tabSite): \(why); TRIF's earlier fill taken out\(others ? " (the person's own words kept)" : "")\(left > 0 ? ", but \(left) of its things stayed, so nothing was added" : "")")
+            }
             if left > 0 { return }
         } else if st["has"] as? Bool == true {
-            report.log("claude", "\(name): the message box already has something in it: left as it is"); return
+            // (the person's own words or files: kept, and the page goes in with them, once: a fill recorded for this page
+            // that's no longer there was taken out by the person)
+            if same { report.log("claude", "\(name): the message box has the person's own things, and this page's fill was taken out: not again"); return }
+            report.log("claude", "\(name): the message box has the person's own things: kept, the page added")
         }
         let conv = v.conversation
         if st["context"] as? Bool == true, let conv { noteContext(conv) }
@@ -844,6 +878,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if history > 0 { parts.append("\(history) in replies not seen arriving") }
             let how = "\(d["why"] as? String ?? "?"), \(d["mode"] as? String ?? "?"), \(d["anchored"] as? Bool == true ? "sent message found" : "no sent message found"), \(d["live"] as? Int ?? 0) live"
             Diagnostics.shared.log("chat offers", "held from \(v.site.isEmpty ? "no site" : v.site) at \(d["path"] as? String ?? "?"): \(parts.joined(separator: ", ")) (\(how))")
+        case "fillguard":
+            // (the page put something of TRIF's back after the fill (its saved draft): taken out again by chat.js)
+            let gone = (d["gone"] as? [String] ?? []).joined(separator: ", ")
+            report.log("claude", "\(name): after the fill, taken out again: \(gone)")
+            Diagnostics.shared.log("chat", "\(name) for \(v.site.isEmpty ? "no site" : v.site): the page put back an earlier fill after TRIF's (its saved draft): taken out again: \(gone)")
         case "nopickup":
             // (a reply with code in it, and no mod read from it: what there was, for the next report)
             let what = "\(name)'s reply at \(d["path"] as? String ?? "?") had \(d["blocks"] as? Int ?? 0) code block(s)\(d["header"] as? Bool == true ? " and a mod's header" : ""), and no mod was read from it (\(d["kinds"] as? String ?? "?"))"
@@ -928,7 +967,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             }
             v.activity = !offered.isEmpty || looking ? .idle : .replied
             self.updateLink(v) { $0.state = looking ? .read : .waiting }
-            if !looking && (hold || offered.isEmpty) { self.banner(v, hold ? offered : []) }
+            // (mods in the reply TRIF didn't see being written: the banner says so, and the chat opens at them)
+            let inChat = texts.isEmpty ? d["waiting"] as? Int ?? 0 : 0
+            v.waitingMods = looking ? 0 : inChat
+            if inChat > 0 { Diagnostics.shared.log("chat offers", "\(v.service.rawValue) for \(v.site.isEmpty ? "no site" : v.site): \(inChat) mod(s) in the reply, not seen being written: left in the chat for its Add to TRIF\(looking ? "" : ", the done banner says so")") }
+            if !looking && (hold || offered.isEmpty) { self.banner(v, hold ? offered : [], inChat: inChat) }
             self.endBackgroundIfIdle()
         }
     }
@@ -992,11 +1035,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         links[i].state = .added
         saveLinks()
     }
-    private func banner(_ v: ChatView, _ mods: [InstalledMod]) {
+    private func banner(_ v: ChatView, _ mods: [InstalledMod], inChat: Int = 0) {
         let key = ClaudePane.linkKey(v.service.rawValue, v.site)
         // (one per chat: a later reply's joins it, mods and all)
-        if let i = banners.firstIndex(where: { $0.link == key }) { banners[i].mods += mods; return }
-        banners.append(ChatBanner(link: key, service: v.service.rawValue, site: v.site, mods: mods))
+        if let i = banners.firstIndex(where: { $0.link == key }) { banners[i].mods += mods; banners[i].inChat += inChat; return }
+        var b = ChatBanner(link: key, service: v.service.rawValue, site: v.site, mods: mods)
+        b.inChat = inChat
+        banners.append(b)
         Diagnostics.shared.log("chats", "done banner for \(v.site.isEmpty ? "no site" : v.site): \(mods.isEmpty ? "a reply" : "\(mods.count) mod(s) held for it")")
     }
     /// The banner's ✕ (or swiped up): its mods dismissed, as a sheet swiped away is.
@@ -1080,7 +1125,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             go(v, u)
         }
         shown = true
-        if v.activity == .replied { v.activity = .idle; queue(v) { [weak self] in _ = await self?.chatJS(v, "showReply()") } }
+        if v.activity == .replied { v.activity = .idle; let toMod = v.waitingMods > 0; v.waitingMods = 0; queue(v) { [weak self] in _ = await self?.chatJS(v, "showReply(\(toMod))") } }
         seen(v)
         report.log("claude", "\(s.rawValue): the chat for \(l.site) opened from its link")
     }
@@ -1636,9 +1681,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         service = s
         UserDefaults.standard.set(s.rawValue, forKey: "chatService")
         report.log("claude", "switched to \(s.rawValue)")
-        showFor(tabSite)
-        let v = cur!
-        if shown, v.activity == .idle, let ready = prepare(v) { queue(v) { [weak self] in await self?.fillContext(v, ready) } }
+        showSwitched()
     }
 
     /// Where a chat went, without what the address carries after ? (sign-in steps put secrets there).
@@ -1981,6 +2024,9 @@ struct ChatBannerView: View {
         let s = banner.site.isEmpty ? "" : " for \(banner.site)"
         if banner.mods.count == 1 { return "\(banner.service) made a mod\(s)" }
         if banner.mods.count > 1 { return "\(banner.service) made \(banner.mods.count) mods\(s)" }
+        // (draft, 11-18: mods TRIF didn't see being written, to add from the chat)
+        if banner.inChat == 1 { return "\(banner.service) replied with a mod\(s)" }
+        if banner.inChat > 1 { return "\(banner.service) replied with \(banner.inChat) mods\(s)" }
         return banner.site.isEmpty ? "\(banner.service) replied" : "\(banner.service) replied about \(banner.site)"
     }
 

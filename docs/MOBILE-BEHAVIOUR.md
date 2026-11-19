@@ -140,6 +140,10 @@ change there is a change on both phones. Change this file whenever a rule change
   own site's tab with nothing over it, Add this mod? comes up at once instead.
 - A tap anywhere on the banner outside its buttons = Open chat (11-18); a mod banner stays over the chat, still
   holding its mods. A plain banner goes after 8 s.
+- A reply whose mods TRIF didn't see being written (it finished while the app was in the background, the page
+  suspended) is never offered by itself (fail closed, as old chats), but its done banner says "{Service} replied with
+  a mod for {site}", stays until closed, and Open chat opens the chat at the first such mod, its Add to TRIF in view
+  (11-18, Tim's reuters.com replies).
 - Go to {site}: the tab sent from while it's open and on that site; else a new tab at its page if that page is on the
   site, else at https://{site}/ (never a tab navigated elsewhere, nothing rewritten); a chat not sent from yet: its
   site's tab as the tab list picks it [shared: tab-list.js goTo].
@@ -150,6 +154,14 @@ change there is a change on both phones. Change this file whenever a rule change
 - No private routes or tokens of claude.ai / chatgpt.com; TRIF reads only what their pages show.
 - The full chat opens with no keyboard (11-18: "the keyboard flies up and it's disorienting"): filling never leaves
   their box focused.
+- Only ever the page in front in the chat's box (11-18, Tim's iPhone: chatgpt.com put back, as its draft, an old TRIF
+  fill for YouTube beside x.com's attachments). TRIF's own text starts with its first line ("I'm looking at {address}
+  in TRIF…" / "Here's {address} in TRIF now:") and ends with "--- End of what TRIF sent ---"; a fill takes out every
+  earlier TRIF tile and TRIF text block (one naming another page is never "already there"), keeps the person's own words
+  and files around them and adds this page's. For 8 s after a fill, what the page puts back (its saved draft) is taken
+  out again: TRIF text for another page, any TRIF text when this fill's went as a file, a second tile of something TRIF
+  attached once; this fill's own text is typed again if the draft replaced it. Switching to Claude or ChatGPT (from
+  More too) is opening that chat: its box filled for the tab's page when the chat is idle and the tab's.
 - Projects: the person makes the project; TRIF copies its instructions and remembers the page.
 
 ## Quick ask
@@ -224,7 +236,10 @@ change there is a change on both phones. Change this file whenever a rule change
   all the audio from the start, if no words came yet.
 - Sound around talking (11-18): as listening starts TRIF pauses what plays; however listening ends, the audio is put
   back exactly as it was and what TRIF paused plays on from its time (never a reload). After a call or Siri it stays
-  paused.
+  paused. One that "plays" with no time going by (two looks: 1.2 s, then 0.6 s), or hangs in a seek, gets steps in
+  turn, each needing time to go by again: a seek to its own time, pause and play, 0.25 s on, 1 s on, then the media
+  element loaded again at its time (never for a blob: source, a player's own stream; never the page). Each step and
+  what worked goes to the diagnostics (11-18, Tim's reuters.com: "still stuck (3.6 → 3.6 s)").
 
 ## Links
 

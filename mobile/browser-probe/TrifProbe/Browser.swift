@@ -1004,6 +1004,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// The page's parts and sizes when it was last sent to the chat, to say afterwards what a mod did.
     private var baseline: (host: String, layout: String)?
 
+    /// The last line of what TRIF puts in a chat's box about a page (agent-facing; chat.js OUR_END, the same words): where
+    /// TRIF's text ends, so an old fill can be taken out of the box and the person's own words around it kept (11-18).
+    static let fillEnd = "--- End of what TRIF sent ---"
+
     /// What the chat gets for this page: how TRIF mods are written, then its outline. Notes its layout.
     func pageForChat(conv: String? = nil, _ sw: Stopwatch? = nil, guideInProject: Bool = false) async -> String? {
         guard let o = await outline() else { return nil }
@@ -1020,6 +1024,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             \(here)
             --- The page: \(page?.absoluteString ?? host) ---
             \(o.text)
+            \(Browser.fillEnd)
             """
             report.log("outline", "\(host): \(o.chars) characters, for a chat in TRIF's project (\(r.count) characters in all, without the guide)")
             return r
@@ -1036,6 +1041,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         \(here)
         --- The page: \(page?.absoluteString ?? host) ---
         \(o.text)
+        \(Browser.fillEnd)
         """
         report.log("outline", "\(host): \(o.chars) characters, about \(o.tokens) tokens, with the request (\(request.count) characters in all)")
         return request
@@ -1143,7 +1149,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         sw?.lap("mods and their errors", "\(on.count) mods")
         text += here.isEmpty ? "\nNo TRIF mods are running on this page, and nothing on it is hidden.\n" : here
         text += "\nI'll say what I want changed. As before: reply with the whole mod file in one code block, nothing to fill in, never as an attached file; to change a mod above, give back its whole file with the same @name. Work from what I've attached; don't open the page in a browser or another tool.\n"
-        text += "\n--- The page now: \(page) ---\n\(o.text)\n"
+        text += "\n--- The page now: \(page) ---\n\(o.text)\n\(Browser.fillEnd)\n"
         report.log("outline", "\(host): the follow-up, \(text.count) characters")
         return text
     }
@@ -1847,8 +1853,8 @@ enum BackgroundPlay {
         """
     /// (TRIF's world) After: what TRIF paused, or what iOS paused as listening started (within 2 s of it), still
     /// paused and not ended (the person or the page didn't play or pause it since), plays on from where it was. Refused
-    /// (autoplay rules): left paused there. Playing but stuck (no time going by in 1.2 s): nudged once, a seek to its
-    /// own time and play. Never reloaded. `count`: only how many there are.
+    /// (autoplay rules): left paused there. Playing but stuck (no time going by in 1.2 s and the 0.6 s after, or still in
+    /// a seek): marked for talkNudge's steps. Never reloaded. `count`: only how many there are. Answers JSON {lines, stuck}.
     static let talkResume = """
         const due = [...document.querySelectorAll('video, audio')].filter((m) => {
           const p = m.__trifPause, mine = m.__trifTalk && m.__trifTalk.at === t0;
@@ -1857,19 +1863,63 @@ enum BackgroundPlay {
         });
         if (count) return String(due.length);
         const out = [], wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        let stuck = 0;
         for (const m of due) {
           delete m.__trifTalk;
           const at = m.currentTime;
           try { await m.play(); } catch (e) { out.push(m.localName + ' left paused at ' + at.toFixed(1) + ' s (' + e.name + ')'); continue; }
+          // (time going by on two looks: a leap and a stop again isn't playing)
           await wait(1200);
-          if (!m.paused && m.currentTime - at < 0.3) {
-            m.currentTime = m.currentTime;
-            try { await m.play(); } catch (e) {}
-            await wait(1200);
-            out.push(m.localName + ' stuck, nudged: ' + (!m.paused && m.currentTime - at >= 0.3 ? 'playing' : 'still stuck') + ' (' + at.toFixed(1) + ' → ' + m.currentTime.toFixed(1) + ' s)');
-          } else out.push(m.localName + ' played on from ' + at.toFixed(1) + ' s' + (m.paused ? ', then paused by the page' : ''));
+          const mid = m.currentTime;
+          await wait(600);
+          if (!m.paused && (mid - at < 0.3 || m.currentTime - mid < 0.2 || m.seeking)) { m.__trifStuck = { at, tried: [], seeking: m.seeking }; stuck++; }
+          else out.push(m.localName + ' played on from ' + at.toFixed(1) + ' s' + (m.paused ? ', then paused by the page' : ''));
         }
-        return out.join('; ');
+        return JSON.stringify({ lines: out, stuck });
+        """
+    /// (TRIF's world) A video or sound still stuck after talking (playing, its time not going by, or a seek that never
+    /// ends: Tim's reuters.com, 11-18, "nudged: still stuck (3.6 → 3.6 s)" with only a seek to its own time; seen in the
+    /// Simulator too, a seek left hanging, `seeking` true for good) gets the next step, each its own call from the app
+    /// (so each play() is the app's, a gesture), and then must show time going by on two looks (1.2 s, then 0.6 s
+    /// more; a jump and a stop again isn't playing): 1 a seek to its own time and play; 2 pause and play; 3 a quarter
+    /// second on and play (past a gap in what it has loaded); 4 a second on; 5 the media element loaded again at its
+    /// time (`load()`: the only one that cleared a hanging seek in the Simulator; never for a player's own stream, a
+    /// blob: source, which load() would cut off). Never the page. Answers JSON {lines, stuck}: a line once one has
+    /// played on, been paused by the page, or tried all.
+    static let talkNudge = """
+        const steps = ['its own time', 'pause and play', '0.25 s on', '1 s on', 'loaded again at its time'];
+        const list = [...document.querySelectorAll('video, audio')].filter((m) => m.__trifStuck);
+        const out = [], wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const from = new Map(), skipped = new Set();
+        for (const m of list) {
+          const end = isFinite(m.duration) ? m.duration - 0.1 : Infinity;
+          const t = m.currentTime;
+          try {
+            if (step === 1) m.currentTime = t;
+            else if (step === 2) m.pause();
+            else if (step === 5) {
+              if (/^blob:/.test(m.currentSrc || m.src || '') || !(m.currentSrc || m.src)) { skipped.add(m); continue; }
+              m.load();
+              m.currentTime = t;
+            } else m.currentTime = Math.min(t + (step === 3 ? 0.25 : 1), end);
+            m.play().catch(() => {});
+          } catch (e) {}
+          from.set(m, step === 5 ? t : m.currentTime); // (after the step's own seek: only time going by counts)
+        }
+        if (from.size) await wait(1200);
+        const mid = new Map([...from.keys()].map((m) => [m, m.currentTime]));
+        if (from.size) await wait(600);
+        let stuck = 0;
+        for (const m of list) {
+          const s = m.__trifStuck, tried = s.tried.concat(skipped.has(m) ? [] : [steps[step - 1] || '?']);
+          const said = m.localName + ' stuck at ' + s.at.toFixed(1) + ' s' + (s.seeking ? ' (in a seek)' : '') + ', tried ' + tried.join(', ') + ': ';
+          const going = from.has(m) && !m.paused && !m.seeking && mid.get(m) - from.get(m) >= 0.3 && m.currentTime - mid.get(m) >= 0.2;
+          if (from.has(m) && m.paused) { out.push(said + 'then paused by the page'); delete m.__trifStuck; }
+          else if (going) { out.push(said + 'playing after ' + tried[tried.length - 1] + ' (' + s.at.toFixed(1) + ' → ' + m.currentTime.toFixed(1) + ' s)'); delete m.__trifStuck; }
+          else if (step >= steps.length) { out.push(said + 'still stuck (' + s.at.toFixed(1) + ' → ' + m.currentTime.toFixed(1) + ' s' + (m.seeking ? ', in a seek' : '') + (skipped.has(m) ? '; its player’s own stream, not loaded again' : '') + ')'); delete m.__trifStuck; }
+          else { s.tried = tried; stuck++; }
+        }
+        return JSON.stringify({ lines: out, stuck });
         """
 
     /// Listening starts: every tab's playing media paused (each page in TRIF's world), the moment kept.
@@ -1911,7 +1961,23 @@ enum BackgroundPlay {
                     let v = try? await wv.callAsyncJavaScript(talkResume, arguments: ["t0": t0, "count": false], in: nil, contentWorld: Browser.trifWorld)
                     return v.map { "\($0)" } ?? "no answer"
                 }
-                Diagnostics.shared.log("audio", "after talking, \(Diagnostics.place(wv.url))\(shown ? "" : " (a tab behind)"): \(r)")
+                var lines: [String] = []
+                var stuck = 0
+                if let o = Browser.parse(r) as? [String: Any] { lines = o["lines"] as? [String] ?? []; stuck = o["stuck"] as? Int ?? 0 } else { lines = [r] }
+                // (stuck: the next step, one call each, until it plays or all five were tried)
+                var step = 1
+                while stuck > 0 && step <= 5 {
+                    let k = step
+                    let n = await Browser.within(4, "no answer in 4 s") { () -> String in
+                        do { return try await wv.callAsyncJavaScript(talkNudge, arguments: ["step": k], in: nil, contentWorld: Browser.trifWorld).map { "\($0)" } ?? "nil" }
+                        catch { return "error: \((error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription)" }
+                    }
+                    guard let o = Browser.parse(n) as? [String: Any] else { lines.append("nudge \(step): \(n)"); break }
+                    lines += o["lines"] as? [String] ?? []
+                    stuck = o["stuck"] as? Int ?? 0
+                    step += 1
+                }
+                Diagnostics.shared.log("audio", "after talking, \(Diagnostics.place(wv.url))\(shown ? "" : " (a tab behind)"): \(lines.joined(separator: "; "))")
             }
         }
     }

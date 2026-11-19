@@ -40,7 +40,7 @@ test('the chat script: fill, the send, the reply watched until done, its mods ha
     await page.addScriptTag({ content: CHAT });
 
     // A new chat: no instructions in it, nothing in the box. The instructions go in as an attached file.
-    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, usable: true, viewer: null, has: false, trif: 0, others: false, context: false, working: false, replying: false });
+    assert.deepEqual(JSON.parse(await page.evaluate(() => globalThis.__trifChat.state())), { editor: true, usable: true, viewer: null, has: false, trif: 0, others: false, pages: [], context: false, working: false, replying: false });
     const said = await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null),
       "I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…");
     assert.match(said, /text attached/);
@@ -551,6 +551,157 @@ test('the chat script: the quick ask\'s strip (Tim, 11-18: "a very little panel 
     assert.equal(await page.evaluate(() => globalThis.__trifChat.stripWatch(false)), 'off');
     // (and nothing sent, ever)
     assert.equal(await page.evaluate(() => window.__standinSends.length), 0);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+// (a 1×1 PNG: a screenshot stand-in)
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const OLD = "I'm looking at https://m.youtube.com/feed/subscriptions?ra=m in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page.\n\n--- How TRIF mods are written ---\n…\n--- The page: https://m.youtube.com/feed/subscriptions?ra=m ---\nytm-app 375×667 Subscriptions";
+const NOW = "I'm looking at http://127.0.0.1:9/x.html in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page.\n\n--- How TRIF mods are written ---\n…\n--- The page: http://127.0.0.1:9/x.html ---\nmain 375×667 X\n--- End of what TRIF sent ---";
+
+test('the chat script: an earlier TRIF fill for another page that the chat puts back as its draft (Tim, 11-18: chatgpt.com, YouTube\'s text beside x.com\'s attachments): taken out, before the fill or after it, as a file or as text; the person\'s own words kept; only the page in front left', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    const open = async (query, draft) => {
+      await page.goto(`${base}/plain.html`);
+      await page.evaluate((d) => { if (d) localStorage.setItem('standin-draft', d); else localStorage.removeItem('standin-draft'); }, draft);
+      await page.goto(`${base}/chat.html?${query}`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+    };
+    const box = () => page.evaluate(() => document.querySelector('.ProseMirror').textContent);
+    const tileNames = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="file-thumbnail"]')].map((t) => t.firstChild.textContent));
+    const st = async () => JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
+
+    // 1. Put back AFTER TRIF looked and filled (as Tim's): the page's file and screenshot go in; 1.5 s later the old
+    // YouTube text comes back; the guard takes it out again. Only x.com's things are left.
+    await open('gptdraft=1500', OLD);
+    assert.equal((await st()).has, false);
+    assert.match(await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), NOW), /text attached/);
+    assert.match(await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.jpg'), PNG), /picture pasted/);
+    await page.waitForFunction(() => (window.__posts.some((m) => m.type === 'fillguard') ? [1] : null), {}, { timeoutMs: 6000 });
+    await page.waitForTimeout(400);
+    assert.equal(await box(), '');
+    assert.deepEqual(await tileNames(), ['TRIF instruction.txt', 'TRIF screenshot.jpg']);
+    assert.deepEqual((await posts(page)).find((m) => m.type === 'fillguard').gone, ['TRIF\'s text for m.youtube.com']);
+    // (and the site's draft is now empty, so it doesn't come back next time)
+    assert.equal(await page.evaluate(() => localStorage.getItem('standin-draft')), null);
+
+    // 2. Put back BEFORE: the app sees TRIF's text for another page (state's pages), takes it out, then fills.
+    await open('gptdraft=200', OLD);
+    await page.waitForTimeout(500);
+    let s = await st();
+    assert.equal(s.trif, 1);
+    assert.equal(s.others, false);
+    assert.deepEqual(s.pages, ['https://m.youtube.com/feed/subscriptions?ra=m']);
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.clearTrif()), 0);
+    assert.equal(await box(), '');
+    await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), NOW);
+    assert.deepEqual(await tileNames(), ['TRIF instruction.txt']);
+
+    // 3. The page's details as text (a chat that takes pictures only, ChatGPT's newer page), the old draft put back
+    // over it 1.5 s later (replacing the box, as its editor does): the old text out, this page's typed again.
+    await open('octane&gptdraft=1500', OLD);
+    assert.match(await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), NOW), /text typed|text pasted/);
+    await page.waitForFunction(() => (window.__posts.some((m) => m.type === 'fillguard') ? [1] : null), {}, { timeoutMs: 6000 });
+    await page.waitForTimeout(400);
+    assert.equal((await box()).replace(/\s+/g, ''), NOW.replace(/\s+/g, ''));
+    s = await st();
+    assert.deepEqual(s.pages, ['http://127.0.0.1:9/x.html']);
+    assert.deepEqual((await posts(page)).find((m) => m.type === 'fillguard').gone, ['TRIF\'s text for m.youtube.com', 'this fill\'s own text typed again']);
+
+    // 4. The person's own words around an old fill (this build's, with its end line): kept; only TRIF's block goes.
+    const theirs = `make the header smaller\n\n${OLD}\n--- End of what TRIF sent ---\n\nthanks!`;
+    await open('gptdraft=200', theirs);
+    await page.waitForTimeout(500);
+    s = await st();
+    assert.equal(s.trif, 1);
+    assert.equal(s.others, true);
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.clearTrif()), 0);
+    assert.equal((await box()).replace(/\s+/g, ' ').trim(), 'make the header smaller thanks!');
+    await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), NOW);
+    assert.deepEqual(await tileNames(), ['TRIF instruction.txt']);
+    assert.equal((await box()).replace(/\s+/g, ' ').trim(), 'make the header smaller thanks!');
+    // (and nothing of TRIF's typed text for x.com comes and goes later: the guard leaves the person's words alone)
+    await page.waitForTimeout(1500);
+    assert.equal((await box()).replace(/\s+/g, ' ').trim(), 'make the header smaller thanks!');
+    assert.equal(await page.evaluate(() => window.__standinUntrusted()), 0);
+
+    // 5. Claude's kind of draft (the stand-in's ?draft: its attachments too, back 0.8 s after a reload): the old
+    // page's tiles come back after this fill's; the second of each is taken out, this fill's kept.
+    await page.goto(`${base}/chat.html?draft`);
+    await page.evaluate(() => sessionStorage.removeItem('draft'));
+    await page.reload();
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), OLD);
+    await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.jpg'), PNG);
+    await page.reload();
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), NOW);
+    await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.jpg'), PNG);
+    await page.waitForFunction(() => (window.__posts.some((m) => m.type === 'fillguard') ? [1] : null), {}, { timeoutMs: 6000 });
+    await page.waitForTimeout(600);
+    assert.deepEqual(await tileNames(), ['TRIF instruction.txt', 'TRIF screenshot.jpg']);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('[data-trif-fill]').length), 2, 'the ones left are this fill\'s');
+    assert.deepEqual((await posts(page)).find((m) => m.type === 'fillguard').gone, ['a second TRIF instruction', 'a second TRIF screenshot']);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+test('the chat script: claude.ai\'s code blocks as they are now (11-18, "pre.code-block__code code.language-js code": a code of line numbers inside the code) read without their numbers; a reply that finished unseen (the app in the background) not offered but counted for the banner, its Add to TRIF there and shown', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    for (const shape of ['nested', 'nested=inline']) {
+      await page.goto(`${base}/chat.html?${shape}`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+      const say = (t) => page.evaluate((w) => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, w); }, t);
+      await say('Make the headings green on http://127.0.0.1:9/');
+      await page.click('button[aria-label="Send message"]');
+      const [done] = await waitPost(page, 'done');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('pre.code-block__code > code.language-js').length), 1, shape);
+      assert.equal(done.mods.length, 1, shape);
+      assert.match(done.mods[0], /^\/\/ ==WebMod==\n\/\/ @name {8}Calmer feed\n/, shape);
+      assert.doesNotMatch(done.mods[0], /^\d/m, `${shape}: no line numbers`);
+      assert.deepEqual(Object.keys(JSON.parse(done.mods[0].split('==/WebMod==')[1])), ['css', 'hide']);
+      // (Add to TRIF hands over the same text; the line numbers are still on the page after the read)
+      await page.click('.trif-add');
+      const [mod] = await waitPost(page, 'mod');
+      assert.equal(mod.text.trim(), done.mods[0].trim());
+      assert.ok(await page.evaluate(() => getComputedStyle(document.querySelector('.react-syntax-highlighter-line-number')).display !== 'none'));
+
+      // A reply found finished (as after the app's page was suspended): not offered, held, counted as waiting.
+      await say('whole: make it blue, called Bluer, on http://127.0.0.1:9/');
+      await page.click('button[aria-label="Send message"]');
+      const two = await waitPost(page, 'done', 2);
+      assert.deepEqual(two[1].mods, [], shape);
+      assert.equal(two[1].waiting, 1, shape);
+      assert.ok((await posts(page)).some((m) => m.type === 'held' && m.history === 1 && m.anchored), shape);
+      assert.ok(!(await posts(page)).some((m) => m.type === 'nopickup'), `${shape}: no "nopickup" when it was held`);
+      assert.equal(await page.evaluate(() => globalThis.__trifChat.showReply(true)), 'shown at its mod');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('.trif-add').length), 2);
+      await page.evaluate(() => document.querySelectorAll('.trif-add')[1].click());
+      const mods = await waitPost(page, 'mod', 2);
+      assert.match(mods[1].text, /^\/\/ ==WebMod==\n/);
+      assert.doesNotMatch(mods[1].text, /^\d/m);
+    }
   } finally {
     if (browser) await browser.close();
     server.close();

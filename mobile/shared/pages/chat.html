@@ -44,6 +44,15 @@
   does on a phone: the box's tool row (+, the model, Manual) comes 1 s after load, the "… can make mistakes." line above
   the box 1.6 s after, the page's own box grows a little at 2.2 s, and each attachment's tile shows 0.5 s after it's
   taken (a tile placeholder first).
+  `?gptdraft` (Tim, 11-18: chatgpt.com put an old TRIF fill for a YouTube page back into a chat opened on x.com): as
+  chatgpt.com keeps an unsent message, ONE draft for the whole site (localStorage `standin-draft`, the box's text only,
+  saved at each change, gone at a send), put back into the box of any chat page 0.8 s after it loads (`?gptdraft=2500`:
+  that many ms), replacing what's there as its editor does.
+  `?nested` (11-18, claude.ai's code blocks: "pre.code-block__code code.language-js code"): each code block, once
+  written, drawn as claude.ai's: pre.code-block__code > code.language-js holding a code of line numbers (a column a
+  person can't select) and the code in spans; `?nested=inline`: each line's number at its start instead.
+  "whole" in the message: the reply drawn all at once, finished, with no stop button or streaming mark, as a reply
+  that finished while the app's page wasn't running is found on its return.
 -->
 <style>
   :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
@@ -139,9 +148,18 @@
   }
   const refresh = () => { send.disabled = !(ed.textContent.trim() || files.length || pastes.length); };
   ed.addEventListener('input', refresh);
+  // (?gptdraft: one draft for the site, its text only, as chatgpt.com's)
+  const gptdraft = /[?&]gptdraft\b/.test(location.search);
+  if (gptdraft) {
+    const ms = Number((location.search.match(/gptdraft=(\d+)/) || [])[1] || 800);
+    const keep = () => { try { if (ed.textContent.trim()) localStorage.setItem('standin-draft', ed.textContent); else localStorage.removeItem('standin-draft'); } catch (e) {} };
+    new MutationObserver(keep).observe(ed, { childList: true, subtree: true, characterData: true });
+    const saved = (() => { try { return localStorage.getItem('standin-draft'); } catch (e) { return null; } })();
+    if (saved) setTimeout(() => { ed.textContent = saved; refresh(); }, ms);
+  }
   // (?draft: the box's attachments and text kept across a reload and put back a moment after the page loads, as
   // claude.ai keeps a draft)
-  const draft = location.search.includes('draft');
+  const draft = /[?&]draft\b/.test(location.search); // (not ?gptdraft's)
   const saveDraft = () => { if (draft) sessionStorage.setItem('draft', JSON.stringify({ text: ed.textContent, files })); };
   function addFile(name, text, type) {
     const entry = { name, text: text || '' };
@@ -288,6 +306,7 @@ ${JSON.stringify(body, null, 2)}`;
     pastes.length = 0;
     tiles.textContent = '';
     if (draft) sessionStorage.removeItem('draft');
+    if (gptdraft) try { localStorage.removeItem('standin-draft'); } catch (e) {}
     if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}${location.search}`);
     // ("no match": the mod has no @match line)
     const origin = /no match/i.test(text) ? null : (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
@@ -319,7 +338,7 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
       if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', { hide: ['.cookie-consent'] })]);
       parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
     }
-    reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0));
+    reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0), /\bwhole\b/i.test(text));
   }
 
   // (?history: a long conversation whose older messages render late, as claude.ai draws them a little at a time: an
@@ -417,7 +436,36 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
     document.body.append(v);
   }
 
-  function reply(parts, seconds) {
+  // (?nested: a written code block drawn again as claude.ai's: pre.code-block__code > code.language-js > a code of line
+  // numbers and the code in spans; =inline: each line's number at its start)
+  const nested = (location.search.match(/[?&]nested(?:=(\w+))?/) || [])[0] ? ((location.search.match(/nested=(\w+)/) || [])[1] || 'column') : '';
+  function drawNested(pre, text) {
+    pre.className = 'code-block__code';
+    pre.textContent = '';
+    const code = document.createElement('code');
+    code.className = 'language-js';
+    code.style.whiteSpace = 'pre';
+    const lines = text.replace(/\n$/, '').split('\n');
+    const num = (i) => { const n = document.createElement('span'); n.className = 'linenumber react-syntax-highlighter-line-number'; n.style.cssText = 'display:inline-block;min-width:2.25em;padding-right:1em;text-align:right;user-select:none;-webkit-user-select:none;opacity:.5'; n.textContent = String(i + 1); return n; };
+    if (nested === 'column') {
+      const col = document.createElement('code');
+      col.style.cssText = 'float:left;padding-right:10px';
+      lines.forEach((_, i) => { const n = num(i); n.textContent += '\n'; col.append(n); });
+      code.append(col);
+    }
+    lines.forEach((l, i) => {
+      const row = document.createElement('span');
+      if (nested === 'inline') row.append(num(i));
+      const tok = document.createElement('span');
+      tok.className = /^\s*\/\//.test(l) ? 'token comment' : 'token';
+      tok.textContent = l;
+      row.append(tok, '\n');
+      code.append(row);
+    });
+    pre.append(code);
+  }
+
+  function reply(parts, seconds, whole) {
     const stop = document.createElement('button');
     stop.type = 'button';
     stop.setAttribute('aria-label', 'Stop response');
@@ -456,11 +504,22 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
       }
       const words = t.split(/(?<=\s)/);
       let into = null; // (not box.lastElementChild: TRIF puts its Add to TRIF button after a code block)
-      steps.push(() => { const n = document.createElement(tag); into = n; if (tag === 'pre') { into = document.createElement('code'); n.append(into); } box.append(n); });
+      let made = null;
+      steps.push(() => { const n = document.createElement(tag); made = n; into = n; if (tag === 'pre') { into = document.createElement('code'); n.append(into); } box.append(n); });
       for (let i = 0; i < words.length; i += tag === 'pre' ? 6 : 2) {
         const chunk = words.slice(i, i + (tag === 'pre' ? 6 : 2)).join('');
         steps.push(() => { into.append(chunk); });
       }
+      if (tag === 'pre' && nested) steps.push(() => drawNested(made, t));
+    }
+    // ("whole": every step at once, finished: no stop button, no streaming mark)
+    if (whole) {
+      box.setAttribute('data-is-streaming', 'false');
+      if (!nostop) stop.replaceWith(send);
+      for (const f of steps) f();
+      if (octane) box.setAttribute('data-message-complete', '');
+      refresh();
+      return;
     }
     // ("wait N" in the message: the reply takes about N seconds, written a little at a time)
     const each = seconds ? Math.max(90, (seconds * 1000) / steps.length) : slow ? 220 : 90;

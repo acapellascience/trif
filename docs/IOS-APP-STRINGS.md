@@ -855,3 +855,13 @@ in Mods." (the runaway offer's banner keeps it for now: asked above).
 brief had "from {computer}"; with the name already at the start ("Synced with Tim's MacBook Pro · 2 from Tim's
 MacBook Pro, …") it read twice, so "from the computer" for now: say if the name is wanted there.
 
+
+## The done banner when the reply's mod can't be read (added 11-19, the mod matrix, draft)
+
+Found by the mod matrix (docs/IOS-MOD-MATRIX.md, C7): a reply whose mod is broken (its rules not valid JSON, say) gave
+only the 2-second note "The reply's mod can't be added: {why}." and, if you were elsewhere, "{Service} replied about
+{site}", which hides that anything went wrong. The banner now says so; the note (with the reason) is unchanged.
+
+| Where | Before | Now (draft) |
+|---|---|---|
+| The done banner, a reply with a mod TRIF couldn't read (stays until closed, as one with mods; Open chat opens the chat) | **{Service} replied about {site}** · **Open chat** | **{Service}'s mod for {site} can't be added** · **Open chat** · **Go to {site}** |

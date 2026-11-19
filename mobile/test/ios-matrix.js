@@ -13,7 +13,7 @@
 // and 8378 if they aren't up. It launches the app with -chathome (Claude's stand-in) and -gpthome (ChatGPT's, ?gptin),
 // so nothing here ever reaches claude.ai or chatgpt.com. Each run's mods are named Mx… with a run tag in their code
 // (never offered before); the run's own mods are deleted at the start of the next run. Screenshots (--shots <dir>)
-// for the cases that take them. Results: a line per case and mobile/test/ios-matrix-last.json (not committed).
+// for the cases that take them. Results: a line per case, and $TMPDIR/trif-ios-matrix-last.json.
 
 const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
@@ -153,7 +153,8 @@ async function ask(words, service = 'Claude') {
 const words = (id, extra = '') => `called Mx${id}${TAG} ask ${TAG} ${id} ${extra}`.trim();
 const modId = (id, site = 'localhost') => `${site}/mx${id.toLowerCase()}${TAG}`;
 const reset = async () => {
-  await step({ cancelOffer: 1 });
+  // (an earlier case's offers still queued: each comes up 1.2 s after the last closes)
+  for (let i = 0; i < 6; i++) { await step({ cancelOffer: 1 }); if (!(await offer()).queued) break; await sleep(1600); }
   for (let i = 0; i < 4; i++) await step({ banner: 'dismiss' });
   await step({ sheet: 'none' });
   await step({ closechat: 1 });
@@ -331,6 +332,28 @@ for (const [id, sheet] of [['B6', 'mods'], ['B7', 'tabs'], ['B8', 'history']]) {
   });
 }
 
+add('B6b', 'where', 'The banner\'s Add tapped while the Mods sheet is still open: Add this mod? comes up (over it, or once it closes), once', async () => {
+  const r = await ask(words('B6b', 'wait 6'));
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  await sleep(600);
+  await step({ sheet: 'mods' });
+  const b = await gotBanner('localhost');
+  if (!b.ok) return ['FAIL', `no banner: ${b.text}`];
+  await step({ banner: 'add' });
+  await sleep(2000);
+  const during = await offer();
+  shot('B6b-add-over-mods');
+  await step({ sheet: 'none' });
+  await sleep(2000);
+  const after = await offer();
+  shot('B6b-after-mods-closed');
+  await step({ addOffer: 1 });
+  await sleep(1200);
+  const m = await hasMod(modId('B6b'));
+  const q = await quiet(3000);
+  return [after.id === modId('B6b') && m && q.ok ? 'PASS' : 'FAIL', `with the sheet open: offer ${during.id || 'none'}; sheet closed: ${after.id || 'none'}; added ${!!m}; nothing more ${q.ok} (look at the two shots: is it seen?)`];
+});
+
 add('B9', 'where', 'Arrives while the app is in the background: offered (or the banner) once on return', async () => {
   const r = await ask(words('B9', 'wait 6'));
   if (!r.ok) return ['FAIL', `send: ${r.why}`];
@@ -390,16 +413,16 @@ add('C3', 'what', 'An every-site mod: the offer says every site, added, runs on 
 });
 
 add('C4', 'what', 'An update of an added mod (same @id): offered as that mod, added as a new version of it', async () => {
-  const w1 = `modid mxu${TAG} called MxC4${TAG} ask ${TAG} one`;
+  const w1 = `modid mxu${TAG} called MxC4${TAG} ask ${TAG} alpha`;
   const r = await ask(w1);
   if (!r.ok) return ['FAIL', `send: ${r.why}`];
   const o1 = await gotOffer();
-  await addAndRun(`${TAG} one`);
-  const r2 = await ask(`modid mxu${TAG} called MxC4${TAG} ask ${TAG} two`);
+  await addAndRun(`${TAG} alpha`);
+  const r2 = await ask(`modid mxu${TAG} called MxC4${TAG} ask ${TAG} beta`);
   if (!r2.ok) return ['FAIL', `send 2: ${r2.why}`];
   const o2 = await gotOffer();
   shot('C4-update-offer');
-  const ran = await addAndRun(`${TAG} two`);
+  const ran = await addAndRun(`${TAG} beta`);
   const mine = (await modlist()).filter((m) => m.name === `MxC4${TAG}`);
   return [o1.id && o2.id === o1.id && mine.length === 1 && mine[0].history >= 1 && ran ? 'PASS' : 'FAIL', `first ${o1.id}, update ${o2.id}; mods named so: ${mine.length}, history ${mine.map((m) => m.history)}; runs the new one ${ran}`];
 });
@@ -598,13 +621,15 @@ add('D7', 'after', 'A mod added from a chat syncs to the computer (the stand-in 
   await step({ select: 1 });
   await step({ go: 'https://example.com/' });
   await sleep(2500);
-  const r = await ask(words('D7'));
+  // (a free mod: the stand-in computer's EDIT appends JavaScript, which only a free mod can take: a style mod's edit
+  // is refused by the phone, rightly)
+  const r = await ask(`full code called MxD7${TAG} ask ${TAG}D7`);
   if (!r.ok) return ['FAIL', `send: ${r.why}`];
   const o = await gotOffer();
   await step({ addOffer: 1 });
   await sleep(4500);
   await step({ sync: 1 });
-  const got = await until(async () => { c.say('twin'); const t = await c.next((l) => l.twin, 5000); const f = t && Object.entries(t.twin).find(([, v]) => v.includes(`${TAG} D7`)); return { ok: !!f, f: f && f[0], all: t && Object.keys(t.twin) }; }, 25000, 1500);
+  const got = await until(async () => { c.say('twin'); const t = await c.next((l) => l.twin, 5000); const f = t && Object.entries(t.twin).find(([, v]) => v.includes(`${TAG}D7`)); return { ok: !!f, f: f && f[0], all: t && Object.keys(t.twin) }; }, 25000, 1500);
   return [o.id && got.ok ? 'PASS' : 'FAIL', `offer ${o.id}; on the computer: ${got.f || `not there (${(got.all || []).join(', ')})`}`];
 });
 
@@ -653,7 +678,7 @@ async function main() {
   }
   const tally = results.reduce((a, r) => ((a[r.status] = (a[r.status] || 0) + 1), a), {});
   console.log(`\n${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ')} (tag ${TAG})`);
-  fs.writeFileSync(path.join(__dirname, 'ios-matrix-last.json'), JSON.stringify({ tag: TAG, at: new Date().toISOString(), results }, null, 1));
+  fs.writeFileSync(path.join(os.tmpdir(), 'trif-ios-matrix-last.json'), JSON.stringify({ tag: TAG, at: new Date().toISOString(), results }, null, 1));
   for (const p of servers) p.kill();
 }
 if (require.main === module) main().catch((e) => { console.error(e); for (const p of servers) p.kill(); process.exit(1); });

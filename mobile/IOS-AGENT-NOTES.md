@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (529 now; ios-chatgpt used 520-529): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (549 now; ios-chatgpt used 520-529, the mod matrix 530-549): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -114,6 +114,29 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   code.language-js > a code column of line numbers, user-select none; `=inline`: each line's number at its start).
   Message word "whole": the reply drawn at once, finished, no stop button or streaming mark (a reply that finished
   while the app's page was suspended): held, `waiting` in done, the "replied with a mod" banner.
+- THE MOD MATRIX (11-19, docs/IOS-MOD-MATRIX.md: the table, what broke and what's blocked): `node mobile/test/ios-matrix.js`
+  (Node 22: /usr/local/bin/node; `--only A1,B3`, `--list`, `--shots <dir>`). Needs the SE booted, a Debug build installed
+  (dev steps), the device lock; starts serve.js on 8377/8378 if they're down; launches the app itself with
+  `-chathome …chat.html?greet=claude&keep` and `-gpthome …chat.html?gpt&gptin&keep` (never the real chats). Each run's
+  mods are named Mx<case><tag> (the tag in their CSS, so never "offered before"); the last run's Mx… mods are deleted at
+  the start; the stand-ins' lastChat/chatProject prefs, chatLinks and chatOffers are cleared (Simulator data only). D7 and
+  A8 start phone-link's tests/phone-link-computer.js (`--computer <worktree>`), relaunch with `-linkhost` and pair. ~15
+  min for all. A case is an async function returning [PASS|FAIL|BLOCKED, what was seen]: add rows there. Not in it
+  (done by hand with the iOS Simulator tool): the phone locked (LOCK/HOME), dark mode, rotation, the keyboard up.
+  `-gpthome <url>` (11-19): ChatGPT's own stand-in (Claude's stays `-chathome`'s). Dev steps `panelmsg` (any Mods tab
+  message through ModsPanel.handle: `{"type": "delete", "id"}`) and `modlist` (each mod: id, name, site, on/held,
+  history count, code length).
+- Stand-in additions (11-19): `?greet=claude` (claude.ai's signed-in greeting: no heading, div.font-voice > starburst +
+  span.select-none); Claude's composer as signed in (tiptap ProseMirror [data-testid=chat-input], Send
+  [data-testid=chat-input-send], tiles [data-cds=MessageAttachmentsFile|Image] Cards with [data-cds-card-body], the
+  upload input #chat-input-file-upload-onpage, ?late's model selector [data-testid=model-selector-dropdown]); `?gptin`
+  (chatgpt.com's signed-in composer: a form whose type=submit "Send" sends, "Attach files" takes any file as
+  span.group/composer-attachment, "Select ChatGPT model", stop [data-testid=stop-button] "Stop streaming"); `?keep`
+  (conversations at /chat/k-<id> kept by serve.js's /standin-conv/…, drawn finished when opened again: as a service's
+  server keeps them; the app drops the query on resume, hence the k-). Message words: "full code" (a free mod setting
+  html[data-standin-free] to the ask words), "broken" (rules not valid JSON), "everywhere" (@match *://*/*), "modid <x>"
+  (an @id line: updates), "long" (12 paragraphs before the mod; with "wait N"); "two" now puts the ask words in the
+  second mod too.
 - What the browser says it is: serve.js's `/agent` (`?nometa`: no width=device-width viewport): the user agent sent,
   navigator's, platform, width; `window.__agent` for pagejs. localhost vs 127.0.0.1 are two sites.
 - Logged-out chatgpt.com works in the Simulator (reject non-essential cookies on its banner).
@@ -133,7 +156,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (img alt) + button "Remove …". The box keeps its WORDS as one draft for the site (back within 2 s of a new chat) but
   DROPS attachments on any load. Model button `ModelPickerTrigger…` "Medium" → a Thinking effort slider. No upsell
   buttons showed. claude.ai signed in (11-19, shot 526): pills are group/tile with data-cds-card-body; its greeting
-  ("Hello, night owl") isn't an h1/h2, so TRIF's greeting sits above it, not in its place (follow-up's call).
+  ("Hello, night owl") is no h1/h2 but div.font-voice (25.5 px anthropic-serif) > a starburst div + span.select-none:
+  chat.js `displayGreeting` (11-19, the matrix batch) takes short words in display type (≥ 22 px and 1.3× the body's)
+  between the top bar and the box, outside menus/links/buttons, and hides the block that is only that greeting (its
+  starburst too): TRIF's greeting in its place, light and dark (shots 530-532). Its tiles carry
+  data-cds-attachment-restored: claude.ai keeps a draft's attachments too. Its composer: editor
+  [data-testid=chat-input][data-cds=Editor] "Write your prompt to Claude", Send [data-testid=chat-input-send], model
+  [data-testid=model-selector-dropdown] "Model: …". chatgpt.com signed in (11-19, again): Send is a form's
+  type=submit button named "Send" (no id or testid), model "Select ChatGPT model", four file inputs (Take a photo,
+  photos or videos, photos, "Attach files" with no accept).
 - Mock APIs (More's engines): `node mobile/mock-api.js 8379` (`MOCK_MODEL_MS=125` for 2 MB/s model downloads), launch with
   `-apibase http://localhost:8379` and paste the key `sk-test-not-a-real-key`. Message words: "loop" (15-step cap),
   "slow" (try Stop), "no tools". It refuses a turn that lost Claude's thinking block or OpenAI's reasoning item.
@@ -1057,9 +1088,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
-- Signed-in ChatGPT, needs a real reply (Tim sends, 11-19 list): the send told once and back to the tab; the reply
-  watched to done (no streaming mark there); a mod in the reply offered / Add to TRIF; the conversation remembered for
-  the site (lastChat) and a follow-up in it; the picture pill in the SENT message; a reply finished in the background.
+- Real replies (11-19): mobile/TIM-SENDS.md is Tim's one-sitting list (12 steps, Claude and ChatGPT: the send told once,
+  the reply watched to done, offered on its tab / the banner elsewhere / the background, nothing twice, an update, the
+  picture pill in ChatGPT's sent message, a follow-up in the remembered conversation, the quick ask's real strip, two
+  chats at once, killed mid-reply, then Copy diagnostics). A follow-up agent checks his answers and diagnostics.
 
 - Safe mode's snapshot and the sync toast (11-18), checked in the Simulator only (shots 501-511): kill in front →
   snapshot (localhost + 127.0.0.1, a two-site mod already off on 127.0.0.1); the banner's Turn them back on (a real
@@ -1291,7 +1323,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - The chat look, signed in (11-19, Simulator, Tim's accounts, no send): ChatGPT's pills (file and picture) and
   greeting checked light and dark, keyboard up, landscape, the model menu open (shots 520-529); Claude's pills and robot
   (shot 526). Not checked: a bigger iPhone signed in (the greeting's free-space placement is tested in Chrome at 375x471
-  and 393x640 against stand-in `?greet&suggest&octane`), Claude's own greeting heading (not an h1/h2: left visible),
+  and 393x640 against stand-in `?greet&suggest&octane`),
   upsell words signed in (none seen). On the SE with the keyboard up and two pills, ChatGPT's own box runs under the
   keyboard's bar (its layout in 252 px; shot 528). Logged-out chatgpt.com: shot 241.
 

@@ -15,6 +15,9 @@ import Network
 //   every wait is used up, the followed runs are given up (`onLost`): the computer keeps them, listed in `hello`'s
 //   `pending`, which pickUp follows again (PanelChat does on the panel's start and when the app is back in front)
 //   from the last event its chat already shows (`shown`, kept across launches in `defaults`).
+// - keepOpen (the app active): the link stays open with nothing using it and is found again quietly after a drop
+//   (`keepRetry`'s waits), so the computer can reach the phone; the `ping` every 30 s keeps it alive (the helper
+//   drops a link quiet for 2 minutes).
 // Callbacks come on `queue` (main by default).
 
 final class PhoneLinkRemote: PhoneSyncLink {
@@ -55,6 +58,22 @@ final class PhoneLinkRemote: PhoneSyncLink {
     private let fixed: [NWEndpoint]?
     /// The waits before each reconnection after a drop (seconds); none left: the followed runs are given up.
     var retry: [Double] = [2, 4, 8, 15, 30, 30]
+    /// While true (the app in front and active: PhoneSyncModel), the link stays open with nothing using it, so the
+    /// computer can reach the phone (its nudge, the Mac's Sync now). A drop, or a find that fails, is tried again
+    /// after `keepRetry`'s waits (the last one repeated), saying nothing; not a failure a retry can't mend (not
+    /// paired, removed there, Local Network off, the keychain, the self-test): the next `keepOpen = true` tries again.
+    /// False (the app in the background): as before, a dropped link stays down unless runs are followed.
+    var keepOpen = false {
+        didSet {
+            guard keepOpen != oldValue else { return }
+            keepTimer?.cancel(); keepTimer = nil
+            keepAttempt = 0
+            if keepOpen { keep() }
+        }
+    }
+    var keepRetry: [Double] = [2, 5, 15, 30, 60]
+    private var keepTimer: DispatchWorkItem?
+    private var keepAttempt = 0
 
     private(set) var state = State.idle { didSet { if oldValue != state { onState?(state) } } }
     private(set) var hello: Hello?
@@ -181,9 +200,11 @@ final class PhoneLinkRemote: PhoneSyncLink {
         find()
     }
 
-    /// Closes the link and forgets the followed runs (the computer keeps them).
+    /// Closes the link and forgets the followed runs (the computer keeps them). A kept link (`keepOpen`) isn't
+    /// found again until keepOpen is set again.
     func close() {
         following = [:]
+        keepTimer?.cancel(); keepTimer = nil
         stopAll()
         failWaiting(.notFound)
         state = .idle
@@ -200,6 +221,7 @@ final class PhoneLinkRemote: PhoneSyncLink {
     // MARK: finding and connecting
 
     private func find() {
+        keepTimer?.cancel(); keepTimer = nil
         stopAll()
         if Self.selfTestResult == nil { Self.selfTestResult = .some(PhoneLink.selfTest()) }
         if case .some(.some) = Self.selfTestResult { return fail(.selfTest) }
@@ -268,6 +290,7 @@ final class PhoneLinkRemote: PhoneSyncLink {
             let kept = Set(pending.map(\.runId)).union(self.following.keys)
             if self.shown.keys.contains(where: { !kept.contains($0) }) { self.shown = self.shown.filter { kept.contains($0.key) } }
             self.attempt = 0
+            self.keepAttempt = 0
             self.state = .open
             self.ping()
             // (the runs followed before the drop: from the last event this app has)
@@ -317,6 +340,24 @@ final class PhoneLinkRemote: PhoneSyncLink {
         guard state == .open else { return }
         state = .away
         scheduleRetry()
+        scheduleKeep()
+    }
+
+    /// (keepOpen) Finds the computer now, unless the link is open, being found, or a followed run's reconnection
+    /// is waiting.
+    private func keep() {
+        guard keepOpen, state != .open, state != .finding, retryTimer == nil else { return }
+        find()
+    }
+
+    /// (keepOpen) The next quiet try: after a drop or a find that failed, never after one a retry can't mend.
+    private func scheduleKeep() {
+        guard keepOpen, !keepRetry.isEmpty, keepTimer == nil, retryTimer == nil, state != .open, state != .finding else { return }
+        if case .failed(let f) = state, f != .notFound, f != .broken { return }
+        let w = DispatchWorkItem { [weak self] in self?.keepTimer = nil; self?.keep() }
+        keepTimer = w
+        queue.asyncAfter(deadline: .now() + keepRetry[min(keepAttempt, keepRetry.count - 1)], execute: w)
+        keepAttempt += 1
     }
 
     private func scheduleRetry() {
@@ -341,6 +382,7 @@ final class PhoneLinkRemote: PhoneSyncLink {
         state = .failed(f)
         if f == .removed { for id in lost.keys { forget(id) } }
         for id in lost.keys.sorted() { onLost?(id, RunError(code: f == .removed ? "removed" : "away", message: "\(f)")) }
+        scheduleKeep()
     }
 
     private func failWaiting(_ f: Failure) {

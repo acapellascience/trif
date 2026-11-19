@@ -347,10 +347,12 @@ final class PhoneSync {
     /// When the phone syncs (D9). `sync` runs one (PhoneSync.run with the app's store and link); its answer comes
     /// back through `finished`. Callbacks and calls on one queue (main in the app).
     ///
-    /// One at a time, and never two begun closer than `gap` (11-19, Tim: "half the time they say not synced"): the
-    /// computer refuses a sync.begin within a second of the last (`busy`), and a switch's sync was followed at once
-    /// by the computer's nudge for that same switch arriving in the browser. What comes while one runs, or before the
-    /// gap is over, runs once after it. A `busy` answer is tried again quietly after the gap (3 times at most),
+    /// One at a time, and never one begun within `gap` of the last one's start or its answer (11-19, Tim: "half the
+    /// time they say not synced"): the computer refuses a sync.begin within a second of the last begin it got
+    /// (`busy`), and a switch's sync was followed at once by the computer's nudge for that same switch arriving in the
+    /// browser. The begin reaches the computer some time after the start (the link found first: most of a second at
+    /// launch) but before the answer, so the gap counts from the answer too. What comes while one runs, or before
+    /// the gap is over, runs once after it. A `busy` answer is tried again quietly after the gap (3 times at most),
     /// never said. A change syncs `changeDelay` after the last change of a burst: five switches in two seconds are
     /// one sync, three seconds after the last.
     final class Scheduler {
@@ -365,6 +367,7 @@ final class PhoneSync {
         private var pending: String?
         private var changeTimer: DispatchWorkItem?
         private var gapTimer: DispatchWorkItem?
+        /// The last sync's start, then its answer (the gap counts from the later).
         private var lastStart: Double?
         private var busyTries = 0
         private let queue: DispatchQueue
@@ -410,6 +413,7 @@ final class PhoneSync {
             sync { [weak self] r in
                 guard let self else { return }
                 self.running = false
+                self.lastStart = Self.clock()
                 // (busy: a sync begun within the computer's second; quietly again after the gap)
                 if case .failure(let f) = r, f.code == "busy", self.busyTries < 3 {
                     self.busyTries += 1; self.retried += 1

@@ -119,11 +119,25 @@ change there is a change on both phones. Change this file whenever a rule change
   can't find {computer}; syncing phone mods is off on {computer}; this iPhone isn't connected to {computer} any more;
   TRIF needs Local Network access; anything else: no reason, the note alone), until a sync works. Nothing else
   interrupts.
-- When the phone syncs (11-19, the half that failed): never two at once, and never two begun closer than 1.2 s (the
-  computer refuses a second within a second, `busy`); a switch, an edit or an Allow syncs 3 s after the last change
+- When the phone syncs (11-19, the half that failed): never two at once, and never one begun within 1.2 s of the
+  last one's start or its answer (the computer refuses a second within a second of the begin it got, `busy`; at
+  launch that begin reaches it only once the link is found, so the computer's nudge during the first sync waits for
+  the gap after its answer); a switch, an edit or an Allow syncs 3 s after the last change
   of a burst (five switches in two seconds: one sync), so a switch reaches the computer within about 3 s; a `busy`
   answer is tried again quietly after the gap (3 times at most) and never said. The computer doesn't nudge the phone
   for the phone's own switch arriving in its browser (that echo was the second sync refused `busy`).
+- The link to the paired computer (11-19, Tim: the Mac's Sync now said "iPhone isn't connected just now" with TRIF
+  open on the phone): while the app is active (in front, screen on) it stays open with nothing using it, so the
+  computer's nudge and its Sync now / Sync with phone reach the phone at once. Dropped (a Wi-Fi blip, the helper
+  restarting), it is found again by itself, saying nothing, after 2, 5, 15, 30 s, then every 60 s while the app
+  stays active; not after a failure a retry can't mend (removed there, Local Network off, not paired): coming back to
+  the front tries again. Kept alive by the app's ping every 30 s (the helper drops a link quiet for 2 minutes). In the
+  background (screen off, another app) it is closed once a sync in flight ends (a run of More's My computer engine
+  keeps it, as before); a link opened while the app isn't active is closed after 30 s of nothing. So the computer's
+  "{phone} isn't connected just now. It syncs when TRIF is open on it." means just that: the app closed or in the
+  background, the phone asleep, or another Wi-Fi. Battery: one idle TCP connection on the Wi-Fi and a small message
+  every 30 s, only while the app is in front with the screen on. Android: the same (open while the activity is
+  resumed, closed when it stops).
 - Phone sync's switches (Tim, 11-18; docs/PHONE-SYNC.md 4b on branch phone-link): a mod's on/off and its per-site
   switches follow the last change on either side, three-way against the switch both sides last agreed on; changed on
   both since, the later change wins (each side stamps when the person last switched it; the same time: the phone's,

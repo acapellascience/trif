@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (499 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (500 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -982,6 +982,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   tabs.json); tabs behind are let go after 20 s, so their counts stand still until shown again.
 
 ## Open and unverified
+
+- Stable ids and renames (11-18): phonelink.test.js test 9 passes against phone-link eb138f8 (rename on the phone moves
+  the computer's file with nothing in its trash; the computer's rename arrives as one; rename vs edit merge; same name,
+  two ids kept apart; every-site both ways; an app from before ids, CHECK_OLD_PHONE=1, gets delete + add). Simulator
+  with the stand-in computer (shot 500): the phone's Rename reached the twin as a moved file, every-site mods both
+  ways, the computer's rename (made there as write new + delete old) arrived as a rename. Its switch came back off: the
+  stand-in's browser saw the new file as a fresh mod (only the computer changed vs the base), not the desktop's real
+  Rename, which moves the switch: not tried with the real extension. `localhost` mods are `skipped` by the computer
+  (HOST_RE wants a dot): use example.com etc. for sync tests. A rename reloads the shown page when the mod runs there
+  (its script text changes). Android's side (branch android) still to do: ModStore uid/stamping/rename/syncRename,
+  ModsPanel's `whole`, `everywhere`, `rename: true`, `all`, `renamed`, messages rename / showAll, its sync's ids.
 
 - OpenRouter's picker and the quick ask's checks (11-18): Simulator only, the mock (shots 472-489): Recommended (472),
   search (473), a bad key → red, its tap → API keys (474-475), no credits (476), no key (477), robotless (478), the

@@ -468,3 +468,142 @@ test('PhoneSync.swift against the real helper (Store, Server and the sync sessio
     await new Promise((r) => { const t = setTimeout(() => { comp.kill('SIGKILL'); r(); }, 5000); comp.on('exit', () => { clearTimeout(t); r(); }); });
   }
 });
+
+// Stable ids (11-18, docs/PHONE-SYNC.md 2a, 3, 4, 7 "Ids and renames"): needs the computer's side of it (branch
+// phone-link from "Phone sync by stable id"); without it this is skipped.
+const idsOnComputer = !noComputer && lib && fs.existsSync(path.join(lib, '..', 'modid.js')) && /renames/.test(fs.readFileSync(path.join(lib, 'syncsession.js'), 'utf8'));
+test('PhoneSync.swift against the real helper, by stable id: a rename on the phone moves the computer\'s file (no delete and add), a rename on the computer reaches the phone as one, a rename on one side and an edit on the other merge, two different mods with one name are kept apart, every-site mods both ways, an app from before ids still syncs', { skip: noComputer || (!idsOnComputer && 'the computer\'s side of stable ids (helper/lib/modid.js, renames in syncsession.js) isn\'t in the phone-link worktree yet'), timeout: 240000 }, async () => {
+  build();
+  const comp = spawn(process.execPath, [computerFixture, '--seconds', '220'], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const C = lineReader(comp, 'computer');
+  const phones = [];
+  const ask = async (line, key) => { comp.stdin.write(line + '\n'); return JSON.parse(await C.next((l) => l.startsWith(`{"${key}"`) || l.startsWith('{"error"'))); };
+  const U = (n) => `${String(n).repeat(8)}-aaaa-4aaa-8aaa-${String(n).repeat(12)}`;
+  const mod = (name, uid, body, match = 'https://example.com/*') => `// ==WebMod==\n// @name ${name}\n${uid ? `// @id ${uid}\n` : ''}${match ? `// @match ${match}\n` : ''}// ==/WebMod==\n${body}\n`;
+  const withName = (text, name) => text.replace(/^\/\/ @name .*$/m, `// @name ${name}`);
+  // (every file under the computer's trash folders: a rename must leave none)
+  const trashed = (home) => {
+    const out = [];
+    const walk = (d) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.push(p); } };
+    for (const root of [home, `${home}-private`]) walk(path.join(root, 'trash'));
+    return out.map((p) => path.basename(p));
+  };
+  const phone = async (qr, port, env = {}) => {
+    const p = spawn(bin, ['remote', String(port), qr], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...env } });
+    phones.push(p);
+    const P = lineReader(p, 'phone');
+    const say = (l) => p.stdin.write(l + '\n');
+    assert.equal(await P.next((l) => l.startsWith('paired') || l.includes('failed')), 'paired Stand-in Mac');
+    await P.next((l) => l.startsWith('hello') || l.includes('failed'));
+    let last = 0;
+    const sync = async () => {
+      const wait = last + 1150 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      last = Date.now();
+      say('sync');
+      const l = await P.next((x) => x.startsWith('synced') || x.startsWith('sync failed'));
+      assert.match(l, /^synced /, l);
+      const out = { unfinished: / unfinished$/.test(l) };
+      for (const [, k, v] of l.slice(7).matchAll(/(\w+) (\[[^\]]*\])/g)) out[k] = JSON.parse(v);
+      return out;
+    };
+    const files = async () => { say('files'); const f = JSON.parse((await P.next((l) => l.startsWith('files '))).slice(6)); const t = JSON.parse((await P.next((l) => l.startsWith('trash '))).slice(6)); return { f, t }; };
+    const ren = async (from, to, name) => { say(`pren ${from} ${to} ${name}`); assert.equal(await P.next((l) => l.startsWith('pren')), `pren ${from} ${to}`); };
+    return { say, sync, files, ren, P };
+  };
+  try {
+    const { port, qr, home } = JSON.parse(await C.next((l) => l.startsWith('{"port"')));
+    const A = await phone(qr, port);
+
+    // 1. Renamed on the phone: the computer's file moves (no delete and add: nothing in its trash), its id kept.
+    const a1 = mod('Alpha', U(1), 'document.title = "a";');
+    A.say(`pset example.com/alpha ${JSON.stringify(a1)}`);
+    let s = await A.sync();
+    assert.deepEqual(s.sent, ['example.com/alpha']);
+    assert.equal((await ask('twin', 'twin')).twin['phone~example.com/alpha.js'], a1);
+    await A.ren('example.com/alpha', 'example.com/beta', 'Beta');
+    s = await A.sync();
+    let twin = (await ask('twin', 'twin')).twin;
+    const beta = (await A.files()).f['example.com/beta'];
+    assert.match(beta, new RegExp(`@name Beta\\n// @id ${U(1)}`));
+    assert.equal(twin['phone~example.com/beta.js'], beta, JSON.stringify(Object.keys(twin)));
+    assert.equal(twin['phone~example.com/alpha.js'], undefined, 'the old file is gone there');
+    assert.ok(!trashed(home).some((f) => f.includes('alpha')), `a rename, not a delete: ${trashed(home)}`);
+
+    // 2. Renamed on the computer (its file under a new name, the same id): the phone moves its mod, then takes the text.
+    const gamma = withName(beta, 'Gamma');
+    await ask(`write phone~example.com/gamma.js ${JSON.stringify(gamma)}`, 'wrote');
+    await ask('delete phone~example.com/beta.js', 'deleted');
+    s = await A.sync();
+    assert.deepEqual(s.renamed, ['example.com/beta>example.com/gamma'], JSON.stringify(s));
+    let ph = await A.files();
+    assert.equal(ph.f['example.com/gamma'], gamma);
+    assert.equal(ph.f['example.com/beta'], undefined);
+    assert.ok(!ph.t.includes('example.com/beta'), 'not deleted on the phone: moved');
+
+    // 3. Renamed on the phone, edited on the computer: one mod with the new name and the edit, on both.
+    await A.ren('example.com/gamma', 'example.com/delta', 'Delta');
+    const edited = gamma.replace('document.title = "a";', 'document.title = "edited on the computer";');
+    await ask(`write phone~example.com/gamma.js ${JSON.stringify(edited)}`, 'wrote');
+    s = await A.sync();
+    ph = await A.files();
+    twin = (await ask('twin', 'twin')).twin;
+    assert.match(ph.f['example.com/delta'], /@name Delta/);
+    assert.match(ph.f['example.com/delta'], /edited on the computer/);
+    assert.match(ph.f['example.com/delta'], new RegExp(`@id ${U(1)}`));
+    assert.equal(twin['phone~example.com/delta.js'], ph.f['example.com/delta'], 'the same text on both');
+    assert.equal(twin['phone~example.com/gamma.js'], undefined);
+    assert.equal(Object.keys(ph.f).filter((k) => k.startsWith('example.com/')).length, 1, `one mod: ${Object.keys(ph.f)}`);
+
+    // 4. Two different mods with one name (made apart): the phone's keeps it, the computer's moves beside it.
+    const sp = mod('Same', U(2), 'document.title = "phone";'), sc = mod('Same', U(3), 'document.title = "computer";');
+    A.say(`pset example.com/same ${JSON.stringify(sp)}`);
+    await ask(`write phone~example.com/same.js ${JSON.stringify(sc)}`, 'wrote');
+    s = await A.sync();
+    assert.deepEqual(s.apart, ['example.com/same-from-computer~example.com/same'], JSON.stringify(s));
+    ph = await A.files();
+    twin = (await ask('twin', 'twin')).twin;
+    assert.equal(ph.f['example.com/same'], sp);
+    assert.match(ph.f['example.com/same-from-computer'], /computer/);
+    assert.match(ph.f['example.com/same-from-computer'], new RegExp(`@id ${U(3)}`), 'its id kept: the same mod, renamed');
+    assert.equal(twin['phone~example.com/same.js'], sp);
+    assert.equal(twin['phone~example.com/same-from-computer.js'], ph.f['example.com/same-from-computer']);
+
+    // 5. Every-site mods both ways (D10).
+    const dark = mod('Dark', U(4), 'body { filter: invert(1) }', null), light = mod('Light', U(5), 'body { filter: none }', null);
+    A.say(`pset all-sites/dark ${JSON.stringify(dark)}`);
+    await ask(`write phone~all-sites/light.js ${JSON.stringify(light)}`, 'wrote');
+    s = await A.sync();
+    assert.ok(s.sent.includes('all-sites/dark') && s.taken.includes('all-sites/light'), JSON.stringify(s));
+    twin = (await ask('twin', 'twin')).twin;
+    assert.equal(twin['phone~all-sites/dark.js'], dark);
+    assert.equal((await A.files()).f['all-sites/light'], light);
+
+    // 6. Nothing new: a sync that changes nothing.
+    s = await A.sync();
+    assert.deepEqual([s.taken, s.sent, s.removed, s.renamed, s.apart], [[], [], [], [], []], JSON.stringify(s));
+
+    // 7. An app from before ids (no `ids`, no row uid/body/meta): it still syncs, by file id; a rename on the computer
+    // reaches it as the old one deleted and the new one added.
+    const { qr: qr2 } = await ask('pair', 'qr');
+    const O = await phone(qr2, port, { CHECK_OLD_PHONE: '1' });
+    s = await O.sync();
+    assert.ok(s.taken.includes('example.com/delta') && s.taken.includes('all-sites/dark'), JSON.stringify(s));
+    O.say(`pset example.com/old-one ${JSON.stringify(mod('Old one', null, 'document.title = "old";'))}`);
+    s = await O.sync();
+    assert.deepEqual(s.sent, ['example.com/old-one']);
+    const delta = (await ask('twin', 'twin')).twin['phone~example.com/delta.js'];
+    await ask(`write phone~example.com/epsilon.js ${JSON.stringify(withName(delta, 'Epsilon'))}`, 'wrote');
+    await ask('delete phone~example.com/delta.js', 'deleted');
+    s = await O.sync();
+    assert.deepEqual(s.renamed, [], 'an old app has no renames');
+    assert.ok(s.removed.includes('example.com/delta') && s.taken.includes('example.com/epsilon'), JSON.stringify(s));
+    // (and the new app takes the same change as a rename)
+    s = await A.sync();
+    assert.deepEqual(s.renamed, ['example.com/delta>example.com/epsilon'], JSON.stringify(s));
+  } finally {
+    for (const p of phones) p.kill('SIGKILL');
+    comp.stdin.write('quit\n');
+    await new Promise((r) => { const t = setTimeout(() => { comp.kill('SIGKILL'); r(); }, 5000); comp.on('exit', () => { clearTimeout(t); r(); }); });
+  }
+});

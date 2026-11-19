@@ -705,6 +705,14 @@ export function normalizeNewOff(value) {
  * The file name a pasted mod is imported under (sidepanel.js "Paste a mod…"): its @name in kebab-case, as the
  * helper names a mod (helper/lib/share.js nameOf), or "pasted-mod". Pure.
  */
+/** A pasted screenshot comes as "image.png" every time: give it a name of its own (when it was pasted). */
+export function pastedFileName(name, type, now = new Date()) {
+  const n = String(name || '');
+  if (n && !/^image\.\w+$/i.test(n)) return n;
+  const ext = (/\.(\w+)$/.exec(n)?.[1] || String(type || '').split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png').toLowerCase();
+  const p = (x) => String(x).padStart(2, '0');
+  return `pasted-${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}.${ext}`;
+}
 export function pastedModName(text) {
   const m = /^\s*\/\/\s*@name\s+(.+?)\s*$/m.exec(String(text || ''));
   const base = (m ? m[1] : '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);

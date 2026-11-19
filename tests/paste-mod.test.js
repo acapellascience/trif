@@ -37,3 +37,14 @@ test('the paste card is the panel\'s, reachable only from its menu: nothing a pa
   assert.equal(calls, 2, 'defined once, called once (from the menu item)');
   assert.match(js, /ui\.pasteMod\?\.addEventListener\('click', async \(\) => \{\n {2}ui\.modsMenu\.hidden = true;\n {2}const text = await pasteCard\(\);/);
 });
+
+test('a file pasted into the chat box: a screenshot ("image.png") gets a name of its own, other names stay', async () => {
+  const { pastedFileName } = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'lib.js')).href);
+  const at = new Date(2026, 10, 18, 19, 5, 7);
+  assert.equal(pastedFileName('image.png', 'image/png', at), 'pasted-2026-11-18-190507.png');
+  assert.equal(pastedFileName('', 'image/jpeg', at), 'pasted-2026-11-18-190507.jpeg');
+  assert.equal(pastedFileName('Image.PNG', '', at), 'pasted-2026-11-18-190507.png');
+  assert.equal(pastedFileName('', '', at), 'pasted-2026-11-18-190507.png');
+  assert.equal(pastedFileName('Screenshot 2026-11-18 at 7.05.07 PM.png', 'image/png', at), 'Screenshot 2026-11-18 at 7.05.07 PM.png');
+  assert.equal(pastedFileName('notes.csv', 'text/csv', at), 'notes.csv');
+});

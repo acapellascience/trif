@@ -7,7 +7,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
-  ROBOTLESS, isRobotless, switchableAgents, pastedModName } from './lib.js';
+  ROBOTLESS, isRobotless, switchableAgents, pastedModName, pastedFileName } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
@@ -3638,10 +3638,25 @@ document.addEventListener('drop', async (e) => {
   }
 });
 
-async function addSiteFile(f) {
+// Pasting files into the chat box (a screenshot, an image copied from a page, files copied in the Finder):
+// each goes in the site's files and is attached to the message being written, as a dropped file is while
+// typing. Pasted text stays ordinary text.
+ui.input?.addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();
+  if (!view.site || !view.status?.helper?.connected) return;
+  (async () => { for (const f of files.slice(0, 10)) await addSiteFile(pastedFile(f), { attach: true }); })();
+});
+function pastedFile(f) {
+  const name = pastedFileName(f.name, f.type);
+  return name === f.name ? f : new File([f], name, { type: f.type });
+}
+
+async function addSiteFile(f, { attach } = {}) {
   const site = chatSite(); // (the phone view's: its phone twin's files, and its chat)
   const note = (text) => request({ type: 'chat.note', site, text }).catch(() => {});
-  const typing = !!ui.input.value.trim();
+  const typing = attach ?? !!ui.input.value.trim();
   // (a slice at a time, so a big file is never all in memory: the helper appends them, then renames it into place)
   let id = null;
   const progress = el('p', 'note file-progress');

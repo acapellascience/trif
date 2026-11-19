@@ -578,7 +578,7 @@ test('the chat script: an earlier TRIF fill for another page that the chat puts 
       await page.addScriptTag({ content: CHAT });
     };
     const box = () => page.evaluate(() => document.querySelector('.ProseMirror').textContent);
-    const tileNames = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="file-thumbnail"]')].map((t) => t.firstChild.textContent));
+    const tileNames = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="file-thumbnail"]')].map((t) => (t.querySelector('[data-cds-whole-caption]') || t.firstChild).textContent));
     const st = async () => JSON.parse(await page.evaluate(() => globalThis.__trifChat.state()));
 
     // 1. Put back AFTER TRIF looked and filled (as Tim's): the page's file and screenshot go in; 1.5 s later the old
@@ -748,6 +748,41 @@ test('the chat script: TRIF\'s greeting never drawn over the chat\'s own suggest
         assert.equal(await page.evaluate(() => document.querySelector('h1.greet').hasAttribute('data-trif-greeting-hidden')), after.shown);
         await page.close();
       }
+    }
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
+test('the chat script: claude.ai\'s own greeting signed in (11-19: "Hello, night owl" with its starburst, no heading): TRIF\'s greeting in its place, the words and starburst hidden while it shows; light and dark', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 60000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const shape = { rim: '10,10 118,10 118,118 10,118', face: '24,24 104,24 104,104 24,104', eyes: ['40,50 56,50 56,70 40,70', '72,50 88,50 88,70 72,70'], colours: { rim: '#34d399', face: '#18181b', eye: '#34d399' } };
+  let browser;
+  try {
+    browser = await launch();
+    for (const scheme of ['light', 'dark']) {
+      const page = await browser.newPage();
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 560, deviceScaleFactor: 2, mobile: true });
+      await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+      await page.goto(`${base}/chat.html?greet=claude`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+      await page.evaluate((s) => globalThis.__trifChat.look('example.com', s), shape);
+      await page.waitForTimeout(300);
+      const r = await page.evaluate(() => {
+        const c = document.getElementById('trif-greeting'), g = document.querySelector('.greet');
+        const a = c.getBoundingClientRect(), b = g.getBoundingClientRect();
+        return { shown: !c.hidden, hidden: g.hasAttribute('data-trif-greeting-hidden'), seen: getComputedStyle(g.querySelector('svg')).visibility,
+          gap: Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) };
+      });
+      assert.equal(r.shown, true, `${scheme}: TRIF's greeting shows`);
+      assert.equal(r.hidden, true, `${scheme}: Claude's greeting block hidden: ${JSON.stringify(r)}`);
+      assert.equal(r.seen, 'hidden', `${scheme}: its starburst too`);
+      assert.ok(r.gap < 40, `${scheme}: in its place (centres ${r.gap} px apart)`);
+      await page.close();
     }
   } finally {
     if (browser) await browser.close();

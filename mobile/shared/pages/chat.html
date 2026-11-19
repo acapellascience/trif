@@ -53,6 +53,10 @@
   chatgpt.com keeps an unsent message, ONE draft for the whole site (localStorage `standin-draft`, the box's text only,
   saved at each change, gone at a send), put back into the box of any chat page 0.8 s after it loads (`?gptdraft=2500`:
   that many ms), replacing what's there as its editor does.
+  `?gptin` (11-19, chatgpt.com signed in, checked in the Simulator with Tim's account, nothing sent): `?octane`'s messages
+  and picture tiles, and its composer as signed in: the box a ProseMirror named "Ask ChatGPT" in a form, its Send a
+  type=submit button named "Send" (a submit is the send), "Select ChatGPT model", an "Attach files" input that takes any
+  file, a file's tile a span.group/composer-attachment (name in a span.truncate, a button named by it, "Remove …").
   `?nested` (11-18, claude.ai's code blocks: "pre.code-block__code code.language-js code"): each code block, once
   written, drawn as claude.ai's: pre.code-block__code > code.language-js holding a code of line numbers (a column a
   person can't select) and the code in spans; `?nested=inline`: each line's number at its start instead.
@@ -102,10 +106,10 @@
 <header>Stand-in chat <button type="button" id="old-chat" style="float: right; font: 13px system-ui; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit;">Older chat</button></header>
 <div id="log"></div>
 <div class="composer">
-  <div class="tiles"></div>
+  <div class="tiles" data-cds="MessageAttachments"></div>
   <div class="row">
-    <div class="ProseMirror" contenteditable="true"></div>
-    <button type="button" aria-label="Send message" disabled>↑</button>
+    <div class="tiptap ProseMirror" contenteditable="true" data-testid="chat-input" data-cds="Editor" aria-label="Write your prompt to the stand-in"></div>
+    <button type="button" aria-label="Send message" data-testid="chat-input-send" disabled>↑</button>
   </div>
 </div>
 <script>
@@ -122,10 +126,21 @@
   if (location.search.includes('slowload')) { const i = new Image(); i.src = `http://localhost:8378/slow?${Date.now()}`; document.body.append(i); }
   const nostop = location.search.includes('nostop');
   if (location.search.includes('greet')) {
-    const h = document.createElement('h1');
-    h.className = 'greet';
-    h.textContent = 'How can I help you today?';
-    h.style.cssText = 'font: 600 26px/1.3 Georgia, serif; text-align: center; margin: 22vh 0 0;';
+    // (`?greet=claude`: claude.ai's signed-in greeting (11-19), no heading: a div of display type holding its
+    // starburst (an svg in a div) and the words in a span.select-none)
+    const claudeGreet = /[?&]greet=claude\b/.test(location.search);
+    const h = document.createElement(claudeGreet ? 'div' : 'h1');
+    h.className = claudeGreet ? 'greet font-voice text-center' : 'greet';
+    if (claudeGreet) {
+      const star = document.createElement('div');
+      star.style.cssText = 'display: inline-block; width: 30px; height: 30px; vertical-align: middle; margin-right: 8px;';
+      star.innerHTML = '<svg viewBox="0 0 30 30" width="30" height="30"><path d="M15 2 L17 13 L28 15 L17 17 L15 28 L13 17 L2 15 L13 13 Z" fill="#d97757"/></svg>';
+      const words = document.createElement('span');
+      words.className = 'select-none';
+      words.textContent = 'Hello, night owl';
+      h.append(star, words);
+    } else h.textContent = 'How can I help you today?';
+    h.style.cssText = `font: ${claudeGreet ? '360 25.5px/1.3' : '600 26px/1.3'} Georgia, serif; text-align: center; margin: 22vh 0 0;`;
     log.append(h);
     const up = document.createElement('button');
     up.type = 'button';
@@ -165,7 +180,7 @@
     setTimeout(() => {
       const t = document.createElement('div');
       t.className = 'tools';
-      t.innerHTML = '<span>+</span><span>⚙︎</span><span style="flex:1"></span><span>Stand-in 5.5 High</span><span>Manual</span>';
+      t.innerHTML = '<span>+</span><span>⚙︎</span><span style="flex:1"></span><button type="button" data-testid="model-selector-dropdown" data-cds="ModelSelector" aria-label="Model: Stand-in 5.5 High" style="font: inherit; border: 0; background: none; color: inherit; padding: 0">Stand-in 5.5 High</button><span>Manual</span>';
       document.querySelector('.composer').append(t);
     }, 1000);
     setTimeout(() => {
@@ -199,7 +214,7 @@
     x.type = 'button';
     x.textContent = '×';
     x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); saveDraft(); });
-    if (location.search.includes('octane') && /^image\//.test(type || '')) {
+    if (/octane|gptin/.test(location.search) && /^image\//.test(type || '')) {
       // (?octane, a picture, as chatgpt.com signed in draws it (11-19): a div[role=button].composer-attachment-surface
       // named only by its aria-label and its img's alt, no data-testid; a name used before gets "(n)" before its
       // extension, as its uploads do)
@@ -221,12 +236,58 @@
       x.setAttribute('aria-label', `Remove ${name}`);
       x.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: inherit;';
       tile.append(layer, x);
-    } else {
-      tile.setAttribute('data-testid', 'file-thumbnail');
-      const label = document.createElement('span');
-      label.textContent = name;
+    } else if (/gptin/.test(location.search)) {
+      // (?gptin, a file, as chatgpt.com signed in draws it (11-19): span.group/composer-attachment > a surface with the
+      // name in span.truncate and a button named by it; "Remove …" beside; a name used before gets "(n)")
+      const used = files.filter((f) => f !== entry && f.base === name).length;
+      entry.base = name;
+      if (used) { entry.name = name.replace(/(\.[^.]*)?$/, `(${used + 1})$1`); name = entry.name; }
+      tile.className = 'group/composer-attachment';
+      tile.style.cssText = 'position: relative; display: inline-block; width: 120px; height: 120px; border-radius: 10px; background: var(--tile); font-size: 12px;';
+      const surf = document.createElement('span');
+      surf.className = 'composer-attachment-surface';
+      surf.style.cssText = 'display: flex; flex-direction: column; justify-content: flex-end; height: 100%; padding: 6px; box-sizing: border-box;';
+      const nm = document.createElement('span');
+      nm.className = 'truncate';
+      nm.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+      nm.textContent = name;
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'composer-attachment-surface';
+      open.setAttribute('aria-label', name);
+      open.style.cssText = 'position: absolute; inset: 0; opacity: 0; border: 0;';
+      surf.append(nm, open);
       x.setAttribute('aria-label', `Remove ${name}`);
-      tile.append(label, x);
+      x.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: inherit;';
+      tile.append(surf, x);
+    } else {
+      // (as claude.ai signed in draws it (11-19): div[data-cds=MessageAttachmentsFile|Image][data-testid=file-thumbnail]
+      // .group/tile > a Card whose body holds an sr-only name in a CardLink and the caption; Remove beside the card)
+      tile.setAttribute('data-testid', 'file-thumbnail');
+      tile.setAttribute('data-cds', /^image\//.test(type || '') || /\.png$/i.test(name) ? 'MessageAttachmentsImage' : 'MessageAttachmentsFile');
+      tile.setAttribute('data-cds-attachment', '');
+      tile.setAttribute('tabindex', '-1');
+      tile.className = 'group/tile';
+      const card = document.createElement('div');
+      card.setAttribute('data-cds', 'Card');
+      const body = document.createElement('div');
+      body.setAttribute('data-cds-card-body', '');
+      const link = document.createElement('span');
+      link.setAttribute('data-cds', 'CardLink');
+      link.setAttribute('role', 'button');
+      link.innerHTML = '<span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>';
+      link.firstChild.textContent = name;
+      const label = document.createElement('span');
+      label.setAttribute('data-cds-whole-caption', '');
+      label.setAttribute('aria-hidden', 'true');
+      const bdi = document.createElement('bdi');
+      bdi.textContent = name;
+      label.append(bdi);
+      body.append(link, label);
+      card.append(body);
+      x.setAttribute('aria-label', `Remove ${name}`);
+      x.setAttribute('data-cds-attachment-remove', '');
+      tile.append(card, x);
     }
     if (late) {
       // (a placeholder first, the real tile 0.5 s later, as claude.ai's upload card does)
@@ -242,17 +303,20 @@
   // (?gptpaste: as chatgpt.com on Tim's iPhone, 11-16: a pasted text file goes into the box as its text; pictures
   // and files picked with the file input (the paper clip) become tiles)
   const gptpaste = location.search.includes('gptpaste');
-  const octane = location.search.includes('octane');
+  const gptin = location.search.includes('gptin');
+  const octane = location.search.includes('octane') || gptin;
   const cm = location.search.includes('cm');
   const picker = document.createElement('input');
   picker.type = 'file';
   picker.multiple = true;
   picker.hidden = true;
-  if (octane) { picker.id = 'octane-mobile-composer-files-input'; picker.accept = 'image/avif,image/bmp,image/gif,image/heic,image/heif,image/jpeg,image/png,image/webp'; }
+  if (gptin) { picker.setAttribute('aria-label', 'Attach files'); }
+  else if (!octane) { picker.id = 'chat-input-file-upload-onpage'; picker.setAttribute('data-testid', 'file-upload'); picker.setAttribute('aria-label', 'Upload files'); }
+  if (octane && !gptin) { picker.id = 'octane-mobile-composer-files-input'; picker.accept = 'image/avif,image/bmp,image/gif,image/heic,image/heif,image/jpeg,image/png,image/webp'; }
   const toast = (t) => { const n = document.createElement('div'); n.className = 'toast'; n.textContent = t; document.body.append(n); setTimeout(() => n.remove(), 3000); };
   picker.addEventListener('change', () => {
     for (const f of picker.files) {
-      if (octane && !f.type.startsWith('image/')) { toast('The selected file is not a supported image.'); continue; }
+      if (octane && !gptin && !f.type.startsWith('image/')) { toast('The selected file is not a supported image.'); continue; }
       takeFile(f);
     }
     refresh(); saveDraft();
@@ -265,7 +329,7 @@
     const list = [...dt.files];
     if (list.length) {
       for (const f of list) {
-        if (octane && !f.type.startsWith('image/')) { toast('The selected file is not a supported image.'); continue; }
+        if (octane && !gptin && !f.type.startsWith('image/')) { toast('The selected file is not a supported image.'); continue; }
         if (gptpaste && !f.type.startsWith('image/')) f.text().then((t) => { document.execCommand('insertText', false, t); refresh(); saveDraft(); });
         else takeFile(f);
       }
@@ -328,17 +392,46 @@
   const sends = window.__standinSends = [];
   const noteSend = (how, e) => sends.push({ how, trusted: !!(e && e.isTrusted), at: Date.now() });
   window.__standinUntrusted = () => sends.filter((x) => !x.trusted).length;
-  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('button[aria-label="Send message"]') && !e.isTrusted) noteSend('scripted click', e); }, true);
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('button[aria-label="Send message"], button[aria-label="Send"]') && !e.isTrusted) noteSend('scripted click', e); }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isTrusted) noteSend('scripted Enter', e); }, true);
   document.addEventListener('submit', (e) => noteSend('submit', e), true);
   for (const name of ['submit', 'requestSubmit']) { const was = HTMLFormElement.prototype[name]; HTMLFormElement.prototype[name] = function (...a) { noteSend(`form.${name}()`, null); return was.apply(this, a); }; }
   ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (e.isTrusted) noteSend('Enter', e); go(); } });
   row.addEventListener('click', (e) => { if (e.target.closest('button[aria-label="Send message"]')) { if (e.isTrusted) noteSend('button', e); go(); } });
+  // (the Send button as the page draws it again after a reply)
+  function makeSend() {
+    const b = document.createElement('button');
+    b.textContent = '↑';
+    if (gptin) { b.type = 'submit'; b.setAttribute('aria-label', 'Send'); } else { b.type = 'button'; b.setAttribute('aria-label', 'Send message'); b.setAttribute('data-testid', 'chat-input-send'); }
+    return b;
+  }
+  // (?gptin: chatgpt.com's composer signed in: a form whose submit (its Send, type=submit, named "Send") sends)
+  if (gptin) {
+    const composer = document.querySelector('.composer');
+    const form = document.createElement('form');
+    composer.replaceWith(form);
+    form.append(composer);
+    const b = makeSend();
+    b.disabled = send.disabled;
+    send.replaceWith(b);
+    send = b;
+    ed.setAttribute('aria-label', 'Ask ChatGPT');
+    ed.removeAttribute('data-testid');
+    ed.removeAttribute('data-cds');
+    form.addEventListener('submit', (e) => { e.preventDefault(); go(); });
+    const pick = document.createElement('button');
+    pick.type = 'button';
+    pick.setAttribute('aria-label', 'Select ChatGPT model');
+    pick.textContent = 'Stand-in Medium';
+    pick.style.cssText = 'float: right; font: 13px system-ui; border: 0; background: none; color: inherit; margin-right: 8px;';
+    document.querySelector('header').append(pick);
+  }
 
   // (origin null: no @match line, as desktop's mods in a site's folder (FeedBook): the site comes from the chat's)
-  const modFor = (origin, name, body) => `// ==WebMod==
-// @name        ${name}
-// @description Made by the stand-in chat${origin ? `\n// @match       ${origin}/*` : ''}
+  // (`extra`: more header lines, as "// @id x")
+  const modFor = (origin, name, body, extra = '') => `// ==WebMod==
+// @name        ${name}${extra}
+// @description Made by the stand-in chat${origin ? `\n// @match       ${origin === '*' ? '*://*' : origin}/*` : ''}
 // @style
 // ==/WebMod==
 ${JSON.stringify(body, null, 2)}`;
@@ -382,13 +475,34 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
       parts = [['p', 'The mod is big, so here it is as a file:'], ['a', '/stand-in-file/calmer-feed.js', 'calmer-feed.js']];
       if (/block/i.test(text)) parts.push(['pre', modFor('http://localhost', 'Calmer feed', { css: '.feed-item h2 { color: #1f8a5b }' })]);
     }
+    // (the mod matrix's words, 11-19: "full code" a free mod (JavaScript in the page) marking the body; "broken" a
+    // style mod whose JSON can't be read; "everywhere" a style mod for every site (@match *://*/*); "modid <x>" an @id
+    // line (an update of the mod kept under it); "long" many paragraphs before the mod, written slowly)
+    else if (/full code/i.test(text)) {
+      const called = (text.match(/called (\w+)/i) || [])[1] || 'Page marker';
+      const asked = (text.match(/ask ([\w ]{1,40})/i) || [])[1] || '';
+      parts = [['p', 'This one needs JavaScript in the page:'], ['pre', `// ==WebMod==
+// @name        ${called}
+// @description Marks the page (from the stand-in chat)${origin ? `\n// @match       ${origin}/*` : ''}
+// ==/WebMod==
+document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(asked.trim() || 'yes')});`]];
+    }
+    else if (/broken/i.test(text)) parts = [['p', 'Try this:'], ['pre', `// ==WebMod==
+// @name        Broken one
+// @description Made by the stand-in chat${origin ? `\n// @match       ${origin}/*` : ''}
+// @style
+// ==/WebMod==
+{ "css": ".feed-item h2 { color: red }", "hide": [ "#promo" `]];
     else {
       // ("called <Name>": the mod's name (a new mod, not an update of Calmer feed); "ask <words>": those words in its
       // CSS, so each quick ask's mod is code of its own)
       const called = (text.match(/called (\w+)/i) || [])[1];
       const asked = (text.match(/ask ([\w ]{1,40})/i) || [])[1];
+      const id = (text.match(/\bmodid ([\w-]+)/i) || [])[1];
+      const every = /everywhere/i.test(text);
       parts = [['p', 'Here is a style mod that does that. It only changes how the page looks.'],
-        ['pre', modFor(origin, called || 'Calmer feed', { css: `.feed-item h2 { color: #1f8a5b }${asked ? ` /* ${asked.trim()} */` : ''}`, hide: ['#promo-banner', '.feed-item.promoted'] })]];
+        ['pre', modFor(every ? '*' : origin, called || 'Calmer feed', { css: `.feed-item h2 { color: #1f8a5b }${asked ? ` /* ${asked.trim()} */` : ''}`, hide: ['#promo-banner', '.feed-item.promoted'] }, id ? `\n// @id          ${id}` : '')]];
+      if (/\blong\b/i.test(text)) for (let k = 1; k <= 12; k++) parts.splice(k, 0, ['p', `Step ${k}: here is a long explanation of what the mod does and why, so the reply takes a while to write on a slow connection. `.repeat(3)]);
       if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', { hide: ['.cookie-consent'] })]);
       parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
     }
@@ -522,7 +636,8 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
   function reply(parts, seconds, whole) {
     const stop = document.createElement('button');
     stop.type = 'button';
-    stop.setAttribute('aria-label', 'Stop response');
+    stop.setAttribute('aria-label', gptin ? 'Stop streaming' : 'Stop response');
+    if (gptin) stop.setAttribute('data-testid', 'stop-button');
     stop.textContent = '■';
     if (!nostop) send.replaceWith(stop);
     else send.disabled = true;
@@ -586,10 +701,7 @@ trif.css('.feed-item { outline: 1px dashed #c96442 }'); // ${text.slice(0, 40).r
       if (octane) box.setAttribute('data-message-complete', '');
       if (nostop) { refresh(); return; }
       box.setAttribute('data-is-streaming', 'false');
-      send = document.createElement('button');
-      send.type = 'button';
-      send.setAttribute('aria-label', 'Send message');
-      send.textContent = '↑';
+      send = makeSend();
       stop.replaceWith(send);
       refresh();
       if (older) setTimeout(addOlder, 2000);

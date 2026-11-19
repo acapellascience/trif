@@ -257,6 +257,16 @@ extension Model {
             out = a.1.map { "refused: \($0)" } ?? "ok"
         }
         if step["toast"] != nil { out = AppToast.shared.describe }
+        // ({"panelmsg": {"type": "delete", "id": …}}: any Mods tab message, as its page sends it (the mod matrix's clean-up);
+        // {"modlist": "site or empty"}: each mod's id, name, site, on, held, history count and its code's length)
+        if let m = step["panelmsg"] as? [String: Any] {
+            let a = await panel.handle(m)
+            out = a.1.map { "refused: \($0)" } ?? "ok"
+        }
+        if let s = step["modlist"] as? String {
+            out = browser.mods.mods.filter { s.isEmpty || $0.site == s || $0.sites.contains(s) }
+                .map { "\($0.id)\t\($0.name)\t\($0.site)\t\($0.on ? "on" : "off")\($0.held ? " held" : "")\thistory \($0.history.count)\t\($0.code.count)" }.joined(separator: "\n")
+        }
         // ({"rename": [id, "New name"]}: the Mods tab's Rename, as its Save sends it; {"modcode": id}: a mod's file now;
         // {"modreads": [text, here]}: what readNamed makes of a chat's code (the id it'd be kept under, its @id))
         if let r = step["rename"] as? [String], r.count == 2 {

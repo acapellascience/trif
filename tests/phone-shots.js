@@ -52,17 +52,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         continue;
       }
       await h.shot(tabId, `${site}-desktop.png`);
-      const r = await ask({ type: 'phone.open', tabId, screen: { left: 0, top: 25, width: 1470, height: 931 } });
+      const r = await h.openPhone(tabId, { left: 0, top: 25, width: 1470, height: 931 });
       await waitFor(`${site} on the phone`, () => E((id) => chrome.tabs.get(id).then((t) => t.status === 'complete'), tabId), 30000).catch(() => {});
       await sleep(4000);
       const seen = await h.page(tabId, '({ ua: navigator.userAgent, w: innerWidth, h: innerHeight, touch: navigator.maxTouchPoints, url: location.href })').catch((e) => ({ error: e.message }));
       await h.shot(tabId, `${site}-phone.png`);
-      // the panel window beside it
+      // the side panel beside it (the one showing the phone view's banner)
       if (!report.some((x) => x.viewport)) { // (the first site shown: the panel too)
         const { targetInfos } = await browser.cdp.send('Target.getTargets');
-        const t = targetInfos.find((x) => x.type === 'page' && x.url.includes(`sidepanel.html?window=${r.window}&fallback=1`));
-        if (t) {
-          const sid = await browser._attach(t.targetId);
+        let sid = null;
+        for (const t of targetInfos.filter((x) => x.type === 'page' && x.url.endsWith('/sidepanel.html'))) {
+          const s2 = await browser._attach(t.targetId);
+          const r2 = await browser.cdp.send('Runtime.evaluate', { expression: '!document.getElementById("phone-note").hidden', returnByValue: true }, s2);
+          if (r2.result.value === true) { sid = s2; break; }
+        }
+        if (sid) {
           await browser.cdp.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 760, deviceScaleFactor: 1, mobile: false }, sid);
           await sleep(1500);
           const { data } = await browser.cdp.send('Page.captureScreenshot', { format: 'png' }, sid);

@@ -56,7 +56,26 @@ test above checks them here too; the menu's are in sidepanel.js `PHONE_MENU`.
 | What it did | Synced with {phone}: {n} from the phone, {m} to it. · Synced with {phone}: {n} from the phone, {m} to it, {k} waiting for your OK. · Phone settings | the link opens Settings at Connect a phone |
 | No phone connected just now (or no sync within 30 s) | {phone} isn't connected just now. It syncs when TRIF is open on it. · Sync now · Phone settings | |
 | Syncing turned off in Settings | Syncing with {phone} is off. · Phone settings | |
-| The phone view's navigation bar | Back · Forward · Reload · Address or search | the buttons' names and the field's placeholder. Not an address: searched on Google, Safari's default on an iPhone |
+| The phone view's navigation bar | Back · Forward · Reload · Address or search | the buttons' names and the field's placeholder. Not an address: searched on Google, Safari's default on an iPhone. **Since 11-18 (branch phone-view2) only in the popup route** (a browser without a side panel, as Arc): the phone view's ordinary window has the browser's own address bar |
+| The phone line in the phone view, once a phone has synced (new 11-18, draft) | Syncing with {phone} · last synced {ago}. · Sync now | {ago}: "just now" (under a minute), "{n} min ago" (under an hour), else "at {time}" ("at 2:05 PM"). Before any sync since the helper started: "Syncing with {phone}." as before |
+| The same, its {ago} | just now · {n} min ago · at {time} | new 11-18 (draft) |
+
+## Desktop: a sync done, and the phone view's window (11-18, branch phone-view2, drafts)
+
+Tim, 11-18: "it should have some kind of visible 'successfully synced' message". Every open TRIF panel (the side
+panel, the phone view's, a panel window) shows a toast for a few seconds when a sync with a phone ends, whoever
+started it (the phone on its own, the phone's Sync now, or Sync now here); not when the phone line under the bar
+already says what that sync did (after Sync now there). The toast's words are in phonelink.js `TEXT`; the phone
+view's are in sidepanel.js `PHONE_VIEW_TEXT`.
+
+| Where | String | Notes |
+|---|---|---|
+| The toast, after a sync that moved something | Synced with {phone} · {n} from the phone, {m} to it | {phone} as the phone line's (two: "{phone} and {other}"). No full stop: it's a passing line |
+| The same, with mods waiting for an OK | Synced with {phone} · {n} from the phone, {m} to it, {k} waiting for your OK | |
+| The same, nothing moved | Synced with {phone} · nothing new | |
+| The phone view just opened without TRIF's panel beside it (Firefox always; Chrome if the side panel couldn't open): in the panel the phone view was opened from, with a × | The phone view is in a window of its own. Click TRIF's button there to open TRIF beside the phone. | until TRIF's panel is open in the phone window, or the phone view ends. Firefox can't open its sidebar in another window from a click in this one (sidebarAction.open has no window, and only works inside the click itself) |
+| The phone view's banner, when the page is wider than the phone's because the browser won't make the window narrower | This page is {w} px wide, wider than an iPhone's 390: the browser won't make this window narrower. | {w}: the page's width in CSS px. Headless Chrome 156 keeps a window with its side panel open at 792 px or wider, so a 406 px page; Tim's Chrome to be checked. Not shown at 390 (± 2) |
+| The popup route's address field, when going there failed (a toast) | Couldn't go there: {error} | {error}: the browser's words, as they come. Before 11-18 the failure went to the console only |
 
 ## iPhone: More and My computer (pairing built in round 15 on ios-poc, 85166ad; the engine in More in round 16, step 14)
 

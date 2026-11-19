@@ -53,10 +53,10 @@ export function copyBounds(win, screen) {
  */
 export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome', family, copy = false, allUrls = true }) {
   // (`browser` is the name the user knows, LibreWolf say; `family` what it does: lib.js FAMILY)
-  family = family || (browser === 'Firefox' ? 'firefox' : browser === 'Safari' ? 'safari' : 'chromium');
+  family = familyOf(browser, family);
   if (captureTab && allUrls) return 'tab';
   if (showing && !full) return 'visible';
-  if (!allUrls) return { error: notAllSites(browser, full ? 'To capture a full page' : "To capture a tab that isn't showing") };
+  if (!allUrls) return { error: notAllSites(browser, full ? 'To capture a full page' : "To capture a tab that isn't showing", family) };
   // Firefox puts captureTab in a page only if the add-on had <all_urls> when that page loaded (checked in
   // Firefox 159: granted later, it shows up in new pages and after the add-on restarts, not in the running
   // background, until Firefox suspends that idle event page and starts it again). A restart settles it.
@@ -82,13 +82,25 @@ export function screenshotPlan({ showing, full = false, captureTab = false, brow
 
 // Without access to every site: what can still be captured, and how to check the page otherwise.
 const CHECK_INSTEAD = 'For checks, use `trif sweep`, `trif text` or `trif run`, which work on any tab of the site';
-function notAllSites(browser, what) {
-  return `${what}, ${browser} wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for. ` +
-    `It can capture the tab in front once the user has clicked the TRIF toolbar button on that tab. ${CHECK_INSTEAD}`;
+// Where the button is and what the click does, so the agent can tell the user in plain words (they may not know
+// what "the toolbar button" is, and the click also closes TRIF's panel if it's open).
+function familyOf(browser, family) {
+  return family || (browser === 'Firefox' ? 'firefox' : browser === 'Safari' ? 'safari' : 'chromium');
 }
-function needsClick(browser) {
-  return `${browser} lets TRIF capture this tab only after the user clicks the TRIF toolbar button on it (TRIF has access to the sites ` +
-    `it's on, which isn't enough for ${browser} to let it take screenshots). Ask the user to click the TRIF button on this tab, then try again. ${CHECK_INSTEAD}`;
+function theButton(browser, family) {
+  const panel = familyOf(browser, family) === 'firefox' ? 'sidebar' : 'side panel';
+  return `TRIF's robot icon at the top right of ${browser}, to the right of the address bar (if it isn't pinned there, ` +
+    `it's in the puzzle-piece Extensions menu). If TRIF's ${panel} is open, that click closes it, and a second click brings it back: ` +
+    'tell the user so, in those plain words';
+}
+function notAllSites(browser, what, family) {
+  return `${what}, ${browser} wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for. ` +
+    `It can capture the tab in front once the user has clicked ${theButton(browser, family)}. ${CHECK_INSTEAD}`;
+}
+function needsClick(browser, family) {
+  return `${browser} lets TRIF capture this tab only after the user clicks TRIF's button on it (TRIF has access to the sites ` +
+    `it's on, which isn't enough for ${browser} to let it take screenshots). Ask the user to go to this tab and click ` +
+    `${theButton(browser, family)}. Then try again. ${CHECK_INSTEAD}`;
 }
 
 /** Scroll offsets for a stitched full page: viewport-sized steps, the last one flush with the bottom. */
@@ -180,7 +192,7 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
     let dataUrl;
     try { dataUrl = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }); } catch (e) {
       // ("Either the '<all_urls>' or 'activeTab' permission is required.")
-      if (!allUrls && /activeTab|all_urls|permission/i.test(String(e?.message ?? e))) throw new Error(needsClick(deps.browser));
+      if (!allUrls && /activeTab|all_urls|permission/i.test(String(e?.message ?? e))) throw new Error(needsClick(deps.browser, deps.family));
       throw e;
     }
     dataUrl = (await showingNow()) && dataUrl;

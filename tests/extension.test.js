@@ -3404,7 +3404,7 @@ test('background: sites setup turns on are disconnected until connected, then on
     bg.chrome.tabs.captureVisibleTab = async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); };
     const r = await bg.native.call('screenshot', { tab: 5 });
     assert.strictEqual(r.ok, false);
-    assert.match(r.error, /only after the user clicks the TRIF toolbar button on it/);
+    assert.match(r.error, /only after the user clicks TRIF's button on it.*robot icon at the top right/);
   } finally { bg.restore(); }
 });
 

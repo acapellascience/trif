@@ -28,9 +28,9 @@ final class PhoneSyncModel: ObservableObject {
         let t = UserDefaults.standard.double(forKey: "phoneSync.lastAt")
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
     }()
-    /// The toast after each sync (PhoneSync.Toast: "nothing new" only after one the person started; an automatic
-    /// sync's problem once until a sync works or it changes).
-    private var toastRule = PhoneSync.Toast(told: UserDefaults.standard.string(forKey: "phoneSync.toldProblem"))
+    /// Why the latest try didn't get through (kept until a sync works, across launches): the lasting line's quiet
+    /// note, in place of a toast after an automatic sync (PhoneSync.Toast.lastLine; Tim, 11-19).
+    @Published private(set) var lastFailed: String? = UserDefaults.standard.string(forKey: "phoneSync.lastFailed")
     /// What the Mods tab tells the person until they tap OK: conflicts, mods that came back, ones that couldn't
     /// come over (S7; drafts in docs/IOS-APP-STRINGS.md, "Phone sync").
     @Published private(set) var notices: [String] = []
@@ -53,6 +53,7 @@ final class PhoneSyncModel: ObservableObject {
     func start(store: ModStore) {
         guard scheduler == nil else { return }
         self.store = store
+        UserDefaults.standard.removeObject(forKey: "phoneSync.toldProblem") // (11-18's automatic problem toasts: gone)
         let sync = PhoneSync(store: store, link: link)
         // (a file, a switch or an Allow that differs from the last sync's: a sync 3 s later; the sync itself reads the store)
         let s = PhoneSync.Scheduler(files: { store.syncSignature() }) { [weak self] done in
@@ -76,6 +77,10 @@ final class PhoneSyncModel: ObservableObject {
 
     private func finished(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) {
         syncing = false
+        if r.failureCode != "notPaired" {
+            lastFailed = PhoneSync.Toast.failed(r)
+            UserDefaults.standard.set(lastFailed, forKey: "phoneSync.lastFailed")
+        }
         switch r {
         case .success(let s):
             last = s; lastProblem = nil
@@ -135,23 +140,16 @@ final class PhoneSyncModel: ObservableObject {
 
     func seen() { notices = [] }
 
-    /// The toast after a sync (Tim, 11-18; the rule and words: PhoneSync.Toast).
+    /// The toast after a sync the person started (Tim, 11-18, 11-19: none after an automatic one; PhoneSync.Toast).
     private func toast(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) {
-        let t = toastRule.after(r, why: why, computer: computerName ?? "your computer")
-        UserDefaults.standard.set(toastRule.told, forKey: "phoneSync.toldProblem")
-        guard let t else { return }
-        if t.problem { AppToast.shared.show(t.text, problem: true, seconds: 6) } else { AppToast.shared.show(t.text) }
+        guard let t = PhoneSync.Toast.after(r, why: why, computer: computerName ?? "your computer") else { return }
+        AppToast.shared.show(t.text, problem: t.problem)
     }
 
-    /// "Last synced just now / 5 min ago / at 2:05 PM / Nov 17 at 2:05 PM" (nil: never), as the computer's phone line
-    /// says its {ago}.
+    /// "Last synced 5 min ago", and while the latest try failed " · the last try didn't get through: {reason}" (nil:
+    /// never synced): PhoneSync.Toast.lastLine.
     func lastLine(now: Date = Date()) -> String? {
-        guard let t = lastAt else { return nil }
-        let secs = now.timeIntervalSince(t)
-        if secs < 60 { return "Last synced just now" }
-        if secs < 3600 { return "Last synced \(Int(secs / 60)) min ago" }
-        let time = t.formatted(date: .omitted, time: .shortened)
-        return Calendar.current.isDateInToday(t) ? "Last synced at \(time)" : "Last synced \(t.formatted(.dateTime.month(.abbreviated).day())) at \(time)"
+        PhoneSync.Toast.lastLine(at: lastAt, failed: lastFailed, computer: computerName ?? "your computer", now: now)
     }
 
     private func name(_ id: String) -> String {

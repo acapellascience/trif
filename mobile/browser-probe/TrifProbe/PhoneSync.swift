@@ -268,43 +268,32 @@ final class PhoneSync {
         Failure(code: a["code"] as? String ?? "failed", message: a["message"] as? String ?? "no answer")
     }
 
-    /// The toast after a sync (Tim, 11-18), the computer's own toast seen from the phone's side: what came from the
-    /// computer (taken here, new or changed, and deleted there), what went to it, and what waits here for an OK;
-    /// switches aren't counted, as on the computer (extension/phonelink.js `syncToast(done, { asked })` on branch
-    /// phone-link). A sync that moved nothing says "nothing new" only when the person started it on the phone (Sync now,
-    /// the first sync after pairing); an automatic one (the app in front, a change, the computer's nudge) says
-    /// nothing. A sync that didn't happen says why: always when the person started it; for an automatic one only
-    /// when it's news (`told`: the problem last said, until a sync works or the problem changes), so a Mac asleep
-    /// isn't said each time the app comes to the front. Drafts in docs/IOS-APP-STRINGS.md.
-    struct Toast {
+    /// The toast after a sync (Tim, 11-18; 11-19: "they happen every time you hit a switch … either way they're just
+    /// noise"): only after a sync the person started on the phone (Sync now, the first sync after pairing), never
+    /// after an automatic one (the app in front, a switch or another change, the computer's nudge), whatever it did.
+    /// Its words are the computer's own toast seen from the phone's side: what came from the computer (taken here,
+    /// new or changed, and deleted there), what went to it, and what waits here for an OK, or "nothing new"
+    /// (switches aren't counted, as on the computer: extension/phonelink.js `syncToast(done, { asked })` on branch
+    /// phone-link); a sync that didn't happen says why. An automatic sync's trace is the lasting line instead
+    /// (`lastLine`: "Last synced …", and quietly, while the latest try failed, why). Drafts in docs/IOS-APP-STRINGS.md.
+    enum Toast {
         /// The reasons the person started (the Scheduler's `why`): Sync now and pairing's first sync.
         static func asked(_ why: String) -> Bool { why == "now" || why == "pair" }
-        /// The problem the toast last said (nil: none since the last good sync). The app keeps it across launches, so
-        /// iOS ending the app in the background doesn't make the same problem news again.
-        private(set) var told: String?
-        init(told: String? = nil) { self.told = told }
 
         /// What to show after a sync (nil: no toast). A failure "notPaired" is never said.
-        mutating func after(_ r: Result<Summary, Failure>, why: String, computer c: String) -> (text: String, problem: Bool)? {
+        static func after(_ r: Result<Summary, Failure>, why: String, computer c: String) -> (text: String, problem: Bool)? {
+            guard asked(why) else { return nil }
             switch r {
-            case .success(let s) where !s.unfinished:
-                told = nil
-                return Self.words(s, c, asked: Self.asked(why)).map { ($0, false) }
-            case .success: return problem("unfinished", why, c)
-            case .failure(let f): return f.code == "notPaired" ? nil : problem(f.code, why, c)
+            case .success(let s) where !s.unfinished: return (words(s, c), false)
+            case .success: return (problemWords("unfinished", c), true)
+            case .failure(let f): return f.code == "notPaired" ? nil : (problemWords(f.code, c), true)
             }
         }
 
-        private mutating func problem(_ code: String, _ why: String, _ c: String) -> (text: String, problem: Bool)? {
-            guard Self.asked(why) || code != told else { return nil }
-            told = code
-            return (Self.problemWords(code, c), true)
-        }
-
-        /// The counts' words, "nothing new" (asked only), or nil.
-        static func words(_ s: Summary, _ c: String, asked: Bool) -> String? {
+        /// The counts' words, or "nothing new".
+        static func words(_ s: Summary, _ c: String) -> String {
             let n = s.taken.count + s.removed.count, m = s.sent.count, k = s.waitingHere.count
-            guard n + m + k > 0 else { return asked ? "Synced with \(c) · nothing new" : nil }
+            guard n + m + k > 0 else { return "Synced with \(c) · nothing new" }
             return "Synced with \(c) · \(n) from the computer, \(m) to it" + (k > 0 ? ", \(k) waiting for your OK" : "")
         }
 
@@ -317,42 +306,121 @@ final class PhoneSync {
             default: return "Not synced with \(c) this time. TRIF tries again"
             }
         }
+
+        /// What the latest try's failure is kept as for the lasting line (nil: it worked, or nothing to keep).
+        static func failed(_ r: Result<Summary, Failure>) -> String? {
+            switch r {
+            case .success(let s): return s.unfinished ? "unfinished" : nil
+            case .failure(let f): return f.code == "notPaired" ? nil : f.code
+            }
+        }
+
+        /// The why after "the last try didn't get through" (nil: none said, as for a dropped connection).
+        static func reasonWords(_ code: String, _ c: String) -> String? {
+            switch code {
+            case "off": return "syncing phone mods is off on \(c)"
+            case "notFound": return "can't find \(c)"
+            case "removed": return "this iPhone isn't connected to \(c) any more"
+            case "denied": return "TRIF needs Local Network access"
+            default: return nil
+            }
+        }
+
+        /// The lasting line on My computer and in Settings: "Last synced just now / 5 min ago / at 2:05 PM / Nov 17 at
+        /// 2:05 PM" (as the computer's phone line says its {ago}), and while the latest try failed (`failed`, kept until
+        /// a sync works), " · the last try didn't get through: {reason}". Nil before the first sync.
+        static func lastLine(at t: Date?, failed: String?, computer c: String, now: Date = Date()) -> String? {
+            guard let t else { return nil }
+            let secs = now.timeIntervalSince(t)
+            var line: String
+            if secs < 60 { line = "Last synced just now" }
+            else if secs < 3600 { line = "Last synced \(Int(secs / 60)) min ago" }
+            else {
+                let time = t.formatted(date: .omitted, time: .shortened)
+                line = Calendar.current.isDateInToday(t) ? "Last synced at \(time)" : "Last synced \(t.formatted(.dateTime.month(.abbreviated).day())) at \(time)"
+            }
+            if let f = failed { line += " · the last try didn't get through" + (reasonWords(f, c).map { ": \($0)" } ?? "") }
+            return line
+        }
     }
 
     /// When the phone syncs (D9). `sync` runs one (PhoneSync.run with the app's store and link); its answer comes
     /// back through `finished`. Callbacks and calls on one queue (main in the app).
+    ///
+    /// One at a time, and never two begun closer than `gap` (11-19, Tim: "half the time they say not synced"): the
+    /// computer refuses a sync.begin within a second of the last (`busy`), and a switch's sync was followed at once
+    /// by the computer's nudge for that same switch arriving in the browser. What comes while one runs, or before the
+    /// gap is over, runs once after it. A `busy` answer is tried again quietly after the gap (3 times at most),
+    /// never said. A change syncs `changeDelay` after the last change of a burst: five switches in two seconds are
+    /// one sync, three seconds after the last.
     final class Scheduler {
         let changeDelay: Double
+        let gap: Double
         private let files: () -> [String: String]
         private let sync: (@escaping (Result<Summary, Failure>) -> Void) -> Void
         /// Each sync's answer, and its reason (front, change, nudge; the person's: now, pair).
         var finished: ((Result<Summary, Failure>, String) -> Void)?
         private(set) var running = false
-        private var again: String?
+        /// The reason of the sync waiting (for the one running to end, or for the gap).
+        private var pending: String?
         private var changeTimer: DispatchWorkItem?
+        private var gapTimer: DispatchWorkItem?
+        private var lastStart: Double?
+        private var busyTries = 0
         private let queue: DispatchQueue
         /// The files' revisions the last sync left (nil: no sync yet this launch).
         private(set) var known: [String: String]?
+        /// (tests) how many syncs were begun, and how many `busy` answers were tried again
+        private(set) var started = 0, retried = 0
 
-        init(changeDelay: Double = 3, queue: DispatchQueue = .main, files: @escaping () -> [String: String],
+        init(changeDelay: Double = 3, gap: Double = 1.2, queue: DispatchQueue = .main, files: @escaping () -> [String: String],
              sync: @escaping (@escaping (Result<Summary, Failure>) -> Void) -> Void) {
-            self.changeDelay = changeDelay; self.queue = queue; self.files = files; self.sync = sync
+            self.changeDelay = changeDelay; self.gap = gap; self.queue = queue; self.files = files; self.sync = sync
         }
 
         private func revs() -> [String: String] { files().mapValues(PhoneSync.rev) }
+        private static func clock() -> Double { ProcessInfo.processInfo.systemUptime }
 
-        /// Sync now (or once the one running ends). What comes during one runs once after it, with the person's
-        /// reason if one of them was theirs (`Toast.asked`: the toast after it says "nothing new" too).
+        /// (the reason kept: the person's wins over an automatic one, so its toast says "nothing new" too)
+        private func want(_ why: String) {
+            if pending == nil || Toast.asked(why) && !Toast.asked(pending!) { pending = why }
+        }
+
+        /// Sync now (or once the one running ends and the gap is over). What comes meanwhile runs once after it,
+        /// with the person's reason if one of them was theirs.
         func now(_ why: String) {
             changeTimer?.cancel(); changeTimer = nil
-            guard !running else { if again == nil || Toast.asked(why) && !Toast.asked(again!) { again = why }; return }
+            want(why)
+            kick()
+        }
+
+        private func kick() {
+            guard !running, gapTimer == nil, let why = pending else { return }
+            let wait = lastStart.map { gap - (Self.clock() - $0) } ?? 0
+            if wait > 0 {
+                let w = DispatchWorkItem { [weak self] in self?.gapTimer = nil; self?.kick() }
+                gapTimer = w
+                queue.asyncAfter(deadline: .now() + wait, execute: w)
+                return
+            }
+            pending = nil
             running = true
+            lastStart = Self.clock()
+            started += 1
             sync { [weak self] r in
                 guard let self else { return }
                 self.running = false
+                // (busy: a sync begun within the computer's second; quietly again after the gap)
+                if case .failure(let f) = r, f.code == "busy", self.busyTries < 3 {
+                    self.busyTries += 1; self.retried += 1
+                    self.want(why)
+                    self.kick()
+                    return
+                }
+                self.busyTries = 0
                 if case .success(let s) = r, !s.unfinished { self.known = self.revs() }
                 self.finished?(r, why)
-                if let w = self.again { self.again = nil; self.now(w) }
+                self.kick()
             }
         }
 
@@ -370,4 +438,9 @@ final class PhoneSync {
             queue.asyncAfter(deadline: .now() + changeDelay, execute: w)
         }
     }
+}
+
+extension Result where Success == PhoneSync.Summary, Failure == PhoneSync.Failure {
+    /// The failure's code (nil: a sync that happened).
+    var failureCode: String? { if case .failure(let f) = self { return f.code } else { return nil } }
 }

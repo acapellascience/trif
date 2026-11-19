@@ -468,9 +468,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `same`s `after` (on, offSites, switchAt): else "changed"; ModStore.setOn → fresh switchAt → it syncs),
   `Browser.restoreSwitches` (restore + modsChanged + the toast), `restoreWords`, `snapshotLabel`; Safety.renamed
   moves snapshot ids too. SafetyBanner's `restore` (Turn them back on); ModsPanel's `RestoreSwitchesMenu` in the ⋯
-  menu. Toast.swift: `AppToast.shared.show(text, problem:, seconds:)`: a UIWindow at .alert (under LeavingCover's
-  .alert + 1), isUserInteractionEnabled false, a SwiftUI pill at the top; nothing when the app isn't active; a
-  VoiceOver announcement. Diagnostics.swift:
+  menu. Toast.swift: `AppToast.shared.show(text, problem:, seconds:)`: a `PillWindow` at .alert (under LeavingCover's
+  .alert + 1) whose `point(inside:)` is the pill's laid-out frame alone (elsewhere touches fall through); since
+  11-19 (Tim: "swiped up and away … or much less obtrusively") a one-line caption2 capsule inside the status bar's
+  strip (`ToastPill.place`: SE 18 pt high, 1 pt down; a taller strip 22 pt at its foot; never over the app's bars or
+  a sheet's), 2.5 s / 3.5 s for a problem (`ToastPill.seconds`), `dismiss()` on a tap or a swipe up
+  (`ToastPill.dismisses`: up past 10 pt or flung past 30; it follows the finger up); nothing when the app isn't
+  active; a VoiceOver announcement, the pill a button. `ToastPill` is Foundation-only above `#if canImport(UIKit)`,
+  so phonelink.test.js builds Toast.swift too. Not seen on a screen yet (no Simulator that round): the Face ID
+  phones' place overlaps the island's foot a few points, unchecked. Diagnostics.swift:
   diagnostics log, hang watchdog (`Diagnostics.hangs`), cookie keeper. Report.swift: report.json. Pages.swift: test pages
   scheme. Checks.swift, OnDevice.swift: the probe's old checks.
 - PhoneLink.swift: the phone link's wire (More's "My computer" engine; design: docs/PHONE-LINK.md and the progress file on
@@ -509,14 +515,26 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   syncs on didBecomeActive ("front"), `$mods` changes ("change"), `sync.changed` ("nudge"), syncNow ("now") and
   `syncAfterPairing` ("pair": PhoneLinkModel's `.paired` step); closes a sync-only link after 30 s unused (`lastUse`).
   The person's reasons are `PhoneSync.Toast.asked` (now, pair); one pressed during a running sync replaces a queued
-  automatic reason in the Scheduler. After each sync (11-18): `PhoneSync.Toast` (in PhoneSync.swift, so the Mac
-  check tests it) decides the toast: counts (n = taken + removed, m = sent, k = waitingHere: the computer's
-  fromPhone/toPhone seen from here; switches not counted, as there) after any sync that moved something; "nothing
-  new" only for asked reasons, nothing for automatic ones; `problemWords(code)` always when asked, else only a code
-  not told since the last good sync (`told`, kept in UserDefaults "phoneSync.toldProblem" across launches); an
-  `unfinished` sync is a problem toast. `lastAt` (UserDefaults "phoneSync.lastAt") → `lastLine()` ("Last synced
-  just now / n min ago / at …"), in PhoneLinkView (`lastSynced`, a TimelineView) and in link.status's `synced` for
-  Settings' block (panel-adapter.js paintLink; `__trifPanelSynced` repaints it, PanelChat.syncedChanged on $lastAt).
+  automatic reason in the Scheduler. Scheduler (11-19): `pending` (one reason waiting), never two in flight, never
+  two begun closer than `gap` (1.2 s; the helper refuses a sync.begin within 1 s: `busy`), a `busy` answer tried
+  again quietly after the gap (`busyTries`, 3 at most; `retried`, `started` for tests), a change 3 s after the last
+  of a burst. The toast (11-19, Tim: "every time you hit a switch … just noise"): `PhoneSync.Toast` (an enum in
+  PhoneSync.swift, so the Mac check tests it): `after(r, why:)` is nil for every automatic reason (front, change,
+  nudge), success or failure; asked: counts (n = taken + removed, m = sent, k = waitingHere; switches not counted),
+  "nothing new", or `problemWords(code)`. 11-18's `told` (UserDefaults "phoneSync.toldProblem") is gone (the key
+  removed at start). `lastFailed` (UserDefaults "phoneSync.lastFailed": `Toast.failed(r)`, any failure but
+  notPaired, or "unfinished"; nil after a sync that works) and `lastAt` (UserDefaults "phoneSync.lastAt") →
+  `lastLine()` = `Toast.lastLine(at:failed:computer:)` ("Last synced just now / n min ago / at …", + " · the last
+  try didn't get through[: {reasonWords}]"), in PhoneLinkView (`lastSynced`, a TimelineView) and in link.status's
+  `synced` for Settings' block (panel-adapter.js paintLink; `__trifPanelSynced` repaints it, PanelChat.syncedChanged
+  on $lastAt + $lastFailed).
+  Why half the syncs failed (11-19): each switch's sync sent the switch to the computer's browser; the browser's
+  report of it (host.js modsApplied phoneSwitches) differed from the last, so the helper nudged the phone, which
+  began again at once, within the helper's second: `busy`, the "Not synced with {computer} this time" toast.
+  Reproduced in phone-link's tests/phone-sync-e2e.test.js third test (a phone scheduling as the app did: 2 syncs,
+  1 refused busy, on the old helper; 0 on the fixed one). Fixed on both sides: phone-link's `switchNews` (no nudge
+  for the phone's own switch arriving; the switch agreed into the base at the sync that sent it), and the gap + quiet
+  busy retry here (an older helper still echoes: the check `syncunit` prints "burst: 2 syncs … 0 refused").
   Dev steps `sync`, `syncstate` (each mod: off, off on sites, held, its mark, allowed-there
   when the computer's hint fits, its switch time). Since 11-18 beside the text (docs/PHONE-SYNC.md 4b, 6b): each row's
   `sw` (InstalledMod.switchAt, stamped by ModStore.setOn, which also clears the "computer" mark) and `ok`

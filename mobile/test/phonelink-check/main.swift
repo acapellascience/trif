@@ -167,7 +167,7 @@ if args.count > 1, args[1] == "syncunit" {
 
     // the scheduler: one at a time, the change rule
     var runs = 0, finish: ((Result<PhoneSync.Summary, PhoneSync.Failure>) -> Void)?
-    let sch = PhoneSync.Scheduler(changeDelay: 0.05, files: { st.files }, sync: { runs += 1; finish = $0 })
+    let sch = PhoneSync.Scheduler(changeDelay: 0.05, gap: 0, files: { st.files }, sync: { runs += 1; finish = $0 })
     var reasons: [String] = []
     sch.finished = { _, why in reasons.append(why) }
     sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
@@ -188,41 +188,151 @@ if args.count > 1, args[1] == "syncunit" {
     finish?(.failure(.init(code: "notFound", message: ""))); RunLoop.main.run(until: Date().addingTimeInterval(0.02))
     st.files["a.com/up"] = "// up v4"; sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.15))
     expect(runs == 6, "after a failed sync the change rule still compares with the last good one")
-    // the toast after a sync (Tim, 11-18): "nothing new" only after one the person started; automatic problems once
+    // the toast after a sync (Tim, 11-18, 11-19): only after one the person started (Sync now, pairing's first);
+    // an automatic one (front, change, nudge) shows none, whatever it did or why it failed
     do {
-        var t = PhoneSync.Toast()
         let C = "Tim's Mac"
         var moved = PhoneSync.Summary(); moved.taken = ["a.com/x"]; moved.sent = ["a.com/y", "a.com/z"]
         var waits = PhoneSync.Summary(); waits.taken = ["a.com/x"]; waits.waitingHere = ["a.com/x"]
         var switchedOnly = PhoneSync.Summary(); switchedOnly.switched = ["a.com/x"]
         let nothing = PhoneSync.Summary()
         let off = PhoneSync.Failure(code: "notFound", message: "")
+        var un = PhoneSync.Summary(); un.unfinished = true
         func said(_ r: Result<PhoneSync.Summary, PhoneSync.Failure>, _ why: String) -> String {
-            guard let x = t.after(r, why: why, computer: C) else { return "-" }
+            guard let x = PhoneSync.Toast.after(r, why: why, computer: C) else { return "-" }
             return (x.problem ? "! " : "") + x.text
         }
-        for why in ["front", "change", "nudge"] { expect(said(.success(nothing), why) == "-", "automatic, nothing moved: no toast (\(why))") }
-        expect(said(.success(switchedOnly), "front") == "-", "automatic, only switches (not counted, as on the computer): no toast")
+        for why in ["front", "change", "nudge"] {
+            for r: Result<PhoneSync.Summary, PhoneSync.Failure> in [.success(nothing), .success(switchedOnly), .success(moved), .success(waits), .success(un), .failure(off), .failure(.init(code: "busy", message: "")), .failure(.init(code: "off", message: ""))] {
+                expect(said(r, why) == "-", "automatic (\(why)): no toast, success or failure: \(said(r, why))")
+            }
+        }
         expect(said(.success(nothing), "now") == "Synced with \(C) · nothing new", "Sync now, nothing moved: nothing new")
         expect(said(.success(nothing), "pair") == "Synced with \(C) · nothing new", "pairing's first sync, nothing moved: nothing new")
-        expect(said(.success(moved), "front") == "Synced with \(C) · 1 from the computer, 2 to it", "automatic with changes: the counts")
-        expect(said(.success(waits), "nudge") == "Synced with \(C) · 1 from the computer, 0 to it, 1 waiting for your OK", "automatic, waiting here: the counts and the wait")
         expect(said(.success(moved), "now") == "Synced with \(C) · 1 from the computer, 2 to it", "Sync now with changes: the counts")
+        expect(said(.success(waits), "pair") == "Synced with \(C) · 1 from the computer, 0 to it, 1 waiting for your OK", "the counts and the wait")
         let notFound = "! Not synced: can't find \(C). It may be asleep, on another Wi-Fi, or have no browser with TRIF open"
-        expect(said(.failure(off), "front") == notFound, "an automatic failure: said once")
-        expect(said(.failure(off), "front") == "-" && said(.failure(off), "change") == "-" && said(.failure(off), "nudge") == "-", "the same failure again, automatic: not said again")
-        expect(said(.failure(off), "now") == notFound, "Sync now: said every time")
-        expect(said(.failure(off), "front") == "-", "after Sync now said it, an automatic one still doesn't repeat it")
-        expect(said(.failure(.init(code: "off", message: "")), "front") == "! Not synced: syncing phone mods is off on \(C)", "another reason: said")
-        expect(said(.failure(.init(code: "notFound", message: "")), "front") == notFound, "back to the first reason: news again")
-        expect(said(.success(nothing), "front") == "-", "a sync that works: no toast for nothing")
-        expect(said(.failure(off), "front") == notFound, "after a sync worked the failure is news again")
-        var un = PhoneSync.Summary(); un.unfinished = true
-        expect(said(.success(un), "front") == "! Not synced with \(C) this time. TRIF tries again", "an unfinished sync: a problem, once")
-        expect(said(.success(un), "front") == "-", "…not twice")
+        expect(said(.failure(off), "now") == notFound && said(.failure(off), "now") == notFound, "Sync now failing: said every time")
+        expect(said(.failure(.init(code: "off", message: "")), "pair") == "! Not synced: syncing phone mods is off on \(C)", "another reason")
+        expect(said(.success(un), "now") == "! Not synced with \(C) this time. TRIF tries again", "an unfinished sync the person started: a problem")
         expect(said(.failure(.init(code: "notPaired", message: "")), "now") == "-", "not paired: never said")
-        var kept = PhoneSync.Toast(told: "notFound") // (as the app keeps it across launches)
-        expect(kept.after(.failure(off), why: "front", computer: C) == nil, "a problem told before a relaunch isn't news after it")
+
+        // the lasting line (My computer, Settings): the latest try's failure said quietly, cleared when one works
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        func line(_ failed: String?, _ ago: Double) -> String? { PhoneSync.Toast.lastLine(at: t0, failed: failed, computer: C, now: t0.addingTimeInterval(ago)) }
+        expect(PhoneSync.Toast.lastLine(at: nil, failed: "notFound", computer: C) == nil, "never synced: no line")
+        expect(line(nil, 10) == "Last synced just now" && line(nil, 125) == "Last synced 2 min ago", "the line: \(line(nil, 125) ?? "nil")")
+        expect(line("notFound", 125) == "Last synced 2 min ago · the last try didn't get through: can't find \(C)", "a failed try's note: \(line("notFound", 125) ?? "nil")")
+        expect(line("off", 125) == "Last synced 2 min ago · the last try didn't get through: syncing phone mods is off on \(C)", "off")
+        expect(line("busy", 125) == "Last synced 2 min ago · the last try didn't get through", "a reason without words: the note alone")
+        var lastFailed: String? = nil
+        for r: Result<PhoneSync.Summary, PhoneSync.Failure> in [.failure(off)] { lastFailed = PhoneSync.Toast.failed(r) }
+        expect(lastFailed == "notFound", "a failed try is kept")
+        expect(PhoneSync.Toast.failed(.success(un)) == "unfinished", "an unfinished one too")
+        lastFailed = PhoneSync.Toast.failed(.success(nothing))
+        expect(lastFailed == nil && line(lastFailed, 10) == "Last synced just now", "a sync that works clears it")
+        expect(PhoneSync.Toast.failed(.failure(.init(code: "notPaired", message: ""))) == nil, "not paired: nothing kept")
+    }
+
+    // the scheduler against a computer that refuses a begin within its second (busy) and nudges after each sync that
+    // sent it a switch (the helper before 11-19: the switch arriving in the browser was news): a burst of 5 switch
+    // changes in 2 s (here 0.5 s, the delays scaled by 1/4) is one sync, never two in flight, nothing reported failed
+    do {
+        var fs = ["a.com/s": "1"], seen: [String: String] = [:]
+        var lastBegin = -100.0, inFlight = 0, maxInFlight = 0, begins = 0, busy = 0
+        var reported: [String] = []
+        weak var schRef: PhoneSync.Scheduler?
+        let clock = { ProcessInfo.processInfo.systemUptime }
+        let refuseWithin = 0.25 // (the computer's second, scaled)
+        let sch = PhoneSync.Scheduler(changeDelay: 0.75, gap: 0.3, files: { fs }) { done in
+            inFlight += 1; maxInFlight = max(maxInFlight, inFlight); begins += 1
+            let now = clock()
+            if now - lastBegin < refuseWithin {
+                busy += 1; inFlight -= 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { done(.failure(.init(code: "busy", message: "one sync a second"))) }
+                return
+            }
+            lastBegin = now
+            let sent = fs != seen // (the phone's switch went to the computer)
+            seen = fs
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                inFlight -= 1
+                done(.success(.init()))
+                // (the old helper's echo: a nudge a moment after the switch reached the browser)
+                if sent { DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { schRef?.now("nudge") } }
+            }
+        }
+        schRef = sch
+        sch.finished = { r, why in
+            if case .failure(let f) = r { reported.append("\(why): \(f.code)") }
+        }
+        sch.now("front") // (the app's first sync this launch)
+        wait { sch.known != nil }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6)) // (its echo, and quiet)
+        let before = sch.started
+        let t0 = Date()
+        for i in 0..<5 { fs["a.com/s"] = "\(i + 2)"; sch.changed(); RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
+        let lastChange = Date()
+        var firstSync: Date?
+        let startedAtBurst = sch.started
+        let end = Date().addingTimeInterval(3)
+        while Date() < end { if firstSync == nil && sch.started > startedAtBurst { firstSync = Date() }; RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        let burstSyncs = sch.started - before
+        expect(reported.isEmpty, "a burst of switches: nothing reported failed: \(reported)")
+        expect(maxInFlight == 1, "never two in flight: \(maxInFlight)")
+        expect(firstSync.map { $0.timeIntervalSince(lastChange) < 1.0 } ?? false, "the burst's sync goes soon after its last change (3 s scaled): \(firstSync.map { $0.timeIntervalSince(lastChange) } ?? -1)")
+        // (the switch's sync, and the old helper's echo: one or two begun with the computer, a busy tried again quietly)
+        let accepted = burstSyncs - sch.retried
+        expect(accepted >= 1 && accepted <= 2, "a burst of 5 switch changes: one or two syncs: \(accepted) (\(burstSyncs) begun, \(sch.retried) tried again) in \(Date().timeIntervalSince(t0))")
+        expect(busy == 0, "the gap keeps every begin past the computer's second: \(busy) refused")
+        say("burst: \(accepted) syncs with the computer (\(burstSyncs) begun, \(sch.retried) tried again), \(firstSync.map { Int($0.timeIntervalSince(lastChange) * 1000) } ?? -1) ms after the last change (0.75 s delay), \(busy) refused")
+    }
+
+    // a `busy` answer (a computer whose second was another sync's): tried again quietly after the gap, said only when
+    // it keeps coming (3 times tried again)
+    do {
+        var answers = ["busy", "busy", "ok"], calls = 0
+        var got: [String] = []
+        let sch = PhoneSync.Scheduler(changeDelay: 0.05, gap: 0.1, files: { [:] }) { done in
+            calls += 1
+            let a = answers.isEmpty ? "busy" : answers.removeFirst()
+            DispatchQueue.main.async { a == "ok" ? done(.success(.init())) : done(.failure(.init(code: a, message: ""))) }
+        }
+        sch.finished = { r, why in got.append("\(why) \(r.failureCode ?? "ok")") }
+        sch.now("now")
+        wait { !got.isEmpty }
+        expect(got == ["now ok"] && calls == 3 && sch.retried == 2, "busy twice: tried again, then ok, one answer: \(got) \(calls)")
+        answers = []
+        got = []; calls = 0
+        sch.now("front")
+        wait { !got.isEmpty }
+        expect(got == ["front busy"] && calls == 4, "busy every time: said after 3 tries again: \(got) \(calls)")
+        // (a sync asked for during the gap waits for it, and is one)
+        answers = ["ok", "ok", "ok"]; got = []; calls = 0
+        sch.now("front"); sch.now("nudge"); sch.now("change")
+        wait { got.count == 1 }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        expect(got == ["front ok"] && calls == 1, "three asked for at once: one sync: \(got)")
+        sch.now("front"); sch.now("now")
+        wait { got.count == 3 }
+        expect(got.suffix(2) == ["front ok", "now ok"], "the person's during one waits and keeps its reason: \(got)")
+    }
+
+    // the toast's pill (Tim, 11-19: swiped up and away, or a tap; smaller, shorter, never over the top bar)
+    do {
+        let se = ToastPill.place(safeTop: 20)
+        expect(se.top == 1 && se.height == 18 && se.top + se.height <= 20, "iPhone SE: inside the 20 pt status bar: \(se)")
+        let hidden = ToastPill.place(safeTop: 0)
+        expect(hidden.top + hidden.height <= 20, "status bar hidden: the top 20 pt: \(hidden)")
+        for top in [44.0, 47, 59, 62] {
+            let p = ToastPill.place(safeTop: top)
+            expect(p.height == 22 && p.top + p.height <= top, "a \(top) pt strip: at its foot, inside it: \(p)")
+        }
+        expect(ToastPill.seconds(problem: false) == 2.5 && ToastPill.seconds(problem: true) == 3.5, "2.5 s, a problem 3.5 s")
+        expect(ToastPill.dismisses(dragY: -12, predictedY: -12), "a swipe up puts it away")
+        expect(ToastPill.dismisses(dragY: -6, predictedY: -60), "a flick up too")
+        expect(!ToastPill.dismisses(dragY: -6, predictedY: -12) && !ToastPill.dismisses(dragY: 20, predictedY: 40), "a nudge or a drag down doesn't")
+        expect(ToastPill.follow(-15) == -15 && ToastPill.follow(30) == 4, "it follows up, barely down")
     }
 
     // ---- stable ids (11-18, docs/PHONE-SYNC.md 2a, 3, 4, 7): rows with uid, body and meta; renames applied first; a
@@ -349,7 +459,7 @@ if args.count > 1, args[1] == "syncunit" {
     // (the scheduler keeps comparing with the last finished sync: an unfinished one doesn't count)
     var runs6 = 0, finish6: ((Result<PhoneSync.Summary, PhoneSync.Failure>) -> Void)?
     var f6 = ["x.com/a": "1"]
-    let sch6 = PhoneSync.Scheduler(changeDelay: 0.05, files: { f6 }, sync: { runs6 += 1; finish6 = $0 })
+    let sch6 = PhoneSync.Scheduler(changeDelay: 0.05, gap: 0, files: { f6 }, sync: { runs6 += 1; finish6 = $0 })
     sch6.now("front"); var un = PhoneSync.Summary(); un.unfinished = true; finish6?(.success(un))
     RunLoop.main.run(until: Date().addingTimeInterval(0.02))
     expect(sch6.known == nil, "an unfinished sync isn't the last good one")

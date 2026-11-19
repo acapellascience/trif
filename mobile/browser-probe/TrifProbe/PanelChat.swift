@@ -123,7 +123,9 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         linkWatch = PhoneLinkModel.shared.$computer.dropFirst().removeDuplicates { $0?.id == $1?.id && $0?.name == $1?.name }
             .sink { [weak self] _ in DispatchQueue.main.async { self?.linkChanged() } }
         // (a sync ended: Settings' My computer block says when, if it shows)
-        syncWatch = PhoneSyncModel.shared.$lastAt.dropFirst().removeDuplicates()
+        // (and the latest try's failure, the line's quiet note: PhoneSync.Toast.lastLine)
+        syncWatch = PhoneSyncModel.shared.$lastAt.combineLatest(PhoneSyncModel.shared.$lastFailed).dropFirst()
+            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
             .sink { [weak self] _ in DispatchQueue.main.async { self?.syncedChanged() } }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.wakeLink() }
@@ -850,7 +852,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         onActivity(.working)
         link.pickUp(p.runId)
     }
-    /// A sync with the computer ended well: Settings' My computer block's "Last synced" line painted again.
+    /// A sync with the computer ended (well, or its try failed): Settings' My computer block's "Last synced" line painted again.
     func syncedChanged() {
         guard loaded else { return }
         Task { _ = try? await webView.callAsyncJavaScript("window.__trifPanelSynced && window.__trifPanelSynced(); return 1;", arguments: [:], in: nil, contentWorld: .page) }

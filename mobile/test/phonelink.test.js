@@ -18,6 +18,7 @@ const HERE = __dirname;
 const SWIFT = [path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLink.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkPair.swift'),
   path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneLinkRemote.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'PhoneSync.swift'),
   path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'ModID.swift'), path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'Core.swift'),
+  path.join(HERE, '..', 'browser-probe', 'TrifProbe', 'Toast.swift'),
   path.join(HERE, 'phonelink-check', 'main.swift')];
 const mac = process.platform === 'darwin';
 const lib = [process.env.TRIF_PHONE_LINK_LIB, path.join(os.homedir(), 'WebMods-worktrees', 'phone-link', 'helper', 'lib', 'phonelink'),
@@ -52,7 +53,9 @@ test('PhoneLink.swift: the published Noise IK vector and the frames vector, in C
 test('PhoneSync.swift: a scripted computer and a store in memory (the plan applied: puts, gets new and changed, held here, refused, stale, removed to the trash, a conflict, came back; have; off; the scheduler; stable ids: rows with uid, body and meta, renames first, a rename that can\'t ends the sync, merge and apart, keys by id, an older computer)', { skip: !mac && 'macOS only', timeout: 180000 }, async () => {
   const { lines, code } = await run(['syncunit']);
   assert.equal(code, 0, lines.join('\n'));
-  assert.deepEqual(lines, ['sync unit: ok']);
+  // (and the burst of switches against a computer that refuses a begin within its second: printed, 11-19)
+  assert.deepEqual(lines.filter((l) => !l.startsWith('burst: ')), ['sync unit: ok']);
+  assert.match(lines.find((l) => l.startsWith('burst: ')) || '', /^burst: [12] syncs .* 0 refused$/);
 });
 
 const noLib = !mac ? 'macOS only' : !lib && 'the helper\'s phonelink folder (branch phone-link) isn\'t here';

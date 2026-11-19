@@ -313,7 +313,7 @@ extension Browser {
     func restoreSwitches(_ snapId: String) -> SwitchSnapshot.Result? {
         guard let r = safety.restore(snapId, store: mods) else { return nil }
         if !r.restored.isEmpty { modsChanged(why: "safe mode's switches put back") }
-        AppToast.shared.show(Safety.restoreWords(r), problem: r.restored.isEmpty, seconds: 6)
+        AppToast.shared.show(Safety.restoreWords(r), problem: r.restored.isEmpty)
         return r
     }
 }

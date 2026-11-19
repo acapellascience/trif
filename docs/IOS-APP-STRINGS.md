@@ -822,8 +822,12 @@ titles are the desktop panel's, unchanged (modswitch.js: "On on {site}: click to
 ## Safe mode's switches put back, and the "synced" message (added 11-18, drafts; Tim: "turn them all back on exactly as they were", "some kind of visible 'successfully synced' message")
 
 Safety.swift (the banner's button, the toast after a restore, the ⋯ menu's lines), ModsPanel.swift (the menu),
-Toast.swift (the toast itself: a pill at the top for 4 s, 6 s for a problem or a restore, over everything, no
-touches), PhoneLinkView.swift (the sync toast, Last synced), Web/panel-adapter.js (Settings' line). The banner's
+Toast.swift (the toast itself; since 11-19 one small line in the status bar's strip, 2.5 s, 3.5 s for a problem or
+an empty restore, a swipe up or a tap puts it away; before: a pill at the top for 4 s, 6 s for a problem or a restore,
+no touches), PhoneLinkView.swift (the sync toast, Last synced), Web/panel-adapter.js (Settings' line). Since 11-19
+(Tim: "they happen every time you hit a switch … just noise") the sync toasts show only after a sync the person
+started on the phone (Sync now, the first sync after pairing); automatic syncs show none, and the lasting line says
+when the latest try failed. A long line is cut short with "…" (the Mods tab's line says the whole reason). The banner's
 own words were unchanged (only its button is new); 11-18 Tim dropped safe mode's "Switch them back on one at a time
 in Mods." (the runaway offer's banner keeps it for now: asked above).
 
@@ -834,16 +838,18 @@ in Mods." (the runaway offer's banner keeps it for now: asked above).
 | …its items, newest first (the last 5) | (none) | {time} · {sites} (another day: {date, time} · {sites}; one put back already: "… (put back)") |
 | The toast after a restore | (none) | {n} mods back on as before / 1 mod back on as before; then, each only when not 0: " · 1 you changed since is left as it is" / " · {c} you changed since are left as they are"; " · 1 still waits for your OK" / " · {w} still wait for your OK" |
 | …nothing came back | (none) | Nothing to put back: you've switched those mods since (all deleted since: "Nothing to put back: those mods were deleted since") |
-| The toast after a sync that moved something (automatic or Sync now) | (none) | Synced with {computer} · {n} from the computer, {m} to it (no full stop: a passing line, as the computer's) |
+| The toast after a sync the person started that moved something (11-19: none after an automatic one) | (none) | Synced with {computer} · {n} from the computer, {m} to it (no full stop: a passing line, as the computer's) |
 | …with mods waiting here for an OK | (none) | Synced with {computer} · {n} from the computer, {m} to it, {k} waiting for your OK |
 | …nothing moved, after a sync the person started (Sync now, the first sync after pairing) | (none) | Synced with {computer} · nothing new (11-18, Tim: an automatic sync that moved nothing shows no toast) |
-| The toast, not synced (always after Sync now or pairing; after automatic syncs once, until a sync works or the reason changes): syncing off there | (none) | Not synced: syncing phone mods is off on {computer} |
+| The toast, not synced (after Sync now or pairing only; 11-19: never after an automatic sync): syncing off there | (none) | Not synced: syncing phone mods is off on {computer} |
 | …the computer not found | (none) | Not synced: can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open |
 | …this iPhone removed there | (none) | Not synced: this iPhone isn't connected to {computer} any more |
 | …Local Network off | (none) | Not synced: TRIF needs Local Network access to find {computer} |
 | …anything else | (none) | Not synced with {computer} this time. TRIF tries again |
 | My computer (the pairing screen), under "Connected to {computer} since {date}." | (none) | Last synced just now / Last synced {n} min ago / Last synced at {time} / Last synced {Nov 17} at {time} |
 | More's Settings, My computer block, under "Paired with {computer}. …" | (none) | the same "Last synced …" line |
+| …after it, while the latest try failed (11-19, draft; cleared when a sync works) | (none) | " · the last try didn't get through: {reason}" ({reason}: can't find {computer} / syncing phone mods is off on {computer} / this iPhone isn't connected to {computer} any more / TRIF needs Local Network access; anything else: " · the last try didn't get through" alone). E.g. "Last synced 2 min ago · the last try didn't get through: can't find Tim's MacBook Pro" |
+| The toast, read by VoiceOver | (none) | its line, as a button: a double tap puts it away (no words of its own) |
 
 "{n} from the computer": the computer's own toast says "{n} from the phone, {m} to it"; the phone's mirrors it. The
 brief had "from {computer}"; with the name already at the start ("Synced with Tim's MacBook Pro · 2 from Tim's

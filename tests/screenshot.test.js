@@ -297,7 +297,7 @@ test('without access to every site: only the tab in front, after the toolbar cli
     S.screenshotPlan({ showing: false, copy: true, allUrls: false }),
     S.screenshotPlan({ showing: true, full: true, copy: true, allUrls: false }),
     S.screenshotPlan({ showing: false, captureTab: true, browser: 'Firefox', allUrls: false }),
-  ]) assert.match(plan.error, /wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for.*clicked the TRIF toolbar button on that tab.*`trif sweep`/);
+  ]) assert.match(plan.error, /wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for.*clicked TRIF's robot icon at the top right of .*puzzle-piece Extensions menu.*`trif sweep`/);
   assert.strictEqual(S.screenshotPlan({ showing: true, captureTab: true, browser: 'Firefox', allUrls: false }), 'visible');
   assert.strictEqual(S.screenshotPlan({ showing: true, copy: true, allUrls: false }), 'visible');
   // Firefox given <all_urls> after it started: no captureTab in the running background until a restart.
@@ -307,7 +307,9 @@ test('without access to every site: only the tab in front, after the toolbar cli
   const api = mockApi();
   api.tabs.captureVisibleTab = async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); };
   await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null }),
-    /lets TRIF capture this tab only after the user clicks the TRIF toolbar button on it.*Ask the user to click the TRIF button on this tab/);
+    /lets TRIF capture this tab only after the user clicks TRIF's button on it.*Ask the user to go to this tab and click TRIF's robot icon at the top right of Chrome.*side panel is open, that click closes it, and a second click brings it back/);
+  await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'LibreWolf', family: 'firefox', allUrls: false, pageCall: async () => null }),
+    /top right of LibreWolf.*TRIF's sidebar is open, that click closes it/);
   // After the click it works as before; and with <all_urls> nothing changes.
   const ok = mockApi();
   const r = await S.captureScreenshot(ok, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null });

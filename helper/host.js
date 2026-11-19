@@ -352,6 +352,15 @@ function syncMods(reason, force) {
   const scanned = scanMods(ws.modsDir);
   let { mods } = scanned;
   const { problems, warnings } = scanned;
+  // A mod renamed since the last look (its stable id in the same folder, or the same code: mods.js findRenames, a
+  // rename in the code card, an agent's mv, the phone sync's): what the helper keys by its id moves with it before
+  // held.js judges it, so it's the same mod (lib/rename.js moveKeys; idempotent, origins follow in trackOrigins).
+  if (state.mods && state.mods.length) {
+    try {
+      const renames = findRenames(state.mods, mods);
+      if (renames.length && require('./lib/rename').moveKeys(ws, renames)) logger.info(`renamed: ${renames.map((r) => `${r.from} -> ${r.to}`).join(', ')} (what it was allowed and its history kept)`);
+    } catch (e) { logger.warn(`renames: ${e.message}`); }
+  }
   // (an error here mustn't let a new or changed mod through unchecked: those wait until a sync works)
   try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); state.held = heldOnError(ws, mods, state.held, e); }
   // A change waiting for the user's OK to a mod that was running: the version that last ran keeps
@@ -624,7 +633,7 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.toPhone', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.preview']);
+  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.rename', 'mod.preview']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
@@ -1095,6 +1104,13 @@ function agentCommand(cmd, args) {
       const h = state.held[r.id];
       logger.info(`saved an edit of ${r.id}${h ? `, waiting for the user's OK (${(h.needs || []).join(', ')})` : ''}`);
       return { ...r, held: !!h, pending: (state.pending || []).includes(r.id) };
+    }
+    // The code card's Rename (lib/rename.js): the @name line set (an @id added if there's none), the file following
+    // the name, what the helper keeps by the mod's id moved with it. Never waits for an OK: only those lines change.
+    case 'mod.rename': {
+      const r = require('./lib/rename').renameMod(workspace(ws.home), { id: String(args.id ?? ''), name: args.name });
+      if (r.renamed) { syncMods('rename', false); logger.info(`renamed ${r.from} to "${r.name}" (${r.id})`); }
+      return { ...r, held: !!state.held[r.id] };
     }
     // Undo right after Save: the version before back, if the file is still the edit
     case 'mod.undoEdit': {

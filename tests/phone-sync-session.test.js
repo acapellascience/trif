@@ -3,7 +3,7 @@
 // fake session and server in a temp workspace: the real held.js, history.js and trash layout. No network.
 // What is proven here: adds and edits both ways; deletes go to the trash; a conflict keeps both; a change that
 // can do more than style waits for the user's OK on the computer (held.js, naming the phone) and a style mod runs
-// at once; history before replace; a twin with a run is left for later; every-site mods stay on the phone; the
+// at once; history before replace; a twin with a run is left for later; every-site mods sync (D10); the
 // refusals (bad ids, not a mod, too big, changed since the plan, a link for a twin, a stale or second sync, off);
 // a removed phone's base goes; the nudge carries nothing and comes at most every 2 s.
 
@@ -195,7 +195,7 @@ test('approval on the computer: a change that can do more waits, naming the phon
   assert.equal(r3.puts['example.com/clicker'].held, true);
 });
 
-test('left alone: a twin with a run working (later), every-site mods, bad ids, too big, links', async () => {
+test('left alone: a twin with a run working (later), bad ids, too big, links; every-site mods sync (D10)', async () => {
   const runs = [{ runId: 'r1', site: 'busy.com', scope: 'phone~busy.com' }];
   const s = setup({ runs });
   s.write('phone~busy.com/a.js', mod('A'));
@@ -214,12 +214,14 @@ test('left alone: a twin with a run working (later), every-site mods, bad ids, t
   assert.deepEqual(plan.later.sort(), ['busy.com/a', 'busy.com/b']);
   const why = Object.fromEntries(plan.skipped.map((k) => [k.id, k.why]));
   assert.match(why['../etc/passwd'], /site/);
-  assert.equal(why['all-sites/dark'], 'every-site mods stay on the phone for now');
-  assert.equal(why['all-sites/everywhere'], 'every-site mods stay on the phone for now');
+  assert.equal(why['all-sites/dark'], undefined, 'every-site mods sync now (D10)');
+  assert.equal(why['all-sites/everywhere'], undefined);
+  assert.deepEqual(plan.want, [{ id: 'all-sites/dark' }], 'the phone\'s every-site mod: to sites/phone~all-sites/');
+  assert.deepEqual(plan.give.map((g) => g.id), ['all-sites/everywhere'], 'and the computer\'s to the phone');
   assert.equal(why['example.com/huge'], 'over 1 MB');
   assert.match(why['example.com/pointer'], /isn't a mod file/);
   assert.match(why['linked.com/secret'], /isn't a plain folder/);
-  assert.deepEqual([plan.want, plan.give], [[], []], 'nothing read or written through a link, nothing too big, nothing of a busy twin');
+  assert.ok(![...plan.want, ...plan.give].some((x) => /pointer|secret|huge|busy/.test(x.id)), 'nothing read or written through a link, nothing too big, nothing of a busy twin');
   await assert.rejects(s.ask({ t: 'sync.put', syncId: plan.syncId, mod: 'linked.com/secret', code: mod('Other') }), fails('bad-mod'));
   assert.equal(fs.readFileSync(path.join(s.ws.home, 'elsewhere', 'secret.js'), 'utf8'), mod('Secret'));
   assert.ok(!fs.existsSync(path.join(s.ws.home, 'elsewhere', '.sync')), 'nothing written there');

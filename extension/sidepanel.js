@@ -2885,9 +2885,58 @@ const DETAILS_TIER = {
   'boxed-mods': ['Boxed mod:', ' can do what you\'ve allowed.'],
   'free-mods': ['Free mod:', ' can do anything code can do.'],
 };
+// The mod's name in its Details, with Rename (Tim, 11-18; helper/lib/rename.js): the @name line, the file following
+// it. Words: drafts (docs/PHONE-LINK-STRINGS.md "Renaming a mod").
+function nameRow(P, m) {
+  const row = el('div', 'cv-d-name');
+  const show = () => {
+    const label = el('span', 'cv-d-name-label', 'Name');
+    const value = el('b', 'cv-d-name-value', m.name || m.id.split('/').pop());
+    const b = button('Rename', 'link-btn cv-rename', () => edit());
+    const connected = !!view.status?.helper?.connected;
+    b.disabled = !connected;
+    if (!connected) b.title = 'TRIF\'s helper isn\'t connected, so it can\'t rename the file';
+    row.replaceChildren(label, value, b);
+  };
+  const edit = () => {
+    const input = el('input', 'cv-d-name-input');
+    input.type = 'text';
+    input.value = m.name || '';
+    input.maxLength = 80;
+    input.setAttribute('aria-label', 'Name');
+    const note = el('p', 'ap-err cv-d-name-err');
+    note.hidden = true;
+    note.setAttribute('role', 'alert');
+    const save = button('Save', 'go cv-rename-save', () => go());
+    const cancel = button('Cancel', 'cv-rename-cancel', () => show());
+    const go = async () => {
+      const name = input.value.trim();
+      if (!name) { note.textContent = 'Give it a name.'; note.hidden = false; input.focus(); return; }
+      if (name === (m.name || '')) { show(); return; }
+      save.disabled = true;
+      note.hidden = true;
+      try {
+        const r = await request({ type: 'mod.rename', id: m.id, name });
+        await refreshStatus();
+        const now = (view.status?.mods || []).find((x) => x.id === r.id);
+        if (now && codeView.dialog?.open) openCodeView(r.id, { tab: 'details' });
+        else { m.name = name; show(); }
+      } catch (e) { note.textContent = String(e?.message ?? e); note.hidden = false; save.disabled = false; }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); show(); } });
+    const line = el('div', 'cv-d-name-edit');
+    line.append(input, save, cancel);
+    row.replaceChildren(el('span', 'cv-d-name-label', 'Name'), line, note);
+    input.focus();
+    input.select();
+  };
+  show();
+  return row;
+}
+
 function renderDetails(P, m) {
   const site = m.id.split('/')[0];
-  const out = [];
+  const out = [nameRow(P, m)];
   // The tier, in its colour (Tim, 11-13), with its explanation behind the "i"; a free mod's explanation is its
   // warning instead, in a coral box (the tier card's words, after its line), so no "i" to repeat it.
   const tierId = m.rules ? 'style-mods' : m.sandboxed ? 'boxed-mods' : 'free-mods';

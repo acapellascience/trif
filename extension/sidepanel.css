@@ -1105,6 +1105,13 @@ body.resizing-mods, body.resizing-mods * { cursor: ns-resize !important; user-se
 #approval .ap-together.ap-free p { color: var(--text); }
 #approval .ap-together.ap-free p + p { margin-top: 6px; }
 .code-view .cv-details > p.cv-d-tier { color: var(--muted); }
+/* (the name and Rename: renderDetails nameRow) */
+.code-view .cv-d-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 10px; }
+.code-view .cv-d-name-label { color: var(--muted); }
+.code-view .cv-d-name-value { color: var(--text); overflow-wrap: anywhere; min-width: 0; }
+.code-view .cv-d-name-edit { display: flex; gap: 6px; flex: 1 1 100%; min-width: 0; }
+.code-view .cv-d-name-input { flex: 1 1 auto; min-width: 0; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); }
+.code-view .cv-d-name-err { flex: 1 1 100%; margin: 0; }
 .code-view .cv-details > p.cv-d-tier b { color: var(--tier); } /* (the name in its colour, the rest grey; its "i" coloured too: Tim, 11-13) */
 .code-view .cv-details .cv-d-tier .more-btn { color: color-mix(in srgb, var(--tier) 80%, var(--surface)); }
 .code-view .cv-details .cv-d-tier .more-btn:is(:hover, .open) { color: var(--tier); }

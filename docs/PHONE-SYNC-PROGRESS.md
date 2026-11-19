@@ -76,6 +76,17 @@ mod.enable, reported; `phoneSwitches` applied to phone twin mods only, after the
 waits), sidepanel.js ("You allowed this on {phone}."). Tests: phone-sync.test.js (every case), phone-sync-session
 (both ways, D8, older peers, the hint), phone-sync-e2e's second test. iPhone: ios-poc, the same round.
 
+## Round 9 (11-18): stable mod ids, renaming, every-site mods (D10, D16, D17)
+
+Tim's asks of 11-18 (docs/PHONE-SYNC.md 2a). Computer: helper/lib/modid.js (the id and name rules, the fixture
+tests/fixtures/mod-id-cases.json that the iPhone's mobile/shared/core/mod-id.js is held to), mods.js (`@id` read as
+`uid`, one id to a folder, findRenames by id, phone~all-sites' `*://*/*`), rename.js (Rename, moveKeys), host.js
+(`mod.rename`; every rename the scan sees moves what's kept by the id before held.js judges), edit.js and share.js
+(an edit and an import give an id; an import with a mod's id is that mod), sync.js (`pairUp`, `byParts`, keys by id,
+the base's `meta`), syncsession.js (`ids: true`: pairing, the computer's moves, `renames`, merges at `sync.put`,
+`apart`; every-site mods no longer skipped), extension (findRenames by id, switch times and chat-waiting carried,
+the code card's Name and Rename, modHome of phone~all-sites). iPhone: ios-poc, the same round.
+
 ## For Tim (decisions)
 
 1. D1–D10 in docs/PHONE-SYNC.md section 1 are defaults: the goal's choices plus D5 (in a conflict the phone's

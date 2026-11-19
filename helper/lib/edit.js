@@ -14,7 +14,8 @@
 //   undoEdit(ws, {id, stamp, hash}) -> {id, restored}
 //     Undo right after Save: the version kept at `stamp` back, if the file is still the edit (`hash`).
 //
-// The mod's id stays its file's: a new @name only changes the name shown (mods.js buildMod).
+// The mod's id stays its file's: a new @name only changes the name shown (mods.js buildMod); Rename (lib/rename.js)
+// moves the file too. A saved edit gets a stable id (@id) if it has none.
 
 const fs = require('fs');
 const path = require('path');
@@ -178,6 +179,9 @@ function saveEdit(ws, { id, text, base }) {
   const check = checkText(edited, { site: f.site, file: f.file });
   if (!check.ok) return { ok: false, check, id: f.id };
   if (edited === current) return { ok: true, saved: false, id: f.id, hash: base };
+  // (TRIF writes it for the person: it gets a stable id if it has none, docs/PHONE-SYNC.md 2a)
+  const M = require('./modid');
+  if (!M.readMeta(edited).uid && M.readMeta(edited).header) edited = M.withMeta(edited, { uid: M.readMeta(current).uid || M.newId() });
   const held = require('./held');
   // What the version before could do, for held.js: the version TRIF last let run (it keeps running while the
   // edit waits), or the file as it was

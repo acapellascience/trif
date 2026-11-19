@@ -147,7 +147,18 @@ function importMod(ws, { text, name = '', site = '', choice = '', phone = false 
   }
   let base = nameOf(name) || nameOf(header.name) || 'imported-mod';
   const dir = path.join(ws.modsDir, s);
-  const clean = stripShipped(code);
+  let clean = stripShipped(code);
+  // (its stable id, @id: a mod in the folder with that id is this mod, whatever its file is called now (export, then
+  // import: the same mod); none, it gets one, as every mod TRIF writes does: docs/PHONE-SYNC.md 2a)
+  const MI = require('./modid');
+  const uid = MI.readMeta(clean).uid;
+  if (uid) {
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((x) => x.endsWith('.js') && !x.startsWith('.') && !x.startsWith('_')).sort(); } catch { /* new folder */ }
+    for (const x of names) {
+      try { if (MI.readMeta(fs.readFileSync(path.join(dir, x), 'utf8')).uid === uid) { base = x.slice(0, -3); break; } } catch { /* unreadable */ }
+    }
+  } else clean = MI.withMeta(clean, { uid: MI.newId() });
   let file = path.join(dir, `${base}.js`);
   let replaced = false;
   if (fs.existsSync(file)) {
@@ -156,6 +167,7 @@ function importMod(ws, { text, name = '', site = '', choice = '', phone = false 
       while (fs.existsSync(path.join(dir, `${base}-${n}.js`))) n++;
       base = `${base}-${n}`;
       file = path.join(dir, `${base}.js`);
+      if (uid) clean = MI.withMeta(clean, { uid: MI.newId() }); // (a copy is a mod of its own)
     } else if (choice === 'replace') {
       history.writeEntry(ws, s, base, fs.readFileSync(file), Date.now(), 'import');
       replaced = true;

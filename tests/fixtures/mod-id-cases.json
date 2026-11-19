@@ -1,0 +1,374 @@
+{
+ "ids": [
+  [
+   "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01",
+   true
+  ],
+  [
+   "abcdefgh",
+   true
+  ],
+  [
+   "abcdefg",
+   false
+  ],
+  [
+   "-abcdefgh",
+   false
+  ],
+  [
+   "ABCDEFGH",
+   false
+  ],
+  [
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   true
+  ],
+  [
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   false
+  ],
+  [
+   "abc_defgh",
+   false
+  ],
+  [
+   "",
+   false
+  ]
+ ],
+ "texts": {
+  "plain": {
+   "text": "// ==WebMod==\n// @name Calmer feed\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n",
+   "meta": {
+    "name": "Calmer feed",
+    "uid": null,
+    "header": true
+   },
+   "body": "// ==WebMod==\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n",
+   "metaText": "Calmer feed\n",
+   "revs": {
+    "body": "85f97726100a997735098f4c8f4738c8ff0a0e77b3ea228da6c1976cfbef7d78",
+    "meta": "184f258fcdbb244dadc1934fe39d49ccd18ba31ebe107d98c3266cafd9b29eeb"
+   }
+  },
+  "withId": {
+   "text": "// ==WebMod==\n// @name Calmer feed\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n",
+   "meta": {
+    "name": "Calmer feed",
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01",
+    "header": true
+   },
+   "body": "// ==WebMod==\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n",
+   "metaText": "Calmer feed\n3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01",
+   "revs": {
+    "body": "85f97726100a997735098f4c8f4738c8ff0a0e77b3ea228da6c1976cfbef7d78",
+    "meta": "64b519148c08a231b2a528f1cb390d157810d7203c7bb11b4a5feab8da00833e"
+   }
+  },
+  "crlf": {
+   "text": "// ==WebMod==\r\n// @name  Calmer feed  \r\n// @match *://x.com/*\r\n// ==/WebMod==\r\nbody();",
+   "meta": {
+    "name": "Calmer feed",
+    "uid": null,
+    "header": true
+   },
+   "body": "// ==WebMod==\r\n// @match *://x.com/*\r\n// ==/WebMod==\r\nbody();",
+   "metaText": "Calmer feed\n",
+   "revs": {
+    "body": "0d6ff36b80525c56473c87451c1befac3d3ff25ac8f986487362c5963d249096",
+    "meta": "184f258fcdbb244dadc1934fe39d49ccd18ba31ebe107d98c3266cafd9b29eeb"
+   }
+  },
+  "noName": {
+   "text": "// ==WebMod==\n// @match *://x.com/*\n// ==/WebMod==\nx();\n",
+   "meta": {
+    "name": null,
+    "uid": null,
+    "header": true
+   },
+   "body": "// ==WebMod==\n// @match *://x.com/*\n// ==/WebMod==\nx();\n",
+   "metaText": "\n",
+   "revs": {
+    "body": "da7aa3ab09785854eb8319f8a70afe9bd2ecb0d4114e63b7798ac1a5825ecd6e",
+    "meta": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+   }
+  },
+  "badId": {
+   "text": "// ==WebMod==\n// @name A\n// @id NOT_AN_ID\n// ==/WebMod==\n",
+   "meta": {
+    "name": "A",
+    "uid": null,
+    "header": true
+   },
+   "body": "// ==WebMod==\n// ==/WebMod==\n",
+   "metaText": "A\n",
+   "revs": {
+    "body": "8c4cb6e09d380e8765abfe75ef0e4dccd5b8d508b86a5cc0a7363eca2d33b50e",
+    "meta": "06f961b802bc46ee168555f066d28f4f0e9afdf3f88174c1ee6f9de004fc30a0"
+   }
+  },
+  "twoIds": {
+   "text": "// ==WebMod==\n// @name A\n// @id aaaaaaaa-1\n// @id bbbbbbbb-2\n// ==/WebMod==\n",
+   "meta": {
+    "name": "A",
+    "uid": "aaaaaaaa-1",
+    "header": true
+   },
+   "body": "// ==WebMod==\n// ==/WebMod==\n",
+   "metaText": "A\naaaaaaaa-1",
+   "revs": {
+    "body": "8c4cb6e09d380e8765abfe75ef0e4dccd5b8d508b86a5cc0a7363eca2d33b50e",
+    "meta": "68265844287c521294fbd520a5f9cdaa6db0da9ccb13a518f2a8875b6ea9961a"
+   }
+  },
+  "twoNames": {
+   "text": "// ==WebMod==\n// @name First\n// @name Second\n// @name\n// ==/WebMod==\n",
+   "meta": {
+    "name": "Second",
+    "uid": null,
+    "header": true
+   },
+   "body": "// ==WebMod==\n// ==/WebMod==\n",
+   "metaText": "Second\n",
+   "revs": {
+    "body": "8c4cb6e09d380e8765abfe75ef0e4dccd5b8d508b86a5cc0a7363eca2d33b50e",
+    "meta": "8d9adfcada83dd7ef5567582febcfd834a9e4d799ddea8b5845432ae2fb3c93a"
+   }
+  },
+  "noHeader": {
+   "text": "just code();\n// @name Not in a header\n",
+   "meta": {
+    "name": null,
+    "uid": null,
+    "header": false
+   },
+   "body": "just code();\n// @name Not in a header\n",
+   "metaText": "\n",
+   "revs": {
+    "body": "139221b5a4d4f42f563faf0a10705199307579ab0d52a5a5ad53f40c0582f443",
+    "meta": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+   }
+  },
+  "open": {
+   "text": "// ==WebMod==\n// @name Open\nno end\n",
+   "meta": {
+    "name": null,
+    "uid": null,
+    "header": false
+   },
+   "body": "// ==WebMod==\n// @name Open\nno end\n",
+   "metaText": "\n",
+   "revs": {
+    "body": "a4ff953582deb3c14e1546b2e495e72fdb202529775993d2f7d7dc256b4f3192",
+    "meta": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+   }
+  },
+  "bom": {
+   "text": "﻿// ==WebMod==\n// @name Bom\n// ==/WebMod==\n",
+   "meta": {
+    "name": "Bom",
+    "uid": null,
+    "header": true
+   },
+   "body": "﻿// ==WebMod==\n// ==/WebMod==\n",
+   "metaText": "Bom\n",
+   "revs": {
+    "body": "6135189a017626934375706a2c65d3d4351dc310eb019b4b2c3c54681e0a922a",
+    "meta": "7fc5913d04c05112b0031413949333880de4586a7d2616c71d45586a98e61b39"
+   }
+  },
+  "nameInBody": {
+   "text": "// ==WebMod==\n// @name A\n// ==/WebMod==\n// @name B\n// @id cccccccc\n",
+   "meta": {
+    "name": "A",
+    "uid": null,
+    "header": true
+   },
+   "body": "// ==WebMod==\n// ==/WebMod==\n// @name B\n// @id cccccccc\n",
+   "metaText": "A\n",
+   "revs": {
+    "body": "3cd1f23219262f9e746413057f85ecd3814d0a2df059ed52010dbaf5d8773f60",
+    "meta": "06f961b802bc46ee168555f066d28f4f0e9afdf3f88174c1ee6f9de004fc30a0"
+   }
+  }
+ },
+ "withMeta": [
+  {
+   "text": "plain",
+   "set": {
+    "name": "Quiet feed"
+   },
+   "out": "// ==WebMod==\n// @name Quiet feed\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n"
+  },
+  {
+   "text": "plain",
+   "set": {
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "// ==WebMod==\n// @name Calmer feed\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n"
+  },
+  {
+   "text": "plain",
+   "set": {
+    "name": "Quiet feed",
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "// ==WebMod==\n// @name Quiet feed\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n"
+  },
+  {
+   "text": "withId",
+   "set": {
+    "name": "Quiet"
+   },
+   "out": "// ==WebMod==\n// @name Quiet\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n"
+  },
+  {
+   "text": "withId",
+   "set": {
+    "uid": "dddddddd-1"
+   },
+   "out": "// ==WebMod==\n// @name Calmer feed\n// @id dddddddd-1\n// @match *://x.com/*\n// ==/WebMod==\nbody();\n"
+  },
+  {
+   "text": "crlf",
+   "set": {
+    "name": "Quiet",
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "// ==WebMod==\r\n// @name  Quiet\r\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\r\n// @match *://x.com/*\r\n// ==/WebMod==\r\nbody();"
+  },
+  {
+   "text": "noName",
+   "set": {
+    "name": "Named",
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "// ==WebMod==\n// @name Named\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// @match *://x.com/*\n// ==/WebMod==\nx();\n"
+  },
+  {
+   "text": "noName",
+   "set": {
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "// ==WebMod==\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// @match *://x.com/*\n// ==/WebMod==\nx();\n"
+  },
+  {
+   "text": "twoNames",
+   "set": {
+    "name": "Third"
+   },
+   "out": "// ==WebMod==\n// @name First\n// @name Third\n// @name\n// ==/WebMod==\n"
+  },
+  {
+   "text": "noHeader",
+   "set": {
+    "name": "X",
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "just code();\n// @name Not in a header\n"
+  },
+  {
+   "text": "badId",
+   "set": {
+    "uid": "3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01"
+   },
+   "out": "// ==WebMod==\n// @name A\n// @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01\n// ==/WebMod==\n"
+  }
+ ],
+ "slugs": [
+  [
+   "Calmer feed",
+   "calmer-feed"
+  ],
+  [
+   "Café au lait!",
+   "cafe-au-lait"
+  ],
+  [
+   "  --Hi--  ",
+   "hi"
+  ],
+  [
+   "日本語",
+   ""
+  ],
+  [
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  [
+   "Mod.js",
+   "mod"
+  ],
+  [
+   "x.com: hide ads",
+   "x-com-hide-ads"
+  ]
+ ],
+ "files": [
+  [
+   "Calmer feed",
+   [],
+   null,
+   "calmer-feed.js"
+  ],
+  [
+   "Calmer feed",
+   [
+    "calmer-feed.js"
+   ],
+   null,
+   "calmer-feed-2.js"
+  ],
+  [
+   "Calmer feed",
+   [
+    "Calmer-Feed.js",
+    "calmer-feed-2.js"
+   ],
+   null,
+   "calmer-feed-3.js"
+  ],
+  [
+   "Calmer feed",
+   [
+    "calmer-feed.js"
+   ],
+   "calmer-feed.js",
+   "calmer-feed.js"
+  ],
+  [
+   "日本語",
+   [],
+   null,
+   "mod.js"
+  ]
+ ],
+ "names": [
+  [
+   "Quiet feed",
+   ""
+  ],
+  [
+   "",
+   "a name can't be empty"
+  ],
+  [
+   "   ",
+   "a name can't be empty"
+  ],
+  [
+   "a\nb",
+   "a name is one line"
+  ],
+  [
+   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   ""
+  ],
+  [
+   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "a name can be up to 80 characters"
+  ]
+ ]
+}

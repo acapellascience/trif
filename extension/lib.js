@@ -820,6 +820,8 @@ export function applyAbsorbed(mods, disabled = {}, offSites = {}, absorbed = {})
   return { disabled: d, offSites: o, absorbed: a, changed };
 }
 
+// A mod's file without its header's @name and @id lines (a rule mod's own text, not the code TRIF makes of it).
+const renameBody = (m) => String(typeof m.text === 'string' ? m.text : m.code).split('\n').filter((l) => !/^\s*\/\/\s*@(name|id)(\s|$)/i.test(l)).join('\n');
 /**
  * Mods renamed on disk since the last `mods` message. A mod's id is its site folder and file name, so a
  * renamed file arrives as a new id while the old one is gone; when the code is the same, in the same site
@@ -833,7 +835,10 @@ export function findRenames(prev, next) {
   for (const m of next || []) {
     if (!gone.length) break;
     if (typeof m?.id !== 'string' || typeof m.code !== 'string' || before.has(m.id)) continue;
-    const i = gone.findIndex((g) => g.site === m.site && g.code === m.code);
+    // (the same stable id, @id, in the same folder: renamed, its text changed or not: docs/PHONE-SYNC.md 2a)
+    let i = typeof m.uid === 'string' && m.uid ? gone.findIndex((g) => g.site === m.site && g.uid === m.uid) : -1;
+    // (else the same code once its @name and @id lines are left out: a rename that gave it its id, an mv)
+    if (i === -1) { const b = renameBody(m); i = gone.findIndex((g) => g.site === m.site && renameBody(g) === b); }
     if (i === -1) continue;
     out.push({ from: gone[i].id, to: m.id });
     gone.splice(i, 1);
@@ -1289,7 +1294,7 @@ export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [
 /** The site a mod's folder is: its id's first part, as a site (all-sites: null). */
 export function modHome(mod, sensitive = null) {
   const folder = String(mod?.id || '').split('/')[0] || String(mod?.site || '');
-  if (!folder || folder === 'all-sites') return null;
+  if (!folder || folder === 'all-sites' || folder === 'phone~all-sites') return null; // (the phone view's every-site folder too: D10)
   return sensitive ? sensitive.scopeOf(folder) : scopeFor(folder);
 }
 

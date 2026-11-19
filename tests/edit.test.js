@@ -14,6 +14,9 @@ const { updateHeld, approveHeld, loadHeld, loadEdits, editsFile } = require('../
 const history = require('../helper/lib/history');
 const { checkText, saveEdit, undoEdit, fileHash, jsonErrorLine } = require('../helper/lib/edit');
 
+// (what Save writes: the text with a stable id added, if it had none: docs/PHONE-SYNC.md 2a)
+const idOf = (t) => (/^\/\/ @id (\S+)$/m.exec(t) || [])[1];
+const stamped = (t, uid) => t.replace(/^(\/\/ @name [^\n]*\r?\n)/m, (l) => `${l}// @id ${uid}${l.endsWith('\r\n') ? '\r\n' : '\n'}`);
 const header = (lines, body) => `// ==WebMod==\n${lines.map((l) => `// ${l}`).join('\n')}\n// ==/WebMod==\n${body}\n`;
 
 function makeWs() {
@@ -81,8 +84,10 @@ test('a saved edit: the version before in History, a change elsewhere runs at on
   const r = save(ws, id, v2);
   assert.equal(r.ok, true);
   assert.equal(r.saved, true);
-  assert.equal(r.hash, fileHash(v2));
-  assert.equal(fs.readFileSync(fileOf(ws, id), 'utf8'), v2);
+  const saved2 = fs.readFileSync(fileOf(ws, id), 'utf8');
+  assert.ok(idOf(saved2), 'a saved edit gets a stable id');
+  assert.equal(saved2, stamped(v2, idOf(saved2)));
+  assert.equal(r.hash, fileHash(saved2));
   const [kept] = history.listHistory(ws, id);
   assert.equal(kept.stamp, r.stamp);
   assert.equal(kept.source, 'edit');
@@ -94,7 +99,7 @@ test('a saved edit: the version before in History, a change elsewhere runs at on
   assert.deepEqual(undoEdit(ws, { id, stamp: r.stamp, hash: r.hash }), { id, restored: r.stamp });
   assert.equal(fs.readFileSync(fileOf(ws, id), 'utf8'), v1);
   assert.equal(history.listHistory(ws, id)[0].source, 'undo');
-  assert.equal(history.entryText(ws, id, history.listHistory(ws, id)[0].stamp), v2);
+  assert.equal(history.entryText(ws, id, history.listHistory(ws, id)[0].stamp), saved2);
   assert.deepEqual(sync(ws), {});
   // (an Undo once the file changed again: refused, History has it)
   const r2 = save(ws, id, v2);
@@ -126,7 +131,8 @@ test('nothing broken is saved, and nothing over a change made meanwhile', () => 
   const crlf = v1.replace(/\n/g, '\r\n');
   fs.writeFileSync(fileOf(ws, 'x.com/crlf'), crlf);
   assert.equal(saveEdit(ws, { id: 'x.com/crlf', text: v1.replace('1;', '2;'), base: fileHash(crlf) }).saved, true);
-  assert.equal(fs.readFileSync(fileOf(ws, 'x.com/crlf'), 'utf8'), crlf.replace('1;', '2;'));
+  const savedCrlf = fs.readFileSync(fileOf(ws, 'x.com/crlf'), 'utf8');
+  assert.equal(savedCrlf, stamped(crlf.replace('1;', '2;'), idOf(savedCrlf)));
 });
 
 test('a saved edit waits for what it adds: a power, a line using one, another site while it can act, becoming a free mod', () => {
@@ -209,7 +215,8 @@ test('the helper: mod.code gives the version, mod.save saves and syncs (held or 
   // runs at once
   let r = await ask('mod.save', { id: 'x.com/a', text: v1.replace('1;', '2;'), base: code.base });
   assert.equal(r.ok, true);
-  assert.deepEqual({ ...r.result, stamp: typeof r.result.stamp }, { ok: true, saved: true, id: 'x.com/a', stamp: 'string', hash: fileHash(v1.replace('1;', '2;')), held: false, pending: false });
+  assert.deepEqual({ ...r.result, stamp: typeof r.result.stamp }, { ok: true, saved: true, id: 'x.com/a', stamp: 'string', hash: fileHash(fs.readFileSync(file, 'utf8')), held: false, pending: false });
+  assert.equal(fs.readFileSync(file, 'utf8'), stamped(v1.replace('1;', '2;'), idOf(fs.readFileSync(file, 'utf8'))));
   await ext.nextMods((mods) => mods.some((m) => m.id === 'x.com/a' && /= 2;/.test(m.code) && !m.held && !m.pending));
   // waits: a line that sends; the version before is what's sent meanwhile, the change pending
   const v3 = v1.replace('1;', "2;\nfetch('/x', { method: 'POST' });");
@@ -228,10 +235,11 @@ test('the helper: mod.code gives the version, mod.save saves and syncs (held or 
   const broken = await ask('mod.save', { id: 'x.com/a', text: v3.replace('fetch(', 'fetch(('), base: r.result.hash });
   assert.equal(broken.result.ok, false);
   assert.equal(broken.result.check.errors[0].line, 6);
-  assert.equal(fs.readFileSync(file, 'utf8'), v3);
+  const uid = idOf(fs.readFileSync(file, 'utf8'));
+  assert.equal(fs.readFileSync(file, 'utf8'), stamped(v3, uid), 'the mod keeps its id through each save');
   // Undo
   const u = await ask('mod.undoEdit', { id: 'x.com/a', stamp: r.result.stamp, hash: r.result.hash });
   assert.equal(u.ok, true);
-  assert.equal(fs.readFileSync(file, 'utf8'), v1.replace('1;', '2;'));
+  assert.equal(fs.readFileSync(file, 'utf8'), stamped(v1.replace('1;', '2;'), uid));
   await ext.nextMods((mods) => mods.some((m) => m.id === 'x.com/a' && !m.pending && !m.held && /= 2;/.test(m.code)));
 });

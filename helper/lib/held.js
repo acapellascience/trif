@@ -208,7 +208,7 @@ function recordSyncedAllowed(home, phone, hints) {
  * when there's a hint for it. */
 function allowedOnFor(m, hints) {
   const S = require('./phonelink/sync');
-  const key = S.keyOfModId(m.id);
+  const key = S.keyOfModId(m.id, m.uid);
   const h = key && hints[key] ? S.readHint(hints[key]) : null;
   if (!h) return null;
   let buf;

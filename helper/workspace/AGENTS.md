@@ -87,6 +87,10 @@ you to from their terminal (side-panel runs can't).
   its subdomains); `@exclude` none; `@run-at document-start`; `@name` = file name; `@description` empty.
   `@match`/`@exclude` repeat and take Chrome match patterns. Add `@match` lines when a site has several
   domains (x.com and twitter.com).
+- `@id <id>` is the mod's stable id: TRIF adds it when it writes a mod (an edit or a rename in the panel, an
+  import, the phone). Keep that line exactly as it is when you edit a mod; never write one yourself, and never copy
+  it into a new mod (a copy with the same id is taken for the same mod). To rename a mod, change its `@name` and
+  leave the file name: the user's Rename in the mod's details moves the file.
 - `@description` is **4 to 9 words**, in plain words, saying what the user will see ("Buttons wobble like
   jelly when you hover them"), not how the code does it; the side panel shows it under the mod's name.
   Not a sentence about every feature: keys, modes and details go in a comment in the file. Always
@@ -244,7 +248,8 @@ site sees an iPhone (Safari's user agent, touch, no hover) and shows its mobile 
 
 - Phone mods live in the site's phone twin, `sites/phone~<site>/` (`trif new phone~x.com <name>`): a chat in
   the phone view can write there and nowhere else. Only phone mods run in the phone view, and they never run in
-  a desktop tab. Their `@match` is the site's own (`*://x.com/*`).
+  a desktop tab. Their `@match` is the site's own (`*://x.com/*`). A phone mod for every site lives in
+  `sites/phone~all-sites/` (its default `@match` is `*://*/*`).
 - The site's desktop mods (`sites/<site>/`) are there to read, never to change, from the phone view. Asked to
   bring one to the phone ("the hide-reposts filter from the desktop"), read it for the idea, then build it again
   for the mobile page: look at the phone tab (`trif tabs` marks it `phone`; `--tab`), and assume nothing about

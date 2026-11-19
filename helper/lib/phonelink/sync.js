@@ -11,8 +11,10 @@
 //   siblingId, renameHeader   a conflict's mod kept beside it: `<name>-from-computer`, "@name … (from your computer)".
 //   loadBase, saveBase, deleteBase   <private>/phone-link/sync/<phone id>.json: {v: 1, base: {id: rev}, sw?, at},
 //                      mode 600 (`sw`: the switches' base, {key: switchKey}, loadSwitchBase).
-//   syncKey, keyOfModId, modIdOfKey   the ONE place a mod is keyed for its switch and its approval hint (today its
-//                      id; a stable id can take over later without touching the rest).
+//   syncKey, keyOfModId, modIdOf   the ONE place a mod is keyed for its switch and its approval hint: its stable id
+//                      where it has one (`<site>#<uid>`, D16/D17), else its file id.
+//   pairUp, byParts    stable ids (D17): which rows are one mod and the file id each ends at (renames, mods kept
+//                      apart); both changed in different parts (a rename and an edit): decided part by part.
 //   readSwitch, switchKey, planSwitches   the switches' three-way rule (D12): a mod's on/off and per-site switches
 //                      follow the last change on either side; changed on both: the latest change wins.
 //   readHint, hintFits, tierOf   the approval hint (D13): the other device allowed this exact revision. Never an
@@ -125,14 +127,17 @@ function renameHeader(code, suffix = SIBLING_NAME) {
  *   base: {id: rev} (the revision each had when the two last agreed)
  *   leave: Map id -> why, ids left alone this time (a twin with a run working: why 'later'; a mod over 1 MB on
  *     either side: 'too-big'): nothing is done to them and their base stays
+ *   parts: (D17, an app that sends them) {phone, computer: Map id -> {body, meta}, base: {id: {body, meta}}}: both changed,
+ *     the body and the name/id are decided apart (byParts): a merge is `want {id, merge}` + `give {id, merge}` and
+ *     `merges: [{id, body: 'phone'|'computer', meta: 'phone'|'computer'}]` (whose text gives which part)
  * Returns {want: [{id, back?, conflict?}], give: [{id, rev, back?} | {id: sibling, conflict: id} (its rev is known
  *   once the computer has written it)], remove: [id] (the phone trashes),
  *   trash: [id] (the computer trashes), conflicts: [{id, sibling, rev}] (the computer's rev, to write beside),
  *   later: [id], skipped: [{id, why}], agreed: {id: rev} (in sync now: the base for them), gone: [id] (on neither
  *   side any more: out of the base)}.
  */
-function plan({ phone, computer, base = {}, leave = new Map() }) {
-  const out = { want: [], give: [], remove: [], trash: [], conflicts: [], later: [], skipped: [], agreed: {}, gone: [] };
+function plan({ phone, computer, base = {}, leave = new Map(), parts = null }) {
+  const out = { want: [], give: [], remove: [], trash: [], conflicts: [], later: [], skipped: [], agreed: {}, gone: [], merges: [] };
   const ids = [...new Set([...phone.keys(), ...computer.keys(), ...Object.keys(base)])].sort();
   const taken = new Set([...phone.keys(), ...computer.keys()]);
   for (const id of ids) {
@@ -154,6 +159,8 @@ function plan({ phone, computer, base = {}, leave = new Map() }) {
       out.give.push({ id, rev: C, back: true });
     } else if (C === null) { // deleted on the computer, changed on the phone
       out.want.push({ id, back: true });
+    } else if (byParts(id, P, C, B, parts, out)) { // both changed, in different parts (D17): decided part by part
+      // (done: byParts pushed the want, the give, or a merge)
     } else { // both changed: both kept, the phone's at the id, the computer's beside it
       const sibling = siblingId(id, taken);
       taken.add(sibling);
@@ -165,21 +172,114 @@ function plan({ phone, computer, base = {}, leave = new Map() }) {
   return out;
 }
 
+/**
+ * Both sides changed a mod: its body (the file without @name and @id) and its name and id (meta) decided apart, each by
+ * the three-way rule (docs/PHONE-SYNC.md 4, D17). A body changed on both is a conflict (false: the caller's conflict
+ * row). The meta changed on both, or no base: the phone's (D5). Pushes the result into `out`; true when it decided.
+ */
+function byParts(id, P, C, B, parts, out) {
+  if (!parts) return false;
+  const pp = parts.phone && parts.phone.get(id);
+  const cp = parts.computer && parts.computer.get(id);
+  const bp = B !== null ? parts.base && parts.base[id] : null;
+  if (!pp || !cp || (B !== null && !bp)) return false;
+  const pick = (x, y, b, tie) => (x === y ? 'same' : b && x === b ? 'computer' : b && y === b ? 'phone' : tie);
+  const body = pick(pp.body, cp.body, bp && bp.body, 'conflict');
+  if (body === 'conflict') return false;
+  const meta = pick(pp.meta, cp.meta, bp && bp.meta, 'phone');
+  const from = body === 'same' ? (meta === 'computer' ? 'computer' : 'phone') : body;
+  if (meta === 'same' || meta === from) {
+    if (from === 'phone') out.want.push({ id }); else out.give.push({ id, rev: C });
+    return true;
+  }
+  out.want.push({ id, merge: true });
+  out.give.push({ id, merge: true });
+  out.merges.push({ id, body: from, meta });
+  return true;
+}
+
+/**
+ * Pairing (docs/PHONE-SYNC.md 4, D17): which phone row and which computer file are one mod, and the file id each ends
+ * at. phone, computer: Map id -> {uid?}; baseMeta: {id: {uid?}} (the base's ids then). Pairs by site and stable id
+ * where both have one, then by file id where at most one has an id (two different ids at one file id: two mods). A
+ * pair whose ids differ was renamed: the phone's id unless only the computer renamed it (the base's id is the phone's
+ * then); both or no base: the phone's (D5). Two that end at one id (any case): the one the phone has there keeps it,
+ * the computer's moves beside it (`<name>-from-computer`, siblingId). Returns {phoneRenames: [{from, to}],
+ * computerMoves: [{from, to, apart?}] (apart: the id it moved away from, which another mod keeps), baseMoves: [{from,
+ * to}], uidOf: Map final id -> uid}.
+ */
+function pairUp({ phone, computer, baseMeta = {} }) {
+  const siteOf = (id) => id.slice(0, id.indexOf('/'));
+  const entries = []; // {p, c, uid}
+  const usedP = new Set();
+  const usedC = new Set();
+  const cBy = new Map();
+  for (const [id, r] of computer) if (r && r.uid && !cBy.has(`${siteOf(id)}#${r.uid}`)) cBy.set(`${siteOf(id)}#${r.uid}`, id);
+  for (const [id, r] of phone) {
+    const c = r && r.uid ? cBy.get(`${siteOf(id)}#${r.uid}`) : null;
+    if (!c || usedC.has(c)) continue;
+    entries.push({ p: id, c, uid: r.uid });
+    usedP.add(id);
+    usedC.add(c);
+  }
+  for (const [id, r] of phone) {
+    if (usedP.has(id) || !computer.has(id) || usedC.has(id)) continue;
+    const cu = computer.get(id) && computer.get(id).uid;
+    if (r && r.uid && cu && r.uid !== cu) continue;
+    entries.push({ p: id, c: id, uid: (r && r.uid) || cu || null });
+    usedP.add(id);
+    usedC.add(id);
+  }
+  for (const id of phone.keys()) if (!usedP.has(id)) entries.push({ p: id, c: null, uid: phone.get(id) && phone.get(id).uid || null });
+  for (const id of computer.keys()) if (!usedC.has(id)) entries.push({ p: null, c: id, uid: computer.get(id) && computer.get(id).uid || null });
+  const baseIdOf = (e) => {
+    if (e.uid) for (const [id, m] of Object.entries(baseMeta)) if (m && m.uid === e.uid && siteOf(id) === siteOf(e.p || e.c)) return id;
+    return null;
+  };
+  for (const e of entries) {
+    e.base = baseIdOf(e) || (e.p && Object.prototype.hasOwnProperty.call(baseMeta, e.p) ? e.p : e.c && Object.prototype.hasOwnProperty.call(baseMeta, e.c) ? e.c : null);
+    e.to = !e.p ? e.c : !e.c || e.p === e.c ? e.p : e.base === e.p ? e.c : e.p;
+  }
+  const taken = new Set([...phone.keys(), ...computer.keys()].map((x) => x.toLowerCase()));
+  const claims = new Map();
+  for (const e of entries) { const k = e.to.toLowerCase(); if (!claims.has(k)) claims.set(k, []); claims.get(k).push(e); }
+  for (const list of claims.values()) {
+    if (list.length < 2) continue;
+    const keep = list.find((e) => e.p && e.p.toLowerCase() === e.to.toLowerCase()) || list.find((e) => e.c && e.c.toLowerCase() === e.to.toLowerCase()) || list[0];
+    for (const e of list) {
+      if (e === keep) continue;
+      const sibling = siblingId(keep.to, taken);
+      taken.add(sibling.toLowerCase());
+      e.apart = keep.to;
+      e.to = sibling;
+    }
+  }
+  const out = { phoneRenames: [], computerMoves: [], baseMoves: [], uidOf: new Map() };
+  for (const e of entries) {
+    if (e.p && e.p !== e.to) out.phoneRenames.push({ from: e.p, to: e.to });
+    if (e.c && (e.c !== e.to || e.apart)) out.computerMoves.push({ from: e.c, to: e.to, ...(e.apart ? { apart: e.apart } : {}) });
+    if (e.base && e.base !== e.to) out.baseMoves.push({ from: e.base, to: e.to });
+    if (e.uid) out.uidOf.set(e.to, e.uid);
+  }
+  return out;
+}
+
 // ---- beside the text: the switches (D12) and the approval hint (D13), keyed by syncKey
 
-/** A phone mod's sync key, from its id (`<site>/<name>`, the wire's): today the id itself. Every switch and hint
- * record goes through here, so a stable id (coming) can replace it in one place. */
-function syncKey(id) { return parseId(id).id; }
-/** The helper's mod id (`phone~<site>/<name>`) -> its sync key, or null (not a phone twin's mod the sync takes). */
-function keyOfModId(modId) {
+/** A phone mod's sync key (D16): `<site>#<uid>` for a mod with a stable id (docs/PHONE-SYNC.md 2a), else its file
+ * id (`<site>/<name>`, the wire's). Every switch and hint record goes through here, so a renamed mod keeps them. */
+function syncKey(id, uid = null) { const p = parseId(id); return uid && /^[a-z0-9][a-z0-9-]{7,63}$/.test(uid) ? `${p.site}#${uid}` : p.id; }
+/** The helper's mod id (`phone~<site>/<name>`) -> its sync key, or null (not a phone twin's mod the sync takes).
+ * `uid`: the mod's stable id, if it has one. */
+function keyOfModId(modId, uid = null) {
   const s = String(modId || '');
   const cut = s.indexOf('/');
   if (cut < 1) return null;
   const id = idOf(s.slice(0, cut), `${s.slice(cut + 1)}.js`);
-  return id ? syncKey(id) : null;
+  return id ? syncKey(id, uid) : null;
 }
-/** A sync key -> the helper's mod id. */
-function modIdOfKey(key) { const { folder, name } = parseId(key); return `${folder}/${name}`; }
+/** A file id -> the helper's mod id. */
+function modIdOf(id) { const { folder, name } = parseId(id); return `${folder}/${name}`; }
 
 const OFF_SITE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 /** {on, off, at, fresh?} as the wire carries a switch: on (bool), off (the sites it's switched off on, sorted), at (ms
@@ -276,19 +376,38 @@ function loadSwitchBase(privateDir, phoneId) {
   if (!obj || obj.v !== 1 || !obj.sw || typeof obj.sw !== 'object') return out;
   for (const [id, k] of Object.entries(obj.sw)) {
     if (typeof k !== 'string' || k.length > 20000 || !/^(on|off)\|/.test(k)) continue;
-    try { parseId(id); } catch { continue; }
+    // (by sync key: a file id, or <site>#<uid>)
+    const hash = id.indexOf('#');
+    try { if (hash > 0) { parseId(`${id.slice(0, hash)}/x`); if (!/^[a-z0-9][a-z0-9-]{7,63}$/.test(id.slice(hash + 1))) continue; } else parseId(id); } catch { continue; }
     out[id] = k;
   }
   return out;
 }
 
-/** `sw`: the switches' base to keep (undefined: the file's own, as it is). */
-function saveBase(privateDir, phoneId, base, now = Date.now(), sw = undefined) {
+/** The base's part revisions (D17): {id: {uid?, body, meta}} (none: {}). An older helper's file has none. */
+function loadBaseMeta(privateDir, phoneId) {
+  let obj;
+  try { obj = JSON.parse(fs.readFileSync(basePath(privateDir, phoneId), 'utf8')); } catch { return {}; }
+  const out = {};
+  if (!obj || obj.v !== 1 || !obj.meta || typeof obj.meta !== 'object') return out;
+  for (const [id, m] of Object.entries(obj.meta)) {
+    if (!m || typeof m !== 'object' || !REV_RE.test(m.body) || !REV_RE.test(m.meta)) continue;
+    try { parseId(id); } catch { continue; }
+    out[id] = { ...(typeof m.uid === 'string' && /^[a-z0-9][a-z0-9-]{7,63}$/.test(m.uid) ? { uid: m.uid } : {}), body: m.body, meta: m.meta };
+  }
+  return out;
+}
+
+/** `sw`: the switches' base to keep, `meta`: the part revisions (undefined: the file's own, as they are; only ids in
+ * `base` are kept). */
+function saveBase(privateDir, phoneId, base, now = Date.now(), sw = undefined, meta = undefined) {
   const file = basePath(privateDir, phoneId);
   const keep = sw === undefined ? loadSwitchBase(privateDir, phoneId) : sw;
+  const parts = meta === undefined ? loadBaseMeta(privateDir, phoneId) : meta;
+  const m = Object.fromEntries(Object.entries(parts).filter(([id]) => Object.prototype.hasOwnProperty.call(base, id)));
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ v: 1, base, ...(Object.keys(keep).length ? { sw: keep } : {}), at: now }), { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify({ v: 1, base, ...(Object.keys(m).length ? { meta: m } : {}), ...(Object.keys(keep).length ? { sw: keep } : {}), at: now }), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -297,7 +416,7 @@ function deleteBase(privateDir, phoneId) {
 }
 
 module.exports = {
-  parseId, idOf, rev, readManifest, plan, siblingId, renameHeader, loadBase, saveBase, deleteBase, basePath, loadSwitchBase,
-  syncKey, keyOfModId, modIdOfKey, readSwitch, switchKey, planSwitches, readHint, hintFits, tierOf, TIERS,
+  parseId, idOf, rev, readManifest, plan, byParts, pairUp, siblingId, renameHeader, loadBase, saveBase, deleteBase, basePath, loadSwitchBase, loadBaseMeta,
+  syncKey, keyOfModId, modIdOf, readSwitch, switchKey, planSwitches, readHint, hintFits, tierOf, TIERS,
   SyncError, MAX_MODS, MOD_MAX, NAME_MAX, SIBLING, SIBLING_NAME, ALL_SITES,
 };

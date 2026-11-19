@@ -222,5 +222,7 @@ test('the approval hint: the very revision, and nothing beyond what was allowed 
   assert.strictEqual(S.syncKey('a.com/x'), 'a.com/x');
   assert.strictEqual(S.keyOfModId('phone~a.com/x'), 'a.com/x');
   assert.strictEqual(S.keyOfModId('a.com/x'), null, 'a desktop mod has no sync key');
-  assert.strictEqual(S.modIdOfKey('a.com/x'), 'phone~a.com/x');
+  assert.strictEqual(S.modIdOf('a.com/x'), 'phone~a.com/x');
+  assert.strictEqual(S.syncKey('a.com/x', '3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01'), 'a.com#3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01', 'a mod with a stable id is keyed by it (D16)');
+  assert.strictEqual(S.keyOfModId('phone~a.com/x', 'abcdefgh'), 'a.com#abcdefgh');
 });

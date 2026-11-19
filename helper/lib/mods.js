@@ -61,6 +61,13 @@ function parseHeader(code) {
       case 'description':
         out.description = value;
         break;
+      // `@id <id>`: the mod's stable id (lib/modid.js, docs/PHONE-SYNC.md 2a): the first @id line counts
+      case 'id':
+        if (out.uid === undefined) {
+          out.uid = /^[a-z0-9][a-z0-9-]{7,63}$/.test(value) ? value : null;
+          if (!out.uid) out.warnings.push(`@id should be 8 to 64 lower-case letters, digits and hyphens (got "${value.slice(0, 80)}")`);
+        }
+        break;
       case 'match':
         if (value) out.matches.push(value);
         break;
@@ -138,7 +145,8 @@ function parseHeader(code) {
 const ALL_SITES = 'all-sites';
 
 function defaultMatches(site) {
-  if (site === ALL_SITES) return ['*://*/*'];
+  // (a phone twin's every-site folder, sites/phone~all-sites/, too: D10)
+  if (site === ALL_SITES || phoneBase(String(site)) === ALL_SITES) return ['*://*/*'];
   // (a phone twin, sites/phone~x.com/: the site's own pages, run only in the phone view: lib/scope.js)
   const host = phoneBase(String(site).toLowerCase()).replace(/:\d+$/, '');
   // `*.<ip>` is not a meaningful (or valid) host pattern, so IPs only get the exact pattern.
@@ -180,6 +188,7 @@ function buildMod({ site, file, code }) {
     risk: header.risk, // {tier, why} or null when the header doesn't say
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
+    ...(header.uid ? { uid: header.uid } : {}), // its stable id (@id: lib/modid.js), not part of the hash (the text is)
     ...(header.device ? { device: header.device } : {}), // (informational: where a phone mod is is what counts)
     ...(isPhoneSite(site) ? { phone: true } : {}), // (a phone mod: in a phone twin's folder; runs only in the phone view)
   };
@@ -324,6 +333,16 @@ function scanMods(modsDir) {
     for (const warning of w) warnings.push({ id, file, warning });
     mods.push(mod);
   }
+  // (one id to a folder: two files with the same @id (a copied file), the first by file name keeps it, the others
+  // count as having none until TRIF writes them: docs/PHONE-SYNC.md 2a)
+  const owner = new Map();
+  for (const m of [...mods].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    if (!m.uid) continue;
+    const k = `${m.site}#${m.uid}`;
+    if (!owner.has(k)) { owner.set(k, m.id); continue; }
+    warnings.push({ id: m.id, file: m.file, warning: `the same @id as ${owner.get(k)}: TRIF counts it as having none` });
+    delete m.uid;
+  }
   return { mods, problems, warnings };
 }
 
@@ -434,6 +453,8 @@ function withSame(mods, had) {
   return mods.map((m) => (typeof m.hash === 'string' && had.get(m.id) === m.hash ? { ...m, code: undefined, same: true } : m));
 }
 
+// A mod's file without its header's @name and @id lines (a rule mod's own text, not the code TRIF makes of it).
+const renameBody = (m) => String(typeof m.text === 'string' ? m.text : m.code).split('\n').filter((l) => !/^\s*\/\/\s*@(name|id)(\s|$)/i.test(l)).join('\n');
 /**
  * Mods renamed on disk between two scans: a mod's id is its site folder and file name, so a renamed file
  * is a new id while the old one is gone; the same code in the same site folder is the same mod. Returns
@@ -448,7 +469,10 @@ function findRenames(prev, next) {
   for (const m of next) {
     if (!gone.length) break;
     if (before.has(m.id)) continue;
-    const i = gone.findIndex((g) => g.site === m.site && g.code === m.code);
+    // (the same stable id in the same folder: renamed, its text changed or not: docs/PHONE-SYNC.md 2a)
+    let i = m.uid ? gone.findIndex((g) => g.site === m.site && g.uid === m.uid) : -1;
+    // (else the same code once its @name and @id lines are left out: a rename that gave it its id, an mv)
+    if (i === -1) { const b = renameBody(m); i = gone.findIndex((g) => g.site === m.site && renameBody(g) === b); }
     if (i === -1) continue;
     out.push({ from: gone[i].id, to: m.id });
     gone.splice(i, 1);

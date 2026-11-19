@@ -27,12 +27,13 @@ named.
 | D7 | **Deletes go to the trash**, never hard: the computer's `trash/` (30 days, `trif restore`); on the phone a new Recently deleted list (30 days) in the Mods tab, since the app keeps only the last delete today. Tim, 2026-11-18. | 5 |
 | D8 | **A mod new to the phone** (made on the computer) **arrives with the computer's switch state** (on, off, off on some sites: D12), still marked new ("From your computer"), and waiting for an OK there if its code can do more than change the page (with the gentle card when the hint fits, D13). The same the other way: new on the phone, it arrives on the computer with the phone's switch, held as held.js decides. Tim, 2026-11-18 (it arrived off, as an import, before). | 4b, 6 |
 | D9 | **When:** the phone syncs when the app comes to the front (if paired), a few seconds after one of its phone mods changes, when the computer nudges it, and from Sync now in the Mods tab. The computer never sends a mod unasked: it sends a nudge with no data (section 7). Tim, 2026-11-18. | 8 |
-| D10 | **The phone's every-site mods** (`all-sites`) stay on the phone in v1: checked in S2, the desktop phone view has no every-site folder (a `sites/phone~all-sites/` mod without `@match` would get `*://all-sites/*`, mods.js `defaultMatches`). They're `skipped` ("every-site mods stay on the phone for now") and said so in the Mods tab. Later: `defaultMatches` and the phone view taught that folder. | 2 |
+| D10 | **The phone's every-site mods sync** (Tim, 2026-11-18: "every-site mods sync"): the phone's `all-sites/<name>` is the computer's `sites/phone~all-sites/<name>.js`, a folder of the desktop phone view like any twin: its mods (no `@match`: `*://*/*`, mods.js `defaultMatches`) run on every site in the phone view and are listed in its panel on every site. (Before 11-18 they were `skipped`, "every-site mods stay on the phone for now".) | 2 |
 | D12 | **A mod's switches sync** (Tim, 2026-11-18: "so editing continues seamlessly"): its on/off and its per-site switches follow the last change on either side, by the same base and three-way rule as the text (section 4b). Changed on both since they last agreed: **the later change wins** (each side stamps when the person last switched it; the same time: the phone's, as D5). | 4b |
 | D13 | **Approvals stay per device, but gentler, both ways** (Tim, 2026-11-18). A synced mod that waits for an OK still waits (consent is per device; sync is never a way round a hold, nothing is ever approved by it), but when the other device allowed this very version, its card says "You allowed this on {device}." and its one Allow is the same Allow. The other side's approval travels only as a hint: the mod's sync key, the revision allowed there, its tier and powers (the device's name is the one it was paired under, never the wire's). It counts only if the arriving revision is that one AND it asks for nothing beyond that tier and those powers; otherwise the normal card. | 6b |
 | D14 | **A site's tier (group) switches and Pause all stay each device's.** Pause all is a safety switch: it stops everything on the device in your hand, and must never be turned on or off from elsewhere. A tier's switch (On / Off for a site's style, boxed or free mods) is the same kind of brake, for one site; and the computer's phone view is a testing ground (Tim, 2026-11-18), where those brakes are for testing. Only a mod's own switches sync. | 4b |
 | D15 | **Safe mode's switch-offs on the phone sync like any switch** (they change the mod's own switch): a mod that took the phone down is off in the computer's phone view too, until switched on on either side. The alternative (a per-device layer for safe mode) is open for Tim. | 4b |
-| D16 | **One sync key** (`sync.js syncKey`, Swift `PhoneSync.key`): every switch and hint record is keyed through it. Today it's the mod's id (`<site>/<name>`); mods get a stable id separate from their name in a later batch (with a rename on both sides), and only that function changes. | 2 |
+| D16 | **One sync key** (`sync.js syncKey`, Swift `PhoneSync.key`): every switch and hint record is keyed through it. Since 11-18 it's the mod's stable id where it has one (`<site>#<@id>`, section 2a), else its file id (`<site>/<name>`, as before): a renamed mod keeps its switch and its hint. | 2a |
+| D17 | **Stable mod ids and renaming** (Tim, 2026-11-18: "Knowing it's the same mod should use a separate ID, instead of relying on equivalent names"): each mod carries `// @id <id>` in its header (section 2a); sync knows a mod by it, and by its name only where a side has no id (the first sync, old peers). A mod can be renamed in its details on both devices; its file follows the name, and a rename syncs as a rename. | 2a, 4 |
 | D11 | **A switch, on for a paired phone.** Pairing is the opt-in, so a paired phone syncs; Settings' Connect a phone has "Keep phone mods the same here and on connected phones" under the link's switch to turn it off (the store's `sync`, only `false` is off; `phone.sync`, the panel's alone). Off, every `sync.*` is answered `off` and no nudge goes out. Tim, 2026-11-17 (in place of the round-3 draft's off by default). | 9 |
 
 ## 2. What is synced, and the ids
@@ -53,6 +54,47 @@ named.
 - **A revision** is the SHA-256 of the file's UTF-8 bytes, hex. Nothing is normalised: the same text is the same
   revision on both sides.
 
+## 2a. Mod ids and renames (D17, Tim 2026-11-18)
+
+**The id.** A header line in the `==WebMod==` block, right after `@name`:
+
+    // @id 3f2b8c1e-6d4a-4b7e-9c1f-2a5d8e7b9c01
+
+- Its value: 8 to 64 lower-case letters, digits and hyphens, starting with a letter or digit
+  (`/^[a-z0-9][a-z0-9-]{7,63}$/`). TRIF makes them as a random UUID (v4) in lower case. Anything else isn't an id (a
+  header warning; the line stays in the text as it is). The first `@id` line counts.
+- It's identity only: it isn't part of what a mod can do, nor of an approval. held.js and the phone's holds read
+  powers from the code; the `@id` line is never a line that uses one, so adding it never makes a mod wait.
+- **One device**: a mod is its folder (site) and its id. Two mods in one folder with the same id (a copied file):
+  the first by file name keeps it, the others count as having none (and get a new one the next time TRIF writes
+  them). The same id in two folders is two mods. A mod without an id is its file id `<site>/<name>`, as before.
+- **When TRIF gives one**: whenever TRIF writes a mod for the person: one it makes (the phone's chat add, import,
+  paste, link; the desktop's import), an edit saved in the code card, a rename. An import of a file that has one keeps
+  it (export, then import: the same mod; on the phone an import whose id is a mod's on that site is a new version of
+  it). TRIF never writes a mod only to give it an id, and never when it copies one between devices: a sync's copy is
+  the other side's bytes, so revisions stay equal. A conflict's kept copy (section 4) gets a new id: it's a mod of
+  its own. Agents don't make ids: a mod an agent writes has none until TRIF writes it; an agent that edits a mod
+  keeps the line as it is (AGENTS.md).
+
+**Renaming** (each mod's details, both devices: the desktop panel's code card, Details; the iPhone's Mods tab
+details, the shared mods page):
+- The name is the header's `@name` (one line, added after the header's first line if there's none), 1 to 80
+  characters, no line breaks. The rename also adds the `@id` line if the mod has none. Nothing else in the text
+  changes, so a rename never needs an OK: what the mod can do is the same.
+- **The file follows**: `<slug>.js`, the slug the phone already makes from a name (modfile.js `nameOf`: lower
+  case, NFKD, every run of other characters one `-`, at most 60, none left: `mod`); taken by another mod in the folder
+  (any case): `-2`, `-3`… A slug equal to the file's name now: the file stays.
+- **Everything keyed by the mod's id moves with it**: on the computer held.json, allowed.json, seen.json and the
+  `.ran/` copy, edits.json, synced.json, origins, `history/` entries (`<name>@<stamp>.*`), the browser's switches
+  (`disabled`, `offSites`, `switchAt`, `newOff`, `startedOff`, `seenMods`, the panel's order, `chatWaiting`);
+  `trash/` keeps what was deleted under the name it had. On the phone the mod's record carries its switch,
+  approvals and History; the store's file, Recently deleted's Undo, the sync hints, the chat offers' memory (by
+  code, its `@id` line left out) follow. A rename isn't a new mod anywhere: it keeps its switch and isn't marked new.
+- The same name as another mod in the folder is fine (the file gets `-2`); the id tells them apart.
+
+**Sync's identity rule** (section 4): rows carry the id; two rows are one mod when they have the same site and id;
+rows where a side has no id pair by their file id, as before; the same file id with two different ids is two mods.
+
 ## 3. The base
 
 The computer keeps, per paired phone, the revision each mod had when the two sides last agreed:
@@ -61,11 +103,34 @@ in the private folder (no run can read it). Only the computer keeps a base: the 
 computer decides (section 4) and tells the phone what to do. A lost answer costs nothing: two sides with the same
 revision are in sync whatever the base says, and the base is set again.
 
+Since 11-18 (D17) the file also has `meta: {<id>: {uid?, body, meta}}` beside `base`, for each id in it: the mod's
+stable id then, and its two part revisions (below). An older helper's file has none: a mod without them is decided on
+its whole revision, as before.
+
+**Part revisions** (an app that says `ids: true`, and the computer): `body` is the SHA-256 of the file with the
+header's `@name` and `@id` lines taken out (each whole line with its line ending; only inside the first complete
+`==WebMod==` block; no complete block: the whole file); `meta` the SHA-256 of `<name>\n<id>` (the header's name as
+mods.js reads it, the last non-empty `@name`; and the id; each '' when there's none). A rename changes `meta` alone;
+an edit of the code `body`.
+
 Removing a phone deletes its base. Pairing again starts with no base: the first sync joins the two sets (a mod on
 one side only is copied to the other; the same text on both is in sync; different text on both is a conflict,
 section 4), so nothing is lost.
 
 ## 4. Deciding: the three-way rule
+
+**Pairing first** (D17; an app that says `ids: true`, else only the file ids, as before). The phone's rows and the
+computer's twin files are paired: by site and stable id where both have one; the rest by file id where at most one of
+the two has an id (two different ids at one file id are two mods). A pair's base is the base entry with its stable id,
+else its file id's.
+
+**Names.** A pair whose file ids differ was renamed: on the phone if the computer's id is still the base's, on the
+computer if the phone's is (the plan's `renames: [{from, to}]`: the phone moves its mod to the computer's id, its text
+as it is, everything keyed by it following), on both or with no base: the phone's name (D5). The computer moves its own
+file at once (in `sync.begin`, keys following, section 2a). Then each mod has one file id on both sides. Two that
+would end at one file id (two different mods with one name: made apart, or one renamed to the other's name): the one
+the phone has there keeps it; the computer's moves beside it as `<name>-from-computer.js`, "{name} (from your
+computer)" (its id kept: the same mod, renamed), given to the phone with `apart: <id>`.
 
 For every id on either side or in the base: P = the phone's revision (or none), C = the computer's, B = the base.
 
@@ -78,7 +143,17 @@ For every id on either side or in the base: P = the phone's revision (or none), 
 | P ≠ B, C ≠ B, C none | Deleted on the computer, changed on the phone: the computer asks for P (`want`, `back: true`). |
 | P ≠ B, C ≠ B, both there | **Conflict** (D5): the computer writes its own C as a new mod beside it, `sites/phone~<site>/<name>-from-computer.js` (`-from-computer-2`… if taken), with the header's `@name` given " (from your computer)" (that one line; none: the file name says it), keeps C in its history, asks for P (`want`) and writes it at the id, and gives the new sibling to the phone (`give`, `conflict: <id>`). Both devices end with the same two mods. |
 
-(No base and both there with different text is the last row too: two mods of the same name made apart.)
+**Both changed, in parts** (D17: an app that sends `body` and `meta`, the base has them or there's no base): before the
+conflict row, the two parts are decided apart, each by the three-way rule: the body (P's, C's, B's `body`) and the
+name and id (their `meta`; changed on both: the phone's, D5). A body changed on both is the conflict row. Otherwise the
+result is the body's winner with the name and id of the meta's winner: the phone's file (`want`), the computer's
+(`give`), or, a rename on one side and an edit on the other, a new text both take (`want {id, merge: true}` and `give
+{id, merge: true}`, no `rev`: at `sync.put` the computer writes the body side's text with the other's `@name` and `@id`
+lines, and `sync.get` gives that). A conflict's kept copy gets " (from your computer)" and a new id.
+
+(No base and both there with different text is the last row too: two mods of the same name made apart, when neither
+has an id; with two different ids they're two mods, kept apart by name, above. No base and only the name or id
+differs: the phone's text.)
 
 The computer leaves out of a sync, as `later`, every mod of a twin where a run is working (a phone run or a
 desktop phone-view chat: `Runs.bySite`), so a run's working copy and a synced file never cross. It nudges the phone
@@ -172,7 +247,7 @@ Phone → computer:
 
 | `t` | Fields | Answer |
 |---|---|---|
-| `sync.begin` | `mods`: `[{id, rev}]`, every mod on the phone (at most 500) | `sync.plan` `{syncId, want: [{id, back?, conflict?}], give: [{id, rev, back?, conflict?}], remove: [id], later: [id], skipped: [{id, why}]}` (`skipped`: a bad id or a mod over 1 MB) |
+| `sync.begin` | `mods`: `[{id, rev}]`, every mod on the phone (at most 500) | `sync.plan` `{syncId, want: [{id, back?, conflict?, merge?}], give: [{id, rev, back?, conflict?, merge?, apart?}], remove: [id], later: [id], skipped: [{id, why}], renames?}` (`skipped`: a bad id or a mod over 1 MB) |
 | `sync.get` | `syncId`, `mod` (an id from `give`) | `sync.mod` `{mod, name, code}` (`code` is the computer's file as it is now) |
 | `sync.put` | `syncId`, `mod` (an id from `want`), `code` | `ok` `{mod, rev, held}` (`held`: waiting for the user's OK on the computer), or `error` `bad-mod` (not a mod file, or its id), `too-big`, `changed` (the computer's file changed since the plan: the next sync decides) |
 | `sync.end` | `syncId`, `have`: `[{id, rev}]` (the phone's revisions now, for the plan's ids) | `sync.done` `{synced, waiting: [{id, name}] (held on the computer), conflicts: [{id, sibling}]}`; the base moves for each id where `have` matches the computer's file |
@@ -187,6 +262,21 @@ none of it; an older helper ignores it all, and the app finds no `switches` or `
 | `sync.plan` | `switches: [{id, on, off, at}]` | what the phone sets, after its gets (a new mod: after it's taken) |
 | `sync.plan` | `allowed: [{id, rev, tier, powers}]` | the computer's hints |
 | `sync.end` | `switches: [{id, on, off, at}]` | every mod's switch on the phone now (the switches' base moves where it matches the extension) |
+
+Ids and renames (D17: an app from 11-18 says `ids: true` in `sync.begin`; an older app gets none of it and is paired
+by file id; an older helper ignores it all, so a rename on the phone reaches it as the old id deleted and the new one
+added):
+
+| Where | Field | What |
+|---|---|---|
+| `sync.begin` | `ids: true` | this app pairs by stable id and takes renames and merges |
+| `sync.begin` each row | `uid?`, `body`, `meta` | the mod's stable id (section 2a), its part revisions (section 3) |
+| `sync.plan` | `renames: [{from, to}]` | the phone moves its mod `from` → `to` first (its text as it is; the rest of the plan names `to`). One it can't (`to` taken there): the phone ends that sync without `sync.end`; the next one decides again |
+| `sync.plan` `want`/`give` rows | `merge: true` | a rename against an edit: put the phone's file, then get the text both keep (a `give` with `merge` has no `rev`) |
+| `sync.plan` `give` rows | `apart: <id>` | a mod of the computer's moved beside the phone's mod of the same name (the phone may say so) |
+
+Keys (D16): `switches`, `allowed` and the base's `sw` stay by file id on the wire (`id`), and by sync key in the
+computer's files.
 
 Computer → phone:
 
@@ -258,8 +348,7 @@ Exact drafts: docs/PHONE-LINK-STRINGS.md, "Phone sync".
   makes a twin of a site) rather than synced as is: desktop selectors seldom fit the phone's page.
 - **Switches**: synced per mod since 11-18 (D12); site groups and Pause all stay each device's (D14).
 - **Approvals**: never synced by design (rule 6); since 11-18 the other side's is a hint for the card's words (D13).
-- **A stable id** separate from a mod's name, and a rename on both sides (Tim, 11-18, next batch): the sync key (D16)
-  becomes it.
+- **A stable id** separate from a mod's name, and a rename on both sides: built 11-18 (D17, section 2a).
 - **More than one phone**: each has its own base, so two phones and one computer converge through the computer;
   conflicts between two phones name the phone (`-from-<phone>`). v1 builds the base per phone already.
 - **Sync away from home**: rides whatever transport the link gets (PHONE-LINK.md section 9).
@@ -284,6 +373,12 @@ Exact drafts: docs/PHONE-LINK-STRINGS.md, "Phone sync".
   once, the refusals. Built (S4): `tests/phone-sync-e2e.test.js`, with `PhoneClient.sync` (the app's whole
   sync: begin, get, put, end); also a race (`changed`, then the conflict), a twin with a phone run `later`, a
   twin that's a link, a second phone's own base, the switch off, and the desktop mods untouched throughout.
+- Unit (computer, 11-18, D17): tests/mod-id.test.js (modid.js against tests/fixtures/mod-id-cases.json, the cases the
+  iPhone's shared core is held to; the reader's @id, one id to a folder, renames found by id; Rename: the file
+  follows, what the helper keeps by the id moves, nothing waits; an edit and an import give an id, export → import
+  is the same mod) and tests/phone-sync-ids.test.js (the session with an app that says `ids: true`: a rename on each
+  side, a rename against an edit both ways (merged), a code conflict's copy with an id of its own, two mods with one
+  name kept apart, an id on one side only, an old phone's delete + add, every-site mods both ways).
 - The Mac test harness for the Swift side (mobile/test/phonelink.test.js) against the same helper.
 - Simulator: a mod made on the phone, edited by a desktop phone-view chat (the stand-in agent), back on the phone;
   a conflict; a delete.

@@ -129,16 +129,16 @@ test('phone sync end to end: join, edits both ways, a conflict, deletes both way
   const s1 = await A.request({ t: 'sync.begin', mods: [...Object.entries(onPhone).map(([id, t]) => ({ id, rev: PhoneClient.rev(t) })), ...bad.map((id) => ({ id, rev: PhoneClient.rev('x') }))] });
   assert.equal(s1.t, 'sync.plan', JSON.stringify(s1));
   for (const id of bad) assert.ok(s1.skipped.some((s) => s.id === id || s.id === id.slice(0, 400)), `${JSON.stringify(id)} skipped`);
-  assert.ok(s1.skipped.some((s) => s.id === 'all-sites/every' && /every-site/.test(s.why)), JSON.stringify(s1.skipped));
-  assert.deepEqual(s1.want.map((w) => w.id).sort(), ['example.com/clicker', 'example.com/no-ads', 'example.com/plain']);
+  assert.ok(!s1.skipped.some((s) => s.id === 'all-sites/every'), 'every-site mods sync since 11-18 (D10)');
+  assert.deepEqual(s1.want.map((w) => w.id).sort(), ['all-sites/every', 'example.com/clicker', 'example.com/no-ads', 'example.com/plain']);
   assert.deepEqual(s1.give.map((g) => g.id), ['example.com/desk']);
   assert.deepEqual([s1.remove, s1.later], [[], []]);
   // (that sync is ended by the next begin: the stand-in's own sync below, a second later)
   const r1 = await sync(A, onPhone);
-  assert.deepEqual(Object.values(r1.puts).map((p) => [p.t, p.mod, p.held]).sort(), [['ok', 'example.com/clicker', true], ['ok', 'example.com/no-ads', false], ['ok', 'example.com/plain', false]]);
+  assert.deepEqual(Object.values(r1.puts).map((p) => [p.t, p.mod, p.held]).sort(), [['ok', 'all-sites/every', false], ['ok', 'example.com/clicker', true], ['ok', 'example.com/no-ads', false], ['ok', 'example.com/plain', false]]);
+  assert.equal(read('phone~all-sites/every.js'), onPhone['all-sites/every'], 'an every-site mod: in the phone view\'s every-site folder (D10)');
   assert.equal(onPhone['example.com/desk'], mod('Desk'), 'the twin\'s mod is on the phone');
   for (const id of ['no-ads', 'clicker', 'plain']) assert.equal(read(`phone~example.com/${id}.js`), onPhone[`example.com/${id}`]);
-  assert.equal(fs.existsSync(file('phone~all-sites')), false, 'every-site mods stay on the phone (D10)');
   assert.deepEqual(r1.done.waiting, [{ id: 'example.com/clicker', name: 'Clicker' }]);
   assert.deepEqual(r1.done.conflicts, []);
   // The side panel: the clicker waits for the user's OK, from the phone; the style mod and the plain one don't.
@@ -151,7 +151,7 @@ test('phone sync end to end: join, edits both ways, a conflict, deletes both way
     assert.ok(m && !m.held && !m.pending, `${id} runs at once: ${JSON.stringify(m && (m.held || m.pending))}`);
   }
   const line1 = await syncedOf(idA);
-  assert.deepEqual([line1.fromPhone, line1.toPhone, line1.waiting, line1.conflicts], [3, 1, 1, []]);
+  assert.deepEqual([line1.fromPhone, line1.toPhone, line1.waiting, line1.conflicts], [4, 1, 1, []]);
   assert.equal(typeof line1.at, 'number');
   // The sync's own writes nudge nobody; and the next sync has nothing to do.
   await noNudge(A, 3000);
@@ -266,7 +266,7 @@ test('phone sync end to end: join, edits both ways, a conflict, deletes both way
   const onB = {};
   const rB = await sync(B, onB);
   assert.deepEqual(rB.plan.remove, []);
-  assert.deepEqual(Object.keys(onB).sort(), ['example.com/clicker', 'example.com/desk', 'example.com/no-ads']);
+  assert.deepEqual(Object.keys(onB).sort(), ['all-sites/every', 'example.com/clicker', 'example.com/desk', 'example.com/no-ads']);
   for (const id of Object.keys(onB)) assert.equal(onB[id], onPhone[id]);
 
   // ---- Off in the panel: every sync.* refused, nothing written, a twin's change nudges nobody. On again.
@@ -308,7 +308,7 @@ test('phone sync end to end, beside the text: switches both ways (the later chan
   const onC = {};
   const sw = {};
   const r1 = await sync(C, onC, { switches: sw });
-  assert.deepEqual(Object.keys(onC).sort(), ['example.com/clicker', 'example.com/desk', 'example.com/no-ads']);
+  assert.deepEqual(Object.keys(onC).sort(), ['all-sites/every', 'example.com/clicker', 'example.com/desk', 'example.com/no-ads']);
   assert.deepEqual(sw['example.com/no-ads'], { on: false, off: [], at: 100 });
   assert.deepEqual(sw['example.com/desk'], { on: true, off: [], at: 0 });
   // (what the computer allows: the style mod, not the held clicker)

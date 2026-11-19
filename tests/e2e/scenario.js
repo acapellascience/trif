@@ -1416,6 +1416,7 @@ class Scenario {
       await r.check('downloads: off until switched on in Settings; then a new mod file in Downloads (not one there before) gets an "Add this mod?" card naming where it came from (the file\'s where-from record); Try it here runs it in this tab with TRIF\'s runtime (style from the card, boxed from the paste card; a free mod refused) and Undo reloads it away; Add imports it switched off, the file left in Downloads; Not now, and Ignore files from <site>', () => this.downloadsCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
+      await r.check('the code card\'s Rename: Details shows the name; an empty name is refused; a rename sets @name, adds @id, moves the file, keeps its switch, and never waits for an OK', () => this.codeRenameCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
       await r.check('mod rows: the light, the name, one chip by its level (hover says what, a click opens the code card), one line of description, the controls', () => this.modRowsCheck(win));
       await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
@@ -4862,6 +4863,55 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
     } finally {
       try { fs.unlinkSync(file); } catch { /* gone */ }
       await this.panel(`async () => { for (const id of ['code-view', 'approval']) { const d = document.getElementById(id); if (d && d.open) d.close(); } return true; }`).catch(() => {});
+    }
+  }
+
+  // ---- Rename in the code card's Details (Tim, 11-18; helper/lib/rename.js, docs/PHONE-SYNC.md 2a): the @name line set,
+  // an @id added, the file following the name, its switch kept (off stays off), not held, not new; an empty name refused
+  async codeRenameCheck(win) {
+    const site = '127.0.0.1';
+    const from = path.join(this.trif, 'sites', site, 'e2e-rename.js');
+    const to = path.join(this.trif, 'sites', site, 'e2e-quiet-feed.js');
+    const v1 = "// ==WebMod==\n// @name E2E rename\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eRename = 'v1';\n";
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const problems = [];
+    const row = (id) => this.panel(`async () => { const li = document.querySelector('li[data-mod="${id}"]'); if (!li) return null; const sw = li.querySelector('[role="switch"]'); return { on: sw ? sw.getAttribute('aria-checked') : null, name: li.querySelector('.mod-name')?.textContent || li.textContent.slice(0, 60) }; }`);
+    try {
+      fs.writeFileSync(from, v1);
+      await waitFor('the mod registered', async () => /e2e-rename\s+registered/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['disable', `${site}/e2e-rename`], { timeoutMs: 20000 });
+      await waitFor('its row, off', async () => { const r = await row(`${site}/e2e-rename`); return r && r.on === 'false' ? r : null; }, { timeoutMs: 15000 });
+      await this.dismissApproval();
+      await this.panelClick(`li[data-mod="${site}/e2e-rename"] .mod-code`);
+      await waitFor('the code card', () => this.panel(`async () => document.getElementById('code-view')?.open || null`), { timeoutMs: 8000 });
+      await this.panelClick('#code-view .cv-tab-details');
+      const shown = await waitFor('the name in Details', () => this.panel(`async () => { const r = document.querySelector('#code-view .cv-d-name'); return r && !r.closest('[hidden]') ? { name: r.querySelector('.cv-d-name-value')?.textContent, rename: !!r.querySelector('.cv-rename:not([disabled])') } : null; }`), { timeoutMs: 8000 });
+      if (shown.name !== 'E2E rename' || !shown.rename) problems.push(`Details' name: ${JSON.stringify(shown)}`);
+      await this.panelClick('#code-view .cv-rename');
+      // (an empty name: refused, nothing written)
+      await this.panel(`async () => { const i = document.querySelector('#code-view .cv-d-name-input'); i.value = '  '; return true; }`);
+      await this.panelClick('#code-view .cv-rename-save');
+      const refused = await waitFor('the refusal', () => this.panel(`async () => { const n = document.querySelector('#code-view .cv-d-name-err'); return n && !n.hidden ? n.textContent : null; }`), { timeoutMs: 5000 });
+      if (refused !== 'Give it a name.' || !fs.existsSync(from)) problems.push(`an empty name: ${refused}`);
+      await this.panel(`async () => { const i = document.querySelector('#code-view .cv-d-name-input'); i.value = 'E2E quiet feed'; return true; }`);
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `code-rename-field-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
+      await this.panelClick('#code-view .cv-rename-save');
+      const after = await waitFor('the card on the renamed mod', () => this.panel(`async () => { const d = document.getElementById('code-view'); const v = d?.querySelector('.cv-d-name-value'); return d?.open && d.dataset.mod === '${site}/e2e-quiet-feed' && v ? { name: v.textContent, title: document.getElementById('code-view-name').textContent } : null; }`), { timeoutMs: 15000 });
+      if (after.name !== 'E2E quiet feed' || after.title !== 'E2E quiet feed') problems.push(`after: ${JSON.stringify(after)}`);
+      await this.shot(this.panelCtx, 'code-renamed');
+      if (fs.existsSync(from) || !fs.existsSync(to)) problems.push(`the file didn't follow: ${fs.existsSync(from)} ${fs.existsSync(to)}`);
+      const text = fs.existsSync(to) ? fs.readFileSync(to, 'utf8') : '';
+      if (!/^\/\/ @name E2E quiet feed$/m.test(text) || !/^\/\/ @id [a-z0-9-]{36}$/m.test(text) || !text.includes("dataset.e2eRename = 'v1'")) problems.push(`the text: ${text}`);
+      const r = await waitFor('its row, renamed', async () => { const x = await row(`${site}/e2e-quiet-feed`); return x || null; }, { timeoutMs: 15000 });
+      if (r.on !== 'false') problems.push(`its switch didn't stay off: ${JSON.stringify(r)}`);
+      const st = await status();
+      if (/e2e-quiet-feed[^\n]*(held|waiting|new)/i.test(st)) problems.push(`it waits or is new: ${st.split('\n').filter((l) => /e2e-quiet/.test(l)).join(' | ')}`);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return 'Details shows the name with Rename; an empty name refused; renamed: the card on the new id, the file e2e-quiet-feed.js with @name and a new @id, its switch still off, not held or new';
+    } finally {
+      for (const f of [from, to]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
     }
   }
 

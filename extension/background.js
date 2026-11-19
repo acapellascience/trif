@@ -996,8 +996,17 @@ async function onModsMessage(msg) {
     const newOff = { ...state.newOff };
     for (const { from, to } of renames) if (newOff[from]) { newOff[to] = newOff[from]; delete newOff[from]; }
     state.newOff = newOff;
+    // (a phone mod's switch time and a chat change waiting go with it too: docs/PHONE-SYNC.md 2a)
+    const switchAt = { ...state.switchAt };
+    const chatWaiting = { ...state.chatWaiting };
+    for (const { from, to } of renames) {
+      if (switchAt[from] !== undefined) { switchAt[to] = switchAt[from]; delete switchAt[from]; }
+      if (chatWaiting[from] !== undefined) { chatWaiting[to] = chatWaiting[from]; delete chatWaiting[from]; }
+    }
+    state.switchAt = switchAt;
+    state.chatWaiting = chatWaiting;
     const order = await chrome.storage.local.get('modOrder').then((s) => renameInOrder(s.modOrder, renames), () => ({ changed: false }));
-    await save({ disabled: state.disabled, offSites: state.offSites, startedOff: state.startedOff, newOff: state.newOff, ...(state.seenMods ? { seenMods: state.seenMods } : {}), ...(order.changed ? { modOrder: order.modOrder } : {}) })
+    await save({ disabled: state.disabled, offSites: state.offSites, startedOff: state.startedOff, newOff: state.newOff, switchAt: state.switchAt, chatWaiting: state.chatWaiting, ...(state.seenMods ? { seenMods: state.seenMods } : {}), ...(order.changed ? { modOrder: order.modOrder } : {}) })
       .catch((e) => log('warn', errMsg(e)));
     log('info', `renamed: ${renames.map((r) => `${r.from} -> ${r.to}`).join(', ')} (switches kept)`);
   }
@@ -2630,6 +2639,12 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
     case 'mod.save': {
       if (!fromPanel) throw new Error('only the side panel can change this');
       return helperRequest('mod.save', { id: String(msg.id ?? ''), text: String(msg.text ?? '').slice(0, 5 * 1024 * 1024), base: String(msg.base ?? '') }, 20000);
+    }
+    // The code card's Rename (helper/lib/rename.js): the helper sets the @name, moves the file and what it keeps by the
+    // mod's id; the switches follow here by its stable id (findRenames). The side panel's alone: a click there.
+    case 'mod.rename': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('mod.rename', { id: String(msg.id ?? ''), name: String(msg.name ?? '').slice(0, 400) }, 15000);
     }
     case 'mod.undoEdit': {
       if (!fromPanel) throw new Error('only the side panel can change this');

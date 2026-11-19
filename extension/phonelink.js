@@ -54,7 +54,8 @@ export const TEXT = {
   justNow: 'just now',
   minutesAgo: '{n} min ago',
   atTime: 'at {time}',
-  // The toast when a sync with a phone is done, whoever started it (syncToast): every open panel shows it
+  // The toast when a sync with a phone is done, whoever started it (syncToast): every open panel shows it;
+  // "nothing new" only after a sync started here
   toastSynced: 'Synced with {phone} · {n} from the phone, {m} to it',
   toastSyncedWaiting: 'Synced with {phone} · {n} from the phone, {m} to it, {k} waiting for your OK',
   toastNothing: 'Synced with {phone} · nothing new',
@@ -181,15 +182,17 @@ export function ago(at, now = Date.now(), time = shortTime) {
 
 /**
  * The toast for syncs that just ended (`done`: [{phone: its name, synced: the helper's record}]), or '' for none:
- * what came from the phones and went to them, summed; "nothing new" when nothing moved.
+ * what came from the phones and went to them, summed; "nothing new" when nothing moved, but only after a sync the
+ * person started here (`asked`: Sync now, Sync with phone). Automatic syncs nothing moved in say nothing (Tim,
+ * 2026-11-18: the phone syncs every time it comes to the front, so "nothing new" would show all the time).
  */
-export function syncToast(done) {
+export function syncToast(done, { asked = false } = {}) {
   const list = (Array.isArray(done) ? done : []).filter((d) => d && d.synced && typeof d.synced === 'object');
   if (!list.length) return '';
   const name = phonesName(list.map((d) => ({ name: String(d.phone || '') })));
   const sum = (k) => list.reduce((n, d) => n + (Number.isInteger(d.synced[k]) ? d.synced[k] : 0), 0);
   const n = sum('fromPhone'); const m = sum('toPhone'); const k = sum('waiting');
-  if (!n && !m && !k) return fill(TEXT.toastNothing, { phone: name });
+  if (!n && !m && !k) return asked ? fill(TEXT.toastNothing, { phone: name }) : '';
   return fill(k > 0 ? TEXT.toastSyncedWaiting : TEXT.toastSynced, { phone: name, n, m, k });
 }
 
@@ -220,8 +223,12 @@ export function createPhoneLink({ request, changed = () => {}, synced = () => {}
       const was = new Map((state.status.phones || []).map((p) => [p.id, p.synced && Number.isFinite(p.synced.at) ? p.synced.at : 0]));
       const done = (Array.isArray(status.phones) ? status.phones : [])
         .filter((p) => p && p.synced && Number.isFinite(p.synced.at) && p.synced.at > (was.get(p.id) ?? 0))
-        .map((p) => ({ phone: p.name, synced: p.synced }));
-      if (done.length) { try { synced(syncToast(done), done); } catch { /* the panel's toast, no more */ } }
+        .map((p) => ({ id: p.id, phone: p.name, synced: p.synced }));
+      // (one the person asked for: a sync of a phone Sync now told, ended after it was pressed and within the wait)
+      const a = state.asked;
+      const asked = !!a && !a.error && done.some((d) => d.synced.at >= a.at && d.synced.at - a.at <= ASK_MS + 5000
+        && (a.pending || (a.told || []).includes(d.id)));
+      if (done.length) { try { const text = syncToast(done, { asked }); if (text) synced(text, done); } catch { /* the panel's toast, no more */ } }
     }
     const fresh = (Array.isArray(status.phones) ? status.phones : []).filter((p) => !before.has(p.id));
     // The window closed on the helper's side: a phone took it (say which), or its time was up

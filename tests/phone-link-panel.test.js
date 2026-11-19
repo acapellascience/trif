@@ -353,13 +353,15 @@ test('the phone line: Connect a phone with none paired; Syncing with {phone} and
 // Tim, 11-18: a sync that worked showed nothing. A sync the phone starts (on its own, or its Sync now) reached the
 // panel only as a status, whose one trace was Settings' "Synced {time}" row: now every open panel shows a toast
 // for each sync that ends, whoever started it, and the phone view's line says when it last synced.
-test('a sync done: a toast with what it moved, "nothing new" when nothing did; none for the first status a panel gets', async () => {
+test('a sync done: a toast with what it moved, "nothing new" only after Sync now here; none for the first status a panel gets', async () => {
   const mod = await load();
   const { syncToast, ago } = mod;
   const rec = (over = {}) => ({ at: 2000, fromPhone: 2, toPhone: 1, waiting: 0, conflicts: [], skipped: 0, ...over });
   assert.equal(syncToast([]), '');
   assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }]), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it');
-  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }]), 'Synced with Tim’s iPhone · nothing new');
+  // (Tim, 11-18: "nothing new" only after a sync started here; automatic ones nothing moved in say nothing)
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }]), '');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }], { asked: true }), 'Synced with Tim’s iPhone · nothing new');
   assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ waiting: 1 }) }]), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it, 1 waiting for your OK');
   assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }, { phone: 'iPad', synced: rec({ fromPhone: 1 }) }]), 'Synced with Tim’s iPhone and iPad · 3 from the phone, 2 to it');
   assert.equal(ago(1000, 30000), 'just now');
@@ -370,14 +372,24 @@ test('a sync done: a toast with what it moved, "nothing new" when nothing did; n
   const s = setup(mod, { 'phoneLink.status': { ...on, phones: [{ ...PHONE, synced: rec({ at: 500 }) }] } });
   await s.link.peek(true);
   assert.deepStrictEqual(s.toasts, [], 'how things were when the panel opened: no toast');
-  // (a sync the phone started: only its status comes)
+  // (a sync the phone started, nothing moved: only its status comes, and no toast)
   s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1500, fromPhone: 0, toPhone: 0 }) }] });
-  assert.deepStrictEqual(s.toasts, ['Synced with Tim’s iPhone · nothing new']);
-  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1500, fromPhone: 0, toPhone: 0 }), online: false }] });
+  assert.deepStrictEqual(s.toasts, [], 'an automatic sync that moved nothing: no toast');
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1600 }) }] });
+  assert.deepStrictEqual(s.toasts, ['Synced with Tim’s iPhone · 2 from the phone, 1 to it'], 'one that moved something: a toast');
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1600 }), online: false }] });
   assert.equal(s.toasts.length, 1, 'the same sync again (another change): no second toast');
-  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1700 }) }] });
-  assert.deepStrictEqual(s.toasts.at(-1), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it');
+  // (Sync now, pressed here: its sync says "nothing new" too)
+  s.answers['phoneLink.syncNow'] = { told: [PHONE.id], ...on, phones: [{ ...PHONE, synced: rec({ at: 1600 }) }] };
+  await s.link.syncNow();
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1700, fromPhone: 0, toPhone: 0 }) }] });
+  assert.deepStrictEqual(s.toasts.at(-1), 'Synced with Tim’s iPhone · nothing new', 'a sync the person asked for');
+  // (and a later automatic one, past the wait, that moved nothing: none)
+  await s.advance(mod.ASK_MS + 10000);
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1000 + mod.ASK_MS + 10000, fromPhone: 0, toPhone: 0 }) }] });
+  assert.equal(s.toasts.length, 2, 'an automatic sync long after Sync now: no toast');
   // (the phone view's line, between syncs)
+  s.link.forgetAsked();
   assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone · last synced just now.');
 });
 

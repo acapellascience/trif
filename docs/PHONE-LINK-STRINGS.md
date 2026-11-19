@@ -72,7 +72,7 @@ view's are in sidepanel.js `PHONE_VIEW_TEXT`.
 |---|---|---|
 | The toast, after a sync that moved something | Synced with {phone} · {n} from the phone, {m} to it | {phone} as the phone line's (two: "{phone} and {other}"). No full stop: it's a passing line |
 | The same, with mods waiting for an OK | Synced with {phone} · {n} from the phone, {m} to it, {k} waiting for your OK | |
-| The same, nothing moved | Synced with {phone} · nothing new | |
+| The same, nothing moved (only after a sync started here: Sync now, Sync with phone; automatic syncs that moved nothing show no toast. Tim, 11-18) | Synced with {phone} · nothing new | |
 | The phone view just opened without TRIF's panel beside it (Firefox always; Chrome if the side panel couldn't open): in the panel the phone view was opened from, with a × | The phone view is in a window of its own. Click TRIF's button there to open TRIF beside the phone. | until TRIF's panel is open in the phone window, or the phone view ends. Firefox can't open its sidebar in another window from a click in this one (sidebarAction.open has no window, and only works inside the click itself) |
 | The phone view's banner, when the page is wider than the phone's because the browser won't make the window narrower | This page is {w} px wide, wider than an iPhone's 390: the browser won't make this window narrower. | {w}: the page's width in CSS px. Headless Chrome 156 keeps a window with its side panel open at 792 px or wider, so a 406 px page; Tim's Chrome to be checked. Not shown at 390 (± 2) |
 | The popup route's address field, when going there failed (a toast) | Couldn't go there: {error} | {error}: the browser's words, as they come. Before 11-18 the failure went to the console only |

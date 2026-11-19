@@ -237,6 +237,26 @@ extension Model {
             let m = browser.mods
             out = "sync: \(PhoneSyncModel.shared.syncing ? "running" : "idle"); last: \(PhoneSyncModel.shared.describe)\nmods: \(m.mods.map { "\($0.id)\($0.on ? "" : " off")\($0.offSites.isEmpty ? "" : " off on \($0.offSites.joined(separator: ","))")\($0.held ? " held" : "")\($0.newOff.map { " mark \($0)" } ?? "")\(m.allowedOnComputer($0) ? " allowed-there" : "")\($0.switchAt.map { " at \(Int($0))" } ?? "")\(m.keptUids[$0.id].map { " uid \($0)" } ?? "")\(m.syncHintsKept[m.syncKey($0)] != nil ? " hint" : "")" }.sorted())\ndeleted: \(m.trash.map { "\($0.mod.id) by \($0.by)" })"
         }
+        // (safe mode's snapshots: {"snapshots": 1} lists them; {"restoresnap": 0 | "<id prefix>"} puts one back as the
+        // ⋯ menu does; {"bannerrestore": 1} the shown site's banner's Turn them back on; {"safetystate": 1} what's
+        // listed as switched off by TRIF; {"enable": {"id", "on", "site"}} a switch as the Mods tab sends it; {"toast": 1})
+        if step["snapshots"] != nil { out = browser.safety.describeSnapshots }
+        if let r = step["restoresnap"] {
+            let list = browser.safety.snapshots
+            let id = (r as? Int).flatMap { $0 < list.count ? list[$0].id : nil } ?? (r as? String).flatMap { p in list.first { $0.id.hasPrefix(p) }?.id }
+            out = id.flatMap { browser.restoreSwitches($0) }.map { "restored \($0.restored) changed \($0.changed) gone \($0.gone) waiting \($0.waiting): \(Safety.restoreWords($0))" } ?? "no such snapshot"
+        }
+        if step["bannerrestore"] != nil {
+            if let id = browser.safety.switchedOff[browser.site]?.snap, let r = browser.restoreSwitches(id) { out = "restored \(r.restored) changed \(r.changed): \(Safety.restoreWords(r))" } else { out = "no banner with a snapshot on \(browser.site)" }
+        }
+        if step["safetystate"] != nil { out = browser.safety.switchedOff.map { "\($0.key): \($0.value.ids) \($0.value.why) snap \($0.value.snap?.prefix(8) ?? "-")" }.sorted().joined(separator: "\n").nonEmpty ?? "nothing switched off by TRIF" }
+        if let e = step["enable"] as? [String: Any] {
+            var d: [String: Any] = ["type": "enable", "id": e["id"] as? String ?? "", "enabled": e["on"] as? Bool ?? true]
+            if let site = e["site"] as? String { d["site"] = site }
+            let a = await panel.handle(d)
+            out = a.1.map { "refused: \($0)" } ?? "ok"
+        }
+        if step["toast"] != nil { out = AppToast.shared.describe }
         // ({"rename": [id, "New name"]}: the Mods tab's Rename, as its Save sends it; {"modcode": id}: a mod's file now;
         // {"modreads": [text, here]}: what readNamed makes of a chat's code (the id it'd be kept under, its @id))
         if let r = step["rename"] as? [String], r.count == 2 {
@@ -639,7 +659,9 @@ struct ContentView: View {
             } bars: {
                 VStack(spacing: 0) {
                     if let off = safety.switchedOff[browser.site] {
-                        SafetyBanner(site: browser.site, off: off, open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
+                        SafetyBanner(site: browser.site, off: off,
+                                     restore: off.snap.flatMap { id in safety.snapshots.contains { $0.id == id && $0.restored == nil } ? { _ = browser.restoreSwitches(id) } : nil },
+                                     open: { showMods = true }, dismiss: { browser.safety.dismiss(site: browser.site) })
                     }
                 }
             } toolbar: {

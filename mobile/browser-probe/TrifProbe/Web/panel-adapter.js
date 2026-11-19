@@ -307,9 +307,13 @@
     try { st = await app({ type: 'link.status' }); } catch (e) { return; }
     box.replaceChildren(el('p', 'sites-title', 'My computer'));
     const line = el('p', 'note', st.paired ? `Paired with ${st.name}. Its coding agent makes the mod.` : 'Your coding agent on your computer can make mods here. Pair this iPhone with TRIF on your computer first.');
-    box.append(line, btn(st.paired ? 'My computer…' : 'Pair with my computer…', () => app({ type: 'link.open' }).catch(() => {})));
+    box.append(line);
+    // (when mods last synced with it: PhoneSyncModel.lastLine, kept across launches)
+    if (st.paired && st.synced) box.append(el('p', 'note', st.synced));
+    box.append(btn(st.paired ? 'My computer…' : 'Pair with my computer…', () => app({ type: 'link.open' }).catch(() => {})));
   }
   window.__trifPanelLinkChanged = () => { paintLink().then(afterKeys); return true; };
+  window.__trifPanelSynced = () => { paintLink(); return true; };
 
   // ---- The models that run on this iPhone (On this iPhone's): Settings' block, and a bar over the chat ------------
   // (11-16, Tim: a download he started showed him nothing he could see. Now: in Settings, each model with a real bar,

@@ -818,3 +818,34 @@ titles are the desktop panel's, unchanged (modswitch.js: "On on {site}: click to
 | All mods: no mods | (none) | No mods yet. Open a site, open the chat, say what to fix, and add the mod it writes. |
 | All mods: a row's light (no page to run on) | (Running on this page / Not running on this page) | Switched on / Switched off |
 | A sync notice: two different mods had one name (the computer's moved beside the phone's) | (none) | {name}: two different mods had this name. The one from {computer} is now “{name} (from your computer)”. |
+
+## Safe mode's switches put back, and the "synced" message (added 11-18, drafts; Tim: "turn them all back on exactly as they were", "some kind of visible 'successfully synced' message")
+
+Safety.swift (the banner's button, the toast after a restore, the ⋯ menu's lines), ModsPanel.swift (the menu),
+Toast.swift (the toast itself: a pill at the top for 4 s, 6 s for a problem or a restore, over everything, no
+touches), PhoneLinkView.swift (the sync toast, Last synced), Web/panel-adapter.js (Settings' line). The banner's
+own words are unchanged (only its button is new); with the button there, "Switch them back on one at a time in Mods"
+may want changing too: say if so.
+
+| Where | Old | New |
+|---|---|---|
+| Safe mode's banner (and a runaway offer's), a new first button | Mods · OK | **Turn them back on** · Mods · OK (only while its snapshot hasn't been put back; banners from before 11-18 have none) |
+| The Mods tab's ⋯ menu, before Pause all mods (only when a snapshot is kept) | (none) | Restore switches from before safe mode › |
+| …its items, newest first (the last 5) | (none) | {time} · {sites} (another day: {date, time} · {sites}; one put back already: "… (put back)") |
+| The toast after a restore | (none) | {n} mods back on as before / 1 mod back on as before; then, each only when not 0: " · 1 you changed since is left as it is" / " · {c} you changed since are left as they are"; " · 1 still waits for your OK" / " · {w} still wait for your OK" |
+| …nothing came back | (none) | Nothing to put back: you've switched those mods since (all deleted since: "Nothing to put back: those mods were deleted since") |
+| The toast after a sync (automatic or Sync now) | (none) | Synced with {computer} · {n} from the computer, {m} to it (no full stop: a passing line, as the computer's) |
+| …with mods waiting here for an OK | (none) | Synced with {computer} · {n} from the computer, {m} to it, {k} waiting for your OK |
+| …nothing moved | (none) | Synced with {computer} · nothing new |
+| The toast, not synced: syncing off there | (none) | Not synced: syncing phone mods is off on {computer} |
+| …the computer not found | (none) | Not synced: can't find {computer}. It may be asleep, on another Wi-Fi, or have no browser with TRIF open |
+| …this iPhone removed there | (none) | Not synced: this iPhone isn't connected to {computer} any more |
+| …Local Network off | (none) | Not synced: TRIF needs Local Network access to find {computer} |
+| …anything else | (none) | Not synced with {computer} this time. TRIF tries again |
+| My computer (the pairing screen), under "Connected to {computer} since {date}." | (none) | Last synced just now / Last synced {n} min ago / Last synced at {time} / Last synced {Nov 17} at {time} |
+| More's Settings, My computer block, under "Paired with {computer}. …" | (none) | the same "Last synced …" line |
+
+"{n} from the computer": the computer's own toast says "{n} from the phone, {m} to it"; the phone's mirrors it. The
+brief had "from {computer}"; with the name already at the start ("Synced with Tim's MacBook Pro · 2 from Tim's
+MacBook Pro, …") it read twice, so "from the computer" for now: say if the name is wanted there.
+

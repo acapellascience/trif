@@ -74,12 +74,40 @@ change there is a change on both phones. Change this file whenever a rule change
 - Safe mode: an unclean end while mods ran switches that site's mods off (the banner; the Mods tab lists them). An
   unclean end during TRIF's own heavy work (a model's check or run, an import) blames no mod and switches nothing off
   (11-18).
+- Safe mode's snapshot (Tim, 11-18: "so … you can turn them all back on exactly as they were"). Before safe mode (or a
+  runaway page's offer, taken) changes any switch, the app keeps a snapshot in its own storage (iOS: Application
+  Support/safe-mode-snapshots.json): each affected mod by its file id and its stable id (@id), its name, what safe
+  mode switched off (its whole switch, or its switch on these sites for a mod on several sites), its switch before
+  (on, the sites it's off on, when last switched) and as safe mode left it, and whether it waited for an OK; when,
+  why (quit / busy / ended), the sites; the tiers' switches on those sites and Pause all, for the record only (safe
+  mode changes neither, so neither is restored). The last 5 are kept, newest first, never just overwritten.
+  Restoring a snapshot ("Turn them back on" on safe mode's banner; the Mods tab's ⋯ → Restore switches from before
+  safe mode, listing each snapshot by time and sites, offered only when one exists): each mod found by its stable id
+  first (a mod renamed since still restores), else its file id; only the switches safe mode changed are put back,
+  and only where the mod's switch is still exactly as safe mode left it (on, sites off and its time): a switch
+  changed since, here or synced from the computer, is a later choice and stays. Each put back is the person's own
+  switch (a fresh time), so it syncs to the computer like any switch, as safe mode's switch-offs did (D15). A
+  switch never allows anything: a mod waiting for an OK still waits (its earlier allowed version runs, as for any
+  switch). Then the pages' scripts are made again: the shown tab loads again unless it plays; tabs behind when next
+  shown. A toast says what happened: how many came back, how many were left as changed since, how many still wait
+  for an OK. Desktop TRIF has no automatic switch-off of this kind (new mods from outside start off; nothing is
+  switched off after a crash), so nothing to match there.
 - The Mods tab never shows an error too early (11-18, "odd flashes of error"): a mod switched on is "starts when this
   page loads again" until the page has loaded with it, "starting" until 2 s after that page finished, and only then an
   error if it never said it started. A late state never shows a switch's old state; a tier's On/Off shows the tap at
   once.
 - Phone sync with the computer: a change synced in makes the pages' scripts again; a delete goes to Recently deleted
   (30 days, Restore).
+- After each sync (automatic or Sync now), while the app is open, a short toast in front of everything, moving
+  nothing and taking no touches, no notification or sound (Tim, 11-18): "Synced with {computer} · {n} from the
+  computer, {m} to it[, {k} waiting for your OK]" or "· nothing new". The counts mean what the computer's own toast
+  means from its side: {n} mods taken here (new or changed) plus mods deleted there; {m} mods sent to it; {k} of
+  those taken that wait here for an OK. Switches aren't counted (the computer doesn't count them either). A sync that
+  didn't happen says why in plain words (syncing off there, the computer not found: asleep, another Wi-Fi, no
+  browser with TRIF open; this phone removed there; Local Network off; anything else: TRIF tries again): always
+  after Sync now, after an automatic sync only when the reason is new since the last toast or sync. The pairing
+  screen and Settings' My computer block say "Last synced just now / {n} min ago / at {time} / {date} at {time}",
+  kept across launches.
 - Phone sync's switches (Tim, 11-18; docs/PHONE-SYNC.md 4b on branch phone-link): a mod's on/off and its per-site
   switches follow the last change on either side, three-way against the switch both sides last agreed on; changed on
   both since, the later change wins (each side stamps when the person last switched it; the same time: the phone's,

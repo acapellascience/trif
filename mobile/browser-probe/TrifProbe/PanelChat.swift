@@ -117,10 +117,14 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     /// Pairing changes (PhoneLinkModel) told to the page; the app in front again wakes a dropped link.
     private var linkWatch: AnyCancellable?
+    private var syncWatch: AnyCancellable?
     private func watchLink() {
         guard linkWatch == nil else { return }
         linkWatch = PhoneLinkModel.shared.$computer.dropFirst().removeDuplicates { $0?.id == $1?.id && $0?.name == $1?.name }
             .sink { [weak self] _ in DispatchQueue.main.async { self?.linkChanged() } }
+        // (a sync ended: Settings' My computer block says when, if it shows)
+        syncWatch = PhoneSyncModel.shared.$lastAt.dropFirst().removeDuplicates()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.syncedChanged() } }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.wakeLink() }
         }
@@ -243,7 +247,7 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             return (["stopped": true], nil)
         case "link.status":
             let c = PhoneLinkKeys.shared.computer
-            return (["paired": c != nil, "name": c?.name ?? ""], nil)
+            return (["paired": c != nil, "name": c?.name ?? "", "synced": c == nil ? "" : PhoneSyncModel.shared.lastLine() ?? ""], nil)
         case "link.pickUp":
             pickUpKept()
             return (["asked": true], nil)
@@ -846,6 +850,12 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
         onActivity(.working)
         link.pickUp(p.runId)
     }
+    /// A sync with the computer ended well: Settings' My computer block's "Last synced" line painted again.
+    func syncedChanged() {
+        guard loaded else { return }
+        Task { _ = try? await webView.callAsyncJavaScript("window.__trifPanelSynced && window.__trifPanelSynced(); return 1;", arguments: [:], in: nil, contentWorld: .page) }
+    }
+
     /// Paired, forgotten or paired with another: the panel's agent line and Settings told.
     func linkChanged() {
         guard loaded else { return }

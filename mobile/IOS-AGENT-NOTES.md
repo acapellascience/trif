@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (500 now): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (511 now): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -74,7 +74,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   unreadanswer (true/false: TRIF's words before iOS's question answered Continue / Not now), enginelabel (Go to chat's
   words for what the chat will use; More's looked at again), rename ([id, "New name"]: the Mods tab's Rename through
   ModsPanel.handle), modcode (id: the mod's file now), modreads ([text, here]: the file id and @id readNamed gives a
-  chat's code); syncstate also prints each mod's `uid` and `hint` (a hint kept by its sync key)…
+  chat's code); syncstate also prints each mod's `uid` and `hint` (a hint kept by its sync key); snapshots (safe
+  mode's, newest first: each mod's before/after), restoresnap (0 = newest, or an id prefix: as the ⋯ menu's item),
+  bannerrestore (the shown site's banner's Turn them back on), safetystate (switchedOff, with each one's snapshot),
+  enable ({"id", "on", "site"}: a switch as the Mods tab sends it), toast (AppToast now and the last 10 said)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -457,7 +460,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   PanelEngines.swift: Keychain keys, Anthropic / OpenAI Responses / OpenRouter streaming, the Simulator stand-in.
 - LocalLlama.swift (llama.cpp wrapper), LocalPrompt.swift (guide, grammars, JSON → mod, repairs), LocalModels.swift
   (catalogue, downloads, LocalRunner, LocalConversation). mobile/local-model/: README, local-guide.txt, the research.
-- Safety.swift: safe mode, AppDelegate (shortcut, notifications, background downloads' events). Diagnostics.swift:
+- Safety.swift: safe mode, AppDelegate (shortcut, notifications, background downloads' events). Since 11-18 (Tim:
+  "turn them all back on exactly as they were"): `SwitchSnapshot` (Application Support/safe-mode-snapshots.json,
+  newest first, 5 kept), `Safety.switchOff(bySite, why:, reason:, store:)` (the snapshot written BEFORE any switch,
+  again with each mod's `after`; used by safe mode's quit and a runaway offer's accept), `SwitchedOff.snap` (the
+  banner's snapshot), `Safety.restore(snapId, store:)` (by uid first, then file id; only where the switch still
+  `same`s `after` (on, offSites, switchAt): else "changed"; ModStore.setOn → fresh switchAt → it syncs),
+  `Browser.restoreSwitches` (restore + modsChanged + the toast), `restoreWords`, `snapshotLabel`; Safety.renamed
+  moves snapshot ids too. SafetyBanner's `restore` (Turn them back on); ModsPanel's `RestoreSwitchesMenu` in the ⋯
+  menu. Toast.swift: `AppToast.shared.show(text, problem:, seconds:)`: a UIWindow at .alert (under LeavingCover's
+  .alert + 1), isUserInteractionEnabled false, a SwiftUI pill at the top; nothing when the app isn't active; a
+  VoiceOver announcement. Diagnostics.swift:
   diagnostics log, hang watchdog (`Diagnostics.hangs`), cookie keeper. Report.swift: report.json. Pages.swift: test pages
   scheme. Checks.swift, OnDevice.swift: the probe's old checks.
 - PhoneLink.swift: the phone link's wire (More's "My computer" engine; design: docs/PHONE-LINK.md and the progress file on
@@ -494,7 +507,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Application Support/mods-deleted.json, `restoreDeleted`; every delete goes there now). PhoneSyncModel
   (PhoneLinkView.swift) owns the app's ONE PhoneLinkRemote (PanelChat's `link` is it: one session per phone) and
   syncs on didBecomeActive, `$mods` changes, `sync.changed` (onSyncChanged), syncNow; closes a sync-only link after
-  30 s unused (`lastUse`). Dev steps `sync`, `syncstate` (each mod: off, off on sites, held, its mark, allowed-there
+  30 s unused (`lastUse`). After each sync (11-18): `AppToast` with `toastWords` (n = taken + removed, m = sent,
+  k = waitingHere: the computer's fromPhone/toPhone seen from here; switches not counted, as there) or
+  `problemWords(code)` (always after Sync now, else only a code not told since the last good sync: `toldProblem`);
+  an `unfinished` sync is a problem toast. `lastAt` (UserDefaults "phoneSync.lastAt") → `lastLine()` ("Last synced
+  just now / n min ago / at …"), in PhoneLinkView (`lastSynced`, a TimelineView) and in link.status's `synced` for
+  Settings' block (panel-adapter.js paintLink; `__trifPanelSynced` repaints it, PanelChat.syncedChanged on $lastAt).
+  Dev steps `sync`, `syncstate` (each mod: off, off on sites, held, its mark, allowed-there
   when the computer's hint fits, its switch time). Since 11-18 beside the text (docs/PHONE-SYNC.md 4b, 6b): each row's
   `sw` (InstalledMod.switchAt, stamped by ModStore.setOn, which also clears the "computer" mark) and `ok`
   (`syncAllowed`: mods not held, ran nil); the plan's `switches` set after the gets (`syncSetSwitch`: the computer's
@@ -587,6 +606,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Tim's decisions
 
+- Safe mode's snapshot, 11-18: kept before any switch changes, the last 5; "Turn them back on" / the ⋯ menu put
+  back only what safe mode changed, only where untouched since (a later change, here or from the computer, wins);
+  a restore is the person's switch (fresh time, syncs); holds still hold. Runaway offers' switch-offs get a
+  snapshot too (same banner). Tiers and Pause all are recorded, never restored (safe mode doesn't touch them).
+  Desktop has no crash switch-off: nothing to match there.
+- Sync toast, 11-18 (Tim: "some kind of visible 'successfully synced' message"): every sync while the app is open,
+  "nothing new" too; counts mean what the computer's toast means (phone-link a5f0cf4, PHONE-LINK-STRINGS.md); no
+  notification, no sound.
 - Phone sync, 11-18: a mod's switches follow the last change on either side (the later change wins); tiers and Pause
   all stay per device; a mod new from the computer arrives with its switch there (D8), still marked; approvals stay
   per device, the other side's only a hint for "You allowed this on {computer}." (draft). A mod imported from a file
@@ -982,6 +1009,21 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   tabs.json); tabs behind are let go after 20 s, so their counts stand still until shown again.
 
 ## Open and unverified
+
+- Safe mode's snapshot and the sync toast (11-18), checked in the Simulator only (shots 501-511): kill in front →
+  snapshot (localhost + 127.0.0.1, a two-site mod already off on 127.0.0.1); the banner's Turn them back on (a real
+  tap) put back exactly the earlier switches (the two-site mod back to off on 127.0.0.1 only), left alone a mod the
+  person switched on and off again meanwhile, found a mod renamed meanwhile; the ⋯ menu with two snapshots: the
+  older "Nothing to put back", the newer back on with a held mod (an edit waiting for an OK) still held, its earlier
+  version running; against the real helper (phone-link 7d23d01's stand-in computer): safe mode's offs and the
+  restore reached the computer's switches with fresh times; toasts "0 from the computer, 13 to it" (the computer's
+  record: fromPhone 13, toPhone 0), "1 from the computer, 0 to it" after an edit there, "nothing new", and "can't
+  find" when not reachable. Never on a phone. Dark mode of the toast not looked at. In full screen (an icon launch)
+  the banner, and so Turn them back on, doesn't show (as before): the ⋯ menu still does it.
+- The toast for "nothing new" comes after every automatic sync (each time the app comes to the front, and 3 s after
+  any switch): Tim may find it too chatty; `toastWords` is the one place to quiet it.
+- Safe mode's banner words still say "Switch them back on one at a time in Mods." beside the new button: not
+  changed (only the named spot); asked in docs/IOS-APP-STRINGS.md.
 
 - Stable ids and renames (11-18): phonelink.test.js test 9 passes against phone-link eb138f8 (rename on the phone moves
   the computer's file with nothing in its trash; the computer's rename arrives as one; rename vs edit merge; same name,

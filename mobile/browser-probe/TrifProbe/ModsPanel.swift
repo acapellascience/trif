@@ -288,6 +288,11 @@ struct ModsPanelView: View {
                             }
                             .disabled(!browser.mods.mods.contains { $0.site == browser.site || Site.host($0.site, isIn: browser.site) })
                             Divider()
+                            // (Safety.swift: the switches as they were before safe mode switched mods off, put back)
+                            RestoreSwitchesMenu(safety: browser.safety) { id in
+                                browser.restoreSwitches(id)
+                                Task { await panel.refresh() }
+                            }
                             // (Safety.swift: no mod runs anywhere until Resume)
                             Button(browser.mods.paused ? "Resume mods" : "Pause all mods") {
                                 browser.pauseAll(!browser.mods.paused)
@@ -311,6 +316,23 @@ struct ModsPanelView: View {
     }
 }
 
+
+/// The Mods tab's ⋯ → Restore switches from before safe mode: each snapshot kept (Safety.snapshots), by when and
+/// the sites; only while there is one.
+struct RestoreSwitchesMenu: View {
+    @ObservedObject var safety: Safety
+    let restore: (String) -> Void
+
+    var body: some View {
+        if !safety.snapshots.isEmpty {
+            Menu("Restore switches from before safe mode") {
+                ForEach(safety.snapshots) { s in
+                    Button(Safety.snapshotLabel(s)) { restore(s.id) }
+                }
+            }
+        }
+    }
+}
 
 extension Browser {
     /// The ids of the mods that started on the shown page, in each of the three worlds (modfile.js marks them).

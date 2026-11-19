@@ -34,6 +34,7 @@ const ui = {
   phoneBtn: $('#phone-btn'), phoneNote: $('#phone-note'), phoneNoteText: $('#phone-note-text'), phoneBack: $('#phone-back'),
   phoneMenu: $('#phone-menu'), phoneMenuView: $('#phone-menu-view'), phoneMenuSync: $('#phone-menu-sync'),
   phoneNav: $('#phone-nav'), phoneNavBack: $('#phone-nav-back'), phoneNavForward: $('#phone-nav-forward'), phoneNavReload: $('#phone-nav-reload'), phoneNavUrl: $('#phone-nav-url'),
+  phoneWidth: $('#phone-width'), phoneHint: $('#phone-hint'), phoneHintText: $('#phone-hint-text'), phoneHintClose: $('#phone-hint-close'), toast: $('#toast'),
   phoneSync: $('#phone-sync'), phoneSyncText: $('#phone-sync-text'), phoneSyncActs: $('#phone-sync-acts'), phoneSyncClose: $('#phone-sync-close'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateFoot: $('#gate-foot'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
@@ -151,7 +152,13 @@ function openTab(props) {
 
 // Settings' Connect a phone: its state, drawn into its own box whenever it changes.
 // (and the phone line under the bar: renderPhoneSync)
-const phoneLink = createPhoneLink({ request, changed: () => { renderPhoneLink($('#phone-link'), phoneLink, { addMore }); renderPhoneSync(); } });
+// (a sync with a phone done, whoever started it: a toast in every open panel, unless the phone line under the
+// bar already says what that sync did, after Sync now)
+const phoneLink = createPhoneLink({
+  request,
+  changed: () => { renderPhoneLink($('#phone-link'), phoneLink, { addMore }); renderPhoneSync(); },
+  synced: (text) => { if (text && !(phoneLink.state.asked && ui.phoneSync && !ui.phoneSync.hidden)) showToast(text); },
+});
 
 function request(msg) {
   if (!port) connectPort();
@@ -182,6 +189,7 @@ function onPortMessage(msg) {
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
+    checkPhoneHint().catch(() => {}); // (the phone view's panel opened there, or the phone view ended)
   } else if (msg?.type === 'phoneLink') {
     phoneLink.onMessage(msg.status); // (Settings' Connect a phone: how the link is now)
   } else if (msg?.type === 'agentAsk') {
@@ -3303,8 +3311,66 @@ function renderPhone() {
   ui.phoneNote.hidden = !on;
   document.body.classList.toggle('phone-view', on);
   if (on) ui.phoneNoteText.textContent = `Phone view: ${site} sees an ${view.phone.device || 'iPhone'}. Only its phone mods run here, and the mods you make here are for TRIF on your phone.`;
+  // (the navigation bar: the popup route's alone; the window route's window has the browser's own address bar)
+  ui.phoneNav.hidden = !on || view.phone.route === 'window';
+  // (the page wider than the phone's, as far as the window goes: said, with its width)
+  const w = on ? view.phone.width : null;
+  ui.phoneWidth.hidden = !(Number.isFinite(w) && w > PHONE_WIDTH + 2);
+  if (!ui.phoneWidth.hidden) ui.phoneWidth.textContent = PHONE_VIEW_TEXT.wider.replace('{w}', String(w));
   showPhoneUrl();
   renderPhoneSync();
+  renderPhoneHint();
+}
+
+// The phone view's words beyond the menu's (drafts for Tim: docs/PHONE-LINK-STRINGS.md "The phone view's window").
+const PHONE_VIEW_TEXT = {
+  hint: 'The phone view is in a window of its own. Click TRIF’s button there to open TRIF beside the phone.',
+  wider: 'This page is {w} px wide, wider than an iPhone’s 390: the browser won’t make this window narrower.',
+  navFailed: 'Couldn’t go there: {error}',
+};
+const PHONE_WIDTH = 390;
+// (the phone view this panel opened without TRIF's panel beside it: {tabId}, until it's there: renderPhoneHint)
+let phoneHint = null;
+
+/**
+ * Switch to phone view, and back. The window route (phone.js): the background moves the tab into an ordinary
+ * window and answers at once; this panel then opens TRIF's side panel in it itself, while the menu's click still
+ * counts as a gesture (about five seconds in Chrome: nothing slow comes before it), and the background fits the
+ * window to the page with the panel there (phone.settle). Firefox's sidebar can't be opened in another window
+ * from here: the window opens at phone width and this panel says to click TRIF's button in it (renderPhoneHint).
+ */
+async function openPhone(tabId) {
+  const r = await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
+  if (r?.route !== 'window' || r.already) return;
+  let panel = false;
+  if (!FIREFOX && typeof chrome.sidePanel?.open === 'function') {
+    try { await chrome.sidePanel.open({ windowId: r.window }); panel = true; } catch (e) { console.warn(`[TRIF] phone view: the side panel didn't open in its window: ${e?.message ?? e}`); }
+  }
+  const s = await request({ type: 'phone.settle', tabId, panel });
+  if (!s?.panel) { phoneHint = { tabId }; renderPhoneHint(); }
+}
+/** The hint, while the phone view it's about is open without TRIF's panel beside it. */
+function renderPhoneHint() {
+  if (!ui.phoneHint) return;
+  ui.phoneHint.hidden = !phoneHint;
+  if (phoneHint) ui.phoneHintText.textContent = PHONE_VIEW_TEXT.hint;
+}
+async function checkPhoneHint() {
+  if (!phoneHint) return;
+  const r = await request({ type: 'phone.state', tabId: phoneHint.tabId }).catch(() => null);
+  if (!r?.phone || r.panel) { phoneHint = null; renderPhoneHint(); }
+}
+ui.phoneHintClose?.addEventListener('click', () => { phoneHint = null; renderPhoneHint(); });
+
+/** A short-lived line over the panel's bottom edge (a sync done, a phone address that went nowhere). */
+let toastTimers = [];
+function showToast(text, ms = 6000) {
+  if (!ui.toast || !text) return;
+  for (const t of toastTimers) clearTimeout(t);
+  ui.toast.textContent = text;
+  ui.toast.classList.remove('fading');
+  ui.toast.hidden = false;
+  toastTimers = [setTimeout(() => ui.toast.classList.add('fading'), ms), setTimeout(() => { ui.toast.hidden = true; ui.toast.classList.remove('fading'); }, ms + 300)];
 }
 
 async function togglePhone() {
@@ -3314,7 +3380,7 @@ async function togglePhone() {
   ui.phoneBtn.disabled = true;
   try {
     if (on) await request({ type: 'phone.close', tabId });
-    else await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
+    else await openPhone(tabId);
     await refreshPhone();
   } catch (e) {
     request({ type: 'chat.note', site: chatSite(), text: `${on ? 'Couldn’t go back to desktop' : 'Couldn’t open the phone view'}: ${e?.message ?? e}` }).catch(() => {});
@@ -3402,9 +3468,11 @@ function renderPhoneSync() {
   }));
   ui.phoneSyncClose.hidden = inPhone();
 }
+// (its "last synced 5 min ago" kept true while it shows)
+setInterval(() => { if (ui.phoneSync && !ui.phoneSync.hidden) renderPhoneSync(); }, 30000);
 ui.phoneSyncClose?.addEventListener('click', () => { phoneLineShown = false; phoneLink.forgetAsked(); renderPhoneSync(); });
 
-// ---- the phone view's navigation (its window is a popup: no address bar of its own; background.js phone.nav)
+// ---- the popup route's navigation (its window is a popup: no address bar of its own; background.js phone.nav)
 /** The address field shows the phone tab's address, unless it's being typed in. */
 function showPhoneUrl() {
   if (!ui.phoneNavUrl || document.activeElement === ui.phoneNavUrl) return;
@@ -3413,23 +3481,29 @@ function showPhoneUrl() {
 async function phoneNav(go, url) {
   const tabId = view.tab?.id;
   if (!inPhone() || !Number.isInteger(tabId)) return;
+  ui.phoneNav.classList.remove('failed');
   try {
     await request({ type: 'phone.nav', tabId, go, ...(url !== undefined ? { url } : {}) });
   } catch (e) {
-    // (back with no page before it, say: nothing to say, the page stays)
-    console.info(`[TRIF] phone view: ${go}: ${e?.message ?? e}`);
+    const why = String(e?.message ?? e);
+    console.warn(`[TRIF] phone view: ${go}${url !== undefined ? ` ${JSON.stringify(url)}` : ''} failed: ${why}`);
+    // (back with no page before it, say: the page stays, nothing to say; an address that went nowhere: said)
+    if (go === 'url') { ui.phoneNav.classList.add('failed'); showToast(PHONE_VIEW_TEXT.navFailed.replace('{error}', why)); }
   }
 }
 ui.phoneNavBack?.addEventListener('click', () => phoneNav('back'));
 ui.phoneNavForward?.addEventListener('click', () => phoneNav('forward'));
 ui.phoneNavReload?.addEventListener('click', () => phoneNav('reload'));
-ui.phoneNav?.addEventListener('submit', (e) => {
-  e.preventDefault();
+// (Enter in the field goes there itself, not through the form's implicit submission alone; the form's submit
+// is for anything else that submits it)
+function goTyped() {
   const text = ui.phoneNavUrl.value.trim();
   if (!text) return;
   ui.phoneNavUrl.blur();
   phoneNav('url', text);
-});
+}
+ui.phoneNav?.addEventListener('submit', (e) => { e.preventDefault(); goTyped(); });
+ui.phoneNavUrl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); goTyped(); } });
 ui.phoneNavUrl?.addEventListener('focus', () => ui.phoneNavUrl.select());
 ui.phoneNavUrl?.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); ui.phoneNavUrl.blur(); showPhoneUrl(); } });
 ui.phoneNavUrl?.addEventListener('blur', () => setTimeout(showPhoneUrl, 0));

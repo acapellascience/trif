@@ -48,7 +48,7 @@ test('phoneBounds: the phone\'s page area when the screen has room, shorter when
 // A browser for fitPhoneWindow: a window whose page is the window less its frame, except that after the tab
 // moves in, and after each resize, the page still says its old size for `lag` looks (CI, a busy runner: the
 // window sized from one such look left a 776 x 813 page).
-function fakeWindow({ frame, win, stale, lag, refuse = false }) {
+function fakeWindow({ frame, win, stale, lag, refuse = false, minWidth = 0 }) {
   const w = { ...win };
   let page = { ...stale };
   let since = 0;
@@ -56,7 +56,7 @@ function fakeWindow({ frame, win, stale, lag, refuse = false }) {
   const chrome = {
     windows: {
       get: async () => ({ ...w }),
-      update: async (id, b) => { updates.push(b); if (refuse) return { ...w }; Object.assign(w, b); since = 0; return { ...w }; },
+      update: async (id, b) => { updates.push(b); if (refuse) return { ...w }; Object.assign(w, b); if (w.width < minWidth) w.width = minWidth; since = 0; return { ...w }; },
     },
     scripting: {
       executeScript: async () => {
@@ -87,6 +87,42 @@ test('fitPhoneWindow: the page area is the phone\'s, also when the page still sa
   // a page that can't be measured yet (the tab still moving)
   const none = { windows: { get: async () => win }, scripting: { executeScript: async () => { throw new Error('moving'); } } };
   assert.equal(await fitPhoneWindow({ chrome: none, tabId: 1, windowId: 2, screen, pause: 1 }), null);
+});
+
+// The window route (11-18): an ordinary window with TRIF's side panel beside the page. Its "frame" is the panel
+// and the toolbar: measured the same way, so the page comes out at 390 whatever the panel's width. Corrected
+// later (the panel or the window resized) in width alone, where the window is; as narrow as the browser lets it.
+test('fitPhoneWindow in an ordinary window: the side panel measured as part of the frame; widthOnly; the browser\'s minimum', async () => {
+  const { fitPhoneWindow } = await load('phone.js');
+  const screen = { left: 0, top: 25, width: 1470, height: 931 };
+  const panel = { width: 386, height: 87 };
+  let b = fakeWindow({ frame: panel, win: { left: 0, top: 25, width: 1280, height: 720 }, stale: { w: 894, h: 633 }, lag: 1 });
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, screen, pause: 1 }), { w: 390, h: 750 });
+  assert.deepEqual([b.w.width, b.w.height], [776, 837]);
+  // (the person dragged the panel wider: the page is narrower; the window moved and made taller is left so)
+  const moved = { left: 300, top: 80, width: 776, height: 700 };
+  b = fakeWindow({ frame: { width: 450, height: 87 }, win: moved, stale: { w: 326, h: 613 }, lag: 0 });
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, pause: 1, widthOnly: true }), { w: 390, h: 613 });
+  assert.deepEqual(b.updates, [{ width: 840 }], 'the width alone');
+  assert.deepEqual([b.w.left, b.w.top, b.w.height], [300, 80, 700]);
+  // (Chrome won't make it narrower than 792 with its side panel, headless 156: the page is 406, and it stops asking)
+  b = fakeWindow({ frame: panel, win: { left: 0, top: 25, width: 1000, height: 837 }, stale: { w: 614, h: 750 }, lag: 0, minWidth: 792 });
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, pause: 1, widthOnly: true }), { w: 406, h: 750 });
+  assert.equal(b.updates.length, 2, 'asked, then asked once more, then left');
+  // (a maximized window is the person's: left as it is)
+  b = fakeWindow({ frame: panel, win: { left: 0, top: 25, width: 1470, height: 931, state: 'maximized' }, stale: { w: 1084, h: 844 }, lag: 0 });
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, pause: 1, widthOnly: true }), { w: 1084, h: 844 });
+  assert.equal(b.updates.length, 0);
+});
+
+test('phoneRoute: an ordinary window where there is a side panel or sidebar; the popup in a browser without one (Arc)', async () => {
+  const { phoneRoute } = await load('phone.js');
+  assert.equal(phoneRoute({ sidePanel: true }), 'window', 'Chrome');
+  assert.equal(phoneRoute({ firefox: true }), 'window', 'Firefox: its sidebar');
+  assert.equal(phoneRoute({ sidePanel: true, panelInWindow: true }), 'popup', 'Arc: a Chrome whose side panel never showed');
+  assert.equal(phoneRoute({ sidePanel: true, fromPanelWindow: true }), 'popup', 'asked from a panel window: such a browser');
+  assert.equal(phoneRoute({ sidePanel: false }), 'popup', 'a Chromium without chrome.sidePanel');
+  assert.equal(phoneRoute(), 'popup');
 });
 
 test('phone-page.js says what phone.js PHONE says', async () => {

@@ -49,6 +49,15 @@ export const TEXT = {
   syncResult: 'Synced with {phone}: {n} from the phone, {m} to it.',
   syncResultWaiting: 'Synced with {phone}: {n} from the phone, {m} to it, {k} waiting for your OK.',
   phoneSettings: 'Phone settings',
+  // (in the phone view's line, once a phone has synced since the helper started: phoneSyncView)
+  syncingLast: 'Syncing with {phone} · last synced {ago}.',
+  justNow: 'just now',
+  minutesAgo: '{n} min ago',
+  atTime: 'at {time}',
+  // The toast when a sync with a phone is done, whoever started it (syncToast): every open panel shows it
+  toastSynced: 'Synced with {phone} · {n} from the phone, {m} to it',
+  toastSyncedWaiting: 'Synced with {phone} · {n} from the phone, {m} to it, {k} waiting for your OK',
+  toastNothing: 'Synced with {phone} · nothing new',
   twoPhones: '{phone} and {other}',
   morePhones: '{phone} and {n} more',
 };
@@ -156,7 +165,32 @@ export function phoneSyncView(state, now = Date.now()) {
     const k = sum('waiting');
     return { text: fill(k > 0 ? TEXT.syncResultWaiting : TEXT.syncResult, { phone: name, n: sum('fromPhone'), m: sum('toPhone'), k }), actions: ['settings'], busy: false };
   }
+  // (when it last synced, if it has since the helper started)
+  const last = Math.max(0, ...phones.map((p) => (p.synced && Number.isFinite(p.synced.at) ? p.synced.at : 0)));
+  if (last > 0) return { text: fill(TEXT.syncingLast, { phone: name, ago: ago(last, now) }), actions: ['syncNow'], busy: !!state.busy };
   return { text: fill(TEXT.syncing, { phone: name }), actions: ['syncNow'], busy: !!state.busy };
+}
+
+/** How long ago `at` was, in the phone line's words: just now, 5 min ago, at 14:05. */
+export function ago(at, now = Date.now(), time = shortTime) {
+  const s = Math.max(0, now - at) / 1000;
+  if (s < 60) return TEXT.justNow;
+  if (s < 3600) return fill(TEXT.minutesAgo, { n: Math.floor(s / 60) });
+  return fill(TEXT.atTime, { time: time(at) });
+}
+
+/**
+ * The toast for syncs that just ended (`done`: [{phone: its name, synced: the helper's record}]), or '' for none:
+ * what came from the phones and went to them, summed; "nothing new" when nothing moved.
+ */
+export function syncToast(done) {
+  const list = (Array.isArray(done) ? done : []).filter((d) => d && d.synced && typeof d.synced === 'object');
+  if (!list.length) return '';
+  const name = phonesName(list.map((d) => ({ name: String(d.phone || '') })));
+  const sum = (k) => list.reduce((n, d) => n + (Number.isInteger(d.synced[k]) ? d.synced[k] : 0), 0);
+  const n = sum('fromPhone'); const m = sum('toPhone'); const k = sum('waiting');
+  if (!n && !m && !k) return fill(TEXT.toastNothing, { phone: name });
+  return fill(k > 0 ? TEXT.toastSyncedWaiting : TEXT.toastSynced, { phone: name, n, m, k });
 }
 
 /**
@@ -164,7 +198,7 @@ export function phoneSyncView(state, now = Date.now()) {
  * called whenever what the section shows may have changed. Settings tells it `open(helperConnected)` and
  * `close()`; the background's `phoneLink` messages go to `onMessage(status)`.
  */
-export function createPhoneLink({ request, changed = () => {}, now = () => Date.now(), setTimer = (f, ms) => setTimeout(f, ms), clearTimer = (t) => clearTimeout(t) }) {
+export function createPhoneLink({ request, changed = () => {}, synced = () => {}, now = () => Date.now(), setTimer = (f, ms) => setTimeout(f, ms), clearTimer = (t) => clearTimeout(t) }) {
   // (asked: the last Sync now, {at, told: [phone ids], error}, for the phone line: phoneSyncView)
   const state = { status: null, pairing: null, busy: false, error: '', removed: '', added: '', asked: null };
   let opened = false;
@@ -180,6 +214,15 @@ export function createPhoneLink({ request, changed = () => {}, now = () => Date.
     if (!r || typeof r !== 'object') return;
     const { qr, expires, removed, ...status } = r;
     const before = new Set((state.status?.phones || []).map((p) => p.id));
+    // (a sync that ended since the last status this panel had, whoever started it: `synced`, the toast; none for
+    // the first status a panel gets, which only says how things were)
+    if (state.status) {
+      const was = new Map((state.status.phones || []).map((p) => [p.id, p.synced && Number.isFinite(p.synced.at) ? p.synced.at : 0]));
+      const done = (Array.isArray(status.phones) ? status.phones : [])
+        .filter((p) => p && p.synced && Number.isFinite(p.synced.at) && p.synced.at > (was.get(p.id) ?? 0))
+        .map((p) => ({ phone: p.name, synced: p.synced }));
+      if (done.length) { try { synced(syncToast(done), done); } catch { /* the panel's toast, no more */ } }
+    }
     const fresh = (Array.isArray(status.phones) ? status.phones : []).filter((p) => !before.has(p.id));
     // The window closed on the helper's side: a phone took it (say which), or its time was up
     if (state.pairing && !status.pairing) {

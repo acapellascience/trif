@@ -1,14 +1,35 @@
-// The phone view: "Edit for mobile" (docs/MOBILE-EDIT.md). The panel's tab moves into a phone-sized window of
-// its own, where the site sees an iPhone: Safari's user agent and no client hints in every request the tab
-// makes (declarativeNetRequest session rules for that tab only), and touch, an iPhone's screen and no hover in
-// the page's JavaScript (phone-page.js, in the page's own world before the site's scripts). TRIF's panel
-// opens beside it, following that window, so the chat, the agent's commands and its screenshots work on the
-// phone layout. "Back to desktop" puts the tab back where it was, as a desktop tab again.
+// The phone view: "Edit for mobile" (docs/MOBILE-EDIT.md). The panel's tab moves into a window of its own, where
+// the site sees an iPhone: Safari's user agent and no client hints in every request the tab makes
+// (declarativeNetRequest session rules for that tab only), and touch, an iPhone's screen and no hover in the
+// page's JavaScript (phone-page.js, in the page's own world before the site's scripts). "Back to desktop" puts
+// the tab back where it was, as a desktop tab again.
+//
+// The window (2026-11-18, after Tim tried it): an ORDINARY browser window, sized so its page area is the
+// phone's 390 px with TRIF's side panel (Chrome) or sidebar (Firefox) open beside the page. So the phone view
+// has the browser's own address bar, back, forward and reload, TRIF's toolbar button, and TRIF's real panel.
+// The width is measured, not guessed: the window's parts (its frame and the panel) are the window's width less
+// the page's, as the page itself sees it, and the window is corrected by the difference (fitPhoneWindow). When
+// the person resizes the panel or the window, the page tells TRIF (a resize listener in TRIF's isolated world)
+// and the width is corrected again. The browser keeps an ordinary window from going narrower than its own
+// minimum (about 500 px without a panel, and in headless Chrome 156 792 px with the side panel, so a 406 px
+// page): then the page is as narrow as the window goes, and the panel says how wide it is.
+//
+// TRIF's panel in that window: Chrome's sidePanel.open needs a user gesture, and the 📱 menu's click is one in
+// the panel that made it, for about five seconds (its transient activation: checked in Chrome 156, refused
+// after 6 s and without a click), so that panel opens the side panel in the new window itself (sidepanel.js
+// togglePhone). Firefox's sidebarAction.open takes no window and only works synchronously inside the click
+// handler, before the new window exists (it then opens in the window clicked in): there, and whenever the
+// open fails, the window opens at phone width and the panel that asked says to click TRIF's button in it.
+//
+// The popup route (the design before 11-18), kept for browsers with no side panel (Arc: the panel in a window,
+// `state.panelInWindow`, or a request from such a panel window): a phone-sized popup, which an ordinary window
+// can't be, with TRIF's panel in a popup window beside it, and in its banner a navigation bar standing in for
+// the address bar the popup doesn't have (background.js phone.nav). phoneRoute says which a browser gets.
 //
 // Why the tab itself moves, not a copy: Chrome lets TRIF capture a tab only with <all_urls> or activeTab, which
-// comes from the toolbar click on that tab, and a phone window has no toolbar. A tab keeps activeTab when it
-// moves to another window and on reloads and pages of the same origin (checked in Chrome 156), so the agent's
-// `trif screenshot` of the phone works without any new permission.
+// comes from the toolbar click on that tab. A tab keeps activeTab when it moves to another window and on
+// reloads and pages of the same origin (checked in Chrome 156), so the agent's `trif screenshot` of the phone
+// works without any new permission (in the ordinary window a toolbar click there gives it too).
 //
 // No new permission: declarativeNetRequest, scripting, tabs and the site's own access are what TRIF has. What
 // the browser's debugger would add (CSS hover and pointer media queries, the viewport meta tag, workers) is
@@ -34,8 +55,20 @@ export const PHONE = Object.freeze({
 export const SEARCH = 'https://www.google.com/search?q=';
 
 /**
- * Where the phone view's address field goes (the panel's navigation bar: the phone window has no address bar
- * of its own): an http(s) address as typed; a bare host ("x.com", "localhost:3000", "x.com/home"), https (http
+ * Which phone view a browser gets: 'window' (an ordinary window, its address bar and TRIF's side panel or
+ * sidebar beside the page), or 'popup' (a phone-sized popup and TRIF's panel in a window beside it, with the
+ * panel's navigation bar) where the browser has no side panel: Arc (`panelInWindow`, remembered from a
+ * toolbar click that showed none, or a request from a panel window, `fromPanelWindow`), or a Chromium without
+ * chrome.sidePanel. Firefox always has its sidebar.
+ */
+export function phoneRoute({ firefox = false, sidePanel = false, panelInWindow = false, fromPanelWindow = false } = {}) {
+  if (firefox) return 'window';
+  return sidePanel && !panelInWindow && !fromPanelWindow ? 'window' : 'popup';
+}
+
+/**
+ * Where the phone view's address field goes (the popup route's navigation bar, in the panel: a popup has no
+ * address bar of its own): an http(s) address as typed; a bare host ("x.com", "localhost:3000", "x.com/home"), https (http
  * for localhost and an IP address); anything else, a search. Never another scheme (javascript:, file:,
  * chrome:…): that's searched for, as text. null for nothing.
  */
@@ -125,6 +158,9 @@ export function phoneBounds({ frame = { width: 0, height: 0 }, screen = null, ho
 // The window's parts around the page before they're measured: Chrome's popup window on macOS (a title bar
 // and the address line). Corrected from the real window right after it opens.
 const FRAME_GUESS = { width: 0, height: 62 };
+// An ordinary window's: the side panel or sidebar beside the page (Chrome's is about 320–390 px, Firefox's
+// sidebar about 280–340), the tab strip and the toolbar above it. Corrected the same way.
+const WINDOW_FRAME_GUESS = { width: 360, height: 90 };
 
 const BOUNDS = ['left', 'top', 'width', 'height'];
 
@@ -159,16 +195,20 @@ async function settled(chrome, tabId, windowId, pause) {
 /**
  * Makes phone window `windowId`'s page area (tab `tabId`'s) the phone's: the window's parts measured, the
  * window resized, then measured again until it's right (a look taken while the page still had another size is
- * corrected there), a few rounds at most. `screen`, `home`: as phoneBounds takes them. Returns the page's
- * size, {w, h}, or null if it can't be measured yet. `pause`: ms between looks.
+ * corrected there), a few rounds at most. `screen`, `home`: as phoneBounds takes them; `widthOnly`: the width
+ * alone, the window left where it is and as tall as it is. Returns the page's size, {w, h}, or null if it can't
+ * be measured yet. `pause`: ms between looks.
  */
-export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, home = null, log = () => {}, pause = 100 }) {
+export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, home = null, log = () => {}, pause = 100, widthOnly = false }) {
   let before = null;
   for (let round = 0; round < 4; round++) {
     const m = await settled(chrome, tabId, windowId, pause);
     if (!m) return null;
+    // (a maximized, full-screen or minimized window is the person's choice: left as it is)
+    if (m.win.state && m.win.state !== 'normal') return m.size;
     const frame = { width: m.win.width - m.size.w, height: m.win.height - m.size.h };
-    const want = phoneBounds({ frame, screen, home });
+    // (widthOnly: correcting a window the person has moved or made taller: only its width, where it is)
+    const want = widthOnly ? { width: phoneBounds({ frame }).width } : phoneBounds({ frame, screen, home });
     if (!BOUNDS.some((k) => finite(want[k]) && Math.abs(want[k] - m.win[k]) > 1)) return m.size;
     // (the browser kept the window as it was though asked last round: it won't go there, so this is as close as it gets)
     if (before && BOUNDS.every((k) => before[k] === m.win[k])) return m.size;
@@ -191,6 +231,11 @@ export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, h
  */
 export function createPhones({ chrome, log = () => {}, changed = () => {}, panelUrl = null, firefox = false }) {
   const phones = new Map();
+  const settling = new Map(); // tabId -> the window route's settling (fit and reload), once
+  const goes = new Map();     // tabId -> what lets it start (the panel's phone.settle, or a timeout)
+  const fitting = new Map();  // tabId -> a width correction under way
+  const again = new Set();    // tabs resized again while one was under way
+  const moving = new Set();   // tabs TRIF itself is moving (into the phone window and back)
   const KEY = 'phones';
   const types = firefox ? ALL_TYPES.filter((t) => t !== 'webtransport' && t !== 'webbundle') : ALL_TYPES;
   const ready = (async () => {
@@ -199,6 +244,8 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       const rules = await chrome.declarativeNetRequest.getSessionRules();
       const have = new Set(rules.map((r) => r.id));
       for (const [tab, p] of Object.entries(saved)) if (p && Array.isArray(p.ids) && p.ids.every((i) => have.has(i))) phones.set(Number(tab), p);
+      // (a window route's settling cut short by the worker's restart: as fitted as it got; corrected from here on)
+      for (const p of phones.values()) if (p.route === 'window') p.settled = true;
       // (a tab that's gone while the worker slept)
       for (const id of [...phones.keys()]) { if (!(await chrome.tabs.get(id).catch(() => null))) await forget(id); }
       // rules of the phone view no phone owns (its record lost): removed
@@ -238,6 +285,7 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
   async function forget(tabId) {
     const p = phones.get(tabId);
     phones.delete(tabId);
+    settling.delete(tabId); goes.delete(tabId); again.delete(tabId);
     if (p?.ids?.length) await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: p.ids }).catch((e) => log(`phone rules: ${e?.message ?? e}`));
     save();
     if (!phones.size) await unregister();
@@ -285,6 +333,77 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
     await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
   }
 
+  // The ordinary window's width, kept right: the page tells TRIF when its size changes (the person resized the
+  // panel or the window, or the panel opened or closed), from TRIF's isolated world, where the site can't
+  // reach it, and only for the browser's own resize events. Put in each page of the phone tab as it loads.
+  async function watchSize(tabId) {
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] }, world: 'ISOLATED', injectImmediately: true,
+      func: () => {
+        if (globalThis.__trifPhoneSize) return;
+        globalThis.__trifPhoneSize = true;
+        let timer = 0;
+        addEventListener('resize', (e) => {
+          if (!e.isTrusted) return;
+          clearTimeout(timer);
+          timer = setTimeout(() => { try { chrome.runtime.sendMessage({ type: 'phone.resized' }).catch(() => {}); } catch { /* TRIF reloaded */ } }, 250);
+        });
+      },
+    }).catch(() => {});
+  }
+
+
+  /** The window route's second half: the panel's page laid out, the window fitted, the page loaded as a phone's. */
+  function settleWindow(tabId, p) {
+    if (settling.has(tabId)) return settling.get(tabId);
+    let go;
+    const started = new Promise((r) => { go = r; });
+    goes.set(tabId, go);
+    // (no word from the panel that asked, closed meanwhile, say: on its own, without waiting for a panel)
+    const timer = setTimeout(() => go({ panel: null }), 8000);
+    const run = (async () => {
+      const { panel } = await started;
+      clearTimeout(timer);
+      goes.delete(tabId);
+      // (the side panel or sidebar opened: until it's there, so the page's width is the one it will have)
+      let shown = false;
+      for (let i = 0; i < 30 && panel; i++) { if (panel()) { shown = true; break; } await new Promise((r) => setTimeout(r, 100)); }
+      if (!phones.has(tabId)) return { window: p.window, viewport: null, panel: shown };
+      let viewport = null;
+      for (let i = 0; i < 20 && !viewport; i++) {
+        viewport = await fitPhoneWindow({ chrome, tabId, windowId: p.window, screen: p.screen || null, home: p.homeBounds || null, log });
+        if (!viewport) await new Promise((r) => setTimeout(r, 150));
+      }
+      if (viewport) { p.width = viewport.w; save(); }
+      // (a hard reload, as the popup route's: past the HTTP cache and the site's service worker; see open)
+      await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+      changed();
+      return { window: p.window, viewport, panel: shown };
+    })();
+    settling.set(tabId, run);
+    run.finally(() => { p.settled = true; save(); }).catch(() => {});
+    return run;
+  }
+
+  /** The page's size changed: the window's width corrected (debounced by the page; one at a time). */
+  async function refit(tabId) {
+    const p = phones.get(tabId);
+    if (!p || p.route !== 'window' || !p.settled || p.window == null) return;
+    if (fitting.has(tabId)) { again.add(tabId); return; }
+    const run = (async () => {
+      try {
+        do {
+          again.delete(tabId);
+          const size = await fitPhoneWindow({ chrome, tabId, windowId: p.window, log, widthOnly: true });
+          if (size && size.w !== p.width) { p.width = size.w; save(); changed(); }
+        } while (again.has(tabId) && phones.has(tabId));
+      } catch (e) { log(`phone window: ${e?.message ?? e}`); }
+    })();
+    fitting.set(tabId, run);
+    await run;
+    fitting.delete(tabId);
+  }
+
   return {
     ready,
     check: (tabId) => ready.then(() => check(Number(tabId))),
@@ -292,18 +411,23 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
     get: (tabId) => phones.get(Number(tabId)) || null,
     windows: () => [...phones.values()].map((p) => p.window),
     tabs: () => [...phones.keys()],
+    /** The phone window `windowId` is one: its tab's id, or null. */
+    tabOfWindow: (windowId) => { for (const [id, p] of phones) if (p.window === windowId) return id; return null; },
 
     /**
-     * Tab `tabId` into a phone window. `screen`: the usable screen the panel is on, `site`: the panel's site.
-     * Returns {window, viewport: the page's size}. Throws when the tab can't be (not a web page, no access).
+     * Tab `tabId` into a phone window. `screen`: the usable screen the panel is on, `site`: the panel's site,
+     * `route`: phoneRoute's. Throws when the tab can't be (not a web page, no access).
+     * The window route returns as soon as the window is there, {window, route: 'window'}, so the panel that
+     * asked can open its side panel in it within its click's gesture; then settle() fits it. The popup route
+     * returns when it's done: {window, route: 'popup', viewport: the page's size}.
      */
-    async open(tabId, { screen = null, site = '', panel = true } = {}) {
+    async open(tabId, { screen = null, site = '', panel = true, route = 'popup' } = {}) {
       await ready;
       tabId = Number(tabId);
       if (phones.has(tabId)) {
         const p = phones.get(tabId);
         await chrome.windows.update(p.window, { focused: true }).catch(() => {});
-        return { window: p.window, already: true };
+        return { window: p.window, route: p.route || 'popup', already: true };
       }
       const tab = await chrome.tabs.get(tabId);
       const url = tab.url || tab.pendingUrl || '';
@@ -320,13 +444,31 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
         await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids }).catch(() => {});
         throw new Error("this browser didn't keep the phone view's rules to one tab");
       }
-      const p = { window: null, home: { windowId: tab.windowId, index: tab.index }, ids, site, since: Date.now() };
+      const p = { window: null, home: { windowId: tab.windowId, index: tab.index }, ids, site, since: Date.now(), route };
       phones.set(tabId, p);
       save();
       try {
         await register();
+        if (route === 'window') {
+          p.screen = screen;
+          p.homeBounds = home ? { left: home.left, top: home.top } : null;
+          const bounds = phoneBounds({ frame: WINDOW_FRAME_GUESS, screen, home });
+          moving.add(tabId);
+          let win;
+          try {
+            win = await chrome.windows.create({ tabId, type: 'normal', focused: true, ...bounds })
+              .catch(() => chrome.windows.create({ tabId, type: 'normal', focused: true }));
+          } finally { moving.delete(tabId); }
+          p.window = win.id;
+          save();
+          settleWindow(tabId, p);
+          changed();
+          return { window: win.id, route };
+        }
         const bounds = phoneBounds({ frame: FRAME_GUESS, screen, home });
-        const win = await chrome.windows.create({ tabId, type: 'popup', focused: true, ...bounds });
+        moving.add(tabId);
+        let win;
+        try { win = await chrome.windows.create({ tabId, type: 'popup', focused: true, ...bounds }); } finally { moving.delete(tabId); }
         p.window = win.id;
         save();
         // (the window measured on the page it has, and resized, before the reload: so the phone page loads at
@@ -336,6 +478,7 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
           viewport = await fitPhoneWindow({ chrome, tabId, windowId: win.id, screen, home, log });
           if (!viewport) await new Promise((r) => setTimeout(r, 150));
         }
+        if (viewport) { p.width = viewport.w; save(); }
         // A hard reload: past the HTTP cache and the site's service worker. A page a service worker serves (X
         // has one) comes from the worker's own request, which belongs to no tab (tabId -1): the tab's rules
         // never see it, so the server would get the desktop user agent and the page no marker. A hard reload
@@ -349,11 +492,36 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
             .catch((e) => log(`phone panel: ${e?.message ?? e}`));
         }
         changed();
-        return { window: win.id, viewport };
+        return { window: win.id, route, viewport };
       } catch (e) {
         await forget(tabId);
         throw e;
       }
+    },
+
+    /**
+     * The window route, after open: `panel` says whether the panel that asked opened TRIF's side panel there,
+     * `shown()` whether it's there now (the background's record of the panels). Waits for it (3 s at most),
+     * fits the window and loads the page as the phone's. {window, viewport, panel: whether the panel is there}.
+     */
+    async settle(tabId, { panel = false, shown = () => false } = {}) {
+      await ready;
+      tabId = Number(tabId);
+      const p = phones.get(tabId);
+      if (!p) throw new Error('that tab isn\'t in the phone view');
+      if (p.route !== 'window') return { window: p.window, viewport: p.width ? { w: p.width } : null, panel: false };
+      const run = settleWindow(tabId, p);
+      goes.get(tabId)?.({ panel: panel ? shown : null });
+      const r = await run;
+      // (shown after all, by now: a toolbar click in the phone window, say)
+      return { ...r, panel: r.panel || !!shown() };
+    },
+
+    /** The phone tab's page changed size (its isolated world's resize listener): the width corrected. */
+    resized(tabId) {
+      tabId = Number(tabId);
+      if (!phones.has(tabId)) return;
+      ready.then(() => refit(tabId)).catch(() => {});
     },
 
     /** Back to desktop: the tab back in its window, where it was, as a desktop tab (reloaded). */
@@ -365,24 +533,38 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       await forget(tabId);
       let windowId = p.home?.windowId;
       const home = windowId != null ? await chrome.windows.get(windowId).catch(() => null) : null;
+      moving.add(tabId);
       try {
-        // (a browser that won't move a tab out of a popup, as Firefox's documentation says: an ordinary window of its own)
+        // (a browser that won't move a tab out of a popup, as Firefox's documentation says: an ordinary window of its own.
+        // The phone window, with no tab left, closes, its side panel or sidebar with it.)
         const moved = home ? await chrome.tabs.move(tabId, { windowId, index: Number.isInteger(p.home.index) ? p.home.index : -1 }).then(() => true, (e) => { log(`back to desktop: ${e?.message ?? e}`); return false; }) : false;
         if (!moved) windowId = (await chrome.windows.create({ tabId, type: 'normal', focused: true })).id;
         await chrome.tabs.update(tabId, { active: true });
         await chrome.windows.update(windowId, { focused: true }).catch(() => {});
-      } catch (e) { log(`back to desktop: ${e?.message ?? e}`); }
+      } catch (e) { log(`back to desktop: ${e?.message ?? e}`); } finally { moving.delete(tabId); }
       if (reload) await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {}); // (past the worker and the cache, as open)
       changed();
       return { back: true, window: windowId };
     },
 
-    /** The browser's events: a phone window closed (its tab with it), a phone tab closed. */
+    /**
+     * The browser's events: a phone window closed (its tab with it), a phone tab closed, a page of it loaded
+     * (healed if it came without the rules; its size watched), the phone tab dragged out of its window by the
+     * person (an ordinary window lets them): no longer a phone there, so a desktop tab again.
+     */
     listen() {
       chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
-        if (info.status === 'complete' && phones.has(tabId)) ready.then(() => heal(tabId, tab?.url || '')).catch(() => {});
+        if (info.status !== 'complete' || !phones.has(tabId)) return;
+        ready.then(() => heal(tabId, tab?.url || '')).catch(() => {});
+        if (phones.get(tabId)?.route === 'window') ready.then(() => watchSize(tabId)).then(() => refit(tabId)).catch(() => {});
       });
       chrome.tabs?.onRemoved?.addListener((tabId) => { if (phones.has(tabId)) ready.then(() => forget(tabId)).then(changed).catch(() => {}); });
+      chrome.tabs?.onAttached?.addListener((tabId, { newWindowId }) => {
+        const p = phones.get(tabId);
+        if (!p || moving.has(tabId) || p.window == null || newWindowId === p.window) return;
+        log(`phone view, tab ${tabId}: moved out of its phone window, so a desktop tab again`);
+        ready.then(() => forget(tabId)).then(() => chrome.tabs.reload(tabId, { bypassCache: true })).catch(() => {}).then(changed);
+      });
       chrome.windows?.onRemoved?.addListener((windowId) => {
         for (const [tabId, p] of phones) if (p.window === windowId) ready.then(() => forget(tabId)).then(changed).catch(() => {});
         healed.clear();

@@ -217,7 +217,22 @@ async function harness(browser) {
   };
   const id = JSON.stringify(browser.extensionId);
   const allowUserScripts = () => extensionsPage(`new Promise((res, rej) => chrome.developerPrivate.updateExtensionConfiguration({ extensionId: ${id}, userScriptsAccess: true }, () => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(true)))`);
-  return { sw, E, page, ask, shot, click, target, panelTab, allowUserScripts };
+  // The phone view as the panel opens it (sidepanel.js openPhone): phone.open; in the window route, TRIF's side
+  // panel opened in the new window from this panel page within a click's gesture (CDP's userGesture: what the
+  // 📱 menu's click gives the real panel), unless `panel: false`; then phone.settle. One result: {window, route,
+  // viewport, panel}.
+  const openPhone = async (tabId, screen = null, { panel = true } = {}) => {
+    const r = await ask({ type: 'phone.open', tabId, screen });
+    if (r.route !== 'window' || r.already) return r;
+    let opened = false;
+    if (panel) {
+      const g = await browser.cdp.send('Runtime.evaluate', { expression: `chrome.sidePanel.open({ windowId: ${r.window} }).then(() => true, (e) => 'ERR ' + e.message)`, awaitPromise: true, returnByValue: true, userGesture: true }, panelSid);
+      opened = g.result?.value === true;
+      if (!opened) throw new Error(`the side panel didn't open in the phone window: ${JSON.stringify(g.result?.value ?? g.exceptionDetails)}`);
+    }
+    return { ...r, ...(await ask({ type: 'phone.settle', tabId, panel: opened })) };
+  };
+  return { sw, E, page, ask, shot, click, target, panelTab, allowUserScripts, openPhone, panelSid };
 }
 
 const waitFor = async (what, fn, ms = 15000) => {

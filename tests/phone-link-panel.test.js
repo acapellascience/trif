@@ -21,7 +21,9 @@ function setup(mod, answers = {}) {
   let clock = 1000;
   const timers = [];
   let changes = 0;
+  const toasts = [];
   const link = mod.createPhoneLink({
+    synced: (text) => toasts.push(text),
     request: async (msg) => {
       asked.push(msg);
       const a = answers[msg.type];
@@ -34,7 +36,7 @@ function setup(mod, answers = {}) {
     clearTimer: (t) => { t.on = false; },
   });
   const advance = async (ms) => { clock += ms; for (const t of timers) if (t.on && t.at <= clock) { t.on = false; t.fn(); } await tick(); };
-  return { link, asked, answers, advance, changes: () => changes, types: () => asked.map((m) => m.type) };
+  return { link, asked, answers, advance, toasts, changes: () => changes, types: () => asked.map((m) => m.type) };
 }
 
 test('connect a phone: nothing shows without a helper that has the link; off, it is a line and a button', async () => {
@@ -325,7 +327,7 @@ test('the phone line: Connect a phone with none paired; Syncing with {phone} and
   s.link.onMessage(synced(1600, { waiting: 1 }));
   assert.equal(s.link.syncView().text, 'Synced with Tim’s iPhone: 2 from the phone, 1 to it, 1 waiting for your OK.');
   s.link.forgetAsked();
-  assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone.');
+  assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone · last synced just now.', 'and when it last did (11-18)');
   // (no phone connected just now: said at once; told, and no sync in 30 s: said then)
   s.answers['phoneLink.syncNow'] = { told: [], ...on };
   await s.link.syncNow();
@@ -346,6 +348,37 @@ test('the phone line: Connect a phone with none paired; Syncing with {phone} and
   assert.equal(there.link.view().elsewhere, 'TRIF in Firefox is handling phones: connect from there, or quit Firefox.');
   assert.equal(there.link.view().button, null);
   assert.equal(TEXT.elsewhereNamed.includes('{browser}'), true);
+});
+
+// Tim, 11-18: a sync that worked showed nothing. A sync the phone starts (on its own, or its Sync now) reached the
+// panel only as a status, whose one trace was Settings' "Synced {time}" row: now every open panel shows a toast
+// for each sync that ends, whoever started it, and the phone view's line says when it last synced.
+test('a sync done: a toast with what it moved, "nothing new" when nothing did; none for the first status a panel gets', async () => {
+  const mod = await load();
+  const { syncToast, ago } = mod;
+  const rec = (over = {}) => ({ at: 2000, fromPhone: 2, toPhone: 1, waiting: 0, conflicts: [], skipped: 0, ...over });
+  assert.equal(syncToast([]), '');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }]), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ fromPhone: 0, toPhone: 0 }) }]), 'Synced with Tim’s iPhone · nothing new');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec({ waiting: 1 }) }]), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it, 1 waiting for your OK');
+  assert.equal(syncToast([{ phone: 'Tim’s iPhone', synced: rec() }, { phone: 'iPad', synced: rec({ fromPhone: 1 }) }]), 'Synced with Tim’s iPhone and iPad · 3 from the phone, 2 to it');
+  assert.equal(ago(1000, 30000), 'just now');
+  assert.equal(ago(0, 5 * 60000 + 10), '5 min ago');
+  assert.equal(ago(0, 2 * 3600000, () => '14:05'), 'at 14:05');
+
+  const on = status({ on: true, sync: true, phones: [PHONE] });
+  const s = setup(mod, { 'phoneLink.status': { ...on, phones: [{ ...PHONE, synced: rec({ at: 500 }) }] } });
+  await s.link.peek(true);
+  assert.deepStrictEqual(s.toasts, [], 'how things were when the panel opened: no toast');
+  // (a sync the phone started: only its status comes)
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1500, fromPhone: 0, toPhone: 0 }) }] });
+  assert.deepStrictEqual(s.toasts, ['Synced with Tim’s iPhone · nothing new']);
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1500, fromPhone: 0, toPhone: 0 }), online: false }] });
+  assert.equal(s.toasts.length, 1, 'the same sync again (another change): no second toast');
+  s.link.onMessage({ ...on, phones: [{ ...PHONE, synced: rec({ at: 1700 }) }] });
+  assert.deepStrictEqual(s.toasts.at(-1), 'Synced with Tim’s iPhone · 2 from the phone, 1 to it');
+  // (the phone view's line, between syncs)
+  assert.equal(s.link.syncView().text, 'Syncing with Tim’s iPhone · last synced just now.');
 });
 
 test('connect a phone: every string the panel shows is in docs/PHONE-LINK-STRINGS.md, and none names another product', async () => {

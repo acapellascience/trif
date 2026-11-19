@@ -245,7 +245,7 @@
       tile.className = 'group/composer-attachment';
       tile.style.cssText = 'position: relative; display: inline-block; width: 120px; height: 120px; border-radius: 10px; background: var(--tile); font-size: 12px;';
       const surf = document.createElement('span');
-      surf.className = 'composer-attachment-surface';
+      surf.className = 'composer-attachment-surface flex';
       surf.style.cssText = 'display: flex; flex-direction: column; justify-content: flex-end; height: 100%; padding: 6px; box-sizing: border-box;';
       const nm = document.createElement('span');
       nm.className = 'truncate';
@@ -283,8 +283,13 @@
       const bdi = document.createElement('bdi');
       bdi.textContent = name;
       label.append(bdi);
-      body.append(link, label);
-      card.append(body);
+      const words = document.createElement('div');
+      words.append(label);
+      body.append(link, words);
+      const fill = document.createElement('span');
+      fill.className = 'cds-card-fill';
+      fill.setAttribute('aria-hidden', 'true');
+      card.append(fill, body);
       x.setAttribute('aria-label', `Remove ${name}`);
       x.setAttribute('data-cds-attachment-remove', '');
       tile.append(card, x);
@@ -454,7 +459,7 @@ ${JSON.stringify(body, null, 2)}`;
     tiles.textContent = '';
     if (draft) sessionStorage.removeItem('draft');
     if (gptdraft) try { localStorage.removeItem('standin-draft'); } catch (e) {}
-    if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${Math.random().toString(36).slice(2, 10)}${location.search}`);
+    if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${keep ? 'k-' : ''}${Math.random().toString(36).slice(2, 10)}${location.search}`);
     // ("no match": the mod has no @match line)
     const origin = /no match/i.test(text) ? null : (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
     let parts;
@@ -503,11 +508,15 @@ document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(aske
       parts = [['p', 'Here is a style mod that does that. It only changes how the page looks.'],
         ['pre', modFor(every ? '*' : origin, called || 'Calmer feed', { css: `.feed-item h2 { color: #1f8a5b }${asked ? ` /* ${asked.trim()} */` : ''}`, hide: ['#promo-banner', '.feed-item.promoted'] }, id ? `\n// @id          ${id}` : '')]];
       if (/\blong\b/i.test(text)) for (let k = 1; k <= 12; k++) parts.splice(k, 0, ['p', `Step ${k}: here is a long explanation of what the mod does and why, so the reply takes a while to write on a slow connection. `.repeat(3)]);
-      if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', { hide: ['.cookie-consent'] })]);
+      if (/two/i.test(text)) parts.push(['p', 'And a second one for the cookie box:'], ['pre', modFor(origin, 'No cookie box', asked ? { css: `/* ${asked.trim()} */`, hide: ['.cookie-consent'] } : { hide: ['.cookie-consent'] })]);
       parts.push(['p', 'Add it, and tell me if anything looks wrong.']);
     }
+    // (?keep: the conversation kept by its address on the server (serve.js), as the service keeps it: the reply as it will end)
+    if (keep) fetch(`/standin-conv${location.pathname}`, { method: 'POST', body: JSON.stringify({ text, parts }) }).catch(() => {});
     reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0), /\bwhole\b/i.test(text));
   }
+  // (a kept conversation's address starts k-, so it's known as one without the query, which the app drops on resume)
+  const keep = /[?&]keep\b/.test(location.search) || /^\/(chat|c)\/k-/.test(location.pathname);
 
   // (?history: a long conversation whose older messages render late, as claude.ai draws them a little at a time: an
   // older exchange with an earlier version of the mod put at the top 1.5 s after the load, and another 2 s after
@@ -708,6 +717,17 @@ document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(aske
     };
     setTimeout(tick, 600);
   }
+  // (?keep, 11-19, the mod matrix: a conversation opened again (the app killed mid-reply and launched again) shows its
+  // exchanges finished, as claude.ai draws a conversation whose reply ended while nobody watched; kept by serve.js)
+  if (/^\/(chat|c)\/k-/.test(location.pathname)) fetch(`/standin-conv${location.pathname}`).then((r) => r.json()).then((list) => { try {
+    for (const x of list) {
+      const u = document.createElement(octane ? 'li' : 'div');
+      if (octane) u.setAttribute('data-message-role', 'user'); else u.setAttribute('data-testid', 'user-message');
+      u.textContent = x.text;
+      log.append(u);
+      reply(x.parts, 0, true);
+    }
+  } catch (e) {} }).catch(() => {});
 })();
 </script>
 </body>

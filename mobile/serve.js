@@ -19,6 +19,7 @@ const PAGES = path.join(__dirname, 'shared', 'pages');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json' };
 
 function handler(log = console.log) {
+  const conversations = {};
   const headers = JSON.parse(fs.readFileSync(path.join(PAGES, 'pages.json'), 'utf8'));
   return (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -67,6 +68,20 @@ window.__agent = { host: location.host, sent: ${JSON.stringify(sent)}, nav: navi
 <body style="font: 17px/1.5 -apple-system, sans-serif; padding: 40px 20px; text-align: center"><h1>Log in (stand-in)</h1>
 <p>Signed out: there's no message box here.</p><p><button style="font: inherit; padding: 10px 18px">Continue with Google</button></p>
 <p><input type="email" placeholder="Enter your email" style="font: inherit; padding: 8px"></p><p><button style="font: inherit; padding: 10px 18px">Log in</button></p>`);
+    }
+    // (the stand-in chat's `?keep`: its conversations kept here, by address, as a service keeps them on its servers (a
+    // page's own storage can be lost when the app is killed): POST adds an exchange, GET gives them all)
+    const kept = /^standin-conv\/((?:chat|c)\/[\w-]+)$/.exec(name);
+    if (kept) {
+      const key = kept[1];
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (d) => { body += d; if (body.length > 1e6) req.destroy(); });
+        req.on('end', () => { try { (conversations[key] = conversations[key] || []).push(JSON.parse(body)); } catch (e) {} res.writeHead(204, { 'Cache-Control': 'no-store' }); res.end(); });
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify(conversations[key] || []));
     }
     if (/^c\/[\w-]+$/.test(name)) name = 'chat.html';
     // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)

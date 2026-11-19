@@ -396,7 +396,7 @@ extension Model {
         if let p = Model.pane {
             if step["links"] != nil {
                 out = p.links.map { l in "\(l.service) \(l.site) \(l.state.rawValue) tab \(browser.tabs.firstIndex { t in t.id == l.tab }.map(String.init) ?? "closed") \(l.conv?.suffix(12) ?? "-") \(l.tabTitle)" }.joined(separator: "\n")
-                out += "\nbanners: " + p.banners.map { "\($0.site) \($0.mods.map(\.id))" }.joined(separator: "; ")
+                out += "\nbanners: " + p.banners.map { "\($0.site) \($0.mods.map(\.id))\($0.unreadable.map { " unreadable: \($0)" } ?? "")\($0.inChat > 0 ? " in chat \($0.inChat)" : "")" }.joined(separator: "; ")
                 out += "\nshown tab \(browser.tabs.firstIndex { $0 === browser.current } ?? -1) \(browser.site), covers \(ContentView.coversNow), offer \(browser.modOffer.map { "\($0.id) runs on \($0.sites) came from \($0.cameFrom ?? "-")" } ?? "none")"
             }
             if let n = step["gosite"] as? Int, n < p.links.count { p.goToSite(p.links[n].id) }

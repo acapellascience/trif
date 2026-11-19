@@ -87,6 +87,9 @@ const E2E_SITE_ORIGINS = ['*://127.0.0.1/*', '*://*.x.com/*', '*://*.google.com/
 // "Agent on this site" for the test sites (the harness drives them with trif run): Run code.
 const AGENT_SITES = { '127.0.0.1': 'run', 'x.com': 'run', 'google.com': 'run', 'example.com': 'run' };
 
+// (a mod TRIF wrote, without the stable id it gave it: docs/PHONE-SYNC.md 2a)
+const noId = (t) => String(t).replace(/^\/\/ @id [a-z0-9-]+\r?\n/m, '');
+
 class Scenario {
   /**
    * opts: { browser: 'firefox'|'chrome', kind: 'fresh'|'upgrade', work, newTgz, oldTgz, results, servers,
@@ -1933,7 +1936,7 @@ class Scenario {
         for (const extra of [[], ['--full'], ...(chrome ? [['--copy'], ['--copy', '--full']] : [])]) {
           const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...extra, '-o', path.join(this.work, 'refused.png')]);
           if (x.status === 0) throw new Error(`trif screenshot ${extra.join(' ')} worked`);
-          if (!/access to every site/.test(x.stderr) || !/toolbar button/.test(x.stderr) || !/trif sweep/.test(x.stderr)) throw new Error(`no hint: ${x.stderr}`);
+          if (!/access to every site/.test(x.stderr) || !/robot icon/.test(x.stderr) || !/trif sweep/.test(x.stderr)) throw new Error(`no hint: ${x.stderr}`);
           results.push(x.stderr.trim().split('\n')[0]);
         }
         const after = await view();
@@ -1949,7 +1952,7 @@ class Scenario {
         const tab = String(this.win.tabId);
         const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-trif-screenshot-front.png`);
         const no = await this.cli(['screenshot', '--tab', tab, '-o', file]);
-        if (no.status === 0 || !/only after the user clicks the TRIF toolbar button on it/.test(no.stderr)) throw new Error(`before the click: ${no.status} ${no.stderr}`);
+        if (no.status === 0 || !/only after the user clicks TRIF's button on it/.test(no.stderr)) throw new Error(`before the click: ${no.status} ${no.stderr}`);
         const ctx = await d.findPage((u) => u === front);
         await d.clickToolbarButton(ctx);
         await sleep(500);
@@ -4458,7 +4461,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('share-paste');
       await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(1)');
       await waitFor('the pasted mod', () => (fs.existsSync(pasted) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Paste a mod wrote nothing'));
-      if (fs.existsSync(pasted) && fs.readFileSync(pasted, 'utf8') !== pasteText) problems.push('the pasted mod isn\'t the text pasted');
+      if (fs.existsSync(pasted) && noId(fs.readFileSync(pasted, 'utf8')) !== pasteText) problems.push('the pasted mod isn\'t the text pasted (but for the @id TRIF gives it)');
       const pastedStatus = await waitFor('the pasted mod off', async () => { const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout; const line = out.split('\n').find((l) => l.includes(`${site}/e2e-pasted-calm`)); return line && /off/.test(line) ? line.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
       if (!pastedStatus) problems.push('the pasted mod isn\'t listed as off');
       await themes('share-files');
@@ -4562,7 +4565,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       const added = path.join(dir, 'e2e-downloaded.js');
       made.push(added);
       await waitFor('the added mod', () => (fs.existsSync(added) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Add wrote nothing'));
-      if (fs.existsSync(added) && fs.readFileSync(added, 'utf8') !== styleText) problems.push('the added mod isn\'t the file');
+      if (fs.existsSync(added) && noId(fs.readFileSync(added, 'utf8')) !== styleText) problems.push('the added mod isn\'t the file (but for the @id TRIF gives it)');
       if (!fs.existsSync(f) || fs.readFileSync(f, 'utf8') !== styleText) problems.push('the download was moved or changed');
       const off = await waitFor('it\'s off', async () => { const l = (await this.cli(['status'], { timeoutMs: 20000 })).stdout.split('\n').find((x) => x.includes(`${site}/e2e-downloaded`)); return l && /off/.test(l) ? l.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
       if (!off) problems.push('the added mod isn\'t off');
@@ -4802,8 +4805,8 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('edit-editor');
       // 2. Save: runs from the next page load, the version before in History; Undo puts it back
       c = await save('saved');
-      if (c.saved !== 'Saved. It runs from the next page load. Undo' || c.editing || c.code !== typed) problems.push(`saved: ${JSON.stringify(c)}`);
-      if (fs.readFileSync(file, 'utf8') !== typed) problems.push('the file isn\'t the edit');
+      if (c.saved !== 'Saved. It runs from the next page load. Undo' || c.editing || noId(c.code) !== typed || !/^\/\/ @id [a-z0-9-]{36}$/m.test(c.code)) problems.push(`saved (with the @id a saved edit gets): ${JSON.stringify(c)}`);
+      if (noId(fs.readFileSync(file, 'utf8')) !== typed) problems.push('the file isn\'t the edit');
       await themes('edit-saved');
       await runs('v2');
       done.push('typed, Tab, Undo and Redo; saved, it ran');
@@ -5027,7 +5030,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await this.dismissApproval();
       await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-icons').click(); return true; }`);
       // (the icons open the card on Details: the hold's presentation, with each "more")
-      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && x && !x.hidden ? { mod: d.dataset.mod, tab: d.querySelector('.cv-tab-details')?.getAttribute('aria-selected'), about: x.textContent, icons: [...x.querySelectorAll('.cv-d-facts svg')].filter((v) => !v.closest('.more-btn')).length, more: x.querySelectorAll('.more-btn').length, codeShown: !d.querySelector('.cv-code').hidden, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
+      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && x && !x.hidden ? { mod: d.dataset.mod, tab: d.querySelector('.cv-tab-details')?.getAttribute('aria-selected'), about: [...x.children].filter((c) => !c.classList.contains('cv-d-name')).map((c) => c.textContent).join(''), name: x.querySelector('.cv-d-name-value')?.textContent || null, icons: [...x.querySelectorAll('.cv-d-facts svg')].filter((v) => !v.closest('.more-btn')).length, more: x.querySelectorAll('.more-btn').length, codeShown: !d.querySelector('.cv-code').hidden, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
       if (about.mod !== `${site}/e2e-row-power` || about.tab !== 'true' || about.codeShown || !/Noticeable/.test(about.about) || !/It can see and filter/.test(about.about) || !/^Boxed mod: can do what you've allowed\./.test(about.about) || about.icons !== 1 || about.more < 3 || about.file !== 'e2e-row-power.js') problems.push(`the card's Details: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
       // (the warning about two powers together: in Details, as the hold put it, not on the icons)

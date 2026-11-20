@@ -687,7 +687,7 @@ struct ContentView: View {
                     Divider()
                     toolbar
                 }
-                .background(.bar)
+                .background { toolbarFill }
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
             }
@@ -968,6 +968,14 @@ struct ContentView: View {
     private var onWebPage: Bool { let s = browser.webView.url?.scheme; return s == "https" || s == "http" }
     /// Something covers the page: the chat, the tabs, the Mods tab, the address screen.
     private var covered: Bool { pane.shown || showTabs || showMods || showAddress }
+    /// The toolbar's background: see-through over the page (it takes the page's colours, as Safari's does), but the
+    /// colour of whatever covers the page when something does (Tim, 11-20: a pink BBC mod tinted the toolbar under
+    /// a white chat; "also do that for the other views").
+    @ViewBuilder private var toolbarFill: some View {
+        if showTabs { Color(.systemGroupedBackground) }
+        else if covered { Color(.systemBackground) }
+        else { Rectangle().fill(.bar) }
+    }
     /// Whatever covers the page closes (the chat as its own Back does: nothing in it lost). `all`: the sheets and
     /// questions too (history, checks, report, the project and Ask the phone questions, the file pickers), for a Home
     /// Screen icon, which lands on its page as an app would. An Add this mod? stays: it waits for the person's OK.

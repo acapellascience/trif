@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (568 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (575 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -77,7 +77,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   chat's code); syncstate also prints each mod's `uid` and `hint` (a hint kept by its sync key); snapshots (safe
   mode's, newest first: each mod's before/after), restoresnap (0 = newest, or an id prefix: as the ⋯ menu's item),
   bannerrestore (the shown site's banner's Turn them back on), safetystate (switchedOff, with each one's snapshot),
-  enable ({"id", "on", "site"}: a switch as the Mods tab sends it), toast (AppToast now and the last 10 said)…
+  enable ({"id", "on", "site"}: a switch as the Mods tab sends it), toast (AppToast now and the last 10 said),
+  site access (11-20): connect / disconnect ("host or address"), access (the connected sites, the person's sensitive
+  ones, each tab's controller: its set, user script count, TRIF's handler, the page's set, readable), readcheck (every
+  way of reading the shown page tried through its web view: REFUSED on a disconnected page), sensitiveown ("pattern" /
+  "-pattern"), accessupgrade (the first-start rule runs again at the next launch; `"keep": []` sets the connected list
+  first)…
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -138,6 +143,13 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   instructions") or chatgpt's "•••" (Open project options) → menu Project settings / Delete project (sets
   body[data-standin-deleted] if pressed: TRIF must never) → dialog "Project settings", "Instructions", Save. A send on
   a /g/…/project page goes to /g/g-p-…/c/<id>.
+- Site access's stand-in (11-20): `access.html` (serve.js): its OWN scripts POST what they see of TRIF (TRIF's globals,
+  window.webkit's handlers, #probe's colour, the root's border, styles, TRIF attributes/nodes) to `/standin-access`
+  (GET lists, `?clear` empties; one list per serve.js process, so 8377's and 8378's apart); `?frame=<origin>` embeds
+  itself from another origin. `/standin-redirect?to=<address>` answers 302. Matrix rows S1-S5 use them (127.0.0.1
+  disconnected for each, connected again after). A sensitive stand-in: add the Mac's Bonjour name as the person's own
+  (`{"sensitiveown": "timothys-macbook-air.local"}`, then http://timothys-macbook-air.local:8377/…); IPs and
+  one-word hosts are never sensitive (the rule needs a dot and not an IP). Remove it after (`"-…"`).
 - THE MOD MATRIX (11-19, docs/IOS-MOD-MATRIX.md: the table, what broke and what's blocked): `node mobile/test/ios-matrix.js`
   (Node 22: /usr/local/bin/node; `--only A1,B3`, `--list`, `--shots <dir>`, `--gpt thread`: ChatGPT's stand-in as its
   11-20 page, `chat.html?thread&keep`; its rows A2, B4, C9, F2 (F2 needs F1)). Needs the SE booted, a Debug build installed
@@ -146,7 +158,9 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mods are named Mx<case><tag> (the tag in their CSS, so never "offered before"); the last run's Mx… mods are deleted at
   the start; the stand-ins' lastChat/chatProject prefs, chatLinks and chatOffers are cleared (Simulator data only). D7 and
   A8 start phone-link's tests/phone-link-computer.js (`--computer <worktree>`), relaunch with `-linkhost` and pair. ~15
-  min for all. A case is an async function returning [PASS|FAIL|BLOCKED, what was seen]: add rows there. P1-P6 (11-20,
+  min for all. A case is an async function returning [PASS|FAIL|BLOCKED, what was seen]: add rows there. Since 11-20 its
+  setup connects localhost and 127.0.0.1 (site access: every site starts disconnected); a new stand-in host needs the
+  same. P1-P6 (11-20,
   projects) relaunch the app with the stand-in project prefs cleared (cleanPrefs drops every `chatProject*.….standin`);
   P4 needs P3's project. Dev steps `projectstate` (each service's offer answer, project, guide; each chat's setup) and
   `projectsetup` ("Claude": ⋯'s Set it up). Not in it
@@ -567,6 +581,37 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   state carried by `InstalledMod.carry`, the kept-running version's script made again, the hint moved to the new key,
   `renamedTo` + `current(id)` for old ids, `onRename` → Browser.modRenamed: lastAdded, tabs' modsLoadedIds, the page's
   last answer, Safety.renamed, `renamedForPanel` for the open code card). No id is ever written at launch.
+- Site access (Tim 11-20, "let's opt in per site"; docs/MOBILE-BEHAVIOUR.md "Site access"): SiteAccess.swift.
+  `SiteAccess.shared` (UserDefaults `connectedSites`, `sensitiveOwn`; `card(host)` memo per host through
+  core/site-access.js: site (a sensitive host's own scope, else Site.of), connected, sensitive, why, own; `allows(url)`:
+  http(s) on a connected site, or the probe's own scheme; `connect`/`disconnect` → `onChange` → Browser.accessChanged;
+  `upgradeOnce` (UserDefaults `siteAccess.upgraded`, the note `siteAccess.note`); `sensitiveAdd`). `TabWebView`: every
+  tab's web view; overrides `__evaluateJavaScript`, `__callAsyncJavaScript`, `evaluateJavaScript(_:completionHandler:)`,
+  `takeSnapshot`, `__createPDF`, `__createWebArchiveData`, `__find` (the Swift async forms call these same ObjC methods)
+  and refuses (domain TRIF.disconnected, one Diagnostics "site access" line a page) unless `readable` (`pageConnected`,
+  set at commit by Browser.accessCommitted, and `allows(url)`; a frame by its own origin too). `tabPicture` is the tab
+  list's own way past it (TabShots). Browser: each tab has its OWN WKUserContentController (`tabConfig`: the shared
+  config copied with a fresh controller; a page's new window: WebKit's given config gets the fresh controller itself,
+  WebKit insists on that object); `swapScripts` no longer touches a controller: it keeps `connectedScripts` and bumps
+  `scriptsVersion`; `applyAccess(tab, url, response:)` (decidePolicy navigationAction for the main frame, again at the
+  main-frame navigationResponse, and back at a failed load) empties the controller and removes TRIF's "trif" handler
+  for "plain", or puts in "all" (`connectedScripts`) / "sens:<site>" (`sensitiveScripts`: base + only the mods kept
+  under that site, `ScriptPlan.only`, `userScripts(from:fresh:remember: false)`) and adds the handler.
+  `accessCommitted` (didCommit): the page's set = its response's, else (WebKit's back/forward memory: no response) the
+  item's (`Tab.itemAccess`, weak-keyed); a page back with TRIF in it on a site disconnected since is reloaded.
+  `accessChanged`: connect → the shown tab readable at once, refreshIfStale (a reload only if mods run there);
+  disconnect → the shown tab reloaded, tabs behind on the site discarded. `ensureKit` (outline, noteBaseline,
+  PanelChat.outline): kit.js put into a page loaded before its site was connected. ModStore.running(on:) answers [] off
+  a connected site and only the site's own mods on a sensitive one (so signatures, the Mods tab, Safety follow).
+  `Browser.site` = SiteAccess.scope (a sensitive host is its own site everywhere: Mods tab, chats, the prompt's
+  wildcard). UI: ChatListView's `DisconnectedCard` (in place of the box and Go to chat; Connect connects, the box comes
+  up in the same sheet), ContentView (`webHost`, `disconnectedHere`: the robot at 40%, the hold opens the card,
+  `browser.wantsConnectCard` from ClaudePane.open/quickAsk's `disconnectedHere`), ⋯ → Disconnect from {site} and
+  Sensitive sites… (`SensitiveSitesView`), the one-time alert. The Mods tab: state `access`, mods-page.js
+  `renderAccess` (#access-note, message `connect`), its ⋯ Disconnect. ModStore.add: sensitiveAdd → off + newOff
+  "sensitive", extraNeeds `sensitive:free` / `sensitive:change` (lines [hash]). quickDeliver: nothing added by itself
+  on a sensitive site. Checks that would need a script in a disconnected page are skipped there: Browser.playing
+  (WebKit's state alone), checkAgent, TabShots' password-field look, ModsPanel's page answer.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
   (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
   a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is
@@ -801,6 +846,21 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).
 
 ## Tim's decisions
+
+- Site access (Tim 11-20: "let's opt in per site. it's not that much hassle compared to now"; decided with the main
+  session, rules in docs/MOBILE-BEHAVIOUR.md "Site access"): every site starts disconnected; the robot's card "TRIF is
+  disconnected on {site}." · Connect (approved) and the quick ask at once after Connect; sensitive sites (desktop's list
+  + the person's own) start disconnected too, with a why line, and once connected follow desktop's rules; Disconnect
+  from ⋯ and the Mods tab; per device. **The upgrade rule is Tim's, confirmed 11-20**: sites with mods or a Home Screen
+  icon connected on the first start of this version, sensitive sites not (their mods kept), a one-time note. Tim asked
+  (11-20) "is that disconnection actually robust? … or are we just faking it?": hence the empty per-tab controller (no
+  script, handler or world of TRIF's in a disconnected page, checked from the page's own scripts) and one gate for every
+  read. My calls (for Tim): Connect reloads only when mods would run there (the kit goes in at the first read); the
+  quiet cue is the toolbar robot at 40%; the tab list's own pictures are still taken on disconnected (non-sensitive)
+  pages, kept on the phone as Safari's are, without the password-field look (that would be a script in the page);
+  video pick-up, background play's resume and the desktop agent fix are TRIF scripts, so they're off on disconnected
+  sites; the person's sensitive sites ADD to TRIF's list (desktop's Settings list replaces it; there's no way here to
+  take one of TRIF's off).
 
 - Safe mode's snapshot, 11-18: kept before any switch changes, the last 5; "Turn them back on" / the ⋯ menu put
   back only what safe mode changed, only where untouched since (a later change, here or from the computer, wins);
@@ -1243,6 +1303,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- Site access (11-20): Simulator only (shots 569-575; matrix S1-S5 and A1-A3, B3, B11, F1, P2 PASS; a page's own
+  scripts saw no handler, no window.webkit, no TRIF global, no mod or every-site mod on a disconnected page, in a
+  disconnected frame of a connected page, after a redirect into one, and back from WebKit's memory after a disconnect;
+  readcheck refused all 10 reads; the sign-in popup still works with WebKit's config given a fresh controller).
+  Not tried: a phone; a frame-targeted script call (the gate checks the frame's origin, but nothing in the app calls
+  into frames); a disconnected site's bfcache restore when the item's set wasn't recorded (then the page counts as
+  "unknown": unreadable, never reloaded for it); a phone-sync arrival for a disconnected site against the real helper
+  (the same ModStore path as an import: it ran nothing in the Simulator); the real claude.ai / chatgpt.com in an ordinary
+  tab (sensitive: should card). The honest limit, for Tim: TRIF is the browser, so this is TRIF's own code holding the
+  line (as Safari and Chrome enforce their extension rules), not iOS: it keeps mods, AI-written code, TRIF's page
+  scripts and any reading or sending of the page away from a disconnected site; it can't protect against a TRIF build
+  that was itself changed to do otherwise.
+
 - Projects (11-20), never seen live past the form: TRIF never presses Create, and opening Tim's existing projects is
   off limits, so the real project pages are unknown. Checked signed in (Simulator, nothing created): claude.ai's
   /projects/create dialog (Name, "What do you want to work on?", Context: "Add repository / a file / a folder / a
@@ -1571,6 +1644,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   while another tab is shown, real Google sign-in.
 
 ## Gotchas
+
+- (11-20) WKWebView's script/snapshot methods are NS_REFINED_FOR_SWIFT: a subclass overrides `__evaluateJavaScript(_:inFrame:in:completionHandler:)`,
+  `__callAsyncJavaScript(_:arguments:inFrame:in:completionHandler:)` etc. with `@MainActor @Sendable` handlers; the
+  Swift async forms (`try await wv.callAsyncJavaScript(…)`) go through them (checked by readcheck).
+- (11-20) A page's start scripts can post to TRIF's handler before didCommit reaches the app: the handler checks the
+  message's own frame origin (`message.frameInfo.securityOrigin`), not the tab's state.
+- (11-20) In createWebViewWith, setting `configuration.userContentController` on WebKit's given configuration and making
+  the web view from that same object works (a copy would break WebKit's check); the sign-in popup's opener link holds.
+- (11-20) Diagnostics "site access: refused … on <site>" lines mean some caller tried to read a disconnected page: find it and skip it there (as
+  checkAgent, Browser.playing, the password look, ModsPanel were).
 
 - (11-20) chat.js `editor()` is "the last visible editable thing": on a page with a form or dialog open it's the
   form's textarea, not the message box. The project code tells them apart with `isComposer`; anything new that looks

@@ -18,6 +18,9 @@ const path = require('path');
 const PAGES = path.join(__dirname, 'shared', 'pages');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json' };
 
+// (site access's stand-in reports, shared by every port this process serves)
+const ACCESS_REPORTS = [];
+
 function handler(log = console.log) {
   const conversations = {};
   // (the stand-ins' projects, by id: {service, name, desc, guide}; Tim 11-20, TRIF's chats in a project of their own)
@@ -32,6 +35,23 @@ function handler(log = console.log) {
       return res.end('canary');
     }
     if (name === 'trif-install') name = 'install.html';
+    // (11-20, site access: /standin-access keeps what access.html's own scripts saw of TRIF (POST, from the page and its
+    // frame; GET lists them, ?clear empties); /standin-redirect?to=<address> answers 302 there)
+    if (name === 'standin-access') {
+      const answer = (body) => { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify(body)); };
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (d) => { body += d; if (body.length > 1e5) req.destroy(); });
+        req.on('end', () => { try { const r = JSON.parse(body); r.at = Date.now(); r.port = req.socket.localPort; ACCESS_REPORTS.push(r); if (ACCESS_REPORTS.length > 200) ACCESS_REPORTS.shift(); } catch (e) {} answer({ ok: true }); });
+        return;
+      }
+      if (url.searchParams.has('clear')) ACCESS_REPORTS.length = 0;
+      return answer(ACCESS_REPORTS);
+    }
+    if (name === 'standin-redirect') {
+      res.writeHead(302, { Location: url.searchParams.get('to') || '/', 'Cache-Control': 'no-store' });
+      return res.end();
+    }
     // (what the browser says it is: the user agent it sent and its page's navigator, platform and width, for Request
     // Desktop Website; `?nometa` drops the width=device-width viewport, as a desktop-only site has none)
     if (name === 'agent') {

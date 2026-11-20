@@ -117,7 +117,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         self.config = config
         super.init()
 
-        config.userContentController.addScriptMessageHandler(self, contentWorld: Browser.trifWorld, name: "trif")
+        // (TRIF's message handler isn't on the shared configuration: each tab's own content controller gets it only while its
+        // page is on a connected site, applyAccess)
         // (before any page: a launch after the app quit in front starts with those sites' mods switched off)
         safety = Safety(store: mods)
         // (a mod renamed (the Mods tab, or a sync): what keeps its id here follows it)
@@ -131,6 +132,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { if let self { BackgroundPlay.resume(self) } }
         }
+        // (site access, Tim 11-20: the first start of this version connects the sites a phone already used TRIF on, sensitive
+        // ones aside; then each connect or disconnect puts the tabs right)
+        SiteAccess.shared.upgradeOnce(modSites: mods.mods.map(\.site), iconSites: Array((UserDefaults.standard.dictionary(forKey: "iconTabs") ?? [:]).keys))
+        SiteAccess.shared.onChange = { [weak self] site, on in self?.accessChanged(site, connected: on) }
         installScripts()
         // (the chat-offer judge's keys of every version a chat mustn't offer again, ahead: ChatOffers.swift)
         let versions = mods.mods.flatMap { [$0.code] + $0.history.map(\.code) } + mods.trash.flatMap { [$0.mod.code] + $0.mod.history.map(\.code) }
@@ -148,8 +153,18 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     // MARK: tabs
 
     /// A web view for a tab: from the shared configuration, or (a page opening a window) the one WebKit hands over.
+    /// A tab's configuration: the shared one's (the cookie store, the probe's pages, the agent) with a content controller
+    /// of its own, which holds TRIF's scripts and message handler only while the tab's page is on a connected site
+    /// (applyAccess: site access, Tim 11-20). A window a page opens comes with WebKit's configuration, which must be the
+    /// one it's made with (WebKit checks): that one gets the fresh controller itself.
+    private func tabConfig(_ given: WKWebViewConfiguration? = nil) -> WKWebViewConfiguration {
+        let c = given ?? (config.copy() as! WKWebViewConfiguration)
+        c.userContentController = WKUserContentController()
+        return c
+    }
+
     private func makeTab(configuration: WKWebViewConfiguration? = nil, id: UUID = UUID(), title: String = "", url: URL? = nil) -> Tab {
-        let tab = Tab(id: id, webView: WKWebView(frame: .zero, configuration: configuration ?? config), title: title, url: url)
+        let tab = Tab(id: id, webView: TabWebView(frame: .zero, configuration: tabConfig(configuration)), title: title, url: url)
         attach(tab)
         return tab
     }
@@ -231,6 +246,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let wv = tab.webView
         return await Browser.within(1, false) {
             guard await wv.requestMediaPlaybackState() == .playing else { return false }
+            // (a page TRIF isn't connected on isn't asked: that would be a script in it. WebKit's word alone there: at
+            // worst a tab is kept that could have been let go)
+            if (wv as? TabWebView)?.readable == false { return true }
             let page = try? await wv.callAsyncJavaScript(Browser.pagePlaying, arguments: [:], in: nil, contentWorld: Browser.trifWorld)
             return (page as? String).map { $0 != "no" } ?? false
         }
@@ -250,7 +268,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         old.navigationDelegate = nil
         old.uiDelegate = nil
         old.removeFromSuperview()
-        tab.replaceWebView(WKWebView(frame: .zero, configuration: config))
+        tab.replaceWebView(TabWebView(frame: .zero, configuration: tabConfig()))
+        tab.accessKey = nil; tab.handlerOn = false
         attach(tab)
         tab.started = false
         tab.reloadCause = nil
@@ -431,7 +450,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// (development) a sheet to open (-open): mods, tabs, history or chat.
     @Published var wantsSheet = ""
     /// The site of the page shown, as the chat pane and the Mods tab group sites (Mods.swift Site.of).
-    var site: String { Site.of(host) }
+    /// (site access, 11-20: a sensitive host is a site of its own, mail.google.com, not google.com: SiteAccess.scope)
+    var site: String { SiteAccess.shared.scope(host) }
+    /// TRIF is connected on the shown tab's page (an http(s) page on a connected site, or TRIF's own pages).
+    var connectedHere: Bool { SiteAccess.shared.allows(webView.url ?? current?.savedURL) }
+    /// Set when something asked for TRIF on a page it isn't connected on: the app shows the robot's card.
+    @Published var wantsConnectCard = false
 
     // MARK: resources and scripts
 
@@ -469,17 +493,67 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         baseScripts = (rules, list)
         return list
     }
-    /// Puts in the scripts every page gets at its start (TRIF's own, then the mods'), in place of those there.
-    private func swapScripts(_ modScripts: [WKUserScript]) {
+    /// The scripts a page on a connected site gets at its start (TRIF's own, then the mods'), as made last; a sensitive
+    /// site's own set (only its own mods: sensitiveScripts) is made from the same plan. Each tab's content controller
+    /// takes the set its next page needs as that page starts loading (applyAccess), so a change here reaches a page
+    /// at its next load, as before (refreshIfStale reloads the shown one when what runs there changed).
+    private(set) var connectedScripts: [WKUserScript] = []
+    /// Counts the sets made, so a tab's controller holding an older one takes the new one at its next load.
+    private(set) var scriptsVersion = 0
+    private var lastPlan: ModStore.ScriptPlan?
+    private var sensitiveSets: [String: [WKUserScript]] = [:]
+    private func swapScripts(_ modScripts: [WKUserScript], plan: ModStore.ScriptPlan?) {
         let t0 = Date()
-        let ucc = config.userContentController
-        ucc.removeAllUserScripts()
         // (development) `-bare`: nothing of the app's in any page, to measure a page without it
-        if ProcessInfo.processInfo.arguments.contains("-bare") { return }
-        let all = base() + modScripts
-        for s in all { ucc.addUserScript(s) }
+        let bare = ProcessInfo.processInfo.arguments.contains("-bare")
+        connectedScripts = bare ? [] : base() + modScripts
+        lastPlan = plan
+        sensitiveSets = [:]
+        scriptsVersion += 1
         lastInstallMs["swap"] = Int(Date().timeIntervalSince(t0) * 1000)
-        lastInstallMs["scripts"] = all.count
+        lastInstallMs["scripts"] = connectedScripts.count
+    }
+
+    /// A connected sensitive site's set (desktop's rule: a sensitive site is a site of its own, and only its own mods
+    /// run there: not its parent's (google.com's on mail.google.com), not every-site mods): TRIF's own scripts and the
+    /// mods kept under that site.
+    private func sensitiveScripts(_ site: String) -> [WKUserScript] {
+        if let s = sensitiveSets[site] { return s }
+        if ProcessInfo.processInfo.arguments.contains("-bare") { return [] }
+        let plan = (lastPlan ?? mods.scriptPlan()).only { SiteAccess.shared.scope($0.site) == site }
+        let list = base() + mods.userScripts(from: plan, fresh: [:], remember: false)
+        sensitiveSets[site] = list
+        return list
+    }
+
+    /// Which of TRIF's sets a page at `url` gets: "plain" (nothing of TRIF's: a disconnected site, or a page that isn't
+    /// a website), "all" (a connected site, and TRIF's own pages), "sens:<site>" (a connected sensitive site).
+    func accessKey(_ url: URL?) -> String {
+        guard SiteAccess.shared.allows(url), let url else { return "plain" }
+        if url.scheme?.lowercased() == PageSchemeHandler.scheme { return "all" }
+        let c = SiteAccess.shared.card(SiteAccess.host(url))
+        return c.sensitive ? "sens:\(c.site)" : "all"
+    }
+
+    /// A tab's content controller made to hold what a page at `url`, about to load in it (its main frame), may have:
+    /// nothing of TRIF's at all on a disconnected site (no user scripts, no message handler, so no content world of
+    /// TRIF's is ever made in that page), TRIF's set on a connected one. Called as each main-frame navigation is let
+    /// through (decidePolicyFor navigationAction, redirects included) and again at its response (the address it really
+    /// lands on): before the new document starts, so its document-start scripts are the ones put here.
+    func applyAccess(_ tab: Tab, _ url: URL?, response: Bool) {
+        let key = accessKey(url)
+        if response { tab.responseAccess = key }
+        guard tab.accessKey != key || (key != "plain" && tab.accessVersion != scriptsVersion) else { return }
+        let ucc = tab.webView.configuration.userContentController
+        ucc.removeAllUserScripts()
+        if key == "plain" {
+            if tab.handlerOn { ucc.removeScriptMessageHandler(forName: "trif", contentWorld: Browser.trifWorld); tab.handlerOn = false }
+        } else {
+            for s in key == "all" ? connectedScripts : sensitiveScripts(String(key.dropFirst(5))) { ucc.addUserScript(s) }
+            if !tab.handlerOn { ucc.addScriptMessageHandler(self, contentWorld: Browser.trifWorld, name: "trif"); tab.handlerOn = true }
+        }
+        tab.accessKey = key
+        tab.accessVersion = scriptsVersion
     }
 
     /// The scripts every page gets at its start, made and put in now, on the main thread (the app's start, the hide
@@ -488,7 +562,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let t0 = Date()
         let list = mods.userScripts()
         lastInstallMs = ["build": Int(Date().timeIntervalSince(t0) * 1000)]
-        swapScripts(list)
+        swapScripts(list, plan: nil)
         swappedShape = nil
     }
 
@@ -528,7 +602,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                 if shape == swappedShape { lastInstallMs = ["same": 1]; mainMs += Int(Date().timeIntervalSince(m1) * 1000); continue }
                 let list = mods.userScripts(from: plan, fresh: fresh)
                 lastInstallMs = ["build": Int(Date().timeIntervalSince(m1) * 1000)]
-                swapScripts(list)
+                swapScripts(list, plan: plan)
                 swappedShape = shape
                 mainMs += Int(Date().timeIntervalSince(m1) * 1000)
             } while rebuildAgain
@@ -572,6 +646,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             holdFromChat = source != "import"
             // (after the Add this mod? sheet has gone: one sheet can't open while another is closing)
             Task { @MainActor in try? await Task.sleep(nanoseconds: 700_000_000); self.wantsMods = true }
+        } else if !added.on, added.newOff == "sensitive", source != "import" {
+            // (site access: a sensitive site's new mod starts off there, whoever made it)
+            status = "Added \(added.name), off: \(SiteAccess.shared.scope(added.site)) is a sensitive site. Switch it on in Mods."
         } else if source != "import" && !quiet {
             status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
             // (added away from the site its chat was for (the done banner's Add, Tim 11-18): the note offers the way there)
@@ -1098,6 +1175,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// `budgetMs`: the walk stops after that long (a big page's whole walk took seconds on an iPhone SE), and the
     /// outline then says it's partial (agent-facing words).
     func outline(_ maxChars: Int = 6000, budgetMs: Int = 300) async -> (text: String, chars: Int, tokens: Int)? {
+        await ensureKit()
         let result = await call("return JSON.stringify(globalThis.__trifKit.outline(max, budget));", ["max": maxChars, "budget": budgetMs], in: Browser.trifWorld)
         guard let o = Browser.parse(result.text) as? [String: Any], var text = o["text"] as? String else {
             status = "No outline: \(result.error ?? "the page has no kit")"
@@ -1142,7 +1220,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // (a chat in the person's TRIF project, whose instructions have how TRIF mods are written: the page only)
         if guideInProject {
             let r = """
-            I'm looking at \(page?.absoluteString ?? host) in TRIF (how TRIF mods are written is in this project's instructions). Its @match must cover \(origin)/*; for the whole site, all of its subdomains too (https://*.\(Site.of(page?.host ?? host))/*). No other sites: never example.com or any placeholder. A screenshot is attached; below is an outline of the page, each line starting with a CSS selector.
+            I'm looking at \(page?.absoluteString ?? host) in TRIF (how TRIF mods are written is in this project's instructions). Its @match must cover \(origin)/*; for the whole site, all of its subdomains too (https://*.\(SiteAccess.shared.scope(page?.host ?? host))/*). No other sites: never example.com or any placeholder. A screenshot is attached; below is an outline of the page, each line starting with a CSS selector.
             \(here)
             --- The page: \(page?.absoluteString ?? host) ---
             \(o.text)
@@ -1154,7 +1232,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
-        I'll say what I want changed. For a new mod, reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). No other sites: never example.com or any placeholder. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). To change a mod already here, use edit blocks, as below.
+        I'll say what I want changed. For a new mod, reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(SiteAccess.shared.scope(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). No other sites: never example.com or any placeholder. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). To change a mod already here, use edit blocks, as below.
 
         A screenshot of what I see is attached, only to show you the page: never edit it or make an image; every change I ask for is a TRIF mod, written as code. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 
@@ -1219,6 +1297,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// The page's parts and sizes now, to say next time what disappeared since (once the chat has its text: it
     /// isn't needed for this one).
     func noteBaseline() async {
+        await ensureKit()
         if let l = (await call("return JSON.stringify(globalThis.__trifKit.layout(300, 250));", in: Browser.trifWorld)).text { baseline = (host, l) }
     }
 
@@ -1432,6 +1511,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     // MARK: the app end of TRIF's world
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
+        // (only from a page TRIF is connected on: a disconnected page has no handler of TRIF's at all; this is the second wall)
+        // (by the sending page's own origin: a page's start can speak before its commit has reached the app)
+        let o = message.frameInfo.securityOrigin
+        guard SiteAccess.shared.allows(URL(string: "\(o.protocol)://\(o.host)\(o.port > 0 ? ":\(o.port)" : "")/")) else {
+            Diagnostics.shared.log("site access", "a message from a page TRIF isn't connected on was refused (\(o.host))")
+            return (nil, "TRIF is disconnected here")
+        }
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return (nil, "not a message of the probe's") }
         switch type {
         case "ping":
@@ -1559,6 +1645,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             if (webView.customUserAgent ?? "") != (agent ?? "") { webView.customUserAgent = agent }
             tab(of: webView)?.desktop = desktop
         }
+        // (site access: the tab's controller holds what the page it's going to may have, before that page starts)
+        if policy == .allow, navigationAction.targetFrame?.isMainFrame ?? true, let t = tab(of: webView) {
+            t.responseAccess = nil
+            applyAccess(t, navigationAction.request.url, response: false)
+        }
         return (policy, preferences)
     }
 
@@ -1595,7 +1686,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
-        ModDownloads.wanted(navigationResponse) ? .download : .allow
+        if ModDownloads.wanted(navigationResponse) { return .download }
+        // (the address the page really comes from, after any redirect: its controller set for that, before it commits)
+        if navigationResponse.isForMainFrame, let t = tab(of: webView) { applyAccess(t, navigationResponse.response.url ?? webView.url, response: true) }
+        return .allow
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { ModDownloads.shared.take(download) }
@@ -1618,7 +1712,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// page loaded again; at most once every 10 s a tab, so it can never loop.
     private func checkAgent(_ tab: Tab, _ webView: WKWebView) {
         // (an iPhone's: an iPad's own pages are a computer's already, WebKit's recommended mode there)
-        guard UIDevice.current.userInterfaceIdiom == .phone,
+        // (not on a page TRIF isn't connected on: asking would be a script in it. A page there that WebKit brings back in
+        // the other mode's agent stays so: a reload by hand puts it right)
+        guard UIDevice.current.userInterfaceIdiom == .phone, (webView as? TabWebView)?.readable != false,
               let url = webView.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
         let want = tab.desktop
         Task { @MainActor [weak self, weak webView, weak tab] in
@@ -1636,9 +1732,69 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         }
     }
 
+    /// A page came into a tab: which of TRIF's sets it was loaded with (its response's, or, for a page WebKit brought back
+    /// from its back/forward memory, which never asks, the one its item was loaded with), whether TRIF may read it, and a
+    /// page brought back with TRIF in it on a site disconnected since: loaded again, so it comes without.
+    private func accessCommitted(_ t: Tab, _ webView: WKWebView) {
+        let item = webView.backForwardList.currentItem
+        let fresh = t.responseAccess
+        let key = fresh ?? item.flatMap { t.itemAccess.object(forKey: $0) as String? } ?? "unknown"
+        t.responseAccess = nil
+        if let item { t.itemAccess.setObject(key as NSString, forKey: item) }
+        t.pageAccess = key
+        let allowed = SiteAccess.shared.allows(webView.url)
+        (webView as? TabWebView)?.pageConnected = allowed && key != "plain" && key != "unknown"
+        if key != "plain", !allowed, fresh == nil, webView.url.map({ ["http", "https"].contains($0.scheme?.lowercased() ?? "") }) == true {
+            reload(t, "site access: the page came back from WebKit's memory with TRIF in it, and TRIF isn't connected on its site now")
+        }
+    }
+
+    /// After a connect or a disconnect (SiteAccess.onChange). Connected: the tab shown there may be read at once (the quick
+    /// ask goes on with no reload: TRIF's kit is put in when the page is first read), and it loads again only if mods
+    /// would run there (refreshIfStale: what runs changed); tabs behind there when shown. Disconnected: TRIF stops there
+    /// at once: the tab shown loads again without TRIF (even while it plays: the person's own act), tabs behind on it let
+    /// go (each loads plain when shown). Its mods and switches are kept for when it's connected again.
+    func accessChanged(_ site: String, connected on: Bool) {
+        let on_ = { (t: Tab) -> Bool in !site.isEmpty && SiteAccess.shared.scope(t.host) == site }
+        if site.isEmpty {
+            // (the person's sensitive list changed: every tab takes its set again at its next load)
+            sensitiveSets = [:]
+            for t in tabs { t.accessVersion = -1 }
+            if let t = current, t.webView.url != nil { reload(t, "site access: the sensitive sites changed") }
+            pageChanged += 1
+            return
+        }
+        for t in tabs where on_(t) {
+            t.accessVersion = -1
+            if on {
+                if t === current {
+                    (t.webView as? TabWebView)?.pageConnected = SiteAccess.shared.allows(t.webView.url)
+                    refreshIfStale(t, "TRIF connected on \(site)", evenPlaying: false)
+                }
+            } else {
+                (t.webView as? TabWebView)?.pageConnected = false
+                if t === current { if t.webView.url != nil { reload(t, "site access: TRIF disconnected on \(site)") } }
+                else if t.started { letGo[t.id]?.cancel(); letGo[t.id] = nil; discard(t, "TRIF was disconnected on its site") }
+            }
+        }
+        pageChanged += 1
+    }
+
+    /// TRIF's kit in the shown page if it isn't there (a page loaded before its site was connected): put in when the page
+    /// is first read, so Connect needs no reload for the quick ask.
+    func ensureKit() async {
+        guard (webView as? TabWebView)?.readable == true else { return }
+        let has = await call("return String(typeof globalThis.__trifKit !== 'undefined');", in: Browser.trifWorld)
+        guard has.text == "false" else { return }
+        let e = await load(Browser.resource("kit", "js"), in: Browser.trifWorld)
+        Diagnostics.shared.log("site access", "TRIF's kit put in \(Diagnostics.place(webView.url)) as it was first read\(e.map { ": \($0)" } ?? "")")
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         tab(of: webView)?.url = webView.url
         tab(of: webView)?.reloadCause = nil
+        // (after the cause is cleared: a reload it asks for keeps its own)
+        if let t = tab(of: webView) { accessCommitted(t, webView) }
         appLinkNewLoad(webView)
         // (a new page: not drawn until it has finished, or a while has passed; its tab keeps the picture it had)
         if let t = tab(of: webView) { t.committedAt = Date(); t.finishedAt = nil }
@@ -1687,6 +1843,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// A load ended without finishing. Loading is what the web view says now (a cancelled load's replacement may
     /// already be under way, so not simply false); real failures (offline, an unknown host, a certificate) show.
     private func failed(_ webView: WKWebView, _ error: Error) {
+        // (a load that never came in: the controller back to what the page still shown may have)
+        if let t = tab(of: webView), !webView.isLoading { t.responseAccess = nil; applyAccess(t, webView.url, response: false) }
         tab(of: webView)?.loading = webView.isLoading
         if !webView.isLoading { tab(of: webView)?.reloadCause = nil }
         guard webView === self.webView else { return }

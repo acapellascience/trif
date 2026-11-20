@@ -1323,6 +1323,193 @@ function undo(state, applied) {
 module.exports = { lookOnly, sort, undo };
 
 };
+SOURCES["sensitive-default.js"] = function (module, exports, require) {
+// Made by mobile/prepare.js from extension/agentsites.js SENSITIVE_DEFAULT: don't edit. TRIF's sensitive list, [pattern, why] (desktop's, the same).
+'use strict';
+module.exports = [["mail.google.com","email"],["outlook.live.com","email"],["outlook.office.com","email"],["outlook.office365.com","email"],["mail.yahoo.com","email"],["mail.proton.me","email"],["account.proton.me","email"],["icloud.com","email and your Apple account"],["paypal.com","payments"],["dashboard.stripe.com","payments"],["wise.com","banking"],["revolut.com","banking"],["monzo.com","banking"],["n26.com","banking"],["chase.com","banking"],["wellsfargo.com","banking"],["citi.com","banking"],["capitalone.com","banking"],["americanexpress.com","banking"],["schwab.com","banking"],["fidelity.com","banking"],["vanguard.com","banking"],["hsbc.com","banking"],["barclays.co.uk","banking"],["td.com","banking"],["rbc.com","banking"],["rbcroyalbank.com","banking"],["bmo.com","banking"],["cibc.com","banking"],["tangerine.ca","banking"],["desjardins.com","banking"],["*bank*","banking"],["*.bank","banking"],["1password.com","a password manager"],["1password.ca","a password manager"],["1password.eu","a password manager"],["bitwarden.com","a password manager"],["lastpass.com","a password manager"],["dashlane.com","a password manager"],["discord.com","your messages"],["web.whatsapp.com","your messages"],["chatgpt.com","your chats with another AI"],["openai.com","your chats with another AI"],["claude.ai","your chats with another AI"],["docs.google.com","your files"],["drive.google.com","your files"],["dropbox.com","your files"],["box.com","your files"],["onedrive.live.com","your files"],["sharepoint.com","your files"],["coinbase.com","a crypto exchange"],["binance.com","a crypto exchange"],["binance.us","a crypto exchange"],["kraken.com","a crypto exchange"],["gemini.com","a crypto exchange"],["crypto.com","a crypto exchange"],["bitstamp.net","a crypto exchange"],["bitfinex.com","a crypto exchange"],["kucoin.com","a crypto exchange"],["okx.com","a crypto exchange"],["bybit.com","a crypto exchange"],["blockchain.com","a crypto exchange"],["shakepay.com","a crypto exchange"],["robinhood.com","a crypto exchange"],["wealthsimple.com","banking"],["cra-arc.gc.ca","a government account"],["clegc-gckey.gc.ca","a government account"],["services.gc.ca","a government account"],["revenuquebec.ca","a government account"],["irs.gov","a government account"],["ssa.gov","a government account"],["login.gov","a government account"],["id.me","a government account"],["account.gov.uk","a government account"],["tax.service.gov.uk","a government account"],["access.service.gov.uk","a government account"],["my.gov.au","a government account"],["ato.gov.au","a government account"],["ird.govt.nz","a government account"],["realme.govt.nz","a government account"]];
+
+};
+SOURCES["site-access.js"] = function (module, exports, require) {
+// Site access on the phones (Tim, 2026-11-20: "let's opt in per site"; docs/MOBILE-BEHAVIOUR.md, Site access): every
+// site starts disconnected, and TRIF does nothing on a disconnected site (no mods, none of TRIF's scripts, nothing read,
+// nothing sent to a chat) until the person connects it there. Connections are per device (they never sync), like Pause
+// all. Sensitive sites (TRIF's list, the desktop's: core/sensitive-default.js, made from extension/agentsites.js by
+// mobile/prepare.js; plus the person's own additions) start disconnected like every site, get one more line on the
+// card, and are each a site of their own (mail.google.com isn't google.com), as on desktop (extension/lib.js
+// "sensitive sites, each a site of its own": sensitiveHit, the same matching). Once connected, every mod starts off
+// there and a chat's free mod or change waits for the person (sensitiveAdd).
+//
+// Pure functions, JSON in and out. Both phone apps run this (mobile/shared/gen/core.js: TrifCore.siteAccess);
+// site-access-cases.json holds the answers; mobile/test/core-siteaccess.test.js checks them.
+
+'use strict';
+
+const site = require('./site.js');
+const DEFAULT = require('./sensitive-default.js');
+
+/** A host as it's compared: trimmed, lower case, without a trailing dot, a port or one leading www. */
+const clean = (h) => String(h == null ? '' : h).trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
+const isIp = (h) => /^[\d.]+$/.test(h) || h.includes(':') || h.startsWith('[');
+const esc = (s) => s.replace(/[.+?^${}()|[\]\\-]/g, '\\$&');
+const labelRe = (lab) => new RegExp(`^${lab.split('*').map(esc).join('[a-z0-9-]*')}$`);
+
+/**
+ * What the person typed as a sensitive site of their own, cleaned: a host (bank.example.com), or a pattern with `*`
+ * inside labels (`*bank*`, `*.bank`). An address is cut to its host. '' when it isn't one.
+ */
+function cleanPattern(text) {
+  let p = String(text == null ? '' : text).trim().toLowerCase();
+  p = p.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[/?#].*$/, '').replace(/:\d+$/, '').replace(/\.$/, '').replace(/^www\./, '');
+  if (!/^[a-z0-9*-]+(\.[a-z0-9*-]+)*$/.test(p)) return '';
+  // (a pattern needs letters beside its stars, or a dot: `*` alone would make every site sensitive)
+  if (p.replace(/[*.]/g, '').length < 2) return '';
+  if (!p.includes('*') && !p.includes('.')) return '';
+  return p;
+}
+
+/** The sensitive list in use: TRIF's ([pattern, why]) and then the person's own (cleaned; why ''). [{pattern, why, own}] */
+function list(own) {
+  const out = DEFAULT.map(([pattern, why]) => ({ pattern, why, own: false }));
+  const have = new Set(out.map((x) => x.pattern));
+  for (const x of Array.isArray(own) ? own : []) {
+    const p = cleanPattern(typeof x === 'string' ? x : x && x.pattern);
+    if (p && !have.has(p)) { have.add(p); out.push({ pattern: p, why: '', own: true }); }
+  }
+  return out;
+}
+
+/** Whether a sensitive pattern matches a host (agentsites.js patternMatches: a host and its subdomains; `*` in a label). */
+function patternMatches(pattern, host) {
+  const p = clean(pattern);
+  const h = String(host || '').toLowerCase();
+  if (!p || !h) return false;
+  if (!p.includes('*')) return h === p || h.endsWith(`.${p}`);
+  const labels = h.split('.');
+  const pl = p.split('.');
+  if (pl.length === 1) return labels.some((l) => labelRe(pl[0]).test(l));
+  if (labels.length < pl.length) return false;
+  const tail = labels.slice(labels.length - pl.length);
+  return pl.every((lab, i) => labelRe(lab).test(tail[i]));
+}
+
+/**
+ * The sensitive site `host` is in: {scope, why, pattern, own}, or null. `scope` is the part of the host the matching
+ * pattern names (mail.google.com for inbox.mail.google.com), or its registrable domain when that's longer (paypal.com
+ * for www.paypal.com; example.bank for `*.bank`); the shortest when several match (lib.js sensitiveHit).
+ */
+function hit(host, own) {
+  const h = clean(host);
+  if (!h || !h.includes('.') || isIp(h)) return null;
+  const reg = site.of(h);
+  let best = null;
+  for (const x of list(own)) {
+    if (!patternMatches(x.pattern, h)) continue;
+    const p = clean(x.pattern);
+    let cand = p;
+    if (p.includes('*')) {
+      const labels = h.split('.');
+      const pl = p.split('.');
+      if (pl.length === 1) {
+        // (the matching label furthest right: `*bank*` on bank.mybank.example.com is mybank.example.com)
+        const re = labelRe(pl[0]);
+        let i = labels.length - 1;
+        while (i >= 0 && !re.test(labels[i])) i--;
+        cand = labels.slice(Math.max(i, 0)).join('.');
+      } else cand = labels.slice(labels.length - pl.length).join('.');
+    }
+    if (!site.hostIsIn(cand, reg)) cand = reg;
+    if (!best || cand.length < best.scope.length) best = { scope: cand, why: x.why, pattern: x.pattern, own: x.own };
+  }
+  return best;
+}
+
+/** The site a host is in for TRIF: its sensitive site if it's in one, else its registrable domain (site.of). */
+function scope(host, own) {
+  const x = hit(host, own);
+  return x ? x.scope : site.of(clean(host));
+}
+
+/** Whether a site (as scope gives it) is a sensitive one. */
+function isSensitive(s, own) {
+  const x = hit(s, own);
+  return !!x && x.scope === clean(s);
+}
+
+/** The connected sites kept: clean, each once, sorted. */
+function sites(v) {
+  return [...new Set((Array.isArray(v) ? v : []).filter((x) => typeof x === 'string').map(clean).filter(Boolean))].sort();
+}
+
+/** Whether TRIF is connected on `host`'s site. `connected`: the sites connected on this device. */
+function connected(connectedSites, host, own) {
+  const s = scope(host, own);
+  return !!s && sites(connectedSites).includes(s);
+}
+
+/** The list after connecting / disconnecting `host`'s site. */
+function connect(connectedSites, host, own) {
+  const s = scope(host, own);
+  return s ? sites([...sites(connectedSites), s]) : sites(connectedSites);
+}
+function disconnect(connectedSites, host, own) {
+  const s = scope(host, own);
+  return sites(connectedSites).filter((x) => x !== s);
+}
+
+/**
+ * What the robot's card (and the Mods tab) says for `host`: {site, connected, sensitive, why, own}. `why` finishes
+ * "It's …" ("email", "banking"); '' for one of the person's own (the card then says it's on their list).
+ */
+function card(connectedSites, host, own) {
+  const s = scope(host, own);
+  const x = hit(host, own);
+  const sensitive = !!x && x.scope === s;
+  return { site: s, connected: connected(connectedSites, host, own), sensitive, why: sensitive ? x.why : '', own: sensitive ? !!x.own : false };
+}
+
+/**
+ * The first start of a version with site access, on a phone that had TRIF already (Tim, 11-20, confirmed): the sites
+ * with mods installed (their folders; all-sites aside) or a Home Screen icon are connected, except sensitive sites,
+ * which start disconnected like everything else (their mods kept, waiting). `already`: anything connected before.
+ * @returns {{connect: string[], waiting: string[]}} the list to keep, and the sensitive sites left waiting
+ */
+function upgrade({ modSites = [], iconSites = [], already = [], own = [] } = {}) {
+  const out = new Set(sites(already));
+  const waiting = new Set();
+  for (const h of [...(Array.isArray(modSites) ? modSites : []), ...(Array.isArray(iconSites) ? iconSites : [])]) {
+    const c = clean(h);
+    if (!c || c === 'all-sites') continue;
+    const s = scope(c, own);
+    if (!s) continue;
+    if (isSensitive(s, own)) waiting.add(s);
+    else out.add(s);
+  }
+  return { connect: [...out].sort(), waiting: [...waiting].sort() };
+}
+
+/**
+ * A mod added for a sensitive site (desktop's rules there, docs/SECURITY.md "Sensitive sites"): every mod new to this
+ * phone starts off there, whoever made it; a chat's free mod waits for the person ('free'), and so does a chat's change
+ * to a mod that's on ('change'): the version before keeps running meanwhile. Not for the person's own edits, nor
+ * imports or the computer's (they start off already, with their own marks).
+ * @param {{sensitive: boolean, isNew: boolean, source: string, tier: string, oldOn: boolean}} f
+ * @returns {{off: boolean, newOff: string|null, holds: string[]}}
+ */
+function sensitiveAdd(f) {
+  const o = f || {};
+  const none = { off: false, newOff: null, holds: [] };
+  if (!o.sensitive) return none;
+  const byChat = ['chat', 'pasted', 'quick'].includes(o.source);
+  if (o.source === 'edit' || o.source === 'import' || o.source === 'computer') return none;
+  const holds = [];
+  if (byChat && o.tier === 'free') holds.push('free');
+  if (byChat && !o.isNew && o.oldOn) holds.push('change');
+  return { off: !!o.isNew, newOff: o.isNew ? 'sensitive' : null, holds };
+}
+
+module.exports = { clean, cleanPattern, list, patternMatches, hit, scope, isSensitive, sites, connected, connect, disconnect, card, upgrade, sensitiveAdd };
+
+};
 SOURCES["site.js"] = function (module, exports, require) {
 // Sites as both apps group them: a host's registrable part (en.wikipedia.org → wikipedia.org; news.bbc.co.uk →
 // bbc.co.uk), without www., lower case; IP addresses, one-word hosts and all-sites as they are. docs/MOBILE-BEHAVIOUR.md,
@@ -1878,6 +2065,8 @@ TrifCore.modId = require("mod-id.js");
 TrifCore.modOffer = require("mod-offer.js");
 TrifCore.modStore = require("mod-store.js");
 TrifCore.quickAsk = require("quick-ask.js");
+TrifCore.sensitiveDefault = require("sensitive-default.js");
+TrifCore.siteAccess = require("site-access.js");
 TrifCore.site = require("site.js");
 TrifCore.speechText = require("speech-text.js");
 TrifCore.tabList = require("tab-list.js");

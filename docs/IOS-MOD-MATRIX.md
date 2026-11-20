@@ -99,6 +99,11 @@ chatgpt.com's ••• → Project settings: from the help pages, not seen sign
 | P4 | The project gone (deleted on the stand-in after P3; its page 404s): the next new chat is ordinary, with the full instructions; the project forgotten; no card | PASS | |
 | P5 | Claude: sent past the card without an answer: never again | PASS | offer ignored |
 | P6 | Claude: Set it up, then the form's Cancel: nothing kept, ordinary chats, no card again | PASS | setup over at the page's leaving |
+| S1 | Site access (11-20): a disconnected site's page sees nothing of TRIF; its controller 0 scripts, no handler; 10 reads refused | PASS | access.html's own report |
+| S2 | A connected page with a frame from a disconnected site: TRIF in the page, nothing in the frame | PASS | |
+| S3 | A redirect from a connected site into a disconnected one lands with nothing of TRIF | PASS | set at the response |
+| S4 | Back to a page WebKit kept with TRIF in it, after its site was disconnected: loaded again, clean | PASS | |
+| S5 | Disconnected: the quick ask stops at the card; Connect: readable at once, the quick ask fills the chat | PASS | no reload (no mods there) |
 
 With P1-P6 the same build ran A1, A2, A3, B11 and F1: PASS. On the signed-in Simulator (Tim's accounts, nothing
 created or sent): Set it up filled claude.ai's real "New project" (name, description, Create enabled; shot 566) and

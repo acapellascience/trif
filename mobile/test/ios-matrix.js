@@ -1110,6 +1110,81 @@ add('P6', 'project', 'Claude: Set it up, then the form\'s Cancel: nothing kept, 
   return [over.ok && !again && !/\/project\//.test(at) ? 'PASS' : 'FAIL', `${(over.st || '').replace(/\n/g, ' / ')}; card ${again}; at ${at}`];
 });
 
+// ---- site access (Tim 11-20: "is that disconnection actually robust?"): what access.html's OWN scripts saw of TRIF,
+// sent to serve.js's /standin-access (never through TRIF), and every way the app reads a page tried on it (readcheck)
+const reports = async (base, clear = true) => {
+  const got = await new Promise((r) => http.get(`${base}/standin-access`, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => { try { r(JSON.parse(b)); } catch (e) { r([]); } }); }).on('error', () => r([])));
+  if (clear) await new Promise((r) => http.get(`${base}/standin-access?clear`, (res) => { res.resume(); res.on('end', r); }).on('error', r));
+  return got;
+};
+/** Nothing of TRIF's in what a page's own scripts saw: no TRIF globals, no handler, no style or attribute of TRIF's. */
+const clean = (r) => r.pageStart === 'undefined' && r.free === 'undefined' && r.trifRan === 'undefined' && !r.globals.length && !r.handlers.length && r.webkit === 'undefined' && !r.trifAttrs.length && r.trifNodes === 0 && r.probeColor === 'rgb(1, 2, 3)' && r.rootBorder === '';
+const accessOf = async () => (await step({ access: 1 })).split('\n').find((l) => l.startsWith('*')) || '';
+async function landed(base, href, ms = 9000) {
+  return until(async () => { const l = (await reports(base, false)).filter((r) => r.when === 'loaded' && r.href.startsWith(href)); return { ok: l.length > 0, r: l[l.length - 1] }; }, ms, 500);
+}
+
+add('S1', 'access', 'A disconnected site: its page\'s own scripts see nothing of TRIF (no handler, no globals, no mods, no every-site mods), the tab\'s controller holds 0 scripts and no handler, every read refused', async () => {
+  await step({ disconnect: '127.0.0.1' });
+  await reports(OTHER);
+  await step({ go: `${OTHER}/access.html?s1` });
+  const l = await landed(OTHER, `${OTHER}/access.html?s1`);
+  const a = await accessOf();
+  const rc = await step({ readcheck: 1 });
+  const refused = rc.split('\n').filter((x) => /REFUSED|none/.test(x)).length;
+  await step({ connect: '127.0.0.1' });
+  return [l.ok && clean(l.r) && /controller plain 0 user script\(s\), handler off/.test(a) && refused === 10 ? 'PASS' : 'FAIL', `page saw ${JSON.stringify(l.r || {}).slice(0, 300)}; ${a}; refused ${refused}/10`];
+});
+
+add('S2', 'access', 'A connected page with a frame from a disconnected site: TRIF in the page, nothing in the frame', async () => {
+  await step({ disconnect: '127.0.0.1' });
+  await reports(BASE); await reports(OTHER);
+  await step({ go: `${BASE}/access.html?frame=${OTHER}` });
+  const top = await landed(BASE, `${BASE}/access.html?frame=`);
+  const fr = await landed(OTHER, `${OTHER}/access.html?inframe`);
+  await step({ connect: '127.0.0.1' });
+  return [top.ok && top.r.pageStart === 'object' && fr.ok && fr.r.frame && clean(fr.r) ? 'PASS' : 'FAIL', `page: start ${top.r && top.r.pageStart}; frame: ${JSON.stringify(fr.r || {}).slice(0, 260)}`];
+});
+
+add('S3', 'access', 'A redirect from a connected site to a disconnected one lands with nothing of TRIF (the controller set at the response)', async () => {
+  await step({ disconnect: '127.0.0.1' });
+  await reports(OTHER);
+  await step({ go: `${BASE}/standin-redirect?to=${encodeURIComponent(`${OTHER}/access.html?s3`)}` });
+  const l = await landed(OTHER, `${OTHER}/access.html?s3`);
+  await step({ connect: '127.0.0.1' });
+  return [l.ok && clean(l.r) ? 'PASS' : 'FAIL', JSON.stringify(l.r || {}).slice(0, 300)];
+});
+
+add('S4', 'access', 'Back to a page WebKit kept with TRIF in it, after its site was disconnected: loaded again, nothing of TRIF', async () => {
+  await step({ go: `${OTHER}/access.html?s4` });
+  const first = await landed(OTHER, `${OTHER}/access.html?s4`);
+  await step({ go: `${BASE}/plain.html` });
+  await sleep(2500);
+  await step({ disconnect: '127.0.0.1' });
+  await reports(OTHER);
+  await step({ back: true });
+  const l = await landed(OTHER, `${OTHER}/access.html?s4`);
+  await step({ connect: '127.0.0.1' });
+  return [first.ok && first.r.pageStart === 'object' && l.ok && clean(l.r) ? 'PASS' : 'FAIL', `before: start ${first.r && first.r.pageStart}; after: ${JSON.stringify(l.r || {}).slice(0, 260)}`];
+});
+
+add('S5', 'access', 'Disconnected: the robot gives the card and nothing is read; Connect: readable at once, a quick ask fills the chat', async () => {
+  await step({ disconnect: '127.0.0.1' });
+  await step({ go: `${OTHER}/access.html?s5` });
+  await landed(OTHER, `${OTHER}/access.html?s5`);
+  await step({ quick: words('S5') });
+  await sleep(1500);
+  const q0 = await step({ quickstate: 1 });
+  await step({ sheet: 'none' });
+  await step({ connect: '127.0.0.1' });
+  await sleep(1500);
+  const rc = await step({ readcheck: 1 });
+  await step({ quick: words('S5') });
+  const q = await until(async () => { const t = await step({ quickstate: 1 }); return { ok: /waitingSend/.test(t) && /in true/.test(t), t }; }, 20000, 800);
+  await step({ quickcancel: 1 });
+  return [!/waitingSend|working|starting/.test(q0) && /outline: \d+ chars/.test(rc) && q.ok ? 'PASS' : 'FAIL', `disconnected: ${q0.split('\n')[0]}; connected: ${rc.split('\n').find((x) => x.startsWith('outline'))}; ${q.t || ''}`];
+});
+
 module.exports = { step, until, launch, links, offer, modlist, ask, send, goToChat, tabs, reset, runsHere, words, modId, TAG, cases, shot, panejs, pagejs, chat, sleep, serve, cleanPrefs };
 
 async function main() {
@@ -1122,6 +1197,9 @@ async function main() {
   // (and the notes of sends a run left (SentNotes): no pickup of an earlier run's chat)
   try { fs.unlinkSync(notesFile()); } catch (e) {}
   await launch();
+  // (site access, 11-20: every site starts disconnected; the stand-ins' hosts are connected for the run, as a person
+  // would connect them; S1-S5 disconnect 127.0.0.1 for a moment and connect it again)
+  for (const h of ['localhost', '127.0.0.1']) await step({ connect: h });
   // (the last run's mods out: Mx… names)
   for (const m of await modlist()) if (/^Mx/.test(m.name)) await step({ panelmsg: { type: 'delete', id: m.id } });
   await tabs();

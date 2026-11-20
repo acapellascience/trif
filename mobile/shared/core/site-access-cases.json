@@ -1,0 +1,103 @@
+{
+ "about": "core/site-access.js (Tim 11-20, per-site opt-in on the phones; docs/MOBILE-BEHAVIOUR.md, Site access). scope: [host, own list, site]. card: [connected, host, own, {site, connected, sensitive, why, own}]. connected / connect / disconnect: [connected, host, own, answer]. cleanPattern: [typed, cleaned]. upgrade: [input, answer]. sensitiveAdd: [facts, answer]. Android's port runs the same cases.",
+ "scope": [
+  ["mail.google.com", [], "mail.google.com"],
+  ["inbox.mail.google.com", [], "mail.google.com"],
+  ["www.google.com", [], "google.com"],
+  ["news.google.com", [], "google.com"],
+  ["docs.google.com", [], "docs.google.com"],
+  ["www.paypal.com", [], "paypal.com"],
+  ["checkout.paypal.com", [], "paypal.com"],
+  ["netbank.example.com", [], "netbank.example.com"],
+  ["www.netbank.example.com", [], "netbank.example.com"],
+  ["a.netbank.example.com", [], "netbank.example.com"],
+  ["bank.mybank.example.com", [], "mybank.example.com"],
+  ["mybank.com", [], "mybank.com"],
+  ["secure.mybank.com", [], "mybank.com"],
+  ["online.td.com", [], "td.com"],
+  ["example.bank", [], "example.bank"],
+  ["www.example.bank", [], "example.bank"],
+  ["claude.ai", [], "claude.ai"],
+  ["chatgpt.com", [], "chatgpt.com"],
+  ["en.wikipedia.org", [], "wikipedia.org"],
+  ["news.bbc.co.uk", [], "bbc.co.uk"],
+  ["localhost", [], "localhost"],
+  ["127.0.0.1", [], "127.0.0.1"],
+  ["LOCALHOST:8377", [], "localhost"],
+  ["", [], ""],
+  ["intranet.corp.example.com", ["intranet.corp.example.com"], "intranet.corp.example.com"],
+  ["intranet.corp.example.com", [], "example.com"],
+  ["shop.example.com", ["*shop*"], "shop.example.com"],
+  ["x.com", ["https://www.x.com/home"], "x.com"],
+  ["mail.example.org", ["mail.example.org"], "mail.example.org"],
+  ["web.whatsapp.com", [], "web.whatsapp.com"],
+  ["www.whatsapp.com", [], "whatsapp.com"]
+ ],
+ "card": [
+  [[], "www.example.com", [], {"site": "example.com", "connected": false, "sensitive": false, "why": "", "own": false}],
+  [["example.com"], "news.example.com", [], {"site": "example.com", "connected": true, "sensitive": false, "why": "", "own": false}],
+  [[], "mail.google.com", [], {"site": "mail.google.com", "connected": false, "sensitive": true, "why": "email", "own": false}],
+  [["google.com"], "mail.google.com", [], {"site": "mail.google.com", "connected": false, "sensitive": true, "why": "email", "own": false}],
+  [["mail.google.com"], "www.google.com", [], {"site": "google.com", "connected": false, "sensitive": false, "why": "", "own": false}],
+  [[], "online.mybank.ca", [], {"site": "mybank.ca", "connected": false, "sensitive": true, "why": "banking", "own": false}],
+  [[], "claude.ai", [], {"site": "claude.ai", "connected": false, "sensitive": true, "why": "your chats with another AI", "own": false}],
+  [[], "intranet.example.com", ["intranet.example.com"], {"site": "intranet.example.com", "connected": false, "sensitive": true, "why": "", "own": true}],
+  [["localhost"], "localhost", [], {"site": "localhost", "connected": true, "sensitive": false, "why": "", "own": false}]
+ ],
+ "connected": [
+  [["example.com"], "www.example.com", [], true],
+  [["example.com"], "a.b.example.com", [], true],
+  [["example.com"], "example.org", [], false],
+  [["google.com"], "mail.google.com", [], false],
+  [["mail.google.com"], "inbox.mail.google.com", [], true],
+  [["localhost"], "127.0.0.1", [], false],
+  [[], "", [], false],
+  [["example.com"], "intranet.example.com", ["intranet.example.com"], false]
+ ],
+ "connect": [
+  [[], "www.example.com", [], ["example.com"]],
+  [["b.com"], "news.a.com", [], ["a.com", "b.com"]],
+  [["a.com"], "a.com", [], ["a.com"]],
+  [[], "inbox.mail.google.com", [], ["mail.google.com"]],
+  [[], "", [], []]
+ ],
+ "disconnect": [
+  [["a.com", "b.com"], "www.a.com", [], ["b.com"]],
+  [["google.com", "mail.google.com"], "mail.google.com", [], ["google.com"]],
+  [["a.com"], "c.com", [], ["a.com"]]
+ ],
+ "cleanPattern": [
+  ["bank.example.com", "bank.example.com"],
+  ["  HTTPS://www.Bank.Example.com/login?x=1 ", "bank.example.com"],
+  ["*bank*", "*bank*"],
+  ["*.bank", "*.bank"],
+  ["*", ""],
+  ["*.*", ""],
+  ["b*", ""],
+  ["localhost", ""],
+  ["exa mple.com", ""],
+  ["", ""],
+  ["example.com:8443", "example.com"]
+ ],
+ "upgrade": [
+  [{"modSites": ["x.com", "en.wikipedia.org", "all-sites", "mail.google.com", "google.com"], "iconSites": ["youtube.com", "www.paypal.com"], "already": []},
+   {"connect": ["google.com", "wikipedia.org", "x.com", "youtube.com"], "waiting": ["mail.google.com", "paypal.com"]}],
+  [{"modSites": [], "iconSites": [], "already": ["a.com"]}, {"connect": ["a.com"], "waiting": []}],
+  [{"modSites": ["netbank.example.com", "example.com"], "iconSites": []}, {"connect": ["example.com"], "waiting": ["netbank.example.com"]}],
+  [{"modSites": ["intranet.example.com"], "iconSites": [], "own": ["intranet.example.com"]}, {"connect": [], "waiting": ["intranet.example.com"]}]
+ ],
+ "sensitiveAdd": [
+  [{"sensitive": false, "isNew": true, "source": "chat", "tier": "free", "oldOn": false}, {"off": false, "newOff": null, "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "chat", "tier": "style", "oldOn": false}, {"off": true, "newOff": "sensitive", "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "chat", "tier": "boxed", "oldOn": false}, {"off": true, "newOff": "sensitive", "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "chat", "tier": "free", "oldOn": false}, {"off": true, "newOff": "sensitive", "holds": ["free"]}],
+  [{"sensitive": true, "isNew": false, "source": "chat", "tier": "style", "oldOn": true}, {"off": false, "newOff": null, "holds": ["change"]}],
+  [{"sensitive": true, "isNew": false, "source": "chat", "tier": "free", "oldOn": true}, {"off": false, "newOff": null, "holds": ["free", "change"]}],
+  [{"sensitive": true, "isNew": false, "source": "chat", "tier": "style", "oldOn": false}, {"off": false, "newOff": null, "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "link", "tier": "free", "oldOn": false}, {"off": true, "newOff": "sensitive", "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "import", "tier": "free", "oldOn": false}, {"off": false, "newOff": null, "holds": []}],
+  [{"sensitive": true, "isNew": false, "source": "edit", "tier": "free", "oldOn": true}, {"off": false, "newOff": null, "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "computer", "tier": "style", "oldOn": false}, {"off": false, "newOff": null, "holds": []}],
+  [{"sensitive": true, "isNew": true, "source": "pasted", "tier": "free", "oldOn": false}, {"off": true, "newOff": "sensitive", "holds": ["free"]}]
+ ]
+}

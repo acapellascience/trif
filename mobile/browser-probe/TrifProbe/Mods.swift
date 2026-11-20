@@ -408,8 +408,15 @@ final class ModStore: ObservableObject {
 
     /// The mods switched on, not held (a change on hold: its version before), whose @match covers this address.
     /// (ModRuns.running: a Swift twin of the shared rule, as it's asked several times on every page load)
+    /// Site access (Tim 11-20): nothing runs on a site TRIF isn't connected on, and on a connected sensitive site only
+    /// the mods kept under it (Browser.accessKey: what the page is given is the same).
     func running(on url: String) -> [InstalledMod] {
-        ModRuns.running(mods.map(\.runFacts), paused: paused, groupsOff: groupsOff, url: url).map { mods[$0.i] }
+        let u = URL(string: url)
+        guard SiteAccess.shared.allows(u) else { return [] }
+        let all = ModRuns.running(mods.map(\.runFacts), paused: paused, groupsOff: groupsOff, url: url).map { mods[$0.i] }
+        let c = SiteAccess.shared.card(SiteAccess.host(u))
+        guard c.sensitive, u?.scheme?.lowercased() != PageSchemeHandler.scheme else { return all }
+        return all.filter { SiteAccess.shared.scope($0.site) == c.site }
     }
 
     /// What runs on a page at `url`, as one string (each mod running there and the version of it that runs): a page
@@ -434,12 +441,28 @@ final class ModStore: ObservableObject {
     /// mods whose key isn't in `built`); `userScripts(from:)` then makes the WKUserScripts on the main thread, each
     /// mod's kept with its key, so an unchanged mod costs nothing the next time.
     struct ScriptPlan: Sendable {
-        struct One: Sendable { var key: String; var script: String; var world: String; var at: String; var style: String; var off: [String] }
+        struct One: Sendable {
+            var key: String; var script: String; var world: String; var at: String; var style: String; var off: [String]
+            /// the folder it's kept under (a host, or all-sites), and its site-data bridge's [matches, excludes], if any
+            var site: String = ""
+            var bridge: [[String]]? = nil
+        }
         var mods: [One] = []
         var mirrorTrif = false, free = false, box = false
         var bridged: [[[String]]] = []
         /// What it puts in, as one string: the same shape, the same scripts.
         var shape: String { "\(mirrorTrif)\(free)\(box)|\(bridged)|" + mods.map(\.key).joined(separator: ",") }
+        /// The plan for some of its mods only (a sensitive site's own: Browser.sensitiveScripts), its shared parts
+        /// worked out again for those.
+        func only(_ keep: (One) -> Bool) -> ScriptPlan {
+            var p = ScriptPlan()
+            p.mods = mods.filter(keep)
+            p.mirrorTrif = p.mods.contains { $0.world == "trif" || !$0.style.isEmpty }
+            p.free = free && p.mods.contains { $0.world == "page" }
+            p.box = p.mods.contains { $0.world == "box" }
+            p.bridged = p.mods.compactMap(\.bridge)
+            return p
+        }
     }
     /// One mod's texts: (source, at the start, world).
     typealias BuiltScripts = [(source: String, start: Bool, world: String)]
@@ -459,7 +482,8 @@ final class ModStore: ObservableObject {
         // change's version before: the power in the grant its script carries). It wraps fetch and XMLHttpRequest only
         // once such a mod asks for a filter; what a filter gives back is checked in the box world (remove or reorder
         // only), and anything else leaves the site's response as it was.)
-        plan.bridged = list.filter { m, script, world, _, _ in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
+        let bridges = { (m: InstalledMod, script: String, world: String) -> Bool in world == "box" && (m.held ? script.contains("\"site-data\"") : m.powers.contains("site-data")) }
+        plan.bridged = list.filter { m, script, world, _, _ in bridges(m, script, world) }
             .map { [$0.0.matches, $0.0.excludes] }
         var seen: [String: PlanKey] = [:]
         for (m, script, world, at, style) in list {
@@ -474,7 +498,8 @@ final class ModStore: ObservableObject {
                 key = "\(m.id)#\(h.finalize())"
             }
             seen[m.id] = PlanKey(script: script, style: style, world: world, at: at, off: off, key: key)
-            plan.mods.append(.init(key: key, script: script, world: world, at: at, style: style, off: off))
+            plan.mods.append(.init(key: key, script: script, world: world, at: at, style: style, off: off, site: m.site,
+                                   bridge: bridges(m, script, world) ? [m.matches, m.excludes] : nil))
         }
         planKeys = seen
         return plan
@@ -515,7 +540,9 @@ final class ModStore: ObservableObject {
     private var bridgeScript: (pairs: [[[String]]], script: WKUserScript)?
 
     /// The WKUserScripts for a plan, with the texts `fresh` built for mods new or changed since (main thread).
-    func userScripts(from plan: ScriptPlan, fresh: [String: BuiltScripts]) -> [WKUserScript] {
+    /// `remember`: the plan is the whole one, and its scripts are kept for the next (false for part of one: a sensitive
+    /// site's own set).
+    func userScripts(from plan: ScriptPlan, fresh: [String: BuiltScripts], remember: Bool = true) -> [WKUserScript] {
         var out: [WKUserScript] = []
         // (first in each world with a mod: a style element the page's policy refuses still applies: Web/style-mirror.js;
         // TRIF's world has a free mod's style section too)
@@ -541,7 +568,7 @@ final class ModStore: ObservableObject {
             keep[m.key] = scripts
             out += scripts
         }
-        built = keep
+        if remember { built = keep }
         return out
     }
     /// All at once, on the main thread (the app's start: the scripts must be there before any page).
@@ -565,6 +592,18 @@ final class ModStore: ObservableObject {
         // (an edit is the record it edits: saveEdit stamped its text already; the computer's copy is never moved or stamped)
         var m = source == "computer" || source == "edit" ? new : placed(new, byName: false, source: source)
         let date = Date()
+        // (site access, Tim 11-20, desktop's sensitive rules: on a sensitive site every mod new here starts off, and a
+        // chat's free mod, or its change to a mod that's on, waits for the person: core siteAccess.sensitiveAdd)
+        let before = mods.first { $0.id == m.id }
+        let sens = SiteAccess.shared.sensitiveAdd(site: m.site, isNew: before == nil, source: source, tier: m.tier, oldOn: before?.on ?? false)
+        if !sens.holds.isEmpty {
+            let where_ = SiteAccess.shared.scope(m.site)
+            for h in sens.holds where !m.extraNeeds.contains(where: { $0.key == "sensitive:\(h)" }) {
+                m.extraNeeds.append(ModNeed(key: "sensitive:\(h)", fact: h == "free"
+                    ? "is a free mod from a chat, and \(where_) is a sensitive site: there a chat may only make style mods and boxed mods"
+                    : "is a chat\u{2019}s change to a mod on \(where_), a sensitive site: there each change a chat makes waits for you", lines: [m.hash]))
+            }
+        }
         if let i = mods.firstIndex(where: { $0.id == m.id }) {
             let old = mods[i]
             var facts = m.holdFacts
@@ -583,6 +622,10 @@ final class ModStore: ObservableObject {
         } else {
             let r = ModChanges.add(old: nil, new: (m.holdFacts, m.on, m.newOff), source: source, at: date, changed: true)
             m.source = r.source; m.on = r.on; m.newOff = r.newOff
+            if sens.off {
+                m.on = false; m.newOff = sens.newOff
+                Diagnostics.shared.log("site access", "\(m.id) added off: \(SiteAccess.shared.scope(m.site)) is a sensitive site")
+            }
             mods.append(m)
         }
         save()

@@ -1141,6 +1141,8 @@ final class PanelChat: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
 
     private func outline(_ run: Run, max: Int = 6000) async -> String? {
         guard let wv = run.tab else { return nil }
+        // (a page loaded before its site was connected has no kit yet: put in, as the chat's outline does)
+        if let browser, wv === browser.webView { await browser.ensureKit() }
         let r = await PanelChat.js(wv, "return JSON.stringify(globalThis.__trifKit.outline(\(max), 300));", [:], Browser.trifWorld)
         guard let o = Browser.parse(r.text) as? [String: Any], let text = o["text"] as? String else { return nil }
         return o["partial"] as? Bool == true ? text + "\n(Partial: the page is big, so the outline stopped early. read_page with a selector shows more.)" : text

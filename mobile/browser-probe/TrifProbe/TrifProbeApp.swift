@@ -27,6 +27,44 @@ struct TrifProbeApp: App {
 /// The app's three long-lived parts, made once, in order.
 @MainActor
 final class Model: ObservableObject {
+
+    /// (development, site access) the connected sites and each tab's set: its controller's user scripts, TRIF's handler,
+    /// the page's set and whether TRIF may read it.
+    static func accessState(_ browser: Browser) -> String {
+        var lines = ["connected: \(SiteAccess.shared.sites)", "own sensitive: \(SiteAccess.shared.own)", "scripts made: \(browser.connectedScripts.count) (set \(browser.scriptsVersion))"]
+        for (i, t) in browser.tabs.enumerated() {
+            let n = t.webView.configuration.userContentController.userScripts.count
+            let c = SiteAccess.shared.card(t.host)
+            lines.append("\(t === browser.current ? "*" : " ")tab \(i) \(t.host.isEmpty ? "-" : t.host): site \(c.site) connected \(c.connected) sensitive \(c.sensitive); controller \(t.accessKey ?? "unset") \(n) user script(s), handler \(t.handlerOn ? "on" : "off"); page \(t.pageAccess), readable \((t.webView as? TabWebView)?.readable ?? false)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// (development, site access) every way the app reads a page, tried on the shown tab through its web view: each is
+    /// refused (TRIF.disconnected) on a page TRIF isn't connected on.
+    static func readCheck(_ browser: Browser) async -> String {
+        let wv = browser.webView
+        var out: [String] = []
+        func said(_ e: Error?) -> String { (e as NSError?).map { $0.domain == TabWebView.refusedDomain ? "REFUSED" : "error \($0.domain) \($0.code)" } ?? "ran" }
+        do { _ = try await wv.callAsyncJavaScript("return 1", arguments: [:], in: nil, contentWorld: Browser.trifWorld); out.append("trif world script: ran") } catch { out.append("trif world script: \(said(error))") }
+        do { _ = try await wv.callAsyncJavaScript("return 1", arguments: [:], in: nil, contentWorld: .page); out.append("page world script: ran") } catch { out.append("page world script: \(said(error))") }
+        do { _ = try await wv.evaluateJavaScript("1", in: nil, contentWorld: Browser.boxWorld); out.append("box world evaluate: ran") } catch { out.append("box world evaluate: \(said(error))") }
+        let e1: Error? = await withCheckedContinuation { c in wv.evaluateJavaScript("1") { _, e in c.resume(returning: e) } }
+        out.append("plain evaluate: \(said(e1))")
+        let shot: (UIImage?, Error?) = await withCheckedContinuation { c in wv.takeSnapshot(with: nil) { i, e in c.resume(returning: (i, e)) } }
+        out.append("screenshot: \(shot.0 != nil ? "taken" : said(shot.1))")
+        let pdf: Error? = await withCheckedContinuation { c in wv.createPDF { r in if case .failure(let e) = r { c.resume(returning: e) } else { c.resume(returning: nil) } } }
+        out.append("pdf: \(said(pdf))")
+        let arch: Error? = await withCheckedContinuation { c in wv.createWebArchiveData { r in if case .failure(let e) = r { c.resume(returning: e) } else { c.resume(returning: nil) } } }
+        out.append("web archive: \(said(arch))")
+        let o = await browser.outline()
+        out.append("outline: \(o == nil ? "none (\(browser.status))" : "\(o!.chars) chars")")
+        let p = await browser.pageForChat()
+        out.append("page for chat: \(p == nil ? "none" : "\(p!.count) chars")")
+        let q = await browser.quickScreenshot()
+        out.append("quick screenshot: \(q == nil ? "none" : "taken")")
+        return out.joined(separator: "\n")
+    }
     let report: Report
     let browser: Browser
     let pane: ClaudePane
@@ -349,6 +387,24 @@ extension Model {
         // ({"rebuild": {"n": 5, "on": true}}: every mod switched on first (with "on"), then n changes to the mods in a
         // row, as the Mods tab's switches make them: the main thread's time for each and the hangs meanwhile)
         if let o = step["rebuild"] as? [String: Any] { out = await Model.rebuildCheck(browser: browser, n: o["n"] as? Int ?? 5, allOn: o["on"] as? Bool ?? false) }
+        // (site access, 11-20: {"connect": "host or address"} / {"disconnect": …} as the card's Connect and ⋯'s Disconnect;
+        // {"access": 1}: the connected sites, the person's own sensitive ones, and each tab's set (its controller's user
+        // scripts, TRIF's handler on it, the page's set, readable); {"readcheck": 1}: every way of reading the shown page
+        // tried through the tab's web view, what came back; {"sensitiveown": "pattern" | "-pattern"}; {"accessupgrade":
+        // 1}: the first-start rule run again (its flag cleared) with today's mods and icons)
+        if let h = step["connect"] as? String { SiteAccess.shared.connect(URL(string: h)?.host ?? h, why: "development step"); out = "connected: \(SiteAccess.shared.sites)" }
+        if let h = step["disconnect"] as? String { SiteAccess.shared.disconnect(URL(string: h)?.host ?? h, why: "development step"); out = "connected: \(SiteAccess.shared.sites)" }
+        if let p = step["sensitiveown"] as? String {
+            if p.hasPrefix("-") { SiteAccess.shared.removeOwn(String(p.dropFirst())); out = "own: \(SiteAccess.shared.own)" }
+            else { out = SiteAccess.shared.addOwn(p) ? "own: \(SiteAccess.shared.own)" : "refused" }
+        }
+        if step["accessupgrade"] != nil {
+            UserDefaults.standard.set(false, forKey: "siteAccess.upgraded")
+            if let keep = step["keep"] as? [String] { UserDefaults.standard.set(keep, forKey: "connectedSites") }
+            out = "run at next launch; connected now \(SiteAccess.shared.sites)"
+        }
+        if step["access"] != nil { out = Model.accessState(browser) }
+        if step["readcheck"] != nil { out = await Model.readCheck(browser) }
         // ({"tabjs": "…", "tab": n}: JavaScript in tab n's page, shown or not)
         if let js = step["tabjs"] as? String, let n = step["tab"] as? Int, n < browser.tabs.count {
             do { out = "\(try await browser.tabs[n].webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
@@ -505,10 +561,21 @@ struct ContentView: View {
     @ObservedObject private var unread = UnreadCounts.shared
     @ObservedObject private var folder = FolderWatch.shared
     @State private var importing = false
+    /// Site access (Tim 11-20): the connections, the person's sensitive sites, the one-time note.
+    @ObservedObject private var access = SiteAccess.shared
+    @State private var showSensitive = false
+    /// The shown tab's website's host ("" for no website): the robot's card is for it.
+    private var webHost: String {
+        guard let u = browser.webView.url ?? browser.current?.savedURL, ["http", "https"].contains(u.scheme?.lowercased() ?? "") else { return "" }
+        return SiteAccess.host(u)
+    }
+    /// The shown tab is a website TRIF isn't connected on: the robot is drawn quieter, and anything that would read the
+    /// page shows the card.
+    private var disconnectedHere: Bool { let _ = access.changes; return !webHost.isEmpty && !access.isConnected(webHost) }
 
     /// Mods waiting for the user's OK on this site (the Mods button's badge, as the panel's waiting badge).
     private var waitingHere: Int {
-        browser.mods.mods.filter { $0.held && ($0.everywhere || Site.of($0.site) == browser.site || $0.sites.contains { Site.of($0) == browser.site }) }.count
+        browser.mods.mods.filter { $0.held && ($0.everywhere || SiteAccess.shared.scope($0.site) == browser.site || $0.sites.contains { SiteAccess.shared.scope($0) == browser.site }) }.count
     }
 
     var body: some View {
@@ -735,6 +802,8 @@ struct ContentView: View {
             }
         }
         .onChange(of: browser.wantsChat) { _, want in if want { pane.open(); browser.wantsChat = false } }
+        // (site access: something asked for TRIF on a page it isn't connected on: the robot's card)
+        .onChange(of: browser.wantsConnectCard) { _, want in if want { browser.wantsConnectCard = false; closeCovers(); showChatList = true } }
         .onChange(of: browser.hideChat) { _, _ in pane.close() }
         // (the next of a reply's mods once the Mods tab, opened for one that waits for an OK, has closed)
         .onChange(of: showMods) { _, open in if !open { browser.holdFromChat = false; nextOfferSoon() } }
@@ -800,13 +869,20 @@ struct ContentView: View {
         .sheet(isPresented: $showChecks) { ChecksView().environmentObject(browser).environmentObject(report) }
         .sheet(isPresented: $showReport) { ReportView().environmentObject(report) }
         .sheet(isPresented: $showHistory) { HistoryView(history: browser.history).environmentObject(browser) }
+        .sheet(isPresented: $showSensitive) { SensitiveSitesView() }
+        // (site access: the one-time note for a phone that had TRIF before it)
+        .alert("TRIF now connects site by site", isPresented: Binding(get: { access.upgradeNote }, set: { if !$0 { access.noteSeen() } })) {
+            Button("OK") { access.noteSeen() }
+        } message: {
+            Text("TRIF does nothing on a site until you connect it there: tap the robot and Connect. Sites where you have mods or a Home Screen icon are connected already. Sensitive sites, such as email and banking, start disconnected; their mods wait.")
+        }
         .sheet(isPresented: $showChatList) {
             ChatListView(pane: pane, site: browser.site,
                          ask: { text in showChatList = false; closeCovers(); pane.quickAsk(text) },
                          goToChat: { showChatList = false; closeCovers(); pane.open() },
                          open: { key in showChatList = false; closeCovers(); pane.openChat(key) },
                          go: { key in showChatList = false; closeCovers(); pane.goToSite(key) },
-                         close: { showChatList = false })
+                         close: { showChatList = false }, host: webHost)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $browser.modOffer, onDismiss: nextOfferSoon) { mod in ModOfferView(mod: mod).environmentObject(browser) }
@@ -939,6 +1015,11 @@ struct ContentView: View {
             Button { onTab { pickingFolder = true } } label: { Label(folder.folderName.map { "Mods folder: \($0)…" } ?? "Watch a folder for mods…", systemImage: "folder.badge.gearshape") }
             if let name = folder.folderName { Button("Stop watching \(name)", role: .destructive) { folder.stop() } }
             Button { onTab { askingProject = true } } label: { Label(pane.service.project == nil ? "Keep TRIF chats in a project…" : "TRIF chats' project…", systemImage: "folder") }
+            // (site access, Tim 11-20: as desktop's Disconnect; the site's mods and switches are kept)
+            if !webHost.isEmpty, !disconnectedHere {
+                Button(role: .destructive) { onTab { SiteAccess.shared.disconnect(webHost, why: "the ⋯ menu") } } label: { Label("Disconnect from \(browser.site)", systemImage: "bolt.horizontal.circle") }
+            }
+            Button { onTab { showSensitive = true } } label: { Label("Sensitive sites…", systemImage: "lock.shield") }
             // (as Safari's page menu, Tim 11-18: the site as a computer's, remembered for the site; the other way back)
             if browser.canRequestDesktop {
                 Button { onTab { browser.requestDesktop(!browser.desktopShown) } } label: {
@@ -1144,6 +1225,13 @@ struct ContentView: View {
 
     private func robotHold() {
         robotHeld = true
+        // (site access: on a site TRIF isn't connected on, the hold doesn't listen: the card, as the tap)
+        if disconnectedHere {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Diagnostics.shared.log("quick ask", "robot held on \(browser.site): TRIF isn't connected there; the card")
+            showChatList = true
+            return
+        }
         let speech = SpeechInput.shared
         guard speech.ready else {
             // (no permission yet, refused, or no speech on this iPhone: the list, whose box says why or asks)
@@ -1202,6 +1290,8 @@ struct ContentView: View {
                 if pane.shown { pane.close() } else if pane.strip { pane.open() } else { showChatList = true }
             } label: {
                 ChatGlyph(activity: pane.activity).frame(width: 24, height: 24)
+                    // (site access: a quieter robot on a site TRIF isn't connected on; my call, for Tim)
+                    .opacity(disconnectedHere && !pane.shown ? 0.4 : 1)
                     .padding(5)
                     .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.trifGreen.opacity(pane.shown ? 0.2 : 0)))
                     .padding(-5)
@@ -1220,6 +1310,7 @@ struct ContentView: View {
                 }
             }
             .accessibilityLabel(pane.activity == .working ? "Chat, writing a reply" : pane.activity == .replied ? "Chat, replied" : "Chat")
+            .accessibilityValue(disconnectedHere ? "TRIF is disconnected on \(browser.site)" : "")
             .accessibilityHint("Opens What should change? and the chats")
             .accessibilityAddTraits(pane.shown ? .isSelected : [])
             .accessibilityAction(named: "Go to chat") { closeCovers(); pane.open() }

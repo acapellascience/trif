@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Site access's stand-in (11-20): what this page's OWN scripts can see of TRIF, sent to serve.js's /standin-access
+     (never through TRIF). `?frame=<origin>`: it embeds itself from that origin (a frame from another site). A style
+     mod for its site colours #probe; TRIF's page-world start script leaves window.__trifProbePageStart; a mod leaves
+     __trifRan in its world (here: a free mod in the page's). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access stand-in</title>
+<style>body { font: 17px/1.5 -apple-system, sans-serif; padding: 16px; } #probe { color: rgb(1, 2, 3); } iframe { width: 100%; height: 220px; border: 1px solid #ccc; }</style>
+</head>
+<body>
+<h1 id="probe">Access stand-in</h1>
+<p>A page whose own scripts report what they can see of TRIF. <a id="other" href="#">Same page, another site</a></p>
+<label>Password <input type="password" id="pw" value=""></label>
+<div id="frames"></div>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  const frameOf = q.get('frame');
+  if (frameOf) {
+    const f = document.createElement('iframe');
+    f.src = frameOf.replace(/\/$/, '') + '/access.html?inframe=1';
+    document.getElementById('frames').append(f);
+  }
+  const has = (n) => { try { return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers[n]); } catch (e) { return false; } };
+  const report = (when) => {
+    const root = document.documentElement;
+    const r = {
+      when, href: location.href, frame: window.top !== window,
+      pageStart: typeof window.__trifProbePageStart, trifRan: Array.isArray(window.__trifRan) ? window.__trifRan.slice() : typeof window.__trifRan,
+      free: typeof window.__trifFree, bridge: typeof window.__trifBridge, modErrors: typeof window.__trifModErrors,
+      globals: Object.getOwnPropertyNames(window).filter((k) => /trif/i.test(k)),
+      webkit: typeof window.webkit, handlers: ['trif', 'app', 'panel', 'chat'].filter(has),
+      probeColor: getComputedStyle(document.getElementById('probe')).color,
+      trifAttrs: [...root.attributes].map((a) => a.name).filter((n) => /trif/i.test(n)),
+      trifNodes: document.querySelectorAll('[data-trif], [id^="trif"], [class*="trif"]').length,
+      sheets: document.styleSheets.length, adopted: (document.adoptedStyleSheets || []).length,
+      styles: document.querySelectorAll('style').length,
+      bodyBg: getComputedStyle(document.body).backgroundColor, rootFilter: getComputedStyle(root).filter, rootBorder: root.style.borderRight,
+    };
+    fetch('/standin-access', { method: 'POST', body: JSON.stringify(r) }).catch(() => {});
+  };
+  report('start');
+  addEventListener('load', () => setTimeout(() => report('loaded'), 1500));
+})();
+</script>
+</body>
+</html>

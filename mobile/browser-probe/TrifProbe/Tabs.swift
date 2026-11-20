@@ -62,6 +62,17 @@ final class Tab: ObservableObject, Identifiable {
     var reloadCause: String?
     /// Why its page was let go in the background (Browser.discard): said when it loads again on being shown.
     var letGoWhy: String?
+    /// Site access (Tim 11-20; Browser.applyAccess): which of TRIF's sets its content controller holds now ("plain":
+    /// nothing of TRIF's; nil: not set up yet) and of which making, whether TRIF's message handler is on it, the set
+    /// the navigation under way was answered with at its response (nil: none yet: a page WebKit brings back from its
+    /// back/forward memory has no response), and the set each back/forward item's page was loaded with.
+    var accessKey: String?
+    var accessVersion = -1
+    var handlerOn = false
+    var responseAccess: String?
+    let itemAccess = NSMapTable<WKBackForwardListItem, NSString>.weakToStrongObjects()
+    /// The set the page now in it was loaded with ("plain", "all", "sens:<site>"; "unknown").
+    var pageAccess = "unknown"
 
     init(id: UUID = UUID(), webView: WKWebView, title: String = "", url: URL? = nil) {
         self.id = id
@@ -162,7 +173,11 @@ final class TabShots {
         cfg.afterScreenUpdates = false
         let id = tab.id
         let path = file(id)
-        wv.takeSnapshot(with: cfg) { [weak tab, weak wv] image, error in
+        // (the tab list's own picture, kept on the phone: taken on a disconnected page too, TabWebView.tabPicture)
+        let snap: (WKSnapshotConfiguration?, @escaping @MainActor @Sendable (UIImage?, (any Error)?) -> Void) -> Void = { c, done in
+            if let t = wv as? TabWebView { t.tabPicture(c, done) } else { wv.takeSnapshot(with: c, completionHandler: done) }
+        }
+        snap(cfg) { [weak tab, weak wv] image, error in
             guard let tab, let wv else { return }
             guard let image, image.size.width > 1 else {
                 Diagnostics.shared.log("tab shot", "\(host) (\(why)): WebKit gave no picture\(error.map { ": \($0.localizedDescription)" } ?? ""); the one before is kept")
@@ -171,7 +186,9 @@ final class TabShots {
             Task { @MainActor in
                 // (a sign-in form on any site: a password field showing, asked in TRIF's world; a page that doesn't
                 // answer within a second counts as having none)
-                if await PrivatePages.passwordShowing(wv) { self.drop(tab, "\(host) (\(why)): not taken, a password field shows"); return }
+                // (only where TRIF is connected: asking means running a script in the page, which a disconnected page
+                // never gets; there the address rules above stand alone)
+                if (wv as? TabWebView)?.readable != false, await PrivatePages.passwordShowing(wv) { self.drop(tab, "\(host) (\(why)): not taken, a password field shows"); return }
                 if TabShots.oneColour(image) {
                     self.last[id] = nil
                     Diagnostics.shared.log("tab shot", "\(host) (\(why)): not kept, all one colour (not drawn yet?); the one before is kept")
@@ -310,10 +327,12 @@ enum PrivatePages {
     }()
 
     /// Why a page isn't pictured, or nil.
-    static func why(_ url: URL) -> String? {
+    @MainActor static func why(_ url: URL) -> String? {
         let host = (url.host ?? "").lowercased().replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
         guard !host.isEmpty else { return nil }
         if let hit = sensitive.first(where: { matches($0.0, host) }) { return "a sensitive site (\(hit.1.isEmpty ? hit.0 : hit.1))" }
+        // (the person's own sensitive sites too, site access 11-20)
+        if SiteAccess.shared.card(host).sensitive { return "a sensitive site (on your list)" }
         if signIn.contains(where: { host == $0 || host.hasSuffix("." + $0) }) { return "a sign-in page" }
         let path = url.path
         if signInPath.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil { return "a sign-in page" }

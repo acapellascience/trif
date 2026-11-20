@@ -628,7 +628,17 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// The chat button: the chat for the shown tab's site, full screen. In a chat that isn't writing a reply, the tab's
     /// data goes into the message box (fillContext); at a reply waiting to be read, it opens there. `then`: one more
     /// thing to put in the message box after.
+    /// Site access (Tim 11-20): a website TRIF isn't connected on: the robot's card instead (ContentView shows it), and
+    /// nothing of the page read, nothing sent. True when it stopped.
+    private func disconnectedHere(_ what: String) -> Bool {
+        guard let browser, browser.webView.url?.scheme.map({ ["http", "https"].contains($0.lowercased()) }) == true, !browser.connectedHere else { return false }
+        report.log("claude", "\(what) on \(browser.site): TRIF isn't connected there; the card instead")
+        browser.wantsConnectCard = true
+        return true
+    }
+
     func open(then extra: (() async -> Void)? = nil) {
+        if disconnectedHere("the chat") { return }
         Diagnostics.shared.mark("opening the chat")
         // (More: the side panel's chat, which has its own context and fills nothing)
         if more {
@@ -740,7 +750,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// The conversation it'll be for is the one the chat is showing or loading: a follow-up if TRIF's instructions
     /// are already in it, else the instructions. The text and the screenshot are gathered side by side.
     private func prepare(_ v: ChatView) -> Prepared? {
-        guard let browser else { return nil }
+        // (site access: nothing of a page TRIF isn't connected on is gathered, the screenshot neither)
+        guard let browser, browser.connectedHere else { return nil }
         let conv = ClaudePane.conversation(of: v.loading ? v.requested : v.webView.url)
         let followUp = conv.map { hasContext($0) && ClaudePane.owner(of: $0) == browser.site } ?? false
         let sw = Stopwatch("\(followUp ? "the follow-up" : "the instructions") for \(browser.host.isEmpty ? "a new tab" : browser.host)")
@@ -1401,6 +1412,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func quickAsk(_ raw: String) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if disconnectedHere("a quick ask") { return }
         guard let browser, !tabSite.isEmpty, browser.webView.url?.scheme?.hasPrefix("http") == true else {
             quick = QuickAsk(request: text, service: more ? "More" : service.rawValue, site: "", key: "", state: .failed("Open a website first, then ask."))
             return
@@ -1593,7 +1605,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             guard let self else { return }
             if let v { self.fillRefusal(v, r) } else { self.panel.fillInput(r.request) }
         })
-        let sorted = QuickAskRules.sort(offered.map(\.quickFacts), chatSite: site)
+        var sorted = QuickAskRules.sort(offered.map(\.quickFacts), chatSite: site)
+        // (site access: on a sensitive site nothing is added by itself: each mod gets its card, and starts off there)
+        if SiteAccess.shared.card(site.hasPrefix("phone~") ? String(site.dropFirst(6)) : site).sensitive, !sorted.look.isEmpty {
+            sorted.rest = sorted.look + sorted.rest; sorted.look = []; sorted.state = "card"
+        }
         let s = sorted.site
         // (offered ids are one each: offerFromChat keeps a mod's last block)
         let look = offered.filter { sorted.look.contains($0.id) }
@@ -2552,6 +2568,17 @@ struct ChatListView: View {
     let open: (String) -> Void
     let go: (String) -> Void
     let close: () -> Void
+    /// The shown tab's page's host, when it's a website (site access: the card instead of the box on a site TRIF isn't
+    /// connected on, Tim 11-20); "" for no website (a new tab, TRIF's own pages): the list as ever.
+    var host: String = ""
+    @ObservedObject private var access = SiteAccess.shared
+    /// Disconnected here: the card ("TRIF is disconnected on {site}." Connect, Tim's words) in place of the box and Go to
+    /// chat; Connect connects the site and the box comes straight up, in the same sheet.
+    private var card: SiteAccess.Card? {
+        guard !host.isEmpty else { return nil }
+        let c = access.card(host)
+        return c.connected ? nil : c
+    }
 
     /// (this tab's site's chat, if it has one: its state on Go to chat)
     private var mine: ChatLink? { site.isEmpty ? nil : pane.links.first { $0.site == site } }
@@ -2579,6 +2606,12 @@ struct ChatListView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let c = card {
+                    Section {
+                        DisconnectedCard(card: c) { SiteAccess.shared.connect(host, why: "the robot's card") }
+                            .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                    }
+                } else {
                 Section {
                     QuickAskBox(ask: ask).listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 12))
                     // (Tim, 11-18: the robot's tap opens this list now; the full chat is one tap further, here, first)
@@ -2601,6 +2634,7 @@ struct ChatListView: View {
                     .accessibilityLabel(mine?.state == .waiting ? "Go to chat, reply waiting" : "Go to chat")
                     .accessibilityValue(goWords.line)
                     .accessibilityHint(pane.engineLabel.fix != nil ? "Opens what needs setting up" : "Opens the whole chat for this page")
+                }
                 }
                 Section {
                 if pane.links.isEmpty {
@@ -2641,12 +2675,35 @@ struct ChatListView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: close).accessibilityHint("Closes without sending. Your words stay in the box")
                 }
-                ToolbarItem(placement: .confirmationAction) { QuickSendButton(ask: ask) }
+                ToolbarItem(placement: .confirmationAction) { if card == nil { QuickSendButton(ask: ask) } }
             }
         }
         // (More's engine and model looked at again: a key or a model changed since)
         .onAppear { pane.refreshEngineLabel() }
         // (the list closed mid-listen (a tap on the microphone): stopped, nothing asked, the words kept in the box)
         .onDisappear { SpeechInput.shared.interrupt(why: "the list closed") }
+    }
+}
+
+
+/// The robot's card on a site TRIF isn't connected on (Tim, 11-20: "TRIF is disconnected on example.com. [Connect]",
+/// approved): the line, a sensitive site's reason (a draft), and Connect. Nothing of the page is read or sent before it.
+struct DisconnectedCard: View {
+    let card: SiteAccess.Card
+    let connect: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                ChatGlyph(activity: .idle).frame(width: 22, height: 22).foregroundStyle(.secondary).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(SiteAccess.disconnectedLine(card.site)).font(.subheadline.weight(.semibold))
+                    if let why = SiteAccess.sensitiveLine(card) { Text(why).font(.footnote).foregroundStyle(.secondary) }
+                }
+            }
+            Button(action: connect) { Text("Connect").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity) }
+                .buttonStyle(.borderedProminent).tint(Color.trifGreen)
+                .accessibilityHint("Connects TRIF on \(card.site)")
+        }
+        .accessibilityElement(children: .contain)
     }
 }

@@ -1238,6 +1238,23 @@
   }
 
   // ---- from the app ----------------------------------------------------------------------------------------
+  // Site access (Tim 11-20; SiteAccess.swift): on a site TRIF isn't connected on, the robot's card here too: the line
+  // (Tim's words), a sensitive site's reason, Connect. Its mods are listed below and wait: nothing runs there.
+  function renderAccess(st) {
+    const box = $('access-note');
+    const a = st.access;
+    if (!a || a.connected) { box.replaceChildren(); box.hidden = true; return; }
+    const head = el('p');
+    head.append(el('b', null, a.line));
+    const parts = [head];
+    if (a.why) parts.push(el('p', null, a.why));
+    if ((st.mods || []).length) parts.push(el('p', null, 'Its mods wait here: none runs until you connect it.'));
+    const go = button('Connect', 'go', async () => { go.disabled = true; try { await ask({ type: 'connect' }); } catch (e) { go.disabled = false; } });
+    parts.push(go);
+    box.replaceChildren(...parts);
+    box.hidden = false;
+  }
+
   // Pause all, and mods TRIF switched off (safe mode, a runaway page): what happened, and the way back (Safety.swift)
   function renderSafety(st) {
     const box = $('safety-note');
@@ -1291,6 +1308,7 @@
     // would show a switch just tapped in its old state for a moment)
     if (view.state && typeof state.seq === 'number' && state.seq < (view.state.seq || 0)) { if (openId) openApproval(openId); return; }
     view.state = state;
+    renderAccess(state);
     renderSafety(state);
     renderSync(state);
     renderMods();

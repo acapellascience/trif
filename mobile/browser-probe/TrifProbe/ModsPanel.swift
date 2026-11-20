@@ -27,7 +27,7 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
     private func closeIfDecided() {
         guard let browser, browser.holdFromChat else { return }
         let site = browser.site
-        let waiting = browser.mods.mods.contains { $0.held && ($0.everywhere || Site.of($0.site) == site || $0.sites.contains { Site.of($0) == site }) }
+        let waiting = browser.mods.mods.contains { $0.held && ($0.everywhere || SiteAccess.shared.scope($0.site) == site || $0.sites.contains { SiteAccess.shared.scope($0) == site }) }
         if !waiting { browser.holdFromChat = false; wantsClose = true }
     }
     /// The approval card to open when the page is next shown (a mod just added that waits).
@@ -134,6 +134,11 @@ final class ModsPanel: NSObject, ObservableObject, WKScriptMessageHandlerWithRep
             browser.safety.forget(id)
             browser.report.log("mods", "deleted \(id)")
             return await done()
+        case "connect":
+            // (the Mods tab's Connect on a disconnected site: as the robot's card's)
+            SiteAccess.shared.connect(browser.host, why: "the Mods tab")
+            await refresh()
+            return (["ok": true], nil)
         case "resume":
             browser.pauseAll(false)
             await refresh()
@@ -281,6 +286,13 @@ struct ModsPanelView: View {
                             Button(panel.showAll ? (browser.site.isEmpty ? "Mods for this page" : "Mods on \(browser.site)") : "All mods") {
                                 Task { _ = await panel.handle(["type": "showAll", "on": !panel.showAll]) }
                             }
+                            // (site access, Tim 11-20: as desktop's Disconnect; its mods and switches kept for when it's connected again)
+                            if !panel.showAll, browser.connectedHere, !browser.site.isEmpty, browser.webView.url?.scheme?.hasPrefix("http") == true {
+                                Button("Disconnect from \(browser.site)", role: .destructive) {
+                                    SiteAccess.shared.disconnect(browser.host, why: "the Mods tab's menu")
+                                    Task { await panel.refresh() }
+                                }
+                            }
                             Divider()
                             Button("Import mod…") { panel.wantsImport = true }
                             Button("Export all mods for \(browser.site)") {
@@ -310,6 +322,7 @@ struct ModsPanelView: View {
         // (All mods is for this look only: the tab opens on the site's mods next time)
         .onDisappear { if panel.showAll { panel.showAll = false; Task { await panel.refresh() } } }
         .onChange(of: browser.pageChanged) { _, _ in Task { await panel.refresh() } }
+        .onReceive(SiteAccess.shared.$changes) { _ in Task { await panel.refresh() } }
         // (a sync started, finished or has news: the line, the list, Recently deleted)
         .onReceive(PhoneSyncModel.shared.objectWillChange) { _ in Task { await panel.refresh() } }
         .sheet(item: $panel.share) { s in ShareSheet(items: s.urls) }
@@ -352,9 +365,14 @@ extension Browser {
     func modsState(askPage: Bool, all: Bool = false) async -> [String: Any] {
         let url = all ? "" : webView.url?.absoluteString ?? ""
         let site = all ? "" : self.site
-        let listed = all ? mods.mods : mods.mods.filter { m in
-            m.everywhere || Site.of(m.site) == site || m.sites.contains { Site.of($0) == site } || (!url.isEmpty && mods.applies(m, to: url))
+        // (site access: a sensitive site is a site of its own: only the mods kept under it, never its parent's or every-site
+        // mods, which never run there)
+        let card = SiteAccess.shared.card(host)
+        let listed = all ? mods.mods : card.sensitive ? mods.mods.filter { SiteAccess.shared.scope($0.site) == site } : mods.mods.filter { m in
+            m.everywhere || SiteAccess.shared.scope(m.site) == site || m.sites.contains { SiteAccess.shared.scope($0) == site } || (!url.isEmpty && mods.applies(m, to: url))
         }
+        // (a page TRIF isn't connected on is never asked anything: that would be a script in it)
+        let askPage = askPage && (webView as? TabWebView)?.readable == true
         let ran: Set<String>, errors: [String: [String]]
         var askedAt: Date?
         if askPage {
@@ -423,6 +441,10 @@ extension Browser {
             "paused": mods.paused,
             "switchedOff": safety.switchedOff[site].map { ["why": $0.why, "ids": $0.ids] } ?? NSNull(),
             "seq": modsStateSeq,
+            // (site access: whether TRIF is on here, and a sensitive site's line; the page shows Connect when it isn't)
+            "access": all || url.isEmpty || !(webView.url?.scheme.map { ["http", "https"].contains($0.lowercased()) } ?? false) ? NSNull()
+                : ["connected": connectedHere, "site": card.site, "line": SiteAccess.disconnectedLine(card.site),
+                   "why": SiteAccess.sensitiveLine(card) ?? NSNull(), "sensitive": card.sensitive] as [String: Any],
             // (a mod still starting on a page that has loaded: ask the page again once the grace is over, so one that
             // really can't start says so then)
             "recheck": starting ? max(0.2, (finished?.addingTimeInterval(Browser.startGrace + 0.1).timeIntervalSinceNow ?? Browser.startGrace)) : NSNull(),

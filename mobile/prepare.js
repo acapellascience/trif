@@ -61,12 +61,26 @@ function modsFile() {
 const CORE_DIR = path.join(__dirname, 'shared', 'core');
 const CORE_OUT = path.join(__dirname, 'shared', 'gen', 'core.js');
 const camel = (file) => file.replace(/\.js$/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+// core/sensitive-default.js: TRIF's sensitive list as desktop has it (extension/agentsites.js SENSITIVE_DEFAULT,
+// [pattern, why]), for the phones' site access (core/site-access.js: sensitive sites, each a site of its own). Made
+// here so the two never drift; written into core/ too, so node's tests can require it as the bundle does.
+const SENSITIVE_OUT = path.join(CORE_DIR, 'sensitive-default.js');
+function sensitiveFile() {
+  const text = fs.readFileSync(path.join(ROOT, 'extension', 'agentsites.js'), 'utf8');
+  const m = /export const SENSITIVE_DEFAULT = (\[[\s\S]*?\n\]);/.exec(text);
+  if (!m) throw new Error('extension/agentsites.js: no SENSITIVE_DEFAULT');
+  const list = require('vm').runInNewContext(m[1].replace(/\/\/[^\n]*/g, ''));
+  if (!Array.isArray(list) || list.length < 20 || !list.every((x) => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'string')) throw new Error('extension/agentsites.js: SENSITIVE_DEFAULT unreadable');
+  return '// Made by mobile/prepare.js from extension/agentsites.js SENSITIVE_DEFAULT: don\'t edit. TRIF\'s sensitive list, ' +
+    '[pattern, why] (desktop\'s, the same).\n\'use strict\';\nmodule.exports = ' + JSON.stringify(list.map((x) => [x[0], x[1]])) + ';\n';
+}
 function coreFile() {
-  const mods = fs.readdirSync(CORE_DIR).filter((f) => f.endsWith('.js')).sort();
+  const mods = [...new Set([...fs.readdirSync(CORE_DIR).filter((f) => f.endsWith('.js')), 'sensitive-default.js'])].sort();
+  const read = (f) => (f === 'sensitive-default.js' ? sensitiveFile() : fs.readFileSync(path.join(CORE_DIR, f), 'utf8'));
   // (a module may require another as './name.js': each runs once, at the first require)
   return '// Made by mobile/prepare.js from mobile/shared/core/*.js: don\'t edit. The phone apps\' shared rules ' +
     '(docs/MOBILE-BEHAVIOUR.md).\nvar TrifCore = (function () {\n\'use strict\';\nconst TrifCore = {};\nconst SOURCES = {};\n' +
-    mods.map((f) => `SOURCES[${JSON.stringify(f)}] = function (module, exports, require) {\n${fs.readFileSync(path.join(CORE_DIR, f), 'utf8')}\n};\n`).join('') +
+    mods.map((f) => `SOURCES[${JSON.stringify(f)}] = function (module, exports, require) {\n${read(f)}\n};\n`).join('') +
     'const cache = {};\nfunction require(name) {\n  const f = name.replace(/^\\.\\//, \'\');\n  if (cache[f]) return cache[f].exports;\n  if (!SOURCES[f]) throw new Error(`no shared rule ${name}`);\n  const module = { exports: {} };\n  cache[f] = module;\n  SOURCES[f](module, module.exports, require);\n  return module.exports;\n}\n' +
     mods.map((f) => `TrifCore.${camel(f)} = require(${JSON.stringify(f)});\n`).join('') +
     '// name "module.fn", args a JSON array; the answer as JSON (null for undefined)\n' +
@@ -191,7 +205,7 @@ function panelFiles() {
 }
 
 async function main() {
-  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()], [ROBOT_OUT, robotSwiftFile()], [CORE_OUT, coreFile()]];
+  const files = [[OUT, await runtimeFile()], [CHECKS_OUT, checksFile()], [MODS_OUT, modsFile()], [KIT_OUT, kitFile()], [GUIDE_OUT, guideFile()], [BRIDGE_OUT, await bridgeFile()], [ROBOT_OUT, robotSwiftFile()], [SENSITIVE_OUT, sensitiveFile()], [CORE_OUT, coreFile()]];
   for (const [file, text] of files) {
     if (process.argv.includes('--check')) {
       if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) { console.error(`${path.relative(ROOT, file)} is out of date: run node mobile/prepare.js`); process.exit(1); }

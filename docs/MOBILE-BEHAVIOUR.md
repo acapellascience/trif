@@ -16,6 +16,51 @@ change there is a change on both phones. Change this file whenever a rule change
   dots stays whole (any script's digits); `all-sites` is itself. A host is in a site when it is the site or ends in
   `.<site>`.
 
+## Site access (added 11-20, Tim: "I want people feeling comfortable with TRIF as their browser and still using it for banking etc." … "let's opt in per site")
+
+- **Every site starts disconnected.** On a site TRIF isn't connected on it adds nothing to the page: no mods (the site's,
+  every-site, synced), no script, message handler or script world of TRIF's at all, no outline, no screenshot, nothing
+  to any chat. Plain browsing is unchanged (tabs, history, downloads, Home Screen icons, unread counts, the tab list's
+  own pictures, which stay on the phone). Only http(s) pages on a connected site, and TRIF's own pages, get TRIF.
+- Structural, not a flag: each tab's web view holds TRIF's scripts only while its page is on a connected site; it's
+  emptied before a page of a disconnected site starts (the navigation's decision, again at its response, so a redirect
+  counts), and a page the engine brings back from its back/forward memory with TRIF in it, on a site disconnected
+  since, is loaded again. TRIF's scripts run in the main frame only, so a frame from another site gets nothing. Every way
+  the app reads a page (scripts in any world, screenshots, PDFs, archives, find) goes through one gate that refuses on a
+  page TRIF isn't connected on, and TRIF's message handler answers only pages on connected sites. (iPhone: TabWebView,
+  Browser.applyAccess; matrix rows S1-S5.)
+- **The robot on a disconnected site** (tap, hold, Go to chat, the chat or a quick ask asked for from anywhere) shows
+  the card: "TRIF is disconnected on {site}." · Connect (Tim's words, approved). Nothing is read or sent before Connect.
+  Connect → the site is connected and the quick ask's box comes up at once, in the same sheet; the page reloads only if
+  mods would run there (TRIF's kit goes into the page the first time it's read, so the quick ask needs no reload). The
+  Mods tab on a disconnected site says the same, with Connect; its mods are listed and wait. A quiet cue: the toolbar's
+  robot drawn fainter there (iPhone: 40%).
+- **Disconnect from {site}**: the ⋯ menu and the Mods tab's ⋯. TRIF stops there at once (the shown tab loads again
+  without TRIF, even while it plays; tabs behind on that site let their pages go and load plain when shown). The site's
+  mods and switches are kept for when it's connected again.
+- **Per device**, like Pause all: connections never sync. A mod synced (or imported) for a site not connected here
+  arrives and waits: the Mods tab shows the site disconnected, with Connect; nothing runs.
+- **Sensitive sites** [shared]: TRIF's list is desktop's (extension/agentsites.js SENSITIVE_DEFAULT, made into
+  core/sensitive-default.js by mobile/prepare.js), plus the person's own (⋯ → Sensitive sites…: hosts or patterns,
+  `*bank*`, `*.bank`). They start disconnected like every site; the card has one more line saying why ("It's {why}, so
+  it's on TRIF's list of sensitive sites." / "It's on your list of sensitive sites."). Each sensitive host is a site of
+  its own, as on desktop: mail.google.com isn't google.com (its own connection, its own Mods tab, its own chat); a
+  pattern's host splits at the matching label (bank.mybank.example.com → mybank.example.com); a sensitive registrable
+  domain (paypal.com) is its own site already. Once connected, desktop's rules: only its own mods run there (never its
+  parent's, never every-site mods); every mod new to the phone starts off there, whoever made it; a chat's free mod
+  waits for the person ("is a free mod from a chat, and {site} is a sensitive site: …"), and so does a chat's change to
+  a mod that's on there (the version before keeps running); the quick ask adds nothing by itself there (each mod gets
+  its card); the page is never pictured.
+- **The upgrade** (Tim confirmed, 11-20): on the first start of this version on a phone that had TRIF, the sites with
+  mods installed (their folders; every-site mods aside) or a Home Screen icon are connected, EXCEPT sensitive sites,
+  which start disconnected like everything else (their mods kept, waiting). A one-time note says so. A new install has
+  nothing connected and no note.
+- TRIF's own chat panes (Claude, ChatGPT, More) are TRIF's UI, not sites: unaffected. claude.ai or chatgpt.com opened in
+  an ordinary tab is a (sensitive) site like any other.
+- The rules [shared]: core/site-access.js (which site a host is in, sensitive matching, connect/disconnect, the card,
+  the upgrade, a sensitive site's adds), against core/site-access-cases.json (mobile/test/core-siteaccess.test.js, which
+  also holds the list and the matching to desktop's).
+
 ## Mods and holds
 
 - Nothing is installed without the person's consent: Add this mod? (or the Mods tab's approval card) is the consent

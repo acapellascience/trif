@@ -930,3 +930,27 @@ Browser.editHowTo, not listed.
 
 Unchanged: "Use this project for TRIF chats" over a project's page TRIF isn't using (now not shown while a setup is
 under way). The project's instructions themselves (ClaudePane.projectInstructions: the guide) are agent-facing.
+
+## Site access: TRIF connects site by site (added 11-20, Tim: "let's opt in per site"; drafts unless marked)
+
+| Where | Old | New |
+|---|---|---|
+| The robot's card on a site TRIF isn't connected on (tap, hold, Go to chat, anything that would read the page), the Mods tab's note too | — | **TRIF is disconnected on {site}.** · **Connect** (**approved**, Tim 11-20) |
+| … under it, a sensitive site on TRIF's list (desktop's `why`: email, banking, payments, a password manager, your messages, your chats with another AI, your files, a crypto exchange, a government account…) | — | It’s {why}, so it’s on TRIF’s list of sensitive sites. |
+| … a sensitive site the person added | — | It’s on your list of sensitive sites. |
+| The Mods tab's note, a disconnected site with mods | — | Its mods wait here: none runs until you connect it. |
+| ⋯ menu (address bar) and the Mods tab's ⋯, on a connected website | — | Disconnect from {site} (red) |
+| ⋯ menu | — | Sensitive sites… |
+| Sensitive sites…: title, sections, field, button | — | Sensitive sites · Yours · TRIF’s list · bank.example.com or *bank* (placeholder) · Add · Done |
+| … its footer | — | Sensitive sites start disconnected. Once you connect one, its mods start off, and a chat can only make style and boxed mods there. |
+| … what it refuses | — | That isn’t a site or a pattern TRIF can use. |
+| The note after adding a mod on a sensitive site (it starts off there) | Added {name}. It runs on {sites}. | Added {name}, off: {site} is a sensitive site. Switch it on in Mods. |
+| The approval card, a chat's free mod on a sensitive site (a finding) | — | is a free mod from a chat, and {site} is a sensitive site: there a chat may only make style mods and boxed mods |
+| The approval card, a chat's change to a mod that's on there | — | is a chat’s change to a mod on {site}, a sensitive site: there each change a chat makes waits for you |
+| The one-time note on the first start of this version, on a phone that had TRIF (an alert) | — | **TRIF now connects site by site** TRIF does nothing on a site until you connect it there: tap the robot and Connect. Sites where you have mods or a Home Screen icon are connected already. Sensitive sites, such as email and banking, start disconnected; their mods wait. · OK |
+| The robot, VoiceOver value on a disconnected site | — | TRIF is disconnected on {site} |
+| The robot's card, Connect's VoiceOver hint | — | Connects TRIF on {site} |
+
+Not words, for Tim to look at: the robot in the toolbar is drawn at 40% on a website TRIF isn't connected on (my call
+for the "quiet cue"; shot 570 has it beside the menu, 569 under the card). The Mods tab's title stays "Mods on {site}";
+for a sensitive host it's that host (mods on mail.google.com, not google.com).

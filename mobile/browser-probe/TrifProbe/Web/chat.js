@@ -1165,8 +1165,29 @@
       const b = modBlocks().find((x) => x.reply && (!lastUser || (lastUser.compareDocumentPosition(x.pre) & Node.DOCUMENT_POSITION_FOLLOWING)));
       if (b) { (b.pre.nextElementSibling && b.pre.nextElementSibling.classList.contains('trif-add') ? b.pre.nextElementSibling : b.pre).scrollIntoView({ block: 'center' }); return 'shown at its mod'; }
     }
-    if (lastUser) lastUser.scrollIntoView({ block: 'start' });
-    return lastUser ? 'shown' : 'no message';
+    return toBottom();
+  }
+  /** The chat opened from TRIF: at the conversation's end (Tim, 11-20: "it got there but isn't scrolled to the
+   *  bottom"). Again every 250 ms for 5 s, as the conversation may still be loading and the page puts back its own
+   *  place; stops at once when the person touches or scrolls the page. */
+  let bottomRun = 0;
+  function toBottom() {
+    const run = ++bottomRun;
+    let n = 0;
+    const quit = () => { if (bottomRun === run) bottomRun++; };
+    addEventListener('touchstart', quit, { once: true, capture: true });
+    addEventListener('wheel', quit, { once: true, capture: true });
+    const tick = () => {
+      if (bottomRun !== run) return;
+      const all = document.querySelectorAll(MSGS);
+      const last = all[all.length - 1];
+      const sc = last && scrollerOf(last);
+      if (sc) sc.scrollTop = sc.scrollHeight;
+      else if (last) window.scrollTo(0, document.documentElement.scrollHeight);
+      if (++n < 20) setTimeout(tick, 250);
+    };
+    tick();
+    return 'to the bottom';
   }
 
   // The reply kept in view (Tim, 11-14): after a send, Claude scrolls the new message to the top of the

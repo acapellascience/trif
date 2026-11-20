@@ -416,7 +416,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard views.contains(where: { $0 === v }) else { return }
         cur = v
         v.lastUsed = Date()
-        if v.activity == .replied { v.activity = .idle; Task { _ = await chatJS(v, "showReply()") } }
+        if v.activity != .working { if v.activity == .replied { v.activity = .idle }; Task { _ = await chatJS(v, "showReply()") } }
         if !v.started { start(v) }
         seen(v)
         report.log("claude", "\(v.service.rawValue): the chat for \(v.site.isEmpty ? "no site" : v.site) shown")
@@ -599,7 +599,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         queue(v) { [weak self] in
             guard let self else { return }
             if was == .replied { _ = await self.chatJS(v, "showReply(\(v.waitingMods > 0))"); v.waitingMods = 0 }
-            else if let ready { await self.fillContext(v, ready) }
+            else {
+                if let ready { await self.fillContext(v, ready) }
+                // (at the conversation's end, Tim 11-20; not while a reply is being written: the page follows it)
+                if was != .working { _ = await self.chatJS(v, "showReply(false)") }
+            }
             if let extra { await extra() } // (chat.js fill waits for the message box itself)
         }
     }
@@ -1141,7 +1145,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             go(v, u)
         }
         shown = true
-        if v.activity == .replied { v.activity = .idle; let toMod = v.waitingMods > 0; v.waitingMods = 0; queue(v) { [weak self] in _ = await self?.chatJS(v, "showReply(\(toMod))") } }
+        // (opened from TRIF: at the conversation's end, or a reply TRIF didn't see arrive at its mod (Tim, 11-20); not while
+        // a reply is being written, when the page follows it itself)
+        if v.activity != .working {
+            let toMod = v.activity == .replied && v.waitingMods > 0
+            if v.activity == .replied { v.activity = .idle; v.waitingMods = 0 }
+            queue(v) { [weak self] in _ = await self?.chatJS(v, "showReply(\(toMod))") }
+        }
         seen(v)
         report.log("claude", "\(s.rawValue): the chat for \(l.site) opened from its link")
     }

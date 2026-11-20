@@ -111,6 +111,12 @@ final class ChatView: Identifiable {
     var projectFill = false
     /// The tab the person was on when they sent: a notification's tap goes back to it.
     var sentTab: UUID?
+    /// Its reply is being picked up (SentNotes, Tim 11-20): TRIF was ended, or away past its background time, before
+    /// the reply ended. Done, it's handled as a reply landing while the person is on another tab (the done banner).
+    var pickup = false
+    /// When a pickup's conversation was asked for, until its page loads (then its watch starts): a load that never
+    /// comes is given up.
+    var pickupLoad: Date?
     /// The site a new conversation started by TRIF's instructions is for (recorded once it has an address).
     var ownerNext: String?
     /// The things put into its message box, one after another.
@@ -284,6 +290,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     private let report: Report
     private weak var browser: Browser?
+    /// The sends whose replies TRIF hasn't seen end yet (SentNotes.swift): picked up after a relaunch or a long time away.
+    let sentNotes = SentNotes(file: SentNotes.appFile)
 
     init(report: Report, browser: Browser) {
         self.report = report
@@ -325,6 +333,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // (memory: the idle chats that aren't showing go first)
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.memoryWarning() }
+        }
+        // (replies TRIF didn't see end before it was last ended: picked up a moment after the launch, once the tabs are in)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            self?.pickUp("launch")
         }
     }
 
@@ -502,7 +515,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             }
             v.seenConversation = s
             // (the chat's link follows its conversation: a new chat's first address, or another one the person went to)
-            if ClaudePane.owner(of: s) == v.site { updateLink(v) { if $0.conv != s, $0.state != .working || $0.conv == nil || ClaudePane.provisional($0.conv) { $0.conv = s } } }
+            if ClaudePane.owner(of: s) == v.site {
+                updateLink(v) { if $0.conv != s, $0.state != .working || $0.conv == nil || ClaudePane.provisional($0.conv) { $0.conv = s } }
+                // (and the note of a send, while its reply is being written: a new chat's address, once it has one)
+                if v.activity == .working { sentNotes.follow(ClaudePane.linkKey(v.service.rawValue, v.site), conv: s) }
+            }
         }
     }
 
@@ -665,10 +682,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     /// A new conversation's provisional address (chatgpt.com signed in, 11-20: /c/local-chatgpt:<uuid>, "%3A" in the
     /// address, until the server gives it its own /c/<id>): the same conversation as the address that replaces it.
-    static func provisional(_ conv: String?) -> Bool {
-        guard let conv, let u = URL(string: conv) else { return false }
-        return u.path.hasPrefix("/c/local-") || u.path.hasPrefix("/c/local:")
-    }
+    static func provisional(_ conv: String?) -> Bool { SentNotes.provisional(conv) }
     /// The conversation an address is (kept without query or fragment), or nil for a new chat.
     static func conversation(of url: URL?) -> String? {
         guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") || url.path.hasPrefix("/uc/") else { return nil }
@@ -883,7 +897,17 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             v.lastUsed = Date()
             sentLink(v)
             v.sentTab = link(v)?.tab
+            v.pickup = false
+            v.pickupLoad = nil
             askToNotify()
+            // (the note of this send, so a reply that ends while TRIF isn't running is picked up when it is again)
+            let key = ClaudePane.linkKey(name, v.site)
+            if !v.site.isEmpty {
+                let q = quick.flatMap { $0.key == key && $0.state == .waitingSend ? $0.request : nil }
+                sentNotes.put(SentNote(service: name, site: v.site, conv: v.conversation, tab: v.sentTab?.uuidString, at: Date(),
+                                       users: d["users"] as? Int ?? -1, print: d["print"] as? String, quick: q))
+                if d["print"] == nil || d["print"] is NSNull { Diagnostics.shared.log("pickup", "\(name) for \(v.site): the message sent has too few words for a fingerprint: found again by its place, if at all") }
+            }
             // (a quick ask sent by the person's own Send in the strip (or in the whole chat): the strip slides away,
             // the pill says it's working)
             if let q = quick, q.key == ClaudePane.linkKey(v.service.rawValue, v.site), q.state == .waitingSend {
@@ -900,6 +924,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 guard let v, v.activity == .working, v.workingSince == since else { return }
                 v.activity = .idle
                 self?.updateLink(v) { if $0.state == .working { $0.state = .read } }
+                self?.sentNotes.clear(key)
             }
         case "done":
             // (the mods: the reply's new code blocks with a whole mod file in each)
@@ -966,15 +991,33 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if v.activity == .working { v.activity = .idle }
             updateLink(v) { if $0.state == .working { $0.state = .read } }
             if quick?.key == key, quick?.state == .working { quick = nil }
+            v.pickup = false
+            sentNotes.clear(key)
             endBackgroundIfIdle(); return
         }
         guard v.activity == .working || late else { return }
+        // (the reply seen ending: its send's note goes (SentNotes); a pickup is handled as a reply landing elsewhere)
+        let pickup = !late && v.pickup
+        if !late { v.pickup = false; sentNotes.clear(key) }
+        // (a pickup that didn't find the message sent (another conversation's page, a long one not drawn): dropped,
+        // nothing offered, nothing said but the log)
+        if !late, d["mode"] as? String == "pickup", d["anchored"] as? Bool == false {
+            v.activity = .idle
+            updateLink(v) { if $0.state == .working { $0.state = .read } }
+            if quick?.key == key, quick?.state == .working { quick = nil }
+            Diagnostics.shared.log("pickup", "\(v.service.rawValue) for \(v.site.isEmpty ? "no site" : v.site): the message sent wasn't found in its conversation: nothing picked up")
+            endBackgroundIfIdle(); return
+        }
+        if !late, d["mode"] as? String == "pickup" {
+            Diagnostics.shared.log("pickup", "\(v.service.rawValue) for \(v.site.isEmpty ? "no site" : v.site): the reply to the message sent read (\(d["why"] as? String ?? "?"), \(d["replies"] as? Int ?? 0) reply part(s), \(texts.count) mod file(s))")
+        }
         guard let browser else { v.activity = .idle; endBackgroundIfIdle(); return }
         // (looking at this chat: as ever. Else the done banner (Tim, 11-18), its mods held for its Add or Go to
-        // <site>; but on the chat's own site's tab, nothing over it, Add this mod? comes up at once, as before)
+        // <site>; but on the chat's own site's tab, nothing over it, Add this mod? comes up at once, as before. A
+        // pickup always gets the banner: it comes up by itself, after a launch or a return, so it says where it's from)
         let looking = shown && cur === v
         let onItsTab = !shown && !v.site.isEmpty && browser.site == v.site && ContentView.coversNow == "none"
-        let hold = !looking && !onItsTab
+        let hold = !looking && (pickup || !onItsTab)
         // (a quick ask's reply: its look-only mods added at once, the rest to their card; the pill says which)
         let isQuick = !late && quick?.key == key && quick?.state == .working
         Task { @MainActor in
@@ -989,17 +1032,25 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 return
             }
             if isQuick {
-                let offered = await self.quickDeliver(texts, site: v.site, path: "quick", hold: hold, view: v)
+                let (offered, added) = await self.quickDeliver(texts, site: v.site, path: pickup ? "quick pickup" : "quick", hold: hold, view: v)
                 if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
-                if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) }
+                if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered, on: added) }
                 v.activity = offered.isEmpty && !looking ? .replied : .idle
                 self.updateLink(v) { $0.state = looking || !offered.isEmpty ? .read : .waiting }
                 self.endBackgroundIfIdle()
                 return
             }
-            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : "auto", hold: hold, refuse: { [weak self, weak v] r in if let self, let v { self.fillRefusal(v, r) } })
+            let offered = await browser.offerFromChat(texts, from: v.site, path: late ? "late" : pickup ? "pickup" : "auto", hold: hold, refuse: { [weak self, weak v] r in if let self, let v { self.fillRefusal(v, r) } })
             let unreadable = offered.isEmpty && !texts.isEmpty ? browser.lastUnreadable : nil
             if let conv = v.conversation { for m in offered { browser.noteChatHas(m.code, conv) } }
+            // (a pickup whose mods were offered already (or are installed: the person added them from the chat): nothing
+            // again, no banner)
+            if pickup, !texts.isEmpty, offered.isEmpty, unreadable == nil {
+                v.activity = .idle
+                self.updateLink(v) { if $0.state == .working { $0.state = .read } }
+                Diagnostics.shared.log("pickup", "\(v.service.rawValue) for \(v.site.isEmpty ? "no site" : v.site): its mod(s) offered before: nothing again")
+                self.endBackgroundIfIdle(); return
+            }
             // (the app in the background: a notification says so, then iOS's background time is given back)
             if UIApplication.shared.applicationState == .background { self.notifyDone(v, offered) } // (not inactive: an alert of the system's over the app)
             if late {
@@ -1482,14 +1533,15 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             quick?.state = .failed("Not done: open the chat to see why.")
             return 0
         }
-        return await quickDeliver(codes, site: site, path: "quick \(path)", hold: false, view: nil).count
+        return await quickDeliver(codes, site: site, path: "quick \(path)", hold: false, view: nil).offered.count
     }
 
     /// A quick ask's reply: its mods judged as any chat's (offered once: ChatOffers), the look-only ones added at
     /// once (Undo keeps what each replaced), the others to Add this mod? or the approval card: now, or held by the
-    /// done banner when the person is elsewhere (`hold`). The pill says Done, Replied, or goes for the card.
-    private func quickDeliver(_ texts: [String], site: String, path: String, hold: Bool, view v: ChatView?) async -> [InstalledMod] {
-        guard let browser else { return [] }
+    /// done banner when the person is elsewhere (`hold`). The pill says Done, Replied, or goes for the card. Returns
+    /// what was offered, and of it what was added at once (look-only).
+    private func quickDeliver(_ texts: [String], site: String, path: String, hold: Bool, view v: ChatView?) async -> (offered: [InstalledMod], added: [InstalledMod]) {
+        guard let browser else { return ([], []) }
         let offered = await browser.offerFromChat(texts, from: site, path: path, hold: true, refuse: { [weak self, weak v] r in
             guard let self else { return }
             if let v { self.fillRefusal(v, r) } else { self.panel.fillInput(r.request) }
@@ -1509,7 +1561,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         quick?.state = sorted.state == "done" ? .done : sorted.state == "card" ? .card : .replied
         if quick?.state == .card { quick = nil }
         Diagnostics.shared.log("quick ask", "reply for \(s.isEmpty ? "no site" : s): \(look.count) look-only mod(s) added (\(look.map(\.id).joined(separator: ", "))), \(rest.count) to their card\(rest.isEmpty ? "" : hold ? " (held by the done banner)" : "")")
-        return offered
+        return (offered, look)
     }
 
     /// Done's Undo: each mod added as it was before (removed if it was new), the page shown again with it.
@@ -1647,10 +1699,122 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 guard let self, let v, v.activity == .working, away > 20, v.conversation != nil else { return }
                 let st = (Browser.parse(await self.chatJS(v, "state()")) as? [String: Any]) ?? [:]
                 if st["replying"] as? Bool == true { return }
-                Diagnostics.shared.log("background", "back after \(Int(away)) s; the reply isn't being written any more: its conversation loaded again to read it")
+                // (its send's note still there (SentNotes): the reply after the message sent is read whether or not TRIF
+                // saw it written, and handled as a reply landing elsewhere: the done banner)
+                let noted = self.sentNotes.note(for: ClaudePane.linkKey(v.service.rawValue, v.site)) != nil
+                if noted { v.pickup = true }
+                Diagnostics.shared.log("background", "back after \(Int(away)) s; the reply isn't being written any more: its conversation loaded again to read it\(noted ? " (picked up from the send's note)" : "")")
                 v.webView.reload()
             }
         }
+        // (and a note no chat here is watching: picked up as at a launch)
+        if away > 20 { Task { @MainActor [weak self] in try? await Task.sleep(nanoseconds: 3_500_000_000); self?.pickUp("back in front after \(Int(away)) s") } }
+    }
+
+    // MARK: replies picked up after TRIF wasn't running (SentNotes; Tim, 11-20)
+
+    /// The sends whose replies TRIF never saw end (the app was ended, or away past its background time): each note
+    /// under an hour old gets its conversation loaded in a chat page behind the tab (nothing shown, no tab switched),
+    /// and the reply after the message sent is read (chat.js resume with the note): mods to the done banner, as a reply
+    /// landing while the person is on another tab; still being written, watched; no mod, a plain reply; can't load,
+    /// dropped quietly (Diagnostics "pickup"). Never sends or types anything.
+    func pickUp(_ why: String) {
+        let (due, old) = sentNotes.due()
+        for o in old { Diagnostics.shared.log("pickup", "\(o.service) for \(o.site): a send \(Int(Date().timeIntervalSince(o.at) / 60)) min ago, older than an hour: its note dropped") }
+        for n in due {
+            guard let s = ChatService(rawValue: n.service), !n.site.isEmpty else { sentNotes.clear(n.key); continue }
+            // (a chat here already watching it (the app was only away): its own watch, or the reload on return, reads it)
+            if views.contains(where: { $0.service == s && $0.site == n.site && $0.activity == .working }) { continue }
+            guard let conv = n.conv, !SentNotes.provisional(conv), let url = URL(string: conv), ClaudePane.conversation(of: url) == conv else {
+                sentNotes.clear(n.key)
+                Diagnostics.shared.log("pickup", "\(n.service) for \(n.site): the send's conversation had no address of its own yet: its note dropped")
+                continue
+            }
+            // (the chat open in front of the person on another conversation: left alone, tried again at the next return)
+            if let open = views.first(where: { $0.service == s && $0.site == n.site }), shown, cur === open, open.conversation != conv { continue }
+            guard let v = pickupView(s, n.site) else {
+                Diagnostics.shared.log("pickup", "\(n.service) for \(n.site): every chat page is busy writing a reply: tried again at the next return")
+                continue
+            }
+            v.started = true
+            v.activity = .working
+            v.workingSince = Date()
+            v.workingConversation = conv
+            v.seenConversation = conv
+            v.sentTab = n.tab.flatMap(UUID.init(uuidString:))
+            v.lastUsed = Date()
+            v.pickup = true
+            updateLink(v) { $0.state = .working }
+            // (a quick ask's: its pill again, Working, its look-only mods added when it ends as they would have been)
+            if let request = n.quick, quick == nil {
+                quick = QuickAsk(request: request, service: n.service, site: n.site, key: n.key, state: .working)
+                watchReply(v, quick!.id)
+            }
+            let ago = Int(Date().timeIntervalSince(n.at))
+            Diagnostics.shared.log("pickup", "\(n.service) for \(n.site) (\(why)): a send \(ago < 120 ? "\(ago) s" : "\(ago / 60) min") ago whose reply TRIF didn't see end: its conversation loaded behind the tab\(n.print == nil ? " (the message found by its place)" : "")")
+            logMemory("a reply to pick up")
+            if v.conversation == conv, !v.loading, !v.navigating {
+                // (on it already, loaded: watched from here)
+                resumeWatch(v)
+            } else {
+                v.pickupLoad = Date()
+                go(v, url)
+                let asked = v.workingSince
+                Task { @MainActor [weak self, weak v] in
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    guard let self, let v, v.pickupLoad != nil, v.workingSince == asked else { return }
+                    v.webView.stopLoading()
+                    self.dropPickup(v, "its conversation didn't load in 60 s")
+                }
+            }
+            // (nothing heard of it for 16 minutes: not working any more, as a send's watch)
+            let since = v.workingSince
+            Task { @MainActor [weak self, weak v] in
+                try? await Task.sleep(nanoseconds: 16 * 60 * 1_000_000_000)
+                guard let self, let v, v.activity == .working, v.workingSince == since else { return }
+                v.activity = .idle
+                v.pickup = false
+                self.updateLink(v) { if $0.state == .working { $0.state = .read } }
+                self.sentNotes.clear(n.key)
+            }
+        }
+    }
+    /// A chat page for a pickup: the site's own (for that service) if there is one; the first page if it hasn't been
+    /// used; a new one while there are fewer than three; else an idle one not shown let go for it. All busy: nil.
+    private func pickupView(_ s: ChatService, _ site: String) -> ChatView? {
+        if let v = views.first(where: { $0.site == site && $0.service == s }) { return v }
+        if views.count == 1, !views[0].started, !shown { views[0].service = s; views[0].site = site; return views[0] }
+        if views.count >= ClaudePane.maxViews {
+            guard let old = views.filter({ $0.activity != .working && $0 !== cur }).min(by: { $0.lastUsed < $1.lastUsed }) else { return nil }
+            release(old, why: "a reply to pick up")
+        }
+        let v = makeView(s)
+        v.site = site
+        views.append(v)
+        report.log("claude", "a chat for \(site) (a reply to pick up): \(views.count) chat pages now")
+        return v
+    }
+    /// A working chat's page loaded (again): its reply watched. With its send's note, from the message sent (chat.js
+    /// pickup: the reply read whether or not TRIF saw it written); else as before, from the person's latest message,
+    /// only a reply still being written.
+    private func resumeWatch(_ v: ChatView) {
+        v.pickupLoad = nil
+        guard let n = sentNotes.note(for: ClaudePane.linkKey(v.service.rawValue, v.site)) else { Task { _ = await chatJS(v, "resume()") }; return }
+        var note: [String: Any] = ["users": n.users]
+        if let p = n.print { note["print"] = p }
+        Task { _ = await chatCall(v, "resume(n)", ["n": note]) }
+    }
+    /// A pickup given up (it can't load): its note gone, the chat plain again, nothing said but the log.
+    private func dropPickup(_ v: ChatView, _ why: String) {
+        let key = ClaudePane.linkKey(v.service.rawValue, v.site)
+        v.pickupLoad = nil
+        v.pickup = false
+        if v.activity == .working { v.activity = .idle }
+        updateLink(v) { if $0.state == .working { $0.state = .read } }
+        if quick?.key == key, quick?.state == .working { quick = nil }
+        sentNotes.clear(key)
+        Diagnostics.shared.log("pickup", "\(v.service.rawValue) for \(v.site): \(why): dropped")
+        endBackgroundIfIdle()
     }
 
     private func notify(_ title: String, _ body: String, id: String, kind: String, tab: UUID?, quiet: Bool = false) {
@@ -1664,11 +1828,20 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     private func noteSite(_ v: ChatView) -> String { v.site.isEmpty ? (browser?.site ?? "") : v.site }
 
-    private func notifyDone(_ v: ChatView, _ offered: [InstalledMod]) {
+    /// `on`: the ones a quick ask added already (look-only, Done · Undo): "Your mod is on" (Tim approved 11-20), not
+    /// "tap to add it"; its tap goes to the tab, where it runs.
+    private func notifyDone(_ v: ChatView, _ offered: [InstalledMod], on added: [InstalledMod] = []) {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [ClaudePane.stillNote])
         let s = noteSite(v)
         let place = s.isEmpty ? "" : " for \(s)"
-        if offered.count == 1 {
+        let toAdd = offered.count - added.count
+        if !added.isEmpty, toAdd <= 0 {
+            if added.count == 1 { notify("Your mod is on", "\(added[0].name)\(place). Tap to see it.", id: ClaudePane.replyNote, kind: "on", tab: v.sentTab) }
+            else { notify("Your mods are on", "\(added.count) mods\(place). Tap to see them.", id: ClaudePane.replyNote, kind: "on", tab: v.sentTab) }
+        } else if !added.isEmpty {
+            // (some on already, some waiting for Add this mod?: draft words)
+            notify("Your mods are ready", "\(added.count) on and \(toAdd) to add\(place). Tap to see them.", id: ClaudePane.replyNote, kind: "mod", tab: v.sentTab)
+        } else if offered.count == 1 {
             notify("Your mod is ready", "\(offered[0].name)\(place): tap to add it.", id: ClaudePane.replyNote, kind: "mod", tab: v.sentTab)
         } else if offered.count > 1 {
             notify("Your mods are ready", "\(offered.count) mods\(place): tap to add them.", id: ClaudePane.replyNote, kind: "mod", tab: v.sentTab)
@@ -1678,7 +1851,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         // (whether iOS will show it: Tim 11-20 saw none, and couldn't tell if notifications were on)
         UNUserNotificationCenter.current().getNotificationSettings { st in
             let allowed = [UNAuthorizationStatus.authorized: "allowed", .denied: "turned off in Settings", .notDetermined: "never asked", .provisional: "delivered quietly", .ephemeral: "ephemeral"][st.authorizationStatus] ?? "unknown"
-            Diagnostics.shared.log("notify", "the reply's notification: \(offered.count) mod(s); notifications \(allowed), alerts \(st.alertSetting == .enabled ? "on" : "off")")
+            Diagnostics.shared.log("notify", "the reply's notification: \(offered.count) mod(s)\(added.isEmpty ? "" : ", \(added.count) on already"); notifications \(allowed), alerts \(st.alertSetting == .enabled ? "on" : "off")")
         }
     }
 
@@ -1843,8 +2016,20 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             // (a provisional address replaced by its own was followed already: remember)
             if let w = v.workingConversation, v.conversation != w {
                 v.activity = .idle
-                Diagnostics.shared.log("chat offers", "\(v.service.rawValue): another conversation loaded while a reply was being written: not watched")
-            } else { Task { _ = await chatJS(v, "resume()") } }
+                let key = ClaudePane.linkKey(v.service.rawValue, v.site)
+                if v.pickupLoad != nil {
+                    // (a pickup's conversation didn't open: signed out, the conversation gone: dropped quietly)
+                    updateLink(v) { if $0.state == .working { $0.state = .read } }
+                    if quick?.key == key, quick?.state == .working { quick = nil }
+                    Diagnostics.shared.log("pickup", "\(v.service.rawValue) for \(v.site): its conversation didn't open (the page went to \(Diagnostics.place(webView.url))): dropped")
+                } else {
+                    Diagnostics.shared.log("chat offers", "\(v.service.rawValue): another conversation loaded while a reply was being written: not watched")
+                }
+                v.pickup = false
+                v.pickupLoad = nil
+                sentNotes.clear(key)
+                endBackgroundIfIdle()
+            } else { resumeWatch(v) }
         }
         // (reloaded while the tab's data was going in: in again)
         if let p = v.refill {
@@ -1860,7 +2045,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         view(of: webView)?.loading = webView.isLoading
-        if !Browser.stoppedNotFailed(error) { report.log("claude", "failed to load: \(error.localizedDescription)") }
+        if !Browser.stoppedNotFailed(error) {
+            report.log("claude", "failed to load: \(error.localizedDescription)")
+            // (a pickup's conversation that can't load (no network, say): dropped quietly)
+            if let v = view(of: webView), v.pickupLoad != nil { dropPickup(v, "its conversation didn't load (\((error as NSError).domain) \((error as NSError).code))") }
+        }
     }
 
     /// A window Claude's page opens (signing in with Google or Apple does): a second web view made from the
@@ -1890,6 +2079,9 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// A chat's page process ended (memory): loaded again, and noted in the diagnostics log.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Diagnostics.shared.log("ended", "WebKit ended a chat page's process at \(Diagnostics.place(webView.url)) (\(views.count) chat pages); loading it again.")
+        // (a reply being written then, whose send has its note: picked up from the note once loaded (its end may have
+        // come while the page was gone), as after a launch: the done banner)
+        if let v = view(of: webView), v.activity == .working, sentNotes.note(for: ClaudePane.linkKey(v.service.rawValue, v.site)) != nil { v.pickup = true }
         if webView.url != nil { webView.reload() }
     }
 

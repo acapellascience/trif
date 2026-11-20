@@ -158,6 +158,24 @@ background, within the ~30 s iOS gives it there.
 
 A tap opens the app on the tab the message was sent from, with Add this mod? (or the chat at the reply).
 
+Mods a quick ask added already (look-only: Done · Undo, no Add this mod?), 11-20:
+
+| When | Title | Body |
+|---|---|---|
+| One mod, on already (**approved by Tim 11-20**) | Your mod is on | {mod's name} for {site}. Tap to see it. |
+| Several, all on already (draft, same style) | Your mods are on | {n} mods for {site}. Tap to see them. |
+| Some on, some waiting for Add this mod? (draft) | Your mods are ready | {a} on and {b} to add for {site}. Tap to see them. |
+
+Their tap opens the app on the tab the message was sent from (the mod runs there), not the chat. Before 11-20 these
+said "Your mod is ready … tap to add it." though nothing was left to add.
+
+A reply that ended while TRIF wasn't running (11-20, Tim: "is there a way to automatically pick up the fact that
+there's a new mod when the app restarts?"): picked up when TRIF starts again, or comes back after its background
+time ran out. No new words: its mods come up in the done banner ("{Service} made a mod for {site}" · Add · Go to
+{site}), a reply without one as a plain reply ("{Service} replied about {site}" · Open chat); a quick ask's pill
+comes back as "Working: {request}" and ends as Done · Undo. If TRIF goes to the background while it does this, the
+notifications above.
+
 ## The chat's message box filling faster (added 11-15)
 
 | Where | Old | New |

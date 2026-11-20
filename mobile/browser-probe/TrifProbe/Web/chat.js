@@ -662,6 +662,8 @@
     if (sending) clearTimeout(sending.timer);
     const withInstructions = c.names.some((n) => n.includes('TRIF instruction')) || c.text.includes('--- How TRIF mods are written ---');
     const seen = new Set(modBlocks().map((b) => b.raw));
+    // (how the message is found again if TRIF stops before the reply ends: the app's note, ClaudePane.pickUp)
+    const print = sentPrint(), users = $$(USER).length;
     // (what was on the page before this send: its messages and replies are never this send's reply)
     const usersBefore = new Set(document.querySelectorAll(USER));
     const repliesBefore = new Set(turns());
@@ -674,7 +676,7 @@
       const went = $$(USER).some((u) => !usersBefore.has(u)) || replying() || (!now.text && !now.names.length);
       if (went) {
         sending = null;
-        post({ type: 'sent', how, withInstructions });
+        post({ type: 'sent', how, withInstructions, print, users });
         startWatch(seen, { mode: 'send', usersBefore, repliesBefore, convo });
       } else if (Date.now() - s.at > 5000) {
         sending = null;
@@ -721,11 +723,71 @@
     const fresh = $$(USER).filter((u) => !w.usersBefore.has(u));
     return fresh[fresh.length - 1] || null;
   }
+  // A reply picked up after TRIF wasn't running (Tim, 11-20: "is there a way to automatically pick up the fact that
+  // there's a new mod when the app restarts?"). At a send the app keeps a note with the message's fingerprint:
+  // the last PRINT letters and digits of the person's own words in the box (TRIF's text taken out), lower case,
+  // FNV-1a 32 of them. Loaded again with that note (resume(note), mode 'pickup'), the conversation's latest message
+  // of the person's whose letters and digits hold those is the one sent, and the replies after it (up to the
+  // person's next message) are that send's reply, whether TRIF saw them written or not: TRIF saw the send. Not
+  // found: nothing (fail closed). A message with too few words for a fingerprint is found by its place instead
+  // (the person's messages before it), which a long conversation's page may not draw: then nothing either.
+  const PRINT = 32;
+  const lettersOf = (t) => String(t || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
+  /** The fingerprint of what's in the box now: "<letters>:<hash>", or null with fewer than 6 letters and digits. */
+  function sentPrint() {
+    const m = boxModel();
+    let rest = m.s || composerText();
+    for (const b of [...trifBlocks(m)].reverse()) rest = rest.slice(0, b.start) + rest.slice(b.end);
+    let n = lettersOf(rest);
+    if (n.length < 6) n = lettersOf(m.s || composerText());
+    if (n.length < 6) return null;
+    const tail = n.slice(-PRINT);
+    return `${tail.length}:${fnv(tail)}`;
+  }
+  /** Whether a message's text holds the letters a fingerprint was made of (its last 6000 looked through). */
+  function holdsPrint(el, print) {
+    const [len, hash] = String(print).split(':');
+    const k = Number(len);
+    if (!k || !hash) return false;
+    const t = lettersOf(el.textContent).slice(-6000);
+    for (let i = t.length - k; i >= 0; i--) if (fnv(t.slice(i, i + k)) === hash) return true;
+    return false;
+  }
+  /** The person's message a pickup is for (see above), or null. Found once, kept while it's on the page. */
+  function pickupAnchor(w) {
+    if (w.anchor && w.anchor.isConnected && live(w.anchor)) return w.anchor;
+    const users = $$(USER);
+    let found = null;
+    if (w.print) {
+      for (let i = users.length - 1; i >= 0 && !found; i--) {
+        const u = users[i];
+        const len = (u.textContent || '').length;
+        if (w.checked.get(u) === len) continue; // (looked at with this text already)
+        w.checked.set(u, len);
+        if (holdsPrint(u, w.print)) found = u;
+      }
+    } else if (Number.isInteger(w.users) && w.users >= 0 && users.length > w.users) found = users[w.users];
+    if (found) w.anchor = found;
+    return found;
+  }
+  /** The anchor of a watch: the message sent in this page, the note's message, or the person's latest. */
+  const anchorOf = (w) => (w.mode === 'send' ? sentMessage(w) : w.mode === 'pickup' ? pickupAnchor(w) : latestUser());
   /** One look: which replies are being written (w.live). (TRIF's own Add to TRIF isn't the reply's writing.) */
   function track(w) {
-    const anchor = w.mode === 'send' ? sentMessage(w) : latestUser();
+    const anchor = anchorOf(w);
     w.anchored = w.anchored || !!anchor;
     if (!anchor) return;
+    if (w.mode === 'pickup') {
+      // (the send's reply: every reply after the noted message, before the person's next one)
+      const next = $$(USER).find((u) => u !== anchor && (anchor.compareDocumentPosition(u) & Node.DOCUMENT_POSITION_FOLLOWING) && !anchor.contains(u));
+      for (const r of turns()) {
+        if (w.live.has(r) || anchor.contains(r) || !(anchor.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+        if (next && !(r.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+        w.live.add(r);
+      }
+      return;
+    }
     for (const r of turns()) {
       if (w.repliesBefore.has(r) || w.live.has(r)) continue;
       if (!(anchor.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) || anchor.contains(r)) continue;
@@ -741,7 +803,8 @@
     stopWatch();
     const w = { seen, saw: false, sig: null, at: Date.now(), started: Date.now(), timer: 0, queued: false, mo: null,
       mode: how.mode, usersBefore: how.usersBefore || new Set(), repliesBefore: how.repliesBefore || new Set(), convo: how.convo || '',
-      live: new Set(), looks: new WeakMap(), grew: new WeakMap(), anchored: false };
+      live: new Set(), looks: new WeakMap(), grew: new WeakMap(), anchored: false,
+      print: how.print || null, users: how.users, anchor: null, checked: new WeakMap() };
     watch = w;
     w.mo = new MutationObserver(() => {
       if (w.queued) return;
@@ -795,7 +858,7 @@
     // (mods in replies after the person's message that TRIF didn't see being written (the app was in the background,
     // 11-18: "held from reuters.com…: 2 in replies not seen arriving"): never offered by themselves, but their Add to
     // TRIF is there, and the app's done banner says so and opens the chat at the first of them)
-    const anchor = w.mode === 'send' ? sentMessage(w) : latestUser();
+    const anchor = anchorOf(w);
     const waiting = anchor ? notOffered.filter((b) => b.reply && (anchor.compareDocumentPosition(b.pre) & Node.DOCUMENT_POSITION_FOLLOWING)).length : 0;
     // (code in the reply but no mod read from it, and none held (the held line says why those weren't): said, with
     // what there was, for the diagnostics)
@@ -806,7 +869,8 @@
       const header = !!r && /==WebMod==/.test(r.textContent || '');
       if (blocks || header) post({ type: 'nopickup', blocks, header, kinds: r ? [...new Set([...r.querySelectorAll(`${CODE_BLOCKS}, code`)].map((n) => n.localName + (n.className && typeof n.className === 'string' ? '.' + n.className.split(/\s+/)[0] : '')))].slice(0, 5).join(' ') : '', path: location.pathname.replace(/[^/]{20,}/g, '…') });
     }
-    post({ type: 'done', why, mods, stop: w.saw, replies: w.live.size, waiting });
+    // (mode and anchored: a pickup whose message wasn't found is dropped by the app, nothing offered)
+    post({ type: 'done', why, mods, stop: w.saw, replies: w.live.size, waiting, mode: w.mode, anchored: w.anchored });
   }
   /** The person's latest message (after a reload, resume: a reply still being written comes after it). */
   function latestUser() {
@@ -1074,12 +1138,19 @@
     const convo = convoOf(location.pathname);
     const c = composer();
     const withInstructions = c.names.some((n) => n.includes('TRIF instruction')) || c.text.includes('--- How TRIF mods are written ---');
+    // (the message's fingerprint as the box last had words, and the person's messages before it: the app's note)
+    let print = sentPrint(), printed = composerText();
+    const users = $$(USER).length;
     const mo = new MutationObserver(() => {
       if (watch) { stop(); return; } // (seen by the click or Return already)
       if (sending) return;
-      if (!$$(USER).some((u) => !usersBefore.has(u))) return;
+      if (!$$(USER).some((u) => !usersBefore.has(u))) {
+        const t = composerText();
+        if (t && t !== printed) { printed = t; print = sentPrint() || print; }
+        return;
+      }
       stop();
-      post({ type: 'sent', how: 'message seen', withInstructions });
+      post({ type: 'sent', how: 'message seen', withInstructions, print, users });
       startWatch(seen, { mode: 'send', usersBefore, repliesBefore, convo });
     });
     const timer = setTimeout(() => stop(), 30 * 60 * 1000);
@@ -1193,8 +1264,14 @@
     return 'on';
   }
 
-  /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
-  function resume() {
+  /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message.
+   *  With the app's note of the send ({print, users}: TRIF stopped, or was away, before the reply ended), from the
+   *  message sent instead, its reply taken whether or not it's still being written (see pickupAnchor). */
+  function resume(note) {
+    if (note && (note.print || Number.isInteger(note.users))) {
+      startWatch(new Set(), { mode: 'pickup', convo: convoOf(location.pathname), print: note.print || null, users: note.print ? undefined : note.users });
+      return 'picking up';
+    }
     const users = $$(USER);
     const lastUser = users[users.length - 1];
     const seen = new Set(modBlocks().filter((b) => !lastUser || !(lastUser.compareDocumentPosition(b.pre) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.raw));

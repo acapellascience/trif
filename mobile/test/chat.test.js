@@ -972,3 +972,86 @@ test('the chat script: edit blocks (Tim, 11-19: changes to a mod, not its whole 
     server.close();
   }
 });
+
+test('the chat script: a reply picked up after TRIF wasn\'t running (Tim, 11-20: "is there a way to automatically pick up the fact that there\'s a new mod when the app restarts?"): the send told with its fingerprint; the conversation loaded again, the reply after that message handed over though TRIF never saw it written, an older reply\'s mod never; by its place when it has no fingerprint; not found, nothing; a reply still being written, watched to its end; Claude\'s and ChatGPT\'s pages', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 150000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    for (const [query, sendButton] of [['keep', 'Send message'], ['thread&keep', 'Send']]) {
+      await page.goto(`${base}/chat.html?${query}`);
+      await page.addScriptTag({ content: STUB });
+      await page.addScriptTag({ content: CHAT });
+      const say = async (t) => {
+        await page.evaluate((w) => { const ed = [...document.querySelectorAll('.ProseMirror')].filter((e) => e.getClientRects().length).pop(); ed.focus(); document.execCommand('insertText', false, w); }, t);
+        await page.evaluate((b) => [...document.querySelectorAll(`button[aria-label="${b}"]`)].filter((e) => e.getClientRects().length).pop().click(), sendButton);
+      };
+      // (the instructions attached, then the person's words: the fingerprint is of their words only)
+      assert.match(await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), "I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…"), /text attached/);
+      await say('Make the headings green, called Older, on http://127.0.0.1:9/');
+      const [first] = await waitPost(page, 'sent');
+      await waitPost(page, 'done');
+      await say('Now make them blue please, called Bluer, on http://127.0.0.1:9/');
+      const [, sent] = await waitPost(page, 'sent', 2);
+      assert.match(sent.print, /^32:[0-9a-f]{8}$/, `${query}: a fingerprint of the words`);
+      assert.notEqual(sent.print, first.print, query);
+      assert.equal(typeof sent.users, 'number', query);
+      const done2 = await waitPost(page, 'done', 2);
+      assert.equal(done2[1].mods.length, 1, `${query}: the live reply as before`);
+      const conv = await page.evaluate(() => location.pathname);
+      assert.match(conv, /^\/(chat|c)\/k-/, query);
+
+      // The app ended: the conversation loaded again, both exchanges drawn finished (the person's messages without
+      // their file names), nothing being written. The note's message found by its words; only its reply's mod.
+      const reopen = async () => {
+        await page.goto(`${base}${conv}?${query}`);
+        await page.addScriptTag({ content: STUB });
+        await page.addScriptTag({ content: CHAT });
+        await page.waitForFunction(() => (document.querySelectorAll('pre').length >= 2 ? [1] : null), {}, { timeoutMs: 10000 });
+      };
+      await reopen();
+      assert.equal(await page.evaluate((n) => globalThis.__trifChat.resume(n), { print: sent.print, users: sent.users }), 'picking up');
+      const [picked] = await waitPost(page, 'done');
+      assert.equal(picked.mode, 'pickup', query);
+      assert.equal(picked.anchored, true, query);
+      assert.equal(picked.mods.length, 1, `${query}: the noted reply's mod`);
+      assert.match(picked.mods[0], /@name {8}Bluer/, query);
+      assert.ok(!picked.mods.some((m) => /Older/.test(m)), `${query}: never the older reply's`);
+
+      // The first message's note: its reply, and not the later one (the person's next message ends it).
+      await reopen();
+      await page.evaluate((n) => globalThis.__trifChat.resume(n), { print: first.print, users: first.users });
+      const [older] = await waitPost(page, 'done');
+      assert.deepEqual(older.mods.map((m) => /@name {8}(\w+)/.exec(m)[1]), ['Older'], query);
+
+      // No fingerprint (too few words): by its place, the person's messages before it.
+      await reopen();
+      await page.evaluate((n) => globalThis.__trifChat.resume(n), { print: null, users: sent.users });
+      const [byPlace] = await waitPost(page, 'done');
+      assert.deepEqual(byPlace.mods.map((m) => /@name {8}(\w+)/.exec(m)[1]), ['Bluer'], query);
+
+      // A message that isn't there (another conversation's note, a long one not drawn): nothing, said so.
+      await reopen();
+      await page.evaluate(() => globalThis.__trifChat.resume({ print: '32:00000000', users: 0 }));
+      const [none] = await waitPost(page, 'done');
+      assert.equal(none.anchored, false, query);
+      assert.deepEqual(none.mods, [], query);
+
+      // A reply still being written when it's picked up: watched to its end, then handed over.
+      await reopen();
+      await say('Make the links red, called Redder, wait 4, on http://127.0.0.1:9/');
+      const [live] = await waitPost(page, 'sent');
+      await page.evaluate((n) => globalThis.__trifChat.resume(n), { print: live.print, users: live.users });
+      const dones = await waitPost(page, 'done');
+      const end = dones[dones.length - 1];
+      assert.equal(end.mode, 'pickup', query);
+      assert.deepEqual(end.mods.map((m) => /@name {8}(\w+)/.exec(m)[1]), ['Redder'], `${query}: the reply written after the pickup began`);
+    }
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

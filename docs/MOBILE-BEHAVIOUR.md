@@ -221,7 +221,8 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
 - Only the assistant's code, only from a reply TRIF saw arrive (11-18: "When I paste code into Claude in the app, the
   app reads it as a mod"; "opening an old chat gets spurious pickups of old code"). Fail closed: a block counts only
   inside a reply (not the person's message, not the box, nothing editable), from a reply that wasn't on the page at
-  the send, came after the person's message, and was seen being written. A watch belongs to its conversation: another
+  the send, came after the person's message, and was seen being written (or is the reply to a send the app saw,
+  picked up after it wasn't running: Chats and tabs). A watch belongs to its conversation: another
   conversation ends it with nothing offered. A viewer counts only if opened by a tap inside a reply (6 s), or with no
   tap while a live reply is written or ended < 2 min ago. Only the page shown counts (11-20: chatgpt.com keeps the
   page it left in the document, display:none, frozen with a message and a Stop button): its messages, code, stop
@@ -272,6 +273,30 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
   suspended) is never offered by itself (fail closed, as old chats), but its done banner says "{Service} replied with
   a mod for {site}", stays until closed, and Open chat opens the chat at the first such mod, its Add to TRIF in view
   (11-18, Tim's reuters.com replies).
+- A reply that ended while TRIF wasn't running is picked up when it runs again (11-20, Tim: "is there a way to
+  automatically pick up the fact that there's a new mod when the app restarts?"). At the person's own Send in a
+  Claude/ChatGPT page (full chat or quick ask) the app keeps a note on disk: service, site, conversation address
+  (a new chat's once it has one; a provisional one replaced by its own), the tab sent from, when, the person's
+  messages on the page before it, a fingerprint of the message, and a quick ask's request. The fingerprint: the last
+  32 letters and digits (Unicode, NFKC, lower case, everything else dropped) of the person's own words in the box
+  (TRIF's text blocks taken out; with fewer than 6 left, the whole box), FNV-1a 32 of their UTF-16 units, written
+  "32:<8 hex>"; fewer than 6 letters and digits in all: none. The note goes when the app sees that reply end (offered,
+  a reply with no mod, the chat gone to another conversation, timed out) or when a new send in that chat replaces it.
+  At launch, and on return to the front after more than 20 s away (the background time ran out, the page suspended
+  or reloaded), each note under an hour old (older ones dropped, logged) whose chat isn't already watching gets its
+  conversation loaded in a chat page behind the tab: no tab switched, nothing over the page, the chat-page limits as
+  ever (at most 3, a working one never let go; all busy: tried at the next return). The person's message is found
+  again: the latest of theirs whose letters and digits hold the fingerprint's (the last 6000 looked through); with no
+  fingerprint, by its place (the messages before it). The replies after it, up to the person's next message, are
+  that send's reply whether or not the app saw them written (the one exception to "seen arriving": the app saw the
+  send); nothing before it is ever offered. Then: finished with mods → the done banner as for a reply landing while
+  the person is on another tab (always the banner, even on the chat's own tab: it says where the mod came from), the
+  chats' list showing it waiting, the mods through the usual chat-offers judge; still being written → watched as
+  usual; no mod → a plain reply; mods offered before (the app was only suspended and saw it end, or the person added
+  them from the chat) → nothing again; the message not found, the conversation not loading in 60 s, signed out, gone
+  or no network → the note dropped quietly, logged. A quick ask's pill comes back Working and its look-only mods are
+  added as they would have been (Done · Undo). The app in the background meanwhile → the usual notifications. A note
+  never makes the app send or type anything. [iOS: SentNotes.swift, ClaudePane.pickUp; chat.js resume(note)]
 - Go to {site}: the tab sent from while it's open and on that site; else a new tab at its page if that page is on the
   site, else at https://{site}/ (never a tab navigated elsewhere, nothing rewritten); a chat not sent from yet: its
   site's tab as the tab list picks it [shared: tab-list.js goTo].
@@ -310,6 +335,10 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
 - Undo puts back the version before (an update) or removes the mod (a new one); it isn't put in Recently deleted.
   Newest first; each undone mod's code is remembered as declined (never offered again). Only from Done.
 - The pill: Done when anything was added at once, else the card when there were mods, else Replied.
+- Its reply ending with the app in the background (11-20, Tim approved): mods already added say so, "Your mod is on" /
+  "{name} for {site}. Tap to see it." (several: "Your mods are on" / "{n} mods for {site}. Tap to see them."; some on
+  and some to add: "Your mods are ready" / "{a} on and {b} to add for {site}. Tap to see them.", drafts), the tap
+  going to the tab sent from; only mods still to add say "Your mod is ready … tap to add it."
 - One offer per mod; follow-ups continue the same chat; the pill closed while working: the reply is offered as ever.
 - The chats' list: top right Send (dimmed when the box is empty), top left Cancel; Cancel, a tap outside and a swipe
   down all keep the box's words.

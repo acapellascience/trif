@@ -53,9 +53,14 @@ For each: do the steps, then note what you saw against "Look for" (a word is eno
     banner naming its site.
 
 11. **Killed mid-reply.** Send a request in Claude, and while it's still writing, swipe TRIF away in the app
-    switcher. Wait 30 seconds, open TRIF, tap the robot → Go to chat.
-    Look for: nothing stuck "working"; the finished reply in the chat with "Add to TRIF" under its code (TRIF doesn't
-    offer a reply it didn't see finish); tapping it brings up "Add this mod?".
+    switcher. Wait 30 seconds (the reply finishes on Claude's side meanwhile), then open TRIF and don't touch anything.
+    Look for (11-20: picked up by itself now): within about 10 seconds, without opening the chat, a banner "Claude made
+    a mod for {site}" with Add and Go to {site}; the robot's list shows that chat as "Reply waiting"; Add brings up
+    "Add this mod?" once, for the new mod only (not an older one from that conversation). Then swipe TRIF away again
+    and reopen it: nothing comes up again. (If no banner: the robot's list, Go to chat, the reply's "Add to TRIF" as
+    before, and Copy diagnostics: its "pickup" lines say why.)
+    Also (optional): the same with the phone locked for 2 minutes instead of swiping TRIF away: on unlock, the
+    same banner (or "Add this mod?" if TRIF saw it end), once.
 
 12. **Claude, changes not the whole file (edit blocks, 11-19).** On a site where a mod of yours runs (a long one if
     you have one), tap the robot → Go to chat (Claude, a new chat). Ask for a small change to that mod by its name

@@ -399,6 +399,10 @@ extension Model {
                 out += "\nbanners: " + p.banners.map { "\($0.site) \($0.mods.map(\.id))\($0.unreadable.map { " unreadable: \($0)" } ?? "")\($0.inChat > 0 ? " in chat \($0.inChat)" : "")" }.joined(separator: "; ")
                 out += "\nshown tab \(browser.tabs.firstIndex { $0 === browser.current } ?? -1) \(browser.site), covers \(ContentView.coversNow), offer \(browser.modOffer.map { "\($0.id) runs on \($0.sites) came from \($0.cameFrom ?? "-")" } ?? "none")"
             }
+            // ({"sentnotes": 1}: the notes of sends whose replies TRIF hasn't seen end (SentNotes), newest first;
+            // {"pickup": 1}: picked up now, as at a launch)
+            if step["sentnotes"] != nil { out = p.sentNotes.all.map { "\($0.key) \($0.conv?.suffix(14) ?? "-") \(Int(Date().timeIntervalSince($0.at))) s ago users \($0.users) print \($0.print ?? "-")\($0.quick != nil ? " quick" : "")" }.joined(separator: "\n").nonEmpty ?? "none" }
+            if step["pickup"] != nil { p.pickUp("the dev step") }
             if let n = step["gosite"] as? Int, n < p.links.count { p.goToSite(p.links[n].id) }
             if let n = step["openlink"] as? Int, n < p.links.count { p.openChat(p.links[n].id) }
             if let b = step["banner"] as? String, let first = p.banners.first {

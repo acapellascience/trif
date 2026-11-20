@@ -14,6 +14,9 @@ sent, only new chats): claude.ai's composer, Send, file cards, upload input and 
 signed-in composer (a form's submit "Send", "Attach files" for any file, its file tile, "Select ChatGPT model"). Not
 comparable without a send: reply and streaming markers, code blocks, a sent message's attachments (Tim's list).
 
+11-20, a reply picked up after TRIF wasn't running (SentNotes): B11 changed, B12-B15 added; with A1, A3, B3, B9, C8,
+D1 on that build: 11 PASS. B10 (the phone locked, by hand) not run again.
+
 **Totals: 46 rows: 43 PASS, 2 FAIL → fixed (now PASS), 1 BLOCKED.** 11-19, edit blocks: F1-F8 added, and A1, A2, A3,
 A6, B3, C2, C4, C5, C6, C7 run again on that build: all PASS (A6 after a test fix, below). The script's last run (merged with origin/ios-poc
 784a3e9): 32 cases, 31 PASS, 1 BLOCKED (A5); the rest by hand.
@@ -44,7 +47,11 @@ needs Tim's send (TIM-SENDS 6-8, 13).
 | B8 | Its own tab, the history sheet open | PASS | as B6 |
 | B9 | The app in the background (Settings in front 14 s) | PASS | offered once on return |
 | B10 | The phone locked mid-reply, unlocked 30 s later (*by hand*) | PASS | the reply finished in background time ("background time given back after 23 s"); Add this mod? waiting on return, once. A 6 s main-thread hang was logged while locked (open, below) |
-| B11 | The app killed mid-reply and launched again | PASS (after a stand-in fix) | the link "read", no stale working badge; the chat shows the finished reply with Add to TRIF; not offered by itself (by design: a reply TRIF didn't see finish) (shot 547) |
+| B11 | The app killed mid-reply and launched again | PASS (11-20: picked up now) | 1.5 s after the launch the conversation loads behind the tab from the send's note; the reply after the noted message read though TRIF never saw it written: the done banner "Claude made a mod for localhost" · Add (shot 559), the chats' list "waiting", Add → Add this mod? once; an older mod earlier in that conversation never handed over; relaunched again: nothing. (Before 11-20: left in the chat with Add to TRIF, shot 547) |
+| B12 | Away past the background time (iOS's time ran out after 26 s), the chat page's WebKit process ended meanwhile, back after ~45 s | PASS | the page loaded again on return, picked up from the note: the banner once (shot 560), note gone |
+| B13 | A note whose reply was offered already (its mod added), TRIF stopping again before it saw the end | PASS | the pickup finds the mod installed: nothing shown, Diagnostics "offered before: nothing again" |
+| B14 | A note over an hour old | PASS | dropped at launch ("older than an hour"), no chat page loaded, nothing shown |
+| B15 | A quick ask killed mid-reply and launched again | PASS | its pill back "Working", then Done · Undo with the look-only mod added (shot 561); Undo removes it |
 | | **What arrives** | | |
 | C2 | Full code (a free mod) | PASS | offered as free; added; runs |
 | C3 | An every-site mod | PASS | the offer says every site; runs on 127.0.0.1 too (shot 545) |
@@ -99,6 +106,4 @@ needs Tim's send (TIM-SENDS 6-8, 13).
   suspended app; not looked into here.
 - E3: on the SE in landscape, Add it is below the fold of Add this mod? (as in portrait for a long code view: the
   buttons come before the code, not before the name and sites).
-- A reply that finished while the app was killed is left in the chat with its Add to TRIF (by design, B11): nothing in
-  the robot's list says a mod is waiting there.
 - Everything that needs a real reply: mobile/TIM-SENDS.md.

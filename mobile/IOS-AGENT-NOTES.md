@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (558 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (561 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -218,7 +218,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   fill put back as the chat's draft (before / after the fill, as a file / as text, the person's words around it,
   Claude-style tiles); claude.ai's nested code and a reply found finished; 11-20: chatgpt.com's redesign (`?thread`: the
   send through the home → conversation switch and a provisional address, Stop, done, Add to TRIF after the code widget,
-  the greeting gone, New chat's hidden conversation never read), and edit blocks on it). 18 tests, ~4 min. One browser
+  the greeting gone, New chat's hidden conversation never read), and edit blocks on it; 11-20: a reply picked up from the send's note). 19 tests, ~5 min. One browser
   suite at a time; small payloads.
 - After talking (Browser.talkResume / talkNudge, 11-18) on the Mac: `node --test mobile/test/talknudge.test.js` (the
   scripts read out of Browser.swift with Swift's escapes undone, run in node's vm on stand-in players and a virtual
@@ -326,6 +326,24 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   robotDown still set (a cancelled touch: stop = interrupt, words kept), scenePhase leaving .active, SpeechInput's
   phase leaving listening/finishing (SpeechInput stopped it itself: UI state only). robotPress calls
   `SpeechInput.lookAhead()` at touch-down.
+- Replies picked up after TRIF wasn't running (Tim 11-20: "is there a way to automatically pick up the fact that
+  there's a new mod when the app restarts?"): SentNotes.swift (no UI; built for the Mac: `node --test
+  mobile/test/sentnotes.test.js`, ~2 s) keeps `SentNote` {service, site, conv, tab, at, users, print, quick} in
+  Application Support/chat-sent.json, one per ClaudePane.linkKey: `put` at "sent" (chat.js sends `print`, the
+  fingerprint, and `users`), `follow` in remember (a new chat's address; provisional → own), `clear` in handleDone
+  (any why but late, incl. left), the 16-min timer, a pickup dropped. `ClaudePane.pickUp(why)` at launch (+1.5 s) and
+  in cameBack (away > 20 s, +3.5 s): `due()` drops notes > 1 h (Diagnostics "pickup"), skips a chat already working,
+  `pickupView` (the site's view for that service, the unused first one, a new one, else an idle one let go; nil when
+  all are busy), sets it working (workingConversation, sentTab, the link working, `ChatView.pickup`), recreates a
+  quick ask's pill from `quick`, `go`es to the conversation (`pickupLoad`: 60 s, didFailProvisional, didFinish on
+  another address → `dropPickup`). didFinish of any working view → `resumeWatch`: with a note, chat.js
+  `resume({print, users})` (mode 'pickup'), else `resume()`. cameBack's reload and a chat page's process ending set
+  `pickup` too when a note exists. handleDone: `pickup` → hold always (the banner, even on its own tab); done
+  `mode: pickup, anchored: false` → dropped; mods all skipped by the judge → nothing at all. chat.js: `sentPrint`
+  (last 32 letters/digits of the person's own words, TRIF's blocks out, FNV-1a 32), `holdsPrint` (any 32-window of
+  a message's last 6000), `pickupAnchor` (latest matching USER, or `users[w.users]` with no print), `anchorOf`,
+  track's pickup branch (replies after the anchor, before the next USER, live without being seen growing). Dev
+  steps `sentnotes`, `pickup`. Matrix rows B11-B14. notifyDone(…, on:): a quick ask's added mods say "Your mod is on".
 - The done banner when the reply's mod couldn't be read (11-19, the matrix's C7): Browser.offerFromChat keeps
   `lastUnreadable` (why, when none of a hand-over could be read); handleDone passes it to `banner(unreadable:)`;
   ChatBanner.unreadable → "{Service}'s mod for {site} can't be added" · Open chat, kept until closed (draft words).
@@ -894,6 +912,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   address/search field or a usable start page; http/https links open where they point, in a new tab, with no
   redirecting or rewriting the destination; WebKit only; no crash-prone launch paths. Tim has no entitlement yet
   (needs the paid account + Apple's request); the Info.plist http/https declaration comes with that step.
+- A reply that ended while TRIF wasn't running is picked up by itself (Tim, 11-20, after TIM-SENDS 11: "it isn't at
+  all obvious that one should do that [open the chat and tap Add to TRIF]"; the main session's design, built 11-20).
+  The one exception to "only a reply TRIF saw arrive": the reply after a send TRIF saw (its note's message), never
+  anything before it. My calls: always the done banner for a pickup ("{Service} made a mod for {site}" · Add · Go to,
+  existing words; not Add this mod? popping up by itself, even on the chat's own tab); a quick ask's note keeps its
+  request, so after a relaunch its pill comes back and its look-only mods are added (Done · Undo) as they would have
+  been; the message is found by a fingerprint of the person's own words (their file names and TRIF's text differ on
+  a reload), by place only when it has under 6 letters; also picked up when a working chat's page process ended; the
+  notes file is removed when empty. Approved 11-20: a quick ask's already-added mods notify "Your mod is on" /
+  "{name} for {site}. Tap to see it." (several / mixed: my drafts), the tap going to the tab, not the chat.
 - Chats and tabs both ways (Tim, 11-18, all four approved; words drafts): (1) a done banner when a chat not being
   looked at finishes a reply: "{Service} made a mod for {site}" · Add · Go to {site}, or "{Service} replied about
   {site}" · Open chat. Its mods are HELD (`offerFromChat(hold: true)`, noted offered once; Add or Go to hands them to
@@ -1162,6 +1190,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- The pickup (11-20): Simulator only, stand-ins (matrix B11-B15, chat.test.js's last test on Claude's and ChatGPT's
+  `?thread` stand-ins). Not known until TIM-SENDS 11 on a phone: whether claude.ai / chatgpt.com draw the person's
+  sent message with the same words after a reload (the fingerprint needs their last 32 letters/digits in it; a
+  collapsed long message still has its text in the DOM, unchecked), whether a long conversation draws that message
+  at all (else "the message sent wasn't found": nothing), whether the reply is complete on the server by the time the
+  page loads (still being written → watched; a page that shows nothing until done waits up to 90 s of quiet), and
+  a real ChatGPT provisional address (a note whose conversation never got its own /c/<id> is dropped). The phone
+  locked past the background time (B12 by its WebKit process killed with kill -9 in the Simulator; a real phone may
+  instead keep the page frozen with Stop showing, then the old watch goes on, no pickup needed) not tried by hand.
+  Diagnostics "pickup" lines say what happened.
 - ChatGPT's redesign (11-20), needs Tim's next real send (TIM-SENDS 6-8, 13): that the send is seen (Diagnostics "chat":
   "ChatGPT for <site>: the person's send seen (button)"; if not, a "Send tapped …, no sign it went in 5 s: …" line says
   what the page showed), the chat closes to the tab, the robot works while Stop shows, "Add this mod?" when it ends,
@@ -1384,8 +1422,8 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   message; that USER still matches (without it NOTHING is picked up now: fail closed, `held … no sent message found`);
   how Claude renders pasted code in the box and in the sent message, and its pasted-text viewer; ChatGPT has no
   streaming mark, so its replies count as live by growing between looks only; a reply that finished while the chat's
-  page wasn't running (WebKit suspended it, then a reload) isn't offered (fail closed: `held … not seen arriving`;
-  Add to TRIF is still there). Tim's next diagnostics should have `chat offers` lines (held/offered/skipped).
+  page wasn't running (WebKit suspended it, then a reload) is offered only through its send's note (the pickup,
+  11-20); without a note, fail closed: `held … not seen arriving`, Add to TRIF still there. Tim's next diagnostics should have `chat offers` lines (held/offered/skipped).
 
 - Never run on a real phone: the local model after the freeze fix (Tim tests next: compare Runs on processor vs graphics
   chip; diagnostics lines have the numbers), real model downloads from Hugging Face, background download events.

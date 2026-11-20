@@ -406,21 +406,146 @@ add('B9', 'where', 'Arrives while the app is in the background: offered (or the 
   return [o.id === modId('B9') && q.ok ? 'PASS' : 'FAIL', `${w.o.id ? 'offer' : `banner ${w.l.banners[0]}`} → ${o.id}; nothing more: ${q.ok}`];
 });
 
-add('B11', 'where', 'The app killed mid-reply and launched again: nothing stale, the chat shows the finished reply with Add to TRIF, not offered by itself', async () => {
+// ---- a reply picked up after TRIF wasn't running (SentNotes, Tim 11-20: "is there a way to automatically pick up the
+// fact that there's a new mod when the app restarts?")
+const notes = async () => (await step({ sentnotes: 1 })).trim();
+const notesFile = () => path.join(container(), 'Library', 'Application Support', 'chat-sent.json');
+/** Diagnostics lines (kind, text) since a time (the app's own file, written a moment after each line). */
+const diag = (kind, since) => {
+  try {
+    const list = JSON.parse(fs.readFileSync(path.join(container(), 'Library', 'Application Support', 'diagnostics.json'), 'utf8'));
+    return list.filter((e) => e.kind === kind && (e.at + 978307200) * 1000 >= since).map((e) => e.text);
+  } catch (e) { return []; }
+};
+/** A first exchange in the shown tab's chat whose mod is offered and dismissed (an older mod in the conversation). */
+async function older(id) {
+  const r = await ask(words(id));
+  if (!r.ok) return `send: ${r.why}`;
+  const o = await gotOffer();
+  if (!o.ok) return `no offer for the first exchange: ${o.text}`;
+  await step({ cancelOffer: 1 });
+  await sleep(1500);
+  return null;
+}
+/** The pickup's banner for localhost holding `id`, its Add → Add this mod? for it, added; then nothing more. */
+async function pickedUp(id, ms = 40000) {
+  const b = await until(async () => { const l = await links(); return { ok: l.banners.some((x) => x.startsWith('localhost ') && x.includes(id)), ...l }; }, ms);
+  if (!b.ok) return { ok: false, why: `no banner holding ${id}: ${b.text}` };
+  const waiting = b.links.find((x) => x.startsWith('Claude localhost ')) || '';
+  shot(`${id.replace(/[^\w-]+/g, "-")}-pickup-banner`);
+  await step({ banner: 'add' });
+  const o = await gotOffer(8000);
+  await step({ addOffer: 1 });
+  await sleep(1500);
+  const q = await quiet(5000);
+  return { ok: o.id === id && q.ok, why: `banner ${b.banners[0]}; the link ${waiting.split(' ').slice(0, 3).join(' ')}; Add → ${o.id || 'none'}; nothing more ${q.ok}${q.ok ? '' : ` (${q.o} / ${q.b})`}`, waiting };
+}
+
+add('B11', 'where', 'The app killed mid-reply and launched again: the reply picked up (the banner with its mod, the chats list waiting), offered once, an older mod in that conversation never', async () => {
+  const t0 = Date.now();
+  const first = await older('B11a');
+  if (first) return ['FAIL', first];
   const r = await ask(words('B11', 'wait 20'));
   if (!r.ok) return ['FAIL', `send: ${r.why}`];
-  await sleep(2500);
+  await sleep(1500);
+  const noted = await notes();
   await launch();
-  const l = await links();
-  const stale = l.links.some((x) => / working /.test(x));
-  const badges = await step({ tabbadges: 1 });
-  await step({ sheet: 'chat' });
+  const p = await pickedUp(modId('B11'));
+  const left = await notes();
+  const lines = diag('pickup', t0);
+  // (launched again: nothing more)
+  await launch();
+  await sleep(6000);
+  const again = await quiet(3000);
+  // (the older exchange's mod never handed over by the page: the chat-offers memory would skip it anyway, so its line is read)
+  const handed = diag('chat offers', t0).filter((l) => /^pickup from/.test(l));
+  const olderHanded = handed.some((l) => l.includes(modId('B11a')));
+  return [p.ok && /Claude\|localhost/.test(noted) && left === 'none' && again.ok && !olderHanded && handed.length === 1 && / waiting /.test(p.waiting) ? 'PASS' : 'FAIL', `${p.why}; the note at the send: ${noted.slice(0, 70)}; after: ${left}; relaunched again, nothing: ${again.ok}; handed over: ${handed.join(' | ')}; log: ${lines.join(' | ').slice(0, 220)}`];
+});
+
+add('B12', 'where', 'The app away past its background time and the chat page lost (WebKit ended it): on return the reply is picked up from the note, the banner, once', async () => {
+  const t0 = Date.now();
+  const r = await ask(words('B12', 'wait 25'));
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  // (the chat page made big, so its WebKit process is the one to end)
+  await panejs('window.__mxBig = new Uint8Array(160e6).fill(1); return "big"');
+  await sleep(1500);
+  const pid = (() => {
+    const ps = execFileSync('ps', ['-axo', 'pid=,rss=,command='], { encoding: 'utf8' }).split('\n').filter((l) => /com\.apple\.WebKit\.WebContent/.test(l) && /CoreSimulator/.test(l));
+    const big = ps.map((l) => l.trim().split(/\s+/)).map(([p, rss]) => ({ p: Number(p), rss: Number(rss) })).sort((a, b) => b.rss - a.rss)[0];
+    return big && big.rss > 150000 ? big.p : null;
+  })();
+  if (!pid) return ['BLOCKED', 'the chat page\'s WebKit process not found'];
+  sim('launch', DEV, 'com.apple.Preferences');
   await sleep(4000);
-  const add = await until(async () => { const t = await panejs('return [...document.querySelectorAll("button, [role=button]")].some((b) => /Add to TRIF/.test(b.textContent)) ? "yes" : "no " + location.pathname + " " + document.querySelectorAll("pre").length'); return { ok: /yes/.test(t), t }; }, 20000);
-  const o = await offer();
-  shot('B11-relaunched-chat');
-  await step({ closechat: 1 });
-  return [!stale && add.ok && !o.id ? 'PASS' : 'FAIL', `links after launch: ${l.links[0]}; badges ${badges.replace(/\n/g, ' ')}; Add to TRIF in the chat: ${add.ok} (${add.t}); offered by itself: ${o.id || 'no'}`];
+  try { process.kill(pid, 'SIGKILL'); } catch (e) { return ['BLOCKED', `kill: ${e.message}`]; }
+  await sleep(40000);
+  sim('launch', DEV, APP);
+  await sleep(2500);
+  const p = await pickedUp(modId('B12'), 45000);
+  try { sim('terminate', DEV, 'com.apple.Preferences'); } catch (e) {}
+  const left = await notes();
+  return [p.ok && left === 'none' ? 'PASS' : 'FAIL', `${p.why}; notes after: ${left}; log: ${[...diag('background', t0), ...diag('ended', t0), ...diag('pickup', t0)].join(' | ').slice(0, 300)}`];
+});
+
+add('B13', 'where', 'A note whose reply was offered already (the mod added from it): nothing again at the next launch', async () => {
+  const t0 = Date.now();
+  const r = await ask(words('B13', 'wait 15'));
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  await sleep(1000);
+  const saved = fs.readFileSync(notesFile(), 'utf8');
+  await launch();
+  const p = await pickedUp(modId('B13'));
+  if (!p.ok) return ['FAIL', `first pickup: ${p.why}`];
+  // (the same note put back, as if TRIF had stopped again before seeing the reply end: its mod is installed now)
+  try { sim('terminate', DEV, APP); } catch (e) {}
+  await sleep(800);
+  fs.writeFileSync(notesFile(), saved);
+  await launch();
+  await sleep(12000);
+  const q = await quiet(3000);
+  const lines = diag('pickup', t0);
+  return [q.ok && lines.some((l) => /offered before: nothing again/.test(l)) && (await notes()) === 'none' ? 'PASS' : 'FAIL', `first: ${p.why}; again: nothing shown ${q.ok} (${q.o || '-'} / ${q.b || '-'}); log: ${lines.join(' | ').slice(0, 260)}`];
+});
+
+add('B14', 'where', 'A note over an hour old: dropped at launch, nothing loaded or offered', async () => {
+  const t0 = Date.now();
+  const r = await ask(words('B14', 'wait 15'));
+  if (!r.ok) return ['FAIL', `send: ${r.why}`];
+  await sleep(1000);
+  try { sim('terminate', DEV, APP); } catch (e) {}
+  await sleep(800);
+  const list = JSON.parse(fs.readFileSync(notesFile(), 'utf8'));
+  for (const n of list) n.at -= 3700;
+  fs.writeFileSync(notesFile(), JSON.stringify(list));
+  await launch();
+  await sleep(12000);
+  const q = await quiet(3000);
+  const chats = await step({ chats: 1 });
+  const lines = diag('pickup', t0);
+  return [q.ok && lines.some((l) => /older than an hour/.test(l)) && !/working/.test(chats) && (await notes()) === 'none' ? 'PASS' : 'FAIL', `nothing shown ${q.ok}; chats: ${chats.replace(/\n/g, ' / ')}; log: ${lines.join(' | ').slice(0, 200)}`];
+});
+
+add('B15', 'where', 'A quick ask killed mid-reply and launched again: its pill back working, its look-only mod added when picked up (Done · Undo), once', async () => {
+  const t0 = Date.now();
+  await step({ quick: words('B15', 'wait 20') });
+  const strip = await until(async () => { const s = await step({ quickstate: 1 }); return { ok: /waitingSend|waiting/i.test(s), s }; }, 20000);
+  if (!strip.ok) return ['FAIL', `strip: ${strip.s}`];
+  const b = await panejs(`const b = document.querySelector('button[aria-label="Send message"]'); if (!b) return 'no send'; b.click(); return 'ok'`);
+  const working = await until(async () => { const s = await step({ quickstate: 1 }); return { ok: /working/i.test(s), s }; }, 8000);
+  if (!working.ok) return ['FAIL', `not working after the Send (${b}): ${working.s}`];
+  await sleep(1500);
+  const noted = await notes();
+  await launch();
+  const back = await step({ quickstate: 1 });
+  const done = await until(async () => { const s = await step({ quickstate: 1 }); return { ok: /done/i.test(s), s }; }, 40000);
+  const added = await hasMod(modId('B15'));
+  shot('B15-quick-pickup-done');
+  const q = await quiet(4000);
+  const u = await step({ quickundo: 1 });
+  await sleep(1500);
+  const gone = !(await hasMod(modId('B15')));
+  return [/quick/.test(noted) && /working/.test(back) && done.ok && added && q.ok && gone ? 'PASS' : 'FAIL', `the note: ${noted.slice(0, 80)}; after the launch: ${back.slice(0, 80)}; then ${done.s.slice(0, 100)}; added ${!!added}; nothing else shown ${q.ok}; Undo removed it ${gone}; log: ${diag('pickup', t0).join(' | ').slice(0, 200)}`];
 });
 
 add('C2', 'what', 'Full code (a free mod): offered as such, added, runs in the page', async () => {
@@ -844,6 +969,8 @@ async function main() {
   try { sim('terminate', DEV, APP); } catch (e) {}
   await sleep(800);
   cleanPrefs();
+  // (and the notes of sends a run left (SentNotes): no pickup of an earlier run's chat)
+  try { fs.unlinkSync(notesFile()); } catch (e) {}
   await launch();
   // (the last run's mods out: Mx… names)
   for (const m of await modlist()) if (/^Mx/.test(m.name)) await step({ panelmsg: { type: 'delete', id: m.id } });

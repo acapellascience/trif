@@ -87,7 +87,8 @@ test('the chat script: fill, the send, the reply watched until done, its mods ha
     await page.click('button[aria-label="Send message"]');
     const doneThree = await waitPost(page, 'done', 3);
     assert.deepEqual(doneThree[2].mods, []);
-    assert.equal(await page.evaluate(() => globalThis.__trifChat.showReply()), 'shown');
+    // (opened from TRIF at the conversation's end, since e416d45)
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.showReply()), 'to the bottom');
   } finally {
     if (browser) await browser.close();
     server.close();
@@ -836,6 +837,89 @@ test('the chat script: chatgpt.com\'s picture tile signed in (11-19: a div[role=
   }
 });
 
+test('the chat script on chatgpt.com\'s page of 11-20 (Tim\'s real send: no "working", no offer, no Add to TRIF, TRIF\'s greeting inside the conversation): the send seen as the new chat switches to the conversation\'s page; working while Stop shows; done → the mod offered; Add to TRIF under the code widget; the greeting gone once there are messages; the pages it keeps hidden never read', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const shape = { rim: '10,10 118,10 118,118 10,118', face: '24,24 104,24 104,104 24,104', eyes: ['40,50 56,50 56,70 40,70'], colours: { rim: '#34d399', face: '#18181b', eye: '#34d399' } };
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const greeting = (pg) => pg.evaluate(() => { const c = document.getElementById('trif-greeting'); return !!c && !c.hidden; });
+  const state = (pg) => pg.evaluate(() => JSON.parse(globalThis.__trifChat.state()));
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 640, deviceScaleFactor: 2, mobile: true });
+    await page.goto(`${base}/chat.html?thread`);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    await page.evaluate((s) => globalThis.__trifChat.look('127.0.0.1', s), shape);
+    await page.waitForTimeout(300);
+    assert.equal(await greeting(page), true, 'the greeting on the new chat');
+    assert.equal(await page.evaluate(() => document.querySelector('.standin-home h1').hasAttribute('data-trif-greeting-hidden')), true, 'in place of ChatGPT\'s own');
+    // (the fill: the instructions as a file, the screenshot as ChatGPT's picture tile, a pill each)
+    assert.match(await page.evaluate((t) => globalThis.__trifChat.fill(t, null, 'TRIF instruction.txt', null, null), "I'm looking at http://127.0.0.1:9/plain.html in TRIF\n--- How TRIF mods are written ---\n…"), /text attached/);
+    assert.match(await page.evaluate((p) => globalThis.__trifChat.fill('', p, null, null, 'TRIF screenshot.jpg'), png), /picture pasted/);
+    await page.waitForTimeout(600);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('[data-trif-chip]')].map((t) => t.getAttribute('data-trif-chip')).sort()), ['TRIF instruction', 'TRIF screenshot']);
+    assert.equal((await state(page)).context, false);
+    await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'Make the headings green'); });
+    await page.click('button[aria-label="Send"]');
+    const [sent] = await waitPost(page, 'sent');
+    assert.equal(sent.withInstructions, true);
+    assert.equal(sent.how, 'button');
+    // (the home view kept hidden, frozen with the message, "Thinking" and a Stop: never the page in front)
+    await page.waitForFunction(() => (document.querySelector('.standin-kept [aria-label="Stop"]') && document.querySelector('[data-turn-key]') ? [1] : null), {}, { timeoutMs: 5000 });
+    // (a provisional address first, its own 2 s later, mid-reply: the same conversation, the watch goes on)
+    assert.match(await page.evaluate(() => location.pathname), /^\/c\/local-chatgpt%3A/);
+    await page.waitForFunction(() => (/^\/c\/[a-z0-9]+$/.test(location.pathname) ? [1] : null), {}, { timeoutMs: 5000 });
+    // (working while the conversation's Stop shows; the greeting gone with the person's message there)
+    await page.waitForFunction(() => (document.querySelector('form [aria-label="Stop"]') ? [1] : null), {}, { timeoutMs: 5000 });
+    assert.equal((await state(page)).replying, true);
+    assert.equal(await greeting(page), false, 'no greeting in the conversation');
+    const [done] = await waitPost(page, 'done');
+    assert.equal(done.why, 'done');
+    assert.equal(done.stop, true);
+    assert.equal(done.replies, 1);
+    assert.equal(done.mods.length, 1);
+    assert.match(done.mods[0], /^\/\/ ==WebMod==\n\/\/ @name\s+Calmer feed[\s\S]*@match\s+http:\/\/127\.0\.0\.1\/\*[\s\S]*==\/WebMod==\n\{/);
+    assert.deepEqual(Object.keys(JSON.parse(done.mods[0].split('==/WebMod==')[1])), ['css', 'hide']);
+    assert.equal(await page.evaluate(() => document.querySelector('[data-talvt-turn-state]').getAttribute('data-talvt-turn-state')), 'complete');
+    // (Add to TRIF: one, right after the code widget, inside the reply; its tap hands over the same text)
+    await page.waitForFunction(() => (document.querySelector('.trif-add') ? [1] : null), {}, { timeoutMs: 5000 });
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.trif-add')].map((b) => [b.textContent, b.previousElementSibling.matches('[data-code-block]'), !!b.closest('[data-response-body]')])), [['Add to TRIF', true, true]]);
+    await page.click('.trif-add');
+    const [tap] = await waitPost(page, 'mod');
+    assert.equal(tap.text, done.mods[0]);
+    // (scrolled: still no greeting, it doesn't come back as the conversation moves)
+    await page.evaluate(() => { const l = document.getElementById('log'); l.scrollTop = 0; l.dispatchEvent(new Event('scroll')); });
+    await page.waitForTimeout(300);
+    assert.equal(await greeting(page), false);
+    assert.equal((await state(page)).context, true, 'the conversation has the instructions');
+    // A second message in the conversation: seen, and its mod offered (the earlier one not again).
+    await page.evaluate(() => { const ed = document.querySelector('.ProseMirror'); ed.focus(); document.execCommand('insertText', false, 'Now two: also the cookie box'); });
+    await page.click('button[aria-label="Send"]');
+    await waitPost(page, 'sent', 2);
+    const doneTwo = await waitPost(page, 'done', 2);
+    assert.deepEqual(doneTwo[1].mods.map((m) => m.match(/@name\s+(.+)/)[1].trim()), ['Calmer feed', 'No cookie box']);
+    // ChatGPT's New chat: the conversation kept hidden; the new chat is empty: the greeting back, no instructions in it,
+    // nothing of the hidden conversation's offered or marked again
+    const added = await page.evaluate(() => document.querySelectorAll('.trif-add').length);
+    await page.click('#new-chat');
+    await page.waitForTimeout(600);
+    assert.equal(await page.evaluate(() => document.querySelector('.standin-kept [data-turn-key]') !== null), true);
+    assert.equal(await greeting(page), true, 'the greeting on the new chat, the old conversation hidden');
+    const st = await state(page);
+    assert.equal(st.context, false, 'the hidden conversation\'s instructions aren\'t this chat\'s');
+    assert.equal(st.working, false);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.trif-add').length), added);
+    assert.equal((await posts(page)).filter((m) => m.type === 'done').length, 2);
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});
+
 test('the chat script: edit blocks (Tim, 11-19: changes to a mod, not its whole file again): a reply\'s edit blocks, two code blocks, handed over together; one "Add 2 changes to TRIF" after the last; an edit quoting a header isn\'t a mod; Claude\'s and ChatGPT\'s pages', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
   const server = http.createServer(handler(() => {}));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -845,7 +929,7 @@ test('the chat script: edit blocks (Tim, 11-19: changes to a mod, not its whole 
   let browser;
   try {
     browser = await launch();
-    for (const query of ['', '?octane&cm&gpt']) {
+    for (const query of ['', '?octane&cm&gpt', '?thread']) {
       const page = await browser.newPage();
       await page.goto(`${base}/chat.html${query}`);
       await page.addScriptTag({ content: STUB });
@@ -861,7 +945,9 @@ test('the chat script: edit blocks (Tim, 11-19: changes to a mod, not its whole 
       assert.match(t, /\n\n<<<<<<< SEARCH\n {2}"hide": \[\n=======\n {2}"hide": \[\n {4}"#standin-edited",\n>>>>>>> REPLACE$/, query);
       // (the button: one, after the last edit block, its count of changes)
       await page.waitForFunction(() => (document.querySelector('.trif-add') ? [1] : null), {}, { timeoutMs: 8000 });
-      const buttons = await page.evaluate(() => [...document.querySelectorAll('.trif-add')].map((b) => [b.textContent, b.hasAttribute('data-trif-edit'), b.previousElementSibling === [...document.querySelectorAll('pre, .cm-editor')].pop()]));
+      // (after the last code block: its outermost element, ChatGPT's [data-code-block] widget since 11-20)
+      const buttons = await page.evaluate(() => [...document.querySelectorAll('.trif-add')].map((b) => [b.textContent, b.hasAttribute('data-trif-edit'),
+        b.previousElementSibling === [...document.querySelectorAll('[data-code-block], pre, .cm-editor')].filter((x) => !x.parentElement.closest('[data-code-block], pre, .cm-editor')).pop()]));
       assert.deepEqual(buttons, [['Add 2 changes to TRIF', true, true]], query);
       await page.click('.trif-add');
       const [tap] = await waitPost(page, 'mod');

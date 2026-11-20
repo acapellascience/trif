@@ -18,6 +18,11 @@ comparable without a send: reply and streaming markers, code blocks, a sent mess
 A6, B3, C2, C4, C5, C6, C7 run again on that build: all PASS (A6 after a test fix, below). The script's last run (merged with origin/ios-poc
 784a3e9): 32 cases, 31 PASS, 1 BLOCKED (A5); the rest by hand.
 
+11-20, ChatGPT redesigned (Tim's real send: nothing seen, no offer, no Add to TRIF): chat.js fixed and a stand-in made
+from the saved real pages (`chat.html?thread`). ChatGPT's rows on it, `--gpt thread --only A2,B4,C9,F1,F2`: 5 PASS
+(A2, B4, C9 again after a Swift change: PASS); on the old `?gptin` stand-in, A2, F1, F2: PASS. The real thing still
+needs Tim's send (TIM-SENDS 6-8, 13).
+
 | # | Case | Result | What was seen |
 |---|---|---|---|
 | | **Where the request starts** | | |

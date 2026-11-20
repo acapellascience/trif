@@ -7,6 +7,7 @@
 //   node mobile/test/ios-matrix.js                 every case
 //   node mobile/test/ios-matrix.js --only A1,B3    those
 //   node mobile/test/ios-matrix.js --list          the cases
+//   node mobile/test/ios-matrix.js --gpt thread --only A2,B4,C9,F1,F2   ChatGPT's rows on its page of 11-20
 //
 // Needs: the Simulator booted (TRIF_SIM, default the SE 531D07B3) with the app installed (a Debug build: the dev steps),
 // and the device lock taken (~/WebMods-worktrees/loop-prompts/devlock.sh take ios). It starts mobile/serve.js on 8377
@@ -26,10 +27,11 @@ const APP = 'com.timsrobot.trifprobe.browser';
 const BASE = 'http://localhost:8377';
 const OTHER = 'http://127.0.0.1:8378';
 const CLAUDE_HOME = `${BASE}/chat.html?greet=claude&keep`;
-const GPT_HOME = `${BASE}/chat.html?gpt&gptin&keep`;
 const TAG = `r${Date.now().toString(36).slice(-5)}`;
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
+// (`--gpt thread`: ChatGPT's stand-in as its page of 11-20 (chat.html?thread); else ?gptin, its page of 11-19)
+const GPT_HOME = `${BASE}/chat.html?${opt('--gpt') ? `${opt('--gpt')}&keep` : 'gpt&gptin&keep'}`;
 const SHOTS = opt('--shots');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sim = (...a) => execFileSync('xcrun', ['simctl', ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -123,10 +125,12 @@ const panejs = async (js) => step({ panejs: js });
 /** The person's words typed into the stand-in's box after TRIF's fill, and its Send pressed (a click there counts
  *  as the stand-in's send, which only the stand-in allows: never on claude.ai or chatgpt.com). */
 async function send(words) {
-  const js = `const ed = document.querySelector('.ProseMirror'); if (!ed) return 'no box';
+  // (the shown box and Send: ?thread keeps the page it left in the document, hidden, as chatgpt.com does)
+  const js = `const vis = (e) => e.getClientRects().length > 0;
+    const ed = [...document.querySelectorAll('.ProseMirror')].filter(vis).pop(); if (!ed) return 'no box';
     ed.append(document.createTextNode(' ' + ${JSON.stringify(words)})); ed.dispatchEvent(new Event('input', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 150));
-    const b = document.querySelector('button[aria-label="Send message"], button[aria-label="Send"]'); if (!b) return 'no send';
+    const b = [...document.querySelectorAll('button[aria-label="Send message"], button[aria-label="Send"]')].filter(vis).pop(); if (!b) return 'no send';
     b.click(); return 'sent';`;
   return panejs(js);
 }

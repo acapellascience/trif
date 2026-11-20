@@ -24,6 +24,13 @@
   if (globalThis.__trifChat) return;
   const post = (m) => { try { return window.webkit.messageHandlers.trif.postMessage(m); } catch (e) { return null; } };
   const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 20 && r.height > 10; };
+  // (in the page shown now: a box of its own, or children with one (a display:contents wrapper); never inside
+  // something display:none. 11-20, chatgpt.com: the page it leaves stays in the document, display:none: its new chat
+  // after a send, frozen with the person's message, a Stop button and a "Thinking" line in it; a conversation after
+  // its New chat. Those are never the page in front.)
+  const live = (el) => el.getClientRects().length > 0 || [...el.children].some((c) => c.getClientRects().length > 0);
+  const $$ = (sel) => [...document.querySelectorAll(sel)].filter(live);
+  const anyLive = (sel) => [...document.querySelectorAll(sel)].some(live);
 
   /** The message box: Claude's and ChatGPT's are ProseMirror editors; else the last visible editable thing. */
   function editor() {
@@ -495,26 +502,40 @@
   //   within 2.5 s, the page showing it went: a new message of the person's, a stop button, or the message box
   //   emptied. (Return that only made a new line, or a send the page refused, isn't a send.)
   //   Still working: Claude's stop button ("Stop response") or its reply marked data-is-streaming="true";
-  //   ChatGPT's stop button (data-testid="stop-button", "Stop streaming"). Done: that's gone, and the last reply
-  //   hasn't changed for 1.2 s. If neither was ever seen (a chat that changed its page), done is the last reply
-  //   unchanged for 6 s with the message box there and no stop button.
+  //   ChatGPT's stop button (data-testid="stop-button", "Stop streaming"; since 11-20 a plain "Stop" in its composer's
+  //   form, where Send was). Done: that's gone, and the last reply hasn't changed for 1.2 s. If neither was ever seen
+  //   (a chat that changed its page), done is the last reply unchanged for 6 s with the message box there and no stop
+  //   button. Only what's in the page shown counts (live: chatgpt.com keeps the page it left, display:none).
   //   Watched with a MutationObserver, its checks at most every half second and once more after the page goes
   //   quiet; it stops when the reply is done (or after 15 minutes).
-  const STOP = 'button[aria-label="Stop response"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[data-testid="stop-button"], [data-is-streaming="true"]';
+  const STOP = 'button[aria-label="Stop response"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[data-testid="stop-button"], form button[aria-label="Stop"], [data-is-streaming="true"]';
   const SEND = 'button[data-testid="send-button"], #composer-submit-button, button[aria-label="Send message"], button[aria-label="Send prompt"], button[aria-label="Send"], button[data-testid="chat-input-send"]';
   // (ChatGPT's mobile page since 11-16 marks its messages li[data-message-role], the reply's li gets
   // data-message-complete when it's done, and its conversations are /uc/<id> logged out: seen logged out, 11-16)
-  const USER = '[data-testid="user-message"], [data-message-author-role="user"], [data-message-role="user"]';
-  const REPLY = '[data-is-streaming], .font-claude-response, .font-claude-message, [data-message-author-role="assistant"], [data-message-role="assistant"]';
+  // (ChatGPT redesigned 11-20, signed in: no data-message-author-role, no conversation-turn testid, no article. Each
+  // message starts with a heading for screen readers, h4[data-conversation-role="user"|"assistant"] ("You said:",
+  // "ChatGPT said:"), a child of the message's own box; that box is also [data-chatgpt-search-unit-key="…:user"|
+  // "…:assistant"]; the reply's text is in [data-response-body] > [data-markdown-text-style="assistant-message"]. The
+  // person's message and the reply share one turn, div[data-talvt-turn-state] (never a message itself: it holds both))
+  const USER = '[data-testid="user-message"], [data-message-author-role="user"], [data-message-role="user"], :has(> [data-conversation-role="user"]), [data-chatgpt-search-unit-key$=":user"]';
+  const REPLY = '[data-is-streaming], .font-claude-response, .font-claude-message, [data-message-author-role="assistant"], [data-message-role="assistant"], :has(> [data-conversation-role="assistant"]), [data-chatgpt-search-unit-key$=":assistant"], [data-response-body], [data-markdown-text-style="assistant-message"]';
   /** A reply being written, by its own mark (Claude's). */
   const STREAMING = '[data-is-streaming="true"]';
-  /** ChatGPT's last reply hasn't been marked complete yet (its newer page marks each one when it's done). */
+  /** ChatGPT's last reply hasn't been marked complete yet: its mobile page (11-16) marks each reply's li when it's done;
+   *  its page of 11-20 marks each turn data-talvt-turn-state ("complete" seen; what it says while writing isn't known:
+   *  anything not a finished word counts as not done), and shows a "Thinking" line, [data-response-starting], before
+   *  the reply's first words. (Not done waits at most 90 s of quiet: settle.) */
+  const TURN_ENDED = /complete|done|finish|idle|error|fail|stop|cancel|interrupt|abort/i;
   function incomplete() {
-    const all = document.querySelectorAll('li[data-message-role="assistant"]');
+    const all = $$('li[data-message-role="assistant"]');
     const last = all[all.length - 1];
-    return !!last && !last.hasAttribute('data-message-complete');
+    if (last && !last.hasAttribute('data-message-complete')) return true;
+    const turns = $$('[data-talvt-turn-state]');
+    const turn = turns[turns.length - 1];
+    if (turn && !TURN_ENDED.test(turn.getAttribute('data-talvt-turn-state') || '')) return true;
+    return anyLive('[data-response-starting]');
   }
-  const replying = () => !!document.querySelector(STOP);
+  const replying = () => anyLive(STOP);
 
   /** The message box's surroundings (where what's attached shows): its widest ancestor, up to eight levels, that
    *  holds none of the conversation's messages. */
@@ -563,7 +584,7 @@
   function turns() {
     const ed = editor(), box = composerBox();
     const out = [];
-    for (const el of document.querySelectorAll(REPLY)) { const t = turnOf(el, ed, box); if (t && !out.includes(t)) out.push(t); }
+    for (const el of $$(REPLY)) { const t = turnOf(el, ed, box); if (t && !out.includes(t)) out.push(t); }
     return out;
   }
 
@@ -584,6 +605,7 @@
     // (a code block: a pre, or a code editor's box (CodeMirror's .cm-editor, which some chats use), the outermost)
     for (const pre of document.querySelectorAll(CODE_BLOCKS)) {
       if (pre.parentElement && pre.parentElement.closest(CODE_BLOCKS)) continue;
+      if (!live(pre)) continue; // (a page chatgpt.com keeps hidden)
       if (pre.closest(VIEWER) || (over && over.contains(pre))) continue;
       const raw = pre.textContent || '';
       // (its markers on lines of their own: a code editor's lines (.cm-line) run together in textContent, so its lines are read)
@@ -620,43 +642,55 @@
   }
   /** What tells a reply is still changing: the last reply's text (or, without one, how much text the page has). */
   function signature() {
-    const all = document.querySelectorAll(REPLY);
+    const all = $$(REPLY);
     const last = all[all.length - 1];
     return last ? `${all.length}:${last.textContent || ''}` : `page:${document.body ? document.body.textContent.length : 0}`;
   }
 
-  let sending = false;
+  let sending = null; // (a send being checked: { at, how, timer })
   let watch = null;
   let last = null; // after a reply: { seen: the mod files known, path } (a mod that turns up late is still offered)
+  // (a tap, Return or submit that may be a send; it is one once the page shows it went: a message of the person's that
+  // wasn't there (in the page shown), a stop button, or the box emptied, within 5 s (2.5 s before 11-20: chatgpt.com
+  // signed in can take longer, its new chat switching to the conversation's page). A tap's touchend, pointerup and
+  // click and the form's submit are one send; a later one (Return made a new line, then Send) checks again.)
   function maybeSent(how) {
-    if (sending || watch) return;
+    if (watch) return;
+    if (sending && Date.now() - sending.at < 1000) return;
     const c = composer();
     if (!c.text && !c.names.length) return;
+    if (sending) clearTimeout(sending.timer);
     const withInstructions = c.names.some((n) => n.includes('TRIF instruction')) || c.text.includes('--- How TRIF mods are written ---');
-    const users = document.querySelectorAll(USER).length;
     const seen = new Set(modBlocks().map((b) => b.raw));
     // (what was on the page before this send: its messages and replies are never this send's reply)
     const usersBefore = new Set(document.querySelectorAll(USER));
     const repliesBefore = new Set(turns());
     const convo = convoOf(location.pathname);
-    sending = true;
-    const t0 = Date.now();
+    const s = { at: Date.now(), how, timer: 0 };
+    sending = s;
     const check = () => {
+      if (sending !== s) return;
       const now = composer();
-      const went = document.querySelectorAll(USER).length > users || replying() || (!now.text && !now.names.length);
+      const went = $$(USER).some((u) => !usersBefore.has(u)) || replying() || (!now.text && !now.names.length);
       if (went) {
-        sending = false;
+        sending = null;
         post({ type: 'sent', how, withInstructions });
         startWatch(seen, { mode: 'send', usersBefore, repliesBefore, convo });
-      } else if (Date.now() - t0 > 2500) sending = false;
-      else setTimeout(check, 150);
+      } else if (Date.now() - s.at > 5000) {
+        sending = null;
+        // (a Send tap with no sign it went: what the page showed, for the diagnostics (Return only makes a new line))
+        if (how !== 'return') post({ type: 'notsent', how, users: $$(USER).length, replies: $$(REPLY).length, stop: replying(), chars: now.text.length, tiles: now.names.length, path: location.pathname.replace(/[^/]{20,}/g, '…') });
+      } else s.timer = setTimeout(check, 150);
     };
-    setTimeout(check, 100);
+    s.timer = setTimeout(check, 100);
   }
-  document.addEventListener('click', (e) => {
+  // (the send button's tap: its click, and its touchend and pointerup too, for a page whose button acts on the touch
+  // and cancels the click)
+  const sendTap = (e) => {
     const b = e.target && e.target.closest && e.target.closest(SEND);
     if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') maybeSent('button');
-  }, true);
+  };
+  for (const t of ['click', 'touchend', 'pointerup']) document.addEventListener(t, sendTap, { capture: true, passive: true });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
     const ed = editor();
@@ -676,9 +710,15 @@
   // offered, ChatOffers.swift, is the second guard.)
   const CONVO = /\/(?:chat|c|uc)\/[^/?#]+/;
   const convoOf = (p) => (String(p || '').match(CONVO) || [''])[0];
+  // (11-20, chatgpt.com signed in: a new conversation's first address is a provisional one, /c/local-chatgpt:<uuid>
+  // (%3A in the address), replaced by its own /c/<id> once the server has it: still the same conversation)
+  const PROVISIONAL = /^\/c\/local[-%:]/i;
+  /** The conversation the watch follows, now at `c`: the same (a new chat's first address, or a provisional one
+   *  becoming its own), or another. */
+  const sameConvo = (was, c) => c === was || !was || (PROVISIONAL.test(was) && /^\/c\//.test(c) && !PROVISIONAL.test(c));
   /** The person's message this watch is for: the last in page order of those that weren't there at the send. */
   function sentMessage(w) {
-    const fresh = [...document.querySelectorAll(USER)].filter((u) => !w.usersBefore.has(u));
+    const fresh = $$(USER).filter((u) => !w.usersBefore.has(u));
     return fresh[fresh.length - 1] || null;
   }
   /** One look: which replies are being written (w.live). (TRIF's own Add to TRIF isn't the reply's writing.) */
@@ -708,7 +748,7 @@
       w.queued = true;
       setTimeout(() => { w.queued = false; settle(w); }, 500);
     });
-    w.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-is-streaming', 'aria-label', 'disabled', 'data-message-complete'] });
+    w.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-is-streaming', 'aria-label', 'disabled', 'data-message-complete', 'data-talvt-turn-state'] });
     settle(w);
   }
   function stopWatch() {
@@ -722,7 +762,7 @@
     clearTimeout(w.timer);
     // (still the same conversation: a new chat's first address is; any other is the person gone elsewhere)
     const c = convoOf(location.pathname);
-    if (c !== w.convo) { if (!w.convo) w.convo = c; else return finish(w, 'left'); }
+    if (c !== w.convo) { if (sameConvo(w.convo, c)) w.convo = c; else return finish(w, 'left'); }
     track(w);
     const now = Date.now();
     const busy = replying();
@@ -760,7 +800,7 @@
     // (code in the reply but no mod read from it, and none held (the held line says why those weren't): said, with
     // what there was, for the diagnostics)
     if (!mods.length && !notOffered.length) {
-      const all = document.querySelectorAll(REPLY);
+      const all = $$(REPLY);
       const r = all[all.length - 1];
       const blocks = r ? r.querySelectorAll(`${CODE_BLOCKS}, code`).length : 0;
       const header = !!r && /==WebMod==/.test(r.textContent || '');
@@ -770,7 +810,7 @@
   }
   /** The person's latest message (after a reload, resume: a reply still being written comes after it). */
   function latestUser() {
-    const users = document.querySelectorAll(USER);
+    const users = $$(USER);
     return users[users.length - 1] || null;
   }
   /** (AUTO path) The mod files in the replies TRIF saw arrive (w.live) that weren't there before the send, the latest
@@ -805,14 +845,16 @@
   let lateSig = '';
   let lateTimer = 0;
   function late() {
-    if (!last || watch || sending || replying() || convoOf(location.pathname) !== last.convo) return;
+    if (!last || watch || sending || replying()) return;
+    const c = convoOf(location.pathname);
+    if (c !== last.convo) { if (last.convo && sameConvo(last.convo, c)) last.convo = c; else return; }
     // (only more of a reply TRIF saw arrive; anything else (old code rendering late, the person's own, the message
     // box) is seen, never offered)
     for (const r of last.live) if (!r.isConnected) last.live.delete(r);
     const all = modBlocks();
-    const live = (b) => !!b.reply && last.live.has(b.reply);
-    for (const b of all) if (!live(b)) last.seen.add(b.raw);
-    const fresh = all.filter((b) => live(b) && !last.seen.has(b.raw));
+    const watched = (b) => !!b.reply && last.live.has(b.reply);
+    for (const b of all) if (!watched(b)) last.seen.add(b.raw);
+    const fresh = all.filter((b) => watched(b) && !last.seen.has(b.raw));
     const sig = fresh.map((b) => b.raw).join('\n');
     // (offered once it's the same on two looks, the second a moment later even if nothing else changes)
     if (!fresh.length || sig !== lateSig) { lateSig = sig; if (fresh.length) { clearTimeout(lateTimer); lateTimer = setTimeout(late, 1500); } return; }
@@ -826,7 +868,12 @@
   function hasContext() {
     const count = (t) => (t.match(/TRIF instruction|--- How TRIF mods are written ---/g) || []).length;
     const box = composerBox();
-    return count(document.body ? document.body.textContent || '' : '') > count(box ? box.textContent || '' : '');
+    // (not in a page chatgpt.com keeps hidden (11-20): a conversation left by its New chat is no part of the new one)
+    let hidden = 0;
+    for (const n of document.querySelectorAll('[style*="display: none" i], [style*="display:none" i]')) {
+      if (!(n.parentElement && n.parentElement.closest('[style*="display: none" i], [style*="display:none" i]'))) hidden += count(n.textContent || '');
+    }
+    return count(document.body ? document.body.textContent || '' : '') - hidden > count(box ? box.textContent || '' : '');
   }
   /** For the app: is there a message box, is anything in it, does the chat have TRIF's instructions, is it replying;
    *  and the pages TRIF's own text in the box is about (`pages`: their addresses), and whether the person's own words
@@ -1030,7 +1077,7 @@
     const mo = new MutationObserver(() => {
       if (watch) { stop(); return; } // (seen by the click or Return already)
       if (sending) return;
-      if (![...document.querySelectorAll(USER)].some((u) => !usersBefore.has(u))) return;
+      if (!$$(USER).some((u) => !usersBefore.has(u))) return;
       stop();
       post({ type: 'sent', how: 'message seen', withInstructions });
       startWatch(seen, { mode: 'send', usersBefore, repliesBefore, convo });
@@ -1148,7 +1195,7 @@
 
   /** The app's chat page loaded again while a reply was being written: watched again, from the person's last message. */
   function resume() {
-    const users = document.querySelectorAll(USER);
+    const users = $$(USER);
     const lastUser = users[users.length - 1];
     const seen = new Set(modBlocks().filter((b) => !lastUser || !(lastUser.compareDocumentPosition(b.pre) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.raw));
     // (no send in this page: only a reply after the person's latest message that's still being written now)
@@ -1158,7 +1205,7 @@
   /** Opened at the reply: the person's last message at the top, the reply under it. */
   /** `toMod`: at the first mod after it instead (its Add to TRIF in view: a reply TRIF didn't see arrive). */
   function showReply(toMod) {
-    const users = document.querySelectorAll(USER);
+    const users = $$(USER);
     const lastUser = users[users.length - 1];
     if (toMod) {
       mark();
@@ -1179,7 +1226,7 @@
     addEventListener('wheel', quit, { once: true, capture: true });
     const tick = () => {
       if (bottomRun !== run) return;
-      const all = document.querySelectorAll(MSGS);
+      const all = $$(MSGS);
       const last = all[all.length - 1];
       const sc = last && scrollerOf(last);
       if (sc) sc.scrollTop = sc.scrollHeight;
@@ -1195,7 +1242,7 @@
   // the reply and its "working" line above it. So: when the conversation's last message is wholly above what
   // shows (nothing but space below everything), it's brought back to sit 60% of the way down. Never when the
   // person has scrolled up to read (then the last message is below the view, not above it).
-  const MSGS = '[data-testid="user-message"], [data-is-streaming], .font-claude-response, [data-message-author-role], [data-message-role]';
+  const MSGS = `[data-testid="user-message"], [data-is-streaming], .font-claude-response, [data-message-author-role], [data-message-role], ${USER}, ${REPLY}`;
   function scrollerOf(el) {
     for (let n = el && el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
       if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight + 4) return n;
@@ -1203,7 +1250,7 @@
     return null;
   }
   function reveal() {
-    const all = document.querySelectorAll(MSGS);
+    const all = $$(MSGS);
     const last = all[all.length - 1];
     const sc = last && scrollerOf(last);
     if (!sc) return;
@@ -1217,7 +1264,7 @@
     const rect = (n) => { const r = n.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom), Math.round(r.height)]; };
     const scrollers = [...document.querySelectorAll('*')].filter((n) => /(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight + 4)
       .map((n) => ({ el: desc(n), rect: rect(n), scrollTop: Math.round(n.scrollTop), scrollHeight: n.scrollHeight, clientHeight: n.clientHeight }));
-    const all = document.querySelectorAll(MSGS);
+    const all = $$(MSGS);
     const last = all[all.length - 1];
     return JSON.stringify({ innerHeight, visual: window.visualViewport && Math.round(visualViewport.height), docScroll: Math.round((document.scrollingElement || document.documentElement).scrollTop),
       messages: all.length, last: last && { el: desc(last), rect: rect(last), scroller: desc(scrollerOf(last)) }, scrollers }, null, 1);
@@ -1433,7 +1480,9 @@
   function placeGreeting() {
     const ed = usableEditor();
     const box = ed;
-    const empty = !document.querySelector(USER) && !document.querySelector(REPLY);
+    // (only the page shown: 11-20, chatgpt.com's messages matched neither USER nor REPLY and TRIF's greeting stayed
+    // up inside its conversation, moving as it scrolled)
+    const empty = !anyLive(USER) && !anyLive(REPLY);
     if (!robot || !box || !empty || viewer() || !document.body) { unhideHeading(); if (card) card.hidden = true; return; }
     const b = composerRect(ed);
     const c = greetingCard();
@@ -1563,7 +1612,7 @@
 
   /** For the app's "still nothing back" watch: whether a reply is being written, and how much reply text is on the
    *  page (it only compares one look with the next). */
-  const replyNow = () => `${replying() || incomplete() ? 1 : 0}:${[...document.querySelectorAll(REPLY)].reduce((n, e) => n + (e.textContent || '').length, 0)}`;
+  const replyNow = () => `${replying() || incomplete() ? 1 : 0}:${$$(REPLY).reduce((n, e) => n + (e.textContent || '').length, 0)}`;
   globalThis.__trifChat = { fill, canAsk, replyNow, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, viewer: () => { const v = viewer(); return v ? v.why : null; } };
   // (the app's look (the site and TRIF's robot) asked for once this script is in: on claude.ai signed in (11-19) the
   // app's call at the page's load came before this script ran, so its greeting and pills had no robot)

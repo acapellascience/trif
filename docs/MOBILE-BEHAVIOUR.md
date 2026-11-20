@@ -223,7 +223,9 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
   inside a reply (not the person's message, not the box, nothing editable), from a reply that wasn't on the page at
   the send, came after the person's message, and was seen being written. A watch belongs to its conversation: another
   conversation ends it with nothing offered. A viewer counts only if opened by a tap inside a reply (6 s), or with no
-  tap while a live reply is written or ended < 2 min ago. [shared: chat.js]
+  tap while a live reply is written or ended < 2 min ago. Only the page shown counts (11-20: chatgpt.com keeps the
+  page it left in the document, display:none, frozen with a message and a Stop button): its messages, code, stop
+  button and greeting test never read from a hidden one. [shared: chat.js]
 - A chat never offers the same code twice, whatever came of it (11-17: "spurious asks to add old code when I open
   Claude chat"), nor an installed mod's current or earlier version, nor one in Recently deleted, nor one already
   waiting to be offered. Code is compared after evening out line ends, trailing spaces and blank end lines. Memory:

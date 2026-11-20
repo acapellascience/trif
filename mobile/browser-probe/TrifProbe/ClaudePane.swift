@@ -103,6 +103,8 @@ final class ChatView: Identifiable {
     /// The conversation the person sent from (nil: a new chat with no address yet): a reload onto another one while
     /// .working isn't that reply (Tim, 11-18: old chats' code picked up).
     var workingConversation: String?
+    /// The conversation address last seen in this chat (ClaudePane.remember): a provisional one becoming its own.
+    var seenConversation: String?
     /// The instructions went in a new chat's first message: its address, once it has one, is noted.
     var contextNext = false
     /// The page went into a new chat in TRIF's project without the guide (the project has it).
@@ -492,8 +494,15 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             if ClaudePane.owner(of: s) == v.site { UserDefaults.standard.set(s, forKey: lastKey(v.service, v.site)) }
             else { report.log("claude", "\(v.service.rawValue): the chat for \(v.site.isEmpty ? "no site" : v.site) is on \(ClaudePane.owner(of: s) ?? "?")'s conversation: not kept as this site's") }
             if v.contextNext { v.contextNext = false; noteContext(s) }
+            // (a provisional address becoming the conversation's own (chatgpt.com, 11-20): the same conversation, its
+            // instructions with it, the reply still watched)
+            if let was = v.seenConversation, was != s, ClaudePane.provisional(was), !ClaudePane.provisional(s) {
+                if v.workingConversation == was { v.workingConversation = s }
+                if hasContext(was) { noteContext(s) }
+            }
+            v.seenConversation = s
             // (the chat's link follows its conversation: a new chat's first address, or another one the person went to)
-            if ClaudePane.owner(of: s) == v.site { updateLink(v) { if $0.conv != s, $0.state != .working || $0.conv == nil { $0.conv = s } } }
+            if ClaudePane.owner(of: s) == v.site { updateLink(v) { if $0.conv != s, $0.state != .working || $0.conv == nil || ClaudePane.provisional($0.conv) { $0.conv = s } } }
         }
     }
 
@@ -654,6 +663,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// (the shown chat's: chat.js's state, for the dev steps)
     func chatState() async -> String? { await chatJS(cur, "state()") }
 
+    /// A new conversation's provisional address (chatgpt.com signed in, 11-20: /c/local-chatgpt:<uuid>, "%3A" in the
+    /// address, until the server gives it its own /c/<id>): the same conversation as the address that replaces it.
+    static func provisional(_ conv: String?) -> Bool {
+        guard let conv, let u = URL(string: conv) else { return false }
+        return u.path.hasPrefix("/c/local-") || u.path.hasPrefix("/c/local:")
+    }
     /// The conversation an address is (kept without query or fragment), or nil for a new chat.
     static func conversation(of url: URL?) -> String? {
         guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") || url.path.hasPrefix("/uc/") else { return nil }
@@ -857,6 +872,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         case "sent":
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
             report.log("claude", "\(name): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
+            // (in the diagnostics too (11-20: Tim's ChatGPT send left no trace there; report.json isn't in them))
+            Diagnostics.shared.log("chat", "\(name) for \(v.site.isEmpty ? "no site" : v.site): the person's send seen (\(d["how"] as? String ?? "?"))")
             if d["withInstructions"] as? Bool == true || v.projectFill { if let conv = v.conversation { noteContext(conv) } else { v.contextNext = true } }
             v.projectFill = false
             setLastFill(v, nil)
@@ -901,6 +918,12 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let gone = (d["gone"] as? [String] ?? []).joined(separator: ", ")
             report.log("claude", "\(name): after the fill, taken out again: \(gone)")
             Diagnostics.shared.log("chat", "\(name) for \(v.site.isEmpty ? "no site" : v.site): the page put back an earlier fill after TRIF's (its saved draft): taken out again: \(gone)")
+        case "notsent":
+            // (the send button tapped and, 5 s later, no sign the message went: what the page showed, for the next
+            // report (11-20: chatgpt.com's redesign, a send TRIF never saw))
+            let what = "\(name) for \(v.site.isEmpty ? "no site" : v.site): Send tapped (\(d["how"] as? String ?? "?")), no sign it went in 5 s: \(d["users"] as? Int ?? -1) message(s) of the person's and \(d["replies"] as? Int ?? -1) reply part(s) seen, stop button \(d["stop"] as? Bool == true ? "shown" : "not seen"), the box \(d["chars"] as? Int ?? 0) characters and \(d["tiles"] as? Int ?? 0) attachment(s), at \(d["path"] as? String ?? "?")"
+            report.log("claude", what)
+            Diagnostics.shared.log("chat", what)
         case "nopickup":
             // (a reply with code in it, and no mod read from it: what there was, for the next report)
             let what = "\(name)'s reply at \(d["path"] as? String ?? "?") had \(d["blocks"] as? Int ?? 0) code block(s)\(d["header"] as? Bool == true ? " and a mod's header" : ""), and no mod was read from it (\(d["kinds"] as? String ?? "?"))"
@@ -1817,6 +1840,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         if v.activity == .working {
             // (only the conversation the person sent from (or a new chat's, which had no address yet): another one
             // loaded meanwhile is history, nothing to watch; chat.js's resume itself takes only a reply still being written)
+            // (a provisional address replaced by its own was followed already: remember)
             if let w = v.workingConversation, v.conversation != w {
                 v.activity = .idle
                 Diagnostics.shared.log("chat offers", "\(v.service.rawValue): another conversation loaded while a reply was being written: not watched")

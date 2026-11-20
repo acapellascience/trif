@@ -83,7 +83,7 @@ window.__agent = { host: location.host, sent: ${JSON.stringify(sent)}, nav: navi
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       return res.end(JSON.stringify(conversations[key] || []));
     }
-    if (/^c\/[\w-]+$/.test(name)) name = 'chat.html';
+    if (/^c\/[\w:-]+$/.test(name)) name = 'chat.html'; // (and ChatGPT's provisional /c/local-chatgpt:<uuid>, 11-20)
     // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)
     if (/^chat\/[\w-]+$/.test(name)) name = 'chat.html';
     // (and claude.ai's new-chat page, /new: a chat there gets /chat/<id> at its first send)

@@ -62,6 +62,23 @@
   person can't select) and the code in spans; `?nested=inline`: each line's number at its start instead.
   "whole" in the message: the reply drawn all at once, finished, with no stop button or streaming mark, as a reply
   that finished while the app's page wasn't running is found on its return.
+  `?thread` (11-20, chatgpt.com redesigned, signed in; from two saved pages, trimmed): `?gptin`'s composer (a form,
+  data-chatgpt-composer) and none of the older markers. Each exchange is one turn, div[data-virtualized-turn] >
+  [data-turn-key] > div[data-talvt-turn-state] ("complete" when done; "pending" and "streaming" before are this page's
+  guesses), holding the person's message (div.block > h4[data-conversation-role=user].sr-only "You said:" + div
+  [data-chatgpt-search-unit-key=…:user] with their files as resource cards and a picture as "User attachment", the words
+  in [data-user-message-bubble]) and the reply (div.block > [data-chatgpt-search-unit-key=…:assistant] > h4
+  [data-conversation-role=assistant] + [data-response-body] > [data-markdown-text-style=assistant-message]); a
+  "Thinking" span[data-response-starting][role=status] before its first words; code as ChatGPT's widget
+  (div[data-client-defined-widget=code_block] > div[data-chatgpt-copy-code].CodeBlock-… > div[data-code-block=true].Root-…
+  > a "JavaScript" header (contenteditable=false, Copy code) and div.InlineCodePane-… > … > div.chatgpt-code-scrollport >
+  pre.m-0 > code, drawn again as spans per line once written). While it writes, the form's Send is a plain
+  button[type=button][aria-label=Stop]. The conversation's scroller is #log[role=region][aria-label=Conversation].
+  A new chat is its home view (div[role=main] with "Where should we begin?" and section.group/home-suggestions); the first
+  send shows the message there with "Thinking" and Stop, and 0.5 s later the page switches: the home view, frozen as it
+  was (message, Thinking, a form with Stop), is kept at the body's start with display:none !important, as chatgpt.com
+  keeps the page it left, and the conversation's turn is drawn anew. The header's "New chat" keeps the conversation the
+  same way (hidden) and shows the home view again.
 -->
 <style>
   :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --tile: #ece9e0; --you: #efece4; }
@@ -100,6 +117,18 @@
   .tools { display: flex; gap: 14px; align-items: center; padding: 8px 4px 0; font-size: 13px; opacity: 0.75; }
   .disclaimer { text-align: center; font-size: 12px; opacity: 0.6; padding: 6px 0 2px; }
   .viewer .linenumber { display: inline-block; width: 2.2em; opacity: 0.45; user-select: none; -webkit-user-select: none; }
+  /* (?thread) */
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  [data-user-message-bubble] { background: var(--you); border-radius: 14px; padding: 10px 12px; margin: 6px 0 10px 40px; white-space: pre-wrap; }
+  .standin-home h1 { font: 400 26px/1.3 system-ui, sans-serif; text-align: center; margin: 18vh 0 12px; }
+  .standin-home section button { display: block; width: 100%; text-align: left; font: 16px/1.3 system-ui; padding: 10px 6px; border: 0; background: none; color: inherit; opacity: 0.6; }
+  [data-code-block] { border-radius: 8px; overflow: clip; margin: 8px 0; }
+  [data-code-block] .code-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; font-size: 12px; background: #2a2a2a; color: #ccc; user-select: none; -webkit-user-select: none; }
+  [data-code-block] .code-head button { width: 18px; height: 18px; border: 0; border-radius: 4px; background: #444; }
+  [data-code-block] pre { margin: 0; border-radius: 0; }
+  .group\/resource-card { display: inline-flex; gap: 6px; font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--tile); margin: 0 6px 6px 0; position: relative; }
+  .group\/resource-card button { position: absolute; inset: 0; opacity: 0; border: 0; }
+  .sent-pic { width: 60px; height: 60px; border-radius: 8px; border: 1px solid var(--line); background: var(--tile); padding: 0; }
 </style>
 </head>
 <body>
@@ -125,6 +154,7 @@
   // its message box is there, as claude.ai's does)
   if (location.search.includes('slowload')) { const i = new Image(); i.src = `http://localhost:8378/slow?${Date.now()}`; document.body.append(i); }
   const nostop = location.search.includes('nostop');
+  const thread = /[?&]thread\b/.test(location.search); // (chatgpt.com's page of 11-20)
   if (location.search.includes('greet')) {
     // (`?greet=claude`: claude.ai's signed-in greeting (11-19), no heading: a div of display type holding its
     // starburst (an svg in a div) and the words in a span.select-none)
@@ -209,12 +239,14 @@
   function addFile(name, text, type) {
     const entry = { name, text: text || '' };
     files.push(entry);
-    const tile = document.createElement('div');
+    // (?gptin's file tile is a span, as chatgpt.com's: span.group/composer-attachment; before 11-20 the stand-in drew a div)
+    const tile = document.createElement(gptin && !(octane && /^image\//.test(type || '')) ? 'span' : 'div');
     const x = document.createElement('button');
     x.type = 'button';
     x.textContent = '×';
     x.addEventListener('click', () => { files.splice(files.indexOf(entry), 1); tile.remove(); refresh(); saveDraft(); });
-    if (/octane|gptin/.test(location.search) && /^image\//.test(type || '')) {
+    if (octane && /^image\//.test(type || '')) {
+      entry.image = true;
       // (?octane, a picture, as chatgpt.com signed in draws it (11-19): a div[role=button].composer-attachment-surface
       // named only by its aria-label and its img's alt, no data-testid; a name used before gets "(n)" before its
       // extension, as its uploads do)
@@ -236,7 +268,7 @@
       x.setAttribute('aria-label', `Remove ${name}`);
       x.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: inherit;';
       tile.append(layer, x);
-    } else if (/gptin/.test(location.search)) {
+    } else if (gptin) {
       // (?gptin, a file, as chatgpt.com signed in draws it (11-19): span.group/composer-attachment > a surface with the
       // name in span.truncate and a button named by it; "Remove …" beside; a name used before gets "(n)")
       const used = files.filter((f) => f !== entry && f.base === name).length;
@@ -308,7 +340,7 @@
   // (?gptpaste: as chatgpt.com on Tim's iPhone, 11-16: a pasted text file goes into the box as its text; pictures
   // and files picked with the file input (the paper clip) become tiles)
   const gptpaste = location.search.includes('gptpaste');
-  const gptin = location.search.includes('gptin');
+  const gptin = location.search.includes('gptin') || thread;
   const octane = location.search.includes('octane') || gptin;
   const cm = location.search.includes('cm');
   const picker = document.createElement('input');
@@ -430,6 +462,113 @@
     pick.textContent = 'Stand-in Medium';
     pick.style.cssText = 'float: right; font: 13px system-ui; border: 0; background: none; color: inherit; margin-right: 8px;';
     document.querySelector('header').append(pick);
+    if (thread) form.setAttribute('data-chatgpt-composer', '');
+  }
+
+  // ---- ?thread: chatgpt.com's page of 11-20 (see the top) ----
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) { if (k === 'class') n.className = v; else n.setAttribute(k, v); }
+    n.append(...kids);
+    return n;
+  };
+  let transcript = log, home = null, homeStop = null, turnN = 0;
+  function showHome() {
+    home = el('div', { role: 'main', class: 'standin-home' }, el('h1', {}, 'Where should we begin?'),
+      el('section', { class: 'group/home-suggestions' }, ...['Create a site to practice everyday…', 'Give me a short practical dialog…']
+        .map((t) => el('div', { class: 'group/home-suggestion-list-item' }, el('button', { type: 'button' }, t)))));
+    log.prepend(home);
+  }
+  /** The person's message: its heading for screen readers and its own box (files as resource cards, a picture as "User attachment", the words in a bubble). */
+  function userParts(text, sent, key) {
+    const h = el('h4', { 'data-conversation-role': 'user', class: 'sr-only' }, el('span', {}, 'You said:'), el('span', { 'aria-hidden': 'true', hidden: '' }, 'You'));
+    const unit = el('div', { 'data-chatgpt-search-unit-key': `${key}:0:user`, class: 'group/user-message' });
+    for (const f of sent) {
+      if (f.image) unit.append(el('div', {}, el('button', { type: 'button', 'aria-label': 'User attachment', class: 'sent-pic' }, el('img', { alt: 'User attachment' }))));
+      else unit.append(el('div', {}, el('span', { class: 'group/resource-card' }, el('button', { type: 'button', 'aria-label': f.name }), el('span', { class: 'truncate' }, f.name), el('span', {}, 'Document'))));
+    }
+    if (text) unit.append(el('div', { 'data-content-search-unit-key': `${key}:0:user` }, el('div', { 'data-user-message-bubble': 'true' }, el('div', { dir: 'auto' }, text))));
+    return { h, unit };
+  }
+  /** A turn in the conversation with the person's message in it (the reply comes into it later). */
+  function addTurn(text, sent) {
+    const key = `t${++turnN}-${Math.random().toString(36).slice(2, 8)}`;
+    const { h, unit } = userParts(text, sent, key);
+    const stack = el('div', { 'data-spacing': 'activity', class: 'flex flex-col stack-eQ550z' }, el('div', { class: 'block-BQZwFn' }, h, unit));
+    const state = el('div', { 'data-talvt-turn-state': 'pending', class: 'group flex flex-col' }, stack);
+    transcript.append(el('div', { 'data-virtualized-turn': '' }, el('div', { 'data-turn-key': key }, el('div', { class: 'flex flex-col gap-1.5' }, state))));
+    log.scrollTop = log.scrollHeight;
+    return state;
+  }
+  /** The first send of a new chat: the message on the home view with "Thinking", Stop where Send was. */
+  function homeSent(text, sent) {
+    const { h, unit } = userParts(text, sent, 'home');
+    for (const n of [...home.children]) n.remove();
+    home.append(el('div', { class: 'flex flex-col gap-1.5' }, el('div', { class: 'flex flex-col gap-1.5' }, h, ...[...unit.childNodes].map((n) => n.cloneNode(true))),
+      el('span', { 'data-response-starting': '', role: 'status' }, el('span', { 'aria-hidden': 'true' }, 'Thinking'))));
+    homeStop = el('button', { type: 'button', 'aria-label': 'Stop' }, '■');
+    send.replaceWith(homeStop);
+  }
+  /** …and the page switched to the conversation's: the home view kept as it was, hidden (with a form showing Stop). */
+  function leaveHome() {
+    const form = document.querySelector('form');
+    const copy = form.cloneNode(true);
+    copy.querySelector('.ProseMirror').textContent = '';
+    copy.querySelector('.tiles').textContent = '';
+    keepHidden(home, copy);
+    home = null;
+    homeStop.replaceWith(send);
+    homeStop = null;
+  }
+  function keepHidden(...nodes) {
+    const kept = el('div', { class: 'standin-kept' }, ...nodes);
+    kept.style.setProperty('display', 'none', 'important');
+    document.body.prepend(kept);
+  }
+  /** The reply's place in the last turn: its heading, [data-response-body] and the markdown box the words go in, and "Thinking" before it. */
+  function threadReplyBox() {
+    const all = transcript.querySelectorAll('[data-talvt-turn-state]');
+    const turn = all[all.length - 1];
+    turn.setAttribute('data-talvt-turn-state', 'streaming');
+    const key = turn.parentElement.closest('[data-turn-key]').getAttribute('data-turn-key');
+    const md = el('div', { 'data-markdown-text-style': 'assistant-message', dir: 'auto', class: 'MarkdownRoot-rZKhxa' });
+    const thinking = el('span', { 'data-response-starting': '', role: 'status' }, el('span', { 'aria-hidden': 'true' }, 'Thinking'));
+    const block = el('div', { class: 'block-BQZwFn' }, el('span', { hidden: '', 'data-chatgpt-agent-turn-start': '' }),
+      el('div', { 'data-chatgpt-search-unit-key': `${key}:2:assistant` }, el('h4', { 'data-conversation-role': 'assistant', class: 'sr-only' }, 'ChatGPT said:'),
+        el('div', { 'data-response-body': key }, el('div', { class: 'group flex min-w-0 flex-col' }, md))));
+    turn.firstElementChild.append(thinking, block);
+    return { box: md, turn, thinking };
+  }
+  /** ChatGPT's code block: the widget, its header, and the pre > code the code is written into. */
+  function codeWidget() {
+    const code = el('code');
+    const copy = el('div', { class: 'CodeBlock-zu1QM3' }, el('div', { 'data-code-block': 'true', 'data-markdown-copy': 'code-block', class: 'relative Root-iW7ipz w-full min-w-0 overflow-clip' },
+      el('div', { 'data-markdown-copy': 'exclude', contenteditable: 'false', class: 'code-head' }, el('div', { style: 'flex: 1' }, 'JavaScript'),
+        el('div', { 'data-code-block-controls': 'true', role: 'presentation' }, el('button', { type: 'button', 'aria-label': 'Enable word wrap' }), el('button', { type: 'button', 'aria-label': 'Copy code' }))),
+      el('div', { class: 'relative' }, el('div', { class: 'InlineCodePane-EYx4bd w-full overflow-x-hidden' }, el('div', { dir: 'ltr', class: 'relative z-0 flex max-w-full Viewer-ALA646' },
+        el('div', { class: 'chatgpt-code-scrollport flex w-full Scrollport-kY3Nlm' }, el('pre', { class: 'm-0 flex-1 font-mono' }, code)))))));
+    return { wrap: el('div', { 'data-client-defined-widget': 'code_block' }, copy), code, copy };
+  }
+  /** Written: drawn again as ChatGPT's highlighter does, a span per line (comments their own class), its text on the widget. */
+  function highlight(w, text) {
+    w.copy.setAttribute('data-chatgpt-copy-code', text);
+    w.code.textContent = '';
+    text.split('\n').forEach((l, i, all) => { w.code.append(el('span', /^\s*\/\//.test(l) ? { class: 'Comment-dh5VVn' } : {}, l)); if (i < all.length - 1) w.code.append(el('span', {}, '\n')); });
+  }
+  if (thread) {
+    log.setAttribute('role', 'region');
+    log.setAttribute('aria-label', 'Conversation');
+    transcript = el('div', { 'data-rail-chat-transcript': 'true', class: 'flex flex-col' });
+    log.append(transcript);
+    if (!/^\/c\//.test(location.pathname)) showHome();
+    const nb = el('button', { type: 'button', id: 'new-chat', style: 'float: right; font: 13px system-ui; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; margin-right: 8px;' }, 'New chat');
+    nb.addEventListener('click', () => {
+      // (the conversation kept, hidden, as chatgpt.com keeps the page it left)
+      if (transcript.childNodes.length) keepHidden(...transcript.childNodes);
+      history.pushState({}, '', `/chat.html${location.search}`);
+      if (!home) showHome();
+    });
+    document.querySelector('header').append(nb);
   }
 
   // (origin null: no @match line, as desktop's mods in a site's folder (FeedBook): the site comes from the chat's)
@@ -446,21 +585,35 @@ ${JSON.stringify(body, null, 2)}`;
     if (!text && !files.length && !pastes.length) return;
     const lined = ed.innerText || text; // (the box's text with its line breaks: what "edit" reads TRIF's mods from)
     const attached = files.map((f) => f.text).join('\n');
-    const msg = document.createElement(octane ? 'li' : 'div');
-    if (octane) msg.setAttribute('data-message-role', 'user'); else msg.setAttribute('data-testid', 'user-message');
-    for (const f of files) { const s = document.createElement('span'); s.className = 'sent-file'; s.textContent = f.name; msg.append(s, document.createElement('br')); }
-    // (?pasted: the person's pasted cards, a tap opening the text in the viewer, and the box's code blocks as they were)
-    for (const p of pastes) { const card = pastedPreview(p.text, 'pasted-card'); card.setAttribute('role', 'button'); card.addEventListener('click', () => openViewer('Pasted text', p.text)); msg.append(card, document.createElement('br')); }
-    if (pastedMode && ed.querySelector('pre')) msg.append(...[...ed.childNodes].map((n) => n.cloneNode(true)));
-    else msg.append(text);
-    log.append(msg);
+    // (?thread: on a new chat's home view first, the page switching 0.5 s later; else a turn of the conversation)
+    const sentFiles = files.map((f) => ({ name: f.name, image: !!f.image }));
+    const fromHome = thread && !!home;
+    if (thread) { if (fromHome) homeSent(text, sentFiles); else addTurn(text, sentFiles); }
+    else {
+      const msg = document.createElement(octane ? 'li' : 'div');
+      if (octane) msg.setAttribute('data-message-role', 'user'); else msg.setAttribute('data-testid', 'user-message');
+      for (const f of files) { const s = document.createElement('span'); s.className = 'sent-file'; s.textContent = f.name; msg.append(s, document.createElement('br')); }
+      // (?pasted: the person's pasted cards, a tap opening the text in the viewer, and the box's code blocks as they were)
+      for (const p of pastes) { const card = pastedPreview(p.text, 'pasted-card'); card.setAttribute('role', 'button'); card.addEventListener('click', () => openViewer('Pasted text', p.text)); msg.append(card, document.createElement('br')); }
+      if (pastedMode && ed.querySelector('pre')) msg.append(...[...ed.childNodes].map((n) => n.cloneNode(true)));
+      else msg.append(text);
+      log.append(msg);
+    }
     ed.textContent = '';
     files.length = 0;
     pastes.length = 0;
     tiles.textContent = '';
     if (draft) sessionStorage.removeItem('draft');
     if (gptdraft) try { localStorage.removeItem('standin-draft'); } catch (e) {}
-    if (!/^\/(chat|c)\//.test(location.pathname)) history.pushState({}, '', `/${location.search.includes('gpt') ? 'c' : 'chat'}/${keep ? 'k-' : ''}${Math.random().toString(36).slice(2, 10)}${location.search}`);
+    // (?thread, not ?keep: a provisional address first, /c/local-chatgpt%3A<uuid>, replaced by its own 2 s later, as
+    // chatgpt.com's new conversation)
+    const own = `${keep ? 'k-' : ''}${Math.random().toString(36).slice(2, 10)}`;
+    if (!/^\/(chat|c)\//.test(location.pathname)) {
+      if (thread && !keep) {
+        history.pushState({}, '', `/c/local-chatgpt%3A${Math.random().toString(16).slice(2, 10)}-0000-4000-8000-000000000000${location.search}`);
+        setTimeout(() => { if (/^\/c\/local-/.test(location.pathname)) history.replaceState({}, '', `/c/${own}${location.search}`); }, 2000);
+      } else history.pushState({}, '', `/${location.search.includes('gpt') || thread ? 'c' : 'chat'}/${own}${location.search}`);
+    }
     // ("no match": the mod has no @match line)
     const origin = /no match/i.test(text) ? null : (((`${attached} ${text}`.match(/https?:\/\/[^\s/]+/) || [])[0]) || 'http://localhost:8377').replace(/:\d+$/, ''); // (a match pattern has no port)
     let parts;
@@ -544,7 +697,9 @@ document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(aske
     }
     // (?keep: the conversation kept by its address on the server (serve.js), as the service keeps it: the reply as it will end)
     if (keep) fetch(`/standin-conv${location.pathname}`, { method: 'POST', body: JSON.stringify({ text, parts }) }).catch(() => {});
-    reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0), /\bwhole\b/i.test(text));
+    const answer = () => reply(parts, Number((text.match(/wait (\d+)/i) || [])[1] || 0), /\bwhole\b/i.test(text));
+    if (fromHome) setTimeout(() => { leaveHome(); addTurn(text, sentFiles); answer(); }, 500);
+    else answer();
   }
   // (a kept conversation's address starts k-, so it's known as one without the query, which the app drops on resume)
   const keep = /[?&]keep\b/.test(location.search) || /^\/(chat|c)\/k-/.test(location.pathname);
@@ -676,17 +831,23 @@ document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(aske
   function reply(parts, seconds, whole) {
     const stop = document.createElement('button');
     stop.type = 'button';
-    stop.setAttribute('aria-label', gptin ? 'Stop streaming' : 'Stop response');
-    if (gptin) stop.setAttribute('data-testid', 'stop-button');
+    // (?thread: a plain "Stop", no testid, in the form where Send was)
+    stop.setAttribute('aria-label', thread ? 'Stop' : gptin ? 'Stop streaming' : 'Stop response');
+    if (gptin && !thread) stop.setAttribute('data-testid', 'stop-button');
     stop.textContent = '■';
     if (!nostop) send.replaceWith(stop);
     else send.disabled = true;
-    const box = document.createElement(octane ? 'li' : 'div');
-    if (octane) box.setAttribute('data-message-role', 'assistant');
-    else box.className = 'font-claude-response';
-    if (!octane && location.pathname.startsWith('/c/')) { box.setAttribute('data-message-author-role', 'assistant'); box.setAttribute('data-message-id', `msg-${Date.now()}`); }
-    if (!nostop && !octane) box.setAttribute('data-is-streaming', 'true');
-    log.append(box);
+    let box, turn = null, thinking = null;
+    if (thread) ({ box, turn, thinking } = threadReplyBox());
+    else {
+      box = document.createElement(octane ? 'li' : 'div');
+      if (octane) box.setAttribute('data-message-role', 'assistant');
+      else box.className = 'font-claude-response';
+      if (!octane && location.pathname.startsWith('/c/')) { box.setAttribute('data-message-author-role', 'assistant'); box.setAttribute('data-message-id', `msg-${Date.now()}`); }
+      if (!nostop && !octane) box.setAttribute('data-is-streaming', 'true');
+      log.append(box);
+    }
+    const ended = () => { if (turn) turn.setAttribute('data-talvt-turn-state', 'complete'); else if (octane) box.setAttribute('data-message-complete', ''); };
     const steps = [];
     for (const [tag, t, label] of parts) {
       if (tag === 'card') {
@@ -714,44 +875,50 @@ document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(aske
       const words = t.split(/(?<=\s)/);
       let into = null; // (not box.lastElementChild: TRIF puts its Add to TRIF button after a code block)
       let made = null;
-      steps.push(() => { const n = document.createElement(tag); made = n; into = n; if (tag === 'pre') { into = document.createElement('code'); n.append(into); } box.append(n); });
+      let widget = null;
+      if (tag === 'pre' && thread) steps.push(() => { widget = codeWidget(); into = widget.code; box.append(widget.wrap); });
+      else steps.push(() => { const n = document.createElement(tag); made = n; into = n; if (tag === 'pre') { into = document.createElement('code'); n.append(into); } box.append(n); });
       for (let i = 0; i < words.length; i += tag === 'pre' ? 6 : 2) {
         const chunk = words.slice(i, i + (tag === 'pre' ? 6 : 2)).join('');
         steps.push(() => { into.append(chunk); });
       }
       if (tag === 'pre' && nested) steps.push(() => drawNested(made, t));
+      if (tag === 'pre' && thread) steps.push(() => highlight(widget, t));
     }
     // ("whole": every step at once, finished: no stop button, no streaming mark)
     if (whole) {
-      box.setAttribute('data-is-streaming', 'false');
+      if (!thread) box.setAttribute('data-is-streaming', 'false');
       if (!nostop) stop.replaceWith(send);
+      if (thinking) thinking.remove();
       for (const f of steps) f();
-      if (octane) box.setAttribute('data-message-complete', '');
+      ended();
       refresh();
       return;
     }
     // ("wait N" in the message: the reply takes about N seconds, written a little at a time)
     const each = seconds ? Math.max(90, (seconds * 1000) / steps.length) : slow ? 220 : 90;
     let i = 0;
-    let pauseAt = octane ? Math.floor(steps.length / 3) : -1;
+    let pauseAt = octane && !thread ? Math.floor(steps.length / 3) : -1;
     const tick = () => {
       // (?octane: a 3 s pause partway, with no stop button, as chatgpt.com's while it searches)
       if (i === pauseAt) { pauseAt = -1; const s2 = stop; s2.replaceWith(send); setTimeout(() => { send.replaceWith(s2); tick(); }, 3000); return; }
+      if (i === 0 && thinking) thinking.remove();
       if (i < steps.length) { steps[i++](); log.scrollTop = log.scrollHeight; setTimeout(tick, each); return; }
-      if (octane) box.setAttribute('data-message-complete', '');
+      ended();
       if (nostop) { refresh(); return; }
-      box.setAttribute('data-is-streaming', 'false');
+      if (!thread) box.setAttribute('data-is-streaming', 'false');
       send = makeSend();
       stop.replaceWith(send);
       refresh();
       if (older) setTimeout(addOlder, 2000);
     };
-    setTimeout(tick, 600);
+    setTimeout(tick, thread ? 1200 : 600); // (?thread: "Thinking" a moment first)
   }
   // (?keep, 11-19, the mod matrix: a conversation opened again (the app killed mid-reply and launched again) shows its
   // exchanges finished, as claude.ai draws a conversation whose reply ended while nobody watched; kept by serve.js)
   if (/^\/(chat|c)\/k-/.test(location.pathname)) fetch(`/standin-conv${location.pathname}`).then((r) => r.json()).then((list) => { try {
     for (const x of list) {
+      if (thread) { addTurn(x.text, []); reply(x.parts, 0, true); continue; }
       const u = document.createElement(octane ? 'li' : 'div');
       if (octane) u.setAttribute('data-message-role', 'user'); else u.setAttribute('data-testid', 'user-message');
       u.textContent = x.text;

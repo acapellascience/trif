@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (557 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (558 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -114,8 +114,22 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   code.language-js > a code column of line numbers, user-select none; `=inline`: each line's number at its start).
   Message word "whole": the reply drawn at once, finished, no stop button or streaming mark (a reply that finished
   while the app's page was suspended): held, `waiting` in done, the "replied with a mod" banner.
+- `?thread` (11-20): chatgpt.com's redesigned page, signed in, built from the two saved pages (see Gotchas, "ChatGPT
+  redesigned 11-20"): `?gptin`'s composer (its file tile now a span, as the real one) in a form[data-chatgpt-composer];
+  turns div[data-virtualized-turn] > [data-turn-key] > div[data-talvt-turn-state] ("pending", "streaming", "complete":
+  the first two guessed) with the person's message and the reply as the real markup (h4[data-conversation-role], the
+  search-unit keys, [data-response-body] > [data-markdown-text-style=assistant-message]); a "Thinking"
+  span[data-response-starting] first; code in ChatGPT's widget ([data-client-defined-widget=code_block] >
+  [data-chatgpt-copy-code].CodeBlock-… > [data-code-block=true].Root-… > header + InlineCodePane-… > … > pre.m-0 > code,
+  spans per line once written); Stop = form button[type=button][aria-label=Stop]; #log is the region "Conversation".
+  A new chat is a home view ("Where should we begin?", section.group/home-suggestions); its first send shows the message
+  there with Thinking and Stop, then 0.5 s later the page switches and the home view (with a form copy showing Stop)
+  is KEPT at the body's start, display:none !important, as chatgpt.com keeps the page it left; the address goes
+  /c/local-chatgpt%3A<uuid> and 2 s later /c/<id> (replaceState; not with ?keep). The header's "New chat" keeps the
+  conversation the same way (hidden) and shows the home view again. Not with ?history/?oldchat/?pasted.
 - THE MOD MATRIX (11-19, docs/IOS-MOD-MATRIX.md: the table, what broke and what's blocked): `node mobile/test/ios-matrix.js`
-  (Node 22: /usr/local/bin/node; `--only A1,B3`, `--list`, `--shots <dir>`). Needs the SE booted, a Debug build installed
+  (Node 22: /usr/local/bin/node; `--only A1,B3`, `--list`, `--shots <dir>`, `--gpt thread`: ChatGPT's stand-in as its
+  11-20 page, `chat.html?thread&keep`; its rows A2, B4, C9, F2 (F2 needs F1)). Needs the SE booted, a Debug build installed
   (dev steps), the device lock; starts serve.js on 8377/8378 if they're down; launches the app itself with
   `-chathome …chat.html?greet=claude&keep` and `-gpthome …chat.html?gpt&gptin&keep` (never the real chats). Each run's
   mods are named Mx<case><tag> (the tag in their CSS, so never "offered before"); the last run's Mx… mods are deleted at
@@ -202,7 +216,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   code, an old conversation: pieces, reload/resume, /new → /chat/<id>, switched mid-reply; the quick ask: never a
   scripted send, the person's Send told once, their message appearing as the send, takeText; the strip; an earlier TRIF
   fill put back as the chat's draft (before / after the fill, as a file / as text, the person's words around it,
-  Claude-style tiles); claude.ai's nested code and a reply found finished). One browser suite at a time; small payloads.
+  Claude-style tiles); claude.ai's nested code and a reply found finished; 11-20: chatgpt.com's redesign (`?thread`: the
+  send through the home → conversation switch and a provisional address, Stop, done, Add to TRIF after the code widget,
+  the greeting gone, New chat's hidden conversation never read), and edit blocks on it). 18 tests, ~4 min. One browser
+  suite at a time; small payloads.
 - After talking (Browser.talkResume / talkNudge, 11-18) on the Mac: `node --test mobile/test/talknudge.test.js` (the
   scripts read out of Browser.swift with Swift's escapes undone, run in node's vm on stand-in players and a virtual
   clock: plays on, refused, deaf until pause+play, a gap, a seek that never ends, a leap, a blob: source, dead; <1 s).
@@ -1145,6 +1162,19 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- ChatGPT's redesign (11-20), needs Tim's next real send (TIM-SENDS 6-8, 13): that the send is seen (Diagnostics "chat":
+  "ChatGPT for <site>: the person's send seen (button)"; if not, a "Send tapped …, no sign it went in 5 s: …" line says
+  what the page showed), the chat closes to the tab, the robot works while Stop shows, "Add this mod?" when it ends,
+  and that the watch survives the address going /c/local-chatgpt:… → /c/<id> (both were seen in the app's prefs for
+  Tim's bbc.com send). Unknown until then: what data-talvt-turn-state says while writing (anything but a finished word
+  holds "done" up to 90 s of quiet), whether Stop shows through the whole reply (incl. "Thinking"), and why the old
+  build saw no send at all (a click it never got, or a box not emptied in 2.5 s: now touchend/pointerup too, 5 s, and
+  a new message of the person's in the shown page counts). Checked: the saved real pages (inert copies, scripts
+  stripped, in headless Chrome: the old chat.js shows Tim's symptoms, the new one has no greeting in the conversation,
+  Add to TRIF after the code widget handing over ChatGPT's own copy text, no "working" from the hidden Stop); a new
+  chat signed in in the Simulator (greeting, pills, green Send; shot 558). NOT checked live: the bbc.com test
+  conversation in the Simulator (the session's permission check refused opening it: ask Tim or the main session).
+
 - Edit blocks (11-19), unverified with real models: whether Claude and ChatGPT follow Browser.editHowTo (the "TRIF
   edit" line inside the code block, whole lines quoted, one code block or several), how claude.ai / chatgpt.com draw
   `<<<<<<<` lines in a code block (the stand-ins' pre/code and .cm-line read fine), and a long mod's edits on a real
@@ -1609,3 +1639,33 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - chat.js look: chatgpt.com's mobile page wraps its message box in display:contents boxes (zero size): composerRect
   takes the outermost ancestor with a size that holds no messages and no heading. Headings in a footer or form are
   allowed (ChatGPT's is), not ones with a link, logo or the service's name in them.
+- ChatGPT redesigned 11-20 (signed in; Tim's real send from bbc.com: no "working", the chat didn't close, no offer, no
+  Add to TRIF, TRIF's greeting inside the conversation jumping as it scrolled; nothing in the log). Saved pages (read-only
+  evidence, NOT in git, never commit them: they carry account ids): ~/WebMods-worktrees/loop-prompts/evidence/
+  chatgpt-2026-11-20/{conversation,new-chat}.html. Gone: data-message-author-role, the conversation-turn testids,
+  article, and the send-button / stop-button testids (in the saved page those were only TRIF's own CSS). Now:
+  - a turn div[data-talvt-turn-state] ("complete" seen) holds BOTH the person's message and the reply (never a message
+    itself). Each message's box has a child h4[data-conversation-role="user"|"assistant"].sr-only ("You said:", "ChatGPT
+    said:") and is also [data-chatgpt-search-unit-key$=":user"|":assistant"]; the reply's words are in
+    [data-response-body] > [data-markdown-text-style="assistant-message"]. USER / REPLY match these (`:has(> …)`).
+  - code: div[data-client-defined-widget=code_block] > div[data-chatgpt-copy-code="<the code>"].CodeBlock-… >
+    div[data-code-block=true].Root-… > a header (contenteditable=false: "JavaScript", Enable word wrap, Copy code) and
+    div.InlineCodePane-… > div.Viewer-… > div.chatgpt-code-scrollport > pre.m-0 > code > a span per token/newline.
+    CODE_BLOCKS already had [data-code-block]: the block is that Root (Add to TRIF goes after it); its text is the
+    code's innerText (equal to data-chatgpt-copy-code, checked).
+  - the composer: form[data-chatgpt-composer][data-composer-placement=home|thread], the box div.ProseMirror[role=textbox]
+    "Ask ChatGPT", Send button[type=submit][aria-label=Send]; while writing that place has button[type=button]
+    [aria-label=Stop] (STOP: `form button[aria-label="Stop"]`); before the first words a "Thinking"
+    span[data-response-starting][role=status] (incomplete()). The scroller: div[role=region][aria-label=Conversation].
+  - the person's sent message: files as span.group/resource-card (a button named by the file), a picture as
+    button "User attachment" > img alt "User attachment" (no name: no TRIF pill there; the box's pills still work).
+  - it KEEPS THE PAGE IT LEFT in the document, display:none !important: after a send from a new chat, the home view
+    frozen with the person's message, "Thinking" and its form showing Stop; after its New chat, the conversation. So
+    chat.js reads only what's shown: `live(el)` (client rects, or a child's for display:contents), `$$`, `anyLive` for
+    USER, REPLY, MSGS, STOP, turns, the sent message, code blocks, the greeting's empty test; hasContext leaves out
+    text inside inline display:none.
+  - a new conversation's address is first /c/local-chatgpt%3A<uuid>, then its own /c/<id>: chat.js `sameConvo` (the
+    watch and late() follow it), ClaudePane.provisional / seenConversation (workingConversation, the instructions
+    noted, the chat link follow it).
+  - the send: also on touchend/pointerup of Send (one tap = one check), 5 s (was 2.5 s), a new message of the person's
+    in the shown page counts; "sent" and "notsent" now reach Diagnostics ("chat").

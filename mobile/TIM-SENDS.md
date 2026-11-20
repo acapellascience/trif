@@ -30,8 +30,9 @@ For each: do the steps, then note what you saw against "Look for" (a word is eno
    not twice, and nothing left spinning.
 
 6. **ChatGPT, on its own tab.** On another site, robot → Go to chat → ChatGPT. Ask for a small change, press send.
-   Look for: the chat closes back to the tab at once; when the reply ends (ChatGPT shows no "writing" mark, so TRIF
-   waits for the reply to stop growing), "Add this mod?" comes up, naming that site.
+   Look for: the chat closes back to the tab at once; when the reply ends (TRIF goes by ChatGPT's Stop button, else
+   waits for the reply to stop growing), "Add this mod?" comes up, naming that site. (11-20: ChatGPT's redesigned page;
+   if the chat doesn't close, wait 5 s before anything else: TRIF then notes what it saw in the diagnostics.)
 
 7. **ChatGPT, the sent message and a follow-up.** Right after 6, Go to chat again.
    Look for: the same conversation; in YOUR sent message, TRIF's screenshot shows as ChatGPT's picture (fine either way:

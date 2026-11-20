@@ -1142,7 +1142,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // (a chat in the person's TRIF project, whose instructions have how TRIF mods are written: the page only)
         if guideInProject {
             let r = """
-            I'm looking at \(page?.absoluteString ?? host) in TRIF (how TRIF mods are written is in this project's instructions). Its @match must cover \(origin)/*; for the whole site, all of its subdomains too (https://*.\(Site.of(page?.host ?? host))/*). A screenshot is attached; below is an outline of the page, each line starting with a CSS selector.
+            I'm looking at \(page?.absoluteString ?? host) in TRIF (how TRIF mods are written is in this project's instructions). Its @match must cover \(origin)/*; for the whole site, all of its subdomains too (https://*.\(Site.of(page?.host ?? host))/*). No other sites: never example.com or any placeholder. A screenshot is attached; below is an outline of the page, each line starting with a CSS selector.
             \(here)
             --- The page: \(page?.absoluteString ?? host) ---
             \(o.text)
@@ -1154,7 +1154,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let request = """
         I'm looking at \(page?.absoluteString ?? host) in TRIF, an app that changes websites with small mods. Below are how TRIF mods are written, then an outline of the page: each line starts with a CSS selector for a part of it.
 
-        I'll say what I want changed. For a new mod, reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). To change a mod already here, use edit blocks, as below.
+        I'll say what I want changed. For a new mod, reply with the whole mod file in one code block, nothing to fill in: a style mod if it can do the job, otherwise a boxed mod; a free mod only if it really needs the page's own code. Always in a code block in the reply, however long, not as an attached file. Its @match must cover \(origin)/*; when I mean the whole site, match all of its subdomains too (for \(page?.host ?? host): https://*.\(Site.of(page?.host ?? host))/*), as a site's pages are often on several (en.wikipedia.org, not only www.wikipedia.org). No other sites: never example.com or any placeholder. In a boxed mod, don't use trif.settings or a style section (this app doesn't have them yet). To change a mod already here, use edit blocks, as below.
 
         A screenshot of what I see is attached, only to show you the page: never edit it or make an image; every change I ask for is a TRIF mod, written as code. Everything you need is in what I send: don't open the page in a browser, a connected computer or any other tool; work from these and answer straight away.
 

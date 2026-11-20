@@ -20,6 +20,9 @@
 // togglePhone). Firefox's sidebarAction.open takes no window and only works synchronously inside the click
 // handler, before the new window exists (it then opens in the window clicked in): there, and whenever the
 // open fails, the window opens at phone width and the panel that asked says to click TRIF's button in it.
+// A tab alone in its window (11-19) doesn't move: that window itself is made phone-sized, its side panel or
+// sidebar staying open (moving a window's last tab out closes the window and the panel in it, which then can't
+// open anything), and Back to desktop gives it its size back.
 //
 // The popup route (the design before 11-18), kept for browsers with no side panel (Arc: the panel in a window,
 // `state.panelInWindow`, or a request from such a panel window): a phone-sized popup, which an ordinary window
@@ -452,6 +455,30 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
         if (route === 'window') {
           p.screen = screen;
           p.homeBounds = home ? { left: home.left, top: home.top } : null;
+          // The tab alone in an ordinary window: that window becomes the phone's, made phone-sized (settle), not a
+          // new one. Moving a window's last tab out closes the window, and the panel that asked with it, before it
+          // can open TRIF's side panel in the new one (Tim, 11-19, google.com in a window of its own: "resizes the
+          // window but doesn't reopen the panel"). Its side panel or sidebar is there already and stays; Back to
+          // desktop gives the window its size back (`restore`).
+          const alone = home?.type === 'normal' && (await chrome.tabs.query({ windowId: tab.windowId }).catch(() => [])).length === 1;
+          if (alone) {
+            p.window = tab.windowId;
+            p.same = true;
+            p.restore = { left: home.left, top: home.top, width: home.width, height: home.height, state: home.state || 'normal' };
+            // (maximized or full screen: an ordinary window first, as fitPhoneWindow leaves the others as they are)
+            if (home.state && home.state !== 'normal') {
+              await chrome.windows.update(tab.windowId, { state: 'normal' }).catch((e) => log(`phone window: ${e?.message ?? e}`));
+              for (let i = 0; i < 30; i++) {
+                const w = await chrome.windows.get(tab.windowId).catch(() => null);
+                if (!w || w.state === 'normal') break;
+                await new Promise((r) => setTimeout(r, 100));
+              }
+            }
+            save();
+            settleWindow(tabId, p);
+            changed();
+            return { window: p.window, route, same: true };
+          }
           const bounds = phoneBounds({ frame: WINDOW_FRAME_GUESS, screen, home });
           moving.add(tabId);
           let win;
@@ -531,6 +558,18 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       const p = phones.get(tabId);
       if (!p) return { back: false };
       await forget(tabId);
+      // (its own window made the phone's: that window its size again, where it was, the tab still in it)
+      if (p.same) {
+        const t = await chrome.tabs.get(tabId).catch(() => null);
+        const r = p.restore;
+        if (t?.windowId === p.window && r) {
+          await chrome.windows.update(p.window, { left: r.left, top: r.top, width: r.width, height: r.height }).catch((e) => log(`back to desktop: ${e?.message ?? e}`));
+          if (r.state && r.state !== 'normal') await chrome.windows.update(p.window, { state: r.state }).catch(() => {});
+        }
+        if (reload) await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+        changed();
+        return { back: true, window: p.window };
+      }
       let windowId = p.home?.windowId;
       const home = windowId != null ? await chrome.windows.get(windowId).catch(() => null) : null;
       moving.add(tabId);

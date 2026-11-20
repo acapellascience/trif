@@ -369,9 +369,17 @@ async function setTab(tab) {
     if (ui.input.value) drafts.set(view.tab.id, ui.input.value); else drafts.delete(view.tab.id);
     ui.input.value = drafts.get(tab.id) || '';
   }
+  const another = view.tab?.id !== tab.id;
   view.tab = { id: tab.id, url };
+  // Whether this tab is in the phone view, known before the site is drawn: the first paint is then the right
+  // view, not the desktop's turning into the phone's a moment later (Tim, 11-19), or the reverse (a tab back from
+  // the phone view whose last state here was the phone's). Briefly: the quick answer (refreshPhoneState).
+  if (another || view.phone?.tabId !== tab.id) {
+    await refreshPhoneState();
+    if (view.tab?.id !== tab.id) return; // (another tab meanwhile: its own setTab draws it)
+    logPhoneState().catch(() => {});
+  }
   showPhoneUrl();
-  if (view.phone?.tabId !== tab.id) refreshPhone().then(() => renderPhone()).catch(() => {});
   const site = siteForUrl(url);
   if (site !== view.site) {
     leaveSite(view.site);
@@ -3399,20 +3407,33 @@ async function refreshPhone() {
     view.chat = normalizeChat((await chrome.storage.local.get(key))[key]);
     render();
   }
+  logPhoneState().catch(() => {});
 }
+/**
+ * Whether the tab shown is in the phone view (`view.phone`): the background's quick answer, which doesn't look
+ * into the page (that can take a second while the page loads, and the panel drew the desktop view meanwhile, then
+ * flipped: Tim, 11-19). 2 s at most: then as it was for this tab, or not in it.
+ */
 async function refreshPhoneState() {
   const tabId = view.tab?.id;
   if (!Number.isInteger(tabId) || SAFARI) { view.phone = null; return; }
   try {
-    const r = await request({ type: 'phone.state', tabId });
-    if (view.tab?.id === tabId) view.phone = { tabId, ...r };
-    // (a line in the panel's console when what's in place changes: Tim's check that the phone view is one)
-    if (r?.phone) {
-      const line = `[TRIF] phone view, tab ${tabId}: rules ${r.rules === 2 ? 'on' : `MISSING (${r.rules} of 2)`}, page script ${r.script ? 'registered' : 'MISSING'}, ` +
-        (r.page?.error ? `page not readable (${r.page.error})` : r.page ? `this page ${r.page.marked ? 'has the marker (it sees an iPhone)' : 'has NO marker (it sees a desktop)'}${r.page.worker ? ', a service worker controls it' : ''}` : 'no page');
-      if (line !== lastPhoneLine) { (r.rules === 2 && r.script && r.page?.marked ? console.info : console.warn)(line); lastPhoneLine = line; }
-    }
+    const r = await Promise.race([request({ type: 'phone.state', tabId, quick: true }), new Promise((res) => setTimeout(() => res(null), 2000))]);
+    if (view.tab?.id !== tabId) return;
+    if (r) view.phone = { tabId, ...r };
+    else if (view.phone?.tabId !== tabId) view.phone = { tabId, phone: false };
   } catch { view.phone = null; }
+}
+// A line in the panel's console when what's in place changes: Tim's check that the phone view is one (the
+// rules, the page script, the page's marker: the full phone.state).
+async function logPhoneState() {
+  const tabId = view.tab?.id;
+  if (!inPhone() || !Number.isInteger(tabId)) return;
+  const r = await request({ type: 'phone.state', tabId });
+  if (!r?.phone) return;
+  const line = `[TRIF] phone view, tab ${tabId}: rules ${r.rules === 2 ? 'on' : `MISSING (${r.rules} of 2)`}, page script ${r.script ? 'registered' : 'MISSING'}, ` +
+    (r.page?.error ? `page not readable (${r.page.error})` : r.page ? `this page ${r.page.marked ? 'has the marker (it sees an iPhone)' : 'has NO marker (it sees a desktop)'}${r.page.worker ? ', a service worker controls it' : ''}` : 'no page');
+  if (line !== lastPhoneLine) { (r.rules === 2 && r.script && r.page?.marked ? console.info : console.warn)(line); lastPhoneLine = line; }
 }
 
 // The phone menu (the bar's phone button): Switch to phone view (Back to desktop in the phone view) and Sync with
@@ -3465,8 +3486,9 @@ let phoneHint = null;
 async function openPhone(tabId) {
   const r = await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
   if (r?.route !== 'window' || r.already) return;
-  let panel = false;
-  if (!FIREFOX && typeof chrome.sidePanel?.open === 'function') {
+  // (`same`: the tab was alone in this window, which became the phone's: this panel is in it, and stays)
+  let panel = !!r.same;
+  if (!panel && !FIREFOX && typeof chrome.sidePanel?.open === 'function') {
     try { await chrome.sidePanel.open({ windowId: r.window }); panel = true; } catch (e) { console.warn(`[TRIF] phone view: the side panel didn't open in its window: ${e?.message ?? e}`); }
   }
   const s = await request({ type: 'phone.settle', tabId, panel });
@@ -3480,7 +3502,7 @@ function renderPhoneHint() {
 }
 async function checkPhoneHint() {
   if (!phoneHint) return;
-  const r = await request({ type: 'phone.state', tabId: phoneHint.tabId }).catch(() => null);
+  const r = await request({ type: 'phone.state', tabId: phoneHint.tabId, quick: true }).catch(() => null);
   if (!r?.phone || r.panel) { phoneHint = null; renderPhoneHint(); }
 }
 ui.phoneHintClose?.addEventListener('click', () => { phoneHint = null; renderPhoneHint(); });

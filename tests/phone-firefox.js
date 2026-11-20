@@ -113,6 +113,21 @@ const dropLock = () => { try { if (Number(fs.readFileSync(path.join(LOCK, 'pid')
     out.after = await ff.eval(ctx2, `async () => ({ ua: window.__seen.uaPhone, touch: window.__seen.touchPoints })`);
     out.windowsAfter = await ff.eval(panel, `async () => (await chrome.windows.getAll({ populate: true })).map((w) => ({ type: w.type, tabs: w.tabs.length }))`);
     out.rulesAfter = await ff.eval(panel, `async () => (await chrome.declarativeNetRequest.getSessionRules()).length`);
+    // The tab alone in its window (11-19): that window made the phone's, its sidebar staying open; Back to
+    // desktop gives it its size back
+    const lone = await ff.eval(panel, `async (u) => { const w = await chrome.windows.create({ url: u, focused: true, width: 1200, height: 860 }); return { win: w.id, tab: w.tabs[0].id }; }`, [pages.url('/detect')]);
+    await sleep(2000);
+    out.lone = { sidebar: await ff.chrome(`async (sb) => { const w = Services.wm.getMostRecentWindow('navigator:browser'); await w.SidebarController.show(sb); return w.SidebarController.isOpen; }`, [SB]) };
+    await sleep(1000);
+    const loneSize = () => ff.eval(panel, `async (w, id) => { const x = await chrome.windows.get(w); const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: () => innerWidth }); return { window: [x.left, x.top, x.width, x.height], page: r.result, sidebar: await browser.sidebarAction.isOpen({ windowId: w }) }; }`, [lone.win, lone.tab]);
+    out.lone.before = await loneSize();
+    out.lone.open = await ask({ type: 'phone.open', tabId: lone.tab, screen: { left: 0, top: 25, width: 1470, height: 931 } });
+    out.lone.settle = await ask({ type: 'phone.settle', tabId: lone.tab, panel: true });
+    await sleep(1500);
+    out.lone.phone = await loneSize();
+    out.lone.close = await ask({ type: 'phone.close', tabId: lone.tab });
+    await sleep(1500);
+    out.lone.after = await loneSize();
     out.problems = (await ff.consoleProblems()).filter((p) => /phone|scripting|declarativeNetRequest|Server/i.test(p.text)).slice(0, 8);
   } catch (e) { out.error = e.stack; } finally {
     console.log(JSON.stringify(out, null, 1));

@@ -2409,7 +2409,12 @@ function onPanelConnect(port) {
       if (own === null) sidePanelShowed(msg.windowId);
       else watchFocus();
       // (a side panel or sidebar in a phone window: the panel that opened the phone view stops asking for it)
-      if (own === null && phones.tabOfWindow(msg.windowId) !== null) notifyPanels();
+      // (and the window's fitting starts now, not when the panel that asked says so: that panel may be gone)
+      const phoneTab = own === null ? phones.tabOfWindow(msg.windowId) : null;
+      if (phoneTab !== null) {
+        notifyPanels();
+        if (!phones.get(phoneTab)?.settled) phones.settle(phoneTab, { panel: true, shown: () => sidePanelIn(msg.windowId) }).catch(() => {});
+      }
       return;
     }
     ready.then(() => onPanelMessage(msg, { fromPanel, sender: port.sender })).then(
@@ -2532,11 +2537,15 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
       await phones.ready;
       const p = phones.get(Number(msg.tabId));
       if (!p) return { phone: false };
-      // (what's in place for it: the panel logs it, so a phone view that isn't one can be told apart)
-      const c = await phones.check(Number(msg.tabId));
       // (route: which phone view; width: its page's, as last measured; panel: TRIF's side panel or sidebar is open in
       // the phone window, which the window route wants)
-      return { phone: true, device: PHONE.name, window: p.window, route: p.route || 'popup', width: Number.isFinite(p.width) ? p.width : null, panel: p.window != null && sidePanelIn(p.window), rules: c.rules, script: c.script, page: c.page };
+      const st = { phone: true, device: PHONE.name, window: p.window, route: p.route || 'popup', width: Number.isFinite(p.width) ? p.width : null, panel: p.window != null && sidePanelIn(p.window) };
+      // (`quick`: whether it is one, at once, for a panel's first paint: the look into the page below can take a
+      // second while the page loads, and the panel drew the desktop view meanwhile: Tim, 11-19)
+      if (msg.quick === true) return st;
+      // (what's in place for it: the panel logs it, so a phone view that isn't one can be told apart)
+      const c = await phones.check(Number(msg.tabId));
+      return { ...st, rules: c.rules, script: c.script, page: c.page };
     }
     case 'site.set': return setSiteOn(msg);
     case 'site.disconnect': return disconnectSite(msg);

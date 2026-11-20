@@ -777,6 +777,186 @@ test('the phone view\'s window from the side panel\'s menu: the side panel besid
   }
 });
 
+// Switching to the phone view, as Tim did 11-19 (real Chrome, google.com): "it resizes the window but doesn't
+// reopen the panel. then when you open the panel it stays on desktop site for like a second before suddenly
+// switching". Two causes: (1) the tab alone in its window: moving it into a window of its own closed its old
+// window, and the side panel in it that was to open TRIF's side panel in the new one (now that window itself is
+// made the phone's, its side panel staying open); (2) a panel drew its site before it knew the tab was in the
+// phone view (the background's answer looked into the page first, slow while the page is busy), so its first
+// paint was the desktop view (now the quick answer comes first, sidepanel.js setTab).
+// What a panel shows, frame by frame: its title (the site) and whether it's in the phone view, each change once.
+const PANEL_FRAMES = `(() => { if (window.__frames) return; window.__frames = []; const look = () => { const s = document.getElementById('site'); if (!s || !document.body) return; const f = { t: Math.round(performance.now()), site: s.textContent, phone: document.body.classList.contains('phone-view'), note: !document.getElementById('phone-note').hidden }; const l = window.__frames.at(-1); if (!l || l.site !== f.site || l.phone !== f.phone || l.note !== f.note) window.__frames.push(f); }; const tick = () => { look(); requestAnimationFrame(tick); }; requestAnimationFrame(tick); })()`;
+const panelHelpers = (browser) => {
+  const panels = async () => (await browser.cdp.send('Target.getTargets')).targetInfos.filter((x) => x.type === 'page' && x.url.endsWith('/sidepanel.html')).map((x) => x.targetId);
+  const attach = async (targetId, sid) => {
+    sid = sid || await browser._attach(targetId);
+    const ev = async (expr) => {
+      const r = await browser.cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sid);
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+      return r.result.value;
+    };
+    const click = async (selector) => {
+      const [x, y] = await ev(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      for (const type of ['mousePressed', 'mouseReleased']) await browser.cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }, sid);
+    };
+    return { targetId, sid, ev, click, frames: () => ev('window.__frames') };
+  };
+  const toolbar = async (url) => {
+    const { targetInfos } = await browser.cdp.send('Target.getTargets', { filter: [{ type: 'tab' }] });
+    const t = targetInfos.find((x) => x.type === 'tab' && x.url === url);
+    await browser.cdp.send('Extensions.triggerAction', { id: browser.extensionId, targetId: t.targetId });
+  };
+  // The next side panel to open, its frames recorded from its first paint: it starts paused (CDP's
+  // waitForDebuggerOnStart) until the recorder is in, before any of its own scripts.
+  const nextPanel = async (open) => {
+    let on = true;
+    const got = new Promise((resolve) => {
+      browser.cdp.on(async (m) => {
+        if (!on || m.method !== 'Target.attachedToTarget' || !m.params.waitingForDebugger) return;
+        const { sessionId } = m.params;
+        let page = false;
+        try {
+          await browser.cdp.send('Page.enable', {}, sessionId);
+          await browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PANEL_FRAMES }, sessionId);
+          page = true;
+        } catch { /* not a page */ }
+        await browser.cdp.send('Runtime.runIfWaitingForDebugger', {}, sessionId).catch(() => {});
+        if (page) resolve({ targetId: m.params.targetInfo.targetId, sessionId });
+      });
+    });
+    await browser.cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+    try {
+      await open();
+      const { targetId, sessionId } = await Promise.race([got, sleep(15000).then(() => { throw new Error('no side panel opened'); })]);
+      await waitFor('the recorded panel loaded', async () => {
+        const r = await browser.cdp.send('Runtime.evaluate', { expression: 'location.href.endsWith("/sidepanel.html") && document.readyState === "complete" && !!window.__frames', returnByValue: true }, sessionId);
+        return r.result?.value === true;
+      });
+      // (a session of its own: turning auto-attach off, below, ends the one it came with)
+      on = false;
+      await browser.cdp.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true }).catch(() => {});
+      const sid = await browser._attach(targetId);
+      return attach(targetId, sid);
+    } finally {
+      on = false;
+      await browser.cdp.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true }).catch(() => {});
+    }
+  };
+  return { panels, attach, toolbar, nextPanel };
+};
+// (a site's frames: from the first with its name in the title; `flips`: how often the view changed after that)
+const siteFrames = (frames, site) => {
+  const f = (frames || []).filter((x) => x.site === site);
+  return { first: f[0], flips: f.slice(1).filter((x, i) => x.phone !== f[i].phone).length, all: f };
+};
+
+test('the phone view from a window with only that tab: the window becomes the phone\'s, its side panel stays open in the phone view; Back to desktop gives the window back', { skip, timeout: 900000 }, async () => {
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
+  try {
+    const h = await harness(browser);
+    await h.allowUserScripts().catch(() => {});
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    const P = panelHelpers(browser);
+    const { phoneTab, homeWin } = await h.E(async (url) => {
+      const w = await chrome.windows.create({ url, focused: true, left: 40, top: 60, width: 1200, height: 860 });
+      await new Promise((r) => setTimeout(r, 1500));
+      return { phoneTab: w.tabs[0].id, homeWin: w.id };
+    }, pages.url('/detect'));
+    const before = await h.E((id) => chrome.windows.get(id).then((w) => ({ left: w.left, top: w.top, width: w.width, height: w.height })), homeWin);
+    const desk = await P.nextPanel(() => P.toolbar(pages.url('/detect')));
+    await waitFor('the panel on the page', () => desk.ev('!document.getElementById("phone-btn").hidden'));
+    const firstDesk = siteFrames(await desk.frames(), '127.0.0.1');
+    assert.equal(firstDesk.first.phone, false, 'a desktop tab: the desktop view');
+    // Switch to phone view: the 📱 button and the menu's item, trusted clicks
+    await desk.click('#phone-btn');
+    await waitFor('the menu', () => desk.ev('!document.getElementById("phone-menu").hidden'));
+    await desk.ev('window.__frames.length = 0');
+    await desk.click('#phone-menu-view');
+    const st = await waitFor('the phone view, TRIF\'s side panel beside it', () => h.ask({ type: 'phone.state', tabId: phoneTab }).then((x) => x.phone && x.panel && x.width && x.page?.marked && x), 30000)
+      .catch(async (e) => { console.error('DEBUG', JSON.stringify(await h.ask({ type: 'phone.state', tabId: phoneTab })), JSON.stringify(await P.panels())); throw e; });
+    assert.equal(st.window, homeWin, 'its own window, made the phone\'s: no new window');
+    assert.equal(await h.E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), homeWin);
+    assert.ok((await P.panels()).includes(desk.targetId), 'the same side panel, still open');
+    await waitFor('the panel in the phone view', () => desk.ev('document.body.classList.contains("phone-view") && !document.getElementById("phone-note").hidden'));
+    await waitFor('the page at the phone\'s width', async () => (await h.page(phoneTab, 'innerWidth')) === st.width);
+    assert.ok(st.width < 500, `a phone's width: ${st.width}`);
+    const win = await h.E((id) => chrome.windows.get(id), homeWin);
+    assert.ok(win.width < before.width, `the window narrower: ${win.width}`);
+    assert.equal(win.left, before.left, 'where it was');
+    let f = siteFrames(await desk.frames(), '127.0.0.1');
+    assert.equal(f.flips, 1, `desktop to phone once, never back: ${JSON.stringify(f.all)}`);
+    assert.equal(f.all.at(-1).phone, true);
+    assert.equal(await desk.ev('document.getElementById("phone-hint").hidden'), true, 'no hint: TRIF is beside the phone');
+    // Back to desktop: the window its size again, where it was; the panel the desktop's, once
+    await desk.ev('window.__frames.length = 0');
+    await desk.click('#phone-btn');
+    await waitFor('the phone menu', () => desk.ev('!document.getElementById("phone-menu").hidden'));
+    assert.equal(await desk.ev('document.getElementById("phone-menu-view").textContent'), 'Back to desktop');
+    await desk.click('#phone-menu-view');
+    await waitFor('back to desktop', () => h.ask({ type: 'phone.state', tabId: phoneTab }).then((x) => !x.phone));
+    await waitFor('the window as it was', async () => { const w = await h.E((id) => chrome.windows.get(id).then((x) => ({ left: x.left, top: x.top, width: x.width, height: x.height })), homeWin); return JSON.stringify(w) === JSON.stringify(before); });
+    await waitFor('the desktop page', () => h.page(phoneTab, 'window.__seen && document.readyState === "complete" && !window.__seen.uaPhone'));
+    await waitFor('the panel the desktop\'s', () => desk.ev('!document.body.classList.contains("phone-view")'));
+    await sleep(1500);
+    f = siteFrames(await desk.frames(), '127.0.0.1');
+    assert.equal(f.flips, 1, `phone to desktop once, never back: ${JSON.stringify(f.all)}`);
+    assert.equal(f.all.at(-1).phone, false);
+  } finally {
+    await browser.close();
+    pages.server.close();
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
+});
+
+test('a side panel opened in the phone window (TRIF\'s button there, while its page is busy): its first paint is the phone view', { skip, timeout: 900000 }, async () => {
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  const browser = await launch({ extension: ext, args: ['--screen-info={0,0 1470x956}'] });
+  try {
+    const h = await harness(browser);
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    const P = panelHelpers(browser);
+    const { phoneTab, homeWin } = await h.E(async (url) => {
+      const w = await chrome.windows.create({ url, focused: true, width: 1200, height: 860 });
+      await chrome.tabs.create({ windowId: w.id, url: 'about:blank', active: false });
+      await new Promise((r) => setTimeout(r, 1500));
+      return { phoneTab: w.tabs[0].id, homeWin: w.id };
+    }, pages.url('/detect'));
+    // the phone view without TRIF's side panel in its window (no click's gesture: the hint's case)
+    const opened = await h.openPhone(phoneTab, { left: 0, top: 25, width: 1470, height: 931 }, { panel: false });
+    assert.notEqual(opened.window, homeWin);
+    await waitFor('the phone page', () => h.page(phoneTab, 'window.__seen && window.__seen.uaPhone && document.readyState === "complete"'));
+    // the page busy for a while (as a heavy site's is as it loads): a look into it waits for that
+    const busy = () => h.E((id) => chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', func: () => { setTimeout(() => { const t = Date.now(); while (Date.now() - t < 2500); }, 50); } }), phoneTab);
+    await busy();
+    const phone = await P.nextPanel(() => P.toolbar(pages.url('/detect')));
+    await waitFor('the panel drew the site', async () => siteFrames(await phone.frames(), '127.0.0.1').first);
+    await sleep(3500);
+    const f = siteFrames(await phone.frames(), '127.0.0.1');
+    assert.equal(f.first.phone, true, `the first paint with the site is the phone view: ${JSON.stringify(f.all)}`);
+    assert.equal(f.first.note, true, 'with its line');
+    assert.equal(f.flips, 0, `and stays so: ${JSON.stringify(f.all)}`);
+    // the reverse: Back to desktop, then TRIF's panel opened on the tab, home again, while its page is busy: the desktop view from the start
+    await h.ask({ type: 'phone.close', tabId: phoneTab });
+    assert.equal(await h.E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), homeWin);
+    await waitFor('the desktop page', () => h.page(phoneTab, 'window.__seen && document.readyState === "complete" && !window.__seen.uaPhone'));
+    await h.E(([tab, win]) => chrome.tabs.update(tab, { active: true }).then(() => chrome.windows.update(win, { focused: true })), [phoneTab, homeWin]);
+    await busy();
+    const desk = await P.nextPanel(() => P.toolbar(pages.url('/detect')));
+    await waitFor('the desktop panel drew the site', async () => siteFrames(await desk.frames(), '127.0.0.1').first);
+    await sleep(3000);
+    const d = siteFrames(await desk.frames(), '127.0.0.1');
+    assert.equal(d.first.phone, false, `the desktop view: ${JSON.stringify(d.all)}`);
+    assert.equal(d.flips, 0, JSON.stringify(d.all));
+  } finally {
+    await browser.close();
+    pages.server.close();
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
+});
+
 // A phone mod for a sensitive site, synced from the phone (Tim, 11-19: sites/phone~claude.ai/meadow.js on the Mac,
 // boxed, `@match https://claude.ai/*` and `https://*.claude.ai/*`; the phone view on claude.ai listed no card and
 // ran nothing: lib.js modHome took the twin, phone~claude.ai, for a site of its own, not the sensitive site

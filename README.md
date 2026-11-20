@@ -33,7 +33,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## Install
 
-These steps install the latest release, **0.3.0**, from npm. GitHub's `main` branch is where work in progress
+These steps install the latest release, **0.3.1**, from npm. GitHub's `main` branch is where work in progress
 lands: it can have features the release doesn't (and new bugs), so don't install from a checkout of it
 unless you're working on TRIF.
 
@@ -43,10 +43,10 @@ unless you're working on TRIF.
    npx timsrobot setup
    ```
 
-   If you were sent a file (`timsrobot-0.3.0.tgz`) instead, run this from the folder it's in:
+   If you were sent a file (`timsrobot-0.3.1.tgz`) instead, run this from the folder it's in:
 
    ```sh
-   npx --yes --package ./timsrobot-0.3.0.tgz trif setup
+   npx --yes --package ./timsrobot-0.3.1.tgz trif setup
    ```
 
    npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
@@ -143,7 +143,7 @@ API keys you save with `trif agent key` go to Windows Credential Manager.
 - Standing instructions for your agent ("talk like a caveman", "don't bring up detectability") go in
   the box in the side panel's settings (the gear). Every chat reads them, and so does Claude Code when
   you run it in `~/.trif`. They're saved in `~/.trif/instructions.md`.
-- Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
+- Commands: `/model sonnet` (or `opus`, `haiku`, `default`: Opus for Claude Code, Codex's own for Codex) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
 ### Tim's starter mods

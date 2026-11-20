@@ -1,4 +1,4 @@
-# The clickjacking guard: the new strings (branch clickjack-guard, for 0.3.1)
+# The clickjacking guard: the new strings (branch clickjack-guard, for 0.3.2)
 
 Every string people see when TRIF's clickjacking guard (extension/runtime.js `clickGuard`; RT-3 in
 docs/SANDBOX-TIER-NOTES.md) stops a click, exact. **Awaiting Tim.** None of them names a coding agent.
@@ -55,7 +55,7 @@ the mod*, as on the mod-error card). Once the mod is off: **Turned off.** in pla
 | inkless | left nothing of it showing (no text, border, background or picture) | |
 | covered | covered it with one of the mod's own elements, which lets clicks through to it | |
 
-## Proposed CHANGELOG line (0.3.1; not in CHANGELOG.md yet)
+## Proposed CHANGELOG line (0.3.2; not in CHANGELOG.md yet)
 
 > - **A click on something a mod hid is stopped.** If a style or boxed mod makes a button or link invisible
 >   and you click where it is, TRIF stops the click and tells you which mod did it.

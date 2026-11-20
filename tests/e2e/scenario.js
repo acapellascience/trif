@@ -1412,7 +1412,7 @@ class Scenario {
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty; the boxed mods of a site of its own are approved as that site ("Your inbox.x.com mods can:" on its card), apart from x.com\'s', () => this.sensitiveCheck(win));
-      await r.check('sharing: a mod pasted in the panel is imported, switched off; a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
+      await r.check('sharing: a mod pasted in the panel is imported, switched off; a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod; a screenshot pasted into the chat box is saved under a name of its own and attached to the message', () => this.shareCheck(win));
       await r.check('downloads: off until switched on in Settings; then a new mod file in Downloads (not one there before) gets an "Add this mod?" card naming where it came from (the file\'s where-from record); Try it here runs it in this tab with TRIF\'s runtime (style from the card, boxed from the paste card; a free mod refused) and Undo reloads it away; Add imports it switched off, the file left in Downloads; Not now, and Ignore files from <site>', () => this.downloadsCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
@@ -4469,6 +4469,18 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       if (bigSize !== 5 * 1024 * 1024) problems.push(`the file in slices: ${bigSize} bytes`);
       const stray = fs.readdirSync(path.join(dir, 'files')).filter((n) => n.startsWith('.upload-'));
       if (stray.length) problems.push(`temp files left: ${stray.join(', ')}`);
+      // a screenshot pasted into the chat box: in the site's files under a name of its own, attached to the message
+      // being written ("[attached: files/pasted-….png]"); pasted text stays text
+      const filesBefore = new Set(fs.readdirSync(path.join(dir, 'files')));
+      await this.panel(`async () => { const i = document.getElementById('input'); i.value = 'look at this'; const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], 'image.png', { type: 'image/png' })); /* (Firefox's ClipboardEvent constructor takes no clipboardData: a paste event carrying it, as a real paste does) */ const ev = new Event('paste', { bubbles: true, cancelable: true }); Object.defineProperty(ev, 'clipboardData', { value: dt }); i.dispatchEvent(ev); return true; }`);
+      const pastedShot = await waitFor('the pasted screenshot', () => fs.readdirSync(path.join(dir, 'files')).find((n) => !filesBefore.has(n) && /^pasted-\d{4}-\d\d-\d\d-\d{6}\.png$/.test(n)) || null, { timeoutMs: 10000, intervalMs: 200 }).catch(() => null);
+      if (!pastedShot) problems.push('a pasted screenshot wasn\'t saved in the site\'s files');
+      else {
+        made.push(path.join(dir, 'files', pastedShot));
+        const box = await waitFor('the attached line', () => this.panel(`async () => { const v = document.getElementById('input').value; return /\\[attached: files\\/pasted-/.test(v) ? v : null; }`), { timeoutMs: 5000 }).catch(() => null);
+        if (box !== `look at this [attached: files/${pastedShot}]`) problems.push(`the chat box after a paste: ${JSON.stringify(box)}`);
+      }
+      await this.panel(`async () => { document.getElementById('input').value = ''; return true; }`);
       // the overlay itself, while dragging
       await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'a.js', { type: 'text/javascript' })); document.body.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true })); return true; }`);
       await themes('share-drop-overlay');
@@ -5587,19 +5599,19 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         const pause = getComputedStyle(document.querySelector('#bar-robot .pause')).display !== 'none';
         const eyes = getComputedStyle(document.querySelector('#bar-robot .eye')).display !== 'none';
         // The state colour: red or yellow if one applies (they win), else the paused white (dark grey on
-        // light); and with those taken away for a moment, the paused colour, the bars white
+        // light); and with those taken away for a moment, the paused colour, the bars the same (one colour)
         const b = document.body.classList;
         const colour = (v) => { const s = document.createElement('span'); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
         const fills = () => ({ rim: getComputedStyle(document.querySelector('#bar-robot .rim')).fill, bars: getComputedStyle(document.querySelector('#bar-robot .pause')).fill });
         const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--led-coral)' : b.contains('needs-login') ? 'var(--led-yellow)' : 'var(--paused)') };
         const had = ['blocked', 'needs-login'].filter((c) => b.contains(c));
         b.remove(...had);
-        const paused = { ...fills(), want: colour('var(--paused)'), white: colour('#fff') };
+        const paused = { ...fills(), want: colour('var(--paused)') };
         b.add(...had);
         return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes, state, paused, had };
       }`), { timeoutMs: 10000 });
       if (lock.state.rim !== lock.state.want) throw new Error(`the robot's rim on the paused tab (${lock.had.join(', ') || 'nothing else'} in the way): ${JSON.stringify(lock.state)}`);
-      if (lock.paused.rim !== lock.paused.want || lock.paused.bars !== lock.paused.white) throw new Error(`the paused colours: ${JSON.stringify(lock.paused)}`);
+      if (lock.paused.rim !== lock.paused.want || lock.paused.bars !== lock.paused.want) throw new Error(`the paused colours: ${JSON.stringify(lock.paused)}`);
       if (!/^Posting is paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
       if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);

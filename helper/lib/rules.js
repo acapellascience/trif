@@ -207,8 +207,12 @@ function rulesRuntime(spec, id) {
     find: r.caseless ? r.find.toLowerCase() : r.find, caseless: r.caseless, with: r.with,
   }));
   const filters = spec.filter.map((f) => ({ ...f, re: f.hideIfRegex ? new RegExp(f.hideIfRegex, 'iu') : null, text: f.hideIfText ? f.hideIfText.toLowerCase() : null }));
-  const done = new WeakMap(); // text node -> the text it had after replacing
+  const done = new WeakMap(); // text node -> the text it had after every rule had replaced in it
   const replaceIn = (root) => {
+    // (whether each text node met here is replaced in this time: once TRIF's rules have all been through a
+    // node, it's left alone until its text changes. Asked once a pass and kept for every rule, then noted when
+    // the last rule is done: noted after the first rule, it kept the rules after it from the node)
+    const fresh = new Map();
     for (const r of replacers) {
       let scopes;
       try { scopes = root.matches && root.matches(r.in) ? [root] : [...(root.querySelectorAll ? root.querySelectorAll(r.in) : [])]; } catch { continue; }
@@ -216,7 +220,9 @@ function rulesRuntime(spec, id) {
       for (const scope of scopes) {
         const walk = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
         for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-          if (done.get(n) === n.data || n.data.length > MAX_TEXT) continue;
+          let go = fresh.get(n);
+          if (go === undefined) { go = done.get(n) !== n.data; fresh.set(n, go); }
+          if (!go || n.data.length > MAX_TEXT) continue;
           const p = n.parentElement;
           // (never what the user is typing: an editor by what the browser says it is, not by how its attribute
           // is spelled: contenteditable="plaintext-only", "TRUE", and a page in design mode are editors too)
@@ -226,10 +232,10 @@ function rulesRuntime(spec, id) {
           else if (r.caseless) { let i, lower = t.toLowerCase(), out = '', from = 0; while ((i = lower.indexOf(r.find, from)) !== -1) { out += t.slice(from, i) + r.with; from = i + r.find.length; } t = out + t.slice(from); }
           else t = t.split(r.find).join(r.with);
           if (t !== n.data) n.data = t;
-          done.set(n, n.data);
         }
       }
     }
+    for (const [n, go] of fresh) if (go) done.set(n, n.data);
   };
   const filterIn = (root) => {
     for (const f of filters) {

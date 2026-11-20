@@ -65,7 +65,10 @@ site the page hadn't already loaded from when the lock started (TL-1: `new Image
 starts using after the lock (a lazy-loaded image from a new CDN) is blocked until the reload. Page code
 can't get around a rule the browser applies; the agent's code, and anything it leaves behind (timers,
 wrapped functions), lives only as long as the page does. The lock lasts until the tab shows a new
-document: a reload or a real navigation.
+document: a reload or a real navigation. It lifts once that document has loaded, not as it starts (what's left
+of the old one, its unload handlers and ending workers, could still send then), so the new page's own
+first requests are blocked too; `trif reload` of a locked tab waits for the lock to lift and loads the
+page once more.
 - It's the document that counts, not the URL (a single-page site changes the URL without a new
   document, and so could the agent's code): a marker in the extension's isolated world, which page code
   can't see or set, is set in the document when the lock starts, and the lock lifts when the tab's
@@ -204,7 +207,7 @@ as a style mod (below). A mod moving to a higher tier is a change like any other
 
 **Clickjacking, for every tier that restyles (RT-3, docs/SANDBOX-TIER-NOTES.md): guarded at the press,
 partly.** CSS alone can make a page's real control invisible and float it over a decoy, so the user's own
-click lands on it; no power check sees that. Since 0.3.1 TRIF's page runtime (extension/runtime.js
+click lands on it; no power check sees that. Since 0.3.2 TRIF's page runtime (extension/runtime.js
 `clickGuard`) gets every trusted press before the page: if the control pressed is unseen and shows without
 the mods' styles (looked at again with TRIF's sheets disabled and boxed mods' inline styles undone for that
 moment), the press is stopped and the mod named in its errors and a card in the chat. The page's own
@@ -446,7 +449,7 @@ That's how runs were designed (an agent looks at the mods its change will meet),
 let through; whether a run should see other sites' mods at all, a sensitive site's above all, is a decision
 of its own.
 
-## The mods feed (0.3.1)
+## The mods feed (0.3.2)
 
 Tim's mods (the mods TRIF ships) can get a new version between releases, from a second signed feed beside
 the TRIF one: `updates/mods.json` + `.sig` on main, signed with the same release key (helper/lib/modsfeed.js;

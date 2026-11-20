@@ -215,7 +215,7 @@ function onExtensionMessage(msg) {
     case 'hello':
       state.hello = {
         version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome',
-        // (since 0.3.1: the kind of browser, and its own version where that isn't Chromium's or Firefox's)
+        // (since 0.3.2: the kind of browser, and its own version where that isn't Chromium's or Firefox's)
         family: browserFamily(msg), browserVersion: typeof msg.browserVersion === 'string' && msg.browserVersion ? msg.browserVersion.slice(0, 40) : null,
         installId: typeof msg.installId === 'string' && msg.installId ? msg.installId : null,
         // What this extension can do beyond 0.2.4's protocol ('modsParts': mods sets in parts).
@@ -590,7 +590,7 @@ const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloa
 // Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
-// The page commands a run's `trif` sends (cli.js; AGENTS.md "Commands"): the only ones that go on from a run
+// The page commands a run's `trif` sends (cli.js; AGENTS.md "The CLI"): the only ones that go on from a run
 // to the extension, which holds each to the run's site (args.scope: background.js scopedTab, checkScopeUrl).
 const RUN_PAGE_COMMANDS = new Set(['status', 'tabs', 'run', 'reload', 'navigate', 'open', 'close', 'text', 'sweep', 'screenshot',
   'record', 'requests', 'request', 'errors', 'logs', 'mod.enable']);

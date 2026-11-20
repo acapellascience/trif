@@ -137,6 +137,16 @@ test('webmods.dev (the address before 0.2.0) redirects to the same place on tims
   assert.equal((await worker.fetch(new Request('https://timsrobot.com/'), e)).status, 200);
 });
 
+test('/install.sh redirects to the newest release\'s installer', async () => {
+  const [{ default: worker }] = await load();
+  for (const method of ['GET', 'HEAD']) {
+    const res = await worker.fetch(new Request('https://timsrobot.com/install.sh', { method }), env());
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('Location'), 'https://github.com/acapellascience/trif/releases/latest/download/install.sh');
+  }
+  assert.equal((await worker.fetch(new Request('https://www.timsrobot.com/install.sh'), env())).headers.get('Location'), 'https://timsrobot.com/install.sh', 'www goes to the bare name first');
+});
+
 test('the home page\'s robot is the extension\'s shaded robot', async () => {
   const fs = require('fs');
   const path = require('path');
@@ -615,6 +625,7 @@ test('/clip: the iPhone app\'s Home Screen icon page: only a TRIF icon is accept
   assert.strictEqual(res.headers.get('Referrer-Policy'), 'no-referrer');
   const body = await res.text();
   assert.match(body, /<script src="\/clip.js\?v=[0-9a-f]+"><\/script>/);
+  assert.match(body, /<a id="settings" class="button" href="trif:\/\/settings" hidden>Open Settings<\/a>/, 'Open Settings goes through the app (trif://settings: TRIF\'s page in Settings, public API)');
   assert.doesNotMatch(body, /https?:\/\/(?!timsrobot\.com)/, 'nothing from anywhere else');
   const js = await worker.fetch(new Request('https://timsrobot.com/clip.js'), env());
   assert.strictEqual(js.status, 200);

@@ -59,6 +59,67 @@ test('rules: the code is TRIF\'s, with the rules as data, and it compiles', () =
   assert.deepEqual(els.map((e) => e.attrs['data-trif-style']), ['x.com/a']);
 });
 
+// A small page for rulesRuntime in Node: elements matched by tag or .class, text nodes, a tree walker, frames
+// run when the test says, and the MutationObserver's callback kept so a test can report a change.
+function fakePage(build) {
+  class El {
+    constructor(tag, cls, kids = []) { this.nodeType = 1; this.localName = tag; this.cls = cls || ''; this.childNodes = []; this.parentElement = null; this.isContentEditable = false; for (const k of kids) this.append(k); }
+    append(k) { const n = typeof k === 'string' ? { nodeType: 3, data: k } : k; n.parentElement = this; this.childNodes.push(n); return n; }
+    get isConnected() { return true; }
+    matches(sel) { return sel.split(',').some((s) => { s = s.trim(); return s.startsWith('.') ? this.cls.split(' ').includes(s.slice(1)) : s === this.localName; }); }
+    closest(sel) { for (let e = this; e; e = e.parentElement) if (e.matches(sel)) return e; return null; }
+    querySelectorAll(sel) { const out = []; const walk = (e) => { for (const c of e.childNodes) if (c.nodeType === 1) { if (c.matches(sel)) out.push(c); walk(c); } }; walk(this); return out; }
+  }
+  const body = new El('body', '', build((tag, cls, ...kids) => new El(tag, cls, kids)));
+  const frames = [];
+  let observed = null;
+  const document = {
+    body, documentElement: new El('html', '', [body]), designMode: 'off', addEventListener() {},
+    createTreeWalker(scope) { const list = []; const walk = (e) => { for (const c of e.childNodes) { if (c.nodeType === 3) list.push(c); else walk(c); } }; walk(scope); let i = 0; return { nextNode: () => list[i++] || null }; },
+  };
+  const context = {
+    document, NodeFilter: { SHOW_TEXT: 4 }, requestAnimationFrame: (f) => frames.push(f),
+    MutationObserver: class { constructor(cb) { observed = cb; } observe() {} },
+  };
+  const texts = () => { const out = []; const walk = (e) => { for (const c of e.childNodes) { if (c.nodeType === 3) out.push(c.data); else walk(c); } }; walk(body); return out; };
+  const flush = () => { while (frames.length) frames.shift()(); };
+  return { context, body, texts, flush, changed: (n) => observed([{ type: 'characterData', target: n }]) };
+}
+
+test('rules: every replace rule applies, not only the first (whichever comes first), and each once', () => {
+  const four = [
+    { find: 'Grok', with: 'the robot' },
+    { in: '.bio', find: 'cat', with: 'dog' },
+    { find: 'HELLO', caseless: true, with: 'hi' },
+    { find: '\\d+ views', regex: true, with: 'some views' },
+  ];
+  for (let first = 0; first < four.length; first++) {
+    const replace = [...four.slice(first), ...four.slice(0, first)];
+    const page = fakePage((h) => [h('article', '', 'Grok says Hello, 12 views', h('p', 'bio', 'my cat')), h('p', '', 'a cat')]);
+    vm.runInNewContext(rules.rulesCode(ok({ replace }), 'x.com/four'), page.context);
+    page.flush();
+    assert.deepEqual(page.texts(), ['the robot says hi, some views', 'my dog', 'a cat'], `replace[${first}] first`);
+  }
+  // a `with` that has its `find` in it is replaced once, also when the page (or TRIF itself) changes the text
+  const page = fakePage((h) => [h('p', '', 'Grok and the cat')]);
+  vm.runInNewContext(rules.rulesCode(ok({ replace: [{ find: 'Grok', with: 'Grok AI' }, { find: 'cat', with: 'cat (a pet)' }] }), 'x.com/twice'), page.context);
+  page.flush();
+  assert.deepEqual(page.texts(), ['Grok AI and the cat (a pet)']);
+  page.changed(page.body.childNodes[0].childNodes[0]);
+  page.flush();
+  assert.deepEqual(page.texts(), ['Grok AI and the cat (a pet)']);
+  // text the page writes later is replaced by every rule too
+  const later = page.body.childNodes[0].append('more Grok, more cat');
+  page.changed(later);
+  page.flush();
+  assert.deepEqual(page.texts(), ['Grok AI and the cat (a pet)', 'more Grok AI, more cat (a pet)']);
+  // `with` is plain text: a regex's $1 stays "$1"
+  const plain = fakePage((h) => [h('p', '', 'ab')]);
+  vm.runInNewContext(rules.rulesCode(ok({ replace: [{ find: '(a)b', regex: true, with: '[$1]' }] }), 'x.com/plain'), plain.context);
+  plain.flush();
+  assert.deepEqual(plain.texts(), ['[$1]']);
+});
+
 function makeWs() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-rules-'));
   const modsDir = path.join(home, 'sites');

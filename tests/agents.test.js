@@ -252,7 +252,9 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
     '--tools', 'Read,Edit,Write,Glob,Grep,Bash', '--disable-slash-commands',
     // Absolute rules ("//" + path): a "./" rule would follow the agent after a `cd`.
     '--allowedTools', 'Read(//h/**)', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
-    '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt-file', '/c/boxes/r1.agent/context.md']);
+    '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt-file', '/c/boxes/r1.agent/context.md',
+    // No model picked: Opus, not Claude Code's own default
+    '--model', 'opus']);
   // The message on stdin, the settings and the context in the run's own files: none of it in argv,
   // which any same-user process can read.
   assert.equal(c.stdin, 'hi there, my secret plan');
@@ -290,6 +292,12 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
   assert.equal(claude.tooOld('2.1.312 (Claude Code)'), false);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus', agentDir: '/a' });
   assert.deepEqual(r.args.slice(-5), ['/a/context.md', '--resume', 's1', '--model', 'opus']);
+  // No model picked: Opus (the alias), not Claude Code's own default; a pick (an exact name too) wins
+  const none = claude.command({ bin: '/x/claude', prompt: 'hi' }).args;
+  assert.equal(none[none.indexOf('--model') + 1], 'opus');
+  assert.equal(none.filter((a) => a === '--model').length, 1);
+  for (const m of ['', null, undefined]) { const a = claude.command({ bin: '/x/claude', prompt: 'hi', model: m }).args; assert.equal(a[a.indexOf('--model') + 1], 'opus'); }
+  for (const m of ['sonnet', 'fable', 'claude-haiku-4-5']) { const a = claude.command({ bin: '/x/claude', prompt: 'hi', model: m }).args; assert.equal(a[a.indexOf('--model') + 1], m); assert.equal(a.filter((x) => x === '--model').length, 1); }
   // the effort only when the user picked one (Settings → Effort), and only a level Claude Code has
   assert.ok(!r.args.includes('--effort'));
   const e = claude.command({ bin: '/x/claude', prompt: 'hi', effort: 'xhigh' }).args;
@@ -550,6 +558,8 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.equal(codex.tooOld('0.166.0'), false);
   assert.equal(codex.tooOld(null), false);
   const r = codex.command({ bin: '/x/codex', prompt: 'P', sessionId: 'th1' });
+  // No model picked: Codex's own default (no -m), not Claude Code's Opus
+  assert.ok(!r.args.includes('-m') && !r.args.includes('opus'));
   assert.deepEqual(r.args.slice(-3), ['resume', 'th1', '-']);
   assert.equal(r.stdin, 'P');
 
@@ -2010,4 +2020,27 @@ test('a run is told which browser it was started from', () => {
   assert.match(agents.contextText({ url: 'https://x.com/', tabId: 3, scope: 'x.com', browser: 'Safari' }), /in the user's Safari\./);
   assert.match(agents.contextText({ url: 'https://x.com/', browser: 'Firefox' }), /in the user's Firefox\./);
   assert.match(agents.contextText({ url: 'https://x.com/' }), /in the user's browser\./);
+});
+
+test('side panel: no model picked reads "Opus (default)" for Claude Code, "Default" for the others', async () => {
+  // (Claude Code's list names no default, so the panel's own name is the one shown, never "Default (Opus (newest))")
+  assert.equal((await claude.listModels()).default, null);
+  const js = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  const grab = (start) => { const i = js.indexOf(start); assert.ok(i >= 0, start); const end = js.indexOf('\n}\n', i); return js.slice(i, end + 2); };
+  const src = `${js.slice(js.indexOf('const DEFAULT_MODEL_NAMES'), js.indexOf(';', js.indexOf('const DEFAULT_MODEL_NAMES')) + 1)}
+    const EFFORT_NAMES = {}; const ui = { using: {} }; const chosenEffort = () => '';
+    ${grab('function renderUsing(')}
+    ({ renderUsing, ui })`;
+  const { renderUsing, ui } = require('vm').runInNewContext(src);
+  const claudeModels = [{ id: 'opus', name: 'Opus (newest)' }, { id: 'sonnet', name: 'Sonnet (newest)' }];
+  renderUsing({ id: 'claude', name: 'Claude Code' }, '', claudeModels, null);
+  assert.equal(ui.using.textContent, 'Claude Code · Opus (default)');
+  renderUsing({ id: 'claude', name: 'Claude Code' }, 'sonnet', claudeModels, null);
+  assert.equal(ui.using.textContent, 'Claude Code · Sonnet (newest)');
+  renderUsing({ id: 'codex', name: 'Codex' }, '', [], null);
+  assert.equal(ui.using.textContent, 'Codex · Default model');
+  renderUsing({ id: 'codex', name: 'Codex' }, '', [{ id: 'gpt-5', name: 'GPT-5' }], { id: 'gpt-5', name: 'GPT-5' });
+  assert.equal(ui.using.textContent, 'Codex · Default (GPT-5)');
+  // the model menu's first entry: the same name for Claude Code (its list has no default of its own)
+  assert.match(js, /new Option\(def \? `Default \(\$\{def\.name\}\)` : DEFAULT_MODEL_NAMES\[id\] \|\| 'Default', ''\)/);
 });

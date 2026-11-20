@@ -7,7 +7,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
-  ROBOTLESS, isRobotless, switchableAgents, pastedModName } from './lib.js';
+  ROBOTLESS, isRobotless, switchableAgents, pastedModName, pastedFileName } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
@@ -3495,10 +3495,28 @@ document.addEventListener('drop', async (e) => {
   }
 });
 
-async function addSiteFile(f) {
+// Pasting files into the chat box (a screenshot, an image copied from a page, files copied in the Finder):
+// each goes in the site's files and is attached to the message being written, as a dropped file is while
+// typing. Pasted text stays ordinary text.
+ui.input?.addEventListener('paste', (e) => {
+  const cd = e.clipboardData;
+  let files = [...(cd?.files || [])];
+  // (where a browser lists a pasted image only as an item)
+  if (!files.length) files = [...(cd?.items || [])].filter((it) => it.kind === 'file').map((it) => it.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  if (!view.site || !view.status?.helper?.connected) return;
+  (async () => { for (const f of files.slice(0, 10)) await addSiteFile(pastedFile(f), { attach: true }); })();
+});
+function pastedFile(f) {
+  const name = pastedFileName(f.name, f.type);
+  return name === f.name ? f : new File([f], name, { type: f.type });
+}
+
+async function addSiteFile(f, { attach } = {}) {
   const site = chatSite(); // (the phone view's: its phone twin's files, and its chat)
   const note = (text) => request({ type: 'chat.note', site, text }).catch(() => {});
-  const typing = !!ui.input.value.trim();
+  const typing = attach ?? !!ui.input.value.trim();
   // (a slice at a time, so a big file is never all in memory: the helper appends them, then renames it into place)
   let id = null;
   const progress = el('p', 'note file-progress');
@@ -3899,6 +3917,9 @@ async function loadModels(agentId, fresh = false) {
   renderModels();
 }
 
+// What "no model picked" runs, where the helper sets it rather than the agent (claude.js DEFAULT_MODEL)
+const DEFAULT_MODEL_NAMES = { claude: 'Opus (default)' };
+
 function renderModels() {
   const { id, info } = currentAgent();
   renderOpenModel(id, !!view.status?.helper?.connected); // open model: where it comes from (openmodel.js)
@@ -3908,7 +3929,7 @@ function renderModels() {
   const allowsOther = !list || list.custom !== false;
   const known = !chosen || models.some((m) => m.id === chosen);
   const def = list?.default ? models.find((m) => m.id === list.default) : null;
-  const opts = [new Option(def ? `Default (${def.name})` : 'Default', '')];
+  const opts = [new Option(def ? `Default (${def.name})` : DEFAULT_MODEL_NAMES[id] || 'Default', '')];
   for (const m of models) {
     const o = new Option(m.name, m.id);
     if (m.description) o.title = m.description;
@@ -3956,13 +3977,13 @@ function renderEffort(id, info, model) {
 
 /**
  * The line over the message box: this chat's agent and model ("Open model · Kimi K2.7 Code", "Claude Code ·
- * Default (Opus)"), so a model picked somewhere else is never a surprise. The model's name once its list has
+ * Opus (default)"), so a model picked somewhere else is never a surprise. The model's name once its list has
  * loaded (settings), its id until then.
  */
 function renderUsing(info, chosen, models, def) {
   if (!info) { ui.using.hidden = true; return; }
   const named = chosen && models.find((m) => m.id === chosen);
-  const model = chosen ? (named ? named.name : chosen) : def ? `Default (${def.name})` : 'Default model';
+  const model = chosen ? (named ? named.name : chosen) : def ? `Default (${def.name})` : DEFAULT_MODEL_NAMES[info.id] || 'Default model';
   const effort = chosenEffort(info.id);
   ui.using.textContent = `${info.name} · ${model}${effort ? ` · ${EFFORT_NAMES[effort] || effort} effort` : ''}`;
   ui.using.title = 'Change the agent or model';

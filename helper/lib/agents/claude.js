@@ -32,6 +32,8 @@ const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'];
 // workspace, which a run's file tools can't read without approval and its sandbox denies.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
 // Claude Code's effort levels (claude --help: --effort), offered in the panel's Settings.
+// The model a run gets when the user picked none: the alias, so always the newest Opus
+const DEFAULT_MODEL = 'opus';
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
@@ -214,6 +216,9 @@ const adapter = {
     return { available: true, path: file, version: v, note: '' };
   },
 
+  // The model when the user picked none (see command)
+  defaultModel: DEFAULT_MODEL,
+
   // Claude Code has no command that lists the models an account can use, so: its aliases, each the
   // newest model of its family (what `claude --model` documents), and any exact name typed in.
   async listModels() {
@@ -257,7 +262,10 @@ const adapter = {
     if (sessionId) args.push('--resume', sessionId);
     // The user's effort setting (the panel's Settings, per agent); none: Claude Code's default
     if (effort && EFFORTS.includes(effort)) args.push('--effort', effort);
-    if (model) args.push('--model', model);
+    // No pick (the panel's "Default", `/model default`, `trif agent run` without --model): Opus, not
+    // Claude Code's own default, which the user's ~/.claude/settings.json can't change here (runs read
+    // project settings only, --setting-sources project) and which can be a slower, costlier model.
+    args.push('--model', model || DEFAULT_MODEL);
     // Every other site's folder got its Edit deny rules (runSettings) and its sandbox denyWrite.
     // Claude Code's own temporary folder (its commands' sandbox may always write there): the run's own
     // (runs.js runLimits agentTmp), not /tmp/claude-<uid>, which every Claude Code session on the computer

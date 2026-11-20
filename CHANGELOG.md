@@ -6,14 +6,13 @@ rest, which goes under "### More" (and on the GitHub release). It's written for 
 `node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
 summary is too long.
 
-## 0.3.1
+## 0.3.2
 
 - **Edit a mod's code in the panel.** TRIF checks it before saving; an edit that lets the mod do more
   waits for your OK.
 - **A click on something a mod hid is stopped**, and TRIF says which mod did it.
 - **Tim's mods get fixes between releases**, signed like TRIF's updates. One you changed is never replaced.
 - **TRIF names your browser**: Brave, Edge, Opera, Vivaldi and Arc aren't all called Chrome any more.
-- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
 
 ### More
 
@@ -25,6 +24,23 @@ summary is too long.
   still works. The mod's row says "stopped a click".
 - If the fixes for Tim's mods can't be fetched or checked, Settings says why, and so does `trif doctor`.
 - Firefox's forks are named too, in the panel, `trif status`, `trif doctor` and problem reports.
+
+## 0.3.1
+
+- **Style mods make every replacement**, not just the first one.
+- **Your agent stops what it hides**: something that keeps playing or loading, like a live preview, is
+  stopped instead of left running out of sight.
+- **Mods without semicolons** no longer wait for your OK as code TRIF can't check.
+- **Claude Code runs on Opus** when you haven't picked a model, and the panel says "Opus (default)".
+- **A paused tab works after your agent reloads it**: the site's own requests go through again.
+
+### More
+
+- Sites' own errors show in the browser's console again where a boxed mod runs.
+- A side-panel chat can read only its own site's mods through TRIF, and send TRIF only the commands its
+  `trif` uses (a security review finding).
+- Shorter guides for your agent, so it starts sooner and goes deeper when a quick fix would leave something
+  wrong.
 
 ## 0.3.0
 

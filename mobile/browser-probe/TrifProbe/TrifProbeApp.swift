@@ -486,6 +486,8 @@ struct ContentView: View {
     @ObservedObject private var phoneLink = PhoneLinkModel.shared
     /// The list of Home Screen icons waiting (IconQueueView).
     @State private var showIconQueue = false
+    /// The quick ask whose Working pill was tucked away (its ✕): hidden until it's done (QuickPill.tuck).
+    @State private var quickTucked: UUID?
     @ObservedObject private var iconQueue = IconQueue.shared
     @State private var pickingFolder = false
     @State private var askingProject = false
@@ -808,8 +810,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // (the quick ask's pill: Working, then Done · Undo or Replied; a tap opens the chat)
             // (and while the strip's chat is filled behind the tab: "Putting it in Claude…")
-            if let q = pane.quick, !pane.shown, q.state != .card, q.state != .waitingSend || (pane.strip && !pane.stripIn) {
-                QuickPill(quick: q, preparing: q.state == .waitingSend, open: { closeCovers(); pane.quickOpen() }, undo: { pane.quickUndo() }, dismiss: { if pane.quick?.id == q.id { pane.quick = nil } })
+            if let q = pane.quick, !pane.shown, q.state != .card, q.state != .waitingSend || (pane.strip && !pane.stripIn),
+               !(quickTucked == q.id && [.working, .starting, .waitingSend].contains(q.state)) {
+                QuickPill(quick: q, preparing: q.state == .waitingSend, open: { closeCovers(); pane.quickOpen() }, undo: { pane.quickUndo() }, dismiss: { if pane.quick?.id == q.id { pane.quick = nil } },
+                          tuck: { withAnimation(.easeOut(duration: 0.25)) { quickTucked = q.id }; Diagnostics.shared.log("quick ask", "the Working pill hidden by the person; the work goes on") })
                     .padding(.bottom, 8)
                     .frame(maxWidth: .infinity)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

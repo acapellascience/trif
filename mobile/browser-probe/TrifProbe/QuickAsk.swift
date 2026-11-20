@@ -368,6 +368,14 @@ struct QuickPill: View {
     let open: () -> Void
     let undo: () -> Void
     let dismiss: () -> Void
+    /// While it's working: the pill tucked away (its ✕, or a swipe), the work going on; Done · Undo, Replied or a
+    /// failure comes back up when it ends (Tim, 11-20: "Working…" lasting the whole run sat over sites' footer menus).
+    var tuck: () -> Void = {}
+
+    /// Still under way: what the ✕ and a swipe tuck away rather than end.
+    private var underWay: Bool {
+        switch quick.state { case .working, .starting, .waitingSend: return true; default: return false }
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -402,18 +410,26 @@ struct QuickPill: View {
             case .waitingSend, .card:
                 EmptyView()
             }
+            if underWay {
+                Button(action: tuck) {
+                    Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide")
+            }
         }
         .font(.footnote)
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.leading, 14).padding(.trailing, underWay ? 8 : 14).padding(.vertical, 8)
         .background(Capsule().fill(.regularMaterial))
         .overlay(Capsule().strokeBorder(border, lineWidth: quick.failed || quick.slow != nil ? 1.5 : 1))
         .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
         .contentShape(Capsule())
         .onTapGesture(perform: open)
-        .gesture(DragGesture(minimumDistance: 12).onEnded { g in if abs(g.translation.height) > 16 || abs(g.translation.width) > 40 { dismiss() } })
+        .gesture(DragGesture(minimumDistance: 12).onEnded { g in if abs(g.translation.height) > 16 || abs(g.translation.width) > 40 { underWay ? tuck() : dismiss() } })
         .accessibilityElement(children: .combine)
         .accessibilityHint(quick.failed ? hint : "Opens the chat")
-        .accessibilityAction(named: "Close", dismiss)
+        .accessibilityAction(named: underWay ? "Hide" : "Close", underWay ? tuck : dismiss)
         .task(id: quick.state) {
             // (Done and Replied go by themselves after 20 s, Undone after 2; Working stays until the reply is done)
             let wait: Double

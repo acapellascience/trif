@@ -1538,7 +1538,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     /// The chat's JS with arguments, in TRIF's world there.
     private func chatCall(_ v: ChatView, _ call: String, _ args: [String: Any]) async -> String? {
         let r = try? await v.webView.callAsyncJavaScript("return globalThis.__trifChat ? globalThis.__trifChat.\(call) : null;", arguments: args, in: nil, contentWorld: ClaudePane.chatWorld)
-        return r.map { "\($0)" }
+        // (JS null, chat.js not in the page yet, comes back as NSNull: nil, "not there yet", not the string "<null>",
+        // which askable took for an answer: "has no message box" 1.2 s into a new chat page, Tim 11-20)
+        guard let r, !(r is NSNull) else { return nil }
+        return "\(r)"
     }
     /// (development: the quick ask's state, for the dev steps)
     var quickDescribe: String {

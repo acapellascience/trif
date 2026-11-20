@@ -7,7 +7,7 @@
 // given --yes-this-computer.
 //
 //   1. a scratch user profile (USERPROFILE, LOCALAPPDATA, APPDATA in a temp folder: os.homedir() reads
-//      USERPROFILE on Windows), then `node helper/cli.js setup --copy --browser chrome,firefox`
+//      USERPROFILE on Windows), then `node helper/cli.js setup --copy --browser chrome,edge,firefox`
 //   2. checks: wrappers in ~\.trif\bin, manifests in %LOCALAPPDATA%\TRIF\NativeMessagingHosts, each
 //      browser's HKCU key naming its manifest (reg.exe query), ~\.trif\bin on the user's Path
 //   3. starts trif-host.bat through `cmd.exe /d /c` with the extension's origin, as Chrome does, says
@@ -44,6 +44,13 @@ async function waitFor(fn, ms = 15000) {
   for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) return null; await sleep(100); }
 }
 
+// The browsers set up, and each one's key (Edge's own: Edge is on every Windows, and the browser most
+// people there have).
+const HOST_KEYS = [
+  ['chrome', 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webmods.helper'],
+  ['edge', 'HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.webmods.helper'],
+  ['firefox', 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\com.webmods.helper'],
+];
 const reg = (args) => spawnSync(path.join(process.env.SystemRoot, 'System32', 'reg.exe'), args, { encoding: 'utf8' });
 // What the registry holds, read independently of TRIF's own code and whatever the letters: Windows
 // PowerShell, answering in UTF-8 (reg.exe prints in the console's code page).
@@ -93,9 +100,9 @@ function runCmd(file, args, env) {
   console.log(`profile ${profile}`);
 
   // 1. setup
-  const s = spawnSync(process.execPath, [path.join(REPO, 'helper', 'cli.js'), 'setup', '--copy', '--browser', 'chrome,firefox'], { env, encoding: 'utf8', timeout: 300000 });
+  const s = spawnSync(process.execPath, [path.join(REPO, 'helper', 'cli.js'), 'setup', '--copy', '--browser', 'chrome,edge,firefox'], { env, encoding: 'utf8', timeout: 300000 });
   console.log(s.stdout);
-  if (!check(s.status === 0, 'setup --copy --browser chrome,firefox exits 0', s.stderr)) { process.exitCode = 1; }
+  if (!check(s.status === 0, 'setup --copy --browser chrome,edge,firefox exits 0', s.stderr)) { process.exitCode = 1; }
 
   // 2. what setup made
   const bin = path.join(home, 'bin');
@@ -105,7 +112,7 @@ function runCmd(file, args, env) {
   check(fs.existsSync(cmd), 'trif.cmd');
   check(fs.existsSync(path.join(bin, 'trif')), 'trif (for Git Bash)');
   check(fs.existsSync(path.join(home, 'app', 'helper', 'host.js')), 'the copy in ~\\.trif\\app');
-  for (const [b, key] of [['chrome', 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webmods.helper'], ['firefox', 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\com.webmods.helper']]) {
+  for (const [b, key] of HOST_KEYS) {
     const manifest = path.join(env.LOCALAPPDATA, 'TRIF', 'NativeMessagingHosts', b, 'com.webmods.helper.json');
     check(fs.existsSync(manifest), `${b}: manifest ${manifest}`);
     const v = regDefault(key);
@@ -162,7 +169,7 @@ function runCmd(file, args, env) {
   check(Date.now() - t0 < 8000, `trif.cmd status took ${Date.now() - t0} ms`);
   const doc = await runCmd(cmd, ['doctor'], env);
   console.log(doc.stdout);
-  for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, /^ok {4}Google Chrome: native host manifest$/m, /^ok {4}Firefox: native host manifest$/m, /^ok {4}helper running/m, /^ok {4}the fence for chats from the panel can be built here/m]) {
+  for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, /^ok {4}Google Chrome: native host manifest$/m, /^ok {4}Microsoft Edge: native host manifest$/m, /^ok {4}Firefox: native host manifest$/m, /^ok {4}helper running/m, /^ok {4}the fence for chats from the panel can be built here/m]) {
     check(want.test(doc.stdout), `trif doctor: ${want}`);
   }
 
@@ -188,7 +195,7 @@ function runCmd(file, args, env) {
   check(!fs.existsSync(markerFile), 'and removes helper.pipe');
   if (code === 'timeout') host.kill();
 
-  for (const key of ['HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webmods.helper', 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\com.webmods.helper']) reg(['delete', key, '/f']);
+  for (const [, key] of HOST_KEYS) reg(['delete', key, '/f']);
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all passed'}`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

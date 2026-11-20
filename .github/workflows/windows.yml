@@ -4,8 +4,9 @@
 #   - tests/windows-smoke.js, which sets TRIF up the way a user does (registry keys under HKCU, the user's
 #     Path, Credential Manager) on the runner, in a profile folder with a space, letters outside ASCII and
 #     a % in its name, starts the helper as Chrome does and talks to it over its pipe;
-#   - tests/windows-browser.js (Node 22 only): Chrome for Testing loads the unpacked extension, and the
-#     extension reaches the helper through the registry key and trif-host.bat, as for a user.
+#   - tests/windows-browser.js (Node 22 only): Chrome for Testing, then Microsoft Edge, loads the unpacked
+#     extension, and the extension reaches the helper through the registry key and trif-host.bat, as for a
+#     user.
 # Nothing is published, uploaded or signed, and no secrets are used.
 name: windows
 
@@ -73,15 +74,19 @@ jobs:
       - name: Browser check, in a profile folder with letters outside ASCII
         if: always() && matrix.node != 18
         run: node tests/windows-browser.js --unicode
-      # Edge is on the runner; whether it takes --load-extension is what this finds out (never failing).
-      - name: (information) the same with Microsoft Edge, through Edge's own registry key
+      # Microsoft Edge: the browser every Windows has, so the same check must pass in it (stable Edge, as
+      # the runner has it, takes --load-extension headless). Setup for Edge alone: Edge's own key
+      # (HKCU\Software\Microsoft\Edge\NativeMessagingHosts), doctor's "Microsoft Edge" line, the helper
+      # started by Edge, the panel page connected. Its INFO lines say what Edge's extensions page has.
+      - name: Browser check in Microsoft Edge, through Edge's own registry key
         if: always() && matrix.node != 18
-        continue-on-error: true
         shell: pwsh
         run: |
           $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $edge) { Write-Output "no Edge here"; exit 0 }
+          if (-not $edge) { Write-Output "no Edge on this runner (windows-latest has had it)"; exit 1 }
+          (Get-Item $edge).VersionInfo.ProductVersion
           node tests/windows-browser.js --browser edge --bin "$edge"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: (information) the same with Brave, through Brave's own registry key
         if: always() && matrix.node != 18
         continue-on-error: true

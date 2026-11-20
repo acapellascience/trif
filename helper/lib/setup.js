@@ -611,8 +611,10 @@ function setup(opts = {}) {
   } else {
     targets = selectBrowsers(opts.browser, opts.homedir, platform, opts.env);
     if (!targets.length) {
-      note('browsers      no browser profile folder found; installing for Google Chrome anyway');
-      targets = selectBrowsers('chrome', opts.homedir, platform, opts.env);
+      // (Windows: Edge too, since every Windows has it and it's the browser people there start with.)
+      note(win ? 'browsers      no browser profile folder found; installing for Google Chrome and Microsoft Edge anyway'
+        : 'browsers      no browser profile folder found; installing for Google Chrome anyway');
+      targets = selectBrowsers(win ? 'chrome,edge' : 'chrome', opts.homedir, platform, opts.env);
     }
     if (legacySafari && !targets.some((t) => t.safari)) {
       note('browsers      also Safari: its bridge from before 0.2.0 was installed, and is replaced by the new one');

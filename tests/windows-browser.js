@@ -13,13 +13,18 @@
 //      the registry and runs trif-host.bat through cmd.exe: the helper names its pipe in helper.pipe
 //   4. `trif.cmd status --json` over that pipe: the helper says which extension said hello (its version,
 //      the browser), and a page command goes to the extension and back; `trif doctor` agrees
-//   5. the browser quits: the helper exits and removes helper.pipe
+//   5. the panel page (sidepanel.html, in a tab: a headless browser has no side panel to click open)
+//      connects to the helper through the service worker: its status dot says so
+//   6. for information, never failing: the browser's own extensions page (where chrome://extensions
+//      leads: Edge's is edge://extensions), whether it has an "Allow User Scripts" switch, and whether
+//      turning it on through that page's own API (developerPrivate) gives the extension chrome.userScripts
+//   7. the browser quits: the helper exits and removes helper.pipe
 //
 // It writes to the real HKEY_CURRENT_USER, so it refuses to run anywhere but GitHub Actions on Windows,
 // unless given --yes-this-computer. Options: --headful (a window, not headless), --unicode (the scratch
 // profile folder has a space, letters outside ASCII and a % in its name), --browser edge|brave with --bin
 // <its program> (another Chromium browser, set up as `trif setup --browser <it>` does: its own registry
-// key). Prints PASS/FAIL per check; exits 1 if anything failed.
+// key). Prints PASS/FAIL per check (INFO for what only informs); exits 1 if anything failed.
 
 const fs = require('fs');
 const os = require('os');
@@ -81,6 +86,15 @@ function runCmd(file, args, env, timeout = 60000) {
     c.on('close', (status) => { clearTimeout(t); resolve({ status, stdout, stderr }); });
   });
 }
+// What the registry holds, read independently of TRIF's own code and whatever the letters (as
+// windows-smoke.js does): Windows PowerShell, answering in UTF-8.
+function regDefault(key) {
+  const exe = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); $k = Get-Item -LiteralPath 'Registry::${key.replace(/^HKCU\\/, 'HKEY_CURRENT_USER\\')}' -ErrorAction SilentlyContinue; if ($k) { [Console]::Out.Write([string]$k.GetValue('')) }`;
+  const r = spawnSync(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 60000 });
+  return r.status === 0 && r.stdout ? r.stdout.trim() : null;
+}
+const info = (what) => console.log(`INFO  ${String(what).split('\n').join('\n      ')}`);
 const tail = (file, n = 40) => { try { return fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(-n).join('\n'); } catch (e) { return `(${e.code || e.message})`; } };
 
 // The DevTools protocol over its WebSocket (Node 22's own WebSocket): send(method, params, sessionId).
@@ -135,6 +149,10 @@ class Cdp {
   const cmd = path.join(home, 'bin', 'trif.cmd');
   check(fs.existsSync(path.join(extensionDir, 'manifest.json')), `the extension folder setup names: ${extensionDir}`);
   check(!fs.existsSync(path.join(home, 'helper.pipe')), 'no helper yet');
+  // The browser's own key names its manifest (the one setup wrote for it, in %LOCALAPPDATA%\TRIF).
+  const ownManifest = path.join(privateDir, 'NativeMessagingHosts', BROWSER, 'com.webmods.helper.json');
+  const named = regDefault(HOST_KEYS[0]);
+  check(fs.existsSync(ownManifest) && !!named && named.toLowerCase() === ownManifest.toLowerCase(), `${HOST_KEYS[0]} names ${ownManifest}`, `it says ${named}`);
   // --drop-key N: one of the keys setup wrote is taken away again, to see which one the browser reads.
   if (arg('--drop-key') !== null) {
     const dropped = HOST_KEYS[Number(arg('--drop-key'))];
@@ -158,7 +176,7 @@ class Cdp {
   let cdp = null;
   try {
     const ver = await waitFor(async () => { const r = await fetch(`http://127.0.0.1:${port}/json/version`); return r.ok ? r.json() : null; }, 45000);
-    if (!check(!!ver, 'Chrome started (its DevTools endpoint answers)', tail(chromeLog))) throw new Error('no browser');
+    if (!check(!!ver, 'the browser started (its DevTools endpoint answers)', tail(chromeLog))) throw new Error('no browser');
     console.log(`      ${ver.Browser}`);
     cdp = await new Cdp(ver.webSocketDebuggerUrl).connect();
 
@@ -199,12 +217,68 @@ class Cdp {
     for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, KIND.doctor, /^ok {4}helper running/m, /^ok {4}extension v\S+ on /m]) {
       check(want.test(doc.stdout), `trif doctor: ${want}`);
     }
+
+    // 5. the panel page, in a tab, reaching the helper through the service worker
+    const evalIn = async (sessionId, expression) => {
+      const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId);
+      if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text);
+      return r.result.value;
+    };
+    const openPage = async (url) => {
+      const { targetId } = await cdp.send('Target.createTarget', { url });
+      const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
+      return { targetId, sessionId };
+    };
+    try {
+      const panel = await openPage(`chrome-extension://${EXTENSION_ID}/sidepanel.html`);
+      const label = await waitFor(async () => {
+        const v = await evalIn(panel.sessionId, 'document.readyState === "complete" && document.getElementById("dot") ? document.getElementById("dot").getAttribute("aria-label") : null');
+        return v && !/^(Checking|Status unknown)/.test(v) && v !== 'Helper not connected' ? v : null;
+      }, 30000, 500);
+      const last = label || await evalIn(panel.sessionId, 'document.getElementById("dot") && document.getElementById("dot").getAttribute("aria-label")').catch((e) => e.message);
+      check(!!label, `the panel page connects to the helper: its status dot says "${last}"`, tail(path.join(privateDir, 'helper.log')));
+      await cdp.send('Target.closeTarget', { targetId: panel.targetId }).catch(() => {});
+    } catch (e) { check(false, 'the panel page opened', e.message); }
+
+    // 6. for information: the browser's extensions page and its "Allow User Scripts" switch
+    try {
+      const page = await openPage(`chrome://extensions/?id=${EXTENSION_ID}`);
+      await sleep(3000);
+      const where = await evalIn(page.sessionId, 'location.href').catch((e) => `(${e.message})`);
+      info(`chrome://extensions/?id=… opens ${where}`);
+      // All the page's words, its shadow roots too (Chrome's page is made of them).
+      const words = await evalIn(page.sessionId, `(() => { const out = []; const walk = (n) => { if (!n) return; if (n.nodeType === 3) out.push(n.textContent); if (n.shadowRoot) walk(n.shadowRoot); for (const c of n.childNodes || []) walk(c); }; walk(document.body); return out.join(' ').replace(/\\s+/g, ' '); })()`).catch((e) => `(${e.message})`);
+      const m = /[^.]{0,60}user scripts[^.]{0,80}/i.exec(words || '');
+      info(`its details page ${m ? `mentions user scripts: "${m[0].trim()}"` : 'never says "user scripts"'}`);
+      const api = await evalIn(page.sessionId, `(async () => {
+        const d = globalThis.chrome && chrome.developerPrivate;
+        if (!d) return 'no chrome.developerPrivate on this page';
+        const out = [];
+        try { await d.updateProfileConfiguration({ inDeveloperMode: true }); out.push('developer mode on: ok'); } catch (e) { out.push('developer mode on: ' + e.message); }
+        try { await d.updateExtensionConfiguration({ extensionId: '${EXTENSION_ID}', userScriptsAccess: true }); out.push('userScriptsAccess true: ok'); } catch (e) { out.push('userScriptsAccess true: ' + e.message); }
+        try { const x = await d.getExtensionInfo('${EXTENSION_ID}'); out.push('userScriptsAccess now: ' + JSON.stringify(x.userScriptsAccess)); } catch (e) { out.push('getExtensionInfo: ' + e.message); }
+        return out.join('; ');
+      })()`).catch((e) => `(${e.message})`);
+      info(`through the page's own API: ${api}`);
+      await cdp.send('Target.closeTarget', { targetId: page.targetId }).catch(() => {});
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      const sw = targetInfos.find((t) => t.type === 'service_worker' && t.url.startsWith(`chrome-extension://${EXTENSION_ID}/`));
+      if (sw) {
+        const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: sw.targetId, flatten: true });
+        const usable = await evalIn(sessionId, '(() => { try { const p = chrome.userScripts.getScripts({ ids: ["trif-probe"] }); if (p && p.catch) p.catch(() => {}); return "usable"; } catch (e) { return "not usable: " + e.message; } })()').catch((e) => `(${e.message})`);
+        info(`chrome.userScripts in the service worker now: ${usable}`);
+      }
+      // (every message from the helper makes the extension look again, and say hello anew if it changed)
+      const on = await waitFor(async () => { const r = await runCmd(cmd, ['status', '--json'], env); const j = JSON.parse(r.stdout); return j.helper && j.helper.extension && j.helper.extension.userScripts ? j : null; }, 10000, 1000);
+      info(`the helper hears user scripts are ${on ? 'on' : 'still off'}`);
+    } catch (e) { info(`the extensions page couldn't be looked at: ${e.message}`); }
+
     const hlog = tail(path.join(privateDir, 'helper.log'), 200);
     check(/host \S+ starting/.test(hlog) && !/\bERROR\b/.test(hlog), 'the helper\'s log: started, no errors', hlog);
   } catch (e) {
     check(false, 'the browser check ran to its end', e.stack || e.message);
   } finally {
-    // 5. the browser quits
+    // 7. the browser quits
     try { if (cdp) await cdp.send('Browser.close').catch(() => {}); } catch { /* gone */ }
     if (cdp) cdp.close();
     const code = await Promise.race([chromeExited, sleep(15000).then(() => 'timeout')]);

@@ -337,6 +337,54 @@ test('windows setup: wrappers, manifests + registry keys, PATH, no /usr/local/bi
   assert.ok(again.ok, again.lines.join('\n'));
 });
 
+test('windows setup for Edge: found by its profile folder, its own key (HKCU\\Software\\Microsoft\\Edge); with no profile at all, Chrome and Edge both; doctor names it', async () => {
+  const { setup } = require('../helper/lib/setup');
+  const { doctor } = require('../helper/lib/doctor');
+  const edgeKey = 'HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.webmods.helper';
+  const chromeKey = 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webmods.helper';
+  const run = (withEdge) => {
+    const root = tempDir('we-');
+    const home = path.join(root, 'trif');
+    const homedir = path.join(root, 'profile');
+    const env = { LOCALAPPDATA: path.join(homedir, 'AppData', 'Local'), APPDATA: path.join(homedir, 'AppData', 'Roaming') };
+    if (withEdge) fs.mkdirSync(path.join(env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default'), { recursive: true });
+    else fs.mkdirSync(env.LOCALAPPDATA, { recursive: true });
+    const reg = makeFakeReg();
+    const regOpts = { env: {}, run: reg.run };
+    // (no --browser: the browsers found, as `npx timsrobot setup` does)
+    const r = setup({ home, platform: 'win32', homedir, env, regOpts, mode: 'link', noExamples: true, verbose: true, addToUserPath: () => ({ how: 'added', error: null }) });
+    assert.ok(r.ok, r.lines.join('\n'));
+    return { r, reg, regOpts, home, homedir, env, text: r.lines.join('\n') };
+  };
+  // Edge's profile folder alone: Edge, and only Edge.
+  const e = run(true);
+  assert.deepEqual(e.r.targets.map((t) => t.key), ['edge']);
+  const edgeManifest = path.join(e.env.LOCALAPPDATA, 'TRIF', 'NativeMessagingHosts', 'edge', 'com.webmods.helper.json');
+  assert.equal(e.reg.get(edgeKey), edgeManifest);
+  assert.ok(JSON.parse(fs.readFileSync(edgeManifest, 'utf8')).allowed_origins.includes(P.EXTENSION_ORIGIN));
+  assert.equal(e.reg.get(chromeKey), undefined, 'Chrome\'s key left alone');
+  assert.match(e.text, /registered: HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com\.webmods\.helper/);
+  let d = await doctor({ home: e.home, platform: 'win32', homedir: e.homedir, env: e.env, regOpts: e.regOpts });
+  let titles = d.checks.map((c) => `${c.status} ${c.title}`).join('\n');
+  assert.match(titles, /^ok Microsoft Edge: native host manifest$/m);
+  assert.ok(!/Google Chrome/.test(titles), titles);
+  // Edge's key gone: doctor says so, and the fix names Edge.
+  e.reg.keys.delete(edgeKey.toLowerCase());
+  d = await doctor({ home: e.home, platform: 'win32', homedir: e.homedir, env: e.env, regOpts: e.regOpts });
+  const broken = d.checks.find((c) => /^Microsoft Edge: native host manifest .*registry key .* is missing/.test(c.title));
+  assert.ok(broken, d.checks.map((c) => c.title).join('\n'));
+  assert.match(broken.fix, /setup.* --browser edge/);
+  // No browser profile folder at all (a new account): Chrome and Edge, each through its own key.
+  const none = run(false);
+  assert.deepEqual(none.r.targets.map((t) => t.key), ['chrome', 'edge']);
+  assert.match(none.text, /no browser profile folder found; installing for Google Chrome and Microsoft Edge anyway/);
+  assert.ok(none.reg.get(chromeKey) && none.reg.get(edgeKey));
+  d = await doctor({ home: none.home, platform: 'win32', homedir: none.homedir, env: none.env, regOpts: none.regOpts });
+  titles = d.checks.map((c) => `${c.status} ${c.title}`).join('\n');
+  assert.match(titles, /^ok Google Chrome: native host manifest$/m);
+  assert.match(titles, /^ok Microsoft Edge: native host manifest$/m);
+});
+
 // ------------------------------------------------------------------ named pipes
 
 test('windows pipes: random names only; markers say where; one primary at a time, a stale one replaced', async (t) => {

@@ -1506,7 +1506,18 @@
     if (document.documentElement.getAttribute('data-trif-tone') !== tone) document.documentElement.setAttribute('data-trif-tone', tone);
   }
   function lookSoon() { if (!lookQueued) { lookQueued = true; requestAnimationFrame(() => { lookQueued = false; try { setTone(); placeGreeting(); } catch (e) {} }); } }
-  function lookUpdate() { try { hideUpsells(); } catch (e) {} lookSoon(); }
+  /** ChatGPT's own suggested prompts on a new chat ("Create a Site…", "Compare the files"), hidden: noise beside
+   *  TRIF's greeting in a pane this small (Tim, 11-20). By the list's own name (its class "group/home-suggestions");
+   *  when ChatGPT renames it, they simply show again. Never anything that holds the message box. */
+  function hideSuggestions() {
+    if (!/(^|\.)chatgpt\.com$/.test(location.hostname)) return;
+    const ed = editor();
+    for (const el of document.querySelectorAll('[class*="home-suggestions"]')) {
+      if (el.hasAttribute('data-trif-hidden') || (ed && el.contains(ed))) continue;
+      el.setAttribute('data-trif-hidden', 'suggestions');
+    }
+  }
+  function lookUpdate() { try { hideUpsells(); } catch (e) {} try { hideSuggestions(); } catch (e) {} lookSoon(); }
   try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(lookSoon, 300)); } catch (e) {}
   addEventListener('resize', lookSoon);
   addEventListener('scroll', lookSoon, { capture: true, passive: true });

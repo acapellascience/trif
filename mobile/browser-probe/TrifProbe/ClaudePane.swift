@@ -1652,7 +1652,11 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         } else {
             notify("\(v.service.rawValue) replied", s.isEmpty ? "Tap to read the reply." : "On \(s): tap to read the reply.", id: ClaudePane.replyNote, kind: "replied", tab: v.sentTab)
         }
-        Diagnostics.shared.log("notify", "the reply's notification: \(offered.count) mod(s)")
+        // (whether iOS will show it: Tim 11-20 saw none, and couldn't tell if notifications were on)
+        UNUserNotificationCenter.current().getNotificationSettings { st in
+            let allowed = [UNAuthorizationStatus.authorized: "allowed", .denied: "turned off in Settings", .notDetermined: "never asked", .provisional: "delivered quietly", .ephemeral: "ephemeral"][st.authorizationStatus] ?? "unknown"
+            Diagnostics.shared.log("notify", "the reply's notification: \(offered.count) mod(s); notifications \(allowed), alerts \(st.alertSetting == .enabled ? "on" : "off")")
+        }
     }
 
     private func notifyStillWriting(_ v: ChatView) {

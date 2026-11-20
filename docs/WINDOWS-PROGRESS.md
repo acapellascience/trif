@@ -298,15 +298,50 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   rerun: a codex-sandbox.test.js flake, untouched by the merge); tests/run-scope-reads.test.js passes there
   (7 of 7); windows-fence and the macOS tests green.
 
+## Merge of main (11-20)
+
+- **main merged into `windows`** (`39c60a7`, from `34ffa44`; then `317debb` took in `4bae788`, the
+  clickjack test's CI fix that was already on `origin/windows` as well as on main). 41 commits of main:
+  0.3.1, the lean guides (AGENTS.md, BOXED.md, TECHNIQUES.md), Claude Code defaulting to Opus when no model
+  is picked, `trif reload` of a locked tab, style mods' replace rules all applying, paste files into the
+  chat box, the screenshot permission message, the clickjack test's warm-up. **No conflicts**, and nothing
+  that needed a Windows decision: the run-scope commit in the list (`6cd0a68`) is the cherry-pick of what
+  the 11-17 merge already brought. Looked at for Windows: `claude.js` `command()` now always ends with
+  `--model <pick or opus>`, after the Windows branch's rules and `mcp.json`, so a fenced run gets it too
+  (`tests/windows-runs.test.js` passes as it is); `cli.js`'s reload timeout and
+  "still locked" line, the extension's pasted-file names (`pasted-<date>-<hhmmss>.png`: no `:`) are the
+  same on Windows. The fence, the run's rules and Credential Manager are untouched.
+- **Local, macOS, Node 22** (temp HOME): the whole unit suite, 899 tests, 881 pass, 18 skipped, 0 fail
+  (browser tests skipped without `TRIF_BROWSER_TESTS`); `tests/update.test.js` on its own, 18 of 18 (it
+  didn't hang on this branch).
+- **CI**: the only red was `run-codex`, and it was red before the merge too (`4bae788`,
+  [44441890277](https://github.com/acapellascience/trif/actions/runs/44441890277)): Codex 0.171 (was 0.169)
+  offers its default model a new tool, `functions.send_message_to_user_async` ("Send a concise message that
+  needs the user's attention…", `{message}` alone), and the run test fails on any tool it doesn't know,
+  by design. Looked at: words out to the user, like `request_user_input_async` beside it; nothing on the
+  computer. Added to `CODEX_BY_DEFAULT` (`7deea00`). The test now prints an unknown tool's description and
+  parameters in the failure (`e22491e`), so the next one can be judged from the log.
+- CI at `7deea00` (the code; the commit after it is these notes): windows-fence
+  [44830579151](https://github.com/acapellascience/trif/actions/runs/44830579151) green (`fence`,
+  `fence-standard-user`, `run`, `agents`, `run-codex`), the macOS tests
+  [44830579194](https://github.com/acapellascience/trif/actions/runs/44830579194) green, windows
+  [44830579183](https://github.com/acapellascience/trif/actions/runs/44830579183) green (Node 18 and
+  `still-skipped` first time; Node 22 after one `gh run rerun --failed`: a flake in `tests/cli.test.js`,
+  untouched by the merge, "run: page error gives exit 1 with the message…": `trif run 'throw new Error("boom")'`
+  exited 1 with nothing on stderr, and the shared helper answered the next tests; 918 tests, 806 pass, 111
+  skipped, that 1 failed).
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is
 done in round 8**, each proven on windows-latest (the links under "Done this round" and the rounds
 before). What's left isn't the loop's:
-- **Tim's**: the texts in `docs/WINDOWS-STRINGS.md` (README's Windows section among them), and the merge
-  to main and a release, which no round does.
-- **If another round runs anyway**, in this order, none of it required by the goal: the Node 18 flakes on
-  the Windows runner ("mod.delete / mod.restore…" in round 8: a run's request unanswered for 10 s; the 5 s waits:
+- **Tim's**: the first pass on a real Windows desktop, a Windows 11 ARM VM in Parallels (the checklist in
+  `docs/WINDOWS.md`, "Trying it on a Windows 11 ARM VM (Parallels)"); the texts in `docs/WINDOWS-STRINGS.md`
+  (README's Windows section among them); and the merge to main and a release, which no round does.
+- **If another round runs anyway**, in this order, none of it required by the goal: the flakes on
+  the Windows runner (Node 22, 11-20: "run: page error gives exit 1…" in `tests/cli.test.js`, exit 1 with
+  an empty stderr; Node 18: "mod.delete / mod.restore…" in round 8: a run's request unanswered for 10 s; the 5 s waits:
   "agent.running lists the runs still going…" in round 7, the six
   `tests/cli.test.js` ones in round 6: longer waits there, or the helper's log printed when one fails);
   an attempt at a junction and a hard link from inside the fence (`tests/windows-fence/run.js`); other
@@ -347,6 +382,10 @@ before). What's left isn't the loop's:
 - Strings: 1–3 in `docs/WINDOWS-STRINGS.md` say "another coding agent" and are shown for the open model
   alone since round 4 (they go if its runs get fenced); 5c and 5d name the run's agent; README's Windows
   section (26) names Claude Code and Codex. All still awaiting Tim.
+- **A new Codex adds tools** (0.171, 11-20: `send_message_to_user_async`): `run-codex` goes red with "not
+  looked at yet", and the failure prints the tool as Codex describes it. Judge it from that, add it to the
+  right list in `tests/windows-run.js` with a comment saying what it does, and say so here; anything that
+  touches files, the network or programs is a question for Tim, not a list entry.
 - **The real Codex run** (round 3): `node tests/windows-run.js codex` on the runner; its log through the
   job's id as above, then `grep -n "FAIL\|all passed\|checks failed"`. What an MCP tool answers reaches the
   model as two parts, "Wall time: … Output:" and then the text, so patterns need `/m`. Codex's sub-agent

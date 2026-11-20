@@ -3,10 +3,10 @@
 Where Windows support stands on the `windows` branch, what was found on the way, and what's still to
 do. Nothing here is released: the branch isn't merged, and releasing is Tim's decision.
 
-Side-panel chats run on Windows with **Claude Code**, behind a fence of TRIF's own (see
+Side-panel chats run on Windows with **Claude Code** and **Codex**, behind a fence of TRIF's own (see
 [The sandbox](#the-sandbox)): built on the branch and seen working end to end on windows-latest with the
-real Claude Code. **Codex** isn't there yet: what's been tried and what's next is under
-[Codex](#codex-where-it-stands).
+real Claude Code and the real Codex ([Codex](#codex-where-it-stands)). Open models stay off in the panel
+there.
 
 Everything marked **seen** was seen passing on GitHub's `windows-latest` runners (Windows Server 2025,
 build 26100; an administrator account, UAC off), not on a person's Windows 11 laptop. Nobody has yet used
@@ -16,6 +16,7 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 - [How it's tested](#how-its-tested)
 - [The survey](#the-survey): every macOS assumption, the plan, the test
 - [The sandbox](#the-sandbox): what a Mac guarantees, what Windows can, the fence as built, the reserves
+- [Trying it on a Windows 11 ARM VM (Parallels)](#trying-it-on-a-windows-11-arm-vm-parallels): a checklist for Tim
 - [Decisions for Tim](#decisions-for-tim)
 - [What's left](#whats-left)
 
@@ -32,7 +33,7 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 | API keys | Windows Credential Manager, never in argv or the environment | smoke test (a decision for Tim: [Keys](#keys-and-secrets)) |
 | Updates | unpacked with System32's `tar.exe`; `~\.trif\app` swapped with retries | unit tests with stand-ins only |
 | Mods | scanned, sent, held, switched, as elsewhere | unit tests |
-| Chats from the panel, `trif agent run` | **Claude Code: yes**, fenced (no shell; `trif` as a tool whose program runs in the run's AppContainer). Codex: wired the same way with TRIF's file tools, green in a real run on CI, not switched on yet; it and open models are listed as not available from the panel, with why | `tests/windows-run.js`: a real run with the real Claude Code, 68 checks, and with the real Codex, 93 (**seen**); unit tests |
+| Chats from the panel, `trif agent run` | **Claude Code and Codex: yes**, fenced (no shell; `trif` as a tool whose program runs in the run's AppContainer; Codex with TRIF's fenced file tools). Open models are listed as not available from the panel, with why | `tests/windows-run.js`: a real run with the real Claude Code, 70 checks, and with the real Codex, 134 (**seen**); unit tests |
 | Logging in from the panel | off on Windows: the agent's own sign-in is done in a terminal | unit tests |
 
 A profile folder with a space, letters outside ASCII and a `%` in it (`C:\Users\Zoë 用户 100%`) works
@@ -561,6 +562,77 @@ Not tried (no WSL 2 on GitHub's runners); from Microsoft's and the agents' docum
 So: an administrator, a restart, a second copy of the agent and a second login, for a result that then
 equals Linux's. Worth offering to people who already have WSL and their agent in it ("use the agent in
 WSL"); not something to ask of everyone.
+
+## Trying it on a Windows 11 ARM VM (Parallels)
+
+For Tim: the first time on a real Windows desktop. Everything above was seen on GitHub's x64 runners
+(Windows Server, administrator, UAC off), so an ordinary Windows 11 account on ARM is new on every count.
+Write down whatever looks or reads wrong; `trif doctor`'s output and `%LOCALAPPDATA%\TRIF\helper.log` are
+the two things worth sending back.
+
+**ARM, in short.** Windows 11 on ARM runs x64 programs under emulation, so nothing here should need an
+ARM build, but get native ARM64 ones where they exist (faster, and that's what people will have). CI never
+ran on ARM. The thing most likely to differ is the fence: it's compiled on the computer by .NET
+Framework's `csc.exe` (TRIF looks in `C:\Windows\Microsoft.NET\Framework64\v4.0.30319` and then
+`Framework`). If the first chat says TRIF couldn't build its fence, that's the finding: send the message.
+
+### Install in the VM
+
+1. **Node.js 22 LTS**, the Windows ARM64 installer from nodejs.org (`node-v22.x.x-arm64.msi`). If something
+   in Node misbehaves, the x64 installer is the fallback (that's what CI uses).
+2. **Google Chrome** from google.com/chrome (it gives the ARM64 build on an ARM computer).
+3. **Git for Windows** (git-scm.com): to get the branch, and Claude Code on Windows has wanted Git's bash
+   to start even with its shell off. The CI machines always have it, so a VM without it is untested.
+4. **Claude Code and/or Codex**, in PowerShell: `npm install -g @anthropic-ai/claude-code` and/or
+   `npm install -g @openai/codex` (what CI does). If npm's Claude Code won't install on ARM, Anthropic's
+   own installer works too (TRIF looks in `%USERPROFILE%\.local\bin`). Then log in, in that terminal:
+   `claude`, then `/login`; or `codex login`. (Logging in from the panel is off on Windows.)
+
+### Install TRIF from the `windows` branch
+
+In a new PowerShell window, in a folder inside the VM (not a Parallels shared folder from the Mac):
+
+```
+git clone -b windows https://github.com/acapellascience/trif.git
+cd trif
+node helper\cli.js setup --copy --browser chrome
+```
+
+No `npm install` is needed. `--copy` puts a copy in `%USERPROFILE%\.trif\app`, as `npx timsrobot setup`
+does for people; it's the way CI's smoke test installs. Follow setup's next steps, then **open a new
+terminal** so `trif` is on the Path.
+
+### The test pass
+
+1. `trif doctor` says nothing's wrong (wrappers, manifests, registry keys; helper and extension once
+   Chrome is open).
+2. In Chrome, `chrome://extensions`: Developer mode on, **Load unpacked**, the folder
+   `%USERPROFILE%\.trif\app\extension`. On the TRIF setup tab: allow user scripts, then **Start with none**
+   (or pick Tim's mods).
+3. Go to a real site (news.ycombinator.com, say) and click the TRIF icon: **the side panel opens**. Click
+   "Fix …" to turn TRIF on there (Chrome asks for that site's permission).
+4. In the panel, with Claude Code picked: "Make the background pale yellow and hide the top bar." The chat
+   runs, a mod appears with its switch, the tab reloads, **the mod is on the page**.
+5. Switch the mod off and on: the page follows. `%USERPROFILE%\.trif\bin` now has `trif-fence-….exe`
+   (built for the first chat).
+6. **The fence: reads.** Make `%USERPROFILE%\Documents\trif-canary.txt` holding a made-up word. Ask the
+   panel: "Read C:\Users\<you>\Documents\trif-canary.txt and tell me the word in it." Refused; the word
+   never shows in the chat.
+7. **The fence: writes and other sites.** Ask it to write a file on the Desktop, then to change a mod of
+   another site (any site with a mod), then "run `trif mods` and list every site's mods". Refused, nothing
+   new on the Desktop, and only this site's mods listed.
+8. **Keys stay in Credential Manager** (do this after the chats: a made-up key makes that agent's chats
+   fail until it's removed). `trif agent key --agent codex --set-key`, paste a made-up key such as
+   `sk-test-not-a-real-key`. Then, in Command Prompt (where `%…%` names work), `cmdkey /list | findstr TRIF` shows `TRIF API key/openai`, and
+   `findstr sk-test %LOCALAPPDATA%\TRIF\config.json %USERPROFILE%\.trif\*.json` finds nothing. `trif agent key --agent codex
+   --remove-key`, and `cmdkey /list` no longer shows it.
+9. If Codex is installed: pick it in the panel and do 4, 6 and 7 again.
+10. Quit Chrome: the helper goes with it (no `node.exe` left in Task Manager from TRIF), and `trif doctor`
+    is still clean.
+
+Also worth a look on the way: setup's next steps and the panel's texts reading right on Windows
+(`docs/WINDOWS-STRINGS.md`), any console window flashing up, and SmartScreen or Defender saying anything
+about `trif-host.bat` or the fence.
 
 ## Decisions for Tim
 

@@ -75,6 +75,9 @@ const CODEX_BY_DEFAULT = ['exec',
   // waiting: for a script of exec's still going, or for a while
   'wait', 'sleep',
   'request_user_input', 'request_user_input_async',
+  // words for the user while the run goes on (Codex 0.171: "Send a concise message that needs the user's
+  // attention…", {message} alone): text out, like the answer itself; it touches nothing on the computer
+  'send_message_to_user_async',
   // its sub-agents, as that model gets them (the third run below starts one and tries each way out from there)
   'spawn_agent', 'wait_agent', 'send_message', 'followup_task', 'interrupt_agent', 'list_agents', 'close_agent'];
 const codexKnownByDefault = (t) => codexKnown(t) || CODEX_BY_DEFAULT.includes(t.split('.').pop());

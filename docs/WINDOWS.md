@@ -25,7 +25,7 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 | | On Windows now | Seen |
 |---|---|---|
 | `npx timsrobot setup` | workspace `%USERPROFILE%\.trif`, the copy in `~\.trif\app`, wrappers, native host manifests, registry keys, `~\.trif\bin` on the user's Path | smoke test |
-| Native messaging | Chrome, Chromium, Edge, Brave, Firefox keys under `HKCU\Software` | Chrome for Testing 157, Edge 156, Brave 157: browser check, each starting the helper itself. Firefox: the key is written and read back, not tried in a real Firefox |
+| Native messaging | Chrome, Chromium, Edge, Brave, Firefox keys under `HKCU\Software` | Chrome for Testing 157, Edge 156–157, Brave 157: browser check, each starting the helper itself; since 11-20 the check in Edge (stable, as the runner has it) is required, not just informing, and the smoke test sets Edge up too. Firefox: the key is written and read back, not tried in a real Firefox |
 | The helper | started by the browser through `trif-host.bat`; ends when the browser closes its end | browser check |
 | The extension | loads unpacked, its service worker connects, hello with version and browser | browser check |
 | `trif` CLI | `trif.cmd` (Command Prompt, PowerShell); talks to the helper over a named pipe. A `trif` script for Git Bash is written too | smoke test, browser check (`trif.cmd`, through `cmd.exe`). The Git Bash script: written, never run |
@@ -56,9 +56,10 @@ There's no Windows computer here, so everything runs on GitHub Actions (`.github
     setup copied; the extension's service worker calls `connectNative`; Chrome finds the manifest through
     the registry and runs `trif-host.bat`; `trif.cmd status` shows the extension's hello; a page command
     goes helper → extension → helper; the browser quits and the helper goes with it. Twice: a plain
-    profile folder, and one with letters outside ASCII. Then, as steps that inform and never fail the
-    job: the same with Edge and with Brave (one registry key at a time), and the unit suite's
-    real-browser tests.
+    profile folder, and one with letters outside ASCII. Then the same in **Microsoft Edge** (the stable
+    Edge the runner has, through Edge's own registry key: a required step since 11-20), and in each the
+    panel page connecting to the helper. Then, as steps that inform and never fail the job: Brave (one
+    registry key at a time), and the unit suite's real-browser tests.
 - **`windows-fence.yml`**: the sandbox prototype (`tests/windows-fence/`), below.
 - **`test.yml`** (every push, macOS): the unit suite as before. One test there fails now and then on main
   too, on timing (`tests/clickjack-browser.test.js`, "a press: 6.00 ms on average"): not Windows' doing.
@@ -116,7 +117,7 @@ it's tested. "Phase 1" is the Windows work from 0.2.0 that this branch carried f
 |---|---|---|
 | A browser finds the host's manifest in a folder (`…/NativeMessagingHosts/`) | through the registry: `HKCU\Software\<browser>\NativeMessagingHosts\com.webmods.helper`, default value = the manifest's full path. Manifests go in `%LOCALAPPDATA%\TRIF\NativeMessagingHosts\<browser>\`. Written with System32's `reg.exe` | windows.test.js; smoke; browser check |
 | Chrome | `Google\Chrome` | **seen** in Chrome for Testing 157 (which reads Chrome's or Chromium's key: setup writes both) |
-| Edge | `Microsoft\Edge` (Edge also falls back to Chromium's and Chrome's) | **seen** in Edge 156: the browser check with `--browser edge` (Edge takes `--load-extension`) |
+| Edge | `Microsoft\Edge` (Edge also falls back to Chromium's and Chrome's) | **seen** in Edge 156 and 157: the browser check with `--browser edge` (stable Edge takes `--load-extension`, headless too), a required step since 11-20; its Allow User Scripts switch is there, and turned on gives the extension `chrome.userScripts` (Edge 157, for information) |
 | Brave | **Chrome's key.** Setup writes Brave's own `BraveSoftware\Brave-Browser` key too, and Chrome's when that's free | **seen** in Brave 157: with its own key alone, "Specified native messaging host not found"; with Chrome's alone, the helper starts |
 | Firefox | `Mozilla` | key written and checked (**seen**); not yet in a real Firefox (the signed add-on is needed, or a temporary install) |
 | Arc, Safari | not on Windows | — |
@@ -580,7 +581,9 @@ Framework's `csc.exe` (TRIF looks in `C:\Windows\Microsoft.NET\Framework64\v4.0.
 
 1. **Node.js 22 LTS**, the Windows ARM64 installer from nodejs.org (`node-v22.x.x-arm64.msi`). If something
    in Node misbehaves, the x64 installer is the fallback (that's what CI uses).
-2. **Google Chrome** from google.com/chrome (it gives the ARM64 build on an ARM computer).
+2. **Google Chrome** from google.com/chrome (it gives the ARM64 build on an ARM computer). **Microsoft
+   Edge** is already there (Windows 11 has it, native on ARM): nothing to install. Let it update once
+   (`edge://settings/help`), since people have the current one.
 3. **Git for Windows** (git-scm.com): to get the branch, and Claude Code on Windows has wanted Git's bash
    to start even with its shell off. The CI machines always have it, so a VM without it is untested.
 4. **Claude Code and/or Codex**, in PowerShell: `npm install -g @anthropic-ai/claude-code` and/or
@@ -595,17 +598,18 @@ In a new PowerShell window, in a folder inside the VM (not a Parallels shared fo
 ```
 git clone -b windows https://github.com/acapellascience/trif.git
 cd trif
-node helper\cli.js setup --copy --browser chrome
+node helper\cli.js setup --copy --browser chrome,edge
 ```
 
-No `npm install` is needed. `--copy` puts a copy in `%USERPROFILE%\.trif\app`, as `npx timsrobot setup`
+(`--browser all` works too: it also writes the keys for Chromium, Brave and Firefox.) No `npm install` is needed. `--copy` puts a copy in `%USERPROFILE%\.trif\app`, as `npx timsrobot setup`
 does for people; it's the way CI's smoke test installs. Follow setup's next steps, then **open a new
 terminal** so `trif` is on the Path.
 
 ### The test pass
 
 1. `trif doctor` says nothing's wrong (wrappers, manifests, registry keys; helper and extension once
-   Chrome is open).
+   Chrome is open). It lists `ok    Google Chrome: native host manifest` and `ok    Microsoft Edge: native
+   host manifest`.
 2. In Chrome, `chrome://extensions`: Developer mode on, **Load unpacked**, the folder
    `%USERPROFILE%\.trif\app\extension`. On the TRIF setup tab: allow user scripts, then **Start with none**
    (or pick Tim's mods).
@@ -629,6 +633,61 @@ terminal** so `trif` is on the Path.
 9. If Codex is installed: pick it in the panel and do 4, 6 and 7 again.
 10. Quit Chrome: the helper goes with it (no `node.exe` left in Task Manager from TRIF), and `trif doctor`
     is still clean.
+11. **The phone view.** On a site with TRIF on, the panel's phone button ("Edit for mobile"): the tab moves
+    into a narrow window (390 px) where the site is its mobile one, with TRIF's panel in a window beside it.
+    Ask the panel for a small change there: the mod shows in the phone window. Resize the phone window: the
+    page follows. **Back to desktop**: the tab goes back where it was, as a desktop tab, and the side panel
+    is still there, still on that site.
+12. **Per-site access and sensitive sites.** On a site TRIF hasn't been on, "Fix …" makes Chrome ask for
+    that site alone (no "all sites" prompt anywhere). Open `mail.google.com` or `paypal.com`: TRIF starts
+    blocked there (the blocked screen, with Unblock), and Google's other sites' mods don't run on it.
+
+### The same in Microsoft Edge
+
+Edge is the browser every Windows has and most people there use, so the pass is done in it too. Quit
+Chrome first (one browser at a time keeps the helper's log readable). CI runs the connection part in Edge
+(`tests/windows-browser.js --browser edge`, a required step): setup, Edge's own registry key, the helper
+started by Edge, the panel page connected, doctor's Edge line. What's below goes beyond that: a person's eyes on Edge's own UI.
+
+1. **Load it.** `edge://extensions` (Edge also takes `chrome://extensions`: it turns it into
+   `edge://extensions`). **Developer mode** is a switch in the *left-hand* column (bottom), not top right;
+   **Load unpacked** then appears at the top. The same folder, `%USERPROFILE%\.trif\app\extension`; the ID
+   must be the same as in Chrome (`iaablflfafmonebdomeikadolkgdbkhe`).
+2. **User scripts.** Edge has Chrome's per-extension **Allow User Scripts** switch, on TRIF's details page
+   (Details on TRIF in `edge://extensions`; seen on CI in Edge 157, whose words there say the code "has
+   not been reviewed by Microsoft"). On the TRIF setup tab Edge opens: allow user scripts, then **Start
+   with none**, as in Chrome. If the setup tab's button doesn't land on that switch, use Details.
+   `trif doctor` then says `extension v… on Edge 1…` and no "Allow User Scripts" failure.
+3. **The side panel.** Click the TRIF icon (Edge may hide it under the puzzle piece, Extensions: the eye
+   icon pins it). TRIF opens in Edge's side pane on the right, beside Edge's own sidebar (Copilot and the
+   rest), with Edge's own header over it (TRIF's name, a close button, perhaps a pin). Write down what Edge
+   shows there. If instead a separate small window opens beside Edge, that's TRIF's fallback for a browser
+   whose side panel shows nothing (Arc's way): note it, it's a finding. A second click on the icon closes it.
+4. **Repeat steps 3–7 and 9 in Edge** (a chat makes a mod, the mod runs, switch it off and on, the fence's
+   reads, writes and other sites, Codex). Expect the same; the fence is Edge's business not at all (it's
+   TRIF's, around the agent), so a difference there would be a surprise.
+5. **Repeat steps 11–12 in Edge** (the phone view, per-site access, sensitive sites). What may differ: Edge
+   may make the phone window wider than 390 px (its smallest window), and its sites see Edge's own client
+   hints unless TRIF's rules strip them; check the site really shows its mobile layout. The per-site prompt
+   is Edge's own dialog ("Allow" / "Deny"). TRIF's details page in Edge has a site access setting, as
+   Chrome's does: leave it as TRIF set it.
+6. **Repeat step 10 in Edge**: quit Edge (all its windows; Edge's "Startup boost" and "Continue running
+   background extensions and apps when Microsoft Edge is closed" can keep it running, and the helper with
+   it: if a `node.exe` stays, check `edge://settings/system` and note it).
+
+Known Edge differences, for reading what you see:
+
+- **Native messaging**: Edge looks for `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.webmods.helper`
+  (setup writes it with `--browser edge`), then the same under `HKLM`; doctor checks the first.
+- **The side panel API** (`chrome.sidePanel`) is in Edge since 114; Edge draws it in its own sidebar.
+- **Policies**: a managed (work or school) Edge can refuse all of this: `ExtensionDeveloperModeSettings`
+  (no Developer mode), `ExtensionInstallBlocklist`, `NativeMessagingBlocklist`, or
+  `NativeMessagingUserLevelHosts` set to off (then the per-user key TRIF writes is ignored: "Specified native
+  messaging host not found"). `edge://policy` lists what applies; on the VM it should be empty.
+- Edge may say on start that extensions in developer mode are on ("Turn off extensions in developer mode"):
+  close it, don't turn them off.
+- Setup's and doctor's texts say `chrome://extensions` and "Chrome" (`docs/WINDOWS-STRINGS.md`): in Edge
+  they still lead to the right page.
 
 Also worth a look on the way: setup's next steps and the panel's texts reading right on Windows
 (`docs/WINDOWS-STRINGS.md`), any console window flashing up, and SmartScreen or Defender saying anything
@@ -668,7 +727,7 @@ In the order it would be done:
    `tests/fake-fence.js`, and stand-in agents that run on Windows), and make them pass there.
 4. Renames that replace a file (`stage.js`, `setConfigKey`) with retries. (`O_NOFOLLOW`'s absence: done,
    see the table above.)
-5. The browser check with user scripts allowed and a mod running on a page; Firefox on Windows in a real
+5. The browser check with user scripts allowed and a mod running on a page (the check can turn user scripts on now, through the extensions page's own `developerPrivate`: seen in Chrome for Testing, Edge and Brave); Firefox on Windows in a real
    Firefox; the unit suite's real-browser tests as part of the Windows job proper (they pass as a step
    that only informs).
 6. The texts that read wrong on Windows; `START HERE.txt` for Windows; `trif help setup`.

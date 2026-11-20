@@ -331,6 +331,45 @@ other programs, Credential Manager), on windows-latest, with the real agent and 
   exited 1 with nothing on stderr, and the shared helper answered the next tests; 918 tests, 806 pass, 111
   skipped, that 1 failed).
 
+## Edge in the tests (11-20)
+
+Tim (11-20): "yeah def put edge in the tests for windows". Edge is the default browser on Windows.
+- **CI** (`1b261e6`): the browser check in Edge (`tests/windows-browser.js --browser edge`, the runner's
+  stable Edge, 157.0.4341.60) is a **required step** of `windows.yml` now, no longer `continue-on-error`; it
+  fails if the runner has no Edge. It checks: `setup --browser edge` alone; Edge's own key
+  `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.webmods.helper` names its manifest (read back
+  through PowerShell); Edge (headless, muted, `--load-extension`, a temp profile) starts the helper
+  through it; the hello says Edge; a page command goes through; doctor's `ok    Microsoft Edge: native
+  host manifest` and `extension v0.3.1 on Edge 157…`; the helper ends with the browser.
+- **New in the browser check, every browser**: the registry check above; **the panel page**
+  (`sidepanel.html` opened in a tab: headless has no side panel to click) reaches the helper through the
+  service worker (its status dot: "User scripts are off", which is right there); and, as INFO lines that
+  never fail, the browser's extensions page. What they said: Edge turns `chrome://extensions/?id=…` into
+  `edge://extensions/?id=…`; **Edge has the "Allow User Scripts" switch** on the details page ("…not been
+  reviewed by Microsoft"), like Chrome and Brave; turning it on through that page's own
+  `chrome.developerPrivate.updateExtensionConfiguration({extensionId, userScriptsAccess: true})` works in
+  all three (Chrome for Testing 158, Edge 157, Brave), `chrome.userScripts` is then usable in the service
+  worker and the helper hears "on".
+- **The smoke test** sets up `chrome,edge,firefox` and checks Edge's key and doctor's Edge line too.
+- **Setup**: the Windows code already registered Edge's key and found its profile
+  (`%LOCALAPPDATA%\Microsoft\Edge\User Data`, `browsers.js`); one gap fixed: with no browser profile
+  folder at all, setup on Windows installed for Chrome alone; now Chrome and Edge (string 14b in
+  `docs/WINDOWS-STRINGS.md`, a draft). Unit test in `tests/windows.test.js` ("windows setup for Edge: …":
+  found by its profile folder alone, its own key, Chrome's untouched, doctor's line and its fix naming
+  `--browser edge`; the no-profile fallback).
+- **Docs**: `docs/WINDOWS.md`'s VM checklist has Edge (no install; `--browser chrome,edge`; the phone view
+  and per-site access/sensitive sites added as steps 11–12 for Chrome; "The same in Microsoft Edge": what to
+  look for in Edge's sidebar, Developer mode in the left column, the user scripts switch, policies, Startup
+  boost keeping Edge and the helper running). `docs/WINDOWS-STRINGS.md`: 14b, and the `chrome://extensions`
+  / "Chrome" texts among those that read wrong in Edge (they still work: Edge takes `chrome://`).
+- **Local, macOS, Node 22** (temp HOME): 919 tests, 900 pass, 19 skipped, 0 fail.
+- **CI at `1b261e6`**: windows [44836145368](https://github.com/acapellascience/trif/actions/runs/44836145368)
+  green first time (Node 18, Node 22 with the Edge step, `still-skipped`), windows-fence
+  [44836145392](https://github.com/acapellascience/trif/actions/runs/44836145392) green, macOS tests
+  [44836145387](https://github.com/acapellascience/trif/actions/runs/44836145387) green. No flakes this time.
+- **Next, if wanted**: since `developerPrivate` turns user scripts on from the test, the browser check could
+  now put a mod on a page and see it run, in Chrome and Edge ("What's left" 5 in `docs/WINDOWS.md`).
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is
@@ -374,7 +413,8 @@ before). What's left isn't the loop's:
   log (the agents job alone is 700 long lines). A push cancels the windows-fence run before it.
 - Known and not Windows' doing: the macOS `tests` workflow fails now and then on
   `tests/clickjack-browser.test.js`. In `windows.yml`, `still-skipped` (the skipped tests run anyway, for
-  information) and the Edge and Brave steps only inform.
+  information) and the Brave step only inform; the Edge step is required since 11-20. Brave's step shows
+  FAIL lines by design (`--drop-key`: each run takes one of its keys away).
 - `still-skipped` had been dying on its first line (bash's `-e`); fixed in this round's last commit. Its
   `all-on-windows.tap` artifact is the list of what fails once the skips go: start the un-skipping there.
 - `tests/windows-run.js` and `tests/windows-fence/run.js` set `TRIF_FENCE_BIN: ''` to get the real fence;

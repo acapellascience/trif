@@ -22,22 +22,39 @@ enum ChatService: String, CaseIterable, Identifiable {
 
     // MARK: a project for TRIF's chats (Tim, 11-16: they cluttered his history)
     /// The project TRIF's new chats start in, picked by the person (Use this project for TRIF chats), or nil.
-    var project: URL? { UserDefaults.standard.string(forKey: "chatProject.\(rawValue)").flatMap(URL.init(string:)) }
+    var project: URL? { UserDefaults.standard.string(forKey: "chatProject.\(rawValue)\(standInKey)").flatMap(URL.init(string:)) }
     /// The person said the project has TRIF's instructions (then a new chat gets the page, not the 16 KB guide again).
-    var projectHasGuide: Bool { project != nil && UserDefaults.standard.bool(forKey: "chatProjectGuide.\(rawValue)") }
+    var projectHasGuide: Bool { project != nil && UserDefaults.standard.bool(forKey: "chatProjectGuide.\(rawValue)\(standInKey)") }
     func useProject(_ url: URL?, hasGuide: Bool) {
-        UserDefaults.standard.set(url?.absoluteString, forKey: "chatProject.\(rawValue)")
-        UserDefaults.standard.set(hasGuide, forKey: "chatProjectGuide.\(rawValue)")
+        UserDefaults.standard.set(url?.absoluteString, forKey: "chatProject.\(rawValue)\(standInKey)")
+        UserDefaults.standard.set(hasGuide, forKey: "chatProjectGuide.\(rawValue)\(standInKey)")
     }
     /// Where a new chat starts: the project's page (its message box starts a chat in it), else a new chat.
     var start: String { project?.absoluteString ?? home }
-    /// Where the person makes a project.
-    var projectsPage: String { (self == .chatgpt ? ChatService.gptStandIn : nil) ?? ChatService.standIn ?? (self == .claude ? "https://claude.ai/projects" : "https://chatgpt.com/") }
+    /// Where TRIF opens the service's new-project form (Tim 11-20, checked signed in in the Simulator: claude.ai's
+    /// /projects/create is a "New project" dialog of its own; chatgpt.com has no address for its "Create project"
+    /// dialog: chat.js opens it from the side bar's + on any page, its home here). The stand-ins' are the same.
+    var newProjectPage: String {
+        if self == .chatgpt { return home }
+        return ChatService.standIn.map { ChatService.origin($0) + "/projects/create" } ?? "https://claude.ai/projects/create"
+    }
+    private static func origin(_ s: String) -> String { URL(string: s).map { "\($0.scheme ?? "http")://\($0.host ?? "localhost")\($0.port.map { ":\($0)" } ?? "")" } ?? s }
     /// A project's own page: claude.ai/project/<id>; chatgpt.com/g/g-p-<id>-<name>/project.
     func isProjectPage(_ url: URL?) -> Bool {
         guard let url, let h = URL(string: home)?.host, url.host == h else { return false }
-        return self == .claude ? url.path.hasPrefix("/project/") : url.path.range(of: "^/g/g-p-[^/]+/project/?$", options: .regularExpression) != nil
+        return ChatProjects.isProjectPage(url.path, claude: self == .claude)
     }
+    /// The first-use card's answer for this service ("Keep TRIF chats in their own project?": asked once). (A stand-in
+    /// run keeps its own, `….standin`, so the Simulator's real sign-ins still get their card.)
+    var offerState: ProjectOfferState {
+        get { ProjectOfferState(rawValue: UserDefaults.standard.string(forKey: offerKey) ?? "") ?? .unasked }
+        nonmutating set { UserDefaults.standard.set(newValue.rawValue, forKey: offerKey) }
+    }
+    private var offerKey: String { "chatProjectOffer.\(rawValue)\(standInKey)" }
+    /// The project prefs' ending in a stand-in run (-chathome / -gpthome): ".standin", kept apart from the real ones.
+    var standInKey: String { (self == .chatgpt ? ChatService.gptStandIn : nil) ?? ChatService.standIn != nil ? ".standin" : "" }
+    /// The card is offered in this service's empty chats: no project kept, never answered.
+    var offersProject: Bool { ChatProjects.offers(offerState, hasProject: project != nil) }
     /// (development) `-chathome <address>`: a stand-in chat page for both (mobile/shared/pages/chat.html, served by
     /// mobile/serve.js), for the Simulator, where neither can be signed in to.
     static let standIn: String? = {
@@ -69,10 +86,14 @@ final class ChatView: Identifiable {
     var site = "" { didSet { if site != oldValue { tellLook() } } }
     /// TRIF's look in the page (Web/chat.js look): the site for its greeting, and TRIF's robot (RobotShape), so the
     /// greeting and the pills draw TRIF's own shape. On each load and whenever the site changes.
+    /// And the first-use project card (Tim 11-20): the service's name when it's offered in this chat now, else "".
     func tellLook() {
-        webView.callAsyncJavaScript("return globalThis.__trifChat && globalThis.__trifChat.look ? globalThis.__trifChat.look(site, shape) : null;",
-                                    arguments: ["site": site, "shape": ChatView.robotShape], in: nil, in: ClaudePane.chatWorld) { _ in }
+        webView.callAsyncJavaScript("return globalThis.__trifChat && globalThis.__trifChat.look ? globalThis.__trifChat.look(site, shape, offer) : null;",
+                                    arguments: ["site": site, "shape": ChatView.robotShape, "offer": offerProject() ? service.rawValue : ""], in: nil, in: ClaudePane.chatWorld) { _ in }
     }
+    /// Whether this chat offers the project card now (ClaudePane: the service's answer, no setup under way, the whole
+    /// chat shown, not the quick ask's strip).
+    var offerProject: () -> Bool = { false }
     static let robotShape: [String: Any] = {
         func points(_ p: [(Double, Double)]) -> String { p.map { "\($0.0),\($0.1)" }.joined(separator: " ") }
         func rgb(_ c: (Int, Int, Int)) -> String { "rgb(\(c.0),\(c.1),\(c.2))" }
@@ -117,6 +138,13 @@ final class ChatView: Identifiable {
     /// When a pickup's conversation was asked for, until its page loads (then its watch starts): a load that never
     /// comes is given up.
     var pickupLoad: Date?
+    /// A project setup under way in this chat (ChatProjects.Setup): TRIF filled the new-project form, then the project's
+    /// instructions; the person taps Create and Save.
+    var setup: ChatProjects.Setup?
+    /// The kept project's page was asked for (start, Start over): its load is checked for the project being gone; and
+    /// the main frame's HTTP status when it came.
+    var projectLoad: URL?
+    var projectStatus: Int?
     /// The site a new conversation started by TRIF's instructions is for (recorded once it has an address).
     var ownerNext: String?
     /// The things put into its message box, one after another.
@@ -134,7 +162,7 @@ final class ChatView: Identifiable {
     var onChatPage: Bool {
         guard let u = webView.url, let home = URL(string: service.home), u.host == home.host else { return false }
         let p = u.path
-        return p.hasPrefix("/chat/") || p.hasPrefix("/c/") || p.hasPrefix("/uc/") || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
+        return ChatProjects.isConversation(p) || p == home.path || p == "/" || p == "/new" || service.isProjectPage(u)
     }
     /// For the chats' list: its site and a short title.
     var label: String {
@@ -353,6 +381,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let v = ChatView(webView: wv, service: s)
         v.changed = { [weak self] in self?.objectWillChange.send() }
         v.activityChanged = { [weak self] in self?.refreshActivity() }
+        // (the first-use project card: chat.js hides it itself while it fills the box and under the quick ask's strip)
+        v.offerProject = { [weak v] in guard let v else { return false }; return v.service.offersProject && v.setup == nil }
         wv.navigationDelegate = self
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
@@ -373,7 +403,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             sv.observe(\.contentSize, options: [.new]) { [weak self, weak v] _, _ in Task { @MainActor in if let v { self?.fitScrolling(v) } } },
             sv.observe(\.bounds, options: [.new]) { [weak self, weak v] _, _ in Task { @MainActor in if let v { self?.fitScrolling(v) } } },
             // (the conversation it's on, kept, so the app reopens it: Tim, 11-14)
-            wv.observe(\.url, options: [.new]) { [weak self, weak v] w, _ in let url = w.url; Task { @MainActor in if let v { self?.remember(v, url) } } },
+            // (and a project the person just made from TRIF's form: projectAddress)
+            wv.observe(\.url, options: [.new]) { [weak self, weak v] w, _ in let url = w.url; Task { @MainActor in if let v { self?.remember(v, url); self?.projectAddress(v, url) } } },
             wv.observe(\.title, options: [.new]) { [weak v] w, _ in let t = w.title ?? ""; Task { @MainActor in v?.title = t } },
             wv.observe(\.canGoBack, options: [.new]) { [weak v] w, _ in let b = w.canGoBack; Task { @MainActor in v?.canGoBack = b } },
             wv.observe(\.canGoForward, options: [.new]) { [weak v] w, _ in let b = w.canGoForward; Task { @MainActor in v?.canGoForward = b } },
@@ -494,8 +525,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private func lastKey(_ s: ChatService, _ site: String) -> String { site.isEmpty ? "lastChat.\(s.rawValue)" : "lastChat.\(s.rawValue).\(site)" }
     /// A conversation's address (claude.ai/chat/…, chatgpt.com/c/…), kept for its chat and site; nothing else is.
     private func remember(_ v: ChatView, _ url: URL?) {
-        guard let url, let home = URL(string: v.service.home), url.host == home.host,
-              url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") || url.path.hasPrefix("/uc/") else { return }
+        guard let url, let home = URL(string: v.service.home), url.host == home.host, ChatProjects.isConversation(url.path) else { return }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
         c?.fragment = nil
@@ -563,6 +593,10 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         v.loading = true
         v.navigating = true
         v.requested = url
+        // (the kept project's page: its load is looked at for the project being gone, didFinish)
+        let isProject = v.service.project.map { ChatProjects.kept(url)?.absoluteString == $0.absoluteString } ?? false
+        v.projectLoad = isProject ? url : nil
+        v.projectStatus = nil
         v.webView.load(URLRequest(url: url))
     }
 
@@ -685,7 +719,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     static func provisional(_ conv: String?) -> Bool { SentNotes.provisional(conv) }
     /// The conversation an address is (kept without query or fragment), or nil for a new chat.
     static func conversation(of url: URL?) -> String? {
-        guard let url, url.path.hasPrefix("/chat/") || url.path.hasPrefix("/c/") || url.path.hasPrefix("/uc/") else { return nil }
+        // (ChatGPT's project conversations too, /g/g-p-<id>-<name>/c/<id>: 11-20)
+        guard let url, ChatProjects.isConversation(url.path) else { return nil }
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
         c?.query = nil
         c?.fragment = nil
@@ -696,6 +731,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     struct Prepared {
         let followUp: Bool
         let conv: String?
+        /// Made for a new chat in TRIF's project, without the guide (the project's instructions have it).
+        var inProject = false
         let text: Task<String?, Never>
         let shot: Task<Data?, Never>
         let watch: Stopwatch
@@ -713,7 +750,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let inProject = !followUp && conv == nil && v.service.projectHasGuide
         if inProject { v.projectFill = true }
         let text = Task { @MainActor in followUp ? await browser.feedbackForChat(conv: conv, sw) : await browser.pageForChat(conv: conv, sw, guideInProject: inProject) }
-        return Prepared(followUp: followUp, conv: conv, text: text, shot: shot, watch: sw)
+        return Prepared(followUp: followUp, conv: conv, inProject: inProject, text: text, shot: shot, watch: sw)
     }
 
     /// The last fill not yet sent, for a chat (its service and site): its conversation ("new" for a new chat), and the
@@ -849,10 +886,13 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         var text = await ready.text.value
         // (made again when the chat turned out to be on another conversation than the one it was made for, or the
         // decision changed: a navigation inside the chat, say)
-        if ready.conv != conv || ready.followUp != followUp {
+        // (and when the project turned out to be gone meanwhile: the full instructions, not the page alone)
+        let inProject = !followUp && conv == nil && v.service.projectHasGuide
+        if ready.conv != conv || ready.followUp != followUp || ready.inProject != inProject {
             text = followUp ? await browser.feedbackForChat(conv: conv, sw)
-                : await browser.pageForChat(conv: conv, sw, guideInProject: conv == nil && v.service.projectHasGuide)
+                : await browser.pageForChat(conv: conv, sw, guideInProject: inProject)
         }
+        v.projectFill = inProject
         if !followUp, has, let t = text { text = "(This is a different site: \(tabSite.isEmpty ? "another page" : tabSite). Start from these instructions and this page; the mods above in this conversation were for \(owner ?? "another site").)\n\n\(t)" }
         // (a new chat is this tab's site's once it has an address; one with no site recorded yet becomes this site's)
         if conv == nil { v.ownerNext = tabSite } else if owner == nil, let conv { ClaudePane.setOwner(conv, tabSite) }
@@ -883,7 +923,14 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             guard let text = d["text"] as? String else { return }
             report.log("claude", "\(name): Add to TRIF tapped (\(text.count) characters)")
             browser?.offer(text: text, site: v.site, refuse: { [weak self, weak v] r in if let self, let v { self.fillRefusal(v, r) } })
+        case "projoffer", "project", "projform", "projguide":
+            projectMessage(v, type, d)
         case "sent":
+            // (the first-use project card, shown in this chat and sent past without an answer: answered, never again)
+            if v.service.offerState == .shown {
+                v.service.offerState = ChatProjects.afterSend(.shown)
+                Diagnostics.shared.log("project", "\(name): sent past the project card without an answer: not offered again")
+            }
             // (back to the tab at once: the reply is watched from here, the dots on the chat button)
             report.log("claude", "\(name): sent (\(d["how"] as? String ?? "?"))\(d["withInstructions"] as? Bool == true ? ", with TRIF's instructions" : "")")
             // (in the diagnostics too (11-20: Tim's ChatGPT send left no trace there; report.json isn't in them))
@@ -1956,6 +2003,8 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     // (a .js file the person taps in the chat, shown or downloaded: never shown in the chat, which it would strand
     // (11-16), but to Add this mod?: ModDownloads)
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        // (the kept project's page: its status, for checkProject)
+        if navigationResponse.isForMainFrame, let v = view(of: webView), v.projectLoad != nil, let h = navigationResponse.response as? HTTPURLResponse { v.projectStatus = h.statusCode }
         if navigationResponse.isForMainFrame, (navigationResponse.response.suggestedFilename ?? "").lowercased().hasSuffix(".js")
             || (navigationResponse.response.url?.path.lowercased().hasSuffix(".js") ?? false) { return .download }
         return ModDownloads.wanted(navigationResponse) ? .download : .allow
@@ -1969,18 +2018,182 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         browser?.appLinkNewLoad(webView)
         guard let v = view(of: webView) else { return }
         v.navigating = false
-        v.projectPage = v.service.isProjectPage(webView.url) && webView.url?.absoluteString != v.service.project?.absoluteString
+        v.projectPage = v.setup == nil && v.service.isProjectPage(webView.url) && webView.url.flatMap(ChatProjects.kept)?.absoluteString != v.service.project?.absoluteString
+        projectAddress(v, webView.url)
+        // (the form's page left for another that isn't a project's, its Create not seen (its Cancel, Back): over; chat.js
+        // says so too, at pagehide)
+        if let st = v.setup, st.stage == .form, !st.createSeen, let u = webView.url, !v.service.isProjectPage(u),
+           ChatProjects.kept(u)?.absoluteString != URL(string: v.service.newProjectPage).flatMap(ChatProjects.kept)?.absoluteString {
+            v.setup = nil
+            Diagnostics.shared.log("project", "\(v.service.rawValue): the new-project form was left without Create (to \(Diagnostics.place(u))): ordinary chats")
+        }
     }
-    /// ⋯'s Keep TRIF chats in a project: the chat, at the service's projects (TRIF's instructions on the clipboard).
-    func openProjects() {
-        UIPasteboard.general.string = ClaudePane.projectInstructions
-        showFor(tabSite)
-        let v = cur!
+    // MARK: TRIF's chats in a project of their own (Tim 11-20: set up in one tap, so they don't sprawl across the
+    // person's history). TRIF fills the service's forms; the person taps Create and Save: TRIF never does (site terms).
+
+    /// The first-use card's and the forms' messages from chat.js.
+    private func projectMessage(_ v: ChatView, _ type: String, _ d: [String: Any]) {
+        let name = v.service.rawValue
+        let what = d["what"] as? String ?? ""
+        switch type {
+        case "projoffer":
+            // (drawn: from now on a send past it counts as an answer)
+            if v.service.offerState == .unasked {
+                v.service.offerState = ChatProjects.shown(.unasked)
+                report.log("claude", "\(name): the project card shown")
+            }
+        case "project":
+            if what == "setup" {
+                report.log("claude", "\(name): the project card's Set it up")
+                setUpProject(v, why: "the card")
+            } else {
+                v.service.offerState = .declined
+                Diagnostics.shared.log("project", "\(name): the project card's Not now: never offered again")
+                v.tellLook()
+            }
+        case "projform":
+            guard var st = v.setup, st.stage == .form else { return }
+            if what == "create" {
+                st.createSeen = true
+                report.log("claude", "\(name): the person tapped Create on the new-project form")
+            } else if what == "closed" {
+                st.closed = true
+                Diagnostics.shared.log("project", "\(name): the new-project form was closed without Create: ordinary chats")
+                v.setup = nil
+                v.tellLook()
+                return
+            }
+            v.setup = st
+        case "projguide":
+            guard let st = v.setup, st.stage == .guide, let project = st.project.flatMap(URL.init(string:)) else { return }
+            if what == "saved" {
+                v.service.useProject(project, hasGuide: true)
+                Diagnostics.shared.log("project", "\(name): the project's instructions saved: new TRIF chats start in it with the page only")
+                finishSetup(v)
+            } else if what == "closed" {
+                Diagnostics.shared.log("project", "\(name): the project's instructions closed without Save: its chats get TRIF's full instructions")
+                v.setup = nil
+            }
+        default: break
+        }
+    }
+
+    /// Set it up (the card, or ⋯): the service's new-project form, opened in the chat and filled in ("TRIF", a short
+    /// description where the form has one). The person taps Create; the project's page is then noticed by its address
+    /// (projectAddress) and its instructions filled in for the person's Save.
+    func setUpProject(_ given: ChatView? = nil, why: String) {
+        // (the tab's site's chat, without loading its own page first: straight to the form)
+        let v: ChatView
+        if let given { v = given } else { v = viewFor(tabSite); cur = v; v.lastUsed = Date() }
         v.started = true
         shown = true
-        if let u = URL(string: v.service.projectsPage) { go(v, u) }
-        report.log("claude", "\(v.service.rawValue): to its projects, TRIF's instructions copied")
+        if v.service.offerState != .accepted { v.service.offerState = .accepted }
+        v.setup = ChatProjects.Setup(claude: v.service == .claude, started: Date(), from: v.webView.url?.absoluteString)
+        v.projectPage = false
+        v.fillGeneration += 1 // (a fill of the tab's page under way stops: the chat goes to the form)
+        guard let url = URL(string: v.service.newProjectPage) else { return }
+        report.log("claude", "\(v.service.rawValue): a project for TRIF's chats (\(why)): to its new-project form")
+        go(v, url)
+        queue(v) { [weak self] in await self?.fillProjectForm(v) }
     }
+
+    /// The new-project form filled in (chat.js projectForm: it waits up to 12 s for the form, opening ChatGPT's from
+    /// its side bar). No form (a plan's limit, a page TRIF doesn't know): quietly ordinary chats, logged.
+    private func fillProjectForm(_ v: ChatView) async {
+        // (the form's page in, not the one before it: a call into a page that's leaving answers nothing)
+        let form = URL(string: v.service.newProjectPage).flatMap(ChatProjects.kept)?.absoluteString
+        for _ in 0..<130 where v.navigating || v.loading || v.webView.url.flatMap(ChatProjects.kept)?.absoluteString != form {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        guard v.setup?.stage == .form else { return }
+        var r: String?
+        for _ in 0..<3 {
+            r = await chatCall(v, "projectForm(o)", ["o": ["name": "TRIF", "description": ClaudePane.projectDescription, "service": v.service.rawValue]])
+            if r != nil || v.setup?.stage != .form { break }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        report.log("claude", "\(v.service.rawValue): the new-project form: \(r ?? "no answer")")
+        guard r == "filled" else {
+            Diagnostics.shared.log("project", "\(v.service.rawValue): no new-project form to fill (\(r ?? "no answer"), at \(Diagnostics.place(v.webView.url))): ordinary chats")
+            v.setup = nil
+            home()
+            return
+        }
+    }
+
+    /// The chat's address changed: during a setup's form stage, a project page is the project the person just made
+    /// (ChatProjects.adopt). It's kept at once (its chats get the full instructions until its own are saved), then its
+    /// instructions go into its settings for the person's Save.
+    private func projectAddress(_ v: ChatView, _ url: URL?) {
+        guard let url, var st = v.setup, ChatProjects.adopt(st, url: url, now: Date()), let kept = ChatProjects.kept(url) else { return }
+        st.stage = .guide
+        st.project = kept.absoluteString
+        v.setup = st
+        v.projectPage = false
+        v.service.useProject(kept, hasGuide: false)
+        Diagnostics.shared.log("project", "\(v.service.rawValue): the project made from TRIF's form noticed (\(Diagnostics.place(kept))\(st.createSeen ? "" : ", its Create tap not seen")): new TRIF chats start in it")
+        queue(v) { [weak self] in await self?.fillProjectGuide(v) }
+    }
+
+    /// The new project's instructions: chat.js projectGuide finds its instructions box (opening it from the page), fills
+    /// in TRIF's, and watches for the person's Save. None found: the project stays, its chats with the full instructions.
+    private func fillProjectGuide(_ v: ChatView) async {
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        for _ in 0..<100 where v.navigating || v.loading { try? await Task.sleep(nanoseconds: 150_000_000) }
+        guard v.setup?.stage == .guide else { return }
+        var r: String?
+        for _ in 0..<3 {
+            r = await chatCall(v, "projectGuide(o)", ["o": ["text": ClaudePane.projectInstructions, "service": v.service.rawValue]])
+            if r != nil || v.setup?.stage != .guide { break }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        report.log("claude", "\(v.service.rawValue): the project's instructions: \(r ?? "no answer")")
+        if r == "already", let p = v.setup?.project.flatMap(URL.init(string:)) {
+            v.service.useProject(p, hasGuide: true)
+            finishSetup(v)
+        } else if r != "filled" {
+            Diagnostics.shared.log("project", "\(v.service.rawValue): the project's instructions box wasn't found (\(r ?? "no answer")): its chats get TRIF's full instructions")
+            finishSetup(v)
+        }
+    }
+
+    /// The setup done: a new chat in the project, the tab's page in its box (with the guide or without, as the
+    /// project has it), as Start over.
+    private func finishSetup(_ v: ChatView) {
+        v.setup = nil
+        guard cur === v else { return }
+        // (a moment for the service to close its dialog)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let self, self.cur === v, v.setup == nil else { return }
+            self.home()
+        }
+    }
+
+    /// A load of the kept project's page ended: gone (deleted, not found, sent elsewhere)? Then dropped for ordinary
+    /// chats, logged, nothing offered again; a new chat instead, the fill going on there with the full instructions.
+    private func checkProject(_ v: ChatView) {
+        guard let want = v.projectLoad, let kept = v.service.project else { return }
+        v.projectLoad = nil
+        let status = v.projectStatus
+        Task { @MainActor [weak self] in
+            // (a page drawn by its own script says "not found" a moment after its load)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self, v.service.project == kept else { return }
+            let missing = await self.chatJS(v, "projectMissing()") == "missing"
+            guard ChatProjects.gone(kept: kept, landed: v.webView.url, status: status, saysMissing: missing, claude: v.service == .claude) else { return }
+            v.service.useProject(nil, hasGuide: false)
+            if v.service.offerState == .unasked || v.service.offerState == .shown { v.service.offerState = .ignored }
+            v.projectFill = false
+            Diagnostics.shared.log("project", "\(v.service.rawValue): TRIF's project is gone (\(status.map { "HTTP \($0)" } ?? (missing ? "the page says not found" : "sent to \(Diagnostics.place(v.webView.url))")) for \(Diagnostics.place(want))): ordinary chats from now on")
+            if let home = URL(string: v.service.home) { self.go(v, home) }
+        }
+    }
+
+    /// The project's short description, where the form has one (claude.ai's "What do you want to work on?"; Claude
+    /// itself doesn't see it). Words people see: a draft (docs/IOS-APP-STRINGS.md).
+    static let projectDescription = "Mods for websites, made in the TRIF app."
+
     /// What goes in a project's instructions: how TRIF mods are written, and how to answer (agent-facing words).
     static var projectInstructions: String {
         """
@@ -2009,6 +2222,7 @@ final class ClaudePane: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         note(v != nil ? "loaded" : "loaded in a window it opened", webView.url, v)
         guard let v else { return }
         v.tellLook()
+        checkProject(v)
         // (the chat's page loaded again while a reply was being written, its process ended say: watched again)
         if v.activity == .working {
             // (only the conversation the person sent from (or a new chat's, which had no address yet): another one

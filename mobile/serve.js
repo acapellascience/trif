@@ -20,6 +20,8 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 
 function handler(log = console.log) {
   const conversations = {};
+  // (the stand-ins' projects, by id: {service, name, desc, guide}; Tim 11-20, TRIF's chats in a project of their own)
+  const projects = {};
   const headers = JSON.parse(fs.readFileSync(path.join(PAGES, 'pages.json'), 'utf8'));
   return (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -83,13 +85,58 @@ window.__agent = { host: location.host, sent: ${JSON.stringify(sent)}, nav: navi
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       return res.end(JSON.stringify(conversations[key] || []));
     }
+    // (11-20: projects. POST /standin-project {service, name, desc} keeps one and answers its id (claude: p-<8 hex>,
+    // chatgpt: 32 hex, as chatgpt.com's g-p-<id>); GET /standin-project/<id> gives it; POST …/<id>/guide keeps its
+    // instructions; GET …/<id>/delete forgets it (a project gone: its page is then not found))
+    const proj = /^standin-project(?:\/([\w-]+)(?:\/(guide|delete))?)?$/.exec(name);
+    if (proj) {
+      const [, id, what] = proj;
+      const answer = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
+      if (!id && req.method === 'POST') {
+        let body = '';
+        req.on('data', (d) => { body += d; if (body.length > 1e6) req.destroy(); });
+        req.on('end', () => {
+          let p = {};
+          try { p = JSON.parse(body); } catch (e) {}
+          const hex = (n) => [...Array(n)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+          const nid = p.service === 'chatgpt' ? hex(32) : `p-${hex(8)}`;
+          projects[nid] = { service: p.service === 'chatgpt' ? 'chatgpt' : 'claude', name: String(p.name || ''), desc: String(p.desc || ''), guide: '' };
+          log(`stand-in project made: ${nid} "${projects[nid].name}"`);
+          answer(200, { id: nid });
+        });
+        return;
+      }
+      if (!id) return answer(200, projects);
+      if (what === 'delete') { delete projects[id]; return answer(200, { deleted: id }); }
+      if (!projects[id]) return answer(404, { error: 'not found' });
+      if (what === 'guide' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (d) => { body += d; if (body.length > 1e6) req.destroy(); });
+        req.on('end', () => { try { projects[id].guide = String(JSON.parse(body).guide || ''); } catch (e) {} answer(200, { ok: true }); });
+        return;
+      }
+      return answer(200, projects[id]);
+    }
+    const gone = () => {
+      res.writeHead(404, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-store' });
+      res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Project not found</title><body style="font: 17px/1.5 -apple-system, sans-serif; padding: 40px 20px; text-align: center"><h1>Project not found</h1><p>This project doesn\'t exist or you don\'t have access to it.</p>');
+    };
+    // (claude.ai's /projects and its new-project form, /projects/create)
+    if (name === 'projects' || name === 'projects/create') name = 'projects.html';
+    // (a stand-in project's page: claude.ai's /project/p-<id>, chatgpt.com's /g/g-p-<32 hex>-<name>/project; not
+    // found once deleted. Other /project/<id> addresses stay plain project pages, as before)
+    const cp = /^project\/(p-[0-9a-f]{8})\/?$/.exec(name);
+    if (cp && !projects[cp[1]]) return gone();
+    const gp = /^g\/g-p-([0-9a-f]{32})[\w-]*\/project\/?$/.exec(name);
+    if (gp && !projects[gp[1]]) return gone();
+    if (gp || /^g\/g-p-[\w-]+\/project\/?$/.test(name) || /^g\/g-p-[\w-]+\/c\/[\w:-]+$/.test(name)) name = 'chat.html';
     if (/^c\/[\w:-]+$/.test(name)) name = 'chat.html'; // (and ChatGPT's provisional /c/local-chatgpt:<uuid>, 11-20)
     // (the stand-in chat's conversations, /chat/<id>, as claude.ai's are: the one page, chat.html)
     if (/^chat\/[\w-]+$/.test(name)) name = 'chat.html';
     // (and claude.ai's new-chat page, /new: a chat there gets /chat/<id> at its first send)
     if (name === 'new') name = 'chat.html';
     // (and a project's page, /project/<id>, as claude.ai's: its message box starts a chat in the project)
-    if (/^project\/[\w-]+$/.test(name)) name = 'chat.html';
+    if (/^project\/[\w-]+\/?$/.test(name)) name = 'chat.html';
     if (name === '') {
       const list = Object.keys(headers).map((f) => `<li><a href="${f}">${f}</a>${headers[f]['Content-Security-Policy'] ? ' (strict policy)' : ''}</li>`).join('');
       res.writeHead(200, { 'Content-Type': TYPES['.html'] });

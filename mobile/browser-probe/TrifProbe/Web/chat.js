@@ -238,7 +238,16 @@
   }
 
   let settled = false; // (that moment waited once for this page)
-  async function fill(text, png, name, pdf, picture) {
+  // (a fill under way, and when the last ended: the project card stays away meanwhile (Tim 11-20: not while a request
+  // is being filled in))
+  let filling = 0, filledAt = 0;
+  async function fill(...args) {
+    filling++;
+    lookSoon();
+    try { return await fillNow(...args); } finally { filling--; filledAt = Date.now(); lookSoon(); setTimeout(lookSoon, 1300); }
+  }
+  async function fillNow(text, png, name, pdf, picture) {
+    if (text && name && /^TRIF instruction/.test(name)) document.documentElement.toggleAttribute('data-trif-pageonly', !text.includes('--- How TRIF mods are written ---'));
     // (the message box, as soon as it's there (every 100 ms, 10 s at most), not the page's whole load: claude.ai
     // goes on loading for seconds after its box works. Then, if the page is still loading, a moment for the box to
     // take pastes (it was a paste taken late: 11-14), 600 ms at most)
@@ -444,7 +453,12 @@
   const pillWords = Object.entries(PILLS).map(([k, w]) => `
     span[data-trif-chip="${k}"][class*="composer-attachment"]::before, div[data-trif-chip="${k}"]${PIC_TILE}::before,
     [data-trif-chip="${k}"] [data-cds-card-body]::after,
-    [data-trif-chip="${k}"][class*="group/thumbnail"] > div:first-child::before { content: "${w}"; }`).join('');
+    [data-trif-chip="${k}"][class*="group/thumbnail"] > div:first-child::before { content: "${w}"; }`).join('')
+    // (a new chat in TRIF's project (11-20): the page went without the guide, which is in the project's instructions)
+    + [['TRIF instruction', 'From TRIF: the page']].map(([k, w]) => `
+    :root[data-trif-pageonly] span[data-trif-chip="${k}"][class*="composer-attachment"]::before, :root[data-trif-pageonly] div[data-trif-chip="${k}"]${PIC_TILE}::before,
+    :root[data-trif-pageonly] [data-trif-chip="${k}"] [data-cds-card-body]::after,
+    :root[data-trif-pageonly] [data-trif-chip="${k}"][class*="group/thumbnail"] > div:first-child::before { content: "${w}"; }`).join('');
   const style = document.createElement('style');
   style.textContent = pillWords + `
     button[data-testid="chat-input-send"]:not(:disabled) [data-cds-part="paint"],
@@ -1414,6 +1428,32 @@
     #trif-greeting.trif-tight .trif-ask { font-size: 14px; }
     #trif-greeting.trif-tight .trif-small { display: none; }
     #trif-greeting .trif-words { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    /* (the first-use project card, Tim 11-20: the only part of the greeting that takes touches) */
+    #trif-greeting .trif-offer { pointer-events: auto; margin-top: 10px; padding: 12px 14px; border-radius: 14px; max-width: 320px;
+      display: flex; flex-direction: column; gap: 6px; text-align: center; box-sizing: border-box; }
+    #trif-greeting.trif-measuring .trif-offer { pointer-events: none !important; }
+    #trif-greeting .trif-offer[hidden], #trif-greeting.trif-tight:not(.trif-compact) .trif-offer { display: none; }
+    #trif-greeting.trif-compact { flex-wrap: wrap; row-gap: 0; }
+    #trif-greeting.trif-compact .trif-offer { flex-basis: 100%; margin-top: 8px; }
+    #trif-greeting.trif-offeronly > svg, #trif-greeting.trif-offeronly .trif-words { display: none; }
+    #trif-greeting.trif-offeronly .trif-offer { margin-top: 0; }
+    #trif-greeting .trif-offer-q { font: 600 15px/1.3 -apple-system, system-ui, sans-serif; }
+    #trif-greeting .trif-offer-why { font: 400 13px/1.35 -apple-system, system-ui, sans-serif; }
+    #trif-greeting .trif-offer-buttons { display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
+    #trif-greeting .trif-offer button { all: unset; font: 600 14px/1 -apple-system, system-ui, sans-serif; padding: 9px 14px; border-radius: 999px; cursor: pointer; }
+    #trif-greeting[data-tone="light"] .trif-offer { background: #f2f7f4; border: 1px solid #d5e8dd; }
+    #trif-greeting[data-tone="light"] .trif-offer-q { color: #18181b; }
+    #trif-greeting[data-tone="light"] .trif-offer-why { color: #52525b; }
+    #trif-greeting[data-tone="light"] .trif-offer .trif-later { color: #3f3f46; }
+    #trif-greeting[data-tone="dark"] .trif-offer { background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.25); }
+    #trif-greeting[data-tone="dark"] .trif-offer-q { color: #f4f4f5; }
+    #trif-greeting[data-tone="dark"] .trif-offer-why { color: #a1a1aa; }
+    #trif-greeting[data-tone="dark"] .trif-offer .trif-later { color: #d4d4d8; }
+    #trif-greeting .trif-offer .trif-setup { background: #1f8a5b; color: #fff; }
+    /* (a line over the service's own form while TRIF waits for the person's Create or Save) */
+    #trif-hint { all: initial; position: fixed; z-index: 2147483000; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: calc(100vw - 32px);
+      box-sizing: border-box; padding: 8px 14px; border-radius: 999px; background: #1f8a5b; color: #fff; pointer-events: none;
+      font: 600 13px/1.3 -apple-system, system-ui, sans-serif; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
     /* (an attachment of TRIF's in markup this doesn't know: the robot before it, on a green tint, its name kept) */
     [data-trif-chip]:not([class*="composer-attachment"]):not([class*="group/thumbnail"]):not(:has([data-cds-card-body])) {
       background: #e3f7ee !important; color: #0f6b4a !important; }
@@ -1511,6 +1551,7 @@
     words.className = 'trif-words';
     for (const cls of ['trif-hello', 'trif-ask', 'trif-small']) { const d = document.createElement('div'); d.className = cls; words.append(d); }
     card.append(words);
+    card.append(offerCard());
     document.body.append(card);
     return card;
   }
@@ -1560,7 +1601,7 @@
     // (only the page shown: 11-20, chatgpt.com's messages matched neither USER nor REPLY and TRIF's greeting stayed
     // up inside its conversation, moving as it scrolled)
     const empty = !anyLive(USER) && !anyLive(REPLY);
-    if (!robot || !box || !empty || viewer() || !document.body) { unhideHeading(); if (card) card.hidden = true; return; }
+    if (!robot || !box || !empty || viewer() || !document.body) { unhideHeading(); if (card) card.hidden = true; offerSince = 0; return; }
     const b = composerRect(ed);
     const c = greetingCard();
     c.querySelector('.trif-hello').textContent = GREETING.hello;
@@ -1576,6 +1617,17 @@
     }
     const attached = !!document.querySelector('[data-trif-chip]');
     c.querySelector('.trif-small').textContent = attached ? GREETING.attached : '';
+    // (the first-use project card under the words: only when the app offers it, not while a fill goes in or just after,
+    // not under the quick ask's strip)
+    const offerOn = !!offerFor && !filling && Date.now() - filledAt > 1200 && !stripOn;
+    const oc = c.querySelector('.trif-offer');
+    if (oc) {
+      oc.hidden = !offerOn;
+      if (offerOn) {
+        const q = PROJECT_CARD.why(offerFor);
+        if (oc.getAttribute('data-words') !== q) { oc.setAttribute('data-words', q); oc.querySelector('.trif-offer-why').textContent = q; }
+      }
+    }
     c.setAttribute('data-tone', document.documentElement.getAttribute('data-trif-tone') || (pageDark() ? 'dark' : 'light'));
     c.hidden = false;
     const width = Math.min(innerWidth, 420);
@@ -1593,9 +1645,16 @@
     // (Tim, 11-19, signed in to chatgpt.com with a screenshot attached: the taller box pushed ChatGPT's own suggestions
     // up into the greeting's place and TRIF drew over them. So the greeting goes only where the page draws nothing:
     // the free stretches between the top bar and the box, measured as they show, the one nearest its usual place)
+    // (the card takes touches, so hit tests would find it over the page's own things: measured without it, 11-20,
+    // claude.ai's "Auto is now the default" notice sat under it)
+    c.classList.add('trif-measuring');
     const gaps = freeGaps(minTop, b.top - 4, ed);
-    const fit = (tight) => {
+    // (three sizes: as it is; with the project card, the robot beside the words and the card under them; the tight one,
+    // with no card)
+    const fit = (tight, compact = false, only = false) => {
       c.classList.toggle('trif-tight', tight);
+      c.classList.toggle('trif-compact', compact);
+      c.classList.toggle('trif-offeronly', only);
       const height = c.getBoundingClientRect().height;
       const want = h ? (() => { const r = h.getBoundingClientRect(); return r.top + r.height / 2 - height / 2; })() : b.top - height - 20;
       let best = null;
@@ -1607,13 +1666,27 @@
       return best;
     };
     let top = fit(false);
+    if (top === null && oc && !oc.hidden) top = fit(true, true);
+    // (still no room (a small phone, ChatGPT's tall box with TRIF's pills: 11-20): the card alone, the greeting's words
+    // left out while it's up)
+    if (top === null && oc && !oc.hidden) top = fit(true, true, true);
     if (top === null) top = fit(true);
     // (no room even for that: nothing, and the service's own greeting shown again)
-    if (top === null) { c.hidden = true; unhideHeading(); return; }
+    if (top === null) { c.classList.remove('trif-measuring'); c.hidden = true; offerSince = 0; unhideHeading(); return; }
     c.style.top = `${Math.round(top)}px`;
     // (something opened over that place, a side bar or a menu: the greeting isn't drawn over it)
     const mid = document.elementFromPoint(innerWidth / 2, Math.min(innerHeight - 1, Math.max(1, top + 26)));
+    c.classList.remove('trif-measuring');
     if (mid && mid.closest('nav, aside, [role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]')) c.hidden = true;
+    // (the card drawn: told to the app once a page, so a send past it counts as its answer)
+    // (only once it has stayed in view 2 s: claude.ai's own notices come in late and can take its room (11-20), and a
+    // card the person never saw mustn't count as asked)
+    const inView = oc && !oc.hidden && !c.hidden && (!c.classList.contains('trif-tight') || c.classList.contains('trif-compact'));
+    if (!inView) offerSince = 0;
+    else if (!offerTold) {
+      if (!offerSince) { offerSince = Date.now(); setTimeout(lookSoon, 2100); }
+      else if (Date.now() - offerSince >= 2000) { offerTold = true; post({ type: 'projoffer', what: 'shown' }); }
+    }
   }
   /** The upsells hidden (only a button or link whose own words are one, and nothing that holds the message box). */
   function hideUpsells() {
@@ -1649,8 +1722,9 @@
   addEventListener('scroll', lookSoon, { capture: true, passive: true });
   if (window.visualViewport) visualViewport.addEventListener('resize', lookSoon);
   /** From the app: the site this chat is for, and TRIF's robot (RobotShape's polygons and colours). */
-  function look(site, shape) {
+  function look(site, shape, offer) {
     lookSite = String(site || '');
+    offerFor = String(offer || '');
     if (shape && shape.rim && !robot) {
       robot = shape;
       if (card) { card.remove(); card = null; }
@@ -1675,6 +1749,229 @@
   mark();
   addEventListener('popstate', () => setTimeout(lookAtViewer, 300));
 
+  // MARK: TRIF's chats in a project of their own (Tim 11-20). The card asks once; TRIF fills the service's forms
+  // (the new project's name and description, then its instructions) and the person taps Create and Save: never TRIF,
+  // which only watches for those taps. Nothing here clicks anything that creates, saves, sends or deletes: only what
+  // opens a form or a menu (ChatGPT's side bar and its "+", an "Instructions" button, "Project settings").
+  let offerFor = ''; // (the service's name while the app offers the card here)
+  let offerTold = false, offerSince = 0;
+  const PROJECT_CARD = {
+    ask: 'Keep TRIF chats in their own project?',
+    why: (service) => `A project called TRIF in ${service || 'this chat'} keeps them together. They still show in your recent chats.`,
+    setup: 'Set it up',
+    later: 'Not now',
+    formHint: (button) => `Tap ${button} to make it. TRIF fills in its instructions next: one more tap.`,
+    guideHint: (button) => `TRIF filled in its instructions. Tap ${button} to finish.`,
+  };
+  function offerCard() {
+    const o = document.createElement('div');
+    o.className = 'trif-offer';
+    o.setAttribute('role', 'group');
+    o.setAttribute('aria-label', PROJECT_CARD.ask);
+    o.hidden = true;
+    const q = document.createElement('div'); q.className = 'trif-offer-q'; q.textContent = PROJECT_CARD.ask;
+    const why = document.createElement('div'); why.className = 'trif-offer-why';
+    const row = document.createElement('div'); row.className = 'trif-offer-buttons';
+    for (const [cls, words, choice] of [['trif-setup', PROJECT_CARD.setup, 'setup'], ['trif-later', PROJECT_CARD.later, 'later']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = cls;
+      b.textContent = words;
+      b.setAttribute('role', 'button');
+      b.setAttribute('data-trif-offer', choice);
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); offerFor = ''; lookSoon(); post({ type: 'project', what: choice }); });
+      row.append(b);
+    }
+    o.append(q, why, row);
+    return o;
+  }
+
+  const NEVER_PRESS = /\b(save|create|send|submit|delete|remove|archive|share|leave|upgrade|buy|subscribe)\b/i;
+  const press = (el) => { try { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); } catch (e) {} el.click(); };
+  /** A control's own words: its text's first line, else its name. */
+  const wordsOf = (el) => (((el.innerText || el.textContent || '').trim().split('\n')[0] || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim());
+  const shownNow = (el) => live(el) && visible(el);
+  /** The chat's own message box (never a form's field: editor() takes the last editable thing, which a form's is). */
+  const isComposer = (f) => f.matches('div.ProseMirror, #prompt-textarea, [data-testid="chat-input"]') || !!f.closest('form[data-chatgpt-composer], .ProseMirror');
+  /** Text into a field as typing would leave it (React's own value setter, then input and change). */
+  function setField(el, text) {
+    if (el.isContentEditable) {
+      el.focus();
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, text);
+      el.blur();
+      return;
+    }
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  /** The words for a field: its label's, its own name, placeholder, id. */
+  function fieldWords(el) {
+    const own = [el.getAttribute('aria-label'), el.getAttribute('placeholder'), el.getAttribute('name'), el.id].filter(Boolean);
+    const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map((id) => id && document.getElementById(id)).filter(Boolean);
+    const labels = [...(el.labels || []), ...by].map((l) => l.textContent);
+    return [...own, ...labels].join(' ');
+  }
+  /** The line over the service's form (pointer-free), near the form's top. */
+  function hint(words, near) {
+    let h = document.getElementById('trif-hint');
+    if (!words) { if (h) h.remove(); return; }
+    if (!h) { h = document.createElement('div'); h.id = 'trif-hint'; h.setAttribute('data-trif', 'hint'); h.setAttribute('role', 'status'); document.body.append(h); }
+    h.textContent = words;
+    const r = near ? near.getBoundingClientRect() : null;
+    h.style.top = '0px';
+    const hh = h.getBoundingClientRect().height || 32;
+    h.style.top = `${Math.round(r && r.top > hh + 12 ? r.top - hh - 8 : r && r.bottom + hh + 12 < innerHeight ? r.bottom + 8 : 8)}px`;
+  }
+
+  /** The new-project form shown now: a dialog or form (or the page's main part) titled "New project" / "Create
+   *  project" with a text field for the name. Its name field, its description (a textarea), its Create button. */
+  function projectFormNow() {
+    const titled = [...document.querySelectorAll('h1, h2, h3, [role="heading"], legend')].filter((h) => shownNow(h) && /^(new|create)( a)? project$/i.test(wordsOf(h)));
+    const named = document.getElementById('chatgpt-project-name');
+    const roots = new Set();
+    if (named && shownNow(named)) roots.add(named.closest('form, [role="dialog"], dialog') || named.parentElement);
+    for (const h of titled) roots.add(h.closest('form, [role="dialog"], dialog, main') || h.parentElement);
+    for (const root of roots) {
+      if (!root || root.closest('[data-trif]')) continue;
+      const fields = [...root.querySelectorAll('input:not([type]), input[type="text"], textarea, [contenteditable="true"]')].filter((f) => shownNow(f) && !isComposer(f));
+      const name = (named && root.contains(named) && named) || fields.find((f) => f.tagName === 'INPUT' && /name/i.test(fieldWords(f))) || fields.find((f) => f.tagName === 'INPUT');
+      if (!name) continue;
+      const desc = fields.find((f) => f !== name && f.tagName === 'TEXTAREA' && /work on|descri|about|purpose/i.test(fieldWords(f))) || fields.find((f) => f !== name && f.tagName === 'TEXTAREA');
+      const create = [...root.querySelectorAll('button, [role="button"]')].find((b) => /^create( project)?$/i.test(wordsOf(b)) || (b.type === 'submit' && /create/i.test(wordsOf(b))));
+      return { root, name, desc, create };
+    }
+    return null;
+  }
+  /** The control that opens the new-project form, where there is one (chatgpt.com: the side bar's + "Add new
+   *  project"; its side bar opened first when it's closed). Each control once. */
+  function openProjectForm(tried) {
+    const plus = document.querySelector('button[data-app-action-sidebar-project-create]')
+      || [...document.querySelectorAll('button, a, [role="button"]')].find((b) => !b.closest('[data-trif]') && /^(add )?new project$|^\+ ?new project$/i.test(wordsOf(b)) && !tried.has(b));
+    if (plus && !tried.has(plus)) { tried.add(plus); press(plus); return 'opened'; }
+    const side = [...document.querySelectorAll('button[aria-label]')].find((b) => /^(show|open) sidebar$/i.test(b.getAttribute('aria-label')) && shownNow(b));
+    if (side && !tried.has(side)) { tried.add(side); press(side); return 'side bar'; }
+    return null;
+  }
+  /** Set it up's first step: the form filled ({name, description, service}), the person's Create watched. Waits up to
+   *  12 s for the form. 'filled', or why not. */
+  async function projectForm(o) {
+    const tried = new Set();
+    let f = projectFormNow();
+    for (let i = 0; !f && i < 120; i++) {
+      if (i % 8 === 0) openProjectForm(tried);
+      await wait(100);
+      f = projectFormNow();
+    }
+    if (!f) return signInPage() ? 'signed out' : 'no form';
+    setField(f.name, o.name || 'TRIF');
+    if (f.desc && o.description && !f.desc.value) setField(f.desc, o.description);
+    await wait(150);
+    const label = (f.create && wordsOf(f.create)) || 'Create';
+    hint(PROJECT_CARD.formHint(label), f.root);
+    let created = false;
+    const saw = () => { if (!created) { created = true; post({ type: 'projform', what: 'create' }); } };
+    const onClick = (e) => { const b = e.target.closest && e.target.closest('button, [role="button"]'); if (b && f.root.contains(b) && (b === f.create || /^create/i.test(wordsOf(b)))) saw(); };
+    const onKey = (e) => { if (e.key === 'Enter' && e.target === f.name && f.name.value.trim()) saw(); };
+    const onSubmit = (e) => { if (f.root.contains(e.target) || e.target === f.root) saw(); };
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('submit', onSubmit, true);
+    // (the form gone: made (its tap seen), or closed without it (its Cancel may leave the page: pagehide); 10 minutes
+    // at most)
+    const started = Date.now();
+    let over = false;
+    const end = () => {
+      if (over) return;
+      over = true;
+      clearInterval(timer);
+      removeEventListener('pagehide', end);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('submit', onSubmit, true);
+      hint('');
+      if (!created) post({ type: 'projform', what: 'closed' });
+    };
+    const timer = setInterval(() => {
+      if (f.root.isConnected && live(f.root) && Date.now() - started < 600000) { if (!created) hint(PROJECT_CARD.formHint(label), f.root); return; }
+      end();
+    }, 400);
+    addEventListener('pagehide', end);
+    return 'filled';
+  }
+
+  /** The project's instructions box shown now: a textarea (or editable box) that isn't the message box, named or
+   *  titled for instructions (its label, placeholder, or its dialog's heading). */
+  function guideBoxNow() {
+    for (const f of document.querySelectorAll('textarea, [contenteditable="true"]')) {
+      if (!shownNow(f) || f.closest('[data-trif]') || isComposer(f)) continue;
+      const around = f.closest('[role="dialog"], dialog, form, section');
+      const head = around ? [...around.querySelectorAll('h1, h2, h3, [role="heading"], label, legend')].map((h) => h.textContent).join(' ') : '';
+      if (/instruction/i.test(`${fieldWords(f)} ${head}`)) return { box: f, root: around || f.parentElement };
+    }
+    return null;
+  }
+  /** What opens the instructions box, one control a round (each once): an "Instructions" control (claude.ai's "Set
+   *  project instructions", ChatGPT's "Add instructions"), else "Project settings" in an open menu, else the project's
+   *  own options menu. Never anything that saves, creates, sends or deletes. */
+  function openGuide(tried) {
+    const all = [...document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')].filter((b) => shownNow(b) && !tried.has(b) && !b.closest('[data-trif], nav, aside') && !NEVER_PRESS.test(wordsOf(b)));
+    const pick = all.find((b) => /^((set|add|edit)( project)? )?instructions\b/i.test(wordsOf(b)) || /^(set|add|edit) (project )?instructions$/i.test(b.getAttribute('aria-label') || ''))
+      || all.find((b) => b.closest('[role="menu"]') && /^(project )?settings$/i.test(wordsOf(b)))
+      || all.find((b) => b.getAttribute('aria-haspopup') && /^(project options|open project options|more options|options|project actions)$|project (options|settings|menu)/i.test(b.getAttribute('aria-label') || '') && !/ for /i.test(b.getAttribute('aria-label') || ''));
+    if (!pick) return null;
+    tried.add(pick);
+    press(pick);
+    return wordsOf(pick) || pick.getAttribute('aria-label');
+  }
+  const GUIDE_MARK = 'This project is for making TRIF mods';
+  /** Set it up's second step, on the new project's page: TRIF's instructions into its instructions box ({text}), the
+   *  person's Save watched ('projguide' saved / closed). 'filled', 'already' (they're in it), or why not. */
+  async function projectGuide(o) {
+    const tried = new Set();
+    let g = guideBoxNow();
+    for (let i = 0; !g && i < 100; i++) {
+      if (i % 8 === 0) openGuide(tried);
+      await wait(100);
+      g = guideBoxNow();
+    }
+    if (!g) return 'no instructions box';
+    const now = g.box.isContentEditable ? g.box.innerText : g.box.value;
+    if (String(now || '').includes(GUIDE_MARK)) return 'already';
+    setField(g.box, now && now.trim() ? `${now.trim()}\n\n${o.text}` : o.text);
+    await wait(150);
+    const save = () => [...g.root.querySelectorAll('button, [role="button"]')].find((b) => /^(save|done|update)\b/i.test(wordsOf(b)) || b.type === 'submit');
+    const label = (save() && wordsOf(save())) || 'Save';
+    hint(PROJECT_CARD.guideHint(label), g.root);
+    let saved = false;
+    const onClick = (e) => { const b = e.target.closest && e.target.closest('button, [role="button"]'); if (b && g.root.contains(b) && (b === save() || /^(save|done|update)\b/i.test(wordsOf(b)))) saved = true; };
+    const onSubmit = (e) => { if (g.root.contains(e.target) || e.target === g.root) saved = true; };
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('submit', onSubmit, true);
+    const started = Date.now();
+    let savedAt = 0;
+    const timer = setInterval(() => {
+      const open = g.box.isConnected && live(g.box) && Date.now() - started < 600000;
+      // (saved: the box closed after the tap, or 1.5 s after it where the box stays on the page)
+      if (saved && !savedAt) savedAt = Date.now();
+      if (open && !(savedAt && Date.now() - savedAt > 1500)) return;
+      clearInterval(timer);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('submit', onSubmit, true);
+      hint('');
+      post({ type: 'projguide', what: saved ? 'saved' : 'closed' });
+    }, 400);
+    return 'filled';
+  }
+  /** The page says the project isn't there (deleted, not found) and has no message box. */
+  function projectMissing() {
+    if (usableEditor()) return 'there';
+    const words = [document.title, ...[...document.querySelectorAll('h1, h2, h3, [role="alert"], main p')].filter(shownNow).map((h) => h.textContent)].join(' ');
+    return /not found|\b404\b|doesn.t exist|does not exist|no longer (exists|available)|couldn.t find|can.t find|been deleted|was deleted/i.test(words) ? 'missing' : 'there';
+  }
+
   /** (development) The message box's surroundings, as HTML, to see how a chat builds its chips and buttons. */
   function dump() {
     try { var m = metrics(); } catch (e) { m = String(e); }
@@ -1690,7 +1987,7 @@
   /** For the app's "still nothing back" watch: whether a reply is being written, and how much reply text is on the
    *  page (it only compares one look with the next). */
   const replyNow = () => `${replying() || incomplete() ? 1 : 0}:${$$(REPLY).reduce((n, e) => n + (e.textContent || '').length, 0)}`;
-  globalThis.__trifChat = { fill, canAsk, replyNow, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, viewer: () => { const v = viewer(); return v ? v.why : null; } };
+  globalThis.__trifChat = { fill, canAsk, replyNow, editor, dump, state, resume, showReply, clearTrif, look, armSend, takeText, stripBox, stripWatch, projectForm, projectGuide, projectMissing, viewer: () => { const v = viewer(); return v ? v.why : null; } };
   // (the app's look (the site and TRIF's robot) asked for once this script is in: on claude.ai signed in (11-19) the
   // app's call at the page's load came before this script ran, so its greeting and pills had no robot)
   post({ type: 'ready' });

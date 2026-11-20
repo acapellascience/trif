@@ -439,6 +439,13 @@ extension Model {
         // (the robot view's More: chosen, and JavaScript in the side panel's page)
         if let m = step["more"] as? Bool { Model.pane?.choose(more: m, service: m ? nil : .claude) }
         if let sv = step["service"] as? String, let s = ChatService(rawValue: sv) { Model.pane?.choose(more: false, service: s) }
+        // (TRIF's chats in a project, 11-20: {"projectstate": 1}: each service's card answer, kept project, whether its
+        // instructions are in it, and each chat's setup; {"projectsetup": "Claude"}: ⋯'s Set it up for that service)
+        if step["projectstate"] != nil, let p = Model.pane {
+            out = ChatService.allCases.map { "\($0.rawValue): offer \($0.offerState.rawValue), project \($0.project?.absoluteString ?? "none"), guide \($0.projectHasGuide)" }.joined(separator: "\n")
+            out += "\n" + p.views.map { "chat \($0.service.rawValue) \($0.site.isEmpty ? "-" : $0.site): setup \($0.setup.map { "\($0.stage.rawValue) create \($0.createSeen) closed \($0.closed) project \($0.project ?? "-")" } ?? "none")" }.joined(separator: "\n")
+        }
+        if let sv = step["projectsetup"] as? String, let s = ChatService(rawValue: sv), let p = Model.pane { p.choose(more: false, service: s); p.setUpProject(why: "the dev step") }
         if let js = step["paneljs"] as? String, let wv = Model.pane?.panel.webView {
             do { out = "\(try await wv.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }
         }
@@ -776,13 +783,15 @@ struct ContentView: View {
         .sheet(isPresented: $addingIcon) { WebClipSheet().environmentObject(browser) }
         .sheet(isPresented: $showIconQueue) { IconQueueView().environmentObject(browser) }
         .sheet(isPresented: $phoneLink.shown) { PhoneLinkView() }
+        // (Tim 11-20: set up in one tap: TRIF fills the service's new-project form, then its instructions; the person taps
+        // Create and Save)
         .alert(pane.service.project == nil ? "Keep TRIF chats in a project" : "TRIF chats' project", isPresented: $askingProject) {
-            Button(pane.service.project == nil ? "Copy and go" : "Make another") { pane.openProjects() }
+            Button(pane.service.project == nil ? "Set it up" : "Make a new one") { pane.setUpProject(why: "the ⋯ menu") }
             if pane.service.project != nil { Button("Stop using it", role: .destructive) { pane.service.useProject(nil, hasGuide: false) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(pane.service.project == nil
-                 ? "In \(pane.service.rawValue), make a new project and paste TRIF's instructions as its instructions (they're copied when you tap Copy and go). Then, on the project's page, tap Use this project for TRIF chats. New TRIF chats then start in it."
+                 ? "TRIF opens \(pane.service.rawValue)'s new-project form, filled in: you tap Create, then Save for TRIF's instructions. New TRIF chats then start in that project. They still show in your recent chats."
                  : "New TRIF chats in \(pane.service.rawValue) start in your project\(pane.service.projectHasGuide ? ", which has TRIF's instructions" : ""). Project chats may still show in \(pane.service.rawValue)'s recent chats.")
         }
         .background(Color.clear.fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in

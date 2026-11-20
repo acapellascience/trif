@@ -608,7 +608,11 @@ ${JSON.stringify(body, null, 2)}`;
     // (?thread, not ?keep: a provisional address first, /c/local-chatgpt%3A<uuid>, replaced by its own 2 s later, as
     // chatgpt.com's new conversation)
     const own = `${keep ? 'k-' : ''}${Math.random().toString(36).slice(2, 10)}`;
-    if (!/^\/(chat|c)\//.test(location.pathname)) {
+    // (a ChatGPT project's page (11-20): its conversations are /g/g-p-<id>-<name>/c/<id>; claude.ai's project chats
+    // are plain /chat/<id>)
+    const gproject = (location.pathname.match(/^\/g\/g-p-[^/]+(?=\/project\/?$)/) || [])[0];
+    if (gproject) history.pushState({}, '', `${gproject}/c/${own}${location.search}`);
+    else if (!/^\/(chat|c)\//.test(location.pathname) && !/^\/g\/g-p-[^/]+\/c\//.test(location.pathname)) {
       if (thread && !keep) {
         history.pushState({}, '', `/c/local-chatgpt%3A${Math.random().toString(16).slice(2, 10)}-0000-4000-8000-000000000000${location.search}`);
         setTimeout(() => { if (/^\/c\/local-/.test(location.pathname)) history.replaceState({}, '', `/c/${own}${location.search}`); }, 2000);
@@ -926,6 +930,114 @@ document.documentElement.setAttribute('data-standin-free', ${JSON.stringify(aske
       reply(x.parts, 0, true);
     }
   } catch (e) {} }).catch(() => {});
+
+  // (11-20, TRIF's chats in a project of their own) ChatGPT's "Create project" (`?gptin` / `?thread`), as signed in on
+  // 11-20 (read in the Simulator, nothing created): no address of its own; the side bar ("Show sidebar") has a Projects
+  // section whose + (button[data-app-action-sidebar-project-create], "Add new project") opens a dialog: a form titled
+  // h2 "Create project", "Project name" for input#chatgpt-project-name[name=project-name] (placeholder "Copenhagen
+  // Trip"), a "Default memory" menu button, a type=submit "Create project" (disabled until there's a name), "Close
+  // dialog". Create keeps the project in serve.js and goes to /g/g-p-<id>-<name>/project.
+  const pEl = (tag, attrs = {}, text) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text) e.textContent = text; return e; };
+  const btnCss = 'font: 13px system-ui; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; margin-right: 8px;';
+  if (octane) {
+    const show = pEl('button', { type: 'button', 'aria-label': 'Show sidebar', 'aria-expanded': 'false', style: btnCss }, 'Menu');
+    document.querySelector('header').prepend(show);
+    let side = null;
+    show.addEventListener('click', () => {
+      if (side) { side.remove(); side = null; show.setAttribute('aria-expanded', 'false'); return; }
+      side = pEl('aside', { id: 'standin-side', style: 'position: fixed; inset: 0 25vw 0 0; background: var(--bg); border-right: 1px solid var(--line); padding: 14px; z-index: 5;' });
+      const head = pEl('div', { style: 'display: flex; justify-content: space-between; align-items: center; font-weight: 600;' });
+      const plus = pEl('button', { type: 'button', 'aria-label': 'Add new project', 'data-app-action-sidebar-project-create': '', style: btnCss }, '+');
+      head.append(pEl('span', {}, 'Projects'), plus);
+      const close = pEl('button', { type: 'button', 'aria-label': 'Close sidebar', style: btnCss }, 'Close');
+      close.addEventListener('click', () => show.click());
+      side.append(close, head);
+      plus.addEventListener('click', () => {
+        const scrim = pEl('div', { style: 'position: fixed; inset: 0; background: #0006; z-index: 9; display: flex; align-items: center; justify-content: center;' });
+        const dlg = pEl('div', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'cp-title', style: 'background: var(--bg); border-radius: 18px; padding: 16px; width: calc(100vw - 40px); box-sizing: border-box;' });
+        const form = pEl('form');
+        form.append(pEl('h2', { id: 'cp-title', style: 'margin: 0 0 12px; font-size: 20px;' }, 'Create project'), pEl('label', { for: 'chatgpt-project-name' }, 'Project name'));
+        const input = pEl('input', { autocomplete: 'off', placeholder: 'Copenhagen Trip', id: 'chatgpt-project-name', type: 'text', name: 'project-name', style: 'display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 10px; margin: 6px 0 12px;' });
+        const submit = pEl('button', { type: 'submit', style: 'font: inherit; padding: 8px 14px; border-radius: 999px;' }, 'Create project');
+        submit.disabled = true;
+        const closeD = pEl('button', { type: 'button', 'aria-label': 'Close dialog', style: btnCss }, 'Close');
+        form.append(input, pEl('p', { style: 'font-size: 14px; opacity: .7' }, 'Projects keep chats, files, and custom instructions in one place.'), pEl('button', { type: 'button', 'aria-haspopup': 'menu', style: btnCss }, 'Default memory'), submit, closeD);
+        input.addEventListener('input', () => { submit.disabled = !input.value.trim(); });
+        closeD.addEventListener('click', () => scrim.remove());
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          if (!input.value.trim()) return;
+          const r = await fetch('/standin-project', { method: 'POST', body: JSON.stringify({ service: 'chatgpt', name: input.value.trim() }) });
+          const { id } = await r.json();
+          const slug = input.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          location.assign(`/g/g-p-${id}-${slug}/project`);
+        });
+        dlg.append(form);
+        scrim.append(dlg);
+        document.body.append(scrim);
+      });
+      document.body.append(side);
+      show.setAttribute('aria-expanded', 'true');
+    });
+  }
+
+  // A project's page (11-20): claude.ai's /project/<id> has its instructions beside the chat ("Set project instructions"
+  // → a dialog: "Set project instructions", a textarea, Cancel / "Save instructions", as its help pages describe; NOT
+  // seen signed in: TRIF never opens Tim's projects). chatgpt.com's /g/g-p-<id>-<name>/project: "•••" (Open project
+  // options) → a menu with "Project settings" (and "Delete project", which TRIF must never press) → a dialog with an
+  // "Instructions" textarea and Save (its help page: ••• → Project settings; the dialog's markup is this page's guess).
+  // Saved instructions are kept in serve.js (GET /standin-project/<id>: its `guide`).
+  const projClaude = (location.pathname.match(/^\/project\/([\w-]+)\/?$/) || [])[1];
+  const projGpt = (location.pathname.match(/^\/g\/g-p-([0-9a-f]{32})[\w-]*\/project\/?$/) || [])[1];
+  const projId = projClaude || projGpt;
+  if (projId) {
+    const panel = pEl('section', { id: 'standin-project', style: 'padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;' });
+    const title = pEl('strong', { style: 'flex: 1' }, 'Project');
+    const state = pEl('span', { id: 'standin-guide-state', style: 'opacity: .7' }, '');
+    panel.append(title, state);
+    document.querySelector('header').after(panel);
+    let saved = '';
+    const paint = () => { state.textContent = saved ? 'Instructions set' : 'No instructions'; };
+    fetch(`/standin-project/${projId}`).then((r) => r.ok ? r.json() : null).then((p) => { if (p) { title.textContent = p.name || 'Project'; saved = p.guide || ''; paint(); } }).catch(() => {});
+    paint();
+    const editor = (heading, label, saveWords) => {
+      const scrim = pEl('div', { style: 'position: fixed; inset: 0; background: #0006; z-index: 9; display: flex; align-items: center; justify-content: center;' });
+      const dlg = pEl('div', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pi-title', style: 'background: var(--bg); border-radius: 18px; padding: 16px; width: calc(100vw - 32px); box-sizing: border-box;' });
+      const area = pEl('textarea', { id: 'pi-text', rows: '8', placeholder: 'Think step by step…', 'aria-labelledby': 'pi-label', style: 'display: block; width: 100%; box-sizing: border-box; font: 14px system-ui; padding: 8px; margin: 6px 0 12px;' });
+      area.value = saved;
+      const save = pEl('button', { type: 'button', style: 'font: inherit; padding: 8px 14px; border-radius: 10px;' }, saveWords);
+      const cancel = pEl('button', { type: 'button', style: btnCss }, 'Cancel');
+      dlg.append(pEl('h2', { id: 'pi-title', style: 'margin: 0 0 8px; font-size: 18px;' }, heading), pEl('label', { id: 'pi-label', for: 'pi-text' }, label), area, cancel, save);
+      cancel.addEventListener('click', () => scrim.remove());
+      save.addEventListener('click', async () => {
+        saved = area.value;
+        await fetch(`/standin-project/${projId}/guide`, { method: 'POST', body: JSON.stringify({ guide: saved }) }).catch(() => {});
+        paint();
+        scrim.remove();
+      });
+      scrim.append(dlg);
+      document.body.append(scrim);
+    };
+    if (projClaude) {
+      const set = pEl('button', { type: 'button', style: btnCss }, 'Set project instructions');
+      set.addEventListener('click', () => editor('Set project instructions', 'How should Claude respond in this project?', 'Save instructions'));
+      panel.append(set);
+    } else {
+      const more = pEl('button', { type: 'button', 'aria-label': 'Open project options', 'aria-haspopup': 'menu', style: btnCss }, '•••');
+      more.addEventListener('click', () => {
+        const old = document.getElementById('standin-proj-menu');
+        if (old) { old.remove(); return; }
+        const menu = pEl('div', { role: 'menu', id: 'standin-proj-menu', style: 'position: fixed; right: 14px; top: 90px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; z-index: 8; display: flex; flex-direction: column;' });
+        const settings = pEl('button', { type: 'button', role: 'menuitem', style: 'font: inherit; padding: 10px 14px; border: 0; background: none; color: inherit; text-align: left;' }, 'Project settings');
+        const del = pEl('button', { type: 'button', role: 'menuitem', style: 'font: inherit; padding: 10px 14px; border: 0; background: none; color: #c00; text-align: left;' }, 'Delete project');
+        settings.addEventListener('click', () => { menu.remove(); editor('Project settings', 'Instructions', 'Save'); });
+        del.addEventListener('click', () => { menu.remove(); document.body.setAttribute('data-standin-deleted', 'pressed'); });
+        menu.append(settings, del);
+        document.body.append(menu);
+      });
+      panel.append(more);
+    }
+  }
 })();
 </script>
 </body>

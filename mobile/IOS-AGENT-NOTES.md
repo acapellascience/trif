@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (561 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (568 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -127,6 +127,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   is KEPT at the body's start, display:none !important, as chatgpt.com keeps the page it left; the address goes
   /c/local-chatgpt%3A<uuid> and 2 s later /c/<id> (replaceState; not with ?keep). The header's "New chat" keeps the
   conversation the same way (hidden) and shows the home view again. Not with ?history/?oldchat/?pasted.
+- Stand-in projects (11-20): serve.js keeps projects (POST /standin-project {service, name, desc} → {id}: claude
+  `p-<8 hex>`, chatgpt 32 hex; GET /standin-project[/<id>]; POST …/<id>/guide; GET …/<id>/delete: its page then 404s
+  "Project not found"). /projects and /projects/create = shared/pages/projects.html (claude.ai's "New project" dialog
+  as signed in 11-20). chat.html `?octane`/`?gptin`/`?thread`: a "Show sidebar" button (header, "Menu") → an aside with
+  Projects' + (button[data-app-action-sidebar-project-create] "Add new project") → "Create project" form
+  (#chatgpt-project-name, submit "Create project") → /g/g-p-<hex>-<name>/project. Project pages (/project/<id>,
+  /g/g-p-<hex>…/project: chat.html, plain Claude-like mode since the query is dropped) get a strip with the name,
+  "Instructions set"/"No instructions" and claude's "Set project instructions" (dialog: textarea #pi-text, "Save
+  instructions") or chatgpt's "•••" (Open project options) → menu Project settings / Delete project (sets
+  body[data-standin-deleted] if pressed: TRIF must never) → dialog "Project settings", "Instructions", Save. A send on
+  a /g/…/project page goes to /g/g-p-…/c/<id>.
 - THE MOD MATRIX (11-19, docs/IOS-MOD-MATRIX.md: the table, what broke and what's blocked): `node mobile/test/ios-matrix.js`
   (Node 22: /usr/local/bin/node; `--only A1,B3`, `--list`, `--shots <dir>`, `--gpt thread`: ChatGPT's stand-in as its
   11-20 page, `chat.html?thread&keep`; its rows A2, B4, C9, F2 (F2 needs F1)). Needs the SE booted, a Debug build installed
@@ -135,7 +146,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   mods are named Mx<case><tag> (the tag in their CSS, so never "offered before"); the last run's Mx… mods are deleted at
   the start; the stand-ins' lastChat/chatProject prefs, chatLinks and chatOffers are cleared (Simulator data only). D7 and
   A8 start phone-link's tests/phone-link-computer.js (`--computer <worktree>`), relaunch with `-linkhost` and pair. ~15
-  min for all. A case is an async function returning [PASS|FAIL|BLOCKED, what was seen]: add rows there. Not in it
+  min for all. A case is an async function returning [PASS|FAIL|BLOCKED, what was seen]: add rows there. P1-P6 (11-20,
+  projects) relaunch the app with the stand-in project prefs cleared (cleanPrefs drops every `chatProject*.….standin`);
+  P4 needs P3's project. Dev steps `projectstate` (each service's offer answer, project, guide; each chat's setup) and
+  `projectsetup` ("Claude": ⋯'s Set it up). Not in it
   (done by hand with the iOS Simulator tool): the phone locked (LOCK/HOME), dark mode, rotation, the keyboard up.
   `-gpthome <url>` (11-19): ChatGPT's own stand-in (Claude's stays `-chathome`'s). Dev steps `panelmsg` (any Mods tab
   message through ModsPanel.handle: `{"type": "delete", "id"}`) and `modlist` (each mod: id, name, site, on/held,
@@ -218,7 +232,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   fill put back as the chat's draft (before / after the fill, as a file / as text, the person's words around it,
   Claude-style tiles); claude.ai's nested code and a reply found finished; 11-20: chatgpt.com's redesign (`?thread`: the
   send through the home → conversation switch and a provisional address, Stop, done, Add to TRIF after the code widget,
-  the greeting gone, New chat's hidden conversation never read), and edit blocks on it; 11-20: a reply picked up from the send's note). 19 tests, ~5 min. One browser
+  the greeting gone, New chat's hidden conversation never read), and edit blocks on it; 11-20: a reply picked up from the send's note; 11-20: projects: the card, both new-project forms filled with Create only watched, the instructions boxes opened, filled and Save told, a gone project's page). 20 tests, ~5 min. One browser
   suite at a time; small payloads.
 - After talking (Browser.talkResume / talkNudge, 11-18) on the Mac: `node --test mobile/test/talknudge.test.js` (the
   scripts read out of Browser.swift with Swift's escapes undone, run in node's vm on stand-in players and a virtual
@@ -344,6 +358,34 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   a message's last 6000), `pickupAnchor` (latest matching USER, or `users[w.users]` with no print), `anchorOf`,
   track's pickup branch (replies after the anchor, before the next USER, live without being seen growing). Dev
   steps `sentnotes`, `pickup`. Matrix rows B11-B14. notifyDone(…, on:): a quick ask's added mods say "Your mod is on".
+- TRIF's chats in a project (Tim 11-20: "set up in one tap, so they don't sprawl"): ChatProjects.swift (no UI; built
+  for the Mac: `node --test mobile/test/chatprojects.test.js`, ~2 s): `ProjectOfferState` (unasked/shown/declined/
+  ignored/accepted), `isConversation` (ChatGPT's project chats /g/g-p-…/c/<id> too: onChatPage, remember and
+  conversation(of:) use it; SentNotes.provisional takes the prefix), `isProjectPage`, `projectID` (ChatGPT's id without
+  the name), `kept`, `offers`/`shown`/`afterSend`, `Setup` (form → guide, createSeen, closed, project) + `adopt` (a
+  project page ≤ 10 min after the form, not the page it started on, not after closed), `gone`. ChatService: `project`,
+  `projectHasGuide`, `useProject`, `offerState`, `offersProject`, `newProjectPage` (claude /projects/create, chatgpt
+  home), `standInKey` (".standin" in stand-in runs: the project prefs `chatProject`, `chatProjectGuide`,
+  `chatProjectOffer` kept apart from the real ones). ClaudePane: `projectMessage` (chat.js projoffer / project /
+  projform / projguide), `setUpProject(v, why:)` (the card, ⋯, the dev step: offer accepted, `v.setup`, go to the form,
+  `fillProjectForm`), `projectAddress` (KVO url + didCommit: adopt → useProject(hasGuide: false), `fillProjectGuide`),
+  `finishSetup` (→ home(): a new chat in the project, filled), `checkProject` (didFinish of a load go() marked
+  `projectLoad` + the response's status: gone → useProject(nil), go home, Diagnostics "project"). didCommit also ends a
+  form-stage setup whose page left for a non-project page without Create. Prepared.`inProject`: fillContext remakes the
+  text when it changed (the project gone meanwhile). ChatView: `setup`, `projectLoad`, `projectStatus`, `offerProject`
+  (tellLook passes `offer`: the service's name or ""). chat.js: look(site, shape, offer) → `.trif-offer` in the
+  greeting (pointer-events only there, none while measuring (`trif-measuring`: hit tests would find the card over
+  the page's own things); hidden while `filling` and 1.2 s after, under the strip; sizes full → compact (robot beside,
+  card under) → offeronly (the card alone) → tight (no card); 'projoffer' only once it has stayed in view 2 s), `projectForm(o)` (projectFormNow: a heading "New
+  project"/"Create project" or #chatgpt-project-name; openProjectForm: [data-app-action-sidebar-project-create], else
+  "Show sidebar" first; setField = React's value setter + input/change; the person's Create seen by click/submit/Enter;
+  'projform' create / closed at the form's going or pagehide), `projectGuide(o)` (guideBoxNow: a textarea/editable box,
+  not the composer (`isComposer`: editor() takes a form's textarea), named or titled /instruction/; openGuide: an
+  "…Instructions" control, else "Project settings" in a menu, else the project's options menu, never NEVER_PRESS words;
+  'already' when TRIF's text is in it; the Save tap seen → 'projguide' saved 1.5 s later or when the box goes),
+  `projectMissing()`, `hint(words, near)` (#trif-hint, green, no touches), `data-trif-pageonly` on <html> while the box
+  holds a page-only fill (its pill: "From TRIF: the page"). ⋯ alert: Set it up / Make a new one / Stop using it.
+  The old "Use this project for TRIF chats" capsule stays (not during a setup).
 - The done banner when the reply's mod couldn't be read (11-19, the matrix's C7): Browser.offerFromChat keeps
   `lastUnreadable` (why, when none of a hand-over could be read); handleDone passes it to `banner(unreadable:)`;
   ChatBanner.unreadable → "{Service}'s mod for {site} can't be added" · Open chat, kept until closed (draft words).
@@ -810,6 +852,17 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - A conversation belongs to the site it started on: no follow-ups across sites; other site's → full instructions.
 - Projects: the person makes the project; TRIF only copies its instructions and remembers the page. Project chats still
   show in Recents (told, not hidden).
+- Projects by default (Tim + main session, 11-20; docs/MOBILE-BEHAVIOUR.md "Projects"): a card under TRIF's greeting in
+  each service's first empty chat, asked once (Not now = never; ⋯ stays); Set it up = TRIF fills the service's
+  new-project form and then the project's instructions, the person taps Create and Save (TRIF never does); the project
+  noticed by its address, no "Use this project" tap; new chats start in it with the page only; a project gone →
+  ordinary chats, nothing offered again; existing chats stay put. My calls (Tim may change them): a send past the card
+  without an answer counts as answered (never shown again: "offered once, on first use"); a failed or abandoned setup
+  doesn't bring the card back; the project is kept as soon as it's noticed (before the instructions are saved: its
+  chats get the full instructions meanwhile); no form found / no instructions box: quiet, logged (Diagnostics
+  "project"); after Save, TRIF goes straight to a new chat in the project with the tab's page in it. Claude's create
+  form's Context could take TRIF's guide as a file at creation (one tap fewer, no instructions step): not done (the
+  decision says instructions; a knowledge file may be searched rather than always read).
 - More = the desktop side panel itself (generated, `--check`), not a new native chat. Engines: On this iPhone, Claude API,
   OpenAI API, OpenRouter; keys in the Keychain, this device only.
 - On this iPhone: MiniCPM5-2B suggested on 4 GB, Qwen3.5-2B offered; Qwen3.5-4B on 6 GB+, and on 4 GB behind "Show bigger
@@ -1190,6 +1243,21 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Open and unverified
 
+- Projects (11-20), never seen live past the form: TRIF never presses Create, and opening Tim's existing projects is
+  off limits, so the real project pages are unknown. Checked signed in (Simulator, nothing created): claude.ai's
+  /projects/create dialog (Name, "What do you want to work on?", Context: "Add repository / a file / a folder / a
+  Google Drive folder", Create project disabled until a name) and chatgpt.com's side bar → Projects "+" ("Add new
+  project", [data-app-action-sidebar-project-create]) → "Create project" (#chatgpt-project-name, "Default memory",
+  submit); both fill from TRIF (Create enabled), through the app's own Set it up (shots 566; the card on ChatGPT's real
+  new chat, compact: 567; on claude.ai's new chat its own "Auto is now the default" notice took the room: no card
+  until it's acknowledged, which is the person's). ChatGPT's side bar lists projects as div[role=button] rows with
+  data-app-action-sidebar-project-id=g-p-<id> (no links). Unknown until Tim's TIM-SENDS 15-17: that Create lands on
+  /project/<uuid> (claude) and /g/g-p-<id>-trif/project (chatgpt) by an address change TRIF sees; where each project
+  page's instructions are on a phone (claude.ai: "Set project instructions" → "Save instructions" per its help;
+  chatgpt.com: ••• → Project settings per its help, the dialog's markup a guess); what a deleted project's page does
+  (404, a "not found" page, or a redirect: all three handled). Free plans: claude.ai allows 5 projects (help page),
+  ChatGPT's free plan has projects (5 files each); at a limit the form or its Create may not come: quiet fallback.
+
 - The pickup (11-20): Simulator only, stand-ins (matrix B11-B15, chat.test.js's last test on Claude's and ChatGPT's
   `?thread` stand-ins). Not known until TIM-SENDS 11 on a phone: whether claude.ai / chatgpt.com draw the person's
   sent message with the same words after a reload (the fingerprint needs their last 32 letters/digits in it; a
@@ -1504,6 +1572,12 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 
 ## Gotchas
 
+- (11-20) chat.js `editor()` is "the last visible editable thing": on a page with a form or dialog open it's the
+  form's textarea, not the message box. The project code tells them apart with `isComposer`; anything new that looks
+  for fields beside the chat's box must too.
+- (11-20) `xcrun simctl spawn <dev> defaults read com.timsrobot.trifprobe.browser` does NOT read the app's prefs (the
+  app's container has its own): use PlistBuddy on <data container>/Library/Preferences/com.timsrobot.trifprobe.browser.plist
+  with the app stopped.
 - (11-18) Foundation's JSONSerialization drops a U+FEFF that starts a string value it reads (`["\u{FEFF}ab"]` → "ab"),
   so a Core.swift answer (or a fixture read in a Mac check) loses a leading BOM. ModID puts it back for parts and
   withMeta (`bom`); modid-check gives the "bom" case its BOM back by hand.

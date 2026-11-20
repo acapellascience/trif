@@ -103,6 +103,7 @@ final class SentNotes {
     /// and not one a page can be loaded at again.
     static func provisional(_ conv: String?) -> Bool {
         guard let conv, let u = URL(string: conv) else { return false }
-        return u.path.hasPrefix("/c/local-") || u.path.hasPrefix("/c/local:")
+        // (in a ChatGPT project too: /g/g-p-<id>-<name>/c/local-…)
+        return u.path.range(of: "^(/g/g-p-[^/]+)?/c/local[-:]", options: .regularExpression) != nil
     }
 }

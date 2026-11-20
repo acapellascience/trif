@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects (stand-in)</title>
+<!--
+  claude.ai's projects, for the iPhone app's "Keep TRIF chats in their own project?" (Tim 11-20), served by
+  mobile/serve.js at /projects and /projects/create. /projects/create is claude.ai's "New project" dialog as it was
+  signed in on 11-20 (read in the Simulator, nothing created): a [role=dialog][data-cds=Dialog] titled by an h2 "New
+  project", a "Name" label for an input with no type (placeholder "API performance"), "What do you want to work on?
+  (optional)" for a textarea, a Context box with an "Add context" menu button, "Create project" (disabled until there's
+  a name) and Cancel. Create keeps the project in serve.js (POST /standin-project) and goes to its page, /project/<id>,
+  as claude.ai does; Cancel goes to /projects.
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #faf9f5; --fg: #1f1e1d; --line: #d8d5cc; --field: #efece4; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #262624; --fg: #f0eee6; --line: #45433f; --field: #30302d; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 16px/1.45 -apple-system, system-ui, sans-serif; }
+  header { padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--line); }
+  .scrim { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-start; justify-content: center; padding-top: 40px; }
+  [role="dialog"] { background: var(--bg); border-radius: 18px; width: calc(100vw - 32px); max-width: 420px; padding: 16px; box-sizing: border-box; }
+  [role="dialog"] h2 { margin: 0 0 12px; font-size: 18px; }
+  label { display: block; margin: 12px 0 6px; font-weight: 500; }
+  input, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 10px; border-radius: 10px; border: 0; background: var(--field); color: inherit; }
+  .context { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 14px 0; font-size: 14px; }
+  .buttons button { display: block; width: 100%; margin-top: 8px; font: inherit; padding: 10px; border-radius: 10px; border: 0; background: var(--field); color: inherit; }
+  .buttons .create { background: #1f1e1d; color: #fff; }
+  .buttons .create:disabled { opacity: 0.4; }
+</style>
+</head>
+<body>
+<header>Projects (stand-in)</header>
+<main id="list"><p style="padding: 0 14px">Your projects.</p><p style="padding: 0 14px"><a href="/projects/create">New project</a></p></main>
+<script>
+(() => {
+  if (!/\/projects\/create\/?$/.test(location.pathname)) return;
+  const scrim = document.createElement('div');
+  scrim.className = 'scrim';
+  scrim.innerHTML = `<div role="dialog" data-cds="Dialog" aria-labelledby="np-title">
+    <h2 id="np-title">New project</h2>
+    <label id="np-name-label" for="np-name">Name</label>
+    <input id="np-name" placeholder="API performance" aria-labelledby="np-name-label">
+    <label id="np-desc-label" for="np-desc">What do you want to work on? <span>(optional)</span></label>
+    <textarea id="np-desc" rows="3" placeholder="Finalize the Q3 launch plan" aria-labelledby="np-desc-label"></textarea>
+    <div class="context">Context <span>(optional)</span> <button type="button" aria-label="Add context" aria-haspopup="menu">+</button><div>Drop in files or folders, or add manually</div></div>
+    <div class="buttons"><button type="button" class="create" disabled>Create project</button><button type="button" class="cancel">Cancel</button></div>
+  </div>`;
+  document.body.append(scrim);
+  const name = scrim.querySelector('#np-name');
+  const desc = scrim.querySelector('#np-desc');
+  const create = scrim.querySelector('.create');
+  name.addEventListener('input', () => { create.disabled = !name.value.trim(); });
+  create.addEventListener('click', async () => {
+    if (create.disabled) return;
+    create.disabled = true;
+    const r = await fetch('/standin-project', { method: 'POST', body: JSON.stringify({ service: 'claude', name: name.value.trim(), desc: desc.value }) });
+    const { id } = await r.json();
+    location.assign(`/project/${id}`);
+  });
+  scrim.querySelector('.cancel').addEventListener('click', () => location.assign('/projects'));
+})();
+</script>
+</body>
+</html>

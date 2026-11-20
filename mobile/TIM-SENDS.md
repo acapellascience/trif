@@ -1,4 +1,4 @@
-# Real sends for Tim (one sitting, ~35 minutes)
+# Real sends for Tim (one sitting, ~45 minutes)
 
 The mod matrix (docs/IOS-MOD-MATRIX.md) ran against stand-in chats in the Simulator: TRIF never presses send on
 claude.ai or chatgpt.com, so these need your own Send. Use the new build on your iPhone, signed in to both. Any site
@@ -81,5 +81,23 @@ For each: do the steps, then note what you saw against "Look for" (a word is eno
     message asking for the changes again, with the mod's code in it. Don't send it unless you want to; if you do,
     the new reply's changes should apply.
 
-15. **Diagnostics.** ⋯ → Copy diagnostics, paste it to me. (Its "chat offers" and "chats" lines say what TRIF saw for
-    each of the above.)
+15. **Claude: TRIF's project, set up (11-20).** On a fresh install's first Claude chat (or after an agent clears
+    `chatProjectOffer.Claude` and `chatProject.Claude` from the app's prefs), open a new chat: under TRIF's greeting a
+    card "Keep TRIF chats in their own project?". Tap **Set it up**. Look for: claude.ai's "New project" form with the
+    name TRIF and the description filled in, and the green line "Tap Create project to make it…"; nothing pressed by
+    TRIF. Tap **Create project** yourself. Look for: the new project's page, and TRIF opening its instructions
+    ("Set project instructions") with TRIF's instructions filled in and the line "… Tap Save instructions to finish."
+    (if no instructions box comes up, say what the page shows: its markup is unverified). Tap **Save**. Look for: a new
+    chat on the project's page with the page attached ("From TRIF: the page", no guide).
+16. **Claude: a send in the project.** Right after 15, type a small request and press send. Look for: the reply and
+    "Add this mod?" as usual; the conversation listed under the TRIF project in Claude (and in Recents). Then the robot
+    → Go to chat on another site → a new chat starts on the TRIF project's page again.
+17. **ChatGPT: the same, and Not now.** As 15-16 with ChatGPT: its card → Set it up → TRIF opens the side bar's
+    "Create project" (name TRIF) → you tap Create project → TRIF opens the project's ••• → Project settings and fills
+    the instructions (unverified markup: say what you see) → you tap Save → a new chat in the project; send one.
+    Look for: the conversation's address /g/g-p-…/c/… and the reply picked up. (To try Not now instead: on a fresh
+    service's card tap Not now: the card never comes back for that service; ⋯ → Keep TRIF chats in a project… still
+    sets it up.)
+
+18. **Diagnostics.** ⋯ → Copy diagnostics, paste it to me. (Its "chat offers", "chats" and "project" lines say what TRIF
+    saw for each of the above.)

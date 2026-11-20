@@ -92,6 +92,9 @@ function cleanPrefs() {
     if (m[2].startsWith('http://localhost:8377')) pb(`Delete :${m[1]}`);
   }
   for (const k of ['chatLinks', 'chatOffers']) pb(`Delete :${k}`);
+  // (and the stand-ins' own project prefs (11-20): their project, its instructions' flag, the first-use card's answer;
+  // a stand-in run keeps them apart, "….standin")
+  for (const m of dump.matchAll(/^ {2}"(chatProject(?:Guide|Offer)?\.[^"]*\.standin)" => /gm)) pb(`Delete :${m[1]}`);
 }
 
 async function launch(extra = []) {
@@ -958,6 +961,153 @@ add('A8', 'start', 'A chat on the computer (a desktop phone-view chat for the ph
   await sleep(2500);
   const runs = /yes/.test(await pagejs('return [...document.querySelectorAll("style")].some((s) => s.textContent.includes("1f8a5b")) || !!document.querySelector("[style*=\'1f8a5b\'], [style*=\'31, 138, 91\']") ? "yes" : "no"'));
   return [done && changed.ok && kept ? 'PASS' : 'FAIL', `computer's run: ${JSON.stringify(done)}; the phone's mod changed ${changed.ok}; the other site's page left alone ${kept}; its colour on example.com ${runs}`];
+});
+
+// ---- TRIF's chats in a project of their own (Tim 11-20): the first-use card asked once, Set it up (TRIF fills the
+// forms, the person's Create and Save are the stand-in's buttons clicked here, as the person's taps), the project
+// noticed by its address, new chats in it with the page only, a project gone, the form left without Create
+const projState = async () => step({ projectstate: 1 });
+async function projReset() {
+  try { sim('terminate', DEV, APP); } catch (e) {}
+  await sleep(800);
+  cleanPrefs();
+  await launch();
+  await step({ select: 0 });
+}
+const cardShown = async () => /yes/.test(await step({ chatjs: `const g = document.getElementById('trif-greeting'), o = g && g.querySelector('.trif-offer'); return o && !o.hidden && !g.hidden && o.getBoundingClientRect().height > 0 ? 'yes' : 'no'` }));
+const cardUp = (ms = 9000) => until(async () => ({ ok: await cardShown() }), ms, 600);
+/** A new chat for the shown tab (Start over), filled. */
+async function newChat(service) {
+  await step({ service });
+  await step({ sheet: 'chat' });
+  await sleep(1200);
+  await step({ newchat: 1 });
+  return until(async () => { const s = await chatState(); return { ok: s.usable && s.trif > 0, s: JSON.stringify(s) }; }, 15000, 600);
+}
+const chatAt = async () => (/at: (\S+)/.exec(await chat()) || [])[1] || '';
+const projOf = (st, service) => (new RegExp(`^${service}: .*project (\\S+), guide (\\w+)`, 'm').exec(st) || []).slice(1);
+const pageOnly = async () => /yes/.test(await step({ chatjs: `return document.documentElement.hasAttribute('data-trif-pageonly') ? 'yes' : 'no'` }));
+
+add('P1', 'project', 'Claude: the project card on the first new chat; Not now: gone, and never again', async () => {
+  await projReset();
+  const g = await newChat('Claude');
+  if (!g.ok) return ['FAIL', `no fill: ${g.s}`];
+  const up = await cardUp();
+  shot('P1-card');
+  // (told to the app once it has stayed in view 2 s)
+  const st0 = (await until(async () => { const st = await projState(); return { ok: /Claude: offer shown/.test(st), st }; }, 6000, 500)).st || '';
+  await step({ chatjs: `document.querySelector('#trif-greeting .trif-later').click(); return 1` });
+  await sleep(1200);
+  const gone = !(await cardShown());
+  const st1 = await projState();
+  await newChat('Claude');
+  await sleep(4000);
+  const again = await cardShown();
+  return [up.ok && /Claude: offer shown/.test(st0) && gone && /Claude: offer declined/.test(st1) && !again ? 'PASS' : 'FAIL', `card up ${up.ok}; ${st0.split('\n')[0]} → ${st1.split('\n')[0]}; gone at once ${gone}; a new chat's card ${again}`];
+});
+
+add('P2', 'project', 'ChatGPT: the card\'s Set it up: the side bar\'s form filled, the person\'s Create, the project noticed, its settings\' instructions filled, the person\'s Save, a new chat in the project with the page only; a send there: its /g/…/c/ conversation kept', async () => {
+  await projReset();
+  const g = await newChat('ChatGPT');
+  if (!g.ok) return ['FAIL', `no fill: ${g.s}`];
+  if (!(await cardUp()).ok) return ['FAIL', 'no card'];
+  await step({ chatjs: `document.querySelector('#trif-greeting .trif-setup').click(); return 1` });
+  const form = await until(async () => { const v = await panejs(`const i = document.getElementById('chatgpt-project-name'); return i ? i.value + '|' + (document.getElementById('trif-hint') ? 'hint' : '') : 'none'`); return { ok: /^TRIF\|hint/.test(v), v }; }, 20000);
+  if (!form.ok) return ['FAIL', `form: ${form.v}`];
+  shot('P2-form');
+  await panejs(`document.getElementById('chatgpt-project-name').form.querySelector('button[type="submit"]').click(); return 1`);
+  const made = await until(async () => { const st = await projState(); const [u] = projOf(st, 'ChatGPT'); return { ok: /\/g\/g-p-[0-9a-f]{32}-trif\/project$/.test(u || ''), st }; }, 15000);
+  if (!made.ok) return ['FAIL', `not noticed: ${made.st}`];
+  const filled = await until(async () => { const v = await panejs(`const t = document.getElementById('pi-text'); return t ? String(t.value.includes('This project is for making TRIF mods')) : 'none'`); return { ok: v === 'true', v }; }, 15000);
+  if (!filled.ok) return ['FAIL', `instructions: ${filled.v}; ${made.st}`];
+  shot('P2-instructions');
+  await panejs(`[...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Save').click(); return 1`);
+  const saved = await until(async () => { const st = await projState(); return { ok: projOf(st, 'ChatGPT')[1] === 'true', st }; }, 10000);
+  const inNew = await until(async () => { const s = await chatState(); const at = await chatAt(); return { ok: s.usable && s.trif > 0 && /\/g\/g-p-[0-9a-f]{32}-trif\/project/.test(at), at }; }, 20000);
+  const only = await pageOnly();
+  shot('P2-new-chat');
+  const s = await send(words('P2'));
+  const working = await until(async () => { const t = await chat(); return { ok: /activity: working/.test(t), t }; }, 8000, 400);
+  await sleep(2500);
+  const conv = { l: (await links()).links[0] || '' };
+  const at = await chatAt();
+  const o = await gotOffer(30000); await step({ cancelOffer: 1 });
+  await newChat('ChatGPT');
+  const back = await chatAt();
+  return [saved.ok && inNew.ok && only && s === 'sent' && working.ok && o.ok && /\/g\/g-p-[^/]+\/c\//.test(at) && /\/project$/.test(back) ? 'PASS' : 'FAIL',
+    `saved ${saved.ok}; new chat ${inNew.at}; page only ${only}; sent ${s}, working ${working.ok}, conversation ${at}; link ${conv.l}; offered ${o.id}; next new chat ${back}`];
+});
+
+add('P3', 'project', 'Claude: ⋯ Set it up: /projects/create filled (name, description), the person\'s Create, Set project instructions filled, the person\'s Save, new chats start in the project', async () => {
+  await projReset();
+  await step({ projectsetup: 'Claude' });
+  const form = await until(async () => { const v = await panejs(`const n = document.getElementById('np-name'), d = document.getElementById('np-desc'); return n ? n.value + '|' + d.value : 'none'`); return { ok: /^TRIF\|Mods for websites/.test(v), v }; }, 20000);
+  if (!form.ok) return ['FAIL', `form: ${form.v}`];
+  await panejs(`document.querySelector('.create').click(); return 1`);
+  const filled = await until(async () => { const v = await panejs(`const t = document.getElementById('pi-text'); return t ? String(t.value.includes('This project is for making TRIF mods')) : 'none'`); return { ok: v === 'true', v }; }, 20000);
+  if (!filled.ok) return ['FAIL', `instructions: ${filled.v}; ${await projState()}`];
+  await panejs(`[...document.querySelectorAll('[role="dialog"] button')].find((b) => /Save instructions/.test(b.textContent)).click(); return 1`);
+  const saved = await until(async () => { const st = await projState(); return { ok: projOf(st, 'Claude')[1] === 'true', st }; }, 10000);
+  const inNew = await until(async () => { const s = await chatState(); const at = await chatAt(); return { ok: s.usable && s.trif > 0 && /\/project\/p-[0-9a-f]{8}$/.test(at), at }; }, 20000);
+  const only = await pageOnly();
+  const s = await send(words('P3'));
+  await until(async () => { const t = await chat(); return { ok: /activity: working/.test(t), t }; }, 8000, 400);
+  await sleep(1500);
+  const at = await chatAt();
+  const o = await gotOffer(30000); await step({ cancelOffer: 1 });
+  await newChat('Claude');
+  const back = await chatAt();
+  const noCard = !(await cardShown());
+  return [saved.ok && inNew.ok && only && o.ok && /\/chat\//.test(at) && /\/project\/p-/.test(back) && noCard ? 'PASS' : 'FAIL', `saved ${saved.ok}; new chat ${inNew.at}; page only ${only}; sent ${s} → ${at}; offered ${o.id}; next new chat ${back}; card ${!noCard}`];
+});
+
+add('P4', 'project', 'The project gone (deleted on the stand-in, after P3): the next new chat is an ordinary one with the full instructions; the project forgotten; no card', async () => {
+  const st0 = await projState();
+  const [u] = projOf(st0, 'Claude');
+  const id = (/\/project\/(p-[0-9a-f]{8})/.exec(u || '') || [])[1];
+  if (!id) return ['BLOCKED', `needs P3's project: ${st0.split('\n')[0]}`];
+  await new Promise((r) => http.get(`${BASE}/standin-project/${id}/delete`, (res) => { res.resume(); res.on('end', r); }).on('error', r));
+  await step({ service: 'Claude' });
+  await step({ sheet: 'chat' });
+  await sleep(1200);
+  await step({ newchat: 1 });
+  const fell = await until(async () => { const st = await projState(); const s = await chatState(); return { ok: /Claude: offer \w+, project none/.test(st) && s.usable && s.trif > 0, st, at: await chatAt() }; }, 25000, 800);
+  const only = await pageOnly();
+  const card = await cardShown();
+  return [fell.ok && !only && !card ? 'PASS' : 'FAIL', `${(fell.st || '').split('\n')[0]}; at ${fell.at}; page only ${only}; card ${card}`];
+});
+
+add('P5', 'project', 'Claude: sent past the card without an answer: never again', async () => {
+  await projReset();
+  const g = await newChat('Claude');
+  if (!g.ok) return ['FAIL', `no fill: ${g.s}`];
+  const up = await cardUp();
+  await until(async () => ({ ok: /Claude: offer shown/.test(await projState()) }), 6000, 500);
+  const s = await send(words('P5'));
+  await until(async () => { const t = await chat(); return { ok: /activity: working/.test(t), t }; }, 8000, 400);
+  const st = await projState();
+  await gotOffer(30000); await step({ cancelOffer: 1 });
+  await newChat('Claude');
+  await sleep(4000);
+  const again = await cardShown();
+  return [up.ok && s === 'sent' && /Claude: offer ignored/.test(st) && !again ? 'PASS' : 'FAIL', `card ${up.ok}; sent ${s}; ${st.split('\n')[0]}; a new chat's card ${again}`];
+});
+
+add('P6', 'project', 'Claude: Set it up, then the form\'s Cancel: nothing kept, ordinary chats, no card again', async () => {
+  await projReset();
+  const g = await newChat('Claude');
+  if (!g.ok) return ['FAIL', `no fill: ${g.s}`];
+  if (!(await cardUp()).ok) return ['FAIL', 'no card'];
+  await step({ chatjs: `document.querySelector('#trif-greeting .trif-setup').click(); return 1` });
+  const form = await until(async () => { const v = await panejs(`const n = document.getElementById('np-name'); return n ? n.value : 'none'`); return { ok: v === 'TRIF', v }; }, 20000);
+  if (!form.ok) return ['FAIL', `form: ${form.v}`];
+  await panejs(`document.querySelector('.cancel').click(); return 1`);
+  const over = await until(async () => { const st = await projState(); return { ok: /chat Claude [^\n]*setup none/.test(st) && /Claude: offer accepted, project none/.test(st), st }; }, 10000);
+  await newChat('Claude');
+  await sleep(4000);
+  const again = await cardShown();
+  const at = await chatAt();
+  return [over.ok && !again && !/\/project\//.test(at) ? 'PASS' : 'FAIL', `${(over.st || '').replace(/\n/g, ' / ')}; card ${again}; at ${at}`];
 });
 
 module.exports = { step, until, launch, links, offer, modlist, ask, send, goToChat, tabs, reset, runsHere, words, modId, TAG, cases, shot, panejs, pagejs, chat, sleep, serve, cleanPrefs };

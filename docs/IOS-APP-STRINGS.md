@@ -914,3 +914,19 @@ The messages put in the chat's box (the person sends them, so they're listed; th
 
 The instructions to the model (how to write edit blocks, the "edit with:" line beside each mod) are agent-facing:
 Browser.editHowTo, not listed.
+
+## TRIF's chats in a project of their own, set up in one tap (added 11-20, Tim: "TRIF's chats in Claude and ChatGPT go into a 'TRIF' project by default, set up in one tap"; drafts)
+
+| Where | Old | New |
+|---|---|---|
+| A card under TRIF's greeting in an empty chat, the first time each service's chat opens (asked once: any answer, or a send past it, is final) | — | **Keep TRIF chats in their own project?** A project called TRIF in {Claude/ChatGPT} keeps them together. They still show in your recent chats. · **Set it up** · Not now |
+| The new project's name, filled in (the person can change it) | — | TRIF |
+| The new project's description, where the form has one (claude.ai's "What do you want to work on?"; Claude doesn't see it) | — | Mods for websites, made in the TRIF app. |
+| A green line over the service's new-project form (no touches) | — | Tap {the form's own button: Create project} to make it. TRIF fills in its instructions next: one more tap. |
+| A green line over the project's instructions box once the project is made | — | TRIF filled in its instructions. Tap {the box's own button: Save instructions / Save} to finish. |
+| The pill on what TRIF attached, in a new chat in TRIF's project (the page without the guide) | From TRIF: page & guide | From TRIF: the page |
+| ⋯ → its question, before a project is used (the menu item itself unchanged: Keep TRIF chats in a project…) | **Keep TRIF chats in a project** In {Claude/ChatGPT}, make a new project and paste TRIF's instructions as its instructions (they're copied when you tap Copy and go). Then, on the project's page, tap Use this project for TRIF chats. New TRIF chats then start in it. · Copy and go · Cancel | **Keep TRIF chats in a project** TRIF opens {Claude/ChatGPT}'s new-project form, filled in: you tap Create, then Save for TRIF's instructions. New TRIF chats then start in that project. They still show in your recent chats. · **Set it up** · Cancel |
+| ⋯ → its question once a project is used (message unchanged) | … · Make another · Stop using it · Cancel | … · Make a new one · Stop using it · Cancel |
+
+Unchanged: "Use this project for TRIF chats" over a project's page TRIF isn't using (now not shown while a setup is
+under way). The project's instructions themselves (ClaudePane.projectInstructions: the guide) are agent-facing.

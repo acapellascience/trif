@@ -17,7 +17,7 @@ comparable without a send: reply and streaming markers, code blocks, a sent mess
 11-20, a reply picked up after TRIF wasn't running (SentNotes): B11 changed, B12-B15 added; with A1, A3, B3, B9, C8,
 D1 on that build: 11 PASS. B10 (the phone locked, by hand) not run again.
 
-**Totals: 46 rows: 43 PASS, 2 FAIL → fixed (now PASS), 1 BLOCKED.** 11-19, edit blocks: F1-F8 added, and A1, A2, A3,
+**Totals: 52 rows: 49 PASS, 2 FAIL → fixed (now PASS), 1 BLOCKED.** 11-20, projects: P1-P6 added, PASS. 11-19, edit blocks: F1-F8 added, and A1, A2, A3,
 A6, B3, C2, C4, C5, C6, C7 run again on that build: all PASS (A6 after a test fix, below). The script's last run (merged with origin/ios-poc
 784a3e9): 32 cases, 31 PASS, 1 BLOCKED (A5); the rest by hand.
 
@@ -84,6 +84,26 @@ needs Tim's send (TIM-SENDS 6-8, 13).
 | E2 | The keyboard up in another chat when a mod arrives | PASS | the banner over the chat, the keyboard left alone (shot 537) |
 | E3 | Rotation with Add this mod? up | PASS (note) | landscape on the SE: the sheet is all there, but Add it is below the fold (scroll) (shot 538) |
 | E4 | claude.ai's own greeting, signed in | FAIL → fixed in 8cc1965 | TRIF's greeting sat above "Hello, night owl"; now in its place, Claude's hidden, light and dark (shots 530-532) |
+
+**TRIF's chats in a project of their own (11-20, Tim: "set up in one tap").** Stand-ins: claude.ai's /projects/create
+(mobile/shared/pages/projects.html, from the real signed-in dialog), chatgpt.com's side bar + "Create project" (chat.html
+`?gptin`/`?thread`, from the real one), project pages with their instructions (claude.ai's "Set project instructions";
+chatgpt.com's ••• → Project settings: from the help pages, not seen signed in), serve.js keeping projects
+(/standin-project). The person's Create and Save are the stand-in's buttons clicked by the script, as the person's taps.
+
+| Row | Case | Result | Seen |
+|---|---|---|---|
+| P1 | Claude: the card on the first new chat; Not now: gone at once, never again | PASS | offer shown (once in view 2 s) → declined; a new chat: no card (shot 562) |
+| P2 | ChatGPT: Set it up: the side bar opened, "Create project" filled (TRIF), the person's Create, the project noticed by /g/g-p-<id>-trif/project, ••• → Project settings opened and filled, the person's Save, a new chat in the project with the page only; a send: its /g/…/c/<id> conversation kept, the reply's mod offered, and the next new chat on the project again | PASS (after a script fix: the person's Create was looked for as the page's first form's submit, the composer's Send) | shot 568 |
+| P3 | Claude: ⋯ Set it up: /projects/create filled (name, description), the person's Create, "Set project instructions" opened and filled, the person's Save, a new chat on /project/<id> with the page only ("From TRIF: the page"); a send → /chat/<id>; the next new chat on the project | PASS | shots 563-565 |
+| P4 | The project gone (deleted on the stand-in after P3; its page 404s): the next new chat is ordinary, with the full instructions; the project forgotten; no card | PASS | |
+| P5 | Claude: sent past the card without an answer: never again | PASS | offer ignored |
+| P6 | Claude: Set it up, then the form's Cancel: nothing kept, ordinary chats, no card again | PASS | setup over at the page's leaving |
+
+With P1-P6 the same build ran A1, A2, A3, B11 and F1: PASS. On the signed-in Simulator (Tim's accounts, nothing
+created or sent): Set it up filled claude.ai's real "New project" (name, description, Create enabled; shot 566) and
+chatgpt.com's real "Create project" through its side bar (name, Create enabled); the card on ChatGPT's real new chat
+(shot 567); on claude.ai's new chat its own "Auto is now the default" notice took the card's room (no card, rightly).
 
 ## What broke and what was fixed
 

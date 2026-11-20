@@ -315,7 +315,37 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
   out again: TRIF text for another page, any TRIF text when this fill's went as a file, a second tile of something TRIF
   attached once; this fill's own text is typed again if the draft replaced it. Switching to Claude or ChatGPT (from
   More too) is opening that chat: its box filled for the tab's page when the chat is idle and the tab's.
-- Projects: the person makes the project; TRIF copies its instructions and remembers the page.
+- Projects (Tim 11-20: "TRIF's chats in Claude and ChatGPT go into a 'TRIF' project by default, set up in one tap, so
+  they don't sprawl across the person's history"):
+  - Offered once per service, on first use: the first time that service's chat opens in TRIF, TRIF's greeting in an
+    empty chat carries a card, "Keep TRIF chats in their own project?" · Set it up · Not now (it says project chats
+    still show in recent chats). Never while TRIF fills the box or just after it, never over the message box, never
+    under the quick ask's strip; with no room for it, it isn't drawn. Any answer is final for that service: Not now =
+    never asked again; a send past the card without an answer counts as one too. ⋯ → "Keep TRIF chats in a
+    project…" stays for anyone who changes their mind (and "Make a new one" / "Stop using it" once there's one).
+  - Set it up: TRIF fills, the person creates. TRIF opens the service's new-project form in the chat and fills it in
+    (name "TRIF"; a short description where the form has one), with a line "Tap {Create button} to make it. TRIF fills
+    in its instructions next: one more tap." TRIF NEVER presses Create, Save or Send (site terms): it only opens forms
+    and menus (ChatGPT's side bar and its +, "Set project instructions", "Project settings") and watches for the
+    person's taps. claude.ai (signed in, 11-20): /projects/create is a "New project" dialog: Name, "What do you want
+    to work on? (optional)", Context, Create project; instructions are set on the project page after ("Set project
+    instructions" → Save instructions). chatgpt.com (11-20): no address for the form: the side bar's Projects + ("Add
+    new project") opens "Create project" (Project name, Default memory, Create project); instructions after, in the
+    project's ••• → Project settings.
+  - The project is noticed by its address (claude.ai/project/<id>; chatgpt.com/g/g-p-<id>-<name>/project): the first
+    project page within 10 minutes of the form, never the page the setup started on, not after the form was closed or
+    left without Create. Whatever the person named it. It's kept at once; TRIF then fills its instructions box with
+    TRIF's instructions (the guide) and the line "TRIF filled in its instructions. Tap {Save button} to finish."; the
+    person's Save marks the project as having them. No instructions box found: the project stays, its chats carry the
+    full instructions. No form found (a plan's limit, a page TRIF doesn't know, signed out): ordinary chats, logged,
+    nothing said.
+  - Every new TRIF chat for that service starts on the project's page (its message box starts a chat in it); with the
+    instructions saved there, a new chat's fill is the page only (no guide; its pill says "From TRIF: the page").
+    ChatGPT's project conversations are /g/g-p-<id>-<name>/c/<id>: conversations like any other.
+  - A project that's gone (404/410, the page says not found, or the service sends the chat elsewhere on its own site;
+    not a sign-in page, not the same project renamed): dropped, ordinary chats from then on, logged; nothing offered
+    again.
+  - Existing chats stay where they are (no moving). Project chats still show in the service's recent chats.
 
 ## Quick ask
 

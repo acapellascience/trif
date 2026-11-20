@@ -1055,3 +1055,92 @@ test('the chat script: a reply picked up after TRIF wasn\'t running (Tim, 11-20:
     server.close();
   }
 });
+
+test('the chat script: TRIF\'s chats in a project (Tim, 11-20: "set up in one tap"): the first-use card under the greeting, its answers told; claude.ai\'s and chatgpt.com\'s new-project forms filled and their Create only watched (never pressed by TRIF); the project\'s instructions box opened and filled, the person\'s Save told; a gone project\'s page said so', { skip: browserTestsSkip(), timeout: LOCK_WAIT + 120000 }, async () => {
+  const server = http.createServer(handler(() => {}));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const shape = { rim: '10,10 118,10 118,118 10,118', face: '24,24 104,24 104,104 24,104', eyes: ['40,50 56,50 56,70 40,70', '72,50 88,50 88,70 72,70'], colours: { rim: '#34d399', face: '#18181b', eye: '#34d399' } };
+  const open = async (browser, url) => {
+    const page = await browser.newPage();
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 560, deviceScaleFactor: 2, mobile: true });
+    await page.goto(url);
+    await page.addScriptTag({ content: STUB });
+    await page.addScriptTag({ content: CHAT });
+    return page;
+  };
+  // (every submit and every click on a Create / Save button the page sees, with whether it was a real (trusted) one)
+  const WATCH = `window.__presses = []; document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('button'); if (b && /create|save|send/i.test(b.textContent)) window.__presses.push(b.textContent.trim()); }, true);
+    document.addEventListener('submit', (e) => window.__presses.push('submit'), true);`;
+  let browser;
+  try {
+    browser = await launch();
+    // (the card: drawn under the greeting with the service's name, told once it has stayed 2 s; Not now told; gone)
+    let page = await open(browser, `${base}/chat.html?greet=claude`);
+    await page.evaluate((s) => globalThis.__trifChat.look('example.com', s, 'Claude'), shape);
+    await page.waitForTimeout(400);
+    const card = await page.evaluate(() => { const o = document.querySelector('#trif-greeting .trif-offer'); return { shown: !!o && !o.hidden && o.getBoundingClientRect().height > 0, words: o && o.textContent }; });
+    assert.equal(card.shown, true, 'the card shows');
+    assert.match(card.words, /Keep TRIF chats in their own project\?.*in Claude.*recent chats.*Set it up.*Not now/);
+    assert.equal((await posts(page)).filter((m) => m.type === 'projoffer').length, 0, 'not told before it has stayed 2 s');
+    await waitPost(page, 'projoffer');
+    await page.evaluate(() => document.querySelector('#trif-greeting .trif-later').click());
+    assert.deepEqual((await posts(page)).filter((m) => m.type === 'project'), [{ type: 'project', what: 'later' }]);
+    await page.waitForTimeout(300);
+    assert.equal(await page.evaluate(() => document.querySelector('#trif-greeting .trif-offer').hidden), true, 'gone at once');
+    // (no card when the app doesn't offer it; none while a fill goes in)
+    await page.evaluate((s) => globalThis.__trifChat.look('example.com', s, ''), shape);
+    await page.waitForTimeout(300);
+    assert.equal(await page.evaluate(() => document.querySelector('#trif-greeting .trif-offer').hidden), true, 'not offered: no card');
+    await page.close();
+
+    // (claude.ai's form: name and description filled, Create enabled, never pressed; the person's Create told)
+    page = await open(browser, `${base}/projects/create`);
+    await page.evaluate(WATCH);
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.projectForm({ name: 'TRIF', description: 'Mods for websites, made in the TRIF app.' })), 'filled');
+    const f = await page.evaluate(() => ({ name: document.getElementById('np-name').value, desc: document.getElementById('np-desc').value, create: document.querySelector('.create').disabled, hint: (document.getElementById('trif-hint') || {}).textContent }));
+    assert.deepEqual(f, { name: 'TRIF', desc: 'Mods for websites, made in the TRIF app.', create: false, hint: 'Tap Create project to make it. TRIF fills in its instructions next: one more tap.' });
+    await page.waitForTimeout(500);
+    assert.deepEqual(await page.evaluate(() => window.__presses), [], 'TRIF pressed nothing');
+    const [, nav] = await Promise.all([page.evaluate(() => document.querySelector('.create').click()), page.waitForFunction(() => /^\/project\/p-/.test(location.pathname) || null, null, { timeoutMs: 8000 }).catch(() => null)]);
+    // (the page left: its posts went with it; the create is seen before it goes)
+    assert.ok(nav !== undefined);
+    await page.close();
+
+    // (chatgpt.com's: the side bar opened, its + pressed, the form filled; Create never pressed; closed: told)
+    page = await open(browser, `${base}/chat.html?gpt&gptin`);
+    await page.evaluate(WATCH);
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.projectForm({ name: 'TRIF' })), 'filled');
+    assert.equal(await page.evaluate(() => document.getElementById('chatgpt-project-name').value), 'TRIF');
+    assert.equal(await page.evaluate(() => document.getElementById('chatgpt-project-name').form.querySelector('button[type=submit]').disabled), false);
+    await page.waitForTimeout(500);
+    assert.deepEqual(await page.evaluate(() => window.__presses), [], 'TRIF pressed nothing');
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Close dialog').click());
+    assert.deepEqual((await waitPost(page, 'projform')).map((m) => m.what), ['closed']);
+    await page.close();
+
+    // (a project's page: claude's "Set project instructions", chatgpt's ••• → Project settings; filled, Save watched)
+    for (const kind of ['claude', 'chatgpt']) {
+      const made = await new Promise((r) => { const q = http.request(`${base}/standin-project`, { method: 'POST' }, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => r(JSON.parse(b).id)); }); q.end(JSON.stringify({ service: kind, name: 'TRIF' })); });
+      page = await open(browser, kind === 'claude' ? `${base}/project/${made}` : `${base}/g/g-p-${made}-trif/project`);
+      await page.evaluate(WATCH);
+      assert.equal(await page.evaluate(() => globalThis.__trifChat.projectGuide({ text: 'This project is for making TRIF mods: test.' })), 'filled', kind);
+      assert.equal(await page.evaluate(() => document.getElementById('pi-text').value), 'This project is for making TRIF mods: test.');
+      assert.equal(await page.evaluate(() => document.body.hasAttribute('data-standin-deleted')), false, `${kind}: Delete project never pressed`);
+      assert.deepEqual(await page.evaluate(() => window.__presses), [], `${kind}: TRIF pressed nothing`);
+      await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => /^Save/.test(b.textContent)).click());
+      assert.deepEqual((await waitPost(page, 'projguide')).map((m) => m.what), ['saved'], kind);
+      // (filled again: TRIF's text is in it already)
+      assert.equal(await page.evaluate(() => globalThis.__trifChat.projectGuide({ text: 'This project is for making TRIF mods: test.' })), 'already', `${kind}: already`);
+      assert.equal(await page.evaluate(() => globalThis.__trifChat.projectMissing()), 'there');
+      await page.close();
+    }
+    // (a deleted project's page: not found)
+    page = await open(browser, `${base}/project/p-00000000`);
+    assert.equal(await page.evaluate(() => globalThis.__trifChat.projectMissing()), 'missing');
+    await page.close();
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+});

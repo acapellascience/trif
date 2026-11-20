@@ -113,8 +113,14 @@ window** whose page area is the phone's, with TRIF's side panel or sidebar besid
   route). Typed in Firefox's real address bar (headless, `gURLBar`): the next page is still the phone's (the
   rules are per tab, whatever navigates it).
 - **The tab still moves, and so does activeTab**; in the ordinary window a toolbar click there gives it too.
-  "Back to desktop" moves the tab back where it was; the phone window, left with no tab, closes with its side
-  panel. A phone tab the person drags out of the phone window into another becomes a desktop tab again (rules
+  "Back to desktop" (since 11-20) expands the phone window back out, to the size, place and state of the window
+  the tab came from (as it is now, or as it was if it's closed), the tab staying in it and TRIF's side panel or
+  sidebar there staying open, now on the desktop page. Tim: "going back to desktop view now kills the sidebar. can
+  we instead expand back out and keep the sidebar?": moving the tab back closed the phone window with its panel.
+  (Before, the tab went back where it was; the popup route still does.) And a width correction under way when
+  Back to desktop came (`refit`, which can take two seconds where the browser won't go as narrow as asked) used
+  to narrow the window back to the phone's right after it was restored, the tab alone in its window too: the
+  fitting now stops once the phone view has ended (`fitPhoneWindow` `live`). A phone tab the person drags out of the phone window into another becomes a desktop tab again (rules
   removed, reloaded): its window isn't the phone's to resize. A new tab opened in the phone window is an ordinary
   tab.
 - **A tab alone in its window doesn't move (11-19).** Tim, real Chrome, google.com in a window of its own:

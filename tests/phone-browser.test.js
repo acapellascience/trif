@@ -130,18 +130,21 @@ test('the phone view: the site sees an iPhone in that tab only, and Back to desk
     await E(([id, url]) => chrome.tabs.update(id, { url }), [deskTab, pages.url('/site')]);
     await waitFor('the desktop redirect', () => E((id) => chrome.tabs.get(id).then((t) => t.status === 'complete' && t.url.endsWith('/desktop/site')), deskTab));
 
-    // Back to desktop: the tab where it was, a desktop page again, the rules and the page script gone
+    // Back to desktop (11-20): the phone window expanded back out to the user's window's size, the tab and its side
+    // panel still in it; a desktop page again, the rules and the page script gone
     await E(([id, url]) => chrome.tabs.update(id, { url }), [phoneTab, pages.url('/detect')]);
     await waitFor('the page again', () => page(phoneTab, 'window.__seen && document.readyState === "complete"'));
+    const homeSize = await E((id) => chrome.windows.get(id).then((w) => [w.width, w.height]), homeWin);
     const back = await ask({ type: 'phone.close', tabId: phoneTab });
     assert.equal(back.back, true);
-    const where = await E((id) => chrome.tabs.get(id).then((t) => ({ windowId: t.windowId, index: t.index })), phoneTab);
-    assert.deepEqual(where, { windowId: homeWin, index: 0 }, 'back in its window, where it was');
+    assert.equal(back.window, opened.window);
+    assert.equal(await E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), opened.window, 'still in its window');
+    await waitFor('expanded back out', async () => JSON.stringify(await E((id) => chrome.windows.get(id).then((w) => [w.width, w.height]), opened.window)) === JSON.stringify(homeSize));
     await waitFor('the desktop page', () => page(phoneTab, 'window.__seen && document.readyState === "complete" && !window.__seen.uaPhone'));
     assert.equal(await page(phoneTab, 'window.__seen.touchPoints'), 0);
     assert.deepEqual(await E(() => chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => x.id >= 1e6).length)), 0);
     assert.deepEqual(await E(() => chrome.scripting.getRegisteredContentScripts().then((r) => r.length)), 0);
-    await waitFor('the phone window to close (no tab left in it), its side panel with it', () => E((id) => chrome.windows.get(id).then(() => false, () => true), opened.window));
+    await E((id) => chrome.windows.remove(id), opened.window);
 
     // Closing the phone window instead: its tab goes with it, and so do the rules
     const again = await h.openPhone(deskTab, null, { panel: false });
@@ -695,7 +698,7 @@ test('the phone view\'s window from the side panel\'s menu: the side panel besid
       known.add(id);
       const p = await attach(id);
       await waitFor(`${what} loaded`, () => p.ev('document.readyState === "complete" && !document.getElementById("phone-btn").hidden'));
-      return p;
+      return { ...p, targetId: id };
     };
     const toolbar = async (url) => {
       const { targetInfos } = await browser.cdp.send('Target.getTargets', { filter: [{ type: 'tab' }] });
@@ -741,13 +744,25 @@ test('the phone view\'s window from the side panel\'s menu: the side panel besid
       await browser.cdp.send('Target.closeTarget', { targetId }).catch(() => {});
     }
     await browser.cdp.send('Emulation.clearDeviceMetricsOverride', {}, phone.sid);
-    // Back to desktop, from the phone's side panel: the tab home, the phone window gone with its side panel
-    await phone.ev('document.getElementById("phone-btn").click(), 0');
+    // Back to desktop, from the phone's side panel (Tim, 11-20: "can we instead expand back out and keep the
+    // sidebar?"): the phone window expanded back out to the user's window's size, the tab in it, and the same side
+    // panel still open there, now the desktop view's
+    const homeSize = await h.E((id) => chrome.windows.get(id).then((w) => [w.left, w.top, w.width, w.height]), homeWin);
+    await phone.click('#phone-btn');
     await waitFor('the phone menu', () => phone.ev('!document.getElementById("phone-menu").hidden'));
     assert.equal(await phone.ev('document.getElementById("phone-menu-view").textContent'), 'Back to desktop');
-    await phone.ev('document.getElementById("phone-menu-view").click(), 0');
+    await phone.click('#phone-menu-view');
     await waitFor('back to desktop', () => h.ask({ type: 'phone.state', tabId: phoneTab }).then((x) => !x.phone));
-    assert.equal(await h.E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), homeWin);
+    assert.equal(await h.E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), st.window, 'the tab still in its window');
+    await waitFor('expanded back out', async () => JSON.stringify(await h.E((id) => chrome.windows.get(id).then((w) => [w.left, w.top, w.width, w.height]), st.window)) === JSON.stringify(homeSize));
+    await sleep(1500);
+    assert.deepEqual(await h.E((id) => chrome.windows.get(id).then((w) => [w.left, w.top, w.width, w.height]), st.window), homeSize, 'and stays so (no fitting of the phone window after it)');
+    assert.ok((await panels()).includes(phone.targetId), 'the same side panel, still open');
+    await waitFor('the side panel the desktop view\'s', () => phone.ev('!document.body.classList.contains("phone-view") && document.getElementById("phone-note").hidden && document.getElementById("phone-btn").dataset.on === "false"'));
+    await waitFor('a desktop page beside it', async () => (await h.page(phoneTab, 'document.readyState === "complete" && window.__seen && !window.__seen.uaPhone && innerWidth')) > 600)
+      .catch(async (e) => { console.error('DEBUG', JSON.stringify(await h.page(phoneTab, 'JSON.stringify({ r: document.readyState, s: window.__seen, w: innerWidth })').catch((x) => x.message)), JSON.stringify(await h.E((id) => chrome.windows.get(id), st.window))); throw e; });
+    // (the tab home again, for what follows: the window it leaves, with no tab, closes)
+    await h.E(([tab, win]) => chrome.tabs.move(tab, { windowId: win, index: 0 }), [phoneTab, homeWin]);
     await waitFor('the phone window gone', () => h.E((id) => chrome.windows.get(id).then(() => false, () => true), st.window));
 
     // Without the click's gesture (a script's click): the window opens, the desktop panel says to click TRIF's button there
@@ -900,6 +915,8 @@ test('the phone view from a window with only that tab: the window becomes the ph
     await waitFor('the desktop page', () => h.page(phoneTab, 'window.__seen && document.readyState === "complete" && !window.__seen.uaPhone'));
     await waitFor('the panel the desktop\'s', () => desk.ev('!document.body.classList.contains("phone-view")'));
     await sleep(1500);
+    assert.deepEqual(await h.E((id) => chrome.windows.get(id).then((x) => ({ left: x.left, top: x.top, width: x.width, height: x.height })), homeWin), before, 'and stays so');
+    assert.ok((await P.panels()).includes(desk.targetId), 'the same side panel, still open');
     f = siteFrames(await desk.frames(), '127.0.0.1');
     assert.equal(f.flips, 1, `phone to desktop once, never back: ${JSON.stringify(f.all)}`);
     assert.equal(f.all.at(-1).phone, false);
@@ -938,10 +955,16 @@ test('a side panel opened in the phone window (TRIF\'s button there, while its p
     assert.equal(f.first.phone, true, `the first paint with the site is the phone view: ${JSON.stringify(f.all)}`);
     assert.equal(f.first.note, true, 'with its line');
     assert.equal(f.flips, 0, `and stays so: ${JSON.stringify(f.all)}`);
-    // the reverse: Back to desktop, then TRIF's panel opened on the tab, home again, while its page is busy: the desktop view from the start
+    // the reverse: Back to desktop (the window expands back out, its side panel staying: the desktop view, once),
+    // then TRIF's panel opened on the tab, home again, while its page is busy: the desktop view from the start
+    await phone.ev('window.__frames.length = 0');
     await h.ask({ type: 'phone.close', tabId: phoneTab });
-    assert.equal(await h.E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), homeWin);
+    assert.equal(await h.E((id) => chrome.tabs.get(id).then((t) => t.windowId), phoneTab), opened.window);
     await waitFor('the desktop page', () => h.page(phoneTab, 'window.__seen && document.readyState === "complete" && !window.__seen.uaPhone'));
+    await sleep(1500);
+    const back = siteFrames(await phone.frames(), '127.0.0.1');
+    assert.deepEqual([back.all.at(-1)?.phone, back.flips], [false, 1], `the phone window's side panel, the desktop view's: ${JSON.stringify(back.all)}`);
+    await h.E(([tab, win]) => chrome.tabs.move(tab, { windowId: win, index: 0 }), [phoneTab, homeWin]);
     await h.E(([tab, win]) => chrome.tabs.update(tab, { active: true }).then(() => chrome.windows.update(win, { focused: true })), [phoneTab, homeWin]);
     await busy();
     const desk = await P.nextPanel(() => P.toolbar(pages.url('/detect')));

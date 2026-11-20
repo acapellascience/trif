@@ -22,7 +22,8 @@
 // open fails, the window opens at phone width and the panel that asked says to click TRIF's button in it.
 // A tab alone in its window (11-19) doesn't move: that window itself is made phone-sized, its side panel or
 // sidebar staying open (moving a window's last tab out closes the window and the panel in it, which then can't
-// open anything), and Back to desktop gives it its size back.
+// open anything), and Back to desktop gives it its size back. Back to desktop (11-20) expands any phone window
+// back out, the tab staying in it with TRIF's panel beside it, to the size of the window the tab came from.
 //
 // The popup route (the design before 11-18), kept for browsers with no side panel (Arc: the panel in a window,
 // `state.panelInWindow`, or a request from such a panel window): a phone-sized popup, which an ordinary window
@@ -202,11 +203,13 @@ async function settled(chrome, tabId, windowId, pause) {
  * alone, the window left where it is and as tall as it is. Returns the page's size, {w, h}, or null if it can't
  * be measured yet. `pause`: ms between looks.
  */
-export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, home = null, log = () => {}, pause = 100, widthOnly = false }) {
+export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, home = null, log = () => {}, pause = 100, widthOnly = false, live = () => true }) {
   let before = null;
   for (let round = 0; round < 4; round++) {
     const m = await settled(chrome, tabId, windowId, pause);
     if (!m) return null;
+    // (the phone view ended meanwhile, Back to desktop expanding the window back out: left as it is now)
+    if (!live()) return m.size;
     // (a maximized, full-screen or minimized window is the person's choice: left as it is)
     if (m.win.state && m.win.state !== 'normal') return m.size;
     const frame = { width: m.win.width - m.size.w, height: m.win.height - m.size.h };
@@ -379,7 +382,7 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       if (!phones.has(tabId)) return { window: p.window, viewport: null, panel: shown };
       let viewport = null;
       for (let i = 0; i < 20 && !viewport; i++) {
-        viewport = await fitPhoneWindow({ chrome, tabId, windowId: p.window, screen: p.screen || null, home: p.homeBounds || null, log });
+        viewport = await fitPhoneWindow({ chrome, tabId, windowId: p.window, screen: p.screen || null, home: p.homeBounds || null, log, live: () => phones.has(tabId) });
         if (!viewport) await new Promise((r) => setTimeout(r, 150));
       }
       if (viewport) { p.width = viewport.w; save(); }
@@ -402,7 +405,7 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       try {
         do {
           again.delete(tabId);
-          const size = await fitPhoneWindow({ chrome, tabId, windowId: p.window, log, widthOnly: true });
+          const size = await fitPhoneWindow({ chrome, tabId, windowId: p.window, log, widthOnly: true, live: () => phones.has(tabId) });
           if (size && size.w !== p.width) { p.width = size.w; save(); changed(); }
         } while (again.has(tabId) && phones.has(tabId));
       } catch (e) { log(`phone window: ${e?.message ?? e}`); }
@@ -485,6 +488,8 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
             return { window: p.window, route, same: true };
           }
           const bounds = phoneBounds({ frame: WINDOW_FRAME_GUESS, screen, home });
+          // (what Back to desktop expands the phone window back out to, should the window it came from be gone)
+          if (home) p.restore = { left: home.left, top: home.top, width: home.width, height: home.height, state: home.state || 'normal' };
           moving.add(tabId);
           let win;
           try {
@@ -507,7 +512,7 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
         // the phone's size from its first script)
         let viewport = null;
         for (let i = 0; i < 20 && !viewport; i++) {
-          viewport = await fitPhoneWindow({ chrome, tabId, windowId: win.id, screen, home, log });
+          viewport = await fitPhoneWindow({ chrome, tabId, windowId: win.id, screen, home, log, live: () => phones.has(tabId) });
           if (!viewport) await new Promise((r) => setTimeout(r, 150));
         }
         if (viewport) { p.width = viewport.w; save(); }
@@ -567,25 +572,40 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       ready.then(() => refit(tabId)).catch(() => {});
     },
 
-    /** Back to desktop: the tab back in its window, where it was, as a desktop tab (reloaded). */
+    /**
+     * Back to desktop, as a desktop tab (reloaded): the window route's phone window expanded back out, the tab in
+     * it (its panel stays); the popup route's tab back in its window, where it was.
+     */
     async close(tabId, { reload = true } = {}) {
       await ready;
       tabId = Number(tabId);
       const p = phones.get(tabId);
       if (!p) return { back: false };
       await forget(tabId);
-      // (its own window made the phone's: that window its size again, where it was, the tab still in it)
-      if (p.same) {
+      // The window route: the phone window expands back out, the tab still in it, and TRIF's side panel or sidebar
+      // there stays open, now on the desktop page (Tim, 11-20: "going back to desktop view now kills the sidebar.
+      // can we instead expand back out and keep the sidebar?": moving the tab back to the window it came from
+      // closed the phone window, and its panel with it). To the size, place and state of the window it came from
+      // (as that window is now, if it's still open; else as it was), or for a tab that was alone in its window,
+      // that window's own from before.
+      if (p.route === 'window' && p.window != null) {
         const t = await chrome.tabs.get(tabId).catch(() => null);
-        const r = p.restore;
-        if (t?.windowId === p.window && r) {
+        const win = t?.windowId === p.window ? await chrome.windows.get(p.window).catch(() => null) : null;
+        let r = p.restore || null;
+        if (win && !p.same && p.home?.windowId != null) {
+          const h = await chrome.windows.get(p.home.windowId).catch(() => null);
+          if (h) r = { left: h.left, top: h.top, width: h.width, height: h.height, state: h.state || 'normal' };
+        }
+        if (win && r) {
           await chrome.windows.update(p.window, { left: r.left, top: r.top, width: r.width, height: r.height }).catch((e) => log(`back to desktop: ${e?.message ?? e}`));
           if (r.state && r.state !== 'normal') await chrome.windows.update(p.window, { state: r.state }).catch(() => {});
+          await chrome.windows.update(p.window, { focused: true }).catch(() => {});
+          if (reload) await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+          changed();
+          return { back: true, window: p.window };
         }
-        if (reload) await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
-        changed();
-        return { back: true, window: p.window };
       }
+      // (the popup route, or a phone window gone: the tab back where it was)
       let windowId = p.home?.windowId;
       const home = windowId != null ? await chrome.windows.get(windowId).catch(() => null) : null;
       moving.add(tabId);

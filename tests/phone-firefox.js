@@ -109,6 +109,8 @@ const dropLock = () => { try { if (Number(fs.readFileSync(path.join(LOCK, 'pid')
     await until(pages.url('/detect'));
     out.close = await ask({ type: 'phone.close', tabId });
     await sleep(2500);
+    // (11-20: the phone window expanded back out, the tab and the sidebar still in it)
+    out.closedWindow = await sizes().catch((e) => `ERR ${e.message}`);
     const ctx2 = await ff.findPage((u) => u.startsWith(pages.url('/detect')));
     out.after = await ff.eval(ctx2, `async () => ({ ua: window.__seen.uaPhone, touch: window.__seen.touchPoints })`);
     out.windowsAfter = await ff.eval(panel, `async () => (await chrome.windows.getAll({ populate: true })).map((w) => ({ type: w.type, tabs: w.tabs.length }))`);

@@ -98,6 +98,12 @@ function directTools(body) {
 }
 // ... over some requests: a.b, sorted.
 const offeredTo = (bodies) => [...new Set(bodies.flatMap((b) => directTools(b).map((t) => (t.ns ? `${t.ns}.${t.name}` : t.name))))].sort();
+// A tool Codex offers that isn't known yet, as Codex describes it (for the log, to be looked at).
+const describeUnknown = (bodies, known) => {
+  const seen = new Map();
+  for (const b of bodies) for (const t of directTools(b)) { const n = t.ns ? `${t.ns}.${t.name}` : t.name; if (!known(n) && !seen.has(n)) seen.set(n, { description: t.def.description, parameters: t.def.parameters }); }
+  return [...seen].map(([n, d]) => `${n}: ${JSON.stringify(d).slice(0, 1500)}`).join('\n');
+};
 // What Codex sent back for the tool calls so far, in a request.
 const outputsOf = (j) => (Array.isArray(j && j.input) ? j.input : []).filter((i) => i && (i.type === 'function_call_output' || i.type === 'custom_tool_call_output')).map((i) => (typeof i.output === 'string' ? i.output : JSON.stringify(i.output)));
 const put = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
@@ -597,13 +603,13 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       console.log(`      (a request has: ${Object.keys(first).join(', ')}; in its input: ${[...new Set((Array.isArray(first.input) ? first.input : []).map((i) => i && i.type))].join(', ')})`);
       console.log(`      (its sub-agent tools, as Codex describes them: ${JSON.stringify(directTools(first).filter((t) => /agent/.test(t.name)).map((t) => ({ ns: t.ns, name: t.name, parameters: t.def.parameters }))).slice(0, 4000)})`);
       const had = offeredTo(parent);
-      check(had.length > 0 && had.every(codexKnownByDefault), `  the tools Codex had beside exec's: ${had.join(', ') || '(none listed)'}`, `not looked at yet: ${had.filter((t) => !codexKnownByDefault(t)).join(', ')}`);
+      check(had.length > 0 && had.every(codexKnownByDefault), `  the tools Codex had beside exec's: ${had.join(', ') || '(none listed)'}`, `not looked at yet: ${had.filter((t) => !codexKnownByDefault(t)).join(', ')}\n${describeUnknown(parent, codexKnownByDefault)}`);
       report(parentSteps, answers(parent[parent.length - 1]), '  ');
       console.log('\n  and a sub-agent of that run\'s (spawn_agent):');
       console.log(`      spawn_agent was asked ${JSON.stringify(callTo('spawn_agent', null).call)} and answered: ${String(spawnOut).replace(/\s+/g, ' ').slice(0, 600)}`);
       waitOuts.forEach((o) => console.log(`      wait_agent answered: ${String(o).replace(/\s+/g, ' ').slice(0, 400)}`));
       const childHad = offeredTo(child);
-      check(child.length > 0 && childHad.every(codexKnownByDefault), `  a sub-agent started (${child.length} requests); the tools it had beside exec's: ${childHad.join(', ') || '(none listed)'}`, `not looked at yet: ${childHad.filter((t) => !codexKnownByDefault(t)).join(', ')}`);
+      check(child.length > 0 && childHad.every(codexKnownByDefault), `  a sub-agent started (${child.length} requests); the tools it had beside exec's: ${childHad.join(', ') || '(none listed)'}`, `not looked at yet: ${childHad.filter((t) => !codexKnownByDefault(t)).join(', ')}\n${describeUnknown(child, codexKnownByDefault)}`);
       report(childSteps, child.length ? answers(child[child.length - 1]) : [], '  from the sub-agent, ');
     }
     pick = null;

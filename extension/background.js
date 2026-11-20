@@ -1322,7 +1322,7 @@ const commands = {
 
   async reload(args) {
     const tab = await scopedTab(args);
-    return loadAndReport(tab.id, () => chrome.tabs.reload(tab.id, { bypassCache: !!args.hard }));
+    return loadAndReport(tab.id, () => phones.reload(tab.id, { bypassCache: !!args.hard }));
   },
 
   // A side-panel run's navigate and open: the address is on the run's site, but the site can send the tab on
@@ -1636,6 +1636,7 @@ async function setSwitchState(id, { disabled, offSites }) {
   state.offSites = nextOff;
 }
 
+// (TRIF's reloads: phones.reload, which loads a phone tab past its service worker and the cache, so it stays the phone's)
 /** After a switch: reload the selected (or active) tab if `mod` runs on it. Returns the tab id or null; never throws. */
 // With onlyIfRunning, only when the mod runs on the tab's page: not switched off (everywhere or on that
 // site) and not held. Deleting or restoring a mod that's off changes nothing on the page.
@@ -1645,8 +1646,8 @@ async function reloadIfApplies(mod, args, { onlyIfRunning = false } = {}) {
     const url = tab.url || tab.pendingUrl || '';
     if (!modAppliesTo(mod, url)) return null;
     if (onlyIfRunning && (!isEnabled(mod.id) || mod.held || offOnSite(state.offSites, mod.id, new URL(url).hostname))) return null;
-    if (args.wait) await loadAndReport(tab.id, () => chrome.tabs.reload(tab.id)).catch(() => {});
-    else await chrome.tabs.reload(tab.id);
+    if (args.wait) await loadAndReport(tab.id, () => phones.reload(tab.id)).catch(() => {});
+    else await phones.reload(tab.id);
     return tab.id;
   } catch {
     return null;
@@ -2109,7 +2110,7 @@ async function onPageMessage(msg) {
       state.groupsOff = switchGroup(state.groupsOff, String(msg.site ?? ''), String(msg.group ?? ''), msg.enabled === true);
       await save({ groupsOff: state.groupsOff });
       await serial(applyMods).then(reportApplied).catch((e) => log('warn', errMsg(e)));
-      if (msg.tab !== undefined) await chrome.tabs.reload(Number(msg.tab)).catch(() => {});
+      if (msg.tab !== undefined) await phones.reload(Number(msg.tab)).catch(() => {});
       notifyPanels();
       return { groupsOff: state.groupsOff };
     }
@@ -2181,7 +2182,7 @@ async function onPageMessage(msg) {
       state.paused = msg.paused === true;
       await save({ paused: state.paused });
       await serial(applyMods).then(reportApplied).catch((e) => log('warn', errMsg(e)));
-      if (msg.tab !== undefined) await chrome.tabs.reload(Number(msg.tab)).catch(() => {});
+      if (msg.tab !== undefined) await phones.reload(Number(msg.tab)).catch(() => {});
       notifyPanels();
       return { paused: state.paused };
     }
@@ -2524,7 +2525,7 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
       if (!phones.isPhone(tabId)) throw new Error('that tab isn\'t in the phone view');
       if (msg.go === 'back') { await chrome.tabs.goBack(tabId); return { ok: true }; }
       if (msg.go === 'forward') { await chrome.tabs.goForward(tabId); return { ok: true }; }
-      if (msg.go === 'reload') { await chrome.tabs.reload(tabId); return { ok: true }; }
+      if (msg.go === 'reload') { await phones.reload(tabId); return { ok: true }; }
       if (msg.go === 'url') {
         const url = navTarget(String(msg.url ?? ''));
         if (!url) throw new Error('nothing to go to');
@@ -2708,7 +2709,7 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
       const tabId = Number(msg.tabId);
       if (!tries.has(tabId)) return { reloaded: false };
       tries.delete(tabId);
-      await chrome.tabs.reload(tabId);
+      await phones.reload(tabId);
       return { reloaded: true };
     }
     case 'files.add': {
@@ -2867,7 +2868,7 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
         const url = tab ? tab.url || tab.pendingUrl || '' : '';
         const added = new Set(r?.added || []);
         const runs = (m) => added.has(m.id) && isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url);
-        if (url && siteOnFor(url, state.sitesOn, sens()) && state.mods.some(runs)) await chrome.tabs.reload(tab.id).catch(() => {});
+        if (url && siteOnFor(url, state.sitesOn, sens()) && state.mods.some(runs)) await phones.reload(tab.id).catch(() => {});
       }
       notifyPanels();
       return r;
@@ -3156,7 +3157,7 @@ async function afterSiteChange(tabId) {
   const url = tab ? tab.url || tab.pendingUrl || '' : '';
   const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url));
   if (checkUserScripts()) reportApplied(await serial(applyMods));
-  if (runsThere) await chrome.tabs.reload(tab.id).catch(() => {});
+  if (runsThere) await phones.reload(tab.id).catch(() => {});
   notifyPanels();
 }
 

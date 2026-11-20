@@ -1082,3 +1082,100 @@ test('a sensitive site\'s phone mod (phone~claude.ai, boxed): the phone view lis
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+// A phone mod edited in the phone view, then the page reloaded, again and again, as an agent's edits, `trif verify`
+// and the mod's approval do it within seconds (Tim, 11-20, on X: "i just edited a mod in phone view and when the
+// page reloaded it reloaded the desktop version"). X's service worker serves its pages, without the phone's rules
+// and marker; TRIF loaded the first such page again past the worker (phone.js heal), and then, for 15 s, not the
+// next ones of the same address: the reload after the approval, seconds after verify's, came back the desktop's.
+// Now TRIF's own reloads of a phone tab go past the worker and the cache, and a heal that worked doesn't stop the
+// next. The real helper (helper/host.js, started by the browser) in a temp workspace with the phone twin's mod;
+// a page with a service worker; the tab alone in its window (made the phone's) and in a window with another tab.
+test('a phone mod edited in the phone view: each reload after it (trif verify, trif reload, the page\'s own) is the phone\'s, with the new version running', { skip, timeout: 900000 }, async () => {
+  const path = require('path');
+  const { tempDir, testEnv, HOST_JS, runCli } = require('./fake-extension');
+  const sh = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const home = tempDir('wm-pme-');
+  const extra = tempDir('wm-pmex-');
+  const twin = path.join(home, 'sites', 'phone~127.0.0.1');
+  fs.mkdirSync(twin, { recursive: true });
+  const ID = 'phone~127.0.0.1/mark';
+  const mod = (v) => ['// ==WebMod==', '// @name Mark', '// @match http://127.0.0.1/*', '// ==/WebMod==', `document.documentElement.dataset.mark = '${v}';`, ''].join('\n');
+  fs.writeFileSync(path.join(twin, 'mark.js'), mod('v1'));
+  const env = testEnv(home);
+  const pidFile = path.join(extra, 'helper.pid');
+  const host = path.join(extra, 'host.sh');
+  fs.writeFileSync(host, `#!/bin/sh\necho $$ > ${sh(pidFile)}\n${Object.entries(env).map(([k, v]) => `export ${k}=${sh(v)}`).join('\n')}\nexec ${sh(process.execPath)} ${sh(HOST_JS)} "$@"\n`);
+  fs.chmodSync(host, 0o755);
+  const pages = await servePhonePages();
+  const ext = extensionCopy(['*://127.0.0.1/*']);
+  let browser = null;
+  try {
+    browser = await launch({
+      extension: ext,
+      args: ['--screen-info={0,0 1470x956}'],
+      prepare: (profile, id) => {
+        fs.mkdirSync(path.join(profile, 'NativeMessagingHosts'));
+        fs.writeFileSync(path.join(profile, 'NativeMessagingHosts', 'com.webmods.helper.json'), JSON.stringify({
+          name: 'com.webmods.helper', description: 'TRIF helper (a test\'s)', path: host, type: 'stdio', allowed_origins: [`chrome-extension://${id}/`],
+        }));
+      },
+    });
+    const h = await harness(browser);
+    await h.allowUserScripts();
+    const status = () => h.ask({ type: 'status' });
+    await waitFor('the helper', async () => { const s = await status(); return s.helper.connected && s.mods.some((m) => m.id === ID); }, 30000);
+    await h.ask({ type: 'site.set', site: '127.0.0.1', on: true });
+    if (!(await status()).mods.find((m) => m.id === ID).enabled) await h.ask({ type: 'mod.enable', id: ID, enabled: true });
+    const cli = async (...args) => { const r = await runCli(args, { home, timeout: 60000 }); return `${r.stdout}${r.stderr}`; };
+    let v = 1;
+    for (const lone of [true, false]) {
+      const what = lone ? 'the tab alone in its window' : 'a window of its own';
+      // the site's page, under its service worker (as X's are)
+      const tabId = await h.E(async ([u, lone]) => {
+        const w = await chrome.windows.create({ url: u, focused: true, width: 1200, height: 860 });
+        if (!lone) await chrome.tabs.create({ windowId: w.id, url: 'about:blank', active: false });
+        return w.tabs[0].id;
+      }, [pages.url('/sw/detect'), lone]);
+      await waitFor('the worker', () => h.page(tabId, 'window.__sw === true'));
+      await h.E((id) => chrome.tabs.reload(id), tabId);
+      await waitFor('the page under its worker', () => h.page(tabId, 'document.readyState === "complete" && !!navigator.serviceWorker.controller'));
+      const opened = await h.openPhone(tabId, { left: 0, top: 25, width: 1470, height: 931 });
+      assert.equal(!!opened.same, lone, `${what}: ${JSON.stringify(opened)}`);
+      const look = () => h.page(tabId, `document.readyState === 'complete' && window.__seen && ({ ua: window.__seen.uaPhone, server: document.getElementById('server').textContent, marked: performance.getEntriesByType('navigation')[0].serverTiming.some((x) => x.name === 'trif-phone'), w: innerWidth, mark: document.documentElement.dataset.mark || null })`);
+      const phone = (want) => ({ ua: true, server: 'phone', marked: true, w: opened.viewport.w, mark: `v${want}` });
+      // (the page after a reload: until it has the mod's version wanted, a few seconds at most; then as it is)
+      const after = async (want) => { await sleep(800); return (await waitFor(`v${want} loaded`, async () => { const x = await look(); return x && x.mark === `v${want}` && x; }, 8000).catch(() => null)) || await look(); };
+      assert.deepEqual(await waitFor('the phone page', async () => { const x = await look(); return x && x.marked && x; }), phone(v), `${what}: the phone view`);
+      // edited and checked, twice in a row, as an agent does it: `trif verify` reloads the tab
+      for (let i = 0; i < 2; i++) {
+        v++;
+        fs.writeFileSync(path.join(twin, 'mark.js'), mod(`v${v}`));
+        await sleep(400); // (verify waits until the browser has the version saved)
+        const out = await cli('verify', ID, '--tab', String(tabId));
+        assert.match(out, /reloaded/, out);
+        assert.deepEqual(await after(v), phone(v), `${what}: after trif verify #${i + 1}`);
+      }
+      // `trif reload` (and what TRIF reloads itself: a mod switched or approved), right after
+      await cli('reload', '--tab', String(tabId));
+      assert.deepEqual(await after(v), phone(v), `${what}: after trif reload`);
+      // the page reloading itself (a mod can: @powers go-to reload), twice
+      for (let i = 0; i < 2; i++) {
+        await h.page(tabId, 'setTimeout(() => location.reload(), 10), 1');
+        await sleep(1500);
+        assert.deepEqual(await waitFor('the page again', async () => { const x = await look(); return x && x.marked && x; }, 10000).catch(look), phone(v), `${what}: after the page's own reload #${i + 1}`);
+      }
+      await h.ask({ type: 'phone.close', tabId });
+      await h.E((id) => chrome.tabs.get(id).then((t) => chrome.windows.remove(t.windowId)), tabId);
+    }
+  } finally {
+    if (browser) await browser.close();
+    pages.server.close();
+    let pid = 0;
+    try { pid = Number(fs.readFileSync(pidFile, 'utf8')); } catch { /* never started */ }
+    if (pid) { await sleep(1500); try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+    fs.rmSync(ext, { recursive: true, force: true });
+    fs.rmSync(extra, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+

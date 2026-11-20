@@ -209,8 +209,15 @@ weren't the cause: the same failure happens with the site granted, as Tim's was.
 The fix (`phone.js`): the phone view loads the page with a **hard reload** (`tabs.reload(…, {bypassCache: true})`),
 which skips the service worker and the HTTP cache for that load and leaves the page uncontrolled by the worker,
 so its own requests are the tab's again. And when a later page of the tab comes without the marker (a plain
-reload, a link the worker answers), TRIF **loads it again, hard**, once per address in 15 s. Back to desktop
-reloads hard too. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
+reload, a link the worker answers), TRIF **loads it again, hard**. Back to desktop reloads hard too.
+
+11-20, Tim on X: "i just edited a mod in phone view and when the page reloaded it reloaded the desktop version".
+The heal was once per address in 15 s: `trif verify`'s reload after the edit was healed, and the reload after
+the mod's approval two seconds later (the same address) wasn't, so the worker's desktop page stayed. Not the
+in-place window (both kinds of phone window did it). Now TRIF's own reloads of a phone tab (`trif reload`, `trif
+verify`, a mod switched, approved or tried, the popup route's reload button: `phones.reload`) are hard ones,
+past the worker; and the 15 s limit is only for a heal that didn't work (a page that comes back marked ends it),
+so the page's own reloads and a person's are healed each time. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
 that serves a kept copy of the page (an app shell), visited first, as X is.
 
 Other hosts: X's API is `api.x.com`, under `*.x.com`, which the site's Connect gives. Pictures, scripts and video

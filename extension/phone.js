@@ -318,14 +318,19 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
   }
 
   // A page in the phone tab that came without the marker (a service worker served it, or the HTTP cache: a
-  // reload, a link to another page of the site): loaded again, hard, once per address in a while.
-  const healed = new Map(); // tabId -> {url, at}
+  // reload, a link to another page of the site): loaded again, hard. Once per address while that doesn't help:
+  // a page that comes back marked ends it, so the next load the worker serves is healed again (11-20, Tim on X:
+  // the reload after a mod's approval, seconds after the one after its edit, came back the desktop's: X's
+  // service worker served it, and the second heal for that address within 15 s was skipped).
+  const healed = new Map(); // tabId -> {url, at}: a heal whose load hasn't come back marked yet
   async function heal(tabId, url) {
     if (!/^https?:/.test(url || '')) return;
-    const h = healed.get(tabId);
-    if (h && h.url === url && Date.now() - h.at < 15000) return;
     const c = await check(tabId);
-    if (!c.phone || !c.page || c.page.error || c.page.marked || c.page.url !== url) return;
+    if (!c.phone || !c.page || c.page.error) return;
+    if (c.page.marked) { healed.delete(tabId); return; }
+    if (c.page.url !== url) return;
+    const h = healed.get(tabId);
+    if (h && h.url === url && Date.now() - h.at < 15000) return; // (healed, and still without: not again and again)
     const u = new URL(url);
     if (!(await chrome.permissions.contains({ origins: [`${u.protocol}//${u.hostname}/*`] }).catch(() => false))) {
       log(`phone view, tab ${tabId}: no access to ${u.hostname}, so it sees a desktop there`);
@@ -542,6 +547,17 @@ export function createPhones({ chrome, log = () => {}, changed = () => {}, panel
       const r = await run;
       // (shown after all, by now: a toolbar click in the phone window, say)
       return { ...r, panel: r.panel || !!shown() };
+    },
+
+    /**
+     * Reloads a tab as TRIF does (`trif reload`, `trif verify`, a mod switched or approved): a phone tab past
+     * its service worker and the HTTP cache, so its page comes with the phone's rules and marker (a page a
+     * worker serves has neither: heal loads it again, a second load), any other tab as asked.
+     */
+    async reload(tabId, { bypassCache = false } = {}) {
+      tabId = Number(tabId);
+      await ready;
+      return chrome.tabs.reload(tabId, { bypassCache: bypassCache || phones.has(tabId) });
     },
 
     /** The phone tab's page changed size (its isolated world's resize listener): the width corrected. */

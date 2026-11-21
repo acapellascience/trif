@@ -1,0 +1,49 @@
+# SPIKE (docs/WHOLE-BOX.md), branch whole-box only: the whole agent process in TRIF's own OS sandbox.
+# Nothing is published, uploaded or signed; no secrets. Claude Code talks to a stand-in for Anthropic's API
+# (no account, no paid call).
+name: whole-box
+
+on:
+  push:
+    branches: [whole-box]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whole-box-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Claude Code (npm's) in TRIF's Seatbelt box on a Mac: the probes, the loosest-settings run, and the
+  # full side-panel run with every `trif` command, with and without the box.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
+      - name: The box, and the loosest Claude Code in it
+        run: node --test --test-timeout=300000 tests/whole-box.test.js
+      - name: A side-panel run, every trif command (today's sandbox)
+        run: TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
+      - name: The same, the whole process in TRIF's box
+        run: TRIF_WHOLE_BOX=1 TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
+
+  # claude.exe in an AppContainer (TRIF's fence launcher), exploration.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      - name: Claude Code in an AppContainer
+        run: node tests/whole-box/win-probe.js

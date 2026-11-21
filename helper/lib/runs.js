@@ -840,7 +840,10 @@ class Runs {
     if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     let limits;
-    try { limits = runLimits(ws, run); } catch (e) {
+    try {
+      limits = runLimits(ws, run);
+      if (require('./wholebox').enabled(process.env) && run.stage && process.platform === 'darwin' && run.agent === 'claude') limits.wholeBox = true;
+    } catch (e) {
       this._emit(run, { kind: 'error', message: e.message });
       return this._finish(run, { code: null, signal: null });
     }
@@ -857,8 +860,21 @@ class Runs {
       this._emit(run, { kind: 'error', message: `couldn't prepare ${adapter.name}'s run: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
     }
-    const { file, args, locked } = cmd;
+    let { file, args } = cmd;
+    const { locked } = cmd;
     if (cmd.env) env = { ...env, ...cmd.env }; // (claude: its temporary folder)
+    // SPIKE (docs/WHOLE-BOX.md): the whole agent process in TRIF's own box, opt-in (TRIF_WHOLE_BOX=1),
+    // macOS, staged runs only.
+    if (limits.wholeBox) {
+      try {
+        const configDir = path.join(limits.privateDir, 'agent-config', run.agent);
+        fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+        ({ file, args, env } = require('./wholebox').wrap({ file, args, env }, { limits, configDir, profileFile: path.join(run.agentDir, 'box.sb'), extraRead: [run.agentDir] }));
+      } catch (e) {
+        this._emit(run, { kind: 'error', message: `couldn't put ${adapter.name} in TRIF's box: ${e.message}` });
+        return this._finish(run, { code: null, signal: null });
+      }
+    }
 
     // (which of the mods folder's changes are this run's is what the helper copied from its working folder:
     // run.stage.written, held.js. `locked`, the folders it couldn't write, is for a run without one.)

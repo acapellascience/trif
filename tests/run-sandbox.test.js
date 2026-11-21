@@ -97,6 +97,8 @@ async function setup() {
     TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1',
     TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), // (where they are by default)
     TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'), ...kc.env,
+    // (SPIKE, docs/WHOLE-BOX.md: the same test with the whole agent in TRIF's box)
+    ...(process.env.TRIF_WHOLE_BOX ? { TRIF_WHOLE_BOX: process.env.TRIF_WHOLE_BOX } : {}),
   };
   // The workspace, by the copy's own setup (non-interactive: no browser opened, no wait, no CLI link).
   const r = spawnSync(process.execPath, [path.join(code, 'helper', 'cli.js'), 'setup', '--link', '--no-link', '--no-examples', '--native-dir', path.join(S, 'native')],

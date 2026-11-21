@@ -67,14 +67,17 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [], staged = false, liveWorkspace = '', liveMods = '' } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [], staged = false, liveWorkspace = '', liveMods = '', wholeBox = false } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
   const inWorkspace = (p) => !!workspace && within(p, workspace, { ci: ignoresCase(workspace) });
   return {
     sandbox: {
-      enabled: true,
+      // SPIKE (wholebox.js, TRIF_WHOLE_BOX=1): the whole process is in TRIF's own Seatbelt box, and a
+      // sandboxed process can't apply another (sandbox_apply: Operation not permitted), so Claude Code's
+      // command sandbox is off: TRIF's box fences its commands and its file tools alike.
+      enabled: !wholeBox,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false, // no retrying a command outside it
       autoAllowBashIfSandboxed: false, // only the commands allowed above, sandbox or not

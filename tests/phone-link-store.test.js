@@ -441,3 +441,25 @@ test("the computer's name: the Mac's own, else the host name", () => {
   assert.equal(asked, 0);
   assert.ok(computerName().length > 0);
 });
+
+test('Windows: the link is off (no Bonjour announcer there): no listener, no runs; phone.status says unsupported, the rest is refused', async () => {
+  const { Link } = require('../helper/lib/phonelink/link');
+  const { home, env, file } = setup();
+  const link = new Link({ home, env, log: () => {}, platform: 'win32', name: 'Study PC' });
+  await link.start();
+  assert.equal(link.owner, true);
+  assert.deepEqual([link.server, link.announcer, link.remote, link.sync], [null, null, null, null], 'nothing made');
+  assert.equal(link.tool, null, 'no `trif phone …` for runs');
+  assert.equal(link.syncChanged(), 0);
+  const st = await link.command('phone.status');
+  assert.deepEqual([st.unsupported, st.on, st.listening, st.phones], ['windows', false, false, []]);
+  for (const cmd of ['phone.on', 'phone.pair.start', 'phone.sync', 'phone.syncNow', 'phone.remove', 'phone.off', 'phone.pair.stop']) {
+    await assert.rejects(link.command(cmd, {}), (e) => e.code === 'unsupported', cmd);
+  }
+  await assert.rejects(link.command('phone.nope', {}), /unknown command/);
+  assert.equal(fs.existsSync(file), false, 'no key and no file made');
+  await link.stop();
+  // (elsewhere it is as before: no `unsupported`)
+  const mac = new Link({ home, env, log: () => {}, platform: 'darwin', name: 'Study Mac' });
+  assert.equal('unsupported' in mac.status(), false);
+});

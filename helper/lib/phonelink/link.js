@@ -17,6 +17,12 @@
 //     the opt-in), and its sync.* handlers answer `off` once the user turns syncing off in Settings (`phone.sync`,
 //     the store's `sync`, D11).
 //
+// Windows (docs/WINDOWS-PROGRESS.md, "Merge of phone-link"): off. The phone finds the computer by its Bonjour
+// record alone, and bonjour.js announces with the Mac's dns-sd, so a Windows computer would listen on the network
+// for a phone that can't find it (and Windows Firewall would ask about it). There the link has the store and
+// nothing else: no listener, no announcer, no phone runs, no sync; `status()` says `unsupported: 'windows'` (the
+// panel shows no Connect a phone and no Sync with phone), and every command but phone.status is refused.
+//
 // TRIF_PHONE_LINK_HOST (tests): 127.0.0.1 or ::1, so a test's listener is never on the network. Anything else
 // is not taken: the variable can only narrow where the listener is.
 
@@ -44,8 +50,9 @@ class Link extends EventEmitter {
    * (syncsession.js; host.js keeps the extension's last report). env: the helper's (the keyring's stand-in and dns-sd's, in tests).
    * Emits 'change' when what `status()` says may have changed.
    */
-  constructor({ home, runs, version, log, agent, getWorkspace, afterWrite, switches, env = process.env, name } = {}) {
+  constructor({ home, runs, version, log, agent, getWorkspace, afterWrite, switches, env = process.env, name, platform = process.platform } = {}) {
     super();
+    this.unsupported = platform === 'win32' ? 'windows' : null;
     this.log = typeof log === 'function' ? log : () => {};
     this.env = env;
     this.store = new Store(home, { env, ...(name ? { name } : {}) });
@@ -82,6 +89,7 @@ class Link extends EventEmitter {
   async start() {
     if (this.owner) return;
     this.owner = true;
+    if (this.unsupported) { this.emit('change'); return; }
     const host = envVar('PHONE_LINK_HOST', this.env);
     this.server = new Server(this.store, { version: this.version, log: this.log, ...(LOOPBACK.has(host) ? { host } : {}) });
     this.announcer = new Announcer(this.store, this.server, { env: this.env, log: this.log });
@@ -154,11 +162,15 @@ class Link extends EventEmitter {
     const synced = (id) => { const r = this.sync ? this.sync.status(id) : null; return r ? { ...r } : null; };
     // (online: a live session with this phone just now, so Sync now reaches it)
     const online = new Set([...((this.server && this.server.sessions) || [])].filter((x) => x.open && x.phone).map((x) => x.phone.id));
-    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id), online: online.has(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null };
+    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id), online: online.has(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null, ...(this.unsupported ? { unsupported: this.unsupported } : {}) };
   }
 
   /** A `phone.*` command from the side panel. Resolves what the panel is answered. */
   async command(cmd, args = {}) {
+    if (this.unsupported && cmd !== 'phone.status') {
+      if (!COMMANDS.includes(cmd)) throw new Error(`unknown command "${cmd}"`);
+      throw fail('unsupported', 'the phone link isn\'t on Windows yet');
+    }
     switch (cmd) {
       case 'phone.status': return this.status();
       case 'phone.on':

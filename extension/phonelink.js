@@ -100,7 +100,8 @@ function syncOf(st, p, time) {
  */
 export function phoneLinkView(state, now = Date.now(), date = shortDate, time = shortTime) {
   const st = state?.status;
-  if (!st || typeof st !== 'object') return { hidden: true };
+  // (unsupported: a helper where the link is off, Windows: helper/lib/phonelink/link.js)
+  if (!st || typeof st !== 'object' || st.unsupported) return { hidden: true };
   const phones = Array.isArray(st.phones) ? st.phones : [];
   const pairing = state.pairing && state.pairing.expires > now && st.on ? state.pairing : null;
   const notes = [];
@@ -144,7 +145,7 @@ function phonesName(phones) {
 export const ASK_MS = 30000; // (a phone told to sync that hasn't in this long: as if it weren't connected)
 export function phoneSyncView(state, now = Date.now()) {
   const st = state?.status;
-  if (!st || typeof st !== 'object' || st.here === false) return null;
+  if (!st || typeof st !== 'object' || st.here === false || st.unsupported) return null;
   const phones = Array.isArray(st.phones) ? st.phones : [];
   // (none paired: Connect a phone; while its code is on screen, nothing: the code is the next step)
   if (!phones.length) return state.pairing ? null : { text: null, actions: ['connect'], busy: !!state.busy };

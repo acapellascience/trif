@@ -421,3 +421,10 @@ test('connect a phone: every string the panel shows is in docs/PHONE-LINK-STRING
   assert.match(js, /ui\.toast\?\.addEventListener\('click', hideToast\)/);
   assert.match(js, /function hideToast\(\) \{[^}]*clearTimeout[\s\S]*?ui\.toast\.hidden = true;/);
 });
+
+test('a helper without the phone link (Windows): no Connect a phone section, no phone line', async () => {
+  const mod = await load();
+  assert.deepStrictEqual(mod.phoneLinkView({ status: status({ unsupported: 'windows' }) }), { hidden: true });
+  assert.equal(mod.phoneSyncView({ status: status({ unsupported: 'windows' }) }), null);
+  assert.notEqual(mod.phoneSyncView({ status: status() }), null, 'elsewhere: Connect a phone');
+});

@@ -637,11 +637,18 @@ terminal** so `trif` is on the Path.
 9. If Codex is installed: pick it in the panel and do 4, 6 and 7 again.
 10. Quit Chrome: the helper goes with it (no `node.exe` left in Task Manager from TRIF), and `trif doctor`
     is still clean.
-11. **The phone view.** On a site with TRIF on, the panel's phone button ("Edit for mobile"): the tab moves
-    into a narrow window (390 px) where the site is its mobile one, with TRIF's panel in a window beside it.
-    Ask the panel for a small change there: the mod shows in the phone window. Resize the phone window: the
-    page follows. **Back to desktop**: the tab goes back where it was, as a desktop tab, and the side panel
-    is still there, still on that site.
+11. **The phone view.** On a site with TRIF on, the panel's phone button, then **Switch to phone view**.
+    With the site's tab **alone in its window**: that window itself narrows to a phone's width (390 px, or
+    the narrowest Windows lets it go: the panel then says how wide the page is), TRIF's side panel stays open
+    in it, and the panel is in the phone view from its first paint (no desktop flash). With **other tabs in
+    the window**: the tab moves into a narrow window of its own and TRIF's side panel opens beside it there.
+    Either way the site shows its mobile layout. Ask the panel for a small change there: the mod shows in the
+    phone window, and the reload after it (and after its approval) stays the mobile page, also on a site
+    with a service worker (x.com). Resize the phone window: the page follows. **Back to desktop**: the window
+    widens back out to the size and place of the window the tab came from, with the tab and TRIF's side
+    panel still in it, still on that site, as a desktop tab (no window closes). The phone menu has no **Sync
+    with phone** and Settings no **Connect a phone** on Windows (the phone link is off there:
+    `docs/WINDOWS-PROGRESS.md`, "Merge of phone-link").
 12. **Per-site access and sensitive sites.** On a site TRIF hasn't been on, "Fix …" makes Chrome ask for
     that site alone (no "all sites" prompt anywhere). Open `mail.google.com` or `paypal.com`: TRIF starts
     blocked there (the blocked screen, with Unblock), and Google's other sites' mods don't run on it.

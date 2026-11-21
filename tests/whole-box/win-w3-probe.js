@@ -86,12 +86,18 @@ function runLayout(id, claude) {
     { path: 'C:\\Program Files\\ClaudeCode', rights: 'r', to: 'capability', optional: true },
   ].filter((g) => fs.existsSync(g.path));
   const spec = {
-    name: winbox.CONTAINER, runCapability: `trif.run.${id}`, lpac: true, capability: 'trifWholeBoxShared', capabilities: ['registryRead'],
+    name: winbox.CONTAINER, runCapability: `trif.run.${id}`, lpac: true, capability: 'trifWholeBoxShared', capabilities: ['registryRead', winbox.NET_CAPABILITY],
     cwd: L.stage, env, job: true, grant, readonly: [path.join(L.stage, 'sites', 'other.com')],
   };
   L.spec = path.join(base, `${id}.json`);
   fs.writeFileSync(L.spec, JSON.stringify(spec));
   return L;
+}
+
+function setCaps(L, extra) {
+  const sp = JSON.parse(fs.readFileSync(L.spec, 'utf8'));
+  sp.capabilities = ['registryRead', ...extra];
+  fs.writeFileSync(L.spec, JSON.stringify(sp));
 }
 
 function fenceExec(fence, specFile, argv, { stdin = '', timeout = 120000, env = {} } = {}) {
@@ -213,6 +219,17 @@ function parseStream(stdout) {
   holds(o, '(before)');
   verdict['before the step: TRIF\'s relay port closed to the box'] = o['TRIF\'s relay port, 127.0.0.1'] !== 'echo ok';
 
+  // (learned: which network capability the exemption needs; the exemption alone, no rules)
+  const few = (t) => Object.fromEntries(['TRIF\'s relay port, 127.0.0.1', 'another port, 127.0.0.1', 'the internet, 1.1.1.1:443'].map((k) => [k, t[k]]));
+  for (const caps of [[], ['privateNetworkClientServer'], ['internetClient']]) {
+    setCaps(A, caps);
+    spawnSync(sys('CheckNetIsolation.exe'), ['LoopbackExempt', '-a', `-p=${sid}`], { encoding: 'utf8' });
+    const x = await inside(fence, A, few(targets), `the exemption only, no rules; capabilities: ${caps.join(', ') || 'none'}`);
+    for (const [k, v] of Object.entries(x)) if (!/^loopback/.test(k)) learned[`exemption only, ${caps.join('+') || 'no capability'}: ${k}`] = v;
+    spawnSync(sys('CheckNetIsolation.exe'), ['LoopbackExempt', '-d', `-p=${sid}`], { encoding: 'utf8' });
+  }
+  setCaps(A, [winbox.NET_CAPABILITY]);
+
   // 3
   const set = winbox.setup({ already: true, dir: base, ports });
   console.log(`\nwinbox.setup: ${JSON.stringify(set)}`);
@@ -234,6 +251,12 @@ function parseStream(stdout) {
   verdict['run b reads its own folder, not run a\'s'] = String(ob['its own folder'] || '').startsWith('read') && !String(ob['the other run\'s folder'] || '').startsWith('read');
   if (String(ob['the other run\'s folder'] || '').startsWith('read')) escaped = true;
   console.log(`the echo listeners heard: ${JSON.stringify(Object.fromEntries(Object.entries(srv).map(([k, v]) => [k, v && v.hits ? v.hits.length : null])))}`);
+
+  // (learned: the rules with internetClient in place of NET_CAPABILITY: do they close the internet too?)
+  setCaps(A, ['internetClient']);
+  const xi = await inside(fence, A, { ...few(targets), 'example.com:443': { port: 443, host: 'example.com' } }, 'the step done; capability internetClient instead');
+  for (const [k, v] of Object.entries(xi)) if (!/^loopback/.test(k)) learned[`rules + internetClient: ${k}`] = v;
+  setCaps(A, [winbox.NET_CAPABILITY]);
 
   // 6: the stand-in API on the key proxy's port (an API-key run's ANTHROPIC_BASE_URL), then the real relay
   await srv.keyProxy.close();

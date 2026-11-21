@@ -8,7 +8,8 @@
 //     listen either (round 9), so no TRIF relay;
 //   - firewall rules naming it (New-NetFirewallRule -Package <its SID>, group RULE_GROUP), block rules (a
 //     block wins over any allow): TCP to every port but TRIF's two (the relay, the key proxy), TCP to those
-//     two anywhere but 127.0.0.1, and all UDP. So the box reaches TRIF's relay and key proxy and nothing
+//     two anywhere but 127.0.0.1, all UDP, and everything inbound. (The container has a network capability,
+//     NET_CAPABILITY: without one nothing connects at all; the rules close what it opens.) So the box reaches TRIF's relay and key proxy and nothing
 //     else on this computer, as on the Mac (the internet stays closed: no internetClient).
 // Turning the setting off takes both out (the administrator again). Before every boxed run status() must
 // say ready (the rules in force, in the ACTIVE store, so a policy that ignores local rules shows; every
@@ -28,6 +29,10 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const CONTAINER = 'TRIF.FullSandbox';
+// The run's network capability. With none, Windows refuses every socket in the container, exemption or not
+// (windows-latest, round 10), so the box has one and the rules close all of it but TRIF's two ports.
+// (Which one: the least that works with the exemption, round 10's probe; see WHOLE-BOX.md.)
+const NET_CAPABILITY = 'privateNetworkClientServer';
 const RULE_GROUP = 'TRIF full sandbox';
 const PORT_CANDIDATES = [47391, 47491, 46391, 45391, 44391, 43391, 42391, 41391, 39391, 38391];
 const IPV4_BUT_LOOPBACK = ['0.0.0.0-127.0.0.0', '127.0.0.2-255.255.255.255'];
@@ -91,6 +96,7 @@ function rules(ports) {
     { name: 'TRIF.FullSandbox.OtherPorts', display: 'TRIF full sandbox: other ports', protocol: 'TCP', remotePort: otherPorts([ports.relay, ports.keyProxy]), remoteAddress: ['Any'] },
     { name: 'TRIF.FullSandbox.OtherAddresses', display: 'TRIF full sandbox: TRIF\'s ports elsewhere', protocol: 'TCP', remotePort: two, remoteAddress: [...IPV4_BUT_LOOPBACK, IPV6_ALL] },
     { name: 'TRIF.FullSandbox.Udp', display: 'TRIF full sandbox: UDP', protocol: 'UDP', remotePort: ['Any'], remoteAddress: ['Any'] },
+    { name: 'TRIF.FullSandbox.Inbound', display: 'TRIF full sandbox: inbound', direction: 'Inbound', protocol: 'Any', remotePort: ['Any'], remoteAddress: ['Any'] },
   ];
 }
 
@@ -118,7 +124,7 @@ function setupScript({ sid, ports, resultFile = null }) {
     "  $r.steps += 'exempt'",
   ];
   for (const x of rules(ports)) {
-    lines.push(`  New-NetFirewallRule -Name ${psq(x.name)} -DisplayName ${psq(x.display)} -Group ${psq(RULE_GROUP)} -Description ${psq(describe(ports))} -Direction Outbound -Action Block -Profile Any -Package ${psq(sid)} -Protocol ${x.protocol}${x.remotePort[0] === 'Any' ? '' : ` -RemotePort ${psList(x.remotePort)}`}${x.remoteAddress[0] === 'Any' ? '' : ` -RemoteAddress ${psList(x.remoteAddress)}`} | Out-Null`);
+    lines.push(`  New-NetFirewallRule -Name ${psq(x.name)} -DisplayName ${psq(x.display)} -Group ${psq(RULE_GROUP)} -Description ${psq(describe(ports))} -Direction ${x.direction || 'Outbound'} -Action Block -Profile Any -Package ${psq(sid)} -Protocol ${x.protocol}${x.remotePort[0] === 'Any' ? '' : ` -RemotePort ${psList(x.remotePort)}`}${x.remoteAddress[0] === 'Any' ? '' : ` -RemoteAddress ${psList(x.remoteAddress)}`} | Out-Null`);
     lines.push(`  $r.steps += ${psq(x.name)}`);
   }
   lines.push('  $r.ok = $true', '} catch { $r.error = "$_" }', ...finish(resultFile));
@@ -201,9 +207,9 @@ function parseStatus(text, { sid }) {
     for (const w of want) {
       const f = found.find((x) => x.name === w.name);
       if (!f) { problems.push('rulesMissing'); continue; }
-      const ok = f.enabled === 'True' && f.action === 'Block' && f.direction === 'Outbound' && /^any$/i.test(f.profile)
+      const ok = f.enabled === 'True' && f.action === 'Block' && f.direction === (w.direction || 'Outbound') && /^any$/i.test(f.profile)
         && String(f.package).toUpperCase() === sid.toUpperCase() && /^any$/i.test(f.program || 'Any')
-        && String(f.protocol).toUpperCase() === w.protocol && sameList(arr(f.remotePort), w.remotePort) && sameList(arr(f.localPort).length ? arr(f.localPort) : ['Any'], ['Any'])
+        && String(f.protocol).toUpperCase() === w.protocol.toUpperCase() && sameList(arr(f.remotePort), w.remotePort) && sameList(arr(f.localPort).length ? arr(f.localPort) : ['Any'], ['Any'])
         && sameList(arr(f.remoteAddress).map(normAddr), w.remoteAddress.map(normAddr)) && portsFromDescription(f.description)?.relay === ports.relay;
       if (!ok) problems.push('rulesChanged');
     }
@@ -283,7 +289,7 @@ function remove({ already = false, sid = containerSid(CONTAINER), dir } = {}) {
 }
 
 module.exports = {
-  CONTAINER, RULE_GROUP, PORT_CANDIDATES, containerSid, capabilitySid, parseExcluded, choosePorts, otherPorts, rules,
+  CONTAINER, NET_CAPABILITY, RULE_GROUP, PORT_CANDIDATES, containerSid, capabilitySid, parseExcluded, choosePorts, otherPorts, rules,
   describe, portsFromDescription, setupScript, removeScript, statusScript, parseStatus, runPs, runElevated, status, setup, remove,
   excludedPorts, busyPorts, encoded,
 };

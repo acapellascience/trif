@@ -45,7 +45,8 @@ Start Port    End Port
 
 test('the rules leave exactly TRIF\'s two ports on 127.0.0.1, TCP', () => {
   const r = w.rules(PORTS);
-  assert.deepStrictEqual(r.map((x) => x.protocol), ['TCP', 'TCP', 'UDP']);
+  assert.deepStrictEqual(r.map((x) => x.protocol), ['TCP', 'TCP', 'UDP', 'Any']);
+  assert.deepStrictEqual(r.map((x) => x.direction || 'Outbound'), ['Outbound', 'Outbound', 'Outbound', 'Inbound']);
   // every TCP port is blocked by the first rule except the two; those two are blocked by the second rule
   // everywhere but 127.0.0.1
   const blocked = (port, addr) => r.some((x) => x.protocol === 'TCP'
@@ -67,8 +68,8 @@ test('the rules leave exactly TRIF\'s two ports on 127.0.0.1, TCP', () => {
 test('the scripts: only the container\'s SID and the ports go in, quoted', () => {
   const s = w.setupScript({ sid: SID, ports: PORTS, resultFile: "C:\\Users\\o'neil\\r.json" });
   assert.match(s, new RegExp(`LoopbackExempt -a '-p=${SID}'`));
-  assert.strictEqual((s.match(/New-NetFirewallRule /g) || []).length, 3);
-  assert.strictEqual((s.match(/-Action Block/g) || []).length, 3);
+  assert.strictEqual((s.match(/New-NetFirewallRule /g) || []).length, 4);
+  assert.strictEqual((s.match(/-Action Block/g) || []).length, 4);
   assert.ok(!/-Action Allow/.test(s));
   assert.match(s, /-RemotePort '1-47390','47393-65535'/);
   assert.match(s, /-RemotePort '47391','47392' -RemoteAddress '0\.0\.0\.0-127\.0\.0\.0','127\.0\.0\.2-255\.255\.255\.255','::-ffff/);
@@ -91,13 +92,13 @@ function good(ports = PORTS, sid = SID) {
     exemptions: `List Loopback Exempted AppContainers\r\n\r\n[1] -----------------------------------------------------------------\r\n    Name: ${w.CONTAINER}\r\n    SID:  ${sid}\r\n\r\nOK.\r\n`,
     profiles: ['Domain', 'Private', 'Public'].map((name) => ({ name, enabled: 'True' })),
     rules: w.rules(ports).map((x) => ({
-      name: x.name, enabled: 'True', action: 'Block', direction: 'Outbound', profile: 'Any', description: w.describe(ports), package: sid, program: 'Any',
+      name: x.name, enabled: 'True', action: 'Block', direction: x.direction || 'Outbound', profile: 'Any', description: w.describe(ports), package: sid, program: 'Any',
       protocol: x.protocol, remotePort: x.remotePort, localPort: ['Any'], remoteAddress: x.remoteAddress,
     })),
   };
 }
 
-test('status: ready only with the exemption, every profile on, and the three rules as made', () => {
+test('status: ready only with the exemption, every profile on, and the four rules as made', () => {
   const st = (o) => w.parseStatus(JSON.stringify(o), { sid: SID });
   assert.deepStrictEqual(st(good()), { ready: true, ports: PORTS, problems: [] });
   assert.deepStrictEqual(st(good({ relay: 47491, keyProxy: 47492 })).ports, { relay: 47491, keyProxy: 47492 });
@@ -118,6 +119,7 @@ test('status: ready only with the exemption, every profile on, and the three rul
   assert.deepStrictEqual(mut((o) => { o.rules[2].package = w.containerSid('other'); }).problems, ['rulesChanged']);
   assert.deepStrictEqual(mut((o) => { o.rules[2].program = 'C:\\x.exe'; }).problems, ['rulesChanged']);
   assert.deepStrictEqual(mut((o) => { o.rules[0].profile = 'Private'; }).problems, ['rulesChanged']);
+  assert.deepStrictEqual(mut((o) => { o.rules[3].direction = 'Outbound'; }).problems, ['rulesChanged']);
   assert.deepStrictEqual(mut((o) => { o.rules.forEach((r) => { r.description = 'x'; }); }).problems, ['rulesChanged']);
   assert.deepStrictEqual(mut((o) => { o.rules.push({ ...o.rules[0], name: 'Someone.Else', action: 'Allow' }); }).problems, ['extraRule']);
   // (one rule: PowerShell's ConvertTo-Json gives an object, not a list)

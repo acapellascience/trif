@@ -223,7 +223,7 @@ the mod's approval two seconds later (the same address) wasn't, so the worker's 
 in-place window (both kinds of phone window did it). Now TRIF's own reloads of a phone tab (`trif reload`, `trif
 verify`, a mod switched, approved or tried, the popup route's reload button: `phones.reload`) are hard ones,
 past the worker; and the 15 s limit is only for a heal that didn't work (a page that comes back marked ends it),
-so the page's own reloads and a person's are healed each time. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
+so the page's own reloads and a person's are healed each time. `tests/phone-browser.test.js` and `tests/phone-helper-browser.test.js` have a site with a worker that fetches every request and one
 that serves a kept copy of the page (an app shell), visited first, as X is.
 
 Other hosts: X's API is `api.x.com`, under `*.x.com`, which the site's Connect gives. Pictures, scripts and video
@@ -462,7 +462,11 @@ would copy the file to `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/`.
   pages that tell a phone the usual ways (`tests/phone-pages.js`: the server from the user agent and hints, an
   `m.` redirect, the page's own checks, a frame, a press), the panel's `phone.open`: everything in sections 3
   and 4 above, the tab moved with `activeTab` (captureVisibleTab works), another tab of the same page untouched,
-  then Back to desktop and closing the window undoing it all. `PHONE_SHOTS=<dir>` saves screenshots.
+  then Back to desktop and closing the window undoing it all. `PHONE_SHOTS=<dir>` saves screenshots. Since 11-21
+  it is three files, each under `npm test`'s 180 s on CI: `tests/phone-browser.test.js` (the view, the mods, the
+  panel), `tests/phone-window-browser.test.js` (the window route as a person uses it, a lone tab's window, a side
+  panel's first paint) and `tests/phone-helper-browser.test.js` (with the real helper: a sensitive site's phone
+  mod, the reloads after a phone mod's edit).
 - `tests/phone-shots.js` (by hand): the same phone view on public sites that serve a mobile layout logged out,
   next to the desktop one, and the panel window. `tests/phone-firefox.js` (by hand): the local pages in Firefox.
 

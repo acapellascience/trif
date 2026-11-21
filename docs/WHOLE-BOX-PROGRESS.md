@@ -17,13 +17,24 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   updating as usual. Pin + checksums in `helper/claude-code.json` (from the npm registry's sha512, inside
   the signed package). `helper/lib/claudepin.js`. Refreshing the pin = a release step after the box tests
   pass (`node helper/lib/claudepin.js pin <version>`). *(round 1; wiring into release.js: step 2)*
-- [ ] **1b. The setting.** "Run chats in TRIF's full sandbox" (opt-in), replaces `TRIF_WHOLE_BOX=1`;
+- [x] **1b. The setting.** "Run chats in TRIF's full sandbox" (opt-in), replaces `TRIF_WHOLE_BOX=1`;
   turning it on downloads the pinned Claude Code in the background (progress in the panel); a run before it
-  is there gets the informed fallback (step 4).
-- [ ] **6. Sign-in via `claude setup-token`.** Run once outside the box (the panel's login flow shows the
+  is there gets the informed fallback (step 4: for now it stops with a message). *(round 2)*
+- [ ] **6. Sign-in via `claude setup-token`.** *(round 2: claudetoken.js + logins.js mode "token"; left:
+  6b below)* Run once outside the box (the panel's login flow shows the
   URL/code), token stored in the Keychain via the helper (keyring.js; never in files, never printed),
   passed to the boxed run as `CLAUDE_CODE_OAUTH_TOKEN` (verify the variable). The box then needs no
   securityd. API keys keep working through the key proxy. Tests with stand-in tokens only.
+- [ ] **6b.** The boxed run gets the token (`claudetoken.readToken` → `tokenEnv` in runs.js's whole-box
+  path; keychain off in the box; with a saved API key, the key proxy as now); no token and no key → the
+  run says so and the panel offers the sign-in (panel button: `agent.login {agent:'claude', mode:'token'}`
+  through background.js, the same URL/code card); a token Anthropic refuses (expired, revoked) → "sign in
+  again"; Settings: signed in for the full sandbox, with Sign out (`removeToken`). Check the real
+  setup-token output from the CI probe first (step "Probe setup-token's output").
+  **Round 2's probe: without a terminal it prints nothing useful** (below), so logins.js mode "token" needs
+  a pseudo-terminal first: e.g. macOS's `/usr/bin/script -q /dev/null <claude> setup-token` (no new
+  dependency; Windows: ConPTY, step 9b), then probe again on CI for the URL, the code prompt and the token
+  line, and fix `parseSetupTokenLine` and the fake `claude` in tests/claudetoken.test.js to match.
 - [ ] **7. Bash kept on macOS, boxed.** Claude Code's own sandbox off inside, its Bash inside TRIF's box
   (the spike does this). `trif` as an MCP tool only when an organization forces Claude Code's sandbox on
   (detected from managed settings: claude-managed.js) and on Windows.
@@ -85,7 +96,50 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   `node helper/lib/claudepin.js ensure` (cached by the pin file's hash), and runs the box tests and the
   full side-panel run with it. The npm `-g` Claude Code stays for today's-sandbox runs (the user's own).
 
+### Round 2 (11-21): step 1b, the setting; step 6 started
+
+- `helper/lib/wholeboxsetting.js`: Settings' "Run chats in TRIF's full sandbox", config.json `"wholeBox":
+  true` (off by default; macOS only for now: `available` false elsewhere, the panel shows no switch).
+  On: TRIF's pinned Claude Code downloads in the background (claudepin `onProgress(got, total)`, sent to the
+  panel at most every 500 ms); a failed download says why, with **Try again**; a helper starting with it on
+  and the copy missing fetches it; off keeps the copy. host.js `wholeBox.status/set/retry` are
+  PANEL_COMMANDS (the extension's connection only: a terminal's or a run's socket is refused).
+  background.js relays `{type:'wholeBox'}` into the panel's status; sidepanel.html/js `renderWholeBox`.
+  runs.js reads the setting (`isOn(ws)`) instead of `TRIF_WHOLE_BOX`; a run while it's still downloading
+  says so. `TRIF_WHOLE_BOX=1` now only tells tests/run-sandbox.test.js to switch the setting on in its
+  config.json. Draft words: WHOLE-BOX-STRINGS.md.
+- claudepin: `onProgress` for every caller of the one shared download; `pinning(home)`.
+- `helper/lib/claudetoken.js` (step 6): `parseSetupTokenLine` (the sign-in URL; the token taken out of
+  whatever line holds it; anything `sk-ant-…` redacted from every line), `tokenEnv(env, token)`
+  (`CLAUDE_CODE_OAUTH_TOKEN`, and the variables that outrank it removed: Bedrock/Vertex/Foundry,
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`), `storeToken/readToken/hasToken/removeToken` (keyring.js,
+  service "TRIF Claude Code sign-in": by stdin, never in an argv). logins.js mode `"token"` (claude only):
+  TRIF's pinned copy (never the user's) runs `setup-token` with a config folder of its own (removed after,
+  so the user's Claude Code settings are untouched) and `DISABLE_AUTOUPDATER=1`; the URL/code flow as for
+  `auth login`; on exit 0 the token goes to the keyring; it never reaches an event, the notes or the log.
+- Tests: `tests/wholebox-setting.test.js` (5: off by default, on → download with progress → ready and
+  pruned, failed → Try again, helper start fetches a missing copy, throttling, unavailable off macOS, and
+  through a real helper: sent on hello, refused from the socket with and without a run token, on → real
+  claudepin download from a stand-in registry with progress → ready, off keeps the copy).
+  `tests/claudepin.test.js` +1 (progress: both callers, one download, the server's size or 0).
+  `tests/claudetoken.test.js` (5: parsing and redaction, tokenEnv, a fake keychain with no argv leak, the
+  token login with a fake pinned `claude`: good code → keyring, nothing in events/log, the URL's query and
+  the code not in the log; bad code, no token, no copy, not Claude Code). Locally all pass, with
+  downloads/agents/agent-keys/explain/extension/install/sandboxlint/whole-box suites (no regressions).
+- Not run locally: `TRIF_WHOLE_BOX=1 tests/run-sandbox.test.js` (the permission check refused it this round
+  as it did running the downloaded binary in round 1): CI runs it. The panel wasn't looked at in a browser
+  (21 test browsers from other sessions were running): the switch's look is unchecked.
+
 ## Findings
+
+- **`claude setup-token` needs a terminal** (round 2 CI probe, pinned 2.1.330 on macos-latest): `--help`
+  works ("Set up a long-lived authentication token (requires Claude subscription)", no options but -h);
+  run with stdin/stdout as pipes (how logins.js runs `auth login`) it prints only a newline, no sign-in URL,
+  and waits until killed (it exits on SIGTERM, 143). Unlike `auth login`, which prints its URL without a
+  TTY. It writes `.claude.json` and `backups/` into CLAUDE_CONFIG_DIR even then: the throwaway config folder
+  logins.js gives it is needed. So the token login (round 2's mode "token") is right in its handling of
+  the token but can't see the URL yet: step 6b starts with a pseudo-terminal.
+- `gh run watch` returns at once in this environment (no TTY): wait with a `gh run view --json status` loop.
 
 - npm's `@anthropic-ai/claude-code` 2.1.x is a thin package whose `optionalDependencies` are per-platform
   packages holding one native binary each (`package/claude`, `claude.exe` on Windows): darwin-arm64 is a
@@ -108,10 +162,20 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 
 ## Next
 
-Round 2: step 1b (the setting, background download) and start step 6 (`claude setup-token`: verify the
-variable name and the output format from the docs; a fake `claude` for tests).
+Round 3: step 6b (above): read the CI probe's real setup-token output first and fix the parser/fake to
+match; then the token into boxed runs, the panel's sign-in offer and Sign out. Then step 7.
 
 ## CI
+
+- Round 2, [run 44871249783](https://github.com/acapellascience/trif/actions/runs/44871249783) (whole-box.yml,
+  7e2146c): macos **passed**: claudepin + wholebox-setting + claudetoken unit tests; the real pin installed;
+  the box tests; the side-panel run in today's sandbox; **the same with the whole process in the box, now
+  switched on through the setting (config.json "wholeBox")**, the missing/changed test included; both
+  managed-settings steps. The setup-token probe (continue-on-error) ran and found no URL (Findings).
+  windows passed (the spike's probe, unchanged). The repo's `tests` workflow: [run
+  44871249816](https://github.com/acapellascience/trif/actions/runs/44871249816) passed (and aec4bae's,
+  e6f3ad8's). (Round 2's first whole-box run, 44871158232, was cancelled by me: I misread `gh run watch`
+  returning at once as the probe hanging; the probe now has a hard stop anyway.)
 
 - Round 1, [run 44869998053](https://github.com/acapellascience/trif/actions/runs/44869998053) (whole-box.yml):
   macos **passed**: claudepin unit tests 8/8; the real pin installed by `claudepin.js ensure` (2.1.330,

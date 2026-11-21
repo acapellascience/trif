@@ -222,7 +222,7 @@ port it), no Bash; an MCP allowlist that removes it → stop with a clear messag
   steps. windows passed (the spike's probe, unchanged). Before it, run 44873006986 (52a4dc9) failed
   one check: a refused token's status was from before the token was saved (fixed in f19e44a). The repo's
   `tests` workflow: [run 44873370090](https://github.com/acapellascience/trif/actions/runs/44873370090)
-  (52a4dc9's, 44873006926, passed).
+  passed (and 52a4dc9's, 44873006926).
 
 - Round 2, [run 44871249783](https://github.com/acapellascience/trif/actions/runs/44871249783) (whole-box.yml,
   7e2146c): macos **passed**: claudepin + wholebox-setting + claudetoken unit tests; the real pin installed;

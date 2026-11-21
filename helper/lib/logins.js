@@ -32,7 +32,9 @@ function redact(text, secrets = []) {
 
 /**
  * new Logins({ getWorkspace, logger, onEvent: (loginId, event) => void })
- *   start({agent}) -> {loginId}   (cancels a login already in progress)
+ *   start({agent[, mode]}) -> {loginId}   (cancels a login already in progress)
+ *     mode "token" (claude only; TRIF's full sandbox, claudetoken.js): TRIF's own copy of Claude Code runs
+ *     `claude setup-token`; the token it prints is kept in the system keyring, never in an event or a log.
  *   code(loginId, code) -> {sent: true}
  *   cancel(loginId) -> {cancelled: true}
  *   stopAll() -> Promise
@@ -57,7 +59,13 @@ class Logins {
     if (!adapter) throw new Error(`unknown agent "${agentId}" (known: ${agents.ADAPTERS.map((a) => a.id).join(', ')})`);
     if (!adapter.login) throw new Error(`${adapter.name} can't log in from the side panel: ${adapter.loginFix || 'log in from a terminal'}`);
     const env = agents.agentEnv(ws);
-    const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
+    const tokenMode = args.mode === 'token';
+    if (args.mode !== undefined && !tokenMode) throw new Error(`unknown login mode "${args.mode}"`);
+    if (tokenMode && adapter.id !== 'claude') throw new Error(`${adapter.name} has no sign-in token for TRIF's full sandbox`);
+    // (token: TRIF's own copy, the one boxed runs use, never the user's; claudepin.js)
+    const pinned = tokenMode ? require('./claudepin').installedPinned(ws.home) : null;
+    if (tokenMode && !pinned) throw new Error('TRIF\'s own copy of Claude Code isn\'t downloaded yet (Settings: Run chats in TRIF\'s full sandbox)');
+    const found = tokenMode ? { available: true, path: pinned.bin } : adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) throw new Error(adapter.missing);
 
     if (this.current) {
@@ -68,10 +76,16 @@ class Logins {
       id: newLoginId(),
       agent: adapter.id,
       adapter,
+      tokenMode,
+      token: null, // (token mode: what setup-token printed, until it's in the keyring)
+      loginArgs: tokenMode ? ['setup-token'] : adapter.login.args,
+      parseLine: tokenMode ? require('./claudetoken').parseSetupTokenLine : adapter.login.parseLine,
       ws,
       path: found.path,
       // BROWSER discourages the CLI from opening a second sign-in page (the panel opens one).
-      env: { ...env, BROWSER: '/usr/bin/true' },
+      // (token mode: a config folder of its own, removed after, so `setup-token` leaves the user's own
+      // Claude Code settings as they were; and TRIF's copy never updates itself)
+      env: { ...env, BROWSER: '/usr/bin/true', ...(tokenMode ? { CLAUDE_CONFIG_DIR: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'trif-setup-token-')), DISABLE_AUTOUPDATER: '1' } : {}) },
       startedAt: Date.now(),
       child: null,
       bufs: { stdout: '', stderr: '' },
@@ -142,7 +156,7 @@ class Logins {
   _launch(login) {
     const { adapter } = login;
     if (login.cancelled) return this._finish(login, { code: null, signal: null });
-    const args = adapter.login.args;
+    const args = login.loginArgs;
     this.logger.info(`agent login ${login.id}: ${adapter.name} ${args.join(' ')} (${login.path})`);
     let child;
     try {
@@ -189,8 +203,12 @@ class Logins {
     const line = stripAnsi(raw).trim();
     if (!line || login.doneSent) return;
     let ev = null;
-    try { ev = login.adapter.login.parseLine(line); } catch (e) { this.logger.warn(`agent login ${login.id}: parse error: ${e.message}`); }
+    try { ev = login.parseLine(line); } catch (e) { this.logger.warn(`agent login ${login.id}: parse error: ${e.message}`); }
     if (!ev) return;
+    if (ev.kind === 'token') { // (token mode: kept for the keyring, its line not passed on)
+      if (login.tokenMode && typeof ev.token === 'string') login.token = ev.token;
+      return;
+    }
     if (ev.kind === 'login' && typeof ev.url === 'string') {
       if (login.urlSent) return;
       login.urlSent = true;
@@ -225,6 +243,7 @@ class Logins {
     if (this.current === login) this.current = null;
     const { adapter } = login;
     agents.forgetLoginStatus(adapter.id);
+    if (login.tokenMode) { try { require('fs').rmSync(login.env.CLAUDE_CONFIG_DIR, { recursive: true, force: true }); } catch { /* the system's temporary folder */ } }
 
     let ok = false;
     let message = null;
@@ -232,6 +251,21 @@ class Logins {
       // cancelled: no error; timed out: already said so
     } else if (login.spawnError) {
       message = `couldn't start ${adapter.name} (${login.path}): ${login.spawnError.message}`;
+    } else if (login.tokenMode) {
+      // `setup-token` saves nothing itself: the token it printed goes to the keyring, or the sign-in failed.
+      const token = login.token;
+      login.token = null;
+      if (code === 0 && token) {
+        try {
+          await require('./claudetoken').storeToken(token, { env: process.env });
+          ok = true;
+        } catch (e) { message = `Signed in, but TRIF couldn't keep the sign-in: ${require('./claudetoken').redactTokens(e.message)}`; }
+      } else if (code === 0) {
+        message = `${adapter.name} finished, but TRIF didn't find a sign-in token in what it printed.`;
+      } else {
+        const tail = login.notes.slice(-3).join('\n');
+        message = `Signing in to ${adapter.name} for TRIF's full sandbox failed${tail ? `: ${tail}` : ` (${signal ? `killed by ${signal}` : `exit code ${code}`})`}`;
+      }
     } else {
       // Exit code 0 isn't enough: ask the agent whether it's logged in now (this also refreshes agent.list).
       const st = await agents.loginStatus(adapter, login.ws, login.path, { fresh: true });

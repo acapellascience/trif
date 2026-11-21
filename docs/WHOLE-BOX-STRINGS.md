@@ -35,3 +35,19 @@ In code now (helper/lib/runs.js):
 - Checking it failed: **couldn't check TRIF's own copy of Claude Code: {error}**
 
 The offer that follows these (step 4, "Run this chat with the older protection"): not written yet.
+
+## Signing in for TRIF's full sandbox (step 6, `claude setup-token`)
+
+In code now (helper/lib/logins.js, mode "token"; the panel's button for it: not yet):
+
+- TRIF's copy not there: **TRIF's own copy of Claude Code isn't downloaded yet (Settings: Run chats in
+  TRIF's full sandbox)**
+- Failed: **Signing in to Claude Code for TRIF's full sandbox failed: {last lines it printed}** (any
+  sk-ant-… in them shown as [token])
+- Finished without a token: **Claude Code finished, but TRIF didn't find a sign-in token in what it printed.**
+- The keyring refused it: **Signed in, but TRIF couldn't keep the sign-in: {keyring's error}**
+- The saved one isn't a token (someone changed the keyring item): **the saved Claude Code sign-in isn't a
+  token TRIF recognizes; sign in again**
+
+Not written yet: the panel's offer to sign in (when the setting is on and there's no token and no API key),
+and what it says about the token (one year, model requests only, kept in the Keychain).

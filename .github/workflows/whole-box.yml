@@ -30,7 +30,7 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
-        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js
+        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4
@@ -43,6 +43,10 @@ jobs:
           ls -la "$RUNNER_TEMP"/claude-pin/runtime/*/
           "$RUNNER_TEMP"/claude-pin/runtime/claude-code-*/claude --version
           echo "TRIF_TEST_CLAUDE_PIN_HOME=$RUNNER_TEMP/claude-pin" >> "$GITHUB_ENV"
+      # (step 6: what the real pinned copy prints for `setup-token` without a terminal; never completed, no account)
+      - name: Probe setup-token's output (TRIF's pinned Claude Code)
+        continue-on-error: true
+        run: node tests/whole-box/setup-token-probe.js "$(ls -d "$RUNNER_TEMP"/claude-pin/runtime/claude-code-*/)claude"
       - name: The box, and the loosest Claude Code in it
         run: node --test --test-timeout=300000 tests/whole-box.test.js
       - name: A side-panel run, every trif command (today's sandbox)

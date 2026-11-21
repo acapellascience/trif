@@ -98,6 +98,7 @@ const view = {
   modNatural: [],            // the ids of the mods listed, in the order they come before the user's (what an unsaved order is)
   myRuns: new Map(),         // runs this panel started: runId -> {prompt, tabId} for a message sent from the box, else null
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
+  updateLater: null,         // chrome.storage.local `updateLater`: the version whose card Not now put away
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
 };
@@ -282,8 +283,9 @@ async function init() {
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
   if (FALLBACK) await setUpPanelWindow();
   sayWindow();
-  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
+  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'updateLater', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
+  view.updateLater = typeof stored.updateLater === 'string' ? stored.updateLater : null;
   view.efforts = stored.agentEffort && typeof stored.agentEffort === 'object' ? stored.agentEffort : {};
   view.settings = normalizeSettings(stored.settings);
   // Once (0.2.3): the default's models, which models picked on sites used to be copied into (see
@@ -4633,7 +4635,9 @@ function renderUpdate() {
   const u = view.status?.helper?.connected ? view.status.update : null;
   const done = view.updated && Date.now() - view.updated.at < UPDATED_SHOWN_MS && view.updated.to === (u?.current || view.status?.version) ? view.updated : null;
   const installing = view.updateBusy === 'installing' || u?.installing;
-  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to]);
+  // (Not now: that version's card stays away; a newer one brings it back, and Settings still says it's there: Tim 11-20)
+  const later = !!u?.available && !installing && !view.updateError && view.updateLater === u.latest;
+  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to, later]);
   renderUpdateSettings(u);
   if (n.dataset.key === key) return;
   n.dataset.key = key;
@@ -4642,12 +4646,18 @@ function renderUpdate() {
   if (installing) {
     parts.push(el('p', 'title', `Updating TRIF to ${u?.latest || 'the new version'}…`));
     parts.push(el('p', 'note', 'It reloads by itself when it’s done.'));
-  } else if (u?.available) {
+  } else if (u?.available && !later) {
     parts.push(el('p', 'title', `TRIF ${u.latest} is available`));
     if (view.updateError) { parts.push(el('p', 'note error', view.updateError)); n.classList.add('bad'); }
     const actions = el('p', 'actions');
     if (u.canInstall) actions.append(button('Update', 'primary', installUpdate));
     if (u.notes) actions.append(notesToggle(n, u.notes));
+    const latest = u.latest;
+    actions.append(button('Not now', null, () => {
+      view.updateLater = latest;
+      chrome.storage.local.set({ updateLater: latest }).catch(() => {});
+      renderUpdate();
+    }));
     if (actions.childNodes.length) parts.push(actions);
     if (!u.canInstall && u.why) parts.push(el('p', 'note', u.why));
   } else if (done) {

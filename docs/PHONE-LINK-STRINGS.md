@@ -166,3 +166,11 @@ The code card's Details tab, first line: the mod's name with Rename. The iPhone'
 | The helper refuses (the name) | A name can't be empty · A name is one line · A name can be up to 80 characters | draft (helper/lib/rename.js, from modid.js checkName) |
 | The helper refuses (the file) | there's no mod {id} · {id} isn't a plain file: rename it where it is · {id} has no ==WebMod== header to keep a name in | agent-ish, shown as is; draft |
 | Phone sync, two different mods with one name (D17 "apart") | (the computer's) “{name} (from your computer)” | the conflict copy's existing name, reused; the phone's notice is in IOS-APP-STRINGS.md |
+
+## The update card's Not now (11-20, DRAFT for Tim)
+
+- **Not now**: a button on "TRIF {version} is available", after What's new. It puts that version's card away
+  (kept in chrome.storage.local `updateLater`); a newer version brings the card back, and Settings' update line
+  still says the version is available. Tim, 11-20: "how does a person get rid of that box if they don't want to
+  install the update right now". (The notes toggle stays What's new / Hide; Tim found "Hide" unclear: option
+  "Hide what's new" awaits him.)

@@ -41,7 +41,13 @@ const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
 // What any program needs to start on macOS (dyld, the system libraries, locale, time zones, terminfo).
 const SYSTEM_READ = ['/usr', '/System', '/Library/Preferences', '/Library/Apple', '/bin', '/sbin', '/private/etc',
-  '/private/var/db/timezone', '/private/var/db/dyld', '/dev', '/opt/homebrew', '/usr/local'];
+  '/private/var/db/timezone', '/private/var/db/dyld', '/dev', '/opt/homebrew', '/usr/local',
+  // An organization's managed settings (claude-managed.js): readable, so its policies still apply in the
+  // box. Without these Claude Code says "Managed settings failed to load; policies from the failed source
+  // are NOT in effect" and goes on (seen on CI): the box would switch an organization's policy off.
+  // (The MDM profile: only Claude Code's own plist, by name: lit() below.)
+  '/Library/Application Support/ClaudeCode', '/etc/claude-code'];
+const MDM_PLIST = 'com.anthropic.claudecode.plist';
 // Mach services: user and group lookups (getpwuid: node's os.userInfo, Claude Code's home folder), and
 // the log. Not Launch Services, not Apple events, not the pasteboard, not securityd (see `keychain`).
 const MACH = ['com.apple.system.opendirectoryd.libinfo', 'com.apple.system.notification_center', 'com.apple.logd',
@@ -80,6 +86,7 @@ function macProfile({ read = [], write = [], readOnly = [], sites = '', configDi
     `(allow mach-lookup ${MACH.map((m) => `(global-name ${q(m)})`).join(' ')})`,
     `(allow file-read* (literal "/") ${SYSTEM_READ.filter((p) => fs.existsSync(p)).map(sub).join(' ')})`,
     '(allow file-write* (regex #"^/dev/(null|zero|tty|dtracehelper|ttys[0-9]+|ptmx)$"))',
+    `(allow file-read* (literal ${q(path.join('/Library/Managed Preferences', MDM_PLIST))}) (literal ${q(path.join('/Library/Managed Preferences', os.userInfo().username, MDM_PLIST))}))`,
   ];
   const reads = [...read, ...write, ...(configDir ? [configDir] : [])].filter(Boolean);
   if (reads.length) L.push(`(allow file-read* ${reads.map(sub).join(' ')})`);

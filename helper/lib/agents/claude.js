@@ -315,6 +315,8 @@ const adapter = {
         result: text || null,
         costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : null,
         ...(state.contextTokens ? { contextTokens: state.contextTokens } : {}),
+        // (for the run's log: comparing setups, e.g. TRIF's full sandbox against the older protection)
+        ...(usageOf(msg) ? { usage: usageOf(msg) } : {}),
         sessionId: msg.session_id || null,
         // A logged-out run's session holds nothing but the message and the error: keep resuming the
         // previous one (runs.js handles this), so the message sent again after logging in isn't there twice.
@@ -449,4 +451,14 @@ module.exports.parseLoginLine = parseLoginLine;
 module.exports.runSettings = runSettings;
 module.exports.tooOld = tooOld;
 module.exports.TRIF_TOOL = TRIF_TOOL;
+/** The result line's tokens and times, numbers only: {input, output, cacheRead, cacheWrite, turns, ms, apiMs}. */
+function usageOf(msg) {
+  const u = msg && msg.usage && typeof msg.usage === 'object' ? msg.usage : {};
+  const n = (v) => (Number.isFinite(v) ? v : undefined);
+  const o = { input: n(u.input_tokens), output: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheWrite: n(u.cache_creation_input_tokens), turns: n(msg && msg.num_turns), ms: n(msg && msg.duration_ms), apiMs: n(msg && msg.duration_api_ms) };
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
+  return Object.keys(o).length ? o : null;
+}
+
 module.exports.NO_SHELL_TOOLS = NO_SHELL_TOOLS;
+module.exports.usageOf = usageOf;

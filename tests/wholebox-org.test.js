@@ -110,3 +110,10 @@ test('runs.js in TRIF\'s full sandbox: an organization\'s network in the run\'s 
     assert.deepStrictEqual(note.notes.map((x) => [x.url, x.why]), [['http://192.0.2.1', 'plain http to another computer']]);
   } finally { ct.prepareBoxed = real; }
 });
+
+test('races (old against full sandbox): a run\'s done line keeps its tokens and times (claude.js usageOf)', () => {
+  assert.deepStrictEqual(claude.usageOf({ usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 'x' }, num_turns: 3, duration_ms: 4200, duration_api_ms: 3900 }),
+    { input: 10, output: 5, cacheRead: 100, turns: 3, ms: 4200, apiMs: 3900 });
+  assert.strictEqual(claude.usageOf({}), null);
+  assert.strictEqual(claude.usageOf(null), null);
+});

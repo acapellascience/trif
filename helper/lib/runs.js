@@ -1347,7 +1347,8 @@ class Runs {
       }
     }
     this._emit(run, done);
-    this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
+    // (usage, wallMs, boxed: the same prompt in two setups compares from these lines: docs/WHOLE-BOX-PROGRESS.md, races)
+    this._log(run, { webmods: 'done', ...done, ...(d && d.usage ? { usage: d.usage } : {}), ...(run.startedAt ? { wallMs: Date.now() - run.startedAt } : {}), boxed: !!run.wholeBox, ...(run.olderProtection ? { olderProtection: true } : {}), exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);
     if (run.marked) markRunEnded(run.ws.home, run.id);
     // Private files that reappeared in the workspace meanwhile (an older helper or bridge still running

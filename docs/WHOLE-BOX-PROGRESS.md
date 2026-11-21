@@ -96,6 +96,16 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 - Locally, running the downloaded binary was refused by this session's permission check (auto mode), so
   the real pinned binary is only run on CI; local tests use fake tarballs.
 
+- For step 6 (code.claude.com/docs/en/authentication, read 11-21): `claude setup-token` opens the same
+  browser flow as `/login` and prints a one-year OAuth token to the terminal after approval; it saves it
+  nowhere. Needs a Pro, Max, Ultra, Team or Enterprise plan. The variable is `CLAUDE_CODE_OAUTH_TOKEN`.
+  Precedence, highest first: cloud-provider variables (Bedrock/Vertex/Foundry) > `ANTHROPIC_AUTH_TOKEN` >
+  `ANTHROPIC_API_KEY` > `apiKeyHelper` > `CLAUDE_CODE_OAUTH_TOKEN` > profiles > `/login` credentials. So a
+  boxed run with the token must unset the higher ones (and an org's `apiKeyHelper` in managed settings
+  would win over it: step 5). The token "can only make model requests" (no Remote Control, no claude.ai
+  connectors). Bare mode doesn't read it. Which stream it's printed on isn't documented: check with a
+  fake `claude` modelled on the real output, never Tim's login.
+
 ## Next
 
 Round 2: step 1b (the setting, background download) and start step 6 (`claude setup-token`: verify the
@@ -103,4 +113,10 @@ variable name and the output format from the docs; a fake `claude` for tests).
 
 ## CI
 
-- (round 1 run: below)
+- Round 1, [run 44869998053](https://github.com/acapellascience/trif/actions/runs/44869998053) (whole-box.yml):
+  macos **passed**: claudepin unit tests 8/8; the real pin installed by `claudepin.js ensure` (2.1.330,
+  checksum and signature passing, `--version` ok); whole-box.test.js with the pinned binary (5 pass, the
+  sandbox-on one runs in its own step); run-sandbox today's sandbox, and with `TRIF_WHOLE_BOX=1` on the pin
+  (2/2, the missing/changed test included); the managed-settings steps (loosen everything; force Claude
+  Code's sandbox on) on the pin. windows job unchanged this round (the spike's probe; still running at
+  push time). The repo's `tests` workflow: [run 44869997926](https://github.com/acapellascience/trif/actions/runs/44869997926).

@@ -1091,7 +1091,7 @@ struct ContentView: View {
                     Label(browser.desktopShown ? "Mobile Website" : "Desktop Website", systemImage: browser.desktopShown ? "iphone" : "desktopcomputer")
                 }
             }
-            // (full screen for this tab; the line under it names the shortcut, which also switches back)
+            // (full screen, the app's view, whatever tab is shown; the line under it names the shortcut, which also switches back)
             Button { onTab { browser.setFullScreen(true) } } label: {
                 Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
                 Text("Or hold two fingers on the page")

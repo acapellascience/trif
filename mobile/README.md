@@ -322,7 +322,9 @@ there is moved or changed. And `trif://add?v=1&name=<site>-<mod>.js&z=<raw defla
 sha256>]` (a QR code's link): unpacked (256 KB at most), checked, offered the same way.
 
 Full screen (Browser.setFullScreen, TrifProbeApp.swift FullScreenNote and FullScreenExit): a tab's page with no browser
-chrome (no bars, no pull-down, no pointing at parts of the page), each tab's own (`fullScreenTabs`, by tab id). Two
+chrome (no bars, no pull-down, no pointing at parts of the page): the app's view, not a tab's (Tim, 11-21; until then
+each tab kept its own, `fullScreenTabs`): choosing another tab keeps it, and a launch starts in TRIF view unless an
+icon launched it. Two
 fingers held still on the page for 0.3 s (0.6 before 11-18) switch it either way, on any tab (a two-finger tap is too short; a pinch is
 refused, as each finger must stay within 24 points of where it came down: the long press alone measures only their
 centre; a tap the lifting fingers make is let go for 0.8 s); the ⋯ menu's Full screen does too. A note says which, at the
@@ -340,9 +342,10 @@ history and other sheets close; an Add this mod? stays, as it waits for an OK); 
 an ordinary tab and the icon makes a new one of its own (11-17: Tim's YouTube icon kept opening his Google search, its
 old tab); a blank own tab takes the icon's address. Every icon link writes Diagnostics lines (kind `link`: the link
 as UIKit handed it over, at launch or later; kind `icon`: taken, and the tab chosen and why), and a link UIKit handed
-over that onOpenURL never brought is opened 2 s after the app comes to the front. TRIF's own icon opens it as it was left. A tapped link to another site, or a window the page opens, goes to a new tab
-in TRIF view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen`, `resethint`, `view` (the
-tab's site, full screen, what covers it) and `iconcheck` (the icon from every in-app state, PASS/FAIL).)
+over that onOpenURL never brought is opened 2 s after the app comes to the front. TRIF's own icon opens it as it was left (a relaunch: TRIF view). A tapped link to another site (or Open in New Tab to
+one) goes to a new tab in TRIF view; a window the page opens keeps the view. (Development: `-exitrobot` draws the robot on the exit button instead; steps `fullscreen`, `resethint`, `view` (the
+tab's site, full screen, what covers it) and `iconcheck` (the icon from every in-app state, then the view kept as tabs
+are chosen, PASS/FAIL).)
 
 Home Screen icons (WebClip.swift): the toolbar's last button (an A in a rounded square since 11-17, so it isn't taken for
 the new tab's +; the ⋯ menu moved to the address bar's left 11-16), opens the sheet. The icon (WebClipMaker.compose) looks like a small TRIF app: the app icon's outline (rim

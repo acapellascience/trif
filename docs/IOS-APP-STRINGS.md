@@ -330,7 +330,7 @@ The findings reuse the Mods tab's approval card's words unchanged: **TRIF found 
 
 | Where | Old | New |
 |---|---|---|
-| A tab in full screen | — | its page with no address bar, toolbar or tabs; mods run as usual. Each tab's own, remembered |
+| A tab in full screen | — | its page with no address bar, toolbar or tabs; mods run as usual. The app's view, not the tab's (11-21; was each tab's own, remembered): switching tabs keeps it; a launch starts in TRIF view unless an icon launched it. No new words |
 | Two fingers held still on the page for a moment (any tab, either way) | a "Switch to TRIF view" control at the top, in the app view only | switches at once; a note at the top, fading after 2 s: Switched to full screen · Switched to TRIF view |
 | The first time in full screen (once) | — | Hold two fingers on the page to switch views (fades after 4 s) |
 | The ⋯ menu | — | **Full screen**, with the line under it: Or hold two fingers on the page |
@@ -339,6 +339,7 @@ The findings reuse the Mods tab's approval card's words unchanged: **TRIF found 
 | With the button hidden, for VoiceOver | Switch to TRIF view (an action) | Switch to TRIF view (a button of its own) |
 | A Home Screen icon made from 11-16 (its address has app=1) | opened the app view | its tab starts in full screen; each icon keeps its own tab |
 | A link tapped in full screen to another site | opens in TRIF's own view, in a new tab | opens in TRIF view, in a new tab |
+| Open in New Tab (a link's long press) in full screen, to another site (11-21) | a new tab in TRIF view (every new tab was) | a new tab in TRIF view, as a tapped link; to the same site, or a window the page opens: the view kept. No new words |
 
 ## Mods that arrive by themselves (added 11-16, Tim approved)
 

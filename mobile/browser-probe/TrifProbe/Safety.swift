@@ -392,7 +392,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         if options.shortcutItem?.type == AppDelegate.pauseShortcut { ModStore.pauseFromShortcut() }
         // (a launch by a link, a Home Screen icon's: logged and kept as UIKit hands it over, WebClip.swift PendingLink)
-        if let url = options.urlContexts.first?.url { MainActor.assumeIsolated { PendingLink.came(url, "the app was launched by a link") } }
+        if let url = options.urlContexts.first?.url { MainActor.assumeIsolated { PendingLink.came(url, "the app was launched by a link"); PendingLink.atLaunch?(url) } }
         let c = UISceneConfiguration(name: nil, sessionRole: session.role)
         c.delegateClass = SceneDelegate.self
         return c

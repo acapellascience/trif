@@ -563,8 +563,16 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
 
 ## Icons (Home Screen) and full screen
 
-- Full screen: per tab, remembered; a two-finger hold (0.3 s, each finger still: 11-18 "half as long") toggles it with
-  a fading note; a faint exit button beside the clock.
+- Full screen: a two-finger hold (0.3 s, each finger still: 11-18 "half as long") toggles it with a fading note; a
+  faint exit button beside the clock.
+- Full screen is how the person is looking at the browser now, not a property of a tab (11-21: "If you're in browser
+  mode and you go get an old tab that was opened from a bookmark link, you still want browser mode. If you wanted the
+  full screen you'd go tap the link or do it yourself"). Switching tabs keeps the current view, whatever the tab: the
+  tabs view, a swipe between tabs where an app has one, a new tab, a banner's Go to {site}, a notification's tab, a page's own new window, a link that
+  opens a tab. Only the person (the hold, the menu's Full screen, the exit button) and a Home Screen icon change it;
+  leaving it applies to the tab shown and stays left on the next tab. One exception, kept from 11-16: in full screen,
+  a link the person taps (or opens in a new tab) to another site opens in browser view, in a new tab. Not kept across
+  launches: the app starts in browser view unless a Home Screen icon launched it.
 - A Home Screen icon ALWAYS lands on its site's own tab in full screen (11-16: "no matter what it was in before"),
   closing covers (Add this mod? stays). An icon's own tab counts only while it's on the icon's site: off-site it's left
   alone and the icon makes a new own tab (11-17); a blank one takes the icon's address. TRIF's own icon opens as left.

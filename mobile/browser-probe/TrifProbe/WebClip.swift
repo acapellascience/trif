@@ -49,6 +49,8 @@ enum TrifLink {
 enum PendingLink {
     static var url: URL?
     static var since = Date()
+    /// The Browser's showIconTabAtLaunch, for a launch's link that comes after the Browser is made (AppDelegate).
+    static var atLaunch: ((URL) -> Void)?
     /// The last link ContentView.openLink took, and when: UIKit's openURLContexts can come just after onOpenURL.
     static var taken: (URL, Date)?
     static func came(_ link: URL, _ how: String) {
@@ -168,16 +170,20 @@ extension Browser {
         let site = Site.of(target.host ?? "")
         let map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
         guard let t = map[site].flatMap(UUID.init(uuidString:)).flatMap({ id in tabs.first { $0.id == id } }),
-              Site.of(t.host) == site, t !== current else { return }
-        select(t)
+              Site.of(t.host) == site else { return }
+        // (also when it's the tab left in front: a launch starts in TRIF view since 11-21, so full screen is set here,
+        // before the first frame, not by openLink a moment later)
+        if t !== current { select(t) }
         setFullScreen(true, note: false)
         Diagnostics.shared.log("icon", "launched by \(site)'s icon: its tab shown from the start")
     }
 
     /// Opened from a site's Home Screen icon made for full screen (Tim, 11-16): the site with no browser around it, as
     /// a native app; each icon's site keeps its own tab for it, so the icon comes back to it. The icon always lands in
-    /// full screen, whatever its tab was left in (Tim, 11-16: "it should go straight to full screen view so it feels
+    /// full screen, whatever the app was in (Tim, 11-16: "it should go straight to full screen view so it feels
     /// like an app"); inside, the hold still switches it either way, and TRIF's own icon opens TRIF as it was left.
+    /// Full screen is the app's view, not the tab's (11-21): another tab chosen after this stays in full screen, and
+    /// this tab chosen again from TRIF view stays in TRIF view.
     func openFullScreen(_ target: URL) {
         let site = Site.of(target.host ?? "")
         var map = UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:]
@@ -189,7 +195,7 @@ extension Browser {
         let place = mapped.map { Site.of($0.host) }
         let why: String
         if let t = mapped, place == site {
-            let was = fullScreenTabs.contains(t.id)
+            let was = fullScreen && t === current
             if t !== current { select(t) }
             why = "its own tab (\(Diagnostics.place(t.url ?? t.savedURL))), \(was ? "already in full screen" : "back to full screen")"
         } else if let t = mapped, place?.isEmpty ?? true {
@@ -236,7 +242,8 @@ extension Model {
     /// be in while in front (no tab of its own yet; its tab in or out of full screen; another tab in front; the tabs,
     /// the chat, More's settings, the address screen, the Mods tab, history over the page; its tab gone to another
     /// site, in front or not; its tab blank), as the icon opens it; each must end on the icon's own tab, on its site,
-    /// in full screen, nothing over it, a tab that went to another site left there. One
+    /// in full screen, nothing over it, a tab that went to another site left there. Then the view kept as tabs are
+    /// chosen (11-21: full screen is the app's view, not a tab's). One
     /// line a state, PASS or FAIL. Through onOpenURL's own handler (ContentView.openForCheck): the app opening its own
     /// scheme asks "Open in …?" first. A cold launch and the app in the background need `simctl openurl` (notes).
     static func iconCheck(browser: Browser, site: URL) async -> String {
@@ -277,15 +284,15 @@ extension Model {
         browser.setFullScreen(false, note: false)
         await tap("its tab in front, left in TRIF view")
         other()
-        await tap("another tab in front, its tab in full screen")
+        await tap("another tab in front, in full screen")
         let wasMore = Model.pane?.more ?? false
         for cover in ["", "tabs", "chat", "more", "address", "mods", "history", "iconqueue"] {
-            if let t = own() { browser.setFullScreen(false, tab: t, note: false) }
+            browser.setFullScreen(false, note: false)
             other()
             if cover == "more" { Model.pane?.choose(more: true); browser.wantsSheet = "chat" }
             else if !cover.isEmpty { browser.wantsSheet = cover }
             await wait(1.2)
-            await tap("another tab in front\(cover.isEmpty ? "" : ", \(cover) over it"), its tab in TRIF view")
+            await tap("another tab in front\(cover.isEmpty ? "" : ", \(cover) over it"), in TRIF view")
             if cover == "more" { Model.pane?.choose(more: wasMore) }
         }
         let strayed = await stray()
@@ -300,6 +307,24 @@ extension Model {
         UserDefaults.standard.set(map, forKey: "iconTabs")
         await wait(1.2)
         await tap("its tab blank (no address kept), the address screen over it")
+        // (full screen is the app's view, not a tab's (Tim, 11-21): choosing a tab keeps the view the person is in)
+        func mode(_ name: String, _ want: Bool) {
+            let ok = browser.fullScreen == want
+            lines.append("\(ok ? "PASS" : "FAIL") \(name) → \(browser.current === own() ? "its tab" : "another tab"), full screen \(browser.fullScreen) (want \(want))")
+        }
+        other()
+        mode("view kept: a new tab from its tab in full screen", true)
+        if let t = own() { browser.select(t) }
+        mode("view kept: its tab chosen again, from full screen", true)
+        browser.setFullScreen(false, note: false)
+        if let o = made.last { browser.select(o) }
+        mode("view kept: TRIF view left on its tab, another tab chosen", false)
+        if let t = own() { browser.select(t) }
+        mode("view kept: its tab chosen again, from TRIF view", false)
+        if let o = made.last { browser.select(o) }
+        browser.setFullScreen(true, note: false)
+        if let t = own() { browser.select(t) }
+        mode("view kept: full screen put on another tab, its tab chosen", true)
         for t in made where browser.tabs.contains(where: { $0 === t }) && t !== own() { browser.close(t) }
         return lines.joined(separator: "\n")
     }

@@ -50,18 +50,19 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// was added (its link says "mod added"). Set by the pane.
     var chatTabFor: (String) -> Bool = { _ in false }
     var modAddedFrom: (String) -> Void = { _ in }
-    /// Full screen (Tim, 11-16): a tab's page with no browser around it (no address bar, toolbar or tabs), as an app.
-    /// Each tab's own: two fingers held on the page switch it, either way, any time; the ⋯ menu's Full screen too; a
-    /// Home Screen icon's tab starts in it. Remembered by tab (its id), across launches.
-    @Published private(set) var fullScreenTabs: Set<UUID> = Set((UserDefaults.standard.stringArray(forKey: "fullScreenTabs") ?? []).compactMap(UUID.init(uuidString:)))
-    var fullScreen: Bool { current.map { fullScreenTabs.contains($0.id) } ?? false }
-    /// Full screen on or off for a tab (the shown one by default); `note`: say so in a note that fades.
-    func setFullScreen(_ on: Bool, tab: Tab? = nil, note: Bool = true) {
-        guard let t = tab ?? current, fullScreenTabs.contains(t.id) != on else { return }
-        if on { fullScreenTabs.insert(t.id) } else { fullScreenTabs.remove(t.id) }
-        UserDefaults.standard.set(fullScreenTabs.map(\.uuidString), forKey: "fullScreenTabs")
-        report.log("fullscreen", "\(on ? "full screen" : "TRIF view") for the tab on \(Site.of(t.host).isEmpty ? "no site" : Site.of(t.host))")
-        guard t === current else { return }
+    /// Full screen (Tim, 11-16): the page with no browser around it (no address bar, toolbar or tabs), as an app.
+    /// How the person is looking at the browser now, not a tab's (Tim, 11-21: "if you're in browser mode and you go get
+    /// an old tab that was opened from a bookmark link ... you still want browser mode"): switching tabs (the tabs,
+    /// a swipe, a new tab, a banner's Go to, a notification, a page's own window) keeps it; two fingers held on the
+    /// page or ⋯ → Full screen switch it, either way, on any tab; a Home Screen icon lands in it on its own tab; a
+    /// tapped link to another site leaves it, for TRIF view in a new tab. Not kept across launches: the app starts in
+    /// TRIF view unless an icon launched it. (Until 11-21 it was each tab's, remembered: "fullScreenTabs".)
+    @Published private(set) var fullScreen = false
+    /// Full screen on or off; `note`: say so in a note that fades.
+    func setFullScreen(_ on: Bool, note: Bool = true) {
+        guard fullScreen != on else { return }
+        fullScreen = on
+        report.log("fullscreen", "\(on ? "full screen" : "TRIF view") on \(Site.of(current?.host ?? "").isEmpty ? "no site" : Site.of(current?.host ?? ""))")
         if on { wakeExit(long: true) }
         // (the first time in full screen, wherever it came from: how to get out, once; Tim, 11-16)
         if on, !UserDefaults.standard.bool(forKey: "fullScreenHinted") {
@@ -121,6 +122,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         config.allowsInlineMediaPlayback = true
         self.config = config
         super.init()
+        // (each tab's full screen, kept until 11-21: full screen is the app's view now, never restored at a launch)
+        UserDefaults.standard.removeObject(forKey: "fullScreenTabs")
 
         // (TRIF's message handler isn't on the shared configuration: each tab's own content controller gets it only while its
         // page is on a connected site, applyAccess)
@@ -153,6 +156,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         UnreadCounts.shared.changed()
         // (a launch by a Home Screen icon: its own tab shown from the first frame, WebClip.swift)
         if let link = PendingLink.url, let site = TrifLink.target(link), TrifLink.isOurs(link) { showIconTabAtLaunch(site) }
+        // (seen 11-21 in the Simulator: SwiftUI made the Model, so this Browser, before UIKit handed over the launch's
+        // link in configurationForConnecting, so the line above found none; the link then still comes before the
+        // first frame: AppDelegate calls this)
+        PendingLink.atLaunch = { [weak self] link in
+            if let site = TrifLink.target(link), TrifLink.isOurs(link) { self?.showIconTabAtLaunch(site) }
+        }
     }
 
     // MARK: tabs
@@ -428,7 +437,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         TabShots.shared.remove(tab.id)
         tab.video = nil
         VideoStore.shared.set(tab.id, nil)
-        setFullScreen(false, tab: tab, note: false)
         UnreadCounts.shared.changed()
         if tabs.isEmpty { let t = makeTab(); t.started = true; tabs = [t]; select(t); wantsAddress = true; return }
         if tab === current { select(next.flatMap { n in tabs.contains { $0 === n } ? n : nil } ?? tabs[min(i, tabs.count - 1)]) } else { saveTabs() }
@@ -1698,6 +1706,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         if fullScreen, webView === self.webView, navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? false,
            ["http", "https"].contains(scheme), !here.isEmpty, !Site.host(url.host ?? "", isIn: here) {
             newTab(url.absoluteString)
+            setFullScreen(false, note: false)
             report.log("fullscreen", "a link from \(here) in full screen to \(url.host ?? "?"): TRIF view, a new tab")
             return .cancel
         }
@@ -1886,7 +1895,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         t.started = true
         // (its opener: where it goes back to when the page closes it, as a sign-in window does)
         t.opener = tab(of: webView)
-        // (a window the page opens: a new tab, in TRIF view)
+        // (a window the page opens: a new tab, in the view the person is in: a sign-in window in full screen stays so)
         let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.count - 1) + 1
         tabs.insert(t, at: at)
         select(t)
@@ -1978,13 +1987,17 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         case .never, .own: return
         case .web, .stay: break
         }
+        // (in full screen, a link to another site opens in TRIF view, as a tapped one does: decidePolicyFor)
+        let here = Site.of(webView?.url?.host ?? "")
+        let leaves = fullScreen && ["http", "https"].contains(url.scheme?.lowercased() ?? "") && !here.isEmpty && !Site.host(url.host ?? "", isIn: here)
         let t = makeTab()
         t.started = true
         let at = (tabs.firstIndex { $0.webView === webView } ?? tabs.firstIndex { $0 === current } ?? tabs.count - 1) + 1
         tabs.insert(t, at: at)
         select(t)
+        if leaves { setFullScreen(false, note: false) }
         t.webView.load(URLRequest(url: url))
-        report.log("link", "opened in a new tab: \(Diagnostics.place(url))")
+        report.log("link", "opened in a new tab: \(Diagnostics.place(url))\(leaves ? ", from full screen on \(here): TRIF view" : "")")
     }
 }
 

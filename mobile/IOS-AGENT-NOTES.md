@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (578 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575, security 576, browser features 577-578): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (582 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575, security 576, browser features 577-578, full screen per app 579-582): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 - **Browser features: own world, every site; mods/AI: connected only** (Tim 11-20). Plain browser behaviour (video
   pick-up, background play, the pause while talking, the "is it playing" and password-field looks, the desktop agent
@@ -54,7 +54,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   offerstate (the offer shown, the queue), copydiag (⋯ → Copy diagnostics), status, fullscreen, resethint, memwarn, bars, tabhosts, openurl, toolbar, approve,
   view (site, full screen, covers), iconcheck ("https://…/": a Home Screen icon from 15 in-app states, PASS/FAIL lines (since 11-17 also: its tab gone to
   another site, in front or not, and its tab blank; PASS needs the icon's site shown);
-  regression check for the icon → full screen rule; cold launch / background still by `simctl openurl` + `view`),
+  regression check for the icon → full screen rule, then 5 "view kept" rows (11-21: tabs chosen keep the view); cold launch / background still by `simctl openurl` + `view`),
   playcheck ("http://…": a page with a <video>/<audio>; ~75 s of PASS/FAIL: a playing background tab is kept past
   20 s and a memory warning, let go once paused; a same-page quiet tab is let go), iconprofile ({"outline", "swatch" 0-5, "badge", "name", "noise"}: the shown
   page's Home Screen icon and profile to Documents/icon-test.png and .mobileconfig; "noise" = a worst-case photo),
@@ -978,12 +978,23 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `usesPrivateFlush` and the `cookies` dev step are `#if DEBUG`; `-publicflush` forces the public route there). A Release
   build always takes the public route (`removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantFuture)`)
   and its binary holds no such selector: check with `strings` on the Release device binary (`_flushCookiesToDisk`: 0 hits).
+- Launch order varies (11-21, Simulator 26.3): SwiftUI sometimes makes Model/Browser BEFORE UIKit's
+  configurationForConnecting hands over the launch's link (Diagnostics: "safe mode" before "launched by a link"), so
+  Browser.init's PendingLink check found nothing and showIconTabAtLaunch never ran (the icon's tab came ~0.35 s later).
+  Now AppDelegate also calls `PendingLink.atLaunch` (set by Browser.init) right after PendingLink.came: both orders
+  log "its tab shown from the start" (3/3 cold launches); recordVideo: every frame full screen behind the cover.
 - An icon's own tab (`iconTabs`) counts only while it's on the icon's site (11-17: Tim's YouTube icon opened his Google
   search, typed in its old tab): off-site it's left as it is and the icon makes a new own tab; a blank one takes the
   icon's address. Icon links log Diagnostics lines `link` (as UIKit hands them over: AppDelegate
   configurationForConnecting at launch, SceneDelegate openURLContexts later, which comes just AFTER onOpenURL) and
   `icon` (taken, the tab and why); PendingLink opens one onOpenURL never brought, 2 s after coming to the front.
-- Full screen: per tab, remembered; the two-finger hold (0.3 s since 11-18, Tim: "half as long"; was 0.6; each finger still) toggles it either way at once, with
+- Full screen: the APP's view, not a tab's (Tim, 11-21: "If you're in browser mode and you go get an old tab that was
+  opened from a bookmark link, you still want browser mode"): `Browser.fullScreen` is one @Published flag, never saved
+  (the old per-tab `fullScreenTabs` pref is removed at launch); select/newTab/close/a page's window never touch it, so
+  every way of switching tabs keeps the view; a launch starts in TRIF view unless an icon launched it. Only the person
+  (hold, ⋯, exit button) and an icon (openFullScreen, showIconTabAtLaunch) change it, plus the one exception: in full
+  screen a tapped link (or Open in New Tab) to another site → a new tab in TRIF view. `mobile/test/fullscreen.test.js`
+  checks the sources for this. The two-finger hold (0.3 s since 11-18, Tim: "half as long"; was 0.6; each finger still) toggles it either way at once, with
   a fading note; ⋯ → Full screen names the hold; a faint exit button at the top right 60 pt down (bright 3 s on entry and
   on scroll-up), hideable in ⋯. A Home Screen icon (`app=1`) ALWAYS lands on its site's own tab in full screen (Tim
   11-16: "no matter what it was in before"), closing covers (Add this mod? stays); TRIF's own icon opens as it was left.
@@ -1418,6 +1429,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   never pictured. Not seen: the desktop agent fix firing on a disconnected page (WebKit loaded the page again rather
   than bring it back from memory, so there was nothing to fix; the call ran unrefused); the talk pause/resume in the
   browser world (same scripts, same world as the watch, whose expandos playOn read fine); a phone.
+- Full screen per app (11-21): Simulator only (shots 579-582). iconcheck 20/20 (15 icon rows + 5 "view kept"); by real
+  touches: icon → full screen on its tab, the two-finger hold out, the tabs view to another tab and back to the icon's
+  tab: TRIF view both times (shot 580); the hold in, tabs switched: full screen kept (581); the exit button out, tabs
+  switched: stays out; relaunch from full screen: TRIF view; cold icon launch: full screen on its tab (582; recordVideo,
+  every frame); warm icon return: full screen; back by TRIF's own launch: as left; a tapped link to 127.0.0.1 from full
+  screen on localhost: new tab, TRIF view. Matrix A1, B3, B7, X1, X2 PASS. Not tried: a phone; a reply notification's
+  tab by a real tap (ClaudePane's .trifNotificationTapped → its tab through select, which no longer touches full
+  screen); Open in New Tab's off-site rule by a real long press. The app has no swipe between tabs (Tim's list named
+  one; nothing to change).
 - Site access (11-20): Simulator only (shots 569-575; matrix S1-S5 and A1-A3, B3, B11, F1, P2 PASS; a page's own
   scripts saw no handler, no window.webkit, no TRIF global, no mod or every-site mod on a disconnected page, in a
   disconnected frame of a connected page, after a redirect into one, and back from WebKit's memory after a disconnect;

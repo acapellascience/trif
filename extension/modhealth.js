@@ -6,14 +6,25 @@
 // version (the mod's hash: a fixed or updated mod starts fresh), TRIF keeps the fingerprints it has seen
 // and the ones the user dismissed; one it hasn't seen is new. A mod whose selectors (a style mod's rules, the
 // boxed mod's trif.observe and trif.hide, a free mod's trif.expect) matched on a page, then matched nothing on
-// QUIET_LOADS loads of that page in a row, is flagged "may be broken", as a fingerprint of its own.
+// QUIET_LOADS loads of that page in a row, is flagged "may be broken", as a fingerprint of its own. A mod that
+// only hides things (hideOnly: a style mod whose rules all hide, rules.js hidesOnly; a boxed mod that only
+// calls trif.hide) is flagged only after HIDE_QUIET_LOADS loads in a row over HIDE_QUIET_DAYS days: what it
+// hides is often something a site shows only sometimes (a promo, a banner), and nothing is wrong meanwhile.
+// A page where what the mod looks for went away and came back (a streak of QUIET_STREAK loads or more with
+// nothing, or a flag, then a match) "comes and goes" there: no flag on that page again for that version. So
+// does one a fix run found nothing broken on (markNotBroken: `trif not-broken`).
 //
 // Pure functions over a plain object kept in chrome.storage.local `modHealth`:
 //   { [modId]: { hash, errors: { [fp]: {message, stack, line, count, first, last, quiet?, page?} },
 //                dismissed: { [fp]: true }, carded: { [fp]: true }, fixed: { [fp]: true },
-//                pages: { [page]: { matched: bool, misses: n } }, logs: [..] } }
+//                pages: { [page]: { matched: bool, misses: n, at, since?, comesAndGoes? } }, logs: [..] } }
+// (since: when the current streak of loads with nothing began)
 
 export const QUIET_LOADS = 3;
+export const HIDE_QUIET_LOADS = 10;
+export const HIDE_QUIET_DAYS = 3;
+const QUIET_STREAK = 2; // (one load with nothing is often a page still building: two, then a match, is a pattern)
+const DAY = 24 * 60 * 60 * 1000;
 const MAX_FP = 30; // fingerprints kept per mod
 const MAX_PAGES = 40; // pages kept per mod
 const MAX_MODS = 300;
@@ -89,28 +100,56 @@ export function recordErrors(health, mods, errors, now = Date.now()) {
   return fresh;
 }
 
+const quietFp = (modId, page) => `${modId}|quiet|${page}`;
+
 /**
  * One load of `page` (an address without its query) for a mod with selectors: did any of them match?
- * Returns the "may be broken" flag when this load makes QUIET_LOADS in a row with nothing, on a page where
- * the mod matched before, else null. A match clears the count (and the flag, if it was up).
+ * Returns the "may be broken" flag when this load makes QUIET_LOADS in a row with nothing (a hide-only mod:
+ * HIDE_QUIET_LOADS, over HIDE_QUIET_DAYS days), on a page where the mod matched before and that doesn't
+ * come and go, else null. A match clears the count and the flag; after a streak with nothing (or a flag)
+ * it marks the page as one where what the mod looks for comes and goes.
  */
-export function recordMatches(health, mod, page, matched, now = Date.now()) {
+export function recordMatches(health, mod, page, matched, now = Date.now(), { hideOnly = false } = {}) {
   const e = entryFor(health, mod);
   const p = e.pages[page] || (e.pages[page] = { matched: false, misses: 0 });
   p.at = now;
-  const fp = `${mod.id}|quiet|${page}`;
+  const fp = quietFp(mod.id, page);
   trim(e.pages, MAX_PAGES, (x) => x.at || 0);
   if (matched) {
+    if (p.matched && ((p.misses || 0) >= QUIET_STREAK || e.errors[fp])) p.comesAndGoes = true;
     p.matched = true;
     p.misses = 0;
+    delete p.since;
     delete e.errors[fp];
     return null;
   }
   if (!p.matched) return null; // (never matched here: not this mod's page, or not yet)
-  p.misses += 1;
-  if (p.misses !== QUIET_LOADS || e.errors[fp]) return null;
+  p.misses = (p.misses || 0) + 1;
+  if (p.since === undefined) p.since = now;
+  if (p.comesAndGoes || e.errors[fp]) return null;
+  const enough = hideOnly ? p.misses >= HIDE_QUIET_LOADS && now - p.since >= HIDE_QUIET_DAYS * DAY : p.misses >= QUIET_LOADS;
+  if (!enough) return null;
   e.errors[fp] = { message: 'nothing it looks for is on the page any more', stack: '', line: 0, count: 1, first: now, last: now, quiet: true, page };
   return { mod: mod.id, fp, message: e.errors[fp].message, stack: '', line: 0, quiet: true, page };
+}
+
+/**
+ * Not broken (a fix run's conclusion, `trif not-broken`): what the mod looks for comes and goes on `page`
+ * (or, without one, on every page it's flagged on), so no "may be broken" there again for this version, and
+ * the flag goes. Returns the flags' fingerprints (a page's, flagged or not).
+ */
+export function markNotBroken(health, mod, page = null, now = Date.now()) {
+  const e = entryFor(health, mod);
+  const prefix = quietFp(mod.id, '');
+  const pages = page ? [page] : Object.keys(e.errors).filter((fp) => fp.startsWith(prefix) && e.errors[fp]?.quiet).map((fp) => fp.slice(prefix.length));
+  for (const pg of pages) {
+    const p = e.pages[pg] || (e.pages[pg] = { matched: true, misses: 0 });
+    p.comesAndGoes = true;
+    p.at = now;
+    delete e.errors[quietFp(mod.id, pg)];
+  }
+  trim(e.pages, MAX_PAGES, (x) => x.at || 0);
+  return pages.map((pg) => quietFp(mod.id, pg));
 }
 
 /** A mod's errors the user hasn't dismissed, newest first: [{fp, message, line, count, quiet?}]. */
@@ -143,6 +182,9 @@ export function fixPrompt({ mod, name, site, url, error, logs }) {
   if (error.quiet) {
     lines.push(`TRIF thinks my mod "${name}" (${mod}, the file ${file}) may be broken on ${url || site}: nothing it looks for is on the page any more, though it was on earlier loads.`);
     lines.push('The site has probably changed how this part of the page is built. Look at the page as it is now (trif text, trif screenshot, trif sweep), find what the mod should act on, and update the mod so it works again, doing the same thing as before.');
+    // (the page the flag is for, as TRIF keys it: the address without its query)
+    const page = String(error.page || url || '').split(/[?#]/)[0];
+    lines.push(`If nothing is broken (the mod still fits how the site builds that part, and the site just didn't show it this time: some parts of a page, like promos, come and go), don't change the mod. Run \`trif not-broken ${mod}${/^https?:\/\//.test(page) ? ` ${page}` : ''}\` so TRIF stops flagging it there, and tell me what you found.`);
   } else {
     lines.push(`My mod "${name}" (${mod}, the file ${file}) has a new error on ${url || site}${error.line ? `, at line ${error.line}` : ''}:`);
     lines.push('', '```', String(error.message || '').slice(0, 1000));

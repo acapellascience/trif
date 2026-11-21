@@ -332,6 +332,17 @@ than deleting or renaming the file. With --site HOST, only on that site (see ena
     examples: ['trif disable x.com/hide-reposts', 'trif disable example.com/dark-mode --url example.com',
       'trif disable all-sites/dark-mode --site bank.com'],
   },
+  'not-broken': {
+    usage: 'trif not-broken <site>/<mod> [ADDRESS]',
+    summary: 'after a "may be broken" flag: say nothing is broken, the part of the page it looks for just comes and goes',
+    details: `TRIF flags a mod "may be broken" when what it looks for stops being on a page where it was. Some
+parts of a page come and go (a promo, a banner the site shows only sometimes): when you've looked and the
+mod is right, run this instead of changing it. TRIF then doesn't flag the mod on that page (ADDRESS, the
+page's address; without it, every page it's flagged on) again until the mod changes, and the flag goes.
+Only when you've checked: a mod that is broken stays unflagged there. Inside a side-panel run, only the
+run's own site's mods.`,
+    examples: ['trif not-broken google.com/hide-promos https://www.google.com/', 'trif not-broken x.com/hide-reposts'],
+  },
   delete: {
     usage: 'trif delete <site>/<mod>',
     summary: 'delete a mod (it goes to the trash; trif restore brings it back)',
@@ -466,7 +477,7 @@ agent-levels/off picks one. Works without the browser, and in side-panel runs.`,
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'export', 'import', 'files', 'add', 'install-example', 'mod-update']],
-  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
+  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject', 'not-broken']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'verify', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ["The user's phone (only in a run started from it)", ['phone']],
   ['Agent runs (what the side panel does)', ['agent']],

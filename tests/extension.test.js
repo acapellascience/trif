@@ -3801,6 +3801,69 @@ test('background: mods that break: a new error gets a card in the site\'s chat o
   } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
 });
 
+test('background: trif not-broken clears a "may be broken" flag and its card (a fix run\'s too), its run\'s own site\'s mods only; a hide-only style mod waits longer', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed?x=1' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [
+    mod('example.com/styler', { name: 'Styler', matches: ['*://example.com/*'], rules: true, selectors: ['#feed'], hash: 's1' }),
+    mod('example.com/promo', { name: 'Promo', matches: ['*://example.com/*'], rules: true, selectors: ['.promo'], hideOnly: true, hash: 'p1' }),
+    mod('other.com/x', { name: 'X', matches: ['*://other.com/*'], rules: true, selectors: ['#x'], hash: 'x1' }),
+    // (a mod whose looks were all trif.hide, as the page says: healthOfPage's hidesOnly, sandbox.js watchedHow)
+    mod('example.com/boxhide', { name: 'Boxhide', matches: ['*://example.com/*'], hash: 'b1' }),
+  ];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const cards = () => (bg.store['chat:example.com']?.messages || []).filter((m) => m.kind === 'modError');
+  const health = async () => { await new Promise((r) => setTimeout(r, 600)); return bg.store.modHealth; }; // (saved 500 ms on: saveHealthSoon)
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.matched = { 'example.com/styler': true, 'example.com/promo': true, 'example.com/boxhide': true };
+    page.hidesOnly = ['example.com/boxhide'];
+    await load();
+    page.matched = { 'example.com/styler': false, 'example.com/promo': false, 'example.com/boxhide': false };
+    await load(); await load(); await load(); await load();
+    // the styler: flagged after three; the hide-only one: not yet (ten loads over three days)
+    assert.deepStrictEqual(cards().map((c) => c.mod), ['example.com/styler']);
+    const h = await health();
+    assert.deepStrictEqual(['example.com/promo', 'example.com/boxhide'].map((id) => h[id].pages['https://example.com/feed'].misses), [4, 4]);
+    // (a fix run is on it)
+    cards()[0].done = 'fixing';
+    // another site's mod, from a run on example.com: refused
+    let r = await bg.native.call('mod.notBroken', { id: 'other.com/x', scope: 'example.com' });
+    assert.match(r.error, /other\.com\/x runs outside example\.com, and this agent run is limited to example\.com/);
+    r = await bg.native.call('mod.notBroken', { id: 'example.com/styler', page: 'https://other.com/', scope: 'example.com' });
+    assert.match(r.error, /other\.com is outside example\.com/);
+    r = await bg.native.call('mod.notBroken', { id: 'example.com/styler', page: 'javascript:alert(1)', scope: 'example.com' });
+    assert.match(r.error, /isn't a page's address/);
+    // (a phone view's run: its phone mods only)
+    r = await bg.native.call('mod.notBroken', { id: 'example.com/styler', scope: 'phone~example.com' });
+    assert.match(r.error, /is a desktop mod/);
+    r = await bg.native.call('mod.notBroken', { id: 'example.com/promo', scope: 'example.com' });
+    assert.match(r.error, /isn't flagged "may be broken" anywhere now/);
+    // its own: the flag goes, the card says so (not reopened when the run ends), the page comes and goes
+    r = await bg.native.call('mod.notBroken', { id: 'example.com/styler', page: 'https://example.com/feed?x=1', scope: 'example.com' });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(r.result, { id: 'example.com/styler', pages: ['https://example.com/feed'] });
+    assert.strictEqual(cards()[0].done, 'notBroken');
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/styler').broken, []);
+    assert.strictEqual((await health())['example.com/styler'].pages['https://example.com/feed'].comesAndGoes, true);
+    await load(); await load(); await load(); await load();
+    assert.strictEqual(cards().length, 1, 'no flag there again');
+    // the hide-only one: ten loads aren't enough within three days either
+    for (let i = 0; i < 6; i++) await load();
+    assert.strictEqual(cards().length, 1);
+    assert.ok((await health())['example.com/promo'].pages['https://example.com/feed'].misses >= 10);
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});
+
 test('background: a click the clickjacking guard stopped: a card of its own in the chat (never a fix run, even with Fix it automatically), and the mod\'s badge', async () => {
   globalThis.__trifHealthDelays = [5, 15];
   const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];

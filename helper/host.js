@@ -792,7 +792,7 @@ const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod
 // The page commands a run's `trif` sends (cli.js; AGENTS.md "Commands"): the only ones that go on from a run
 // to the extension, which holds each to the run's site (args.scope: background.js scopedTab, checkScopeUrl).
 const RUN_PAGE_COMMANDS = new Set(['status', 'tabs', 'run', 'reload', 'navigate', 'open', 'close', 'text', 'sweep', 'screenshot',
-  'record', 'requests', 'request', 'errors', 'logs', 'mod.enable']);
+  'record', 'requests', 'request', 'errors', 'logs', 'mod.enable', 'mod.notBroken']);
 // Everything a run may ask, by its token or through its mailbox (onClientLine): the helper's own `ping` and
 // `mods` (answered for the run's site alone: helperInfo, runMod), the mod-file commands and those page
 // commands. Anything else from a run is refused there and never sent on to the extension, whatever the

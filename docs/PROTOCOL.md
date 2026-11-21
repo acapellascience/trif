@@ -300,6 +300,7 @@ Without one, the target is the active tab of the last-focused normal window.
 | `errors` | tab selector | `[{mod, message, stack, time}]`: errors thrown by mods in that page |
 | `logs` | tab selector | `[{mod, level, args:[strings], time}]`: what mods logged with `trif.log(...)` |
 | `mod.enable` | `id`, `enabled: bool`, `wait: bool` + tab selector | `{id, enabled, reloaded}`: switches a mod on/off (below). `reloaded` = the tab id reloaded, or null |
+| `mod.notBroken` | `id`, `page?` (an address) | `{id, pages}`: `trif not-broken`, a fix run's "nothing is broken" for a "may be broken" flag: that page (or every page the mod is flagged on) comes and goes for this version of the mod (extension/modhealth.js markNotBroken), the flag and its card done. From a run: its own site's mods (every `@match` in its scope; a phone view's run, its phone mods) and pages on its site |
 
 ### Sites TRIF is on for (`sitesOn`)
 
@@ -1262,7 +1263,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `RUN_COMMANDS`): the helper's own `ping` and `mods`, the mod-file commands `mod.delete`, `mod.restore`,
   `mod.code` and `mod.diff`, and the page commands its `trif` sends (`status`, `tabs`, `run`, `reload`,
   `navigate`, `open`, `close`, `text`, `sweep`, `screenshot`, `record`, `requests`, `request`, `errors`, `logs`,
-  `mod.enable`). Anything else from a run, a command nobody knows included, is refused by the helper and never
+  `mod.enable`, `mod.notBroken`). Anything else from a run, a command nobody knows included, is refused by the helper and never
   sent on to the extension. What the helper itself answers a run is its own site's: `mod.code` and `mod.diff`
   only for a mod in the run's site's folders (the rule its delete goes by, `trash.js` siteInScope: a phone view's
   run its phone twin's mods only, a sensitive site of its own and its parent each their own), refused before the
@@ -1286,8 +1287,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   volumes that ignore them (APFS by default: `/Users/x/.TRIF/SITES/` is the workspace's `sites/`).
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
-  only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
-  in scope. The tab can navigate between that check and the injection, so the document is checked again
+  only go to such URLs; `record` only for such sites; `mod.enable` and `mod.notBroken` only for mods whose every
+  `@match` is in scope. The tab can navigate between that check and the injection, so the document is checked again
   from inside (`lib.js` pageGuard: the scope, and TRIF on there): `run`'s code starts with the check,
   and the other page commands (`text`, `sweep`, `requests`, `request`, `errors`, `logs`) inject it first,
   in the isolated world, where it marks the document, and only count their result if the mark is still

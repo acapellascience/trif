@@ -291,4 +291,24 @@ function selectorsOf(rules) {
   return [...out].slice(0, 40);
 }
 
-module.exports = { selectorsOf, parseRules, checkRules, checkCss, checkSelector, checkRegex, cssScan, rulesRuntime, rulesCode, RulesError };
+/**
+ * Whether a style mod only hides things (extension/modhealth.js: such a mod is flagged "may be broken" only
+ * after a much longer absence, as what it hides is often shown only sometimes): a hide list, and CSS rules
+ * (if any) that only set display: none, as the hide list does; no filter (it hides items by what's in them,
+ * which are there whenever the page is), no replace, no other CSS. Not other ways to hide (visibility,
+ * opacity, sizes): those rules restyle as often as they hide.
+ */
+function hidesOnly(rules) {
+  if ((rules.filter || []).length || (rules.replace || []).length) return false;
+  const css = String(rules.css || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  if (/@(?!media\b)/i.test(css)) return false;
+  let blocks = 0;
+  for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    blocks += 1;
+    const decls = m[2].split(';').map((d) => d.trim()).filter(Boolean);
+    if (/^\s*@/.test(m[1]) || !decls.length || !decls.every((d) => /^display\s*:\s*none\s*(!\s*important)?$/i.test(d))) return false;
+  }
+  return blocks > 0 || (rules.hide || []).length > 0;
+}
+
+module.exports = { selectorsOf, hidesOnly, parseRules, checkRules, checkCss, checkSelector, checkRegex, cssScan, rulesRuntime, rulesCode, RulesError };

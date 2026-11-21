@@ -15,7 +15,7 @@ import {
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, panelQuery, isRobotless,
   QUEUE_MAX, CHAT_TEXT_MAX, normalizeQueue, queuedMessage, queueAfterRun,
 } from './lib.js';
-import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
+import { recordErrors, recordMatches, markNotBroken, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS, sandboxModCode } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -1567,6 +1567,40 @@ const commands = {
     return { id, enabled, ...siteInfo, reloaded: await reloadIfApplies(mod, args) };
   },
 
+  /**
+   * `trif not-broken <mod> [page]`: a fix run found nothing broken for a "may be broken" flag (what the mod
+   * looks for comes and goes there). That page (or every page it's flagged on) is marked as one where it
+   * comes and goes, for this version of the mod, and the flag goes (modhealth.js markNotBroken). A scoped run:
+   * its own site's mods only, a phone view's run its phone mods, and pages on its site.
+   */
+  async 'mod.notBroken'(args) {
+    const id = typeof args.id === 'string' ? args.id.trim() : '';
+    if (!id) throw new Error('missing mod id');
+    const mod = state.mods.find((m) => m.id === id);
+    if (!mod) throw new Error(`no mod ${id} (run \`trif status\` to list mods)`);
+    if (args.scope && !modInScope(mod, args.scope)) throw new Error(`${id} runs outside ${args.scope}, and this agent run is limited to ${args.scope}`);
+    if (args.scope && isPhoneMod(mod) !== !!args.phoneRun) {
+      throw new Error(args.phoneRun ? `${id} is a desktop mod: this run is in the phone view, which has only its own mods (sites/phone~${args.scope}/)` : `${id} is a phone mod: this run is on the desktop site, which has only its desktop mods`);
+    }
+    let page = null;
+    if (args.page !== undefined && args.page !== null && args.page !== '') {
+      let u = null;
+      try { u = new URL(String(args.page)); } catch { /* below */ }
+      if (!u || !/^https?:$/.test(u.protocol)) throw new Error(`"${String(args.page).slice(0, 200)}" isn't a page's address (like https://example.com/home)`);
+      if (args.scope && !hostInScope(u.hostname, args.scope)) throw new Error(`${u.hostname} is outside ${args.scope}, and this agent run is limited to ${args.scope}`);
+      page = u.href.split(/[?#]/)[0];
+    }
+    const fps = markNotBroken(state.health, mod, page);
+    if (!fps.length) throw new Error(`${id} isn't flagged "may be broken" anywhere now. To say what it looks for comes and goes on a page, name the page: trif not-broken ${id} <address>`);
+    await save({ modHealth: state.health });
+    // (its cards: done, the one a fix run is on included, which that run's end would otherwise reopen)
+    await markCards(mod.id, fps, 'notBroken', ['fixing']);
+    for (const t of await chrome.tabs.query({}).catch(() => [])) if (runningOn(t.url || '', t.id).some((x) => x.id === mod.id)) await badgeFor(t);
+    notifyPanels();
+    const prefix = `${mod.id}|quiet|`;
+    return { id, pages: fps.map((fp) => fp.slice(prefix.length)) };
+  },
+
   async logs(args) {
     return runtimeList(args, 'logs');
   },
@@ -1672,13 +1706,13 @@ async function runCommand(cmd, args, reqId = null) {
 // trif.hide, a free mod's trif.expect). A new error, or a mod whose selectors stopped matching on a page
 // where they matched, gets a badge on its row and the toolbar, and (Settings' "When a mod breaks") a card in
 // the site's chat, "Want me to fix it?", or a fix run of its own.
-const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), counted, url }
+const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), hideOnly: Map(modId -> bool), counted, url }
 let healthSave = null;
 
 // (when after a load: tests set shorter ones)
 const HEALTH_DELAYS = Array.isArray(globalThis.__trifHealthDelays) ? globalThis.__trifHealthDelays : [3000, 9000];
 function scheduleHealth(tabId) {
-  tabLoads.set(tabId, { since: 0, matched: new Map(), counted: false, url: '' });
+  tabLoads.set(tabId, { since: 0, matched: new Map(), hideOnly: new Map(), counted: false, url: '' });
   setTimeout(() => checkTab(tabId, false).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[0]);
   setTimeout(() => checkTab(tabId, true).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[1]);
 }
@@ -1693,8 +1727,11 @@ function healthOfPage(since, styleSel, sandbox) {
   for (const id of Object.keys(styleSel || {})) matched[id] = any(styleSel[id]);
   const watched = w.watched || {};
   for (const id of Object.keys(watched)) matched[id] = !!matched[id] || any(watched[id]);
+  // (the mods whose looks were all trif.hide: sandbox.js watchedHow)
+  const how = w.watchedHow || {};
+  const hidesOnly = Object.keys(watched).filter((id) => how[id] === 'hide');
   const after = (l) => (Array.isArray(l) ? l : []).filter((e) => (e.time || 0) > since).slice(-50);
-  return { errors: after(w.errors), logs: after(w.logs), matched };
+  return { errors: after(w.errors), logs: after(w.logs), matched, hidesOnly };
 }
 
 // (as registered: a parent's mod doesn't run on a sensitive site of its own, lib.js limitToSites)
@@ -1714,9 +1751,9 @@ async function checkTab(tabId, final = false) {
   // its address by itself, only for errors)
   const here = url.split('#')[0];
   let load = tabLoads.get(tabId);
-  if (!load) { load = { since: 0, matched: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
+  if (!load) { load = { since: 0, matched: new Map(), hideOnly: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
   if (!load.url) load.url = here;
-  else if (load.url !== here) { load = { since: load.since, matched: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
+  else if (load.url !== here) { load = { since: load.since, matched: new Map(), hideOnly: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
   const style = Object.fromEntries(running.filter((m) => m.rules && Array.isArray(m.selectors) && m.selectors.length).map((m) => [m.id, m.selectors]));
   const got = [];
   try { got.push(await rawPageCall(tabId, 'MAIN', healthOfPage, [load.since, style, false])); } catch { /* not readable now */ }
@@ -1735,13 +1772,23 @@ async function checkTab(tabId, final = false) {
   const fresh = recordErrors(state.health, mods, errors);
   for (const m of running) keepLogs(state.health, m, logs.filter((l) => l.mod === m.id).slice(-10));
   load.since = Math.max(load.since, ...errors.map((e) => e.time || 0), ...logs.map((e) => e.time || 0));
-  for (const g of got) for (const [id, ok] of Object.entries(g?.matched || {})) if (mods.has(id)) load.matched.set(id, !!load.matched.get(id) || ok);
+  for (const g of got) {
+    for (const [id, ok] of Object.entries(g?.matched || {})) {
+      if (!mods.has(id)) continue;
+      load.matched.set(id, !!load.matched.get(id) || ok);
+      // (a mod that only hides things: a style mod whose rules all hide, rules.js hidesOnly; a boxed mod that
+      // only calls trif.hide. modhealth.js waits much longer before it says one may be broken)
+      const m = mods.get(id);
+      const hides = m.rules ? m.hideOnly === true : Array.isArray(g.hidesOnly) && g.hidesOnly.includes(id);
+      load.hideOnly.set(id, (load.hideOnly.get(id) ?? true) && hides);
+    }
+  }
   // (one load counts once, on the later look: a page that builds itself slowly gets the time it needs)
   if (final && !load.counted) {
     load.counted = true;
     for (const m of running) { const f = state.fixes[m.id]; if (f && f.fixedHash === m.hash) { f.loads = (f.loads || 0) + 1; save({ modFixes: state.fixes }).catch(() => {}); } }
     const page = url.split(/[?#]/)[0];
-    for (const [id, ok] of load.matched) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok); if (f) fresh.push(f); }
+    for (const [id, ok] of load.matched) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok, Date.now(), { hideOnly: load.hideOnly.get(id) === true }); if (f) fresh.push(f); }
   }
   if (errors.length || logs.length || final) saveHealthSoon();
   await badgeFor(tab);
@@ -1870,13 +1917,13 @@ async function askToRun(site, args, reqId = null) {
 }
 
 // (a card done with: its buttons go; `how` says why, for the line it leaves)
-async function markCards(modId, fps, how) {
+async function markCards(modId, fps, how, over = []) {
   const sites = new Set();
   for (const t of await chrome.tabs.query({}).catch(() => [])) { const s = siteForUrl(t.url || ''); if (s) sites.add(s); }
   for (const site of sites) {
     await updateChat(site, (chat) => {
       let changed = false;
-      for (const m of chat.messages) if (m.kind === 'modError' && m.mod === modId && fps.includes(m.fp) && !m.done) { m.done = how; changed = true; }
+      for (const m of chat.messages) if (m.kind === 'modError' && m.mod === modId && fps.includes(m.fp) && (!m.done || over.includes(m.done))) { m.done = how; changed = true; }
       return changed ? undefined : false;
     });
   }

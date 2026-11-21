@@ -351,6 +351,35 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   assert.match(r.stdout, /TAB: --tab/);
 });
 
+test('not-broken: mod.notBroken through the helper, with the page; the extension\'s refusal said; help', async () => {
+  const { home, ext } = await getShared();
+  ext.handlers['mod.notBroken'] = (args) => {
+    if (args.id !== 'example.com/banner') throw new Error(`no mod ${args.id} (run \`trif status\` to list mods)`);
+    return { id: args.id, pages: [args.page ? args.page.split('?')[0] : 'https://example.com/'] };
+  };
+  try {
+    let r = await runCli(['not-broken', 'example.com/banner', 'https://example.com/?q=1'], { home });
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(lastRequest(ext, 'mod.notBroken').args, { id: 'example.com/banner', page: 'https://example.com/?q=1' });
+    assert.match(r.stdout, /^example\.com\/banner: not broken\. What it looks for comes and goes on https:\/\/example\.com\/, so TRIF won't say it may be broken there again \(until the mod changes\)\.$/m);
+    r = await runCli(['not-broken', 'example.com/banner', '--json'], { home });
+    assert.deepEqual(lastRequest(ext, 'mod.notBroken').args, { id: 'example.com/banner' });
+    assert.deepEqual(JSON.parse(r.stdout), { id: 'example.com/banner', pages: ['https://example.com/'] });
+    r = await runCli(['not-broken', 'example.com/banner', 'example.com'], { home });
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /isn't a page's address/);
+    r = await runCli(['not-broken', 'nope.com/x'], { home });
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /no mod nope\.com\/x/);
+    r = await runCli(['not-broken'], { home });
+    assert.equal(r.code, 1);
+    r = await runCli(['help'], { home });
+    assert.match(r.stdout, /^ {2}not-broken\b/m);
+    r = await runCli(['help', 'not-broken'], { home });
+    assert.match(r.stdout, /comes and goes/);
+  } finally { delete ext.handlers['mod.notBroken']; }
+});
+
 test('enable / disable: exit 2 without the helper; mods says nothing about switches then', async () => {
   const home = tempDir();
   writeMod(home, 'x.com', 'plain.js', '1');

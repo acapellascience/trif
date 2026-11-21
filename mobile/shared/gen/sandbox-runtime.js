@@ -151,8 +151,16 @@ globalThis.__trifStartSandbox = function () {
   const push = (arr, item, max) => { arr.push(item); if (arr.length > max) arr.splice(0, arr.length - max); };
   // (what each mod looks for, from trif.observe and trif.hide: background.js checks whether any of it is on
   // the page, to flag a mod that may be broken; extension/modhealth.js)
+  // (and how: watchedHow[mod] is 'hide' while it only ever called trif.hide, which modhealth.js gives longer)
   if (!store.watched || typeof store.watched !== 'object') store.watched = {};
-  const watch = (modId, sel) => { try { const l = store.watched[modId] || (store.watched[modId] = []); if (l.length < 40 && !l.includes(sel)) l.push(sel); } catch { /* never throw into a mod */ } };
+  if (!store.watchedHow || typeof store.watchedHow !== 'object') store.watchedHow = {};
+  const watch = (modId, sel, how = 'look') => {
+    try {
+      const l = store.watched[modId] || (store.watched[modId] = []);
+      if (l.length < 40 && !l.includes(sel)) l.push(sel);
+      store.watchedHow[modId] = how === 'hide' && store.watchedHow[modId] !== 'look' ? 'hide' : 'look';
+    } catch { /* never throw into a mod */ }
+  };
   const textOf = (a) => { if (typeof a === 'string') return a; try { const s = JSON.stringify(a); return s === undefined ? String(a) : s.slice(0, 10000); } catch { try { return String(a); } catch { return '[unprintable]'; } } };
   const report = (modId, err) => {
     try {
@@ -2040,7 +2048,7 @@ globalThis.__trifStartSandbox = function () {
         }
         return wrap(host, self);
       },
-      hide: (sel) => { const r = css(`${selectorOk(sel)} { display: none !important; }`); watch(modId, sel); return r; },
+      hide: (sel) => { const r = css(`${selectorOk(sel)} { display: none !important; }`); watch(modId, sel, 'hide'); return r; },
       log: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error'),
     };
     const consoleApi = { log: logTo(modId, 'log'), info: logTo(modId, 'log'), debug: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error') };
@@ -2867,7 +2875,7 @@ globalThis.__trifStartSandbox = function () {
   } catch { /* none */ }
   // (evaluate, result: a one-off run and its answer, for TRIF's background; this world's global isn't a mod's to reach)
   const result = (runId) => { const k = String(runId); const v = runResults.get(k); if (v === undefined) return null; runResults.delete(k); return v; };
-  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, evaluate, result, errors: store.errors, logs: store.logs, watched: store.watched, stats }), configurable: false, writable: false });
+  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, evaluate, result, errors: store.errors, logs: store.logs, watched: store.watched, watchedHow: store.watchedHow, stats }), configurable: false, writable: false });
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
   if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }

@@ -301,6 +301,7 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif requests [TAB] [--filter <regex>] [--limit N]` | Recorded requests, newest last, with index `i`. |
 | `trif request [TAB] <i> [-o file]` | One request: method, URL, status, request body, response (JSON pretty-printed). |
 | `trif errors [TAB]` / `trif logs [TAB]` | Errors thrown by mods in that page / what mods logged. `--page`: the page's own errors (where a mod or recording is on). |
+| `trif not-broken <site>/<mod> [address]` | After a "may be broken" flag, when you've looked and nothing is broken (what the mod looks for just comes and goes on that page): TRIF stops flagging it there, for this version of the mod. Don't change the mod then. |
 | `trif mods` | Mods in the workspace (id, matches, file; `[off]` = switched off, `HELD` = waiting for the user's OK). |
 | `trif check <file\|site/mod>` | Check that a mod parses, without running it (use instead of `node --check`). |
 | `trif verify <site>/<mod> [TAB]` | After a save, in one step: `check`, a wait until the browser has what you saved, `reload`, whether the mod runs on the page (or why not: held, off, its `@match`), then `errors` and `logs`. |

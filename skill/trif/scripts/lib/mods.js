@@ -229,7 +229,7 @@ function buildMod({ site, file, code }) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
     const rules = require('./rules');
     const parsed = rules.parseRules(code);
-    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(parsed, meta.id), selectors: rules.selectorsOf(parsed), hash }, warnings: header.warnings };
+    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(parsed, meta.id), selectors: rules.selectorsOf(parsed), ...(rules.hidesOnly(parsed) ? { hideOnly: true } : {}), hash }, warnings: header.warnings };
   }
   return { mod: { ...meta, code, hash, ...styled }, warnings: header.warnings };
 }

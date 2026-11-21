@@ -615,6 +615,18 @@ const handlers = {
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
   async disable(ctx, pos) { return switchMod(ctx, pos, false); },
 
+  // A fix run's "nothing is broken" for a "may be broken" flag (extension/modhealth.js markNotBroken)
+  async 'not-broken'(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing mod id');
+    const id = modId(pos[0]);
+    const page = pos[1] !== undefined ? String(pos[1]).trim() : '';
+    if (page && !/^https?:\/\//i.test(page)) throw new UsageError(`"${page.slice(0, 200)}" isn't a page's address: give it whole, like https://example.com/home`);
+    const r = await ctx.call('mod.notBroken', { id, ...(page ? { page } : {}) });
+    if (ctx.json) return printJson(r);
+    const pages = (r && Array.isArray(r.pages)) ? r.pages : [];
+    out(`${id}: not broken. What it looks for comes and goes on ${pages.join(', ') || 'that page'}, so TRIF won't say it may be broken there again (until the mod changes).`);
+  },
+
   // Inside a run the helper does it (it knows the run's scope); otherwise the CLI moves the file itself,
   // so this works without the browser, and a running helper picks the change up like any other.
   async delete(ctx, pos) {

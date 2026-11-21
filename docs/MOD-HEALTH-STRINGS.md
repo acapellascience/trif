@@ -47,7 +47,7 @@ fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
   **{Mod name}'s fix may not work on {site}. Undo the fix, or want me to try again?**
 - Buttons: **Fix it** · **Show error** · **Ignore** (title: **Don't flag this again for this version of the
   mod**); after a fix: **Undo fix** · **Try again** · **Show error** · **Ignore**; once fixed: **Undo fix**
-- Its state, after: **Fixing…** · **Fixed.** · **Ignored.** · **Fix undone.** · (DRAFT, 11-20, awaiting Tim)
+- Its state, after: **Fixing…** · **Fixed.** · **Ignored.** · **Fix undone.** · (APPROVED by Tim, 11-20)
   **Not broken.** (a fix run found nothing broken and said so with `trif not-broken`; no buttons after it)
 - If a button fails: **Couldn't do that: {why}** · **Couldn't undo the fix: {why}**
 - Fix it automatically, before the run: **{Mod name} has a new error on {site}: TRIF asked your agent to fix

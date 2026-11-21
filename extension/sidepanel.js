@@ -517,7 +517,7 @@ const cardKey = (m) => `${m.done || ''}|${m.undoneFix ? 1 : 0}|${m.fixRun || ''}
 function breakCard(li, m) {
   li.classList.add('break-card');
   li.dataset.cardKey = cardKey(m);
-  const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : m.done === 'notBroken' ? 'Not broken.' : ''; // (Not broken: a draft, docs/MOD-HEALTH-STRINGS.md)
+  const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : m.done === 'notBroken' ? 'Not broken.' : ''; // (Not broken: approved by Tim 11-20, docs/MOD-HEALTH-STRINGS.md)
   if (state) li.append(' ', el('span', 'break-state', state));
   const acts = el('div', 'break-actions');
   const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: chatSite(), text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };

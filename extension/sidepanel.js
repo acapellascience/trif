@@ -4567,6 +4567,7 @@ async function panelCommand(text) {
 }
 
 async function send() {
+  dictationUI?.dictation.endForSend(); // (sending stops the mic; the words being heard go in first)
   const text = ui.input.value.trim();
   if (!text || !view.site || !ui.composer.dataset.canSend) return;
   if (text.startsWith('/')) {

@@ -166,6 +166,27 @@ test('the person\'s stop ends it, never sends, and the last words still come in'
   assert.equal(s.fake.made.length, 2);
 });
 
+test('sending while it listens stops it at once: the words being heard go in first, nothing after lands in the emptied box', async () => {
+  const s = await setup({ text: 'Make it' });
+  await s.d.start();
+  const r = s.fake.last();
+  r.begin();
+  r.results([['blue please', false]]);
+  s.d.endForSend();
+  assert.equal(s.text(), 'Make it blue please', 'the words being heard are in the box before it is read');
+  assert.equal(s.d.view().active, false);
+  assert.equal(s.d.view().phase, 'off');
+  assert.equal(r.aborted, true);
+  s.setText(''); // (the panel sends and empties the box)
+  r.results([['blue please now', true]]);
+  r.end();
+  await s.advance(10000);
+  assert.equal(s.text(), '', 'a late word from the stopped recogniser is ignored');
+  assert.equal(s.fake.made.length, 1, 'no restart');
+  s.d.endForSend(); // (sending with the mic off: nothing)
+  assert.equal(s.text(), '');
+});
+
 test('the box is never replaced: words typed while it listens stay, new words go after them', async () => {
   const s = await setup({ text: 'a' });
   await s.d.start();

@@ -7,7 +7,7 @@ one table each, so a change is one line). `{browser}` is the browser's name, `{k
 How it behaves (Tim's rules for voice input, as on the iPhone): it never stops by itself (when the browser's
 recogniser ends, after a pause or a minute or so, a new one starts at once); the words only accumulate (what's in the
 box stays, new words go at its end; the words being heard show in small italics under the text and only finished ones
-go in); only the person's stop ends it (the button, the shortcut, or Escape in the box), and stopping never sends.
+go in); only the person's stop ends it (the button, the shortcut, or Escape in the box), and stopping never sends. Sending (Send or Enter) while it listens stops it too (Tim 11-21): the words still being heard go into the message.
 
 ## The button (left of Send)
 

@@ -10,6 +10,7 @@
 //     the box's top edge (interim); only finished ones (final) go into the box, at its end. A stretch the recogniser
 //     never finished before it ended is kept as heard (never lost).
 //   - Only the person's own stop ends it (the button, the shortcut, Escape in the box), and stopping never sends.
+//     Sending (Send or Enter) while it listens stops it too: the words still being heard are sent with the rest.
 //   - It never says it's listening unless it is: "listening" only from the recogniser's own start event; while it
 //     starts, asks for the microphone or reconnects, the button says so instead.
 //   - Errors: the microphone blocked ('not-allowed'), none found ('audio-capture'), the service turned off
@@ -352,6 +353,18 @@ export function createDictation(deps) {
     show();
   }
 
+  /** Sending while it listens (Tim 11-21): it stops at once, the words still being heard go into the box first
+   *  (so they're sent), and anything the recogniser says afterwards is ignored (it would land in the emptied box). */
+  function endForSend() {
+    if (!active && !rec) return;
+    active = false;
+    clearTimers();
+    if (note?.kind === 'quiet') note = null;
+    phase = 'off';
+    drop();
+    show();
+  }
+
   /** The microphone was allowed (mic.html said so): a blocked note goes. */
   function granted() {
     if (note?.fix === 'settings') { note = null; show(); }
@@ -363,6 +376,7 @@ export function createDictation(deps) {
     start,
     stop,
     toggle: () => (active ? stop() : start()),
+    endForSend,
     granted,
     dismissNote: () => { if (note) { note = null; show(); } },
     dispose: () => { active = false; clearTimers(); drop(); phase = 'off'; },

@@ -11,6 +11,13 @@
 //     two anywhere but 127.0.0.1, all UDP, and everything inbound. (The container has a network capability,
 //     NET_CAPABILITY: without one nothing connects at all; the rules close what it opens.) So the box reaches TRIF's relay and key proxy and nothing
 //     else on this computer, as on the Mac (the internet stays closed: no internetClient).
+//
+// NOT YET THE GUARANTEE (round 10, windows-latest): Windows Firewall rules don't filter traffic on this
+// computer itself. With the exemption the box reached every port on 127.0.0.1, this computer's own address,
+// ::1 and UDP, rules or not; the same rules did close the internet and the network (internetClient in their
+// place: refused). So these rules alone give W2's reach. Next: WFP filters of TRIF's own (the same one
+// administrator step) for the loopback part; until they hold, nothing turns this on (it isn't wired into runs).
+//
 // Turning the setting off takes both out (the administrator again). Before every boxed run status() must
 // say ready (the rules in force, in the ACTIVE store, so a policy that ignores local rules shows; every
 // firewall profile on), else the run doesn't start in the box (the older-protection card, its reason).

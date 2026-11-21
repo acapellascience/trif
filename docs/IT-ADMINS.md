@@ -83,6 +83,10 @@ them.
 
 ## Windows (in progress; draft)
 
+*(Round 10: on Windows' own test machines the firewall rules below don't filter connections inside the
+computer, so this part is changing: TRIF's own WFP filters, made in the same administrator step, for the
+ports on the computer. This section will say what they are and how to list them.)*
+
 On Windows the box is an AppContainer (Windows' app sandbox): one container for every boxed chat,
 `TRIF.FullSandbox`, with no network capability; each chat's own folders are opened to a capability only that
 chat holds. A container can't reach anything on the computer by itself, so turning the setting on asks once

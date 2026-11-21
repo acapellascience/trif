@@ -92,14 +92,25 @@ managed policy; a normal run works; the fallback happens only on the person's ch
     (`ANTHROPIC_UNIX_SOCKET` doesn't either). With `privateNetworkClientServer` (no administrator) the pipe
     path works end to end, but it opens the local network. WHOLE-BOX.md "Windows without an
     administrator?": options W1–W3.
-  - [ ] **9b'.** Build Tim's pick (For Tim, round 9: recommended W3, the exemption + firewall rules in one
-    administrator step at setup).
+  - [ ] **9b'.** Build Tim's pick: **W3** (11-21), the exemption + firewall rules in one administrator step.
+    - [x] *(round 10)* winbox.js: one container `TRIF.FullSandbox` (its SID derived in JS, = Windows'),
+      each run's folders on a capability of its own (fence.cs `runCapability`; two runs can't read each
+      other's), TRIF's two ports chosen at setup (not excluded, free; in the rules' description), setup /
+      remove (one elevated step: the exemption + four block rules) / status (active store, every profile
+      on, the rules as made); the box's capability `privateNetworkClientServer` (with none, nothing
+      connects). On windows-latest: the stand-in run and the real Anthropic through the relay at its port.
+    - [ ] **Windows Firewall rules don't filter loopback** (round 10): with the exemption the box reaches
+      every port on this computer, rules or not (they do close the internet and the network). Next: TRIF's
+      own WFP filters for the loopback part, same administrator step (WHOLE-BOX.md "W3 on windows-latest").
+      If WFP can't either: For Tim (W1 or W2).
 - [ ] **9b. Windows half of the rest:** pinned claude.exe (1), Credential Manager for the token (6), `trif`
   over MCP, no Bash (7), refusal errors (3), fallback (4), relay (8), managed settings in
   `C:\Program Files\ClaudeCode` (5), daily CI (2).
   - [x] **(1)** *(round 9)* claudepin installs the pinned claude.exe on Windows (the system's tar.exe by
     its full path) and checks its Authenticode signature: Valid, signed by "Anthropic, PBC" (`winSigner` in
     the pin file; Windows PowerShell's Get-AuthenticodeSignature without a PowerShell 7 PSModulePath). On CI.
+  - [x] **(2)** *(round 10, nothing to build)* whole-box-latest.yml calls all of whole-box.yml, so the
+    Windows probes (the W3 one included) run daily on the newest claude.exe too.
   - [ ] **(6)** Nothing to build here: claudetoken.js uses keyring.js's setKey/getKey, which on the windows
     branch are Credential Manager (credman.js, same signatures; a setup-token token fits its 2560 bytes).
     Test when the branches meet.
@@ -352,6 +363,29 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   nothing reached it). Locally the touched suites pass (~280 tests); tests/update.test.js's web-ext part
   needs node_modules, which this worktree doesn't have (CI's `tests` workflow passes it).
 
+### Round 10 (11-21): step 9b' (W3: built; the firewall rules don't hold loopback), drafts
+
+- **helper/lib/winbox.js** (platform-neutral text + parsing; PowerShell on Windows): `containerSid` /
+  `capabilitySid` (Windows' derivations; registryRead's well-known SID in the unit test, the container's
+  against fence.cs on CI), `choosePorts` (netsh's excluded ranges, listening ports; the relay and key proxy
+  adjacent), `rules`, `setupScript` / `removeScript` (run elevated: `Start-Process -Verb RunAs`, the script
+  on the encoded command line, never in a file; on CI directly), `statusScript` / `parseStatus` (no
+  administrator; problems `notExempt`, `firewallOff`, `rulesMissing`, `rulesChanged`, `extraRule`).
+  Not wired into runs (the Windows run code is on branch windows); header says it isn't the guarantee yet.
+- **fence.cs `runCapability`**: one shared container; each run's entries (grants "to run", readonly)
+  name a per-run capability only its token holds; cleanup keeps the container. (The real fence is
+  helper/lib/win/fence.cs on branch windows: the same change there when the branches meet.)
+- relay.start({port}), startFakeAnthropic({port}); win-inside.js: UDP and file-read targets.
+- **tests/whole-box/win-w3-probe.js** (windows job, `continue-on-error` until the loopback part holds):
+  results in WHOLE-BOX.md "W3 on windows-latest". Held: the SID, status before/after, setup twice (same
+  ports), the relay's and key proxy's ports open, the internet closed, two runs apart, a normal stand-in
+  run, the real Anthropic through the relay (401), status `firewallOff`, remove. **Not held: every other
+  port on 127.0.0.1, this computer's address, ::1, UDP: open** (Windows Firewall doesn't filter loopback).
+- Words: WHOLE-BOX-STRINGS.md, Windows' administrator step (on, off, refused, failed, firewall off) and the
+  card's why lines (the change gone, firewall off, rules changed, port taken); round 8 item 4's one chat line
+  (Tim: keep the new session; draft only). IT-ADMINS.md: a Windows section (marked as changing).
+- Tests: winbox.test.js 5/5 locally and on both CI jobs; relay.test.js unchanged (8 pass).
+
 ### Round 9 (11-21): step 9a (Windows' network without an administrator: none that keeps the box to the relay), 9b(1) (the pinned claude.exe)
 
 - **The probe** (tests/whole-box/win-net-probe.js, in whole-box.yml's windows job before the spike's probe):
@@ -370,7 +404,7 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 - Tests: claudepin.test.js (+1, the signature lines; the pin file's winSigner), 11 pass locally with
   release-claudepin.test.js. CI as below.
 
-## For Tim (round 9): NEEDS AN ANSWER before Windows' box goes on
+## For Tim (round 9): answered 11-21, "W3" (built in round 10, step 9b')
 
 **How should TRIF's full sandbox on Windows reach Anthropic?** There's no way without an administrator that
 keeps a chat to TRIF's relay only (round 9 tried a named pipe; details in WHOLE-BOX.md). Three choices:
@@ -387,7 +421,7 @@ keeps a chat to TRIF's relay only (round 9 tried a named pipe; details in WHOLE-
 Until you choose, Windows keeps today's design (no full sandbox). Draft card words for W2/W3 are in
 WHOLE-BOX-STRINGS.md.
 
-## For Tim (round 8): not blocking, the loop goes on
+## For Tim (round 8): answered 11-21: 1–3 keep; 4 keep (a new session; the optional chat line drafted in WHOLE-BOX-STRINGS.md, round 10)
 
 1. **Plain-http telemetry collectors on other computers** (`http://collector.corp:4318`). The relay only
    carries `CONNECT` tunnels, so they're refused (noted in the run's log). Carrying them means TRIF
@@ -582,14 +616,22 @@ question with nothing to decide.
 
 ## Next
 
-**Waiting for Tim** (For Tim, round 9: W1, W2 or W3). Then step 9b': W3 would be one fixed container for
-every run (each run's folders on a capability of its own), the relay on a fixed port, the exemption and
-`New-NetFirewallRule -Package` rules made in one elevated step by `trif setup` / turning the switch on (and
-removed when it goes off), tested on windows-latest (the box reaching the relay, refused at every other
-port on this computer, the internet closed); then 9b's (3), (4), (5), (8) on Windows. The For Tim (round
-8) points don't block anything.
+**Step 9b', the loopback part:** TRIF's own WFP filters (a small C# tool like fence.cs, P/Invoke to
+fwpuclnt.dll: a persistent provider + sublayer of TRIF's, block filters at ALE_AUTH_CONNECT_V4/V6 for the
+container's package ID with loopback remote addresses and every port but TRIF's two, and UDP / inbound
+likewise), added and removed in winbox.js's one elevated step and checked by status (`netsh wfp show
+filters` or FwpmFilterEnum). Try on windows-latest with win-w3-probe.js (then strict again). If WFP can't
+block what the exemption allows: stop with For Tim (W1 or W2). Then 9b's (3), (4), (5), (8) on Windows.
 
 ## CI
+
+- Round 10: whole-box [44952181864](https://github.com/acapellascience/trif/actions/runs/44952181864)
+  (6d8976f): macos passed; windows failed: setup counted the probe's own listeners as busy (the rules named
+  other ports; fixed, setup takes the ports). [44952587854](https://github.com/acapellascience/trif/actions/runs/44952587854)
+  (8f49ddf): macos passed; windows: rules right, but every socket refused (no network capability).
+  [44953062701](https://github.com/acapellascience/trif/actions/runs/44953062701) (ede48d8): windows: the
+  results above (loopback not filtered); macos passed. `tests` passed for 6d8976f (44952181868) and
+  8f49ddf (44952587942); ede48d8's (44953063038) still running at push time.
 
 - Round 9: whole-box [44885239892](https://github.com/acapellascience/trif/actions/runs/44885239892) (b68cf50)
   passed: the pinned claude.exe installed and validly signed by Anthropic, PBC; the probe's node couldn't

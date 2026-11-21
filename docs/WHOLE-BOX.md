@@ -221,6 +221,36 @@ All three still need: one fixed container for every run (an exemption or rules n
 run's folders then go to a capability of its own, which fence.cs takes already), and no Bash (the Windows
 design). Recommendation (For Tim, round 9, in the progress file): W3.
 
+### W3 on windows-latest (round 10, step 9b')
+
+Tim's pick (11-21): one administrator step, the loopback exemption for one container plus firewall rules so
+the box reaches only TRIF's relay. Built (`helper/lib/winbox.js`) and tried with TRIF's pinned claude.exe,
+`tests/whole-box/win-w3-probe.js`, [run 44953062701](https://github.com/acapellascience/trif/actions/runs/44953062701):
+one container `TRIF.FullSandbox` (SID derived in JS = Windows' own), each run's folders on a capability of
+its own (fence.cs `runCapability`), four block rules naming the container (TCP to every port but TRIF's two;
+those two anywhere but 127.0.0.1; all UDP; all inbound), status read from the active store.
+
+| From inside TRIF's container | Result |
+|---|---|
+| No network capability, exemption or not | **every socket refused** (EACCES): the exemption needs a capability |
+| Exemption only + `privateNetworkClientServer` | 127.0.0.1 open (every port); the internet refused |
+| Exemption only + `internetClient` | 127.0.0.1 open; the internet open |
+| **Exemption + the rules** + `privateNetworkClientServer` | TRIF's relay and key proxy open; **every other port on 127.0.0.1, this computer's own address, ::1 and UDP open too**; the internet refused |
+| Exemption + the rules + `internetClient` | 127.0.0.1 every port open; **the internet refused** (1.1.1.1:443, example.com:443): the rules work off the computer |
+| The firewall off (profiles off) | 127.0.0.1 open; the internet refused (no `internetClient`); `status()` says `firewallOff` |
+| Two runs in the one container | each reads its own folder, not the other's (EPERM), nor a file in the home folder |
+| claude.exe, the stand-in API at the key proxy's port | a normal run: its own mod read and written, the `trif` MCP tool; a secret and another site refused |
+| claude.exe → TRIF's relay at its fixed port → api.anthropic.com | works (401 for the made-up token) |
+| `winbox.remove` | the exemption and rules gone, the relay's port refused again |
+
+So **Windows Firewall rules don't filter connections inside the computer** (loopback): with the exemption,
+the rules leave W2's reach (every server on this computer), not W3's. They do close everything off the
+computer. What's left to try for the loopback part, in the same one administrator step: **TRIF's own WFP
+filters** (Windows Filtering Platform, which the firewall is built on: a persistent sublayer of TRIF's with
+block filters at the connect layer for the container's package ID, loopback addresses, every port but
+TRIF's two). Whether WFP lets a filter of its own block loopback that the exemption allows is the next
+round's question; if it can't, W3 isn't possible and the choice is W1 or W2 (For Tim then).
+
 ## Enterprise: what managed settings can still do
 
 Tested for real on GitHub's macOS runner: the workflow writes

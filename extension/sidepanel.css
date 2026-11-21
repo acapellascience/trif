@@ -709,7 +709,7 @@ body:is(.site-off, .no-site) .robotless-line { display: none; }
 .check input { margin: 0; }
 
 /* (no scroller of its own: the notice around it already scrolls, and a scroller inside it that fills the view
-   trapped the wheel at its top, so the notice couldn't be scrolled back up to its title and Hide: Tim 11-20, Safari) */
+   trapped the wheel at its top, so the notice couldn't be scrolled back up to its title and Hide: Tim 11-20) */
 #update .md { margin-top: 6px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 #update .md :is(ul, ol) { margin: 0; padding-left: 16px; }
 #update .md li + li { margin-top: 4px; }

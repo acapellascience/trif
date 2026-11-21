@@ -187,3 +187,16 @@ test('the administrator step carries TRIF\'s WFP source on its own command line,
   const cs = require('fs').readFileSync(w.WFP_CS, 'utf8');
   for (const f of w.WFP_FILTERS) assert.ok(cs.toLowerCase().includes(`new guid("${f.key}")`), f.key);
 });
+
+test('net events: what `wfp events` prints, read (9b(3))', () => {
+  const ok = w.parseEvents('noise\n{"ok":true,"collecting":true,"eventsSddl":"D:(A;;GA;;;BA)","filters":7,"events":[{"time":"2026-11-21T10:00:00Z","filter":"5452e1f0-7769-4b49-8000-747269660011","layer":"connect4","protocol":6,"remote":"127.0.0.1","remotePort":3000,"localPort":5,"app":"node.exe"},"x"],"total":40}');
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(ok.collecting, true);
+  assert.strictEqual(ok.events.length, 1);
+  assert.strictEqual(ok.sddl, 'D:(A;;GA;;;BA)');
+  const denied = w.parseEvents('{"ok":false,"error":"read the net events 0x80070005","denied":true,"collecting":true,"filters":7}');
+  assert.deepStrictEqual([denied.ok, denied.denied, denied.events.length], [false, true, 0]);
+  assert.strictEqual(w.parseEvents('').ok, false);
+  assert.strictEqual(w.parseEvents('[1]').events.length, 0);
+  assert.strictEqual(w.netEvents({ wfpExe: null }).ok, false);
+});

@@ -221,3 +221,55 @@ test('runs.js, the end of a boxed run: a failed run names what the box refused (
   const none = finish({ ok: false, result: 'no' });
   assert.ok(!none.events.some((e) => e.reason === 'box') && !none.log.some((x) => x.webmods === 'boxRefused'));
 });
+
+test('boxrefusals on Windows (9b(3)): the run\'s own lines, TRIF\'s filters\' drops, in words', () => {
+  const home = 'C:\\Users\\runneradmin';
+  const lines = [
+    { type: 'system', subtype: 'init' },
+    // the model's own words never count
+    { type: 'assistant', message: { content: [{ type: 'text', text: "EPERM: operation not permitted, open 'C:\\model\\said.txt'" }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: "EPERM: operation not permitted, open 'C:\\Users\\runneradmin\\wb3-planted.txt'" }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: "Error: EACCES: permission denied, mkdir 'C:\\stage\\sites\\other.com'\nconnect EACCES 1.1.1.1:443\nconnect EACCES 1.1.1.1:443" }] }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: "Get-Content : Access to the path 'C:\\secret.txt' is denied.\nError: spawn C:\\x\\tool.exe EPERM\nspawn EPERM" }] } },
+    { type: 'result', result: "connect EACCES 9.9.9.9:443 (the model's summary)" },
+  ];
+  const own = br.fromRunOutput({ stdout: lines.map((l) => JSON.stringify(l)).join('\r\n'), stderr: "listen EACCES: permission denied 127.0.0.1:5555\nscandir 'x'" });
+  assert.deepStrictEqual(own.map((r) => [r.op, r.target]), [
+    ['file-open', 'C:\\Users\\runneradmin\\wb3-planted.txt'],
+    ['file-write', 'C:\\stage\\sites\\other.com'],
+    ['network-outbound', '1.1.1.1:443'],
+    ['process-exec', 'C:\\x\\tool.exe'],
+    ['process-exec', 'a program'],
+    ['file-open', 'C:\\secret.txt'],
+    ['network-bind', '127.0.0.1:5555'],
+  ]);
+  assert.ok(own.every((r) => r.kind === 'own'));
+  assert.equal(br.describe(own[0], { home }), 'opening ~\\wb3-planted.txt');
+  assert.equal(br.describe(own[1], { home }), 'writing C:\\stage\\sites\\other.com');
+  assert.equal(br.describe(own[2], { home }), 'a connection to 1.1.1.1:443');
+  assert.deepStrictEqual(br.fromRunOutput({ stdout: 'not json\n{"type":"user"}\n', stderr: '' }), []);
+  assert.deepStrictEqual(br.fromRunOutput({}), []);
+
+  const t0 = Date.parse('2026-11-21T10:00:00Z');
+  const ev = [
+    { time: '2026-11-21T09:50:00.0000000Z', layer: 'connect4', protocol: 6, remote: '127.0.0.1', remotePort: 3000, app: '\\device\\harddiskvolume4\\x\\old.exe' },
+    { time: '2026-11-21T10:00:01.5000000Z', layer: 'connect4', protocol: 6, remote: '127.0.0.1', remotePort: 3000, localPort: 50000, app: '\\device\\harddiskvolume4\\hostedtoolcache\\node.exe' },
+    { time: '2026-11-21T10:00:02Z', layer: 'connect4', protocol: 6, remote: '127.0.0.1', remotePort: 3000, localPort: 50001, app: '\\device\\harddiskvolume4\\hostedtoolcache\\node.exe' },
+    { time: '2026-11-21T10:00:02Z', layer: 'connect6', protocol: 6, remote: '::1', remotePort: 47391, app: null },
+    { time: '2026-11-21T10:00:03Z', layer: 'connect4', protocol: 17, remote: '127.0.0.1', remotePort: 53, app: 'C:\\x\\claude.exe' },
+    { time: '2026-11-21T10:00:04Z', layer: 'listen4', protocol: 6, localPort: 8080, app: 'C:\\x\\claude.exe' },
+    { time: '2026-11-21T10:00:05Z', layer: 'accept4', protocol: 6, remote: '10.0.0.5', remotePort: 1234 },
+    'junk', null,
+  ];
+  const net = br.fromNetEvents(ev, { since: t0 });
+  assert.deepStrictEqual(net.map((r) => br.describe(r)), [
+    'a connection to 127.0.0.1:3000 (node.exe)',
+    'a connection to [::1]:47391',
+    'a connection to 127.0.0.1:53 (UDP) (claude.exe)',
+    'listening on port 8080 (claude.exe)',
+    'a connection from 10.0.0.5:1234',
+  ], 'the run\'s own time only, the same connection once');
+  assert.equal(br.fromNetEvents(ev).length, 6, 'no since: all');
+  assert.ok(!net.some((r) => br.routine(r, br.routineContext({ homes: [home] }))), 'none routine');
+  assert.match(br.summary([...own.slice(0, 1), ...net.slice(0, 1)], { home }), /^TRIF's full sandbox refused a connection to 127\.0\.0\.1:3000 \(node\.exe\); opening ~\\wb3-planted\.txt\.$/);
+});

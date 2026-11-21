@@ -23,6 +23,10 @@
 // Round 11: TRIF's own WFP filters (helper/lib/win/wfp.cs) in the same step, for what the firewall rules
 // don't hold (round 10: loopback). Status reads them back (the compiled wfp.exe, no administrator). Also
 // learned: with the filters, are the firewall rules still needed (the rules out; then the firewall off)?
+//
+// Round 12 (9b(3), refusal errors): TRIF's filters' drops read back (`wfp events`) as an administrator and as
+// the person (Basic User), into the run's words (boxrefusals.fromNetEvents); the stand-in claude.exe run's
+// own lines into refusals (boxrefusals.fromRunOutput).
 
 const fs = require('fs');
 const os = require('os');
@@ -34,6 +38,7 @@ const { spawn, spawnSync } = require('child_process');
 const { startFakeAnthropic } = require('../fake-anthropic-server');
 const relay = require('../../helper/lib/relay');
 const winbox = require('../../helper/lib/winbox');
+const br = require('../../helper/lib/boxrefusals');
 
 if (process.platform !== 'win32') { console.error('win-w3-probe: Windows only'); process.exit(2); }
 if (process.env.GITHUB_ACTIONS !== 'true') { console.error('win-w3-probe: runs on GitHub Actions only (it changes the firewall)'); process.exit(2); }
@@ -142,6 +147,17 @@ async function inside(fence, L, targets, title) {
   const r = await fenceExec(fence, L.spec, [...NODE_IN, path.join(L.box, 'win-inside.js')], { timeout: 120000, env: { WBN_TARGETS: JSON.stringify(targets) } });
   show(`${title} (exit ${r.code}, ${r.ms} ms)`, r.stdout + r.stderr);
   try { return JSON.parse(r.stdout.trim().split(/\r?\n/).pop()); } catch { return {}; }
+}
+
+// A command as the person would run it: no administrator (runas /trustlevel:0x20000, Windows' "Basic User":
+// the Administrators group deny-only; no account or password). -> its output (or '(nothing)').
+async function asBasicUser(name, command) {
+  const dir = path.join(base, 'low');
+  const out = path.join(dir, `${name}.out`);
+  const cmd = w(path.join(dir, `${name}.cmd`), ['@echo off', `${command} > "${out}.tmp" 2>&1`, `move /y "${out}.tmp" "${out}" > nul`].join('\r\n'));
+  spawnSync(sys('runas.exe'), ['/trustlevel:0x20000', `cmd /c "${cmd}"`], { encoding: 'utf8', timeout: 30000 });
+  for (let i = 0; i < 60 && !fs.existsSync(out); i++) await new Promise((r) => setTimeout(r, 500));
+  return fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '(nothing)';
 }
 
 const ps = (script) => winbox.runPs(script);
@@ -273,6 +289,7 @@ function parseStream(stdout) {
   verdict['winbox.setup a second time: the same ports, ready'] = again.ok && again.status.ready && JSON.stringify(again.ports) === JSON.stringify(ports);
 
   // 4, 5
+  const t4 = Date.now();
   o = await inside(fence, A, targets, 'run a, after the step');
   holds(o, '(after)');
   verdict['after: TRIF\'s relay port open to the box'] = o['TRIF\'s relay port, 127.0.0.1'] === 'echo ok';
@@ -284,6 +301,26 @@ function parseStream(stdout) {
   verdict['run b reads its own folder, not run a\'s'] = String(ob['its own folder'] || '').startsWith('read') && !String(ob['the other run\'s folder'] || '').startsWith('read');
   if (String(ob['the other run\'s folder'] || '').startsWith('read')) escaped = true;
   console.log(`the echo listeners heard: ${JSON.stringify(Object.fromEntries(Object.entries(srv).map(([k, v]) => [k, v && v.hits ? v.hits.length : null])))}`);
+
+  // 9b(3): what TRIF's filters dropped in that run, read back as an administrator and as the person
+  await new Promise((r) => setTimeout(r, 1500));
+  const evAdmin = winbox.netEvents({ minutes: 10 });
+  show('wfp events as an administrator', JSON.stringify({ ...evAdmin, events: evAdmin.events.slice(0, 12) }, null, 1));
+  const evAdminR = br.fromNetEvents(evAdmin.events, { since: t4 });
+  console.log(`  in the run's words: ${br.summary(evAdminR) || '(none)'}`);
+  verdict['wfp events as an administrator: read'] = evAdmin.ok === true;
+  learned['net events collected (FWPM_ENGINE_COLLECT_NET_EVENTS)'] = evAdmin.collecting;
+  learned['net events: who may read them (DACL)'] = evAdmin.sddl || '(not read)';
+  learned['TRIF\'s filters\' drops in step 4 (administrator)'] = evAdminR.length;
+  learned['  step 4\'s closed TCP ports among them'] = ['another port, 127.0.0.1', 'the internet, 1.1.1.1:443'].map((k) => `${k}: ${evAdminR.some((x) => x.target === `${targets[k].host}:${targets[k].port}`)}`).join('; ');
+  const lowEv = await asBasicUser('events', `"${process.env.TRIF_WFP_EXE}" events 10`);
+  show('wfp events as the person (Basic User)', lowEv.slice(0, 1500));
+  const evLow = winbox.parseEvents(lowEv);
+  learned['NET EVENTS READABLE WITHOUT AN ADMINISTRATOR'] = evLow.ok === true;
+  learned['  as the person: denied'] = !!evLow.denied;
+  learned['  as the person: TRIF\'s drops in step 4'] = br.fromNetEvents(evLow.events, { since: t4 }).length;
+  learned['  as the person: error'] = evLow.error || '(none)';
+  learned['the box\'s own words for a refused connection (node)'] = String(o['the internet, 1.1.1.1:443']).slice(0, 120);
 
   // (learned: the rules with internetClient in place of NET_CAPABILITY: do they close the internet too?)
   setCaps(A, ['internetClient']);
@@ -318,6 +355,13 @@ function parseStream(stdout) {
   if (p.result) console.log(`  result: ${JSON.stringify({ is_error: p.result.is_error, result: String(p.result.result || '').slice(0, 200) })}`);
   else show('stdout (no result line)', r.stdout.slice(-1500));
   if (r.stderr.trim()) show('stderr', r.stderr.slice(-1500));
+  const ownR = br.fromRunOutput({ stdout: r.stdout, stderr: r.stderr });
+  console.log(`  its own lines, as refusals: ${JSON.stringify(ownR)}`);
+  console.log(`  in the run's words: ${br.summary(ownR, { home: os.homedir() }) || '(none)'}`);
+  learned['the run\'s own lines name the home folder\'s write'] = ownR.some((x) => /wb3-planted\.txt$/i.test(x.target));
+  learned['the run\'s own lines name the other site\'s write'] = ownR.some((x) => /other\.com/i.test(x.target));
+  learned['the run\'s own lines name the secret\'s read'] = ownR.some((x) => x.target && x.target.toLowerCase() === secretFile.toLowerCase());
+  learned['the run\'s own lines name the other run\'s folder'] = ownR.some((x) => x.target && x.target.toLowerCase().startsWith(B.stage.toLowerCase()));
   verdict['a normal run in the box (stand-in API): its own mod read and written, the trif tool'] = !!(p.result && !p.result.is_error) && String(got[0] || '').includes('COPY-OK a') && ownWritten && String(got[6] || '').includes('mcp-trif-ok');
   await api.close();
 

@@ -353,6 +353,26 @@ function status({ sid = containerSid(CONTAINER), wfpExe = process.env.TRIF_WFP_E
   return { ...parseStatus(r.stdout, { sid, wfp }), raw: r.code === 0 ? undefined : `${r.stderr}${r.error || ''}`.slice(0, 500) };
 }
 
+/**
+ * What TRIF's filters dropped lately (step 9b(3): the run's error names refused connections, as Seatbelt's
+ * reports do on the Mac). `wfp events <minutes>` lists only drops by TRIF's own filters (their IDs), never
+ * other programs'. -> {ok, events: [{time, filter, layer, protocol, remote, remotePort, localPort, app}],
+ * collecting, denied?, error?}. Whether a person may read them is Windows' (WFP's net events: `denied`).
+ */
+function parseEvents(text) {
+  let j = null;
+  try { j = JSON.parse(String(text || '').trim().split(/\r?\n/).pop()); } catch { /* below */ }
+  if (!j || typeof j !== 'object') return { ok: false, events: [], error: 'unreadable' };
+  const events = Array.isArray(j.events) ? j.events.filter((e) => e && typeof e === 'object') : [];
+  return { ok: j.ok === true, events, collecting: j.collecting === undefined ? null : j.collecting, ...(j.denied ? { denied: true } : {}), ...(j.error ? { error: String(j.error).slice(0, 200) } : {}), ...(j.eventsSddl ? { sddl: j.eventsSddl } : {}) };
+}
+
+function netEvents({ minutes = 5, wfpExe = process.env.TRIF_WFP_EXE || null } = {}) {
+  if (!wfpExe) return { ok: false, events: [], error: 'no wfp.exe' };
+  const w = spawnSync(wfpExe, ['events', String(Math.max(1, Math.min(1440, Math.ceil(minutes))))], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  return parseEvents(w.stdout);
+}
+
 function excludedPorts() {
   const r = spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'netsh.exe'), ['interface', 'ipv4', 'show', 'excludedportrange', 'protocol=tcp'], { encoding: 'utf8', windowsHide: true });
   return parseExcluded(r.stdout);
@@ -383,16 +403,17 @@ function remove({ already = false, sid = containerSid(CONTAINER), dir, wfpExe } 
 module.exports = {
   CONTAINER, NET_CAPABILITY, RULE_GROUP, PORT_CANDIDATES, containerSid, capabilitySid, parseExcluded, choosePorts, otherPorts, rules,
   describe, portsFromDescription, setupScript, removeScript, statusScript, parseStatus, parseWfp, WFP_FILTERS, WFP_CS, elevatedOuter,
-  runPs, runElevated, status, setup, remove, excludedPorts, busyPorts, encoded,
+  runPs, runElevated, status, setup, remove, excludedPorts, busyPorts, encoded, parseEvents, netEvents,
 };
 
 if (require.main === module) {
-  // node helper/lib/winbox.js status | setup | remove | sid [name]   (the tests on windows-latest)
+  // node helper/lib/winbox.js status | setup | remove | events [minutes] | sid [name]   (the tests on windows-latest)
   const [cmd, arg] = process.argv.slice(2);
   const already = process.env.TRIF_WINBOX_ALREADY_ADMIN === '1';
   if (cmd === 'sid') console.log(containerSid(arg || CONTAINER));
   else if (cmd === 'status') console.log(JSON.stringify(status()));
   else if (cmd === 'setup') console.log(JSON.stringify(setup({ already })));
   else if (cmd === 'remove') console.log(JSON.stringify(remove({ already })));
-  else { console.error('usage: winbox.js status|setup|remove|sid [name]'); process.exit(2); }
+  else if (cmd === 'events') console.log(JSON.stringify(netEvents({ minutes: Number(arg) || 5 })));
+  else { console.error('usage: winbox.js status|setup|remove|events [minutes]|sid [name]'); process.exit(2); }
 }

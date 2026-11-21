@@ -12,6 +12,15 @@
 //   - TRIF's network relay's refusals (relay.js `seen`: a CONNECT to a host not on its list, a request it
 //     couldn't read, an Anthropic host resolving to this computer).
 //
+// On Windows (step 9b(3)) there are no Seatbelt reports. Two sources there, besides the relay's:
+//   - TRIF's own WFP filters' drops (winbox.netEvents: `wfp events`, only drops by TRIF's filters),
+//     `fromNetEvents`: the connections refused, with the program. Readable only if Windows lets the person
+//     read WFP's net events (CI round 12: see docs/WHOLE-BOX.md); otherwise none, and the run's own lines say it.
+//   - The run's own lines (`fromRunOutput`): what the programs in the box were told when Windows refused a
+//     file or a connection ("EPERM: operation not permitted, open 'C:\…'", "connect EACCES 1.1.1.1:443",
+//     PowerShell's "Access to the path '…' is denied."), from the tools' results and stderr only (never the
+//     model's own words). Windows logs no AppContainer file refusals, so this is the only source for files.
+//
 // Reports are best effort: the kernel doesn't report every refusal (CI, round 5: a Write tool's refused
 // write had none, the refusals around it did), and the same operation on the same file is kept once.
 //
@@ -88,7 +97,7 @@ function parseReport(text, tag) {
   return { process: m[1], pid: Number(m[2]), op: m[3], target: (m[4] || '').trim() };
 }
 
-const tilde = (p, home) => (home && (p === home || p.startsWith(home + '/')) ? `~${p.slice(home.length)}` : p);
+const tilde = (p, home) => (home && (p === home || p.startsWith(home + '/') || p.startsWith(home + '\\')) ? `~${p.slice(home.length)}` : p);
 
 /** One refusal in words (drafts: docs/WHOLE-BOX-STRINGS.md). */
 function describe(r, { home = os.homedir() } = {}) {
@@ -100,6 +109,8 @@ function describe(r, { home = os.homedir() } = {}) {
   const op = r.op || '';
   let what;
   if (/^file-read/.test(op)) what = `reading ${t}`;
+  else if (op === 'file-open') what = `opening ${t}`;
+  else if (op === 'network-inbound') what = `a connection from ${t}`;
   else if (/^file-write/.test(op)) what = `writing ${t}`;
   // (Seatbelt names the far end "remote:<ip>:<port>", or "remote:*:<port>" with no address, CI round 6)
   else if (/^network-outbound/.test(op)) {
@@ -193,4 +204,89 @@ function fromProxy(seen) {
   }));
 }
 
-module.exports = { tagFor, parseReport, describe, summary, watch, fromProxy, routine, routineContext, ROUTINE, NOISE, MAX };
+// ---- Windows (9b(3))
+
+const baseName = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || null;
+
+/**
+ * TRIF's filters' drops (winbox.netEvents().events) -> refusals; `since` (a Date or ms): only the run's own
+ * time (the filters are the one container's, so every boxed run's drops are there).
+ */
+function fromNetEvents(events, { since = null } = {}) {
+  const t0 = since == null ? null : +since;
+  const out = [];
+  for (const e of events || []) {
+    if (!e || typeof e !== 'object') continue;
+    if (t0 != null && !(Date.parse(e.time) >= t0 - 1000)) continue;
+    const who = baseName(e.app);
+    const addr = e.remote && String(e.remote).includes(':') ? `[${e.remote}]` : e.remote;
+    const proto = Number(e.protocol) === 17 ? ' (UDP)' : '';
+    let r;
+    if (/^listen/.test(e.layer)) r = { op: 'network-bind', target: `port ${e.localPort}` };
+    else if (/^accept/.test(e.layer)) r = { op: 'network-inbound', target: addr ? `${addr}${e.remotePort != null ? `:${e.remotePort}` : ''}` : 'another program' };
+    else r = { op: 'network-outbound', target: addr ? `${addr}${e.remotePort != null ? `:${e.remotePort}` : ''}${proto}` : `(an address)${proto}` };
+    out.push({ kind: 'net', ...r, ...(who ? { process: who } : {}) });
+  }
+  return dedupe(out);
+}
+
+// What a refused call says, by syscall (Node and Bun word their errors the same way): reading / writing /
+// opening (open's mode isn't in the line).
+const READS = /^(scandir|lstat|stat|readlink|access|realpath|read|opendir|watch)$/;
+const WRITES = /^(mkdir|rename|unlink|rmdir|rm|copyfile|symlink|link|chmod|chown|utime|write|cp|truncate|futime)$/;
+const RUN_LINES = [
+  // EPERM: operation not permitted, open 'C:\x'  /  EACCES: permission denied, mkdir 'C:\x'
+  { re: /\b(EPERM|EACCES): (?:operation not permitted|permission denied), (\w+) '([^'\r\n]{1,400})'/g, make: (m) => ({ op: READS.test(m[2]) ? 'file-read' : WRITES.test(m[2]) ? 'file-write' : 'file-open', target: m[3] }) },
+  // connect EACCES 1.1.1.1:443 (Node's words for a refused connect; listen likewise)
+  { re: /\bconnect (?:EACCES|EPERM) (\[?[0-9A-Fa-f:.]+\]?:\d{1,5})/g, make: (m) => ({ op: 'network-outbound', target: m[1] }) },
+  { re: /\blisten (?:EACCES|EPERM)(?:: permission denied)? (\[?[0-9A-Fa-f:.]+\]?:\d{1,5})/g, make: (m) => ({ op: 'network-bind', target: m[1] }) },
+  // spawn C:\x\y.exe EPERM (Node: "spawn <file> <code>"; "spawn EPERM" too, round 9)
+  { re: /\bspawn (?:([^\s'"]{1,300}) )?(?:EPERM|EACCES)\b/g, make: (m) => ({ op: 'process-exec', target: m[1] || 'a program' }) },
+  // PowerShell / .NET
+  { re: /Access to the path '([^'\r\n]{1,400})' is denied/g, make: (m) => ({ op: 'file-open', target: m[1] }) },
+];
+
+/** The strings a run's own programs printed: tool results in Claude Code's stream-json, and stderr. */
+function runTexts({ stdout = '', stderr = '' } = {}) {
+  const texts = [];
+  const pull = (c) => {
+    if (typeof c === 'string') texts.push(c);
+    else if (Array.isArray(c)) c.forEach(pull);
+    else if (c && typeof c === 'object' && typeof c.text === 'string') texts.push(c.text);
+  };
+  for (const line of String(stdout).split(/\r?\n/)) {
+    let m = null;
+    try { m = JSON.parse(line); } catch { continue; }
+    if (!m || m.type !== 'user' || !m.message || !Array.isArray(m.message.content)) continue;
+    for (const c of m.message.content) if (c && c.type === 'tool_result') pull(c.content);
+    if (m.tool_use_result && typeof m.tool_use_result === 'string') texts.push(m.tool_use_result);
+  }
+  if (stderr) texts.push(String(stderr));
+  return texts;
+}
+
+/** The refusals named in a run's own lines (Windows: Windows logs none for files) -> refusals. */
+function fromRunOutput(out) {
+  const found = [];
+  for (const text of runTexts(out)) {
+    for (const { re, make } of RUN_LINES) {
+      re.lastIndex = 0;
+      for (let m = re.exec(text); m; m = re.exec(text)) found.push({ kind: 'own', ...make(m) });
+    }
+  }
+  return dedupe(found);
+}
+
+function dedupe(list) {
+  const keys = new Set();
+  const out = [];
+  for (const r of list) {
+    const k = `${r.process || ''} ${r.op} ${String(r.target).toLowerCase()}`;
+    if (keys.has(k) || out.length >= MAX) continue;
+    keys.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
+module.exports = { fromNetEvents, fromRunOutput, runTexts, dedupe, tagFor, parseReport, describe, summary, watch, fromProxy, routine, routineContext, ROUTINE, NOISE, MAX };

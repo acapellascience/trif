@@ -70,6 +70,12 @@ nothing: no "Use Claude Code anyway" card, no "no TRIF sandbox" chip.
   refused along the way (macOS's preferences and keychain lookups, Xcode's `git` finding its tools,
   Claude Code's own sockets and cache folders, `trif` looking for files it does without: boxrefusals.js
   ROUTINE) is in the run's log only. A failed run refused only those gets no such line.
+  On Windows (round 12, step 9b(3); the same line and words): from TRIF's network filters' drops (when
+  Windows lets the person read them) **a connection to {address:port}** (**… (UDP)** for UDP), **listening
+  on port {n}**, **a connection from {address:port}**, the program's name as Windows gives it (**(node.exe)**);
+  from what the box's programs were told (Windows records no file refusals) **reading {path}** ·
+  **writing {path}** · **opening {path}** (when the line doesn't say which) · **starting {path}** (or
+  **starting a program**). Paths in the home folder start with ~ (**~\wb3.txt**).
 
 ### The card when TRIF's full sandbox can't start (round 6, step 4; sidepanel.js `BOX_FALLBACK`)
 

@@ -13,6 +13,7 @@
 //   wfp add <container SID> <relay port> <key proxy port>    (administrator)
 //   wfp remove                                                (administrator)
 //   wfp status                                                (what's there, as JSON)
+//   wfp events <minutes>                                      (what TRIF's filters dropped lately: 9b(3))
 //
 // Every command prints one line of JSON. TrifWfp.Run(args) returns the same (for PowerShell's Add-Type).
 // x64 only (the struct offsets below).
@@ -86,6 +87,12 @@ public static class TrifWfp
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSidToStringSidW(IntPtr psid, out IntPtr str);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr sd, IntPtr size);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
+    [DllImport("fwpuclnt.dll")] static extern uint FwpmNetEventCreateEnumHandle0(IntPtr engine, IntPtr template, out IntPtr handle);
+    [DllImport("fwpuclnt.dll")] static extern uint FwpmNetEventEnum0(IntPtr engine, IntPtr handle, uint wanted, out IntPtr entries, out uint got);
+    [DllImport("fwpuclnt.dll")] static extern uint FwpmNetEventDestroyEnumHandle0(IntPtr engine, IntPtr handle);
+    [DllImport("fwpuclnt.dll")] static extern uint FwpmEngineGetOption0(IntPtr engine, uint option, out IntPtr value);
+    [DllImport("fwpuclnt.dll")] static extern uint FwpmNetEventsGetSecurityInfo0(IntPtr engine, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl, out IntPtr sd);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSecurityDescriptorToStringSecurityDescriptorW(IntPtr sd, uint revision, uint info, out IntPtr str, IntPtr len);
 
     // Who may do what with TRIF's provider, sublayer and filters: the system and administrators everything;
     // signed-in users read them (WFP's default is administrators only, and `status` runs before every boxed
@@ -312,6 +319,103 @@ public static class TrifWfp
         return sb.ToString();
     }
 
+    // ------------------------------------------------------------------ what TRIF's filters dropped (9b(3))
+    // FWPM_NET_EVENT0 (x64) 104 bytes: header 0 (FWPM_NET_EVENT_HEADER0 88: timeStamp 0, flags 8, ipVersion 12,
+    // ipProtocol 16, localAddr 20 (16), remoteAddr 36 (16), localPort 52, remotePort 54, scopeId 56, appId 64
+    // (size 64, data* 72), userId* 80), type 88, union* 96. FWPM_NET_EVENT_CLASSIFY_DROP0: filterId 0, layerId 8.
+    // FWPM_NET_EVENT_ENUM_TEMPLATE0 32: startTime 0, endTime 8, numFilterConditions 16, conditions* 24.
+    // Only events of TRIF's filters (their IDs, looked up by key), so nothing of other programs' is printed.
+    // Whether a person (no administrator) may read net events at all is Windows' to say: the reply's
+    // `denied` (WFP's default lets only administrators read them, as with filters: round 11).
+    const uint NET_EVENT_CLASSIFY_DROP = 3, FLAG_REMOTE_ADDR = 0x4, FLAG_REMOTE_PORT = 0x10, FLAG_APP_ID = 0x20;
+    const uint E_ACCESS_DENIED = 0x80070005;
+
+    static string Events(IntPtr eng, int minutes)
+    {
+        var sb = new StringBuilder();
+        IntPtr v;
+        uint e = FwpmEngineGetOption0(eng, 0, out v); // FWPM_ENGINE_COLLECT_NET_EVENTS
+        if (e == 0) { sb.Append("\"collecting\":" + (Marshal.ReadInt32(v, 8) != 0 ? "true" : "false") + ","); FwpmFreeMemory0(ref v); }
+        else sb.Append("\"collecting\":null,");
+        IntPtr esd;
+        if (FwpmNetEventsGetSecurityInfo0(eng, 4, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, out esd) == 0)
+        {
+            IntPtr str;
+            if (ConvertSecurityDescriptorToStringSecurityDescriptorW(esd, 1, 4, out str, IntPtr.Zero)) { sb.Append("\"eventsSddl\":" + Q(Marshal.PtrToStringUni(str)) + ","); LocalFree(str); }
+            FwpmFreeMemory0(ref esd);
+        }
+        var ours = new Dictionary<ulong, Spec>();
+        foreach (var spec in Filters)
+        {
+            Guid k = spec.Key; IntPtr f;
+            if (FwpmFilterGetByKey0(eng, ref k, out f) == 0) { ours[(ulong)Marshal.ReadInt64(f, 176)] = spec; FwpmFreeMemory0(ref f); }
+        }
+        sb.Append("\"filters\":" + ours.Count + ",");
+        using (var m = new Mem())
+        {
+            IntPtr t = m.Alloc(32);
+            long now = DateTime.UtcNow.ToFileTimeUtc();
+            Marshal.WriteInt64(t, 0, now - (long)minutes * 60 * 10000000);
+            Marshal.WriteInt64(t, 8, now + 60L * 10000000);
+            IntPtr h;
+            e = FwpmNetEventCreateEnumHandle0(eng, t, out h);
+            if (e != 0)
+            {
+                return "{\"ok\":false,\"error\":" + Q("read the net events " + Hex(e)) + ",\"denied\":" + (e == E_ACCESS_DENIED || e == 5 ? "true" : "false") + "," + sb.ToString().TrimEnd(',') + "}";
+            }
+            sb.Insert(0, "{\"ok\":true,");
+            int total = 0, kept = 0;
+            sb.Append("\"events\":[");
+            try
+            {
+                while (true)
+                {
+                    IntPtr list; uint got;
+                    e = FwpmNetEventEnum0(eng, h, 256, out list, out got);
+                    if (e != 0) { sb.Append("],\"enumError\":" + Q(Hex(e)) + ",\"total\":" + total + "}"); return sb.ToString(); }
+                    for (int i = 0; i < got; i++)
+                    {
+                        IntPtr ev = Marshal.ReadIntPtr(list, 8 * i);
+                        total++;
+                        if ((uint)Marshal.ReadInt32(ev, 88) != NET_EVENT_CLASSIFY_DROP) continue;
+                        IntPtr drop = Marshal.ReadIntPtr(ev, 96);
+                        if (drop == IntPtr.Zero) continue;
+                        ulong fid = (ulong)Marshal.ReadInt64(drop, 0);
+                        if (!ours.ContainsKey(fid) || kept >= 200) continue;
+                        kept++;
+                        uint flags = (uint)Marshal.ReadInt32(ev, 8);
+                        int ipv = Marshal.ReadInt32(ev, 12);
+                        string remote = null;
+                        if ((flags & FLAG_REMOTE_ADDR) != 0)
+                        {
+                            if (ipv == 0) { uint a = (uint)Marshal.ReadInt32(ev, 36); remote = (a >> 24) + "." + ((a >> 16) & 255) + "." + ((a >> 8) & 255) + "." + (a & 255); }
+                            else { var b = new byte[16]; Marshal.Copy(ev + 36, b, 0, 16); remote = new System.Net.IPAddress(b).ToString(); }
+                        }
+                        string app = null;
+                        if ((flags & FLAG_APP_ID) != 0)
+                        {
+                            int n = Marshal.ReadInt32(ev, 64); IntPtr d = Marshal.ReadIntPtr(ev, 72);
+                            if (d != IntPtr.Zero && n > 1) app = Marshal.PtrToStringUni(d, n / 2).TrimEnd('\0');
+                        }
+                        if (kept > 1) sb.Append(",");
+                        sb.Append("{\"time\":" + Q(DateTime.FromFileTimeUtc(Marshal.ReadInt64(ev, 0)).ToString("o"))
+                            + ",\"filter\":" + Q(ours[fid].Key.ToString()) + ",\"layer\":" + Q(Names.ContainsKey(ours[fid].Layer) ? Names[ours[fid].Layer] : "?")
+                            + ",\"protocol\":" + Marshal.ReadByte(ev, 16)
+                            + ",\"remote\":" + Q(remote)
+                            + ",\"remotePort\":" + ((flags & FLAG_REMOTE_PORT) != 0 ? ((ushort)Marshal.ReadInt16(ev, 54)).ToString() : "null")
+                            + ",\"localPort\":" + ((ushort)Marshal.ReadInt16(ev, 52))
+                            + ",\"app\":" + Q(app) + "}");
+                    }
+                    FwpmFreeMemory0(ref list);
+                    if (got < 256) break;
+                }
+            }
+            finally { FwpmNetEventDestroyEnumHandle0(eng, h); }
+            sb.Append("],\"total\":" + total + "}");
+        }
+        return sb.ToString();
+    }
+
     // ------------------------------------------------------------------ JSON, entry points
     static string Q(string s)
     {
@@ -340,7 +444,8 @@ public static class TrifWfp
             if (cmd == "add" && args.Length == 4) return Add(eng, args[1], int.Parse(args[2]), int.Parse(args[3]));
             if (cmd == "remove") return Remove(eng);
             if (cmd == "status") return Status(eng);
-            return Fail("usage: wfp add <sid> <relay port> <key proxy port> | remove | status", new List<string>());
+            if (cmd == "events" && args.Length == 2) return Events(eng, Math.Max(1, Math.Min(1440, int.Parse(args[1]))));
+            return Fail("usage: wfp add <sid> <relay port> <key proxy port> | remove | status | events <minutes>", new List<string>());
         }
         catch (Exception x) { return Fail(x.Message, new List<string>()); }
         finally { FwpmEngineClose0(eng); }

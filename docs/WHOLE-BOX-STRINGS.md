@@ -172,14 +172,51 @@ Settings, under the switch (on), one line:
 Not said anywhere yet (Tim's call whether to): that the token lasts a year and can only make model
 requests (no Remote Control, no claude.ai connectors), and that it needs a Pro, Max, Team or Enterprise plan.
 
-## Windows: setting up TRIF's full sandbox (round 9, step 9; only if Tim picks W2 or W3)
+## Windows: setting up TRIF's full sandbox (Tim's pick W3, 11-21; winbox.js, round 10)
 
 When the switch is turned on, before the download, a card:
 
 - **TRIF's full sandbox on Windows needs one change only an administrator can make: it lets the sandbox
   reach TRIF's own connection to Anthropic on this computer, and nothing else. Windows will ask once.**
   Buttons: **Continue** (Windows' administrator prompt) / **Not now** (the switch stays off).
-- Refused or failed: **Windows didn't make the change, so TRIF's full sandbox stays off. Chats use the older
-  protection.**
+- Done (a line under the switch, as for the download): **Windows made the change.**
+- Said no at Windows' prompt: **Windows didn't make the change (you said no), so TRIF's full sandbox stays
+  off.** The switch goes back off.
+- Failed: **Windows didn't make the change ({why}), so TRIF's full sandbox stays off.** ({why}: Windows'
+  own message, shortened.)
+- Windows Firewall off: **Windows made the change, but Windows Firewall is off, and TRIF's full sandbox
+  needs it on to keep chats to TRIF's connection. Turn Windows Firewall on, then try again.** The switch goes
+  back off.
 
-(W3's "nothing else"; for W2 it would have to say "and other programs' servers on this computer".)
+When the switch is turned off (the change taken out again; Windows asks again):
+
+- **Windows will ask once more, to take out the change TRIF made for its full sandbox.** Buttons: **Continue**
+  / **Leave it** (the switch goes off; the change stays, unused, until the switch is turned on and off
+  again).
+
+A chat when the change isn't in force any more (the older-protection card, its why line):
+
+- The change gone: **The change Windows made for TRIF's full sandbox isn't there any more, so this chat
+  can't run in TRIF's full sandbox. Turn the setting off and on again in Settings to make it again.**
+- Windows Firewall off: **Windows Firewall is off, so TRIF's full sandbox can't keep this chat to TRIF's
+  connection, and this chat can't run in it. Turn Windows Firewall on, or run this chat with the older
+  protection.**
+- Changed (a rule disabled or edited, or a policy that ignores this computer's own rules):
+  **The firewall rules TRIF made for its full sandbox have been changed, or a policy on this computer
+  overrides them, so this chat can't run in TRIF's full sandbox.** (then as for the change gone)
+- TRIF's port taken by another program: **Another program is using the port TRIF's full sandbox
+  connects through ({port}), so this chat can't run in TRIF's full sandbox.**
+- Then the card's usual "You can wait …" or, as these won't change by waiting, the round-8 text ("You can run
+  this chat with the older protection: …").
+
+## A chat that moves between the box and the older protection (round 8 item 4; Tim 11-21: keep, a new session)
+
+The optional line in the chat, shown once, above the first reply that ran with the older protection after
+turns in TRIF's full sandbox (claudesessions.js: only that direction starts a new session; a chat moving into
+the box takes its earlier turns with it, so nothing to say there):
+
+- **This part of the chat runs in a new Claude Code session: TRIF gave it the chat so far, but not the
+  earlier steps Claude Code took in TRIF's full sandbox.**
+
+(Draft only; not built. If Tim wants a reason in the line: "so nothing written inside the sandbox steers a
+Claude Code outside it.")

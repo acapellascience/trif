@@ -80,3 +80,26 @@ them.
 - **Not yet:** a managed setting to require TRIF's full sandbox, or to forbid it. Windows (in progress).
   Your own proxy, and cloud-provider credentials read from files on the computer. Plain `http` collectors
   on other computers. If you need one of these, tell us.
+
+## Windows (in progress; draft)
+
+On Windows the box is an AppContainer (Windows' app sandbox): one container for every boxed chat,
+`TRIF.FullSandbox`, with no network capability; each chat's own folders are opened to a capability only that
+chat holds. A container can't reach anything on the computer by itself, so turning the setting on asks once
+for an administrator (Windows' own prompt) to make one change:
+
+- a **loopback exemption** for that container (`CheckNetIsolation LoopbackExempt -a -p=<its SID>`);
+- three **Windows Firewall block rules** naming it, group `TRIF full sandbox` (block rules win over any
+  allow rule): TCP to every port but TRIF's two (its relay and its key proxy, two adjacent ports chosen at
+  setup, written in the rules' description), TCP to those two anywhere but 127.0.0.1, and all UDP.
+
+So a boxed chat reaches TRIF's relay (and through it only Anthropic's hosts, and the hosts your managed
+settings name) and nothing else: no other server on the computer, nothing on your network, not the internet.
+
+To see it: `Get-NetFirewallRule -Group 'TRIF full sandbox'` and `CheckNetIsolation LoopbackExempt -s`.
+Before every boxed chat TRIF reads the rules from the **active** policy store and needs every firewall
+profile on: if Windows Firewall is off, a rule is disabled or changed, or your policy doesn't apply local
+rules (`AllowLocalFirewallRules` off), the chat doesn't start in the box (the person is told why and may
+choose the older protection). A collector on the computer itself isn't reachable directly from the box
+on Windows (the rules leave only TRIF's ports); use `https`. Turning the setting off takes the exemption and
+the rules out again (the administrator prompt again).

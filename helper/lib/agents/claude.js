@@ -67,7 +67,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [], staged = false, liveWorkspace = '', liveMods = '' } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [], staged = false, liveWorkspace = '', liveMods = '', hidden = [] } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
@@ -87,7 +87,10 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
         // And the system's temporary folders (runs.js runLimits systemTemp: /tmp, $TMPDIR), which hold
         // other programs' files and every Claude Code session's scratch files: Claude Code's sandbox let
         // a run's commands write into /tmp/claude-<uid> even with its own temporary folder moved (2.1.316).
-        denyRead: home ? [...new Set([home, ...(privateDir ? [privateDir] : []), ...skillSecrets.map((x) => x.path), ...systemTemp])] : denied,
+        // (and what the run hides of the workspace: runs.js hiddenPaths. Inside the readable workspace, so the
+        // sandbox may let allowRead win there; the Read rules below and the run's copy, which hasn't them at
+        // all, are what keep them from the run's tools)
+        denyRead: home ? [...new Set([home, ...(privateDir ? [privateDir] : []), ...skillSecrets.map((x) => x.path), ...systemTemp, ...hidden])] : denied,
         allowRead: [...(home ? readable : []), box, screenshots].filter(Boolean),
         // (with a working folder of its own, runs.js runLimits `staged`: its copy's sites/, writable[0]; the
         // mods folder and the workspace's state files, which only the helper writes, denied by name)
@@ -114,6 +117,8 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
         ...[...new Set([...(workspace ? [path.join(workspace, 'sites')] : []), ...(writable[0] ? [writable[0]] : [])])].flatMap((m) => INSTRUCTION_FILES.flatMap((f) => [`Edit(${rel(m)}/${f})`, `Edit(${rel(m)}/**/${f})`])),
         ...skillSecrets.flatMap((x) => (x.dir ? [`Read(/${x.path})`, `Read(/${x.path}/**)`] : [`Read(/${x.path})`])),
         ...skillLinks.flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`]),
+        // (other sites' mods this run may not read, where they are in the workspace: runs.js hiddenPaths)
+        ...hidden.flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`]),
         // Links in the mods folder and the trash (left by an earlier run's commands: Codex can make them)
         // that lead out of the mods folder, or where the run may not read (runs.js workspaceLinks): the
         // Edit and Read allows above cover them by the path they're given.

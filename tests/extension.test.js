@@ -1344,6 +1344,32 @@ test('background: a group switched off on a site (panel) is kept, shown in statu
   } finally { bg.restore(); }
 });
 
+test('background: "Chats on other sites can read this site\'s mods" is the panel\'s to set, kept per site, and goes with each run and to the helper', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    let r = await panel.ask({ type: 'modsReadable.set', site: 'www.y.com', readable: false });
+    assert.equal(r.ok, true, r.error);
+    assert.deepStrictEqual(r.result, { modsReadable: { 'y.com': false }, running: 0 });
+    r = await panel.ask({ type: 'modsReadable.set', site: 'chase.com', readable: true });
+    assert.deepStrictEqual(bg.store.modsReadable, { 'y.com': false, 'chase.com': true });
+    // (the helper keeps it for runs the panel doesn't start: modsApplied)
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsApplied' && m.visibility && m.visibility.shown.includes('chase.com')));
+    r = await panel.ask({ type: 'modsReadable.set', site: 'chase.com', readable: null });
+    assert.deepStrictEqual(bg.store.modsReadable, { 'y.com': false });
+    r = await panel.ask({ type: 'modsReadable.set', site: 'y.com', readable: 'no' });
+    assert.equal(r.ok, false);
+    r = await panel.ask({ type: 'modsReadable.set', site: 'localhost', readable: false });
+    assert.equal(r.ok, false);
+    const st = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual(st.result.modsReadable, { 'y.com': false });
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'p', agent: 'claude' });
+    const req = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    assert.deepStrictEqual([req.args.visibility.hidden, req.args.visibility.shown], [['y.com'], []]);
+    await startP;
+  } finally { bg.restore(); }
+});
+
 test('background: agent.start becomes a native request; agentEvents reach panels and the chat', async () => {
   const bg = await loadBackground();
   try {
@@ -1352,8 +1378,11 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus', effort: 'high' });
     const req = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
     // (the run's scope, and the sites of their own TRIF knows of, for its folder: lib.js "sensitive sites")
-    const { splits, ...rest } = req.args;
+    const { splits, visibility, ...rest } = req.args;
     assert.ok(splits.includes('mail.google.com'), 'the sensitive sites of their own go with it');
+    // (and which other sites' mods it may read: no choices yet, TRIF's sensitive list; helper/lib/visibility.js)
+    assert.deepStrictEqual([visibility.hidden, visibility.shown], [[], []]);
+    assert.ok(visibility.sensitive.includes('mail.google.com') && visibility.sensitive.includes('*bank*'));
     assert.deepStrictEqual(rest, { site: 'x.com', scope: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', agentLevel: 'ask', model: 'opus', effort: 'high', live: true });
     assert.match(req.id, /^ext-/);
     const reply = await replyP;

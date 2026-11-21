@@ -65,3 +65,23 @@ test('the panel: "Agent on this site" on the line over the message box, a menu o
   // only where there's a chat: the site connected and the robot on
   assert.match(js, /const show = !!site && !!view\.status\?\.helper\?\.connected && !!siteScope\(\) && currentState\(\) === 'on';/);
 });
+
+test('modsReadable: on by default, off for a sensitive site, the user\'s choice over both; what a run is told', async () => {
+  const { modsReadable, modsVisibility, normalizeModsReadable, modsSiteOf } = await import('../extension/agentsites.js');
+  assert.deepEqual(modsReadable('example.com'), { readable: true, by: 'default' });
+  assert.deepEqual(modsReadable('chase.com', { sensitive: true }), { readable: false, by: 'sensitive' });
+  assert.deepEqual(modsReadable('chase.com', { sensitive: true, choices: { 'chase.com': true } }), { readable: true, by: 'user' });
+  assert.deepEqual(modsReadable('www.y.com', { choices: { 'y.com': false } }), { readable: false, by: 'user' });
+  assert.deepEqual(normalizeModsReadable({ 'WWW.Y.com': false, 'x.com': 'yes', nope: true, 'z.org': true }), { 'y.com': false, 'z.org': true });
+  assert.equal(modsSiteOf('localhost'), '');
+  const v = modsVisibility({ choices: { 'y.com': false, 'chase.com': true }, sensitive: [{ pattern: 'chase.com', why: 'banking' }, { pattern: '*bank*', why: '' }] });
+  assert.deepEqual(v, { hidden: ['y.com'], shown: ['chase.com'], sensitive: ['chase.com', '*bank*'] });
+  // (TRIF's own list when the user has none)
+  assert.ok(modsVisibility().sensitive.includes('mail.google.com'));
+  // The helper reads it the same way (helper/lib/visibility.js).
+  const { readableByOthers, cleanVisibility } = require('../helper/lib/visibility');
+  const hv = cleanVisibility(modsVisibility({ choices: { 'y.com': false } }));
+  for (const [site, sensitive] of [['example.com', false], ['y.com', false], ['mail.google.com', true], ['paypal.com', true], ['mybank.com', true]]) {
+    assert.equal(readableByOthers(site, hv), modsReadable(site, { choices: { 'y.com': false }, sensitive }).readable, site);
+  }
+});

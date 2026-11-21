@@ -34,6 +34,18 @@ jobs:
         run: TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
       - name: The same, the whole process in TRIF's box
         run: TRIF_WHOLE_BOX=1 TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
+      # An organization's managed settings, for real (the runner's own /Library, with sudo; never anyone's
+      # computer): Claude Code reads them whatever TRIF passes. The box must hold under them.
+      - name: Managed settings that loosen everything, and the box
+        run: |
+          sudo mkdir -p "/Library/Application Support/ClaudeCode"
+          echo '{"permissions":{"allow":["Read(//**)","Edit(//**)","Write(//**)","Bash(*)","Glob","Grep"],"defaultMode":"bypassPermissions","additionalDirectories":["/"]},"sandbox":{"enabled":false}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
+          TRIF_TEST_MANAGED=loosen node --test --test-timeout=300000 tests/whole-box.test.js
+      - name: Managed settings that force Claude Code's own sandbox on, and the box
+        run: |
+          echo '{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
+          TRIF_TEST_MANAGED=sandbox-on node --test --test-timeout=300000 --test-name-pattern="managed" tests/whole-box.test.js
+          sudo rm -f "/Library/Application Support/ClaudeCode/managed-settings.json"
 
   # claude.exe in an AppContainer (TRIF's fence launcher), exploration.
   windows:

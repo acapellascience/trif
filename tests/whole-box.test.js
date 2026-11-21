@@ -180,8 +180,8 @@ function loosest(c, L) {
   return args.map((a, k) => (args[k - 1] === '--permission-mode' ? 'bypassPermissions' : a));
 }
 
-async function runClaude(L, { boxed }) {
-  const steps = [
+async function runClaude(L, { boxed, script = null }) {
+  const steps = script || [
     { tool: 'Read', input: { file_path: L.own } },
     { tool: 'Read', input: { file_path: L.secret } },
     { tool: 'Read', input: { file_path: L.liveMod } },
@@ -244,4 +244,21 @@ test('macOS, real Claude Code with its loosest settings: outside the copy, the s
   assert.doesNotMatch(boxed.results[10], /^\s*200\s*$/, info);
   console.log(`# without the box: ${open.ms} ms; in the box: ${boxed.ms} ms (the whole run, stand-in model)`);
   console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+});
+
+// On CI only (.github/workflows/whole-box.yml writes the real managed-settings.json in /Library/Application
+// Support/ClaudeCode with sudo, on GitHub's runner, never on anyone's computer): TRIF_TEST_MANAGED says which.
+//   loosen      every tool allowed, bypassPermissions, Claude Code's sandbox off, the whole disk as a
+//               working folder: test 5 above must still hold (and its control shows the settings loosen)
+//   sandbox-on  the organization forces Claude Code's own command sandbox on (and no unsandboxed retry):
+//               in TRIF's box it can't start (a sandboxed process can't apply another), so commands fail
+//               closed; the file tools are still fenced
+const managed = process.env.TRIF_TEST_MANAGED || '';
+test('CI, managed settings force Claude Code\'s sandbox on: in the box, commands fail closed, file tools stay fenced', { skip: (managed !== 'sandbox-on' || !claudeBin) && 'only with TRIF_TEST_MANAGED=sandbox-on (CI)' }, async () => {
+  const L = layout();
+  const r = await runClaude(L, { boxed: true, script: [{ tool: 'Read', input: { file_path: L.secret } }, { bash: 'echo bash-ok' }, { bash: `cat ${L.secret}` }, { tool: 'Read', input: { file_path: L.own } }, { say: 'done' }] });
+  const info = r.labels.map((l, i) => `${l}\n  -> ${String(r.results[i]).slice(0, 400)}`).join('\n') + `\nexit ${r.code}\n${r.err.slice(-1500)}`;
+  console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+  assert.ok(r.results.every((x) => !String(x).includes(SECRET)), info);
+  assert.match(String(r.results[3]), /COPY-OK/, info);
 });

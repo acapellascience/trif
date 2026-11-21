@@ -370,6 +370,81 @@ Tim (11-20): "yeah def put edge in the tests for windows". Edge is the default b
 - **Next, if wanted**: since `developerPrivate` turns user scripts on from the test, the browser check could
   now put a mod on a page and see it run, in Chrome and Edge ("What's left" 5 in `docs/WINDOWS.md`).
 
+## Merge of phone-link (11-20)
+
+Tim (11-20, in his Windows 11 ARM VM): the phone view worked but was the old one (a separate phone window);
+the newer one is on `phone-link`. **`origin/phone-link` merged into `windows`** (a real merge, from
+`8f4c666`; phone-link at `cd01c06`). What came in: the phone view's newer window route (a tab alone
+in its window makes that window the phone's and its side panel stays; the panel's first paint is already the
+phone view, `044ce93`; reloads after a mod's edit stay the phone's, past the site's service worker,
+`9008e34`; Back to desktop widens the window back out and keeps the side panel, `d928f6f`), the phone link
+and phone sync (helper `lib/phonelink/`, the panel's Connect a phone, Sync with phone), mods' stable ids
+(`@id`, Rename in the code card's Details, `lib/modid.js`, `lib/rename.js`), the chat queue (messages sent
+while a run works: `--input-format stream-json`, the run's stdin kept open), mod health learning what comes
+and goes (`a61f639`, `trif not-broken`), the What's new / Not now fixes, the kind-change registration fix
+(`cd01c06`), the side panel's fold (`fde34d8`).
+- **Conflicts** (6 files), each resolved keeping both sides:
+  - `claude.js` `command()`: takes `fence` and `live`; a fenced run gets the chat queue's
+    `--input-format stream-json --replay-user-messages` too (stdin through `cmd.exe` for npm's `claude.cmd`
+    passes the JSON lines as it passes the prompt).
+  - `agents/index.js` `contextText`: phone-link's `remote` (a phone's run) and `REPLY_TEXT`, and Windows'
+    `noShell` line, now `noShellText()`, appended to both the side panel's context and a phone run's.
+  - `runs.js`: the context gets `remote` and `noShell`; `adapter.command` gets `live` and the fence;
+    the spawn stays Windows' (`spawnable`, no process group, `windowsHide`) with phone-link's live stdin.
+  - `background.js` `trif reload`: the locked tab's second load (main's `tabLocks`) and phone-link's
+    `phones.reload` (hard for a phone tab), both.
+  - `AGENTS.md` (and the skill's `mod-format.md`, rebuilt with `skill/build.js`): `windows` has the lean
+    guides from main, `phone-link` doesn't yet: the lean text kept, with phone-link's additions written in
+    its style (`@id`, `sites/phone~all-sites/`, the `trif phone …` and `trif not-broken` rows); phone-link's
+    "Phone runs" section came in as it is. (When phone-link meets main, the same three conflicts will come up.)
+  - `8f4c666` (trif MCP steps shown as `trif …`) is untouched by the merge.
+- **The phone link is off on Windows** (`lib/phonelink/link.js`, `platform === 'win32'`). The phone finds
+  the computer by its Bonjour record alone (`_trif._tcp`), and the announcer is the Mac's `/usr/bin/dns-sd`
+  (`bonjour.js`: anything but macOS is `unsupported`). On Windows the helper would listen on all interfaces
+  for a phone that can't find it, and Windows Firewall would ask the user about node.exe. So there the link
+  has the store and nothing else: no listener, no announcer, no phone runs, no sync; `phone.status` says
+  `unsupported: 'windows'`, every other `phone.*` is refused with `unsupported` (no key made, no file
+  written); the panel hides Settings' Connect a phone, the phone line and the phone menu's Sync with phone
+  (no new words). The rest of the phone link is plain Node and its tests run on windows-latest. Nothing
+  about its security rules changed. Turning it on later needs Tim's calls: (a) an announcer for Windows (the
+  DNS-SD API in `dnsapi.dll`, `DnsServiceRegister`, Windows 10 1809+, from PowerShell through P/Invoke as
+  `credman.js` does, or Apple's Bonjour for Windows' `dns-sd.exe`, which isn't on a Windows by default);
+  (b) the firewall: let Windows ask the first time (it offers private and public networks), or have setup
+  add an inbound rule for node.exe on private networks only (needs an administrator); (c) the store's
+  `phone-link.json` and `phone-relay.key` rely on `%LOCALAPPDATA%\TRIF`'s inherited access list, as the
+  rest of the private folder does (modes do nothing there), and the fence denies runs that folder by name;
+  the computer's private key goes to Credential Manager (`keyring.js`, service `TRIF phone link`).
+  Not seen (a label the user sees, for Tim): the phone button's name stays "Phone view and sync with phone"
+  with Sync hidden.
+- Tests added: `tests/phone-link-store.test.js` ("Windows: the link is off…"), `tests/phone-link-panel.test.js`
+  ("a helper without the phone link (Windows)…").
+- **Tests on Windows**: the phone link's pure parts run on windows-latest (Noise, frames, QR, the store's
+  parsing and names, the panel's views, bonjour.js's arguments and pauses, the sync's merge rules, mod ids,
+  rename). What needs the link on is in `tests/windows-skips.json`, reason `phone-link` (their keyring
+  stand-ins are shell scripts too, and the e2e tests start a helper whose link is off); `phone-link-host`'s two
+  as `sockets` (helper.sock paths); two mode-600 checks of the sync's base as a new reason `modes`; a phone
+  run's limits (the macOS/Linux sandbox's) as `limits`. The files moved to `tests/on-windows.js`, which now
+  takes `"*"` for a whole file, its before/after hooks too (`phone-link-remote`, `phone-link-tool`: their
+  hooks turn the link on with a script keyring, and Node 18 failed the run on a hook alone, every test skipped).
+- **Local, macOS, Node 22**: the unit suite without the real-browser files and `tests/update.test.js`:
+  1089 tests, 1085 pass, 4 skipped, 0 fail; the phone link's and phone sync's files again after the skip
+  changes, 142, 0 fail. No test browser was started here (another session's was running).
+- **CI** at `8b6187d` (the code; the commit after it is these notes): windows
+  [44871213761](https://github.com/acapellascience/trif/actions/runs/44871213761) green first time (Node 18,
+  Node 22, `still-skipped`), windows-fence
+  [44871213693](https://github.com/acapellascience/trif/actions/runs/44871213693) green (`fence`,
+  `fence-standard-user`, `run`, `agents`, `run-codex`). On the way: two known Node 18 flakes of the 5 s kind
+  (`cli.test.js` "run: -f file and - (stdin)", `agents.test.js` "merge: a run on another site never settles
+  it"), each passing on a rerun. The macOS tests
+  [44871213740](https://github.com/acapellascience/trif/actions/runs/44871213740): every test passes, but
+  `tests/phone-browser.test.js` as a whole goes over the 180 s a test file gets, some runs and not others
+  (red again on a rerun; green at `8e14385`, [44870505817](https://github.com/acapellascience/trif/actions/runs/44870505817)).
+  That is phone-link's own: the same file times out on `phone-link` itself (cd01c06,
+  [44851716925](https://github.com/acapellascience/trif/actions/runs/44851716925)), red there since
+  `044ce93` but for one run. Not the merge's, and left as it is here: it is phone-link's file to split or time.
+- `mod-visibility` was merged into `windows` meanwhile by its own session (`d8560db`); the commits above
+  went on top of it.
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is

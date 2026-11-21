@@ -34,14 +34,15 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   a real token through the allowlist proxy to api.anthropic.com (CI's runs use a stand-in via
   `TRIF_ANTHROPIC_URL`). Both want one manual try by Tim with his own account when he chooses (not
   needed for the next steps).
-- [ ] **7. Bash kept on macOS, boxed.** Claude Code's own sandbox off inside, its Bash inside TRIF's box
+- [x] **7. Bash kept on macOS, boxed.** Claude Code's own sandbox off inside, its Bash inside TRIF's box
   (the spike does this). `trif` as an MCP tool only when an organization forces Claude Code's sandbox on
   (detected from managed settings: claude-managed.js) and on Windows.
   - [x] **7b.** *(round 4)* An organization forcing Claude Code's sandbox on: boxed runs get no Bash and
     the `trif` tool (helper/mcp.js, from branch windows, no launcher: already in the box); MCP allow/deny
     lists that take it away stop the run with a draft message.
-  - [ ] **7a. NEEDS TIM** (For Tim, below): in a boxed run, a policy that only loosens Claude Code's
-    settings still stops the run and asks "Use Claude Code anyway" (with words that are wrong there).
+  - [x] **7a.** *(round 5; Tim answered 11-21: "yes, the recommendation")* In the box, settings that only
+    loosen Claude Code's rules aren't asked about and the chat isn't marked; they're in the run's log.
+    Settings that let a run use any command → no shell, the `trif` tool. Breaks still stop the chat.
 - [ ] **3. Clear refusal errors.** When the box refuses something, the run's error names it (Seatbelt
   violation reports from the log / the relay's refusal), not a mystery failure.
 - [ ] **4. Informed fallback, never silent.** If the box can't start, the panel offers "Run this chat with
@@ -167,7 +168,7 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   sandboxlint, claudetoken, wholebox-setting, claudepin, explain, agent-tools (286 pass).
 - Not looked at in a browser: the panel's sign-in notice and Settings' line (words are drafts anyway).
 
-## For Tim (round 4)
+## For Tim (round 4): answered 11-21, "yes, the recommendation" (done in round 5, step 7a)
 
 **Should a chat in TRIF's full sandbox still ask "Use Claude Code anyway" when a company's Claude Code
 settings loosen Claude Code's rules?** Today it does. For example, a company allows every command, turns

@@ -42,6 +42,16 @@ In code now (helper/lib/runs.js):
   TRIF's usual protection.** where {what} is **allow only the MCP servers they name, which leaves out
   TRIF's `trif` tool** · **deny TRIF's `trif` tool** (claude-managed.js `mcpBlocks`).
 
+- An organization's settings let runs use any command (so in the box the chat runs with the `trif` tool,
+  no shell: step 7a) **and** take that tool away (round 5, the same `noShellBrokenMessage`): **Your
+  organization's Claude Code settings let Claude Code run any command, so in TRIF's full sandbox this chat
+  gets TRIF's `trif` tool in place of a shell, but they also {what}, so this chat can't run in TRIF's full
+  sandbox. Turning off “Run chats in TRIF's full sandbox” in Settings runs chats with TRIF's usual
+  protection.** ({what} as above.)
+
+Not shown (round 5, Tim 11-21): in TRIF's full sandbox, settings that only loosen Claude Code's rules show
+nothing: no "Use Claude Code anyway" card, no "no TRIF sandbox" chip.
+
 The offer that follows these (step 4, "Run this chat with the older protection"): not written yet.
 
 Not shown to people (round 4): a chat that runs with no shell says nothing in the panel; its steps read

@@ -403,7 +403,8 @@ adapter.afterRun = ({ workingDir, home = require('os').homedir() } = {}) => {
 // preflight what they do. `breaks`: the run couldn't do its work, so it's stopped with brokenMessage.
 // `loosens`: it would get more than TRIF's limits, so it's stopped unless the user chose "Use Claude Code
 // anyway" in the side panel (withoutsandbox.js); then it goes on, ended only if the organization's
-// settings turn out to stop its work after all (orgBlocked).
+// settings turn out to stop its work after all (orgBlocked). In TRIF's full sandbox `loosens` is only
+// logged, never asked about (runs.js; docs/WHOLE-BOX.md, decided 11-21).
 adapter.settingsName = 'Claude Code'; // "Your organization's <settingsName> settings" (docs/CODEX-ORG-STRINGS.md)
 adapter.preflight = (opts) => require('./claude-managed').check(opts);
 const both = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] || '');
@@ -412,8 +413,11 @@ adapter.withoutSandboxMessage = (pre) =>
   'To let Claude Code work under your company\'s settings instead, choose “Use Claude Code anyway” in TRIF\'s side panel. ' +
   'A personal Claude Code login, or another agent, works with TRIF\'s sandbox.';
 // (TRIF's full sandbox, Claude Code's own sandbox forced on, and the trif tool taken away: WHOLE-BOX-STRINGS.md)
+// (or, step 7a: settings that let runs use any command, so the chat gets the trif tool in place of a shell)
 adapter.noShellBrokenMessage = (pre) =>
-  `Your organization's Claude Code settings require Claude Code's own sandbox, which can't start inside TRIF's full sandbox, and ${both(pre.mcpBlocks)}, which would take its place, so this chat can't run in TRIF's full sandbox. ` +
+  (pre.forcesSandbox
+    ? `Your organization's Claude Code settings require Claude Code's own sandbox, which can't start inside TRIF's full sandbox, and ${both(pre.mcpBlocks)}, which would take its place, so this chat can't run in TRIF's full sandbox. `
+    : `Your organization's Claude Code settings let Claude Code run any command, so in TRIF's full sandbox this chat gets TRIF's \`trif\` tool in place of a shell, but they also ${both(pre.mcpBlocks)}, so this chat can't run in TRIF's full sandbox. `) +
   'Turning off “Run chats in TRIF\'s full sandbox” in Settings runs chats with TRIF\'s usual protection.';
 adapter.brokenMessage = (pre) =>
   `Your organization's Claude Code settings ${both(pre.breaks)}, so chats with Claude Code can't work in TRIF's side panel. ` +

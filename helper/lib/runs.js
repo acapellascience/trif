@@ -838,21 +838,33 @@ class Runs {
         run.agentDone = { ok: false, result: message };
         return this._finish(run, { code: null, signal: null });
       }
-      // TRIF's full sandbox under an organization that forces Claude Code's own sandbox on (docs/WHOLE-BOX.md
-      // step 7): it can't start inside TRIF's box, so the run gets no Bash and the `trif` tool instead
-      // (claude.js `mcp`, helper/mcp.js); settings that take that tool away stop the run, saying so.
-      if (run.wholeBox && pre && pre.forcesSandbox) {
-        if (pre.mcpBlocks.length) {
+      // TRIF's full sandbox (docs/WHOLE-BOX.md step 7): an organization that forces Claude Code's own sandbox on
+      // (it can't start inside TRIF's box), or lets runs use commands beyond TRIF's own (anyCommand: they
+      // could read the run's sign-in token from its environment and copy it into a mod), gets runs with no
+      // Bash and the `trif` tool instead (claude.js `mcp`, helper/mcp.js); settings that take that tool
+      // away stop the run, saying so. Settings that only loosen Claude Code's rules (step 7a, Tim 11-21):
+      // TRIF's box holds whatever they say, so the run goes on without asking, its chat not marked "no
+      // TRIF sandbox"; what they do is in the run's log.
+      if (run.wholeBox && pre) {
+        const anyCommand = pre.anyCommand || [];
+        const why = pre.forcesSandbox ? 'managed settings force Claude Code\'s sandbox on'
+          : anyCommand.length ? `managed settings ${anyCommand.join('; ')}` : '';
+        if (why && pre.mcpBlocks.length) {
           const message = adapter.noShellBrokenMessage(pre);
-          this.logger.warn(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) force its sandbox on and ${pre.mcpBlocks.join('; ')}: stopped`);
+          this.logger.warn(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) ${pre.forcesSandbox ? 'force its sandbox on' : anyCommand.join('; ')} and ${pre.mcpBlocks.join('; ')}: stopped`);
           this._emit(run, { kind: 'error', message });
           run.agentDone = { ok: false, result: message };
           return this._finish(run, { code: null, signal: null });
         }
-        run.noShell = true;
-        this._log(run, { webmods: 'noShell', why: 'managed settings force Claude Code\'s sandbox on', from: pre.sources.join(', '), time: Date.now() });
-      }
-      if (pre && pre.loosens.length && !this._withoutSandbox(run, { why: pre.loosens, message: adapter.withoutSandboxMessage(pre), from: pre.sources.join(', ') })) {
+        if (why) {
+          run.noShell = true;
+          this._log(run, { webmods: 'noShell', why, from: pre.sources.join(', '), time: Date.now() });
+        }
+        if (pre.loosens.length) {
+          this.logger.info(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) ${pre.loosens.join('; ')}: in TRIF's full sandbox, which holds them`);
+          this._log(run, { webmods: 'orgSettings', loosens: pre.loosens, from: pre.sources.join(', '), time: Date.now() });
+        }
+      } else if (pre && pre.loosens.length && !this._withoutSandbox(run, { why: pre.loosens, message: adapter.withoutSandboxMessage(pre), from: pre.sources.join(', ') })) {
         return this._finish(run, { code: null, signal: null });
       }
     }

@@ -21,7 +21,8 @@
 // WebSearch denied; and a sandbox for commands (on, failIfUnavailable, no unsandboxed retries, nothing
 // auto-allowed, no network, no sockets, reads and writes listed). Each managed setting below either
 //   loosens  TRIF's limits: the run would do more than TRIF allows. The user may agree to go on
-//            (withoutsandbox.js), and the chat is marked "no TRIF sandbox".
+//            (withoutsandbox.js), and the chat is marked "no TRIF sandbox". In TRIF's full sandbox
+//            (docs/WHOLE-BOX.md) the box holds whatever they say: logged only, never asked.
 //   breaks   runs: TRIF's own rules are ignored, so a run couldn't do its work. TRIF stops it and says why.
 // and everything not listed has no effect on these limits, e.g.
 //   - allow rules for WebFetch, WebSearch or any tool --tools leaves out: the tool isn't there, and TRIF's
@@ -181,17 +182,35 @@ function effects(s, { platform = process.platform } = {}) {
   // entries name a server by serverName, serverCommand or serverUrl; TRIF's is "trif", a command no
   // organization's list names (node and a path of this computer's), so only serverName counts.
   const forcesSandbox = sb.enabled === true;
+  // TRIF's full sandbox (step 7a, Tim 11-21): settings that let a run use commands beyond TRIF's own (`trif`,
+  // `cd`, `ls`) without asking. TRIF's box still holds them, but a boxed run's environment holds its
+  // sign-in token (claudetoken.js), which such a command could read and copy into a mod; so those runs get no
+  // shell and the `trif` tool instead, like forcesSandbox (`anyCommand`: why, as phrases for the log; the
+  // same settings are among `loosens`). Any other command counts: most can run any other (git's aliases,
+  // npm's scripts, an interpreter). acceptEdits mode isn't here: it approves only file edits and file
+  // commands (mkdir, touch, rm, mv, cp, sed), none of which reads the environment.
+  const anyCommand = [];
+  const bashRules = list(perms.allow).filter((rule) => /^Bash(\(|$)/.test(rule.trim()));
+  const others = bashRules.filter((rule) => {
+    const inner = /^Bash\((.*)\)$/s.exec(rule.trim());
+    const cmd = inner ? firstWord(inner[1]) : '';
+    // (a rule with shell operators in it is counted too, whatever its first word)
+    return !cmd || !RUN_COMMANDS.includes(cmd) || /[;&|`$<>(){}\n\\]/.test(inner[1]);
+  });
+  if (others.length) anyCommand.push(`allow ${others.slice(0, 3).map((r) => `\`${r}\``).join(', ')}${others.length > 3 ? ` and ${others.length - 3} more` : ''} without asking`);
+  if (['bypassPermissions', 'auto'].includes(perms.defaultMode)) anyCommand.push(`approve Claude Code’s actions by themselves (${perms.defaultMode} mode)`);
   const mcpBlocks = [];
   const named = (v) => (Array.isArray(v) ? v : []).some((e) => isObject(e) && e.serverName === 'trif');
   if (Array.isArray(s.allowedMcpServers) && !named(s.allowedMcpServers)) mcpBlocks.push('allow only the MCP servers they name, which leaves out TRIF’s `trif` tool');
   else if (s.allowManagedMcpServersOnly === true && !named(s.allowedMcpServers)) mcpBlocks.push('allow only the MCP servers they name, which leaves out TRIF’s `trif` tool');
   if (named(s.deniedMcpServers)) mcpBlocks.push('deny TRIF’s `trif` tool');
-  return { loosens, breaks, forcesSandbox, mcpBlocks };
+  return { loosens, breaks, forcesSandbox, anyCommand, mcpBlocks };
 }
 
 /**
- * Before a run: {loosens, breaks, forcesSandbox, mcpBlocks, sources, errors}, every source's effects
- * together (no duplicates). forcesSandbox and mcpBlocks matter to runs in TRIF's full sandbox only.
+ * Before a run: {loosens, breaks, forcesSandbox, anyCommand, mcpBlocks, sources, errors}, every source's
+ * effects together (no duplicates). forcesSandbox, anyCommand and mcpBlocks matter to runs in TRIF's full
+ * sandbox only, where `loosens` is only logged (TRIF's box holds whatever they say).
  * `errors`: managed files that couldn't be read (Claude Code itself won't start with a broken one).
  */
 function check(opts = {}) {
@@ -199,15 +218,17 @@ function check(opts = {}) {
   const loosens = new Set();
   const breaks = new Set();
   const mcpBlocks = new Set();
+  const anyCommand = new Set();
   let forcesSandbox = false;
   for (const src of found) {
     const e = effects(src.settings, opts);
     for (const x of e.loosens) loosens.add(x);
     for (const x of e.breaks) breaks.add(x);
     for (const x of e.mcpBlocks) mcpBlocks.add(x);
+    for (const x of e.anyCommand) anyCommand.add(x);
     if (e.forcesSandbox) forcesSandbox = true;
   }
-  return { loosens: [...loosens], breaks: [...breaks], forcesSandbox, mcpBlocks: [...mcpBlocks], sources: found.map((x) => x.file), errors };
+  return { loosens: [...loosens], breaks: [...breaks], forcesSandbox, anyCommand: [...anyCommand], mcpBlocks: [...mcpBlocks], sources: found.map((x) => x.file), errors };
 }
 
 module.exports = { check, effects, sources, merge, systemDir, RUN_COMMANDS };

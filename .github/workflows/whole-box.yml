@@ -63,6 +63,14 @@ jobs:
           sudo mkdir -p "/Library/Application Support/ClaudeCode"
           echo '{"permissions":{"allow":["Read(//**)","Edit(//**)","Write(//**)","Bash(*)","Glob","Grep"],"defaultMode":"bypassPermissions","additionalDirectories":["/"]},"sandbox":{"enabled":false}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
           TRIF_TEST_MANAGED=loosen node --test --test-timeout=300000 tests/whole-box.test.js
+      # (step 7a: those settings let a run use any command, so a side-panel run in the box gets no shell, the
+      # trif tool; and nobody is asked "Use Claude Code anyway": the box holds them)
+      - name: The same settings, a side-panel run in TRIF's box, not asked, no shell
+        run: TRIF_WHOLE_BOX=1 TRIF_TEST_MANAGED=loosen TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="no shell" tests/run-sandbox.test.js
+      - name: Managed settings that only loosen Claude Code's rules (no other commands), a side-panel run in TRIF's box with a shell, not asked
+        run: |
+          echo '{"permissions":{"allow":["Read(//**)","Edit(//**)","Write(//**)","Glob","Grep"],"defaultMode":"acceptEdits","additionalDirectories":["/"]},"sandbox":{"enabled":false}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
+          TRIF_WHOLE_BOX=1 TRIF_TEST_MANAGED=loosen-shell TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="only loosen" tests/run-sandbox.test.js
       - name: Managed settings that force Claude Code's own sandbox on, and the box
         run: |
           echo '{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"

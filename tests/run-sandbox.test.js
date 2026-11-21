@@ -53,7 +53,7 @@ const CLAUDE = MAC ? realClaude() : null;
 const CODEX = MAC ? realCodex() : null;
 const skipWhy = (bin, name) => (!MAC ? 'macOS only (the run sandboxes are Seatbelt there; Linux runs are untested here)' : !bin ? `needs ${name} installed (not on CI)` : false);
 
-const MANAGED_TEST = process.env.TRIF_TEST_MANAGED || ''; // (CI only: sandbox-on, sandbox-on-no-mcp)
+const MANAGED_TEST = process.env.TRIF_TEST_MANAGED || ''; // (CI only: sandbox-on, sandbox-on-no-mcp, loosen, loosen-shell)
 const SECRET = `secret-${crypto.randomBytes(8).toString('hex')}`; // in every file runs must not read
 const KEY = `sk-ant-fake-${crypto.randomBytes(12).toString('hex')}`;
 const OAI_KEY = `sk-fake-${crypto.randomBytes(12).toString('hex')}`;
@@ -371,8 +371,19 @@ test('Claude Code in TRIF\'s full sandbox, signed in with setup-token\'s token: 
 
 // docs/WHOLE-BOX.md step 7: an organization forcing Claude Code's own sandbox on (CI writes the runner's real
 // managed settings), which can't start inside TRIF's box. The run gets no Bash and the `trif` tool instead.
-const NO_SHELL_SKIP = !process.env.TRIF_WHOLE_BOX || !MANAGED_TEST.startsWith('sandbox-on') ? 'TRIF_WHOLE_BOX=1 with TRIF_TEST_MANAGED=sandbox-on… only (CI)' : skipWhy(CLAUDE, 'Claude Code');
-test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its own sandbox on, so the run has no Bash and every `trif` command works through the trif tool, still boxed', { skip: NO_SHELL_SKIP || (MANAGED_TEST !== 'sandbox-on' && 'TRIF_TEST_MANAGED=sandbox-on only') }, async () => {
+// Step 7a (Tim 11-21): the same with the loosest settings (TRIF_TEST_MANAGED=loosen: Bash(*), bypass mode, every
+// folder, Claude Code's sandbox off), which let a run use any command: no shell either, and no question.
+const NO_SHELL_SKIP = !process.env.TRIF_WHOLE_BOX || !(MANAGED_TEST.startsWith('sandbox-on') || MANAGED_TEST === 'loosen') ? 'TRIF_WHOLE_BOX=1 with TRIF_TEST_MANAGED=sandbox-on… or loosen only (CI)' : skipWhy(CLAUDE, 'Claude Code');
+// (the run's own log, <private>/runs/<id>.jsonl)
+const runLog = (f, runId) => { try { return fs.readFileSync(path.join(f.priv, 'runs', `${runId}.jsonl`), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }); } catch { return []; } };
+// In TRIF's full sandbox an organization's loosening settings are never asked about: no "Use Claude Code
+// anyway" card, no "no TRIF sandbox" mark; they're in the run's log.
+function notAsked(f, runId, events, info) {
+  assert.ok(!events.some((e) => e.kind === 'sandbox' || (e.kind === 'error' && e.reason === 'sandbox')), `asked, or marked "no TRIF sandbox":\n${info}`);
+  const note = runLog(f, runId).find((x) => x.webmods === 'orgSettings');
+  assert.ok(note && note.loosens.length && /managed-settings\.json/.test(note.from), `the organization's settings in the run's log:\n${JSON.stringify(runLog(f, runId)).slice(0, 2000)}`);
+}
+test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its own sandbox on (or let it run any command), so the run has no Bash and every `trif` command works through the trif tool, still boxed', { skip: NO_SHELL_SKIP || (!['sandbox-on', 'loosen'].includes(MANAGED_TEST) && 'TRIF_TEST_MANAGED=sandbox-on or loosen only') }, async () => {
   const f = await setup();
   const site = 'example.com';
   const commands = trifCommands(site);
@@ -385,7 +396,7 @@ test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its 
   ];
   const steps = [...commands.map((c) => ({ tool: 'mcp__trif__trif', input: { args: words(c) } })), ...refused.map((x) => ({ tool: x.tool, input: x.input })), { say: 'Done: probed.' }];
   setScript(f.anthropicScript, steps);
-  const { done, events } = await runAgent(f, { agent: 'claude', site, tabId: 12 });
+  const { runId, done, events } = await runAgent(f, { agent: 'claude', site, tabId: 12 });
   const results = claudeResults(f.anthropic);
   const labels = [...commands, ...refused.map((x) => `${x.tool} ${JSON.stringify(x.input)}`)];
   const named = results.map((x, i) => ({ ...x, cmd: labels[i] || '?' }));
@@ -406,6 +417,45 @@ test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its 
   assert.ok(JSON.stringify(f.anthropic.requests.map((r) => r.body && r.body.system)).includes('There is no shell in this chat'), 'told there is no shell');
   // The panel's steps read as they do with a shell: "trif status", not mcp__trif__trif.
   assert.ok(events.some((e) => e.kind === 'tool' && e.name === 'Bash' && e.summary === 'trif status'), info);
+  assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
+  const noShell = runLog(f, runId).find((x) => x.webmods === 'noShell');
+  assert.match((noShell || {}).why || '', MANAGED_TEST === 'loosen' ? /allow `Bash\(\*\)` without asking/ : /force Claude Code's sandbox on/, info);
+  if (MANAGED_TEST === 'loosen') notAsked(f, runId, events, info);
+});
+
+test('Claude Code in TRIF\'s full sandbox, managed settings that only loosen its rules (Claude Code\'s sandbox off, every folder, acceptEdits, no other commands): not asked, a shell, still boxed', { skip: !process.env.TRIF_WHOLE_BOX || MANAGED_TEST !== 'loosen-shell' ? 'TRIF_WHOLE_BOX=1 with TRIF_TEST_MANAGED=loosen-shell only (CI)' : skipWhy(CLAUDE, 'Claude Code') }, async () => {
+  const f = await setup();
+  const site = 'example.com';
+  const commands = trifCommands(site);
+  // (every folder is Claude Code's to read and write now: what stops these is TRIF's box)
+  const refused = [
+    { cmd: `ls ${q(f.priv)}`, by: /operation not permitted|EPERM|was blocked|haven't granted|requested permissions|not allowed/i },
+    { tool: 'Read', input: { file_path: path.join(f.priv, 'config.json') }, by: BY.sandbox },
+    { tool: 'Write', input: { file_path: path.join(f.priv, 'probe.txt'), content: 'x' }, by: BY.sandbox },
+    { tool: 'Read', input: { file_path: path.join(f.keychainDir, 'login.keychain-db') }, by: BY.sandbox },
+    { cmd: 'trif new other.net probe --style', by: BY.sandbox },
+  ];
+  const steps = [...commands.map((c) => ({ bash: c })), ...refused.map((x) => (x.tool ? { tool: x.tool, input: x.input } : { bash: x.cmd })), { say: 'Done: probed.' }];
+  setScript(f.anthropicScript, steps);
+  const { runId, done, events } = await runAgent(f, { agent: 'claude', site, tabId: 12 });
+  const results = claudeResults(f.anthropic);
+  const labels = [...commands, ...refused.map((x) => x.cmd || `${x.tool} ${x.input.file_path}`)];
+  const named = results.map((x, i) => ({ ...x, cmd: labels[i] || '?' }));
+  const info = report(named, `events: ${JSON.stringify(events).slice(0, 3000)}\nhelper.log:\n${helperLog(f)}`);
+  assert.equal(done.ok, true, info);
+  assert.equal(results.length, labels.length, `every step ran:\n${info}`);
+  checkTrif(named.slice(0, commands.length), info);
+  for (const [i, x] of refused.entries()) {
+    const got = named[commands.length + i];
+    assert.notEqual(got.code, 0, `${got.cmd} should have been refused:\n${info}`);
+    assert.ok(!got.out.includes(SECRET), `${got.cmd} got through:\n${info}`);
+    assert.match(got.out, x.by, `${got.cmd}:\n${info}`);
+  }
+  assert.ok(!fs.existsSync(path.join(f.priv, 'probe.txt')) && !fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')));
+  const offered = f.anthropic.requests.filter((r) => r.body && Array.isArray(r.body.tools)).flatMap((r) => r.body.tools.map((t) => t.name));
+  assert.ok(offered.includes('Bash') && !offered.includes('mcp__trif__trif'), `a shell: ${[...new Set(offered)].join(', ')}`);
+  assert.ok(!runLog(f, runId).some((x) => x.webmods === 'noShell'), info);
+  notAsked(f, runId, events, info);
   assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
 });
 

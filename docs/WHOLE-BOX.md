@@ -202,7 +202,7 @@ What managed settings can still do to a boxed run:
 
 | They can | Effect in the box |
 |---|---|
-| Loosen permission rules, modes, extra folders, Claude Code's sandbox off, more network for its sandbox | nothing beyond the box: the system refuses. TRIF could stop asking "Use Claude Code anyway" for these |
+| Loosen permission rules, modes, extra folders, Claude Code's sandbox off, more network for its sandbox | nothing beyond the box: the system refuses. Not asked about in the box (decided 11-21, below); any command → no shell |
 | Force Claude Code's sandbox on | shell commands fail (closed); fine with no shell (`trif` over MCP) |
 | `allowManagedPermissionRulesOnly`, plan mode | TRIF's allow rules ignored: `trif` and edits refused by Claude Code itself, as today ("breaks") |
 | Deny or allowlist MCP servers (`allowManagedMcpServersOnly`, `deniedMcpServers`) | would remove a `trif` MCP tool: breaks, closed |
@@ -210,6 +210,21 @@ What managed settings can still do to a boxed run:
 | Add tools | can't add a tool `--tools` leaves out (claude-managed.js) |
 
 None of this involves TRIF reading or changing an organization's settings; it only stops relying on them.
+
+**Decided (Tim, 11-21, step 7a):** in TRIF's full sandbox, settings that only loosen Claude Code's rules
+(any command allowed, its sandbox off, bypass mode, more folders…) are **not asked about**: no "Use Claude
+Code anyway", the chat isn't marked "no TRIF sandbox"; what they do goes in the run's log (`orgSettings`
+line; the helper's log too). Settings that break TRIF's own rules (plan mode, only the company's permission
+rules, the `trif` tool taken away) still stop the chat. When the company's settings **let a run use
+commands beyond TRIF's own** (claude-managed.js `anyCommand`: a `Bash` allow rule for anything but `trif`,
+`webmods`, `cd`, `ls`, or one with shell operators; `bypassPermissions` or `auto` mode), the chat gets the
+`trif` tool instead of a shell, as when Claude Code's sandbox is forced on: the box would hold a free shell
+too, but the run's environment holds its one-year sign-in token (`CLAUDE_CODE_OAUTH_TOKEN`), which a free
+shell could read and copy into a mod; `--tools` leaves Bash out and no company setting can put it back.
+Read strictly: a rule for any other single command counts as any command (git's aliases, npm's scripts and
+every interpreter run others). `acceptEdits` mode keeps the shell: it approves only file edits and file
+commands (mkdir, touch, rm, mv, cp, sed), none of which reads the environment. Outside the full sandbox
+nothing changes (asked, as before).
 
 ## Costs and risks
 

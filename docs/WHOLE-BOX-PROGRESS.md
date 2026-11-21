@@ -377,8 +377,11 @@ fits with step 5 or after.
   ([44879684954](https://github.com/acapellascience/trif/actions/runs/44879684954)) failed: every
   claudetoken.test.js subtest but the last passed, then the file hung to its 180 s limit in the pty test
   (untouched since round 3, passed in every run before: a flake under the whole suite's load; it now has
-  a 30 s watchdog that fails saying what it saw). 10d2ace's `tests` run (44879165967) passed. The last
-  push of the round (the missing-pin test's step-4 check, CI only) was still running at the round's end.
+  a 30 s watchdog that fails saying what it saw). 10d2ace's `tests` run (44879165967) passed. a233444
+  (the missing-pin test now checks the card's reason, then the older protection starting the user's own
+  stand-in Claude Code): [run 44880243221](https://github.com/acapellascience/trif/actions/runs/44880243221)
+  **passed** (macos, windows), its `tests` run
+  [44880243167](https://github.com/acapellascience/trif/actions/runs/44880243167) passed.
 
 - Round 5, 7a: [run 44876683949](https://github.com/acapellascience/trif/actions/runs/44876683949) (whole-box.yml,
   a394c4f) **passed** (macos and windows): with the loosest managed settings (`Bash(*)`, bypass mode,

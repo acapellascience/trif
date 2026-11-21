@@ -34,7 +34,8 @@ if (process.argv[2] === 'client') {
     if (typeof lp === 'number') {
       o['loopback, same process'] = await tryOne({ port: lp, host: '127.0.0.1' });
       o['loopback, another process'] = await new Promise((r) => {
-        const c = spawn(process.execPath, [...process.execArgv, __filename, 'client', String(lp)], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let c;
+        try { c = spawn(process.execPath, [...process.execArgv, __filename, 'client', String(lp)], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { r(`spawn ${e.code || e.message}`); return; }
         let out = '';
         c.stdout.on('data', (d) => { out += d; });
         c.stderr.on('data', (d) => { out += d; });

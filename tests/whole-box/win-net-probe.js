@@ -164,7 +164,7 @@ function parseStream(stdout) {
   return { init: lines.find((m) => m.type === 'system' && m.subtype === 'init'), result: lines.find((m) => m.type === 'result') };
 }
 
-async function standInRun(fence, bridgeExe, specFile, L, claude, sid) {
+async function standInRun(fence, bridgeExe, specFile, L, claude, sid, tag = '') {
   const steps = [
     { tool: 'Read', input: { file_path: L.own } },
     { tool: 'Read', input: { file_path: L.secret } },
@@ -195,10 +195,10 @@ async function standInRun(fence, bridgeExe, specFile, L, claude, sid) {
   if (r.stderr.trim()) show('stderr', r.stderr.slice(-2000));
   b.close();
   await api.close();
-  verdict['stand-in run through the pipe'] = !!(result && !result.is_error && api.requests.length && ownWritten && String(got[0] || '').includes('COPY-OK'));
+  verdict[`stand-in run through the pipe${tag}`] = !!(result && !result.is_error && api.requests.length && ownWritten && String(got[0] || '').includes('COPY-OK'));
 }
 
-async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid) {
+async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid, tag = '') {
   const token = `sk-ant-oat01-${'MadeUpForCI'.repeat(8)}AA`;
   const base = { CLAUDE_CODE_OAUTH_TOKEN: token, CLAUDE_CODE_MAX_RETRIES: '0' };
   const mcp = path.join(L.box, 'mcp-none.json');
@@ -219,8 +219,8 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid) {
     if (!result) show('stdout', r.stdout.slice(-1500));
     if (r.stderr.trim()) show('stderr', r.stderr.slice(-1500));
     const answered = /401|OAuth|authenticat|invalid/i.test(`${r.stdout}\n${r.stderr}`);
-    if (viaPipe) verdict['the real Anthropic through the pipe and the relay (401 for the made-up token)'] = api.some((x) => x.down > 0) && answered;
-    else verdict['control: the relay\'s port straight from the box is refused'] = !api.length;
+    if (viaPipe) verdict[`the real Anthropic through the pipe and the relay (401 for the made-up token)${tag}`] = api.some((x) => x.down > 0) && answered;
+    else verdict[`control: the relay's port straight from the box is refused${tag}`] = !api.length;
     if (b) b.close();
     await r0.close();
   }
@@ -233,6 +233,23 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid) {
   const claude = findClaude();
   const v = spawnSync(claude.argv[0], ['--version'], { encoding: 'utf8' });
   console.log(`Claude Code (${claude.which}): ${claude.argv[0]}: ${(v.stdout || v.stderr || '').trim()}`);
+
+  // (does Claude Code read a setting for a proxy or API over a Unix socket or a pipe? names in the binary)
+  try {
+    const names = new Set();
+    const fd = fs.openSync(claude.argv[0], 'r');
+    const buf = Buffer.alloc(16 * 1024 * 1024);
+    let n;
+    let carry = '';
+    while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      const text = carry + buf.toString('latin1', 0, n);
+      for (const m of text.matchAll(/\b[A-Z][A-Z0-9_]{3,60}(?:UNIX|SOCKET|SOCK|PIPE)[A-Z0-9_]{0,40}\b/g)) names.add(m[0]);
+      for (const m of text.matchAll(/\b(?:unixSocket|socketPath|unix:\/\/)\b/g)) names.add(m[0]);
+      carry = text.slice(-100);
+    }
+    fs.closeSync(fd);
+    show('settings in claude.exe naming a socket or pipe', [...names].sort().join('\n'));
+  } catch (e) { show('scan of claude.exe', e.message); }
 
   const echo = await echoServer('127.0.0.1');
   const echoAll = await echoServer('0.0.0.0');
@@ -274,7 +291,14 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid) {
       await standInRun(fence, bridgeExe, specFile, L, claude, sid);
       if (process.env.WBX_REAL_RELAY) await realRelayRun(fence, bridgeExe, specFile, L, claude, sid);
     } else {
-      verdict['privateNetworkClientServer: this computer\'s own address'] = host ? o[`this computer, its own address ${host}`] : 'no address';
+      const tag = ' (privateNetworkClientServer)';
+      verdict[`container's own loopback, another process${tag}`] = o['loopback, another process'] || o['loopback, listen'];
+      verdict[`this computer's own address${tag}`] = host ? o[`this computer, its own address ${host}`] : 'no address';
+      verdict[`127.0.0.1 outside${tag}`] = o['this computer, 127.0.0.1'];
+      verdict[`the internet${tag}`] = o['the internet, 1.1.1.1:443'];
+      if (o['the internet, 1.1.1.1:443'] === 'echo ok') { escaped = true; console.log('  <== THE INTERNET OPEN'); }
+      await standInRun(fence, bridgeExe, specFile, L, claude, sid, tag);
+      if (process.env.WBX_REAL_RELAY) await realRelayRun(fence, bridgeExe, specFile, L, claude, sid, tag);
     }
     spawnSync(fence, ['cleanup', specFile], { encoding: 'utf8' });
   }

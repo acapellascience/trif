@@ -15,12 +15,19 @@ module.exports = function onWindows(file) {
   const { reasons, files } = require('./windows-skips.json');
   const skips = files[path.basename(file)] || {};
   const why = (name) => (Object.prototype.hasOwnProperty.call(skips, name) ? `Windows: ${reasons[skips[name]] || skips[name]}` : null);
+  let running = 0; // (tests of this file that run here)
   const wrapped = (name, ...rest) => {
     const skip = why(name);
-    if (!skip) return test(name, ...rest);
+    if (!skip) { running++; return test(name, ...rest); }
     return test(name, { skip }, () => {});
   };
-  for (const k of ['before', 'after', 'beforeEach', 'afterEach', 'describe', 'it', 'mock']) wrapped[k] = test[k];
+  // A file whose every test is skipped here: its before/after hooks don't run either (they set up what only
+  // those tests use; a hook that throws fails the file on Node 18 even with every test skipped). They run
+  // after the file has registered its tests, so the count is known by then.
+  const hook = (k) => (fn, ...o) => test[k]((...a) => (running ? fn(...a) : undefined), ...o);
+  wrapped.before = hook('before');
+  wrapped.after = hook('after');
+  for (const k of ['beforeEach', 'afterEach', 'describe', 'it', 'mock']) wrapped[k] = test[k];
   wrapped.skip = test.skip;
   wrapped.todo = test.todo;
   wrapped.only = test.only;

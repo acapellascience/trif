@@ -264,7 +264,7 @@ test('CI, the real network: the pinned Claude Code in the box reaches Anthropic 
     const env = { HOME: L.home, USER: os.userInfo().username, PATH: '/usr/bin:/bin', TERM: 'dumb', CLAUDE_CONFIG_DIR: L.cfg, ...c.env,
       CLAUDE_CODE_OAUTH_TOKEN: `sk-ant-oat01-${'MadeUpForCI'.repeat(8)}AA`, HTTPS_PROXY: `http://127.0.0.1:${r.port}`, CLAUDE_CODE_MAX_RETRIES: '0' };
     for (const k of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete env[k];
-    const cmd = wb.wrap({ file: c.file, args: c.args, env }, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb') });
+    const cmd = wb.wrap({ file: c.file, args: c.args, env }, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb'), extraRead: [agentDir] });
     assert.match(cmd.profile, new RegExp(`\\(allow network-outbound \\(remote tcp "localhost:${r.port}"\\)\\)`));
     const t0 = Date.now();
     const res = await new Promise((resolve) => {

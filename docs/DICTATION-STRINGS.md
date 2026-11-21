@@ -53,7 +53,7 @@ It asks at once, and closes itself once allowed (the panel then starts listening
 - Tab title and heading: **Allow the microphone**
 - **So you can talk to TRIF’s message box instead of typing.**
 - The same where-the-audio-goes line as above (Chrome / Edge).
-- While the browser asks: **Choose Allow when {browser} asks.**
+- While the browser asks: **Choose Allow when {browser} asks. {browser} calls TRIF “this site”, so one Allow lets you dictate in TRIF on every site.** (APPROVED by Tim 11-21)
 - Allowed: **Microphone allowed. Taking you back…**
 - The question closed without an answer: **You closed the question without answering.** with **Ask again** and
   **Close this tab**

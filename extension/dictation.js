@@ -395,7 +395,7 @@ export function dictationLang() {
 export const MIC_PAGE_WORDS = {
   title: 'Allow the microphone',
   lead: 'So you can talk to TRIF’s message box instead of typing.',
-  asking: 'Choose Allow when {browser} asks.',
+  asking: 'Choose Allow when {browser} asks. {browser} calls TRIF “this site”, so one Allow lets you dictate in TRIF on every site.',
   granted: 'Microphone allowed. Taking you back…',
   dismissed: 'You closed the question without answering.',
   askAgain: 'Ask again',

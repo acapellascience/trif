@@ -49,6 +49,62 @@ function oneLine(s, max = 300) {
   return t.length > max ? t.slice(0, max - 1) + '…' : t;
 }
 
+
+// ---- MCP tool calls as steps
+//
+// On Windows a run's agent has no shell (and on macOS in TRIF's full sandbox, when an organization forces
+// Claude Code's own sandbox on, docs/WHOLE-BOX.md step 7): `trif` is a tool of TRIF's MCP server "trif" (helper/mcp.js), as
+// are Codex's file tools there, so Claude Code names a step `mcp__trif__trif` and Codex {server: "trif",
+// tool: "trif"}. Those steps are told as the same steps are elsewhere: a `trif` call as the `trif …`
+// command a shell would have run (name "Bash", as on macOS: the panel says "ran trif verify x.com/a"), a
+// file tool as the agent's own file tool would be (read, wrote, edited, searched). Another server's tool:
+// "server.tool", and what it was given that names something.
+
+/** One word of a command as a shell takes it, for showing it: as it is when plain, else in single quotes. */
+function shellWord(w) {
+  const s = String(w);
+  return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/** The `trif …` command a `trif` tool call ({args, stdin}) stands for, as it would be typed in a shell. */
+function trifCommand(input) {
+  const i = input && typeof input === 'object' ? input : {};
+  const words = Array.isArray(i.args) ? i.args.map(shellWord) : [];
+  const stdin = typeof i.stdin === 'string' && i.stdin ? ` <<'EOF'\n${i.stdin}\nEOF` : '';
+  return ['trif', ...words].join(' ') + stdin;
+}
+
+/** {name, summary} of a step that called MCP tool `tool` of server `server` with `input`. */
+function mcpStep(server, tool, input, workspace) {
+  let i = input;
+  if (typeof i === 'string') { try { i = JSON.parse(i); } catch { i = {}; } } // (Codex: its arguments may be JSON text)
+  if (!i || typeof i !== 'object') i = {};
+  const where = () => oneLine(relToWorkspace(i.path, workspace));
+  server = String(server || '').replace(/^mcp__/, ''); // (the namespace the model is shown it under, if that's what came)
+  if (server === 'trif') {
+    switch (tool) {
+      case 'trif': return { name: 'Bash', summary: oneLine(trifCommand(i)) };
+      case 'read_file': case 'view_image': return { name: 'Read', summary: where() };
+      case 'write_file': return { name: 'Write', summary: where() };
+      case 'edit_file': return { name: 'Edit', summary: where() };
+      case 'search_files': return { name: 'Grep', summary: oneLine(i.pattern) };
+      case 'list_files': { // (a folder's list, as the pattern a search of it would be: sites/x.com/*)
+        const dir = String(relToWorkspace(i.path, workspace) || '').replace(/[\\/]+$/, '');
+        const all = Number(i.depth) > 1 ? '**' : '*';
+        return { name: 'Glob', summary: oneLine(dir && dir !== '.' ? `${dir}/${all}` : all) };
+      }
+      default: break;
+    }
+  }
+  return { name: `${server || 'mcp'}.${tool || 'tool'}`, summary: oneLine(i.description || i.command || relToWorkspace(i.file_path || i.path, workspace) || i.url || i.query || '') };
+}
+
+/** Claude Code's name for an MCP tool, mcp__<server>__<tool>: {server, tool}, or null for another tool. */
+function mcpName(name) {
+  const m = /^mcp__(.+?)__(.+)$/.exec(String(name || ''));
+  return m ? { server: m[1], tool: m[2] } : null;
+}
+
 function parseJsonLine(line) {
   const t = String(line).trim();
   if (!t || t[0] !== '{') return null;
@@ -136,5 +192,5 @@ function loginError(name) {
   return { kind: 'error', reason: 'login', message: `${name} needs you to log in again.` };
 }
 
-module.exports = { isExecutableFile, findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, redactSecrets,
+module.exports = { isExecutableFile, findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, redactSecrets, shellWord, trifCommand, mcpStep, mcpName,
   LOGIN_FAILURES, isLoginFailure, loginError };

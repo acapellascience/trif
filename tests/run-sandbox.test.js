@@ -53,6 +53,7 @@ const CLAUDE = MAC ? realClaude() : null;
 const CODEX = MAC ? realCodex() : null;
 const skipWhy = (bin, name) => (!MAC ? 'macOS only (the run sandboxes are Seatbelt there; Linux runs are untested here)' : !bin ? `needs ${name} installed (not on CI)` : false);
 
+const MANAGED_TEST = process.env.TRIF_TEST_MANAGED || ''; // (CI only: sandbox-on, sandbox-on-no-mcp)
 const SECRET = `secret-${crypto.randomBytes(8).toString('hex')}`; // in every file runs must not read
 const KEY = `sk-ant-fake-${crypto.randomBytes(12).toString('hex')}`;
 const OAI_KEY = `sk-fake-${crypto.randomBytes(12).toString('hex')}`;
@@ -99,6 +100,12 @@ async function setup() {
     TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), // (where they are by default)
     TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'), ...kc.env,
   };
+  // (TRIF_TEST_MANAGED, CI: the runner's real managed settings, which Claude Code reads, are what the
+  // helper sees too: copied into the folder it reads instead of the system's)
+  if (MANAGED_TEST) {
+    fs.mkdirSync(env.TRIF_CLAUDE_MANAGED_DIR);
+    fs.copyFileSync('/Library/Application Support/ClaudeCode/managed-settings.json', path.join(env.TRIF_CLAUDE_MANAGED_DIR, 'managed-settings.json'));
+  }
   // The workspace, by the copy's own setup (non-interactive: no browser opened, no wait, no CLI link).
   const r = spawnSync(process.execPath, [path.join(code, 'helper', 'cli.js'), 'setup', '--link', '--no-link', '--no-examples', '--native-dir', path.join(S, 'native')],
     { env, encoding: 'utf8', timeout: 60000 });
@@ -360,6 +367,56 @@ test('Claude Code in TRIF\'s full sandbox, signed in with setup-token\'s token: 
     await keys.setAgentKey('claude', KEY, { env: f.kc.env });
     setScript(f.anthropicScript, [{ say: 'ok' }]);
   }
+});
+
+// docs/WHOLE-BOX.md step 7: an organization forcing Claude Code's own sandbox on (CI writes the runner's real
+// managed settings), which can't start inside TRIF's box. The run gets no Bash and the `trif` tool instead.
+const NO_SHELL_SKIP = !process.env.TRIF_WHOLE_BOX || !MANAGED_TEST.startsWith('sandbox-on') ? 'TRIF_WHOLE_BOX=1 with TRIF_TEST_MANAGED=sandbox-on… only (CI)' : skipWhy(CLAUDE, 'Claude Code');
+test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its own sandbox on, so the run has no Bash and every `trif` command works through the trif tool, still boxed', { skip: NO_SHELL_SKIP || (MANAGED_TEST !== 'sandbox-on' && 'TRIF_TEST_MANAGED=sandbox-on only') }, async () => {
+  const f = await setup();
+  const site = 'example.com';
+  const commands = trifCommands(site);
+  const words = (c) => c.split(' ').slice(1); // (the commands above have no quoted words)
+  const refused = [
+    { tool: 'Bash', input: { command: 'trif status', description: 'probe' }, by: /no such tool|not available|unknown tool|isn't available|does not exist/i },
+    { tool: 'mcp__trif__trif', input: { args: ['new', 'other.net', 'probe', '--style'] }, by: BY.sandbox },
+    { tool: 'mcp__trif__trif', input: { args: ['check', path.join(f.priv, 'config.json')] }, by: BY.trif },
+    { tool: 'Read', input: { file_path: path.join(f.priv, 'config.json') }, by: /operation not permitted|EPERM|was blocked|haven't granted|requested permissions|not allowed/i },
+  ];
+  const steps = [...commands.map((c) => ({ tool: 'mcp__trif__trif', input: { args: words(c) } })), ...refused.map((x) => ({ tool: x.tool, input: x.input })), { say: 'Done: probed.' }];
+  setScript(f.anthropicScript, steps);
+  const { done, events } = await runAgent(f, { agent: 'claude', site, tabId: 12 });
+  const results = claudeResults(f.anthropic);
+  const labels = [...commands, ...refused.map((x) => `${x.tool} ${JSON.stringify(x.input)}`)];
+  const named = results.map((x, i) => ({ ...x, cmd: labels[i] || '?' }));
+  const info = report(named, `events: ${JSON.stringify(events).slice(0, 3000)}\nhelper.log:\n${helperLog(f)}`);
+  assert.equal(done.ok, true, info);
+  assert.equal(results.length, labels.length, `every step ran:\n${info}`);
+  checkTrif(named.slice(0, commands.length), info);
+  for (const [i, x] of refused.entries()) {
+    const got = named[commands.length + i];
+    assert.notEqual(got.code, 0, `${got.cmd} should have been refused:\n${info}`);
+    assert.ok(!got.out.includes(SECRET), `${got.cmd} got through:\n${info}`);
+    assert.match(got.out, x.by, `${got.cmd}:\n${info}`);
+  }
+  assert.ok(!fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')));
+  // What the model was offered: no Bash, the trif tool; told there's no shell.
+  const offered = f.anthropic.requests.filter((r) => r.body && Array.isArray(r.body.tools)).flatMap((r) => r.body.tools.map((t) => t.name));
+  assert.ok(offered.includes('mcp__trif__trif') && !offered.includes('Bash'), `tools offered: ${[...new Set(offered)].join(', ')}`);
+  assert.ok(JSON.stringify(f.anthropic.requests.map((r) => r.body && r.body.system)).includes('There is no shell in this chat'), 'told there is no shell');
+  // The panel's steps read as they do with a shell: "trif status", not mcp__trif__trif.
+  assert.ok(events.some((e) => e.kind === 'tool' && e.name === 'Bash' && e.summary === 'trif status'), info);
+  assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
+});
+
+test('Claude Code in TRIF\'s full sandbox, no shell, and managed settings that take the trif tool away: the run stops before Claude Code starts, saying why', { skip: NO_SHELL_SKIP || (MANAGED_TEST !== 'sandbox-on-no-mcp' && 'TRIF_TEST_MANAGED=sandbox-on-no-mcp only') }, async () => {
+  const f = await setup();
+  const asked = f.anthropic.requests.length;
+  const { done, events } = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+  const info = `events: ${JSON.stringify(events)}\nhelper.log:\n${helperLog(f)}`;
+  assert.equal(done.ok, false, info);
+  assert.ok(events.some((e) => e.kind === 'error' && /require Claude Code's own sandbox.*can't run in TRIF's full sandbox/.test(e.message)), info);
+  assert.equal(f.anthropic.requests.length, asked, 'no model call');
 });
 
 test('Codex: real `trif` commands work in a side-panel run\'s sandbox; the private folder, config.json, the keychain, TRIF\'s other files and the network stay out of reach', { skip: skipWhy(CODEX, 'Codex') }, async () => {

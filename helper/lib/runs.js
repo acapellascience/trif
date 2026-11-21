@@ -838,6 +838,20 @@ class Runs {
         run.agentDone = { ok: false, result: message };
         return this._finish(run, { code: null, signal: null });
       }
+      // TRIF's full sandbox under an organization that forces Claude Code's own sandbox on (docs/WHOLE-BOX.md
+      // step 7): it can't start inside TRIF's box, so the run gets no Bash and the `trif` tool instead
+      // (claude.js `mcp`, helper/mcp.js); settings that take that tool away stop the run, saying so.
+      if (run.wholeBox && pre && pre.forcesSandbox) {
+        if (pre.mcpBlocks.length) {
+          const message = adapter.noShellBrokenMessage(pre);
+          this.logger.warn(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) force its sandbox on and ${pre.mcpBlocks.join('; ')}: stopped`);
+          this._emit(run, { kind: 'error', message });
+          run.agentDone = { ok: false, result: message };
+          return this._finish(run, { code: null, signal: null });
+        }
+        run.noShell = true;
+        this._log(run, { webmods: 'noShell', why: 'managed settings force Claude Code\'s sandbox on', from: pre.sources.join(', '), time: Date.now() });
+      }
       if (pre && pre.loosens.length && !this._withoutSandbox(run, { why: pre.loosens, message: adapter.withoutSandboxMessage(pre), from: pre.sources.join(', ') })) {
         return this._finish(run, { code: null, signal: null });
       }
@@ -877,7 +891,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, noShell: !!run.noShell };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -898,6 +912,8 @@ class Runs {
     let cmd;
     try {
       fs.mkdirSync(run.agentDir, { mode: 0o700 });
+      // (no shell, _withAgent: the `trif` tool's server, its config beside the run's settings)
+      if (run.noShell) options = { ...options, mcp: this._trifTool(run, limits, env) };
       cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
       for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
     } catch (e) {
@@ -976,6 +992,23 @@ class Runs {
       this._emit(run, { kind: 'error', message: `${adapter.name} was stopped after ${Math.round(RUN_TIMEOUT_MS / 60000) || 1} minutes` });
       this._kill(run);
     }, RUN_TIMEOUT_MS));
+  }
+
+  /**
+   * macOS, TRIF's full sandbox with no shell (_withAgent): the `trif` tool's server (helper/mcp.js), for the
+   * agent's MCP config: {command, args}. Claude Code starts it inside TRIF's box, so the `trif` it runs is
+   * boxed as the agent is; no launcher. Its config, in the run's agent folder: TRIF's CLI, node, and the
+   * run's own TRIF_* variables (what a shell's `trif` would have had), its temporary folder and working folder.
+   */
+  _trifTool(run, limits, env) {
+    const root = realOrResolved(path.join(__dirname, '..', '..'));
+    const runEnv = {};
+    for (const [k, v] of Object.entries(env)) if (/^(TRIF|WEBMODS)_/.test(k)) runEnv[k] = v;
+    if (limits.agentTmp) runEnv.TMPDIR = limits.agentTmp;
+    const configFile = path.join(run.agentDir, 'trif-tool.json');
+    fs.writeFileSync(configFile, JSON.stringify({ node: realOrResolved(process.execPath), cli: path.join(root, 'helper', 'cli.js'), version: require('./paths').VERSION,
+      env: runEnv, cwd: run.stage ? run.stage.dir : run.ws.home }), { mode: 0o600, flag: 'wx' });
+    return { command: realOrResolved(process.execPath), args: [path.join(root, 'helper', 'mcp.js'), configFile] };
   }
 
   // Answer requests from the run's mailbox (client.js boxRequest). The agent can write there, so files are

@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, isLoginFailure, loginError } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, isLoginFailure, loginError, mcpStep, mcpName } = require('./util');
 const { within, ignoresCase } = require('../pathcheck');
 
 // What a side-panel run may do (runs.js runLimits gives the paths). Only the tools in TOOLS, then two layers:
@@ -52,6 +52,14 @@ function absoluteRules(rules, workspace) {
   if (!workspace) return rules;
   return rules.map((r) => r.replace(/^(\w+)\(\.\/(.*)\)$/, (_, tool, p) => `${tool}(/${path.join(workspace, p)})`));
 }
+
+// TRIF's full sandbox under an organization that forces Claude Code's own sandbox on (docs/WHOLE-BOX.md
+// step 7): that sandbox can't start inside TRIF's box (macOS won't apply a second one), so every Bash
+// command would fail. Such a run gets no Bash (`--tools` without it) and the `trif` tool in its place
+// (helper/mcp.js, started by Claude Code inside TRIF's box, so what it runs is boxed too). The file tools'
+// rules are unchanged. (Windows has the same design for its own reasons, on branch windows.)
+const NO_SHELL_TOOLS = TOOLS.filter((t) => t !== 'Bash');
+const TRIF_TOOL = 'mcp__trif__trif';
 
 const MIN_VERSION = [2, 1, 285]; // the sandbox settings used here, and --settings taking precedence over the workspace's
 
@@ -201,15 +209,22 @@ const adapter = {
    * context (system prompt: the page the user is on) go in files in `agentDir`, the run's own folder that
    * only the helper and Claude Code itself read (runs.js writes `files`, 0600, and removes them after).
    */
-  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', ...limits }) {
+  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', mcp = null, ...limits }) {
     const file = (name) => path.join(agentDir || '.', name);
     const files = [{ path: file('settings.json'), content: JSON.stringify(runSettings(limits)) }];
+    // (`mcp`: runs.js, TRIF's full sandbox with Claude Code's own sandbox forced on: no Bash, the trif tool)
+    const allowed = mcp ? [...ALLOWED_TOOLS.filter((r) => !/^Bash\(/.test(r)), TRIF_TOOL] : ALLOWED_TOOLS;
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
       '--settings', file('settings.json'),
-      '--tools', TOOLS.join(','), '--disable-slash-commands',
-      '--allowedTools', ...absoluteRules(ALLOWED_TOOLS, limits.workspace),
+      '--tools', (mcp ? NO_SHELL_TOOLS : TOOLS).join(','), '--disable-slash-commands',
+      '--allowedTools', ...absoluteRules(allowed, limits.workspace),
       '--disallowedTools', ...absoluteRules(DENIED_TOOLS, limits.workspace)];
+    if (mcp) {
+      // (--strict-mcp-config: this server and no other, whatever the user's own settings name)
+      files.push({ path: file('mcp.json'), content: JSON.stringify({ mcpServers: { trif: mcp } }) });
+      args.push('--mcp-config', file('mcp.json'));
+    }
     if (context) {
       files.push({ path: file('context.md'), content: context });
       args.push('--append-system-prompt-file', file('context.md'));
@@ -275,7 +290,10 @@ const adapter = {
           else { flushHeld(emit, state); emit({ kind: 'text', text: c.text }); }
         } else if (c.type === 'tool_use') {
           flushHeld(emit, state);
-          emit({ kind: 'tool', name: String(c.name || 'tool'), summary: toolSummary(c.name, c.input, state.workspace) });
+          // (an MCP tool's, mcp__trif__trif with no shell: told as the same step is elsewhere, util.js mcpStep)
+          const m = mcpName(c.name);
+          if (m) emit({ kind: 'tool', ...mcpStep(m.server, m.tool, c.input, state.workspace) });
+          else emit({ kind: 'tool', name: String(c.name || 'tool'), summary: toolSummary(c.name, c.input, state.workspace) });
         }
       }
     } else if (msg.type === 'result') {
@@ -393,6 +411,10 @@ adapter.withoutSandboxMessage = (pre) =>
   `Your organization's Claude Code settings ${both(pre.loosens)}, which replaces TRIF's sandbox, so TRIF stopped the run before Claude Code started. ` +
   'To let Claude Code work under your company\'s settings instead, choose “Use Claude Code anyway” in TRIF\'s side panel. ' +
   'A personal Claude Code login, or another agent, works with TRIF\'s sandbox.';
+// (TRIF's full sandbox, Claude Code's own sandbox forced on, and the trif tool taken away: WHOLE-BOX-STRINGS.md)
+adapter.noShellBrokenMessage = (pre) =>
+  `Your organization's Claude Code settings require Claude Code's own sandbox, which can't start inside TRIF's full sandbox, and ${both(pre.mcpBlocks)}, which would take its place, so this chat can't run in TRIF's full sandbox. ` +
+  'Turning off “Run chats in TRIF\'s full sandbox” in Settings runs chats with TRIF\'s usual protection.';
 adapter.brokenMessage = (pre) =>
   `Your organization's Claude Code settings ${both(pre.breaks)}, so chats with Claude Code can't work in TRIF's side panel. ` +
   'Try another agent, or work with Claude Code in a terminal in ~/.trif.';
@@ -420,3 +442,5 @@ module.exports.toolSummary = toolSummary;
 module.exports.parseLoginLine = parseLoginLine;
 module.exports.runSettings = runSettings;
 module.exports.tooOld = tooOld;
+module.exports.TRIF_TOOL = TRIF_TOOL;
+module.exports.NO_SHELL_TOOLS = NO_SHELL_TOOLS;

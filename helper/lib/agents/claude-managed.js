@@ -175,23 +175,39 @@ function effects(s, { platform = process.platform } = {}) {
   if (s.allowManagedPermissionRulesOnly === true) breaks.push('ignore every permission rule but theirs, TRIF’s too, so Claude Code can’t run `trif` or write this site’s mods');
   if (perms.defaultMode === 'plan') breaks.push('keep Claude Code in plan mode, where it can’t write mods');
   if (fsb.allowManagedReadPathsOnly === true) breaks.push('ignore what TRIF lets commands read, so `trif` can’t run');
-  return { loosens, breaks };
+  // TRIF's full sandbox (docs/WHOLE-BOX.md step 7): Claude Code's own sandbox can't start inside TRIF's box,
+  // so where an organization forces it on, a boxed run gets no Bash and `trif` as an MCP tool instead
+  // (helper/mcp.js), which these would take away (`mcpBlocks`: breaks for those runs only). Server
+  // entries name a server by serverName, serverCommand or serverUrl; TRIF's is "trif", a command no
+  // organization's list names (node and a path of this computer's), so only serverName counts.
+  const forcesSandbox = sb.enabled === true;
+  const mcpBlocks = [];
+  const named = (v) => (Array.isArray(v) ? v : []).some((e) => isObject(e) && e.serverName === 'trif');
+  if (Array.isArray(s.allowedMcpServers) && !named(s.allowedMcpServers)) mcpBlocks.push('allow only the MCP servers they name, which leaves out TRIF’s `trif` tool');
+  else if (s.allowManagedMcpServersOnly === true && !named(s.allowedMcpServers)) mcpBlocks.push('allow only the MCP servers they name, which leaves out TRIF’s `trif` tool');
+  if (named(s.deniedMcpServers)) mcpBlocks.push('deny TRIF’s `trif` tool');
+  return { loosens, breaks, forcesSandbox, mcpBlocks };
 }
 
 /**
- * Before a run: {loosens, breaks, sources, errors}, every source's effects together (no duplicates).
+ * Before a run: {loosens, breaks, forcesSandbox, mcpBlocks, sources, errors}, every source's effects
+ * together (no duplicates). forcesSandbox and mcpBlocks matter to runs in TRIF's full sandbox only.
  * `errors`: managed files that couldn't be read (Claude Code itself won't start with a broken one).
  */
 function check(opts = {}) {
   const { sources: found, errors } = sources(opts);
   const loosens = new Set();
   const breaks = new Set();
+  const mcpBlocks = new Set();
+  let forcesSandbox = false;
   for (const src of found) {
     const e = effects(src.settings, opts);
     for (const x of e.loosens) loosens.add(x);
     for (const x of e.breaks) breaks.add(x);
+    for (const x of e.mcpBlocks) mcpBlocks.add(x);
+    if (e.forcesSandbox) forcesSandbox = true;
   }
-  return { loosens: [...loosens], breaks: [...breaks], sources: found.map((x) => x.file), errors };
+  return { loosens: [...loosens], breaks: [...breaks], forcesSandbox, mcpBlocks: [...mcpBlocks], sources: found.map((x) => x.file), errors };
 }
 
 module.exports = { check, effects, sources, merge, systemDir, RUN_COMMANDS };

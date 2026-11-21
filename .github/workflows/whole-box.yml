@@ -30,7 +30,7 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
-        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js
+        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4
@@ -67,7 +67,16 @@ jobs:
         run: |
           echo '{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
           TRIF_TEST_MANAGED=sandbox-on node --test --test-timeout=300000 --test-name-pattern="managed" tests/whole-box.test.js
-          sudo rm -f "/Library/Application Support/ClaudeCode/managed-settings.json"
+      # (step 7: so a boxed run gets no Bash and the trif tool, helper/mcp.js; the helper reads the same file)
+      - name: The same settings, a side-panel run in TRIF's box with no shell (the trif tool)
+        run: TRIF_WHOLE_BOX=1 TRIF_TEST_MANAGED=sandbox-on TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="no shell" tests/run-sandbox.test.js
+      - name: Those settings and an MCP denylist naming trif, the run stops and says why
+        run: |
+          echo '{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false},"deniedMcpServers":[{"serverName":"trif"}]}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
+          TRIF_WHOLE_BOX=1 TRIF_TEST_MANAGED=sandbox-on-no-mcp TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="no shell" tests/run-sandbox.test.js
+      - name: Remove the managed settings
+        if: always()
+        run: sudo rm -f "/Library/Application Support/ClaudeCode/managed-settings.json"
 
   # claude.exe in an AppContainer (TRIF's fence launcher), exploration.
   windows:

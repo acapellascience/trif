@@ -215,7 +215,16 @@ function phoneText(phone, tabId, scope) {
   return ` This chat is in TRIF's phone view, a TRIF of its own for ${site || 'the site'} on the phone. ${tab} is a window ${Number(phone.width) || 390} px wide where the site sees ${phone.device === 'iPhone' ? 'an iPhone (Safari\'s user agent, touch, no hover)' : `a ${phone.device}`}, so it shows its mobile layout, and only phone mods run there. Phone mods live in sites/phone~${site}/ (\`trif new phone~${site} <name>\`), the only folder you can write; desktop mods never run in the phone view, nor phone mods on the desktop. The site's desktop mods in sites/${site}/ are there to read, for reference: when the user asks for one of them on the phone, take its idea, then rebuild it for the mobile page you see in this tab, without assuming the same selectors, elements or data. See "Phone mods" in AGENTS.md.`;
 }
 
-function contextText({ url, tabId, scope, browser, agentLevel, phone }) {
+// (no shell: Windows runs, lib/win/fence.js, and macOS runs in TRIF's full sandbox when an organization forces
+// Claude Code's own sandbox on, docs/WHOLE-BOX.md step 7; `trif` is a tool, helper/mcp.js)
+function noShellText(noShell) {
+  if (!noShell) return '';
+  return ' There is no shell in this chat. Wherever AGENTS.md says to run `trif <words>`, call the `trif` tool with those words as its `args` (one item per word, as they are: no quoting, pipes or redirection). ' +
+    (noShell === 'files' ? 'Look at and change files with the read_file, write_file, edit_file, list_files and search_files tools beside it (view_image shows you a screenshot `trif screenshot` made)' : 'Look at and change files with your own file tools') +
+    ', with paths relative to the folder you\'re in (sites/…); there is no `ls`, `cd` or `cat`.';
+}
+
+function contextText({ url, tabId, scope, browser, agentLevel, phone, noShell = false }) {
   const shown = url ? promptUrl(url) : null;
   const where = shown
     ? `They're looking at ${shown}${tabId != null ? ` (tab ${Number(tabId)}): pass \`--tab ${Number(tabId)}\` to trif commands` : ''}.`
@@ -227,7 +236,8 @@ function contextText({ url, tabId, scope, browser, agentLevel, phone }) {
   return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + phoneText(phone, tabId, scope) + limit + (LEVEL_TEXT[agentLevel] || '') +
     ' Follow AGENTS.md. Mods can be switched off and on with `trif disable/enable <site>/<mod>`; `trif status` shows which are on.' +
     ' Reply briefly in plain language; your replies appear in a narrow chat panel: before your first command, one line saying what you\'re about to change; then don\'t narrate your steps as you go, and end with a sentence or two on what changed (AGENTS.md "5. Report"), more only if the user asks.' +
-    " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";
+    " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question." +
+    noShellText(noShell);
 }
 
 // One-line reminder for later messages of a session (agents without a system prompt flag).

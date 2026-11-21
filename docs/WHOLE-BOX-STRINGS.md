@@ -34,7 +34,19 @@ In code now (helper/lib/runs.js):
   · **it can't be read ({code})**
 - Checking it failed: **couldn't check TRIF's own copy of Claude Code: {error}**
 
+- An organization forces Claude Code's own sandbox on (it can't start inside TRIF's box, so the chat runs
+  with no shell and the `trif` tool) **and** its settings take that tool away (round 4, claude.js
+  `noShellBrokenMessage`): **Your organization's Claude Code settings require Claude Code's own sandbox,
+  which can't start inside TRIF's full sandbox, and {what}, which would take its place, so this chat can't
+  run in TRIF's full sandbox. Turning off “Run chats in TRIF's full sandbox” in Settings runs chats with
+  TRIF's usual protection.** where {what} is **allow only the MCP servers they name, which leaves out
+  TRIF's `trif` tool** · **deny TRIF's `trif` tool** (claude-managed.js `mcpBlocks`).
+
 The offer that follows these (step 4, "Run this chat with the older protection"): not written yet.
+
+Not shown to people (round 4): a chat that runs with no shell says nothing in the panel; its steps read
+as they do with a shell ("trif status"). The agent is told (agents/index.js `noShellText`, agent-only).
+
 
 ## Signing in for TRIF's full sandbox (step 6, `claude setup-token`)
 

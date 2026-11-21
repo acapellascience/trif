@@ -2,7 +2,7 @@
 // for any reason, is there a way to make it remember where it was in the video and reload from that spot?").
 // No UI and no WebKit here, so the rules are built for the Mac too (mobile/test/videoresume.test.js).
 //
-// - What's kept: TRIF's world in each page (`watch`, every page from its start, main frame; same-origin frames' videos
+// - What's kept: the browser features' world in each page, on every site (`watch`, BrowserWorld, every page from its start, main frame; same-origin frames' videos
 //   too) tells the app the state of the video playing (or last played): the page's address, the time, playing or
 //   paused, the duration (live: none), muted, the speed, and its source when it isn't a blob. Every 3 s while it plays
 //   in a page shown, every 8 s in a tab behind or with the app in the background (the media's own timeupdate events,
@@ -117,17 +117,18 @@ enum VideoResume {
         }
         """
 
-    /// (TRIF's world, every page from its start, main frame) The video's state to the app, and a plan from it
+    /// (the browser features' world, BrowserWorld: every page from its start, main frame, on every site) The video's state to the app, and a plan from it
     /// applied. Messages: videoplan (asked once at the start: {plan} or nothing), videostate, videoplay (the app
     /// plays the video: a play from the page alone isn't allowed with sound), videoresumed.
     static let watch = """
         (function () {
           if (window.top !== window || globalThis.__trifVideo) return;
           const videoId = \(videoIDScript);
-          const post = (m) => { try { return window.webkit.messageHandlers.trif.postMessage(m); } catch (e) { return Promise.resolve(null); } };
+          const post = (m) => { try { return window.webkit.messageHandlers.trifBrowser.postMessage(m); } catch (e) { return Promise.resolve(null); } };
           const S = globalThis.__trifVideo = { plan: null, asked: false, done: false, applied: 0, appliedAt: 0, target: null, el: null, last: 0, touched: 0 };
           // (the person's own hand on the page: their seek or pause after a resume is theirs)
-          for (const k of ['pointerdown', 'touchstart', 'keydown']) window.addEventListener(k, () => { S.touched = Date.now(); }, true);
+          // (the browser's own events only: none a page or a mod dispatches)
+          for (const k of ['pointerdown', 'touchstart', 'keydown']) window.addEventListener(k, (e) => { if (e.isTrusted) S.touched = Date.now(); }, true);
           const nav = (() => { try { const e = performance.getEntriesByType('navigation')[0]; return e ? e.type : ''; } catch (e) { return ''; } })();
           const isBlob = (s) => !s || s.startsWith('blob:') || s.startsWith('data:') || s.startsWith('mediasource:');
           const docs = new Set();
@@ -192,6 +193,7 @@ enum VideoResume {
             return S.el === m;
           };
           const on = (e) => {
+            if (!e.isTrusted) return;
             const m = e.target;
             if (!m || m.localName !== 'video') return;
             switch (e.type) {
@@ -234,7 +236,7 @@ enum VideoResume {
         })();
         """
 
-    /// (TRIF's world, by the app: its play counts as the person's) The plan's video played: with sound, else muted.
+    /// (the browser features' world, by the app: its play counts as the person's) The plan's video played: with sound, else muted.
     static let play = """
         const S = globalThis.__trifVideo, m = S && S.target;
         if (!m) return 'no video';
@@ -249,7 +251,7 @@ enum VideoResume {
           return 'left paused (' + e.name + ')';
         }
         """
-    /// (TRIF's world, by the app, from the person's tap on "Tap for sound")
+    /// (the browser features' world, by the app, from the person's tap on "Tap for sound")
     static let unmute = """
         const S = globalThis.__trifVideo, m = S && S.target;
         if (!m || !S.mutedByTrif) return 'nothing to do';

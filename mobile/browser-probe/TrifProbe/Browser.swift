@@ -165,8 +165,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     private func tabConfig(_ given: WKWebViewConfiguration? = nil) -> WKWebViewConfiguration {
         let c = given ?? (config.copy() as! WKWebViewConfiguration)
         c.userContentController = WKUserContentController()
+        // (TRIF's browser features, on every site: their own world, their scripts and handler; BrowserWorld)
+        BrowserWorld.install(c.userContentController, handler: browserFeatures)
         return c
     }
+    /// The browser features' message handler, in every tab's controller (for their world only).
+    private(set) lazy var browserFeatures: BrowserFeatureHandler = { let h = BrowserFeatureHandler(); h.browser = self; return h }()
 
     private func makeTab(configuration: WKWebViewConfiguration? = nil, id: UUID = UUID(), title: String = "", url: URL? = nil) -> Tab {
         let tab = Tab(id: id, webView: TabWebView(frame: .zero, configuration: tabConfig(configuration)), title: title, url: url)
@@ -251,11 +255,10 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let wv = tab.webView
         return await Browser.within(1, false) {
             guard await wv.requestMediaPlaybackState() == .playing else { return false }
-            // (a page TRIF isn't connected on isn't asked: that would be a script in it. WebKit's word alone there: at
-            // worst a tab is kept that could have been let go)
-            if (wv as? TabWebView)?.readable == false { return true }
-            let page = try? await wv.callAsyncJavaScript(Browser.pagePlaying, arguments: [:], in: nil, contentWorld: Browser.trifWorld)
-            return (page as? String).map { $0 != "no" } ?? false
+            // (asked in the browser features' world: on every site, connected or not)
+            guard let t = wv as? TabWebView else { return true }
+            let page = try? await t.browserFeature(.playing)
+            return page.map { $0 != "no" } ?? false
         }
     }
     static let pagePlaying = """
@@ -489,8 +492,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         let start = { (s: String, w: WKContentWorld) in WKUserScript(source: s, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: w) }
         let list = [
             start(Diagnostics.stallWatch, Browser.trifWorld),
-            start(BackgroundPlay.watch, Browser.trifWorld),
-            start(VideoResume.watch, Browser.trifWorld),
+            // (background play and video pick-up: TRIF's browser features, in their own world on every page, BrowserWorld)
             start(Browser.resource("kit", "js"), Browser.trifWorld),
             start(Browser.resource("start-own", "js") + "(\(rules));", Browser.trifWorld),
             start(Browser.resource("start-page", "js"), .page),
@@ -551,6 +553,8 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         guard tab.accessKey != key || (key != "plain" && tab.accessVersion != scriptsVersion) else { return }
         let ucc = tab.webView.configuration.userContentController
         ucc.removeAllUserScripts()
+        // (the browser features' scripts first, on every page: they were taken out with the rest)
+        BrowserWorld.install(ucc, handler: nil)
         if key == "plain" {
             if tab.handlerOn { ucc.removeScriptMessageHandler(forName: "trif", contentWorld: Browser.trifWorld); tab.handlerOn = false }
         } else {
@@ -1550,8 +1554,6 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             Diagnostics.shared.log("busy", "\(Diagnostics.place(url)): its main thread was busy \(busy)% of the last 10 s (longest stall \(longest) ms), \((body["elements"] as? NSNumber)?.intValue ?? 0) elements, \(running.map(\.id).joined(separator: ", ").nonEmpty ?? "no mods")")
             safety.busy(site: Site.of(url?.host ?? ""), percent: busy, mods: running)
             return (["ok": true], nil)
-        case "videoplan", "videostate", "videoplay", "videoapplied", "videoresumed":
-            return await videoMessage(type, body, message.webView)
         case "modlog":
             // (a free mod's start, its window.trif.log/warn/error lines and its errors: modfile.js freeRelay, which caps
             // them; told by the page's world, so cut again here and kept to what the mod passed)
@@ -1730,14 +1732,13 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// page loaded again; at most once every 10 s a tab, so it can never loop.
     private func checkAgent(_ tab: Tab, _ webView: WKWebView) {
         // (an iPhone's: an iPad's own pages are a computer's already, WebKit's recommended mode there)
-        // (not on a page TRIF isn't connected on: asking would be a script in it. A page there that WebKit brings back in
-        // the other mode's agent stays so: a reload by hand puts it right)
-        guard UIDevice.current.userInterfaceIdiom == .phone, (webView as? TabWebView)?.readable != false,
+        // (asked in the browser features' world: on every site, connected or not)
+        guard UIDevice.current.userInterfaceIdiom == .phone, let tv = webView as? TabWebView,
               let url = webView.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
         let want = tab.desktop
-        Task { @MainActor [weak self, weak webView, weak tab] in
-            guard let self, let webView, let tab,
-                  let agent = try? await webView.evaluateJavaScript("navigator.userAgent", in: nil, contentWorld: Browser.trifWorld) as? String,
+        Task { @MainActor [weak self, weak tv, weak tab] in
+            guard let self, let webView = tv, let tab,
+                  let agent = try? await webView.browserFeature(.userAgent),
                   agent.contains("Macintosh") != want, tab.desktop == want, webView.url == url,
                   Date().timeIntervalSince(tab.agentFixedAt ?? .distantPast) > 10 else { return }
             tab.agentFixedAt = Date()
@@ -2026,7 +2027,7 @@ extension Browser {
     /// The page's video messages (VideoResume.watch). Its state is kept in the tab (and on disk); the plan is the
     /// saved state if VideoResume.decide says this load picks it up. A back/forward that loaded its page again (not
     /// from WebKit's page memory) is a reload line too.
-    func videoMessage(_ type: String, _ body: [String: Any], _ webView: WKWebView?) async -> (Any?, String?) {
+    func videoMessage(_ type: String, _ body: [String: Any], _ webView: TabWebView?) async -> (Any?, String?) {
         guard let webView, let tab = tabs.first(where: { $0.webView === webView }) else { return (["ok": false], nil) }
         let host = webView.url?.host ?? "a page"
         switch type {
@@ -2049,8 +2050,8 @@ extension Browser {
         case "videoplay":
             // (the app's own play: counts as the person's, so sound is allowed where the page's own play isn't)
             let r = await Browser.within(3, "no answer") { () -> String in
-                let v = try? await webView.callAsyncJavaScript(VideoResume.play, arguments: ["forceMuted": DevFlags.args.contains("-resumemuted")], in: nil, contentWorld: Browser.trifWorld)
-                return v.map { "\($0)" } ?? "no answer"
+                let v = try? await webView.browserFeature(.play(forceMuted: DevFlags.args.contains("-resumemuted")))
+                return v ?? "no answer"
             }
             report.log("video", "\(host): play after resuming: \(r)")
             if r == "muted", tab === current {
@@ -2072,10 +2073,10 @@ extension Browser {
         guard let t = soundTab else { return }
         soundTab = nil
         status = ""
-        let wv = t.webView
+        guard let wv = t.webView as? TabWebView else { return }
         Task { @MainActor in
-            let r = try? await wv.callAsyncJavaScript(VideoResume.unmute, arguments: [:], in: nil, contentWorld: Browser.trifWorld)
-            self.report.log("video", "Tap for sound: \(r.map { "\($0)" } ?? "no answer")")
+            let r = try? await wv.browserFeature(.unmute)
+            self.report.log("video", "Tap for sound: \(r ?? "no answer")")
         }
     }
 }
@@ -2091,7 +2092,7 @@ extension Browser {
 /// changes go to the diagnostics, for a "stopped by itself" report. Development: `-noaudiosession` leaves the
 /// session as iOS starts it, `-nobgresume` leaves WebKit's pause, to compare.
 enum BackgroundPlay {
-    /// (in TRIF's world, every page from its start) When each video or audio was last paused, and whether the page
+    /// (in the browser features' world, every page from its start, on every site: BrowserWorld) When each video or audio was last paused, and whether the page
     /// was showing then. As the app leaves (or the phone locks), WebKit pauses a video with sound while the page
     /// still shows, then tells the page it's hidden. At that moment, before the page's own listeners (this one is
     /// the first on the window), what WebKit paused within the last second plays on; a page that pauses as it goes
@@ -2099,10 +2100,10 @@ enum BackgroundPlay {
     /// (TRIF's world sees the real visibilityState, whatever a mod tells the page.)
     static let watch = """
         document.addEventListener('pause', (e) => {
-          if (e.target instanceof HTMLMediaElement) e.target.__trifPause = { at: Date.now(), visible: document.visibilityState === 'visible' };
+          if (e.isTrusted && e.target instanceof HTMLMediaElement) e.target.__trifPause = { at: Date.now(), visible: document.visibilityState === 'visible' };
         }, true);
-        window.addEventListener('visibilitychange', () => {
-          if (document.visibilityState !== 'hidden') return;
+        window.addEventListener('visibilitychange', (e) => {
+          if (!e.isTrusted || document.visibilityState !== 'hidden') return;
           const now = Date.now();
           for (const m of document.querySelectorAll('video, audio')) {
             const p = m.__trifPause;
@@ -2113,7 +2114,7 @@ enum BackgroundPlay {
     /// After the app has gone (`left`, ms): plays on what WebKit paused since then that's still paused (the page wasn't
     /// told, or a mod stopped the telling): in the shown tab only what was paused while it showed; in a tab already
     /// hidden (its page isn't told anything as the app leaves) whatever was paused since. Says what it did.
-    private static let playOn = """
+    static let playOn = """
         const out = [], since = left - 300;
         for (const m of document.querySelectorAll('video, audio')) {
           const p = m.__trifPause;
@@ -2139,10 +2140,11 @@ enum BackgroundPlay {
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 guard UIApplication.shared.applicationState == .background else { return }
                 for t in browser.tabs where t.started && t.webView.url != nil {
-                    let wv = t.webView, shown = t === browser.current
+                    guard let wv = t.webView as? TabWebView else { continue }
+                    let shown = t === browser.current
                     let r = await Browser.within(1, "no answer") { () -> String in
-                        let v = try? await wv.callAsyncJavaScript(playOn, arguments: ["left": left, "shown": shown], in: nil, contentWorld: Browser.trifWorld)
-                        return v.map { "\($0)" } ?? "no answer"
+                        let v = try? await wv.browserFeature(.playOn(left: left, shown: shown))
+                        return v ?? "no answer"
                     }
                     if !r.isEmpty, told.insert(r).inserted { Diagnostics.shared.log("audio", "the app went to the background, \(Diagnostics.place(wv.url))\(shown ? "" : " (a background tab)"): \(r)") }
                 }
@@ -2240,11 +2242,12 @@ enum BackgroundPlay {
         let t0 = Date().timeIntervalSince1970 * 1000
         browser.talkStarted = t0
         for t in browser.tabs where t.started && t.webView.url != nil {
-            let wv = t.webView, shown = t === browser.current
+            guard let wv = t.webView as? TabWebView else { continue }
+            let shown = t === browser.current
             Task { @MainActor in
                 let r = await Browser.within(1, "no answer") { () -> String in
-                    let v = try? await wv.callAsyncJavaScript(talkPause, arguments: ["t0": t0], in: nil, contentWorld: Browser.trifWorld)
-                    return v.map { "\($0)" } ?? "no answer"
+                    let v = try? await wv.browserFeature(.talkPause(t0: t0))
+                    return v ?? "no answer"
                 }
                 if !r.isEmpty, r != "no answer" { Diagnostics.shared.log("audio", "talking: paused \(r) in \(Diagnostics.place(wv.url))\(shown ? "" : " (a tab behind)")") }
             }
@@ -2255,13 +2258,13 @@ enum BackgroundPlay {
     @MainActor static func resumeAfterTalk(_ browser: Browser) {
         guard let t0 = browser.talkStarted else { return }
         browser.talkStarted = nil
-        let views = browser.tabs.filter { $0.started && $0.webView.url != nil }.map { ($0.webView, $0 === browser.current) }
+        let views = browser.tabs.filter { $0.started && $0.webView.url != nil }.compactMap { t in (t.webView as? TabWebView).map { ($0, t === browser.current) } }
         Task { @MainActor in
-            var due: [(WKWebView, Bool)] = []
+            var due: [(TabWebView, Bool)] = []
             for (wv, shown) in views {
                 let n = await Browser.within(1, "0") { () -> String in
-                    let v = try? await wv.callAsyncJavaScript(talkResume, arguments: ["t0": t0, "count": true], in: nil, contentWorld: Browser.trifWorld)
-                    return v.map { "\($0)" } ?? "0"
+                    let v = try? await wv.browserFeature(.talkResume(t0: t0, count: true))
+                    return v ?? "0"
                 }
                 if (Int(n) ?? 0) > 0 { due.append((wv, shown)) }
             }
@@ -2271,8 +2274,8 @@ enum BackgroundPlay {
             }
             for (wv, shown) in due {
                 let r = await Browser.within(5, "no answer") { () -> String in
-                    let v = try? await wv.callAsyncJavaScript(talkResume, arguments: ["t0": t0, "count": false], in: nil, contentWorld: Browser.trifWorld)
-                    return v.map { "\($0)" } ?? "no answer"
+                    let v = try? await wv.browserFeature(.talkResume(t0: t0, count: false))
+                    return v ?? "no answer"
                 }
                 var lines: [String] = []
                 var stuck = 0
@@ -2282,7 +2285,7 @@ enum BackgroundPlay {
                 while stuck > 0 && step <= 5 {
                     let k = step
                     let n = await Browser.within(4, "no answer in 4 s") { () -> String in
-                        do { return try await wv.callAsyncJavaScript(talkNudge, arguments: ["step": k], in: nil, contentWorld: Browser.trifWorld).map { "\($0)" } ?? "nil" }
+                        do { return try await wv.browserFeature(.talkNudge(step: k)) ?? "nil" }
                         catch { return "error: \((error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription)" }
                     }
                     guard let o = Browser.parse(n) as? [String: Any] else { lines.append("nudge \(step): \(n)"); break }
@@ -2437,7 +2440,7 @@ extension Model {
                     @unknown default: return "?"
                     }
                 }
-                let page = (try? await wv.callAsyncJavaScript(Browser.pagePlaying, arguments: [:], in: nil, contentWorld: Browser.trifWorld)) as? String
+                let page = try? await (wv as? TabWebView)?.browserFeature(.playing)
                 state = "WebKit: \(s), page: \(page ?? "no answer") → \(await Browser.playing(t) ? "kept" : "not playing")"
             }
             out.append("\(t === browser.current ? "*" : " ") \(t.host.isEmpty ? "-" : t.host) \(state)")

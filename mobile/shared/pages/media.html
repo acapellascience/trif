@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- The browser features' stand-in (11-20): a video (serve.js's silent /standin-clip.mp4) whose page's OWN scripts report
+     what they see to serve.js's /standin-access every second (never through TRIF): its time, playing or not, muted,
+     the page's visibility, how it loaded, and what of TRIF the page can see. Tap Play (a real touch) to start it. `?clip=<address>`: the clip from elsewhere. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media stand-in</title>
+<style>body { font: 17px/1.5 -apple-system, sans-serif; padding: 16px; } video { width: 100%; background: #000; } #play { font: inherit; font-size: 22px; padding: 14px 28px; margin: 10px 0; }</style>
+</head>
+<body>
+<h1>Media stand-in</h1>
+<video id="v" playsinline preload="auto"></video>
+<p><button id="play">Play</button> <span id="t"></span></p>
+<script>
+(function () {
+  const v = document.getElementById('v');
+  // (`?clip=<address>`: the clip from another serve.js, one started before /standin-clip.mp4 was there)
+  v.src = new URLSearchParams(location.search).get('clip') || '/standin-clip.mp4';
+  document.getElementById('play').addEventListener('click', () => { v.play().catch((e) => { document.getElementById('t').textContent = e.name; }); });
+  const nav = (() => { try { return performance.getEntriesByType('navigation')[0].type; } catch (e) { return ''; } })();
+  const loadedAt = Date.now();
+  const report = () => {
+    document.getElementById('t').textContent = v.currentTime.toFixed(1) + ' s' + (v.paused ? ' paused' : ' playing');
+    const has = (n) => { try { return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers[n]); } catch (e) { return false; } };
+    const r = { when: 'media', href: location.href, nav, loadedAt, time: v.currentTime, paused: v.paused, muted: v.muted, ready: v.readyState,
+      visible: document.visibilityState, webkit: typeof window.webkit, handlers: ['trif', 'trifBrowser', 'app', 'panel', 'chat'].filter(has),
+      globals: Object.getOwnPropertyNames(window).filter((k) => /trif/i.test(k)), expando: ['__trifPause', '__trifPlayedOn', '__trifTalk'].filter((k) => k in v) };
+    fetch('/standin-access', { method: 'POST', body: JSON.stringify(r) }).catch(() => {});
+  };
+  setInterval(report, 1000);
+  report();
+})();
+</script>
+</body>
+</html>

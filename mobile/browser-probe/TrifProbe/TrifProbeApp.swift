@@ -28,14 +28,17 @@ struct TrifProbeApp: App {
 @MainActor
 final class Model: ObservableObject {
 
+    #if DEBUG
     /// (development, site access) the connected sites and each tab's set: its controller's user scripts, TRIF's handler,
     /// the page's set and whether TRIF may read it.
     static func accessState(_ browser: Browser) -> String {
         var lines = ["connected: \(SiteAccess.shared.sites)", "own sensitive: \(SiteAccess.shared.own)", "scripts made: \(browser.connectedScripts.count) (set \(browser.scriptsVersion))"]
         for (i, t) in browser.tabs.enumerated() {
-            let n = t.webView.configuration.userContentController.userScripts.count
+            let ucc = t.webView.configuration.userContentController
+            let b = BrowserWorld.count(ucc), n = ucc.userScripts.count - b
             let c = SiteAccess.shared.card(t.host)
-            lines.append("\(t === browser.current ? "*" : " ")tab \(i) \(t.host.isEmpty ? "-" : t.host): site \(c.site) connected \(c.connected) sensitive \(c.sensitive); controller \(t.accessKey ?? "unset") \(n) user script(s), handler \(t.handlerOn ? "on" : "off"); page \(t.pageAccess), readable \((t.webView as? TabWebView)?.readable ?? false)")
+            // ("N user script(s)": TRIF's and the mods'; the browser features' world's apart, on every page)
+            lines.append("\(t === browser.current ? "*" : " ")tab \(i) \(t.host.isEmpty ? "-" : t.host): site \(c.site) connected \(c.connected) sensitive \(c.sensitive); controller \(t.accessKey ?? "unset") \(n) user script(s), handler \(t.handlerOn ? "on" : "off"), browser world \(b) script(s); page \(t.pageAccess), readable \((t.webView as? TabWebView)?.readable ?? false)")
         }
         return lines.joined(separator: "\n")
     }
@@ -63,8 +66,36 @@ final class Model: ObservableObject {
         out.append("page for chat: \(p == nil ? "none" : "\(p!.count) chars")")
         let q = await browser.quickScreenshot()
         out.append("quick screenshot: \(q == nil ? "none" : "taken")")
+        // (the browser features' world: any other call into it refused on every site; their own calls run on every site)
+        do { _ = try await wv.callAsyncJavaScript("return 1", arguments: [:], in: nil, contentWorld: BrowserWorld.world); out.append("browser world, another call: ran") } catch { out.append("browser world, another call: \((error as NSError).domain == TabWebView.browserWorldDomain ? "BLOCKED" : said(error))") }
+        do { _ = try await wv.evaluateJavaScript("1", in: nil, contentWorld: BrowserWorld.world); out.append("browser world, another evaluate: ran") } catch { out.append("browser world, another evaluate: \((error as NSError).domain == TabWebView.browserWorldDomain ? "BLOCKED" : said(error))") }
+        if let t = wv as? TabWebView {
+            do { out.append("browser feature's own call (playing): ran, \(try await t.browserFeature(.playing) ?? "nil")") } catch { out.append("browser feature's own call (playing): \(said(error))") }
+        }
         return out.joined(separator: "\n")
     }
+
+    /// (development, the browser features' world, 11-20) What each of the other worlds in the shown page can see of
+    /// the browser world: its globals (__trifVideo), its handler (trifBrowser); a post tried if one is found.
+    static func browserReach(_ browser: Browser) async -> String {
+        let probe = """
+            const w = globalThis;
+            const h = (w.webkit && w.webkit.messageHandlers) || null;
+            const names = h ? ['trifBrowser', 'trif', 'app', 'panel', 'chat'].filter((n) => { try { return !!h[n]; } catch (e) { return false; } }) : [];
+            let posted = 'no handler to post to';
+            if (h && h.trifBrowser) { try { await h.trifBrowser.postMessage({ type: 'videostate', url: 'x', time: 1 }); posted = 'POSTED'; } catch (e) { posted = 'refused: ' + e.message; } }
+            return JSON.stringify({ video: typeof w.__trifVideo, webkit: typeof w.webkit, handlers: names, posted,
+              globals: Object.getOwnPropertyNames(w).filter((k) => /trifvideo|trifbrowser/i.test(k)),
+              pause: [...document.querySelectorAll('video, audio')].filter((m) => '__trifPause' in m || '__trifPlayedOn' in m).length });
+            """
+        var out: [String] = []
+        for (name, world) in [("page", WKContentWorld.page), ("trif", Browser.trifWorld), ("box", Browser.boxWorld), ("chat", ClaudePane.chatWorld)] {
+            let r = await browser.call(probe, in: world)
+            out.append("\(name): \(r.text ?? "error \(r.error ?? "?")")")
+        }
+        return out.joined(separator: "\n")
+    }
+    #endif
     let report: Report
     let browser: Browser
     let pane: ClaudePane
@@ -417,6 +448,10 @@ extension Model {
         }
         if step["access"] != nil { out = Model.accessState(browser) }
         if step["readcheck"] != nil { out = await Model.readCheck(browser) }
+        // ({"browserreach": 1}: what the page's, TRIF's, the box's and chat.js's worlds see of the browser features' world
+        // in the shown page; {"browseraccept": [body…]}: BrowserWorld.accept's answer for each)
+        if step["browserreach"] != nil { out = await Model.browserReach(browser) }
+        if let bodies = step["browseraccept"] as? [Any] { out = bodies.map { BrowserWorld.accept($0).map { "ok \($0.keys.sorted())" } ?? "refused" }.joined(separator: "\n") }
         // ({"tabjs": "…", "tab": n}: JavaScript in tab n's page, shown or not)
         if let js = step["tabjs"] as? String, let n = step["tab"] as? Int, n < browser.tabs.count {
             do { out = "\(try await browser.tabs[n].webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page) ?? "nil")" } catch { out = "error: \(error)" }

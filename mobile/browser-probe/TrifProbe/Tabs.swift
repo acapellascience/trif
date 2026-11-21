@@ -184,11 +184,9 @@ final class TabShots {
                 return
             }
             Task { @MainActor in
-                // (a sign-in form on any site: a password field showing, asked in TRIF's world; a page that doesn't
-                // answer within a second counts as having none)
-                // (only where TRIF is connected: asking means running a script in the page, which a disconnected page
-                // never gets; there the address rules above stand alone)
-                if (wv as? TabWebView)?.readable != false, await PrivatePages.passwordShowing(wv) { self.drop(tab, "\(host) (\(why)): not taken, a password field shows"); return }
+                // (a sign-in form on any site: a password field showing, asked in the browser features' world, on every
+                // site, connected or not; a page that doesn't answer within a second counts as having none)
+                if await PrivatePages.passwordShowing(wv) { self.drop(tab, "\(host) (\(why)): not taken, a password field shows"); return }
                 if TabShots.oneColour(image) {
                     self.last[id] = nil
                     Diagnostics.shared.log("tab shot", "\(host) (\(why)): not kept, all one colour (not drawn yet?); the one before is kept")
@@ -357,14 +355,15 @@ enum PrivatePages {
         return zip(pl, tail).allSatisfy { label($0, $1) }
     }
 
-    /// A password field showing on the page (asked in TRIF's world, a second at most).
+    /// A password field showing on the page (asked in the browser features' world, a second at most).
     static func passwordShowing(_ wv: WKWebView) async -> Bool {
-        await Browser.within(1, false) {
-            let r = try? await wv.callAsyncJavaScript("return [...document.querySelectorAll('input[type=password]')].some((e) => e.offsetWidth > 0 && e.offsetHeight > 0)",
-                                                      arguments: [:], in: nil, contentWorld: Browser.trifWorld)
-            return (r as? Bool) ?? false
+        guard let t = wv as? TabWebView else { return false }
+        return await Browser.within(1, false) {
+            (try? await t.browserFeature(.passwordShowing)) == "yes"
         }
     }
+    static let passwordScript = "return [...document.querySelectorAll('input[type=password]')].some((e) => e.offsetWidth > 0 && e.offsetHeight > 0) ? 'yes' : 'no';"
+
 }
 
 /// What's kept of the tabs between launches (Application Support/tabs.json).

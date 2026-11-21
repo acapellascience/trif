@@ -48,6 +48,10 @@ function handler(log = console.log) {
       if (url.searchParams.has('clear')) ACCESS_REPORTS.length = 0;
       return answer(ACCESS_REPORTS);
     }
+    // (11-20, the browser features: /standin-clip.mp4, a 2-minute silent clip (ffmpeg's testsrc + anullsrc, so nothing
+    // reaches the Mac's speakers), made once into the temp folder, served in ranges as WebKit asks for media; for
+    // media.html, whose own scripts report its video to /standin-access)
+    if (name === 'standin-clip.mp4') return clip(req, res);
     if (name === 'standin-redirect') {
       res.writeHead(302, { Location: url.searchParams.get('to') || '/', 'Cache-Control': 'no-store' });
       return res.end();
@@ -167,6 +171,28 @@ window.__agent = { host: location.host, sent: ${JSON.stringify(sent)}, nav: navi
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(name)] || 'application/octet-stream', 'Cache-Control': 'no-store', ...(headers[name] || {}) });
     res.end(fs.readFileSync(file));
   };
+}
+
+// (a keyframe every second: seeks into it settle in the Simulator; with x264's default 250 frames they hung there)
+const CLIP = path.join(os.tmpdir(), 'trif-standin-clip-k1.mp4');
+function clip(req, res) {
+  if (!fs.existsSync(CLIP)) {
+    const ffmpeg = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find((f) => fs.existsSync(f)) || 'ffmpeg';
+    const r = require('child_process').spawnSync(ffmpeg, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=15:duration=120',
+      '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '120', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-g', '15',
+      '-c:a', 'aac', '-b:a', '32k', '-shortest', '-movflags', '+faststart', CLIP]);
+    if (r.status !== 0) { res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end(`no clip: ${String(r.stderr || r.error)}`); }
+  }
+  const size = fs.statSync(CLIP).size;
+  const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+  if (!m) {
+    res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' });
+    return fs.createReadStream(CLIP).pipe(res);
+  }
+  const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+  const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  res.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' });
+  fs.createReadStream(CLIP, { start, end }).pipe(res);
 }
 
 function main() {

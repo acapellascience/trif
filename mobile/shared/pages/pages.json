@@ -16,5 +16,6 @@
     "Content-Security-Policy": "default-src 'self'; script-src 'self' 'nonce-probe'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'"
   },
   "unread.html": {},
-  "access.html": {}
+  "access.html": {},
+  "media.html": {}
 }

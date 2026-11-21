@@ -99,11 +99,14 @@ chatgpt.com's ••• → Project settings: from the help pages, not seen sign
 | P4 | The project gone (deleted on the stand-in after P3; its page 404s): the next new chat is ordinary, with the full instructions; the project forgotten; no card | PASS | |
 | P5 | Claude: sent past the card without an answer: never again | PASS | offer ignored |
 | P6 | Claude: Set it up, then the form's Cancel: nothing kept, ordinary chats, no card again | PASS | setup over at the page's leaving |
-| S1 | Site access (11-20): a disconnected site's page sees nothing of TRIF; its controller 0 scripts, no handler; 10 reads refused | PASS | access.html's own report |
+| S1 | Site access (11-20): a disconnected site's page sees nothing of TRIF; its controller 0 scripts, no handler (the browser world's 2 aside, invisible to it); 10 reads refused, other calls into the browser world blocked, its own call runs | PASS | access.html's own report (11-20 again with the browser world) |
 | S2 | A connected page with a frame from a disconnected site: TRIF in the page, nothing in the frame | PASS | |
 | S3 | A redirect from a connected site into a disconnected one lands with nothing of TRIF | PASS | set at the response |
 | S4 | Back to a page WebKit kept with TRIF in it, after its site was disconnected: loaded again, clean | PASS | |
 | S5 | Disconnected: the quick ask stops at the card; Connect: readable at once, the quick ask fills the chat | PASS | no reload (no mods there) |
+| S6 | Browser features (11-20): style, boxed and free mods on a connected page reach nothing of the browser world (no global, no trifBrowser handler, no post); the page's, TRIF's, the box's and chat.js's worlds neither | PASS | boxed: #probe::after; free: data-reach-free |
+| S7 | The browser world from the app: every other call into it blocked, connected or not; its own call runs; its handler's checks (BrowserWorld.accept) | PASS | browseraccept |
+| V1 | Video pick-up on a disconnected site: the disconnect's reload picks the video up at its time and plays it; the page sees nothing of TRIF | PASS | shot 578; the Simulator's seek at metadata then often hangs |
 | X1 | Security (11-20): trif://open full screen only with this install's key, or an old icon's start address on a site with an icon record; else a tab | PASS | TrifLink.open's answers |
 | X2 | A forged full screen link from outside: an ordinary tab, its site left disconnected; TRIF's own icon link: full screen | PASS | `simctl openurl` |
 | X3 | Three trif://add links at once: one Add this mod?, two dropped (logged); the next link after the answer is offered | PASS | |

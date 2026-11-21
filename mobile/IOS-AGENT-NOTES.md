@@ -19,8 +19,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (576 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575, security 576): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (578 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575, security 576, browser features 577-578): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
+- **Browser features: own world, every site; mods/AI: connected only** (Tim 11-20). Plain browser behaviour (video
+  pick-up, background play, the pause while talking, the "is it playing" and password-field looks, the desktop agent
+  fix) runs on every page in WKContentWorld "trif-browser" (SiteAccess.swift `BrowserWorld`), fixed code compiled into
+  the app, its handler "trifBrowser" for that world only, reached from the app only by `TabWebView.browserFeature(_:)`
+  (the closed `BrowserCall` list). Anything of mods or AI stays in TRIF's world / the box / the page, connected sites
+  only. A new browser feature: a fixed script + a `BrowserCall` case (numbers/yes-no arguments), a message type in
+  `BrowserWorld.types`/`accept`; never page text out of it to a chat, outline or screenshot; never a mod's or a chat's
+  text into it. mobile/test/browserworld.test.js checks the sources for this.
 
 ## Build and test
 
@@ -96,6 +104,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   takes it: fullScreen/tab and why), outside (the offers from outside waiting: ids, reading, shown, queued),
   watchfolder ("/path" in the app's container: watched as if picked in Files; "": none), folderscan, phonepair "noask"
   (the link's pairing question closed).
+  browser features (11-20): browserreach (what the page's, TRIF's, the box's and chat.js's worlds in the shown page see
+  of the browser world: `__trifVideo`, the trifBrowser handler, a post tried, the media expandos), browseraccept ([body…]:
+  BrowserWorld.accept's answer for each); readcheck's last three lines (two other calls into the browser world BLOCKED,
+  its own `playing` call ran) and access's "browser world N script(s)" per tab.
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -163,6 +175,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   disconnected for each, connected again after). A sensitive stand-in: add the Mac's Bonjour name as the person's own
   (`{"sensitiveown": "timothys-macbook-air.local"}`, then http://timothys-macbook-air.local:8377/…); IPs and
   one-word hosts are never sensitive (the rule needs a dot and not an IP). Remove it after (`"-…"`).
+- The browser features' stand-in (11-20): `media.html` (serve.js) plays serve.js's `/standin-clip.mp4` (a 2-minute
+  silent testsrc + anullsrc clip made by ffmpeg into the temp folder at the first ask, served in ranges); its own scripts
+  POST its video's time, paused, muted, visibility, how it loaded (nav) and what of TRIF the page sees to
+  `/standin-access` (`when: "media"`) every second. `?clip=<address>`: the clip from another serve.js (the matrix starts
+  one on 8391 when the running 8377 is older than the clip route). Matrix rows: S6 (style, boxed and free mods on a
+  connected access.html reach nothing of the browser world; the boxed mod writes what it saw into #probe::after, the
+  free one into data-reach-free), S7 (every other call into the world blocked, connected or not; accept's checks), V1
+  (video pick-up after a disconnect's reload on 127.0.0.1), V2 (background play there, the app sent to Settings).
+  Source checks: `node --test mobile/test/browserworld.test.js` (<1 s).
 - THE MOD MATRIX (11-19, docs/IOS-MOD-MATRIX.md: the table, what broke and what's blocked): `node mobile/test/ios-matrix.js`
   (Node 22: /usr/local/bin/node; `--only A1,B3`, `--list`, `--shots <dir>`, `--gpt thread`: ChatGPT's stand-in as its
   11-20 page, `chat.html?thread&keep`; its rows A2, B4, C9, F2 (F2 needs F1)). Needs the SE booted, a Debug build installed
@@ -627,8 +648,20 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Sensitive sites… (`SensitiveSitesView`), the one-time alert. The Mods tab: state `access`, mods-page.js
   `renderAccess` (#access-note, message `connect`), its ⋯ Disconnect. ModStore.add: sensitiveAdd → off + newOff
   "sensitive", extraNeeds `sensitive:free` / `sensitive:change` (lines [hash]). quickDeliver: nothing added by itself
-  on a sensitive site. Checks that would need a script in a disconnected page are skipped there: Browser.playing
-  (WebKit's state alone), checkAgent, TabShots' password-field look, ModsPanel's page answer.
+  on a sensitive site. ModsPanel's page answer is skipped on a disconnected page (it would be a script there). The
+  browser features (Browser.playing, checkAgent, TabShots' password-field look, VideoResume, BackgroundPlay's resume
+  and talk pause) are not skipped: they run in their own world on every site (below).
+- The browser features' world (Tim 11-20; SiteAccess.swift, top): `BrowserWorld` (WKContentWorld "trif-browser",
+  `scripts` = BackgroundPlay.watch + VideoResume.watch at document start, main frame; `install(ucc, handler:)` in
+  Browser.tabConfig (scripts + the handler "trifBrowser", for that world only, once per controller) and again in
+  applyAccess after its removeAllUserScripts (scripts only; first, before TRIF's set); `types` + `accept` (the video
+  messages, typed fields, strings ≤ 2000, finite numbers)); `BrowserFeatureHandler` (Browser.browserFeatures: the world
+  and main frame checked again, accept, 40 messages a tab in 10 s, → Browser.videoMessage); `BrowserCall` (playing, play,
+  unmute, playOn, talkPause/Resume/Nudge, userAgent, passwordShowing: each a static script constant, numbers/Bool
+  arguments) and `TabWebView.browserFeature(_:)` (super.__callAsyncJavaScript into the world, main frame, any site:
+  the only way in). TabWebView's two script overrides refuse BrowserWorld first (domain TRIF.browserWorld, one
+  "browser world" Diagnostics line a web view), before the readable check. TRIF's own handler no longer takes video
+  messages. `-bare` leaves the browser world out too.
 - Mods.swift: ModStore (installed mods, holds, user scripts), ModReader (mods.js in JavaScriptCore). A free mod
   (modfile.js readMod): its code in the page's world behind `__trifFree.start` (a Diagnostics "mod log" line, once
   a load) and, with a style section, its own `trif.style` (as desktop's wrapModCode); the section's CSS is
@@ -898,10 +931,16 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   script, handler or world of TRIF's in a disconnected page, checked from the page's own scripts) and one gate for every
   read. My calls (for Tim): Connect reloads only when mods would run there (the kit goes in at the first read); the
   quiet cue is the toolbar robot at 40%; the tab list's own pictures are still taken on disconnected (non-sensitive)
-  pages, kept on the phone as Safari's are, without the password-field look (that would be a script in the page);
-  video pick-up, background play's resume and the desktop agent fix are TRIF scripts, so they're off on disconnected
-  sites; the person's sensitive sites ADD to TRIF's list (desktop's Settings list replaces it; there's no way here to
+  pages, kept on the phone as Safari's are; the person's sensitive sites ADD to TRIF's list (desktop's Settings list replaces it; there's no way here to
   take one of TRIF's off).
+
+- Browser features (Tim 11-20, after site access turned them off on disconnected sites: "i think i'm fine with browser
+  features working, as long as they're beyond the modification powers of the agents and mods"): video pick-up,
+  background play's resume, the pause while talking, the desktop agent fix, the thumbnail's password-field look and the
+  "is it playing" check run on every site (sensitive ones too; a sensitive page is still never pictured) in their own
+  world, out of reach of mods, agents and pages (rules in MOBILE-BEHAVIOUR.md "Site access"). My calls: the stall
+  watch stays connected-only (it feeds safe mode, which is about mods); the talk pause counts as a browser feature (it
+  only pauses and plays media); the watches ignore untrusted events (a page or mod's made-up pause/hide/media events).
 
 - Safe mode's snapshot, 11-18: kept before any switch changes, the last 5; "Turn them back on" / the ⋯ menu put
   back only what safe mode changed, only where untouched since (a later change, here or from the computer, wins);
@@ -934,8 +973,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   paste's refusal message goes on the clipboard (there's no box). The shortened-file check: a placeholder comment
   (short, sameness words + what stays, or dots alone) not in the mod now, with lines of the mod now missing where it
   stands; Tim's 224 mods (33,667 lines): none trips it.
-- No private APIs or tokens for the chat sites. The one private call kept: WebKit's `_flushCookiesToDisk`, with the
-  public fallback behind `-publicflush`.
+- No private APIs or tokens for the chat sites. WebKit's private `_flushCookiesToDiskWithCompletionHandler:` (the
+  security review's item, done 11-20, Tim after hearing the trade-off): Debug builds only (CookieKeeper's
+  `usesPrivateFlush` and the `cookies` dev step are `#if DEBUG`; `-publicflush` forces the public route there). A Release
+  build always takes the public route (`removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantFuture)`)
+  and its binary holds no such selector: check with `strings` on the Release device binary (`_flushCookiesToDisk`: 0 hits).
 - An icon's own tab (`iconTabs`) counts only while it's on the icon's site (11-17: Tim's YouTube icon opened his Google
   search, typed in its old tab): off-site it's left as it is and the icon makes a new own tab; a blank one takes the
   icon's address. Icon links log Diagnostics lines `link` (as UIKit hands them over: AppDelegate
@@ -1352,8 +1394,6 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
     pages.
   - A clickjacking guard on the phone (desktop has one).
   - The phone link's pre-auth handling of garbage from the LAN (fuzz the Mac side).
-  - (found here, for the same review) CookieKeeper still uses WebKit's private `_flushCookiesToDiskWithCompletionHandler:`
-    in Release (Tim's choice for now; `-publicflush` was the only switch and is Debug-only now): App Review risk.
   - (found here) History import (a file opened in TRIF) merges visits with no question; a phone-sync new mod takes the
     computer's switch (by design, D8: pairing is the consent).
 - Security fixes (11-20): Simulator only. Matrix X1-X9 PASS (shot 576: the pairing question), the whole matrix 63 PASS
@@ -1364,6 +1404,20 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   .js download after this change (the touch window is 10 s; a tap through ChatGPT's signed-address popup should be
   inside it); the Camera app scanning a real pairing code (now one more tap: Connect).
 
+- Browser features (11-20): Simulator only. Checked: mobile/test/browserworld.test.js (the sources: the world, handler
+  and calls only in SiteAccess.swift, a closed list of constant scripts, both script overrides refuse the world before
+  the readable check, nothing in mobile/shared names it, ModStore.world can't give it, the watches ignore untrusted
+  events); matrix S1-S7 and V1 (the page saw no `window.webkit`, no handler, no `__trifVideo` on a disconnected page
+  with the world-scoped handler in place: WebKit gives `window.webkit` only to worlds with handlers; S6: style, boxed
+  and free mods on a connected page saw nothing of it, and the page's, TRIF's, the box's and chat.js's worlds found no
+  trifBrowser handler, no global, no media expandos; S7: other calls into the world BLOCKED connected or not, accept's
+  checks); by hand (shot 577): background play on a disconnected 127.0.0.1 page after a real tap (the Simulator tool):
+  WebKit paused it as the app left, the browser world played it on, the page's own reports 13.5 → 22.9 s hidden; the
+  playing check kept the tab ("WebKit: playing, page: playing → kept"); the password look skipped a disconnected
+  access.html ("a password field shows") and pictured plain.html; a sensitive own site: browser world in, own call ran,
+  never pictured. Not seen: the desktop agent fix firing on a disconnected page (WebKit loaded the page again rather
+  than bring it back from memory, so there was nothing to fix; the call ran unrefused); the talk pause/resume in the
+  browser world (same scripts, same world as the watch, whose expandos playOn read fine); a phone.
 - Site access (11-20): Simulator only (shots 569-575; matrix S1-S5 and A1-A3, B3, B11, F1, P2 PASS; a page's own
   scripts saw no handler, no window.webkit, no TRIF global, no mod or every-site mod on a disconnected page, in a
   disconnected frame of a connected page, after a redirect into one, and back from WebKit's memory after a disconnect;
@@ -1711,6 +1765,15 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   Swift async forms (`try await wv.callAsyncJavaScript(…)`) go through them (checked by readcheck).
 - (11-20) A page's start scripts can post to TRIF's handler before didCommit reaches the app: the handler checks the
   message's own frame origin (`message.frameInfo.securityOrigin`), not the tab's state.
+- (11-20, browser features) `addScriptMessageHandler(_:contentWorld:name:)` for a named world leaves the page world
+  with no `window.webkit` at all (checked from access.html's own scripts), and a WKUserScript's world can't be read
+  back: BrowserWorld.count tells its scripts apart by identity (`scripts` is made once). Properties put on a page's
+  elements from one world (`__trifPause`) are that world's: playOn and talkResume must run in the same world as the
+  watch. `super.__callAsyncJavaScript` from a subclass method's continuation closure compiles and skips the override.
+- (11-20, browser features) In the Simulator a seek made at a video's metadata (VideoResume's pick-up) often hangs
+  (`seeking` for good, the time standing) even though the video is put at its time and played; a seek while playing
+  settles once the clip has frequent keyframes (serve.js's clip: one a second). V1 checks the pick-up, not the time
+  going by after it.
 - (11-20) In createWebViewWith, setting `configuration.userContentController` on WebKit's given configuration and making
   the web view from that same object works (a copy would break WebKit's check); the sign-in popup's opener link holds.
 - (11-20) Diagnostics "site access: refused … on <site>" lines mean some caller tried to read a disconnected page: find it and skip it there (as

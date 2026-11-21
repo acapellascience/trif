@@ -18,17 +18,35 @@ change there is a change on both phones. Change this file whenever a rule change
 
 ## Site access (added 11-20, Tim: "I want people feeling comfortable with TRIF as their browser and still using it for banking etc." … "let's opt in per site")
 
-- **Every site starts disconnected.** On a site TRIF isn't connected on it adds nothing to the page: no mods (the site's,
-  every-site, synced), no script, message handler or script world of TRIF's at all, no outline, no screenshot, nothing
-  to any chat. Plain browsing is unchanged (tabs, history, downloads, Home Screen icons, unread counts, the tab list's
+- **Every site starts disconnected.** On a site TRIF isn't connected on it adds nothing of mods or AI to the page: no
+  mods (the site's, every-site, synced), no script, message handler or script world of TRIF's mod runtime or kit, no
+  outline, no screenshot, nothing to any chat. Only the browser features' own world is there, as on every page (below). Plain browsing is unchanged (tabs, history, downloads, Home Screen icons, unread counts, the tab list's
   own pictures, which stay on the phone). Only http(s) pages on a connected site, and TRIF's own pages, get TRIF.
+- **Two kinds of page code** (Tim 11-20: "i think i'm fine with browser features working, as long as they're beyond the
+  modification powers of the agents and mods"):
+  - **Browser features** run on every site, connected or not, sensitive or not: a video picks up where it was, sound
+    and video play on in the background, what plays pauses while the microphone listens and plays on after, the tab
+    list's "is it playing" check and its password-field look, the desktop agent put right after back/forward. Plain
+    browser behaviour, nothing of mods or AI. They live in their **own script world** (iPhone: WKContentWorld
+    "trif-browser"; Android: the same rule in whatever isolation its WebView allows), separate from the page's, from
+    TRIF's mod runtime and kit, from the box and from the chats' world. Their code is fixed, shipped inside the app
+    (never made from anything a mod, a chat, the phone link or an agent writes; not in the mod store; nothing syncs
+    it). Their one message handler is registered **for that world only**, so neither the page nor a mod can post to it,
+    and it takes only those features' own messages (the video state), checked and rate-capped. The app calls into
+    that world only by those features' own fixed calls (a closed list, numbers and yes/no as arguments); every other
+    call into it is refused on every site. What they learn stays in the app's own bookkeeping (the tab's video state,
+    the diagnostics): never a chat, an outline, a screenshot or a mod. The page sees nothing of them (no global, no
+    handler, no `window.webkit`). On a sensitive site they run too; its page is still never pictured.
+  - **Everything of mods and AI** (the mod runtimes, the box, the kit, outline and compare, the chat fills,
+    screenshots for chats, the quick ask, the stall watch that feeds safe mode) only on connected sites, as below.
 - Structural, not a flag: each tab's web view holds TRIF's scripts only while its page is on a connected site; it's
   emptied before a page of a disconnected site starts (the navigation's decision, again at its response, so a redirect
   counts), and a page the engine brings back from its back/forward memory with TRIF in it, on a site disconnected
   since, is loaded again. TRIF's scripts run in the main frame only, so a frame from another site gets nothing. Every way
   the app reads a page (scripts in any world, screenshots, PDFs, archives, find) goes through one gate that refuses on a
-  page TRIF isn't connected on, and TRIF's message handler answers only pages on connected sites. (iPhone: TabWebView,
-  Browser.applyAccess; matrix rows S1-S5.)
+  page TRIF isn't connected on, and TRIF's message handler answers only pages on connected sites. The one exception:
+  the browser features' own fixed calls into their own world (above); the browser features' scripts stay in every
+  tab's controller. (iPhone: TabWebView, Browser.applyAccess, BrowserWorld; matrix rows S1-S7, V1-V2.)
 - **The robot on a disconnected site** (tap, hold, Go to chat, the chat or a quick ask asked for from anywhere) shows
   the card: "TRIF is disconnected on {site}." · Connect (Tim's words, approved). Nothing is read or sent before Connect.
   Connect → the site is connected and the quick ask's box comes up at once, in the same sheet; the page reloads only if
@@ -514,8 +532,9 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
 
 ## Video
 
+- Browser features (Site access): on every site, connected or not, in their own world.
 - Sound and video play on with the app in the background or the phone locked; a page that pauses itself as it goes
-  hidden is respected.
+  hidden is respected. Only the browser's own events count (a pause or a hide a page or a mod makes up is ignored).
 - A video picks up where it was (11-18) after any reload of the same page within 30 min (a reload, a page process
   ended, a mod applying, back to it, a relaunch). The matching rules are shared (core/video-resume.js); the page's
   own video id (in the page script) gives the same ids.

@@ -1118,7 +1118,10 @@ const reports = async (base, clear = true) => {
   return got;
 };
 /** Nothing of TRIF's in what a page's own scripts saw: no TRIF globals, no handler, no style or attribute of TRIF's. */
-const clean = (r) => r.pageStart === 'undefined' && r.free === 'undefined' && r.trifRan === 'undefined' && !r.globals.length && !r.handlers.length && r.webkit === 'undefined' && !r.trifAttrs.length && r.trifNodes === 0 && r.probeColor === 'rgb(1, 2, 3)' && r.rootBorder === '';
+// (11-20, the browser features: their world is in every page, invisible to it by construction (its own world: its
+// globals, listeners and handler are its own). So the page still sees no TRIF global (__trifVideo included), no
+// handler of TRIF's (trifBrowser included), no window.webkit at all)
+const clean = (r) => r.pageStart === 'undefined' && r.free === 'undefined' && r.trifRan === 'undefined' && !r.globals.length && !r.handlers.length && r.webkit === 'undefined' && (r.video === undefined || r.video === 'undefined') && !r.trifAttrs.length && r.trifNodes === 0 && r.probeColor === 'rgb(1, 2, 3)' && r.rootBorder === '';
 const accessOf = async () => (await step({ access: 1 })).split('\n').find((l) => l.startsWith('*')) || '';
 async function landed(base, href, ms = 9000) {
   return until(async () => { const l = (await reports(base, false)).filter((r) => r.when === 'loaded' && r.href.startsWith(href)); return { ok: l.length > 0, r: l[l.length - 1] }; }, ms, 500);
@@ -1132,8 +1135,11 @@ add('S1', 'access', 'A disconnected site: its page\'s own scripts see nothing of
   const a = await accessOf();
   const rc = await step({ readcheck: 1 });
   const refused = rc.split('\n').filter((x) => /REFUSED|none/.test(x)).length;
+  // (the browser features' world: every other call into it blocked, its own call runs, here too)
+  const blocked = rc.split('\n').filter((x) => /^browser world, another .*: BLOCKED/.test(x)).length;
+  const own = /browser feature's own call \(playing\): ran/.test(rc);
   await step({ connect: '127.0.0.1' });
-  return [l.ok && clean(l.r) && /controller plain 0 user script\(s\), handler off/.test(a) && refused === 10 ? 'PASS' : 'FAIL', `page saw ${JSON.stringify(l.r || {}).slice(0, 300)}; ${a}; refused ${refused}/10`];
+  return [l.ok && clean(l.r) && /controller plain 0 user script\(s\), handler off, browser world 2 script\(s\)/.test(a) && refused === 10 && blocked === 2 && own ? 'PASS' : 'FAIL', `page saw ${JSON.stringify(l.r || {}).slice(0, 300)}; ${a}; refused ${refused}/10; browser world blocked ${blocked}/2, own call ${own}`];
 });
 
 add('S2', 'access', 'A connected page with a frame from a disconnected site: TRIF in the page, nothing in the frame', async () => {
@@ -1184,6 +1190,110 @@ add('S5', 'access', 'Disconnected: the robot gives the card and nothing is read;
   await step({ quickcancel: 1 });
   return [!/waitingSend|working|starting/.test(q0) && /outline: \d+ chars/.test(rc) && q.ok ? 'PASS' : 'FAIL', `disconnected: ${q0.split('\n')[0]}; connected: ${rc.split('\n').find((x) => x.startsWith('outline'))}; ${q.t || ''}`];
 });
+
+// ---- the browser features (Tim 11-20: "fine with browser features working, as long as they're beyond the
+// modification powers of the agents and mods"): their own world on every page; nothing else reaches it
+const reachMods = (origin) => [
+  `// ==WebMod==\n// @name        MxS6s${TAG}\n// @description Made by the matrix\n// @match       ${origin}/*\n// @style\n// ==/WebMod==\n${JSON.stringify({ css: `#probe { outline: 2px solid #1f8a5b } /* ${TAG} S6 style */` }, null, 2)}`,
+  // (a boxed mod: what its box sees of the browser world, into #probe::after's content)
+  `// ==WebMod==\n// @name        MxS6b${TAG}\n// @description Made by the matrix\n// @match       ${origin}/*\n// @boxed\n// ==/WebMod==\n` +
+    `let seen = 'box'; try { const g = globalThis; seen += ' webkit:' + typeof g.webkit + ' video:' + typeof g.__trifVideo + ' window:' + typeof g.window; } catch (e) { seen += ' threw:' + e.name; }\n` +
+    `trif.css('#probe::after { content: "' + seen + '" }'); // ${TAG} S6`,
+  // (a free mod, in the page's world: the same, and a post tried if a handler is found)
+  `// ==WebMod==\n// @name        MxS6f${TAG}\n// @description Made by the matrix\n// @match       ${origin}/*\n// ==/WebMod==\n` +
+    `(async () => { const h = (window.webkit && window.webkit.messageHandlers) || {}; let post = 'none'; if (h.trifBrowser) { try { await h.trifBrowser.postMessage({ type: 'videostate', url: location.href, time: 3 }); post = 'POSTED'; } catch (e) { post = 'refused'; } }\n` +
+    `document.documentElement.setAttribute('data-reach-free', JSON.stringify({ webkit: typeof window.webkit, video: typeof window.__trifVideo, handlers: Object.keys(h), post, globals: Object.getOwnPropertyNames(window).filter((k) => /trifvideo|trifbrowser/i.test(k)) })); })(); // ${TAG} S6`,
+];
+
+add('S6', 'access', 'Mods (style, boxed, free) on a connected page reach nothing of the browser features\' world: no global, no handler, no post', async () => {
+  await reports(BASE);
+  const got = await step({ offerchat: reachMods('http://localhost'), site: 'localhost' }); // (a match pattern has no port)
+  for (let i = 0; i < 3; i++) { await until(async () => ({ ok: !!(await offer()).id }), 6000, 400); await step({ addOffer: 1 }); await sleep(1600); }
+  await step({ approve: '*' });
+  await step({ sheet: 'none' });
+  const mods = (await modlist()).filter((m) => /MxS6/.test(m.name));
+  for (const m of mods) if (!m.on) await step({ enable: { id: m.id, on: true, site: 'localhost' } });
+  await sleep(1500);
+  await reports(BASE);
+  await step({ go: `${BASE}/access.html?s6` });
+  const l = await landed(BASE, `${BASE}/access.html?s6`, 12000);
+  const reach = await step({ browserreach: 1 });
+  const r = l.r || {};
+  let free = {};
+  try { free = JSON.parse(r.reachFree || '{}'); } catch (e) {}
+  const box = String(r.reachBox || '');
+  const styled = await pagejs(`return getComputedStyle(document.getElementById('probe')).outlineColor`);
+  const worlds = reach.split('\n');
+  const none = worlds.length === 4 && worlds.every((w) => /"video":"undefined"/.test(w) && !/trifBrowser/.test(w) && /no handler to post to/.test(w) && /"pause":0/.test(w));
+  const ok = mods.length === 3 && free.video === 'undefined' && !(free.handlers || []).includes('trifBrowser') && free.post === 'none' && !(free.globals || []).length &&
+    /box webkit:undefined video:undefined/.test(box) && /31, 138, 91/.test(styled) && !r.handlers.includes('trifBrowser') && r.video === 'undefined' && none;
+  for (const m of mods) await step({ panelmsg: { type: 'delete', id: m.id } });
+  return [ok ? 'PASS' : 'FAIL', `${got}; mods ${mods.map((m) => `${m.name} ${m.on ? 'on' : 'off'}`).join(', ')}; style ${styled}; boxed saw ${box}; free saw ${r.reachFree}; page: handlers ${JSON.stringify(r.handlers)} video ${r.video}; worlds: ${reach.replace(/\n/g, ' | ').slice(0, 400)}`];
+});
+
+add('S7', 'access', 'The browser world from the app: every other call into it blocked on a connected and a disconnected page; its handler takes only its checked messages', async () => {
+  await step({ go: `${BASE}/plain.html` });
+  await sleep(1500);
+  const on = await step({ readcheck: 1 });
+  await step({ disconnect: '127.0.0.1' });
+  await step({ go: `${OTHER}/access.html?s7` });
+  await landed(OTHER, `${OTHER}/access.html?s7`);
+  const off = await step({ readcheck: 1 });
+  const reachOff = await step({ browserreach: 1 });
+  await step({ connect: '127.0.0.1' });
+  const acc = await step({ browseraccept: [
+    { type: 'videostate', url: 'https://a/', time: 3, playing: true, duration: 20, live: false, ended: false, muted: false, rate: 1, src: '', why: 'play' },
+    { type: 'videoplan', url: 'https://a/', nav: 'reload' },
+    { type: 'modlog', text: 'x' }, { type: 'videostate', url: 'https://a/', time: 'NaN' }, { type: 'videostate', url: 'x'.repeat(3000), time: 1 },
+    { type: 'videostate', url: 'https://a/', time: 1, code: 'alert(1)' }, { type: 'videoplay', again: 1 },
+  ] });
+  const blocked = (t) => t.split('\n').filter((x) => /^browser world, another .*: BLOCKED/.test(x)).length === 2 && /own call \(playing\): ran/.test(t);
+  const want = ['ok', 'ok', 'refused', 'refused', 'refused', 'refused', 'refused'];
+  const said = acc.split('\n').map((x) => x.split(' ')[0]);
+  const ok = blocked(on) && /trif world script: ran/.test(on) && blocked(off) && /trif world script: REFUSED/.test(off) && /error/.test(reachOff.split('\n')[0]) && JSON.stringify(said) === JSON.stringify(want);
+  return [ok ? 'PASS' : 'FAIL', `connected: ${on.split('\n').slice(-3).join(' | ')}; disconnected: ${off.split('\n').slice(-3).join(' | ')}; reach there: ${reachOff.split('\n')[0].slice(0, 80)}; accept ${said.join(',')}`];
+});
+
+// (the clip: serve.js's /standin-clip.mp4; a serve.js started before it had it gets one on 8391 beside it)
+let clipAt = null;
+async function clipBase() {
+  if (clipAt) return clipAt;
+  const has = await new Promise((r) => http.get(`${BASE}/standin-clip.mp4`, { headers: { Range: 'bytes=0-1' } }, (res) => { res.resume(); r(res.statusCode === 206); }).on('error', () => r(false)));
+  if (has) return (clipAt = '');
+  if (!(await up(8391))) { servers.push(spawn(process.execPath, [path.join(__dirname, '..', 'serve.js'), '8391'], { stdio: 'ignore' })); for (let i = 0; i < 30 && !(await up(8391)); i++) await sleep(100); }
+  return (clipAt = `&clip=${encodeURIComponent('http://localhost:8391/standin-clip.mp4')}`);
+}
+const media = async (base, tag) => (await reports(base, false)).filter((r) => r.when === 'media' && r.href.includes(tag));
+
+add('V1', 'browser', 'Video pick-up on a disconnected site: playing at ~13 s, its site disconnected (the tab loads again without TRIF): picked up there and played, the page seeing nothing of TRIF', async () => {
+  const clip = await clipBase();
+  await reports(OTHER);
+  await step({ go: `${OTHER}/media.html?v1${clip}` });
+  await until(async () => ({ ok: (await media(OTHER, 'v1')).some((r) => r.ready >= 1) }), 15000, 600);
+  // (started while connected: the app's play counts as a tap; then the site disconnected, which loads the page again)
+  await pagejs(`const v = document.getElementById('v'); v.currentTime = 10; await v.play(); return 'ok'`);
+  await sleep(3500);
+  const before = (await media(OTHER, 'v1')).filter((r) => !r.paused).pop();
+  const t0 = Date.now();
+  await step({ disconnect: '127.0.0.1' });
+  await sleep(1500);
+  await reports(OTHER);
+  // (the page's own reports after the reload: at the kept time, not paused. In the Simulator the seek WebKit makes at
+  // its metadata then often hangs (`seeking` for good, time standing): the pick-up is what's checked here)
+  const after = await until(async () => { const l = (await media(OTHER, 'v1')).filter((r) => r.nav === 'reload' && r.time > 8 && !r.paused); return { ok: l.length >= 1, l }; }, 20000, 1000);
+  const a = await accessOf();
+  const last = after.l && after.l[after.l.length - 1];
+  const logged = diag('video', t0).filter((x) => /resumed a video at .* on 127\.0\.0\.1/.test(x));
+  shot('V1-video-resumed-disconnected');
+  await step({ connect: '127.0.0.1' });
+  const ok = before && after.ok && last && Math.abs(last.time - before.time) < 8 && logged.length && /controller plain 0 user script\(s\), handler off, browser world 2 script\(s\)/.test(a) && !last.handlers.length && !last.globals.length && !last.expando.length && last.webkit === 'undefined';
+  return [ok ? 'PASS' : 'FAIL', `before ${before ? before.time.toFixed(1) : '-'} s playing; after the disconnect's reload: ${last ? `${last.time.toFixed(1)} s ${last.paused ? 'paused' : 'playing'}${last.muted ? ' muted' : ''}, page saw handlers ${JSON.stringify(last.handlers)} globals ${JSON.stringify(last.globals)} expandos ${JSON.stringify(last.expando)} webkit ${last.webkit}` : 'nothing'}; log: ${logged.join(' | ') || 'none'}; ${a.slice(0, 160)}`];
+});
+
+// (background play on a disconnected site needs the person's own tap on the page (no script of the app's runs there
+// and a reload's pick-up is the app's play after a seek, which hangs in the Simulator): checked by hand with the iOS
+// Simulator tool's tap on media.html's Play, then `simctl launch … com.apple.Preferences`, media.html's own reports
+// (visible "hidden", time going by) and Diagnostics "audio". See IOS-AGENT-NOTES, Open and unverified.)
 
 // ---- security batch (11-20): links from outside, mods arriving from outside, diagnostics without browsing history
 const openurl = (u) => { try { sim('openurl', DEV, u); return true; } catch (e) { return false; } };

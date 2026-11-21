@@ -401,19 +401,29 @@ final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
     /// How cookies are written down: WebKit's own private flush when it has one (Tim's choice for now), else a public
     /// call that, in WebKit's current source, ends in the same save: removing cookies changed since the distant future
     /// (none), then saving (undocumented behaviour, not a contract). `-publicflush` forces the public one.
+    /// A Release build (the .ipa, TestFlight) never uses the private one (Tim 11-20, App Review: no private Apple API):
+    /// the selector isn't even in its binary. Only a Debug build may, to compare.
+    #if DEBUG
     private static let flushSelector = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
     var usesPrivateFlush: Bool { !DevFlags.args.contains("-publicflush") && store.responds(to: CookieKeeper.flushSelector) }
+    #else
+    var usesPrivateFlush: Bool { false }
+    #endif
 
     /// WebKit's cookies onto disk now; `done` once written.
     func flush(_ why: String?, done: (@MainActor () -> Void)? = nil) {
         let s = store
+        #if DEBUG
         if usesPrivateFlush {
             typealias Flush = @convention(c) (AnyObject, Selector, @convention(block) @escaping () -> Void) -> Void
             let f = unsafeBitCast(s.method(for: CookieKeeper.flushSelector), to: Flush.self)
             f(s, CookieKeeper.flushSelector) { Task { @MainActor in done?() } }
-        } else {
-            WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantFuture) { Task { @MainActor in done?() } }
+            return
         }
+        #else
+        _ = s
+        #endif
+        WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantFuture) { Task { @MainActor in done?() } }
     }
 
     private static func key(_ c: HTTPCookie) -> String { "\(c.name)|\(c.domain)|\(c.path)" }

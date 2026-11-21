@@ -32,7 +32,9 @@
       pageStart: typeof window.__trifProbePageStart, trifRan: Array.isArray(window.__trifRan) ? window.__trifRan.slice() : typeof window.__trifRan,
       free: typeof window.__trifFree, bridge: typeof window.__trifBridge, modErrors: typeof window.__trifModErrors,
       globals: Object.getOwnPropertyNames(window).filter((k) => /trif/i.test(k)),
-      webkit: typeof window.webkit, handlers: ['trif', 'app', 'panel', 'chat'].filter(has),
+      webkit: typeof window.webkit, handlers: ['trif', 'trifBrowser', 'app', 'panel', 'chat'].filter(has),
+      // (the browser features' world (11-20): its global, and a mod's reach reports: a free mod's attribute, a boxed mod's ::after)
+      video: typeof window.__trifVideo, reachFree: root.getAttribute('data-reach-free'), reachBox: getComputedStyle(document.getElementById('probe'), '::after').content,
       probeColor: getComputedStyle(document.getElementById('probe')).color,
       trifAttrs: [...root.attributes].map((a) => a.name).filter((n) => /trif/i.test(n)),
       trifNodes: document.querySelectorAll('[data-trif], [id^="trif"], [class*="trif"]').length,

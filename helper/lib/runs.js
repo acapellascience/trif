@@ -876,6 +876,14 @@ class Runs {
           run.noShell = true;
           this._log(run, { webmods: 'noShell', why, from: pre.sources.join(', '), time: Date.now() });
         }
+        // (step 5: what they name on the network, through TRIF's relay or a port on this computer; the rest
+        // noted, refused by the box: claude-managed.js orgNetwork)
+        const net = pre.network || { relay: [], ports: [], notes: [], files: [] };
+        run.orgNetwork = net;
+        if (net.relay.length || net.ports.length || net.notes.length || net.files.length) {
+          this._log(run, { webmods: 'orgNetwork', relay: net.relay.map((x) => `${x.host}:${x.port} (${x.from})`), ports: net.ports.map((x) => `${x.port} (${x.from})`), notes: net.notes, files: net.files, from: pre.sources.join(', '), time: Date.now() });
+          if (net.notes.length) this.logger.info(`agent run ${run.id}: ${adapter.name}'s managed settings name ${net.notes.map((x) => `${x.url} (${x.from}: ${x.why})`).join('; ')}: TRIF's full sandbox doesn't let those through`);
+        }
         if (pre.loosens.length) {
           this.logger.info(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) ${pre.loosens.join('; ')}: in TRIF's full sandbox, which holds them`);
           this._log(run, { webmods: 'orgSettings', loosens: pre.loosens, from: pre.sources.join(', '), time: Date.now() });
@@ -889,7 +897,7 @@ class Runs {
     // now, else the sign-in from `claude setup-token` (claudetoken.js prepareBoxed: Claude Code's own
     // login is out of the box's reach), or none: the run says so, the panel offers the sign-in.
     const prepare = run.wholeBox && adapter.id === 'claude' && adapter.prepare
-      ? (o) => require('./claudetoken').prepareBoxed({ keyPrep: () => adapter.prepare(o) })
+      ? (o) => require('./claudetoken').prepareBoxed({ keyPrep: () => adapter.prepare(o), allow: (run.orgNetwork && run.orgNetwork.relay) || [] })
       : adapter.prepare;
     // (TRIF's full sandbox: what the box refuses is watched from before the agent starts, boxrefusals.js)
     const watching = run.wholeBox ? this._watchBox(run) : Promise.resolve();
@@ -992,7 +1000,7 @@ class Runs {
       try {
         const configDir = path.join(limits.privateDir, 'agent-config', run.agent);
         fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-        ({ file, args, env } = require('./wholebox').wrap({ file, args, env }, { limits, configDir, profileFile: path.join(run.agentDir, 'box.sb'), extraRead: [run.agentDir], tag: run.boxTag || '' }));
+        ({ file, args, env } = require('./wholebox').wrap({ file, args, env }, { limits, configDir, profileFile: path.join(run.agentDir, 'box.sb'), extraRead: [run.agentDir, ...((run.orgNetwork && run.orgNetwork.files) || [])], ports: ((run.orgNetwork && run.orgNetwork.ports) || []).map((x) => x.port), tag: run.boxTag || '' }));
       } catch (e) {
         this._emit(run, { kind: 'error', message: `couldn't put ${adapter.name} in TRIF's box: ${e.message}` });
         return this._finish(run, { code: null, signal: null });

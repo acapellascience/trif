@@ -48,7 +48,7 @@ jobs:
           echo "== log show (Sandbox)"; log show --last 1m --style compact --predicate 'sender == "Sandbox"' | head -20
           sw_vers; id
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
-        run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js tests/relay.test.js
+        run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js tests/relay.test.js tests/wholebox-org.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4
@@ -111,6 +111,16 @@ jobs:
         run: |
           echo '{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false},"deniedMcpServers":[{"serverName":"trif"}]}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
           TRIF_WHOLE_BOX=1 TRIF_TEST_MANAGED=sandbox-on-no-mcp TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="no shell" tests/run-sandbox.test.js
+      # (step 5: an organization's hooks and telemetry; the hook script records that it ran and what a secret read gave)
+      - name: Managed settings with hooks and telemetry, the pinned Claude Code in the box
+        run: |
+          D="/Library/Application Support/ClaudeCode"
+          sudo mkdir -p "$D"
+          printf '%s\n' '#!/bin/sh' 'f="$CLAUDE_PROJECT_DIR/sites/example.com/hook-ran.txt"' 'echo "hook $1 $(date +%s)" >> "$f"' 'if s=$(cat "$HOME/.ssh/id_ed25519" 2>&1); then echo "secret: $s" >> "$f"; else echo "secret: refused ($s)" >> "$f"; fi' 'echo "net: $(/usr/bin/curl -s -m 5 -o /dev/null -w %{http_code} https://example.com/ 2>&1 || echo refused)" >> "$f"' 'exit 0' | sudo tee "$D/trif-ci-hook.sh" > /dev/null
+          sudo chmod 755 "$D/trif-ci-hook.sh"
+          H="$D/trif-ci-hook.sh"
+          printf '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_METRICS_EXPORTER":"otlp","OTEL_LOGS_EXPORTER":"otlp","OTEL_EXPORTER_OTLP_PROTOCOL":"http/json","OTEL_EXPORTER_OTLP_METRICS_ENDPOINT":"http://127.0.0.1:47318/v1/metrics","OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"https://otel.trif-ci.invalid:4318/v1/logs","OTEL_METRIC_EXPORT_INTERVAL":"1000","OTEL_LOGS_EXPORT_INTERVAL":"1000"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"\\"%s\\" SessionStart"}]}],"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"\\"%s\\" PreToolUse"},{"type":"http","url":"https://hook.trif-ci.invalid/pre"}]}]}}\n' "$H" "$H" | sudo tee "$D/managed-settings.json"
+          TRIF_TEST_MANAGED=org node --test --test-timeout=300000 --test-name-pattern="hooks and telemetry" tests/whole-box.test.js
       - name: Remove the managed settings
         if: always()
         run: sudo rm -f "/Library/Application Support/ClaudeCode/managed-settings.json"

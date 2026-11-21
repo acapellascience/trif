@@ -170,7 +170,7 @@ test('a boxed run\'s sign-in (prepareBoxed): a saved API key\'s proxy first; els
   await ct.storeToken(FAKE_TOKEN, { env: kc.env });
   let closed = 0;
   const p = await ct.prepareBoxed({ keyPrep: async () => ({}), env: kc.env, startProxy: async (o) => { assert.deepStrictEqual(o, {}); return { port: 4567, close: async () => { closed++; } }; } });
-  assert.deepStrictEqual(p.env, { CLAUDE_CODE_OAUTH_TOKEN: FAKE_TOKEN, HTTPS_PROXY: 'http://127.0.0.1:4567' });
+  assert.deepStrictEqual(p.env, { CLAUDE_CODE_OAUTH_TOKEN: FAKE_TOKEN, HTTPS_PROXY: 'http://127.0.0.1:4567', NO_PROXY: '127.0.0.1,localhost,::1' });
   for (const v of [...ct.OUTRANKS, 'ANTHROPIC_BASE_URL']) assert.ok(p.unsetEnv.includes(v), v);
   assert.deepStrictEqual(p.secrets, [FAKE_TOKEN], 'redacted from everything the run says');
   assert.deepStrictEqual(p.state, { signIn: 'token' });
@@ -181,6 +181,25 @@ test('a boxed run\'s sign-in (prepareBoxed): a saved API key\'s proxy first; els
   assert.deepStrictEqual(s.env, { CLAUDE_CODE_OAUTH_TOKEN: FAKE_TOKEN, ANTHROPIC_BASE_URL: 'http://127.0.0.1:9/' });
   assert.ok(!s.unsetEnv.includes('ANTHROPIC_BASE_URL') && s.unsetEnv.includes('ANTHROPIC_API_KEY'));
   assert.strictEqual(s.cleanup, null);
+  // Step 5: hosts an organization's settings name go through TRIF's relay too, whatever the sign-in.
+  const allow = [{ host: 'otel.corp.example', port: 4318, from: 'env OTEL_EXPORTER_OTLP_ENDPOINT' }];
+  const starts = [];
+  let started = 0;
+  const fakeStart = async (o) => { starts.push(o); return { port: 4600 + (++started), seen: ['seen'], close: async () => { closed++; } }; };
+  let keyClosed = 0;
+  const k2 = await ct.prepareBoxed({ keyPrep: async () => ({ ...keyed, cleanup: async () => { keyClosed++; } }), env: kc.env, allow, startProxy: fakeStart });
+  assert.deepStrictEqual(starts.pop(), { hosts: [], allow }, 'with a key: only their hosts (Anthropic is the key proxy\'s)');
+  assert.deepStrictEqual(k2.env, { ...keyed.env, HTTPS_PROXY: 'http://127.0.0.1:4601', NO_PROXY: '127.0.0.1,localhost,::1' });
+  assert.deepStrictEqual(k2.proxySeen, ['seen']);
+  closed = 0;
+  await k2.cleanup();
+  assert.deepStrictEqual([keyClosed, closed], [1, 1]);
+  const t2 = await ct.prepareBoxed({ keyPrep: async () => ({}), env: kc.env, allow, startProxy: fakeStart });
+  assert.deepStrictEqual(starts.pop(), { allow }, 'with the token: Anthropic and theirs');
+  assert.equal(t2.env.HTTPS_PROXY, 'http://127.0.0.1:4602');
+  const s2 = await ct.prepareBoxed({ keyPrep: async () => ({}), env: { ...kc.env, TRIF_ANTHROPIC_URL: 'http://127.0.0.1:9/' }, allow, startProxy: fakeStart });
+  assert.deepStrictEqual(starts.pop(), { hosts: [], allow });
+  assert.deepStrictEqual([s2.env.ANTHROPIC_BASE_URL, s2.env.HTTPS_PROXY], ['http://127.0.0.1:9/', 'http://127.0.0.1:4603']);
   // A keyring item that isn't a token: "sign in again", the item's text never in the message.
   const kc2 = makeFakeKeychain(fresh('kc'));
   await require('../helper/lib/keyring').setKey(ct.ACCOUNT, 'sk-ant-api03-not-a-setup-token-xx', { service: ct.SERVICE, env: kc2.env });
@@ -190,7 +209,9 @@ test('a boxed run\'s sign-in (prepareBoxed): a saved API key\'s proxy first; els
 test('the pseudo-terminal (macOS): the program sees a wide terminal, gets what is typed with Return, its exit status comes back; cancelled, it ends', { skip: process.platform !== 'darwin' && 'macOS only' }, async () => {
   const { spawn } = require('child_process');
   const prog = path.join(fresh('pty'), 'prog');
-  fs.writeFileSync(prog, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ tty: process.stdin.isTTY, cols: process.stdout.columns }) + '\\nname> ');\nprocess.stdin.setRawMode(true);\nlet b = '';\nprocess.stdin.on('data', (d) => { b += d; if (b.includes('\\r')) { process.stdout.write('got ' + b.trim() + '\\n'); process.exit(b.startsWith('wait') ? 0 : 7); } });\n`, { mode: 0o755 });
+  // (raw mode before the prompt: typed before it, the terminal would still turn Return into a newline,
+  // and the program would wait for ever: the flake of rounds 6 and 7)
+  fs.writeFileSync(prog, `#!${process.execPath}\nprocess.stdin.setRawMode(true);\nprocess.stdout.write(JSON.stringify({ tty: process.stdin.isTTY, cols: process.stdout.columns }) + '\\nname> ');\nlet b = '';\nprocess.stdin.on('data', (d) => { b += d; if (b.includes('\\r')) { process.stdout.write('got ' + b.trim() + '\\n'); process.exit(b.startsWith('wait') ? 0 : 7); } });\n`, { mode: 0o755 });
   assert.strictEqual(ct.ptyCommand(prog, [], { platform: 'win32' }), null);
   const run = (typed, { cancel = false } = {}) => new Promise((resolve) => {
     const c = ct.ptyCommand(prog, []);

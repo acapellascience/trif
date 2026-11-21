@@ -138,10 +138,11 @@ function limitsToBox(limits, { agentBin, configDir, extraRead = [] } = {}) {
  * The command (runs.js: {file, args, env}) wrapped in the box: {file, args, env, profile}. The profile is
  * written to `profileFile` (it names the run's site: not on the command line, which other programs read).
  */
-function wrap({ file, args, env = {} }, { limits, configDir, profileFile, keychain = false, platform = process.platform, extraRead = [], tag = '' }) {
+function wrap({ file, args, env = {} }, { limits, configDir, profileFile, keychain = false, platform = process.platform, extraRead = [], ports = [], tag = '' }) {
   if (platform !== 'darwin') throw new Error('TRIF\'s full sandbox is macOS only for now (Windows: tests/whole-box/win-probe.js)');
   const box = limitsToBox(limits, { agentBin: file, configDir, extraRead });
-  const profile = macProfile({ ...box, ports: localPorts(env), keychain, tag });
+  // (`ports`: more on this computer, an organization's local collector: claude-managed.js orgNetwork)
+  const profile = macProfile({ ...box, ports: [...new Set([...localPorts(env), ...ports.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 65536)])], keychain, tag });
   fs.writeFileSync(profileFile, profile, { mode: 0o600 });
   const extraEnv = {
     // Claude Code: no updates from inside a run (the box can't write its versions folder anyway, and the

@@ -182,7 +182,7 @@ function loosest(c, L) {
   return args.map((a, k) => (args[k - 1] === '--permission-mode' ? 'bypassPermissions' : a));
 }
 
-async function runClaude(L, { boxed, script = null }) {
+async function runClaude(L, { boxed, script = null, moreEnv = {}, boxOpts = {} }) {
   const steps = script || [
     { tool: 'Read', input: { file_path: L.own } },
     { tool: 'Read', input: { file_path: L.secret } },
@@ -204,9 +204,9 @@ async function runClaude(L, { boxed, script = null }) {
   const args = loosest(c, L);
   for (const f of c.files) fs.writeFileSync(f.path, f.content);
   const env = { HOME: L.home, USER: os.userInfo().username, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, TERM: 'dumb', ANTHROPIC_BASE_URL: fake.url, ANTHROPIC_API_KEY: 'placeholder',
-    CLAUDE_CONFIG_DIR: L.cfg, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...c.env };
+    CLAUDE_CONFIG_DIR: L.cfg, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...c.env, ...moreEnv };
   let cmd = { file: c.file, args, env };
-  if (boxed) cmd = wb.wrap(cmd, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb'), extraRead: [agentDir, path.dirname(path.dirname(fs.realpathSync(process.execPath)))] }); // (and node, if this Claude Code is npm's node script)
+  if (boxed) cmd = wb.wrap(cmd, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb'), extraRead: [agentDir, path.dirname(path.dirname(fs.realpathSync(process.execPath))), ...(boxOpts.extraRead || [])], ports: boxOpts.ports || [] }); // (and node, if this Claude Code is npm's node script)
   const t0 = Date.now();
   const res = await new Promise((resolve) => {
     const child = spawn(cmd.file, cmd.args, { cwd: L.stage, env: cmd.env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -288,6 +288,44 @@ test('CI, the real network: the pinned Claude Code in the box reaches Anthropic 
     assert.match(`${res.out}\n${res.err}`, /401|OAuth|authenticat|invalid|log ?in/i, `Anthropic's answer, the token refused:\n${info}`);
     assert.doesNotMatch(`${res.out}\n${res.err}`, /EPERM|ECONNREFUSED|Unable to connect/i, `nothing in the way but the token:\n${info}`);
   } finally { await r.close(); }
+});
+
+// Step 5, CI only (TRIF_TEST_MANAGED=org: whole-box.yml writes an organization's managed settings with
+// OpenTelemetry export, to a collector on this computer (port 47318) and one elsewhere over https; an http
+// hook to another host; command hooks, a script in /Library/Application Support/ClaudeCode that records it
+// ran and tries a secret). Done as runs.js does it: claude-managed.js check() → the relay's hosts, the box's
+// ports and scripts. What must hold: the run works, the hooks run inside the box (the secret refused).
+// What Claude Code sends where (the collector, the relay) is printed: round 7's first look.
+const ORG_COLLECTOR = 47318;
+test('CI, an organization\'s hooks and telemetry: in the box, hooks run boxed; what they name goes through the relay or the named port', { skip: (process.env.TRIF_TEST_MANAGED !== 'org' || !claudeBin) && 'only with TRIF_TEST_MANAGED=org (CI)' }, async () => {
+  const http = require('http');
+  const pre = require('../helper/lib/agents/claude-managed').check({});
+  console.log(`# managed network: ${JSON.stringify(pre.network)}`);
+  assert.ok(pre.network.ports.some((x) => x.port === ORG_COLLECTOR), JSON.stringify(pre.network));
+  const got = [];
+  const collector = http.createServer((q, a) => { let b = ''; q.on('data', (d) => { b += d; }); q.on('end', () => { got.push({ url: q.url, bytes: b.length }); a.end('{}'); }); });
+  await new Promise((r) => collector.listen(ORG_COLLECTOR, '127.0.0.1', r));
+  const relay = await wb.startProxy({ allow: pre.network.relay });
+  try {
+    const L = layout();
+    const res = await runClaude(L, {
+      boxed: true,
+      script: [{ tool: 'Read', input: { file_path: L.own } }, { bash: 'echo bash-ran' }, { say: 'done' }],
+      moreEnv: { HTTPS_PROXY: `http://127.0.0.1:${relay.port}`, NO_PROXY: '127.0.0.1,localhost,::1' },
+      boxOpts: { ports: pre.network.ports.map((x) => x.port), extraRead: pre.network.files },
+    });
+    await new Promise((r) => setTimeout(r, 2500)); // (the last telemetry export)
+    const marks = path.join(L.stage, 'sites', 'example.com', 'hook-ran.txt');
+    const ran = fs.existsSync(marks) ? fs.readFileSync(marks, 'utf8') : '(no hook-ran.txt)';
+    const info = `exit ${res.code}\nhooks wrote:\n${ran}\nrelay saw: ${JSON.stringify(relay.seen)}\ncollector got: ${JSON.stringify(got)}\nresults: ${JSON.stringify(res.results).slice(0, 1500)}\nstderr: ${res.err.slice(-1500)}`;
+    console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+    const result = res.out.split('\n').map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((m) => m && m.type === 'result');
+    assert.ok(result && !result.is_error, `the run finished:\n${info}`);
+    assert.match(ran, /hook SessionStart|hook PreToolUse/, `the organization's hooks ran, in the run's copy:\n${info}`);
+    assert.doesNotMatch(ran, new RegExp(SECRET), `the hook in the box can't read the secret:\n${info}`);
+    assert.match(ran, /secret: (refused|.*Operation not permitted)/, info);
+    for (const e of relay.seen.filter((x) => x.allowed)) assert.ok(['api.anthropic.com:443', 'claude.ai:443', 'console.anthropic.com:443', 'platform.claude.com:443', ...pre.network.relay.map((x) => `${x.host}:${x.port}`)].includes(e.target), e.target);
+  } finally { await relay.close(); collector.close(); }
 });
 
 // On CI only (.github/workflows/whole-box.yml writes the real managed-settings.json in /Library/Application

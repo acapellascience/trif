@@ -207,8 +207,66 @@ function effects(s, { platform = process.platform } = {}) {
   return { loosens, breaks, forcesSandbox, anyCommand, mcpBlocks };
 }
 
+// TRIF's full sandbox (docs/WHOLE-BOX-PROGRESS.md step 5): what an organization's settings name on the
+// network, so a boxed run still reaches it (Tim 11-21: honour the policy inside the box, network only to
+// the hosts it names). From the managed `env` (Claude Code applies it over the run's own): an LLM gateway
+// or cloud endpoint, OpenTelemetry endpoints; and HTTP hooks' URLs. An https host goes through TRIF's relay
+// (CONNECT, that host and port only); a host on this computer (a local collector) is that port in the
+// box; plain http to another computer can't go through a CONNECT-only relay, so it's only noted (the box
+// refuses it and a run that fails says so). A proxy of their own in `env` is noted too: Claude Code would
+// use it instead of TRIF's relay and the box refuses it. Command hooks: their absolute paths are readable
+// in the box (they run in it, as children of Claude Code).
+const ENDPOINT_VARS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_BEDROCK_BASE_URL', 'ANTHROPIC_VERTEX_BASE_URL', 'ANTHROPIC_FOUNDRY_BASE_URL',
+  'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT', 'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'];
+const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'];
+const LOCAL_NAMES = ['localhost', '127.0.0.1', '[::1]', '::1'];
+
+function orgNetwork(s) {
+  const relay = [];
+  const ports = [];
+  const notes = [];
+  const files = [];
+  const add = (url, from) => {
+    let u;
+    try { u = new URL(String(url)); } catch { notes.push({ from, url: String(url).slice(0, 200), why: 'not a URL' }); return; }
+    if (!['http:', 'https:', 'grpc:', 'grpcs:'].includes(u.protocol)) { notes.push({ from, url: u.origin, why: 'not http(s)' }); return; }
+    const tls = u.protocol === 'https:' || u.protocol === 'grpcs:';
+    const port = Number(u.port || (tls ? 443 : 80));
+    if (LOCAL_NAMES.includes(u.hostname)) { ports.push({ port, from }); return; }
+    if (tls) relay.push({ host: u.hostname.replace(/^\[(.*)\]$/, '$1'), port, from });
+    else notes.push({ from, url: `${u.protocol}//${u.host}`, why: 'plain http to another computer' });
+  };
+  const env = isObject(s.env) ? s.env : {};
+  for (const k of ENDPOINT_VARS) if (typeof env[k] === 'string' && env[k].trim()) {
+    // (OTEL_EXPORTER_OTLP_ENDPOINT may be a comma-free URL; a protocol of grpc means plain unless https)
+    add(env[k].trim(), `env ${k}`);
+  }
+  for (const k of PROXY_VARS) if (typeof env[k] === 'string' && env[k].trim()) {
+    let local = false;
+    try { local = LOCAL_NAMES.includes(new URL(env[k].trim()).hostname); } catch { /* not a URL */ }
+    notes.push({ from: `env ${k}`, url: String(env[k]).slice(0, 200), why: local ? 'a proxy on this computer, in place of TRIF\'s relay' : 'a proxy of their own, in place of TRIF\'s relay' });
+  }
+  const hooks = isObject(s.hooks) ? s.hooks : {};
+  for (const [event, groups] of Object.entries(hooks)) {
+    for (const g of Array.isArray(groups) ? groups : []) {
+      for (const h of (isObject(g) && Array.isArray(g.hooks)) ? g.hooks : []) {
+        if (!isObject(h)) continue;
+        if (h.type === 'http' && typeof h.url === 'string') add(h.url, `hooks ${event}`);
+        if ((h.type === 'command' || !h.type) && typeof h.command === 'string') {
+          // (absolute paths in the command, as words or quoted: the scripts it runs; existing files only)
+          for (const m of h.command.matchAll(/"(\/[^"]+)"|'(\/[^']+)'|(?:^|\s)(\/[^\s;|&<>()'"]+)/g)) {
+            const f = m[1] || m[2] || m[3];
+            try { if (fs.statSync(f).isFile()) files.push(f); } catch { /* not there */ }
+          }
+        }
+      }
+    }
+  }
+  return { relay, ports, notes, files };
+}
+
 /**
- * Before a run: {loosens, breaks, forcesSandbox, anyCommand, mcpBlocks, sources, errors}, every source's
+ * Before a run: {loosens, breaks, forcesSandbox, anyCommand, mcpBlocks, network, sources, errors}, every source's
  * effects together (no duplicates). forcesSandbox, anyCommand and mcpBlocks matter to runs in TRIF's full
  * sandbox only, where `loosens` is only logged (TRIF's box holds whatever they say).
  * `errors`: managed files that couldn't be read (Claude Code itself won't start with a broken one).
@@ -220,7 +278,10 @@ function check(opts = {}) {
   const mcpBlocks = new Set();
   const anyCommand = new Set();
   let forcesSandbox = false;
+  const network = { relay: [], ports: [], notes: [], files: [] };
   for (const src of found) {
+    const n = orgNetwork(src.settings);
+    for (const k of Object.keys(network)) network[k].push(...n[k].map((x) => (typeof x === 'object' ? { ...x, source: src.name } : x)));
     const e = effects(src.settings, opts);
     for (const x of e.loosens) loosens.add(x);
     for (const x of e.breaks) breaks.add(x);
@@ -228,7 +289,8 @@ function check(opts = {}) {
     for (const x of e.anyCommand) anyCommand.add(x);
     if (e.forcesSandbox) forcesSandbox = true;
   }
-  return { loosens: [...loosens], breaks: [...breaks], forcesSandbox, anyCommand: [...anyCommand], mcpBlocks: [...mcpBlocks], sources: found.map((x) => x.file), errors };
+  network.files = [...new Set(network.files)];
+  return { loosens: [...loosens], breaks: [...breaks], forcesSandbox, anyCommand: [...anyCommand], mcpBlocks: [...mcpBlocks], network, sources: found.map((x) => x.file), errors };
 }
 
-module.exports = { check, effects, sources, merge, systemDir, RUN_COMMANDS };
+module.exports = { check, effects, orgNetwork, sources, merge, systemDir, RUN_COMMANDS };

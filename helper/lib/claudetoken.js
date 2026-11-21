@@ -137,9 +137,22 @@ function ptyCommand(file, args = [], { platform = process.platform } = {}) {
  * startProxy, the box's one way out; TRIF_ANTHROPIC_URL, tests: a stand-in on this computer instead).
  * No token: throws an Error with .signIn = 'token' (the run says so; the panel offers the sign-in).
  */
-async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, keyringOpts = {}, startProxy = (o) => require('./wholebox').startProxy(o) } = {}) {
+async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, keyringOpts = {}, allow = [], startProxy = (o) => require('./wholebox').startProxy(o) } = {}) {
+  // (step 5: hosts an organization's managed settings name, claude-managed.js orgNetwork: through TRIF's
+  // relay too, whatever the sign-in; this computer's own addresses never go to the relay: NO_PROXY)
+  const NO_PROXY = '127.0.0.1,localhost,::1';
   const k = (await keyPrep()) || {};
-  if (k.env && k.env.ANTHROPIC_BASE_URL) return k;
+  if (k.env && k.env.ANTHROPIC_BASE_URL) {
+    if (!allow.length) return k;
+    const relay = await startProxy({ hosts: [], allow });
+    const keyCleanup = k.cleanup;
+    return {
+      ...k,
+      env: { ...k.env, HTTPS_PROXY: `http://127.0.0.1:${relay.port}`, NO_PROXY },
+      cleanup: async () => { try { if (typeof keyCleanup === 'function') await keyCleanup(); } finally { await relay.close(); } },
+      proxySeen: relay.seen,
+    };
+  }
   if (typeof k.cleanup === 'function') { try { await k.cleanup(); } catch { /* nothing started */ } }
   const r = await readToken({ env, ...keyringOpts });
   if (!r.value) {
@@ -151,9 +164,10 @@ async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, key
   }
   const stand = require('./env').envVar('ANTHROPIC_URL', env);
   let proxy = null;
-  if (!stand) proxy = await startProxy({});
+  if (!stand) proxy = await startProxy(allow.length ? { allow } : {});
+  else if (allow.length) proxy = await startProxy({ hosts: [], allow });
   return {
-    env: { CLAUDE_CODE_OAUTH_TOKEN: r.value, ...(stand ? { ANTHROPIC_BASE_URL: stand } : { HTTPS_PROXY: `http://127.0.0.1:${proxy.port}` }) },
+    env: { CLAUDE_CODE_OAUTH_TOKEN: r.value, ...(stand ? { ANTHROPIC_BASE_URL: stand } : {}), ...(proxy ? { HTTPS_PROXY: `http://127.0.0.1:${proxy.port}`, NO_PROXY } : {}) },
     unsetEnv: [...OUTRANKS, ...(stand ? [] : ['ANTHROPIC_BASE_URL'])],
     secrets: [r.value],
     cleanup: proxy ? () => proxy.close() : null,

@@ -406,7 +406,7 @@ export const MIC_CHANNEL = 'trif-mic';
 const MIC_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.75" y="1.75" width="4.5" height="8" rx="2.25"/><path d="M3.25 7.5a4.75 4.75 0 0 0 9.5 0M8 12.25v2"/></svg>';
 
 /**
- * The panel's side: the mic button in the message box, the words being heard over the box, the note above it, the
+ * The panel's side: the mic button in the message box, the words being heard under the box’s text, the note above it, the
  * shortcut. opts: { composer, input, browser() (the name, live: the helper may name it later), canPrompt,
  * openNear(url) (a tab beside the page the panel shows; resolves to the tab), storage (chrome.storage.local) }.
  */
@@ -426,7 +426,7 @@ export function mountDictation(opts) {
   liveLine.className = 'dictation-live';
   liveLine.hidden = true;
   liveLine.setAttribute('aria-hidden', 'true');
-  composer.prepend(liveLine);
+  input.after(liveLine); // (under the box's text, where the words will go)
   const noteLine = document.createElement('div');
   noteLine.className = 'dictation-note';
   noteLine.setAttribute('role', 'status');

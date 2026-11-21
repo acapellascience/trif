@@ -692,9 +692,9 @@ body:is(.site-off, .no-site) .robotless-line { display: none; }
 @media (prefers-reduced-motion: reduce) { .send.mic.listening { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--blocked) 35%, transparent); } }
 .composer.has-mic textarea { padding-right: 72px; }
 .composer.has-mic.busy .send.mic { right: 66px; }
-.composer.has-mic.busy textarea { padding-right: 102px; }
-/* The words being heard, not in the box yet (only finished ones go in): over the text, muted */
-.dictation-live { margin: 0; padding: 7px 12px 0; color: var(--muted); font-style: italic; font-size: 12.5px; line-height: 1.4;
+.composer.has-mic.busy textarea, .composer.has-mic.busy .dictation-live { padding-right: 102px; }
+/* The words being heard, not in the box yet (only finished ones go in): under the text, muted */
+.dictation-live { margin: -4px 0 0; padding: 0 72px 9px 12px; color: var(--muted); font-style: italic; font-size: 12.5px; line-height: 1.4;
   overflow-wrap: anywhere; max-block-size: 4lh; overflow-y: auto; }
 .dictation-live::before { content: "…"; margin-right: 2px; }
 /* Above the box: a quiet line (where the audio goes, the first time; reconnecting; allow it in the tab), or red with

@@ -6,7 +6,7 @@ one table each, so a change is one line). `{browser}` is the browser's name, `{k
 
 How it behaves (Tim's rules for voice input, as on the iPhone): it never stops by itself (when the browser's
 recogniser ends, after a pause or a minute or so, a new one starts at once); the words only accumulate (what's in the
-box stays, new words go at its end; the words being heard show in small italics over the text and only finished ones
+box stays, new words go at its end; the words being heard show in small italics under the text and only finished ones
 go in); only the person's stop ends it (the button, the shortcut, or Escape in the box), and stopping never sends.
 
 ## The button (left of Send)
@@ -19,7 +19,7 @@ with a soft ring pulsing (a still ring with reduced motion).
 - Its tooltip: **Dictate (Ctrl+Shift+Space)** · while on: **Stop dictating (Ctrl+Shift+Space). Your words stay in the box.**
 - While it starts (on, not listening yet), the tooltip: **Starting the microphone…**
 
-## Over the box's text, while it listens
+## Under the box’s text, while it listens
 
 - The words being heard, after an ellipsis, small and italic (not read out: they change as they're heard). No new
   words.

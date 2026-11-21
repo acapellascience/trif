@@ -3,7 +3,7 @@
 // microphone, no speech service: what's said can't be tested here, Tim tries it): TRIF's own extension in headless
 // Chrome for Testing (tests/cdp-page.js: muted, one browser at a time, the memory guard), its panel as a window
 // following a window with a local page. Checks the button's states (off; on but not yet listening; listening only
-// once the recogniser has started), its names and the shortcut, the words being heard over the box and only finished
+// once the recogniser has started), its names and the shortcut, the words being heard under the box’s text and only finished
 // ones in it, a recogniser that ends being followed by a new one, the person's stop (button, shortcut, Escape)
 // keeping the words and sending nothing, the first listen's line about where the audio goes, mic.html asking for the
 // microphone in a tab when the panel couldn't (Chrome's fake media UI answers it) and closing itself, the red note
@@ -15,7 +15,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { browserTestsSkip, launch } = require('./cdp-page');
-const { servePhonePages, extensionCopy, harness, waitFor } = require('./phone-pages');
+const { servePhonePages, extensionCopy, harness } = require('./phone-pages');
+const { waitFor } = require('./e2e/lib/util');
 
 const skip = browserTestsSkip();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -98,6 +99,7 @@ test('the mic in the message box: its states, the words, the shortcut, the stop 
     await browser.cdp.send('Page.enable', {}, sid);
     await browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: STUB }, sid);
     await browser.cdp.send('Page.reload', {}, sid);
+    await browser.cdp.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 640, deviceScaleFactor: 2, mobile: false }, sid);
     await sleep(800);
     const ev = async (expr) => {
       const r = await browser.cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sid);
@@ -143,7 +145,7 @@ test('the mic in the message box: its states, the words, the shortcut, the stop 
     assert.match(v.note, /Chrome sends what you say to Google to turn it into text\./, 'the first listen says where the audio goes');
     assert.equal(v.noteBad, false);
 
-    // The words: being heard over the box, finished ones into it after what was there
+    // The words: being heard under the box’s text, finished ones into it after what was there
     await ev(`window.__say([['smaller', false]])`);
     v = await look();
     assert.equal(v.live, 'smaller');

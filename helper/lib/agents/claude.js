@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, isLoginFailure, loginError } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, isLoginFailure, loginError, mcpStep, mcpName } = require('./util');
 const { within, ignoresCase } = require('../pathcheck');
 
 // What a side-panel run may do (runs.js runLimits gives the paths). Only the tools in TOOLS, then two layers:
@@ -320,7 +320,10 @@ const adapter = {
           else { flushHeld(emit, state); emit({ kind: 'text', text: c.text }); }
         } else if (c.type === 'tool_use') {
           flushHeld(emit, state);
-          emit({ kind: 'tool', name: String(c.name || 'tool'), summary: toolSummary(c.name, c.input, state.workspace) });
+          // (an MCP tool's, mcp__trif__trif on Windows: told as the same step is elsewhere, util.js mcpStep)
+          const mcp = mcpName(c.name);
+          if (mcp) emit({ kind: 'tool', ...mcpStep(mcp.server, mcp.tool, c.input, state.workspace) });
+          else emit({ kind: 'tool', name: String(c.name || 'tool'), summary: toolSummary(c.name, c.input, state.workspace) });
         }
       }
     } else if (msg.type === 'result') {

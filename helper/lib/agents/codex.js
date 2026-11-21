@@ -34,11 +34,11 @@
 // {type:"item.started"|"item.updated"|"item.completed", item:{id, type, ...}} |
 // {type:"turn.completed", usage} | {type:"turn.failed", error:{message}} | {type:"error", message}.
 // Item types: agent_message {text}, reasoning {text}, command_execution {command, aggregated_output,
-// exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool},
+// exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool, arguments},
 // web_search {query}, todo_list, error {message}.
 
 const path = require('path');
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, isLoginFailure, loginError } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, isLoginFailure, loginError, mcpStep } = require('./util');
 
 const PROFILE = 'trif-run';
 // Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex itself
@@ -298,7 +298,8 @@ function toolEvent(item, workspace) {
       const paths = (Array.isArray(item.changes) ? item.changes : []).map((c) => relToWorkspace(c && c.path, workspace)).filter(Boolean);
       return { kind: 'tool', name: 'Edit', summary: oneLine(paths.join(', ')) };
     }
-    case 'mcp_tool_call': return { kind: 'tool', name: `${item.server || 'mcp'}.${item.tool || 'tool'}`, summary: '' };
+    // (`trif` and the file tools on Windows: told as the same step is elsewhere, util.js mcpStep)
+    case 'mcp_tool_call': return { kind: 'tool', ...mcpStep(item.server, item.tool, item.arguments, workspace) };
     case 'web_search': return { kind: 'tool', name: 'WebSearch', summary: oneLine(item.query) };
     default: return null; // reasoning, todo_list
   }

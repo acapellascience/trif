@@ -1199,7 +1199,7 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 ```
 {kind: "session", sessionId}                       the agent's conversation id (for resuming)
 {kind: "text", text}                               a block of assistant text
-{kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"trif reload --tab 12"}
+{kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"trif reload --tab 12"} (a Windows run's `trif` MCP calls too)
 {kind: "error", message}                           something went wrong (agent missing, crashed…)
 {kind: "error", reason: "login", agent, message}   the agent's login is gone, expired or refused: "<Agent> needs you to log in again."
 {kind: "error", reason: "sandbox", agent, name, settingsName, why, message}   an organization's settings replace TRIF's sandbox: the run stopped (see "Organization settings")

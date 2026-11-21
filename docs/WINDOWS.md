@@ -320,7 +320,11 @@ branches of `helper/lib/runs.js` and `helper/lib/agents/claude.js`.
 - Claude Code is started with `--tools Read,Edit,Write,Glob,Grep` (no Bash) and one MCP tool, `trif`.
   `helper/mcp.js` serves it: for each call it starts TRIF's own CLI inside the container with the words it
   was given, one argument each (no shell reads them), and answers with what it printed. The CLI reaches the
-  helper through the run's mailbox, as in any run.
+  helper through the run's mailbox, as in any run. The side panel tells its calls as the same steps are
+  told on macOS, where they are shell commands: `mcp__trif__trif` with `{"args": ["verify", "x.com/a"]}`
+  reads "ran trif verify x.com/a" (a word that isn't plain in single quotes, standard input as a here-document,
+  cut at 300 characters, as a Bash step's command is), and Codex's fenced file tools read as Claude Code's
+  own (read, wrote, edited, searched): `helper/lib/agents/util.js` `mcpStep`.
 - Claude Code's file tools keep TRIF's rules, spelled for Windows: relative to the working folder
   (`Read(./**)`, `Edit(./sites/**)`, denies for other sites and instruction files), and the screenshots
   folder as `//c/Users/…` (of six spellings tried, the ones Claude Code takes there are that, `C:/…` and

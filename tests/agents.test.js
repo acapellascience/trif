@@ -142,6 +142,11 @@ if (prompt.includes('SLEEP') || prompt.includes('STUBBORN')) {
 say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hiding the banner now.' }] } });
 say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'trif reload --tab 12' } }] } });
 say({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'reloaded' }] } });
+if (prompt.includes('WINMCP')) {
+  // Windows: no shell, \`trif\` is the trif MCP server's tool (helper/mcp.js)
+  say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't3', name: 'mcp__trif__trif', input: { args: ['verify', 'example.com/fake'] } }] } });
+  say({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't3', content: [{ type: 'text', text: 'ok' }] }] } });
+}
 if (prompt.includes('EDIT')) {
   const file = path.join(process.cwd(), 'sites', 'example.com', 'fake.js');
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -310,6 +315,90 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
   assert.ok(!f.args.some((a) => a.includes('dangerously')));
   assert.equal(f.stdin, '--dangerously-skip-permissions hide ads');
 });
+
+// Windows: `trif` is an MCP tool there (no shell), and the steps it makes read as the same steps do on
+// macOS, where the agent runs `trif …` in its shell: {name: "Bash", summary: the command}, so the panel says
+// "ran trif verify x.com/a" (lib.js toolLine), never mcp__trif__trif.
+test('MCP steps: a trif tool call is told as the trif command a shell would have run', async () => {
+  const { trifCommand, mcpStep, mcpName } = require('../helper/lib/agents/util');
+  const lib = (await import('../extension/lib.js')).toolLine; // the panel's line for a step
+  const mac = (command) => lib('Bash', claudeSummary('Bash', { command }));
+  const win = (input) => { const s = mcpStep('trif', 'trif', input, '/ws'); return lib(s.name, s.summary); };
+  // the same words as the Mac's command, one per item
+  for (const [args, command] of [
+    [['verify', 'google.com/move-logo-with-arrows'], 'trif verify google.com/move-logo-with-arrows'],
+    [['check', 'sites/x.com/a.js'], 'trif check sites/x.com/a.js'],
+    [['reload', '--tab', '12'], 'trif reload --tab 12'],
+    [['status'], 'trif status'],
+    [['run', '--url', 'x.com', 'page.findAll("[data-testid=cellInnerDiv]").length'], `trif run --url x.com 'page.findAll("[data-testid=cellInnerDiv]").length'`],
+    [['run', '--tab', '3', "document.querySelector('h1').textContent"], `trif run --tab 3 'document.querySelector('\\''h1'\\'').textContent'`],
+    [['screenshot', '--tab', '3', 'a b'], "trif screenshot --tab 3 'a b'"],
+    [['run', ''], "trif run ''"],
+  ]) {
+    assert.equal(trifCommand({ args }), command);
+    assert.equal(win({ args }), mac(command));
+  }
+  assert.equal(win({ args: ['verify', 'google.com/move-logo-with-arrows'] }), 'ran trif verify google.com/move-logo-with-arrows');
+  // standard input: as the here-document the Mac's agent would write, on one line as there
+  const code = "const n = page.findAll('a').length;\nn";
+  assert.equal(trifCommand({ args: ['run', '--tab', '3', '-'], stdin: code }), `trif run --tab 3 - <<'EOF'\n${code}\nEOF`);
+  assert.equal(win({ args: ['run', '--tab', '3', '-'], stdin: code }), mac(`trif run --tab 3 - <<'EOF'\n${code}\nEOF`));
+  assert.equal(win({ args: ['run', '--tab', '3', '-'], stdin: code }), "ran trif run --tab 3 - <<'EOF' const n = page.findAll('a').length; n EOF");
+  // a long one: cut where the Mac's is (oneLine: 300 characters, then …)
+  const long = 'x'.repeat(400);
+  assert.equal(win({ args: ['run', '--tab', '3', long] }), mac(`trif run --tab 3 ${long}`));
+  assert.equal(mcpStep('trif', 'trif', { args: ['run', long] }, '/ws').summary.length, 300);
+  // whatever the agent sent: no words is plain `trif`; not a list, the same
+  assert.equal(win({}), 'ran trif');
+  assert.equal(win({ args: 'status' }), 'ran trif');
+  assert.equal(win(null), 'ran trif');
+  // Claude Code's name for it
+  assert.deepEqual(mcpName('mcp__trif__trif'), { server: 'trif', tool: 'trif' });
+  assert.deepEqual(mcpName('mcp__trif__read_file'), { server: 'trif', tool: 'read_file' });
+  assert.equal(mcpName('Bash'), null);
+  // the file tools (Codex on Windows): as Claude Code's own file tools read
+  assert.deepEqual(mcpStep('trif', 'read_file', { path: 'sites/x.com/a.js', offset: 10 }, '/ws'), { name: 'Read', summary: 'sites/x.com/a.js' });
+  assert.deepEqual(mcpStep('trif', 'write_file', { path: 'sites/x.com/a.js', content: 'x' }, '/ws'), { name: 'Write', summary: 'sites/x.com/a.js' });
+  assert.deepEqual(mcpStep('trif', 'edit_file', { path: 'sites/x.com/a.js', old: 'a', new: 'b' }, '/ws'), { name: 'Edit', summary: 'sites/x.com/a.js' });
+  assert.deepEqual(mcpStep('trif', 'search_files', { pattern: 'banner', path: 'sites' }, '/ws'), { name: 'Grep', summary: 'banner' });
+  assert.deepEqual(mcpStep('trif', 'list_files', { path: 'sites/x.com/' }, '/ws'), { name: 'Glob', summary: 'sites/x.com/*' });
+  assert.deepEqual(mcpStep('trif', 'list_files', { path: 'sites', depth: 3 }, '/ws'), { name: 'Glob', summary: 'sites/**' });
+  assert.deepEqual(mcpStep('trif', 'list_files', {}, '/ws'), { name: 'Glob', summary: '*' });
+  assert.deepEqual(mcpStep('trif', 'view_image', { path: '/shots/x.com/1.png' }, '/ws'), { name: 'Read', summary: '/shots/x.com/1.png' });
+  // Codex's arguments as JSON text, the same
+  assert.deepEqual(mcpStep('trif', 'trif', '{"args":["tabs"]}', '/ws'), { name: 'Bash', summary: 'trif tabs' });
+  assert.deepEqual(mcpStep('trif', 'trif', 'not json', '/ws'), { name: 'Bash', summary: 'trif' });
+  assert.deepEqual(mcpStep('mcp__trif', 'trif', { args: ['tabs'] }, '/ws'), { name: 'Bash', summary: 'trif tabs' });
+  // another server's tool: server.tool and what it names
+  assert.deepEqual(mcpStep('docs', 'fetch', { url: 'https://example.com' }, '/ws'), { name: 'docs.fetch', summary: 'https://example.com' });
+  assert.deepEqual(mcpStep('trif', 'later_tool', {}, '/ws'), { name: 'trif.later_tool', summary: '' });
+  assert.deepEqual(mcpStep(undefined, undefined, undefined, '/ws'), { name: 'mcp.tool', summary: '' });
+});
+
+test('claude adapter: an MCP tool step (Windows: mcp__trif__trif) reads as the Mac\'s Bash `trif` step', () => {
+  const ev = [];
+  const st = { workspace: '/ws' };
+  claude.parse(JSON.stringify({ type: 'assistant', message: { content: [
+    { type: 'tool_use', name: 'mcp__trif__trif', input: { args: ['verify', 'google.com/move-logo-with-arrows'] } },
+    { type: 'tool_use', name: 'Read', input: { file_path: '/ws/sites/google.com/move-logo-with-arrows.js' } },
+    { type: 'tool_use', name: 'mcp__trif__trif', input: { args: ['run', '--tab', '7', 'document.title'] } },
+    { type: 'tool_use', name: 'mcp__other__do_thing', input: { path: '/ws/sites/a.com/m.js' } },
+  ] } }), (e) => ev.push(e), st);
+  assert.deepEqual(ev, [
+    { kind: 'tool', name: 'Bash', summary: 'trif verify google.com/move-logo-with-arrows' },
+    { kind: 'tool', name: 'Read', summary: inWs('sites', 'google.com', 'move-logo-with-arrows.js') },
+    { kind: 'tool', name: 'Bash', summary: 'trif run --tab 7 document.title' },
+    { kind: 'tool', name: 'other.do_thing', summary: inWs('sites', 'a.com', 'm.js') },
+  ]);
+  assert.ok(!JSON.stringify(ev).includes('mcp__'));
+});
+
+// claude.js's summary of a Bash step, as the Mac's run shows it (through a parse, the adapter's only way in)
+function claudeSummary(name, input) {
+  let got = null;
+  claude.parse(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } }), (e) => { got = e; }, { workspace: '/ws' });
+  return got.summary;
+}
 
 test('claude adapter: parses init, text, tools, result; maps "Not logged in"', () => {
   const ev = [];
@@ -573,6 +662,10 @@ test('codex adapter: command, resume, JSONL events', () => {
   line({ type: 'item.completed', item: { id: 'i1', type: 'command_execution', command: 'trif tabs', exit_code: 0, status: 'completed' } });
   line({ type: 'item.started', item: { id: 'i2', type: 'file_change', changes: [] } });
   line({ type: 'item.completed', item: { id: 'i2', type: 'file_change', changes: [{ path: '/ws/sites/a.com/m.js', kind: 'add' }] } });
+  // (Windows: `trif` and the file tools are the trif MCP server's: told as the Mac's command and file change)
+  line({ type: 'item.started', item: { id: 'i5', type: 'mcp_tool_call', server: 'trif', tool: 'trif', arguments: { args: ['verify', 'a.com/m'] }, status: 'in_progress' } });
+  line({ type: 'item.completed', item: { id: 'i5', type: 'mcp_tool_call', server: 'trif', tool: 'trif', arguments: { args: ['verify', 'a.com/m'] }, status: 'completed' } });
+  line({ type: 'item.started', item: { id: 'i6', type: 'mcp_tool_call', server: 'trif', tool: 'write_file', arguments: { path: 'sites/a.com/m.js', content: 'x' }, status: 'in_progress' } });
   line({ type: 'item.completed', item: { id: 'i3', type: 'reasoning', text: 'hmm' } });
   line({ type: 'item.completed', item: { id: 'i4', type: 'agent_message', text: 'All done.' } });
   line({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 2 } });
@@ -580,6 +673,8 @@ test('codex adapter: command, resume, JSONL events', () => {
     { kind: 'session', sessionId: 'th1' },
     { kind: 'tool', name: 'Bash', summary: 'trif tabs' },
     { kind: 'tool', name: 'Edit', summary: inWs('sites', 'a.com', 'm.js') },
+    { kind: 'tool', name: 'Bash', summary: 'trif verify a.com/m' },
+    { kind: 'tool', name: 'Write', summary: 'sites/a.com/m.js' },
     { kind: 'text', text: 'All done.' },
     { kind: 'done', ok: true, result: 'All done.', costUsd: null, sessionId: 'th1' },
   ]);
@@ -698,6 +793,19 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing', as
   const bad = await extRequest(ext, 'agent.fly');
   assert.equal(bad.ok, false);
   assert.match(bad.error, /unknown command/);
+});
+
+test('agent.start: a trif MCP call (Windows) reaches the panel as the Mac\'s Bash step, not mcp__trif__trif', async () => {
+  const { home } = makeHome();
+  const ext = startHost(home);
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'WINMCP hide the banner', agent: 'claude' });
+  assert.equal(r.ok, true, r.error);
+  await waitDone(ext, r.result.runId);
+  const tools = eventsOf(ext, r.result.runId).filter((e) => e.kind === 'tool');
+  assert.deepEqual(tools, [
+    { kind: 'tool', name: 'Bash', summary: 'trif reload --tab 12' },
+    { kind: 'tool', name: 'Bash', summary: 'trif verify example.com/fake' },
+  ]);
 });
 
 test('agent.start: runId first, then session/text/tool events, one done with changedFiles and sessionId', async () => {

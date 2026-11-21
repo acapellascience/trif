@@ -169,7 +169,9 @@ const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms));
  * scope, TRIF off there), onProbe?(windowId, open, info)}. `force`: make a copy of a one-time link anyway.
  * Returns {dataUrl, how, note, full, width?, height?, cut?}.
  */
-export async function captureScreenshot(api, tab, { full = false, copy = false, force = false, timeout = 45000 } = {}, deps) {
+export async function captureScreenshot(api, tab, { full = false, copy = false, force = false, timeout = 45000, format = 'png', quality = 80 } = {}, deps) {
+  // (`format`: 'png', or 'jpeg' at `quality` for a picture of the viewport that's quicker to make and to send: inview.js)
+  const fmt = format === 'jpeg' ? { format: 'jpeg', quality } : { format: 'png' };
   const sleep = deps.sleep || sleepDefault;
   const win = await api.windows.get(tab.windowId).catch(() => null);
   const showing = !!(tab.active && win && win.state !== 'minimized');
@@ -190,7 +192,7 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
     };
     await showingNow();
     let dataUrl;
-    try { dataUrl = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }); } catch (e) {
+    try { dataUrl = await api.tabs.captureVisibleTab(tab.windowId, fmt); } catch (e) {
       // ("Either the '<all_urls>' or 'activeTab' permission is required.")
       if (!allUrls && /activeTab|all_urls|permission/i.test(String(e?.message ?? e))) throw new Error(needsClick(deps.browser, deps.family));
       throw e;
@@ -199,7 +201,7 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
     return { dataUrl, how: 'visible', note: null, full: false };
   }
   if (plan === 'tab') {
-    if (!full) return { dataUrl: await api.tabs.captureTab(tab.id, { format: 'png' }), how: 'tab', note: captureNote({ how: 'tab', showing }), full: false };
+    if (!full) return { dataUrl: await api.tabs.captureTab(tab.id, fmt), how: 'tab', note: captureNote({ how: 'tab', showing }), full: false };
     const d = await deps.pageCall(tab.id, () => ({
       w: document.documentElement.clientWidth || innerWidth,
       h: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, innerHeight),

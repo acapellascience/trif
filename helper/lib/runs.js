@@ -21,6 +21,7 @@ const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
 const { panelRunsOff, killTree, spawnable } = require('./platform');
 const { Stage, INSTRUCTION_NAME } = require('./stage');
+const { remoteStart, writeRemoteFiles, removeRemoteFiles, remoteContext } = require('./phonelink/remoterun');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -561,6 +562,9 @@ function normalizeSite(site, url) {
  * new Runs({ getWorkspace: () => ws, logger, onEvent: (runId, event) => void })
  *   start(args) -> {runId}     args: {agent, model, site, url, tabId, prompt, sessionId}
  *   stop(runId) -> {stopped: true}
+ *   inject(runId, {text, id}) -> {injected: true} | {injected: false, why}: a message the user sent while the run
+ *     works, written into a live run (args.live, an adapter with liveInput: Claude Code), which takes it at
+ *     its next step. `done` names those it never took (notTaken: their ids).
  *   list() -> [{runId, site, scope, agent, startedAt}]
  *   byToken(token) -> the live run whose agent was given this TRIF_RUN_TOKEN, or null
  *   scopes() -> [{runId, site, scope, written, locked, startedAt}] for live and just-finished runs (held
@@ -609,7 +613,8 @@ class Runs {
     return [...live, ...this.recent];
   }
 
-  start(args = {}) {
+  // (`own`: the helper's own word, never a message's. Its `remote` marks a run for a phone: startRemote.)
+  start(args = {}, own = {}) {
     const prompt = typeof args.prompt === 'string' ? args.prompt : '';
     if (!prompt.trim()) throw new Error('missing prompt');
     const site = normalizeSite(args.site, args.url);
@@ -648,6 +653,10 @@ class Runs {
       phone: args.phone && typeof args.phone === 'object' && typeof args.phone.device === 'string' ? { device: args.phone.device.slice(0, 40), width: Number(args.phone.width) || null } : null,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
+      remote: own.remote || null, // (a run for a paired phone: phonelink/remoterun.js)
+      // (from the side panel: the agent's stdin stays open for the user's messages meanwhile, inject)
+      live: args.live === true && !!adapter.liveInput,
+      injected: [], // [{id, text, taken}]: messages written into it (inject)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
       effort: typeof args.effort === 'string' && /^[a-z]{2,12}$/.test(args.effort) ? args.effort : null, // (the panel's Effort setting)
@@ -677,12 +686,50 @@ class Runs {
     return { runId: run.id };
   }
 
+  /**
+   * A run for a paired phone (docs/PHONE-LINK.md section 6; phonelink/remoterun.js remoteStart for `own`, the
+   * helper's word, and `msg`, the phone's). Its site is the phone twin of the page address's host, whatever
+   * else the phone says; the same run as any other from there. -> {runId, site, scope}
+   */
+  startRemote(own, msg) {
+    const { args, remote } = remoteStart(own, msg);
+    const { runId } = this.start(args, { remote });
+    const run = this.runs.get(runId);
+    return { runId, site: run.site, scope: run.scope };
+  }
+
   stop(runId) {
     const run = this.runs.get(runId);
     if (!run) throw new Error(`no running agent with id ${runId}`);
     run.stopped = true;
+    this._endInput(run);
     this._kill(run);
     return { stopped: true };
+  }
+
+  inject(runId, { text, id } = {}) {
+    const run = this.runs.get(runId);
+    const t = typeof text === 'string' ? text.trim() : '';
+    if (!t) throw new Error('empty message');
+    const key = typeof id === 'string' && /^[\w-]{1,64}$/.test(id) ? id : null;
+    if (!key) throw new Error('missing message id');
+    if (!run || run.finished || run.stopped) return { injected: false, why: 'not running' };
+    if (!run.live) return { injected: false, why: `${run.adapter.name} can't take a message while it works` };
+    // (before it starts, or once its turn is over: stdin closed, it's finishing, so the message goes next)
+    if (!run.input || run.inputEnded) return { injected: false, why: run.input ? 'finishing' : 'starting' };
+    if (run.injected.length >= 20) return { injected: false, why: 'too many' };
+    try { run.input.write(run.adapter.userLine(t)); } catch (e) { return { injected: false, why: e.message }; }
+    run.injected.push({ id: key, text: t, taken: false });
+    this._log(run, { webmods: 'inject', id: key, time: Date.now() });
+    this.logger.info(`agent run ${run.id}: a message from the user, sent while it works`);
+    return { injected: true };
+  }
+
+  // A live run's stdin closed: no more messages, so the agent exits once it has done what it was sent.
+  _endInput(run) {
+    if (!run.input || run.inputEnded) return;
+    run.inputEnded = true;
+    try { run.input.end(); } catch { /* gone */ }
   }
 
   stopAll(graceMs = 1500) {
@@ -778,10 +825,12 @@ class Runs {
       const shots = screenshotsFolder(ws, run.scope);
       run.screenshots = shots.dir;
       run.screenshotsReal = shots.real;
+      if (run.remote) writeRemoteFiles(run); // (the phone's copy of the page and its screenshot)
       // The run's own working folder, a copy of the workspace (stage.js): the only mods folder it writes.
       // The helper copies its changes into the real one as they're saved (_syncStage).
       run.stage = new Stage({ ws, dir: path.join(boxRoot(), `${run.id}.ws`), scope: run.scope, splits: run.splits, liveReal: run.modsReal, logger: this.logger,
         settings: run.adapter.workspaceSettings ? JSON.stringify({ permissions: { allow: run.adapter.allowedTools, deny: run.adapter.deniedTools } }, null, 2) + '\n' : null });
+      run.stage.twinOnly = !!run.remote; // (a run for a phone: its phone twin's folder only, stage.js ownTwin)
       run.stage.create();
       run.state.workspace = run.stage.dir; // (the chat names files by their place in it: sites/x.com/a.js)
     } catch (e) {
@@ -845,7 +894,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, noShell: this.platform === 'win32' ? (adapter.fencedFiles ? 'files' : true) : false };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, remote: run.remote ? remoteContext(run) : null, noShell: this.platform === 'win32' ? (adapter.fencedFiles ? 'files' : true) : false };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
@@ -865,7 +914,7 @@ class Runs {
       fs.mkdirSync(run.agentDir, { mode: 0o700 });
       // Windows: the run's fence, and the `trif` tool that starts TRIF's commands inside it (_fence).
       const fenced = this.platform === 'win32' ? this._fence(run, limits, env, { files: !!adapter.fencedFiles }) : {};
-      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options, ...fenced });
+      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, live: run.live, ...limits, ...options, ...fenced });
       for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't prepare ${adapter.name}'s run: ${e.message}` });
@@ -891,7 +940,15 @@ class Runs {
       // (Windows: npm's claude.cmd goes through cmd.exe, platform.js spawnable; no process groups there)
       const s = spawnable(file, args, { platform: this.platform });
       child = spawn(s.file, s.args, { cwd: run.stage ? run.stage.dir : ws.home, env, stdio: [typeof cmd.stdin === 'string' ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: this.platform !== 'win32', windowsHide: true, ...s.options });
-      if (typeof cmd.stdin === 'string') { child.stdin.on('error', () => { /* it may exit first */ }); child.stdin.end(cmd.stdin); }
+      if (typeof cmd.stdin === 'string') {
+        child.stdin.on('error', () => { /* it may exit first */ });
+        // (a live run's stays open for the user's messages until its first result: inject, _endInput)
+        if (cmd.keepStdin && run.live) {
+          child.stdin.write(cmd.stdin);
+          run.input = child.stdin;
+          if (run.stopped) this._endInput(run);
+        } else child.stdin.end(cmd.stdin);
+      }
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't start ${adapter.name}: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
@@ -1037,7 +1094,8 @@ class Runs {
    */
   _withoutSandbox(run, { why = [], message, from = '' }) {
     let ok = false;
-    try { ok = !!this.withoutSandbox.allowed(run.agent); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't read the consent to run without TRIF's sandbox: ${e.message}`); }
+    // (never a run for a phone: the consent is for the side panel's chats, a click on this computer)
+    try { ok = !run.remote && !!this.withoutSandbox.allowed(run.agent); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't read the consent to run without TRIF's sandbox: ${e.message}`); }
     const settingsName = run.adapter.settingsName || run.adapter.name;
     if (ok) {
       run.withoutSandbox = true;
@@ -1093,7 +1151,16 @@ class Runs {
     try {
       run.adapter.parse(line, (ev) => {
         if (!ev || typeof ev !== 'object') return;
+        if (ev.kind === 'taken') {
+          // (a message sent meanwhile, taken by the agent: the oldest not yet taken with these words)
+          const m = run.injected.find((x) => !x.taken && x.text === String(ev.text ?? '').trim());
+          if (m) { m.taken = true; this._emit(run, { kind: 'taken', id: m.id }); }
+          return;
+        }
         if (ev.kind === 'done') {
+          // (its turn is over: no more messages, so it exits; one sent just before is still read, as a
+          // turn of its own, and the last result is the run's)
+          this._endInput(run);
           run.agentDone = ev;
           if (ev.discardSession) run.lastSessionId = run.sessionId;
           else if (ev.sessionId) run.lastSessionId = ev.sessionId;
@@ -1141,6 +1208,7 @@ class Runs {
     if (run.fence) { const why = require('./win/fence').cleanup(run.fence.launcher, run.fence.specFile); if (why) this.logger.warn(`agent run ${run.id}: couldn't take its fence down: ${why}`); run.fence = null; }
     if (run.agentDir) { try { fs.rmSync(run.agentDir, { recursive: true, force: true }); } catch { /* ignore */ } }
     if (run.agentTmp) { try { fs.rmSync(run.agentTmp, { recursive: true, force: true }); } catch { /* ignore */ } }
+    if (run.remote) removeRemoteFiles(run);
     // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment. (Not
     // every one: Claude Code starts each command in a session of its own, and any can leave the group. What
     // they write lands in the run's working folder, which nothing reads any more.)
@@ -1180,6 +1248,10 @@ class Runs {
     }
     if (undoable.length) done.undoable = undoable;
     if (run.stopped && !run.shuttingDown) done.stopped = true;
+    // Messages sent while it worked that it never took (stopped first): the panel sends them again. (Only
+    // when the agent said it took its first message: one that never says so would have them all sent twice.)
+    const notTaken = run.state.prompted ? run.injected.filter((x) => !x.taken).map((x) => x.id) : [];
+    if (notTaken.length) done.notTaken = notTaken;
     // Stopped because an organization's settings replace TRIF's sandbox: the panel's choice card is the
     // error event's; `done` says so too.
     if (run.sandboxRefused && !done.ok) done.error = { kind: 'sandbox', agent: run.agent };

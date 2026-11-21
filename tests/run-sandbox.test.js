@@ -67,9 +67,12 @@ function scratch() {
   return fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync(base), 'trs-')));
 }
 
-let fixture = null;
-async function setup() {
-  if (fixture) return fixture;
+// (`only`: a home folder of its own where that agent alone is installed, as it is where a phone's run is
+// started, which uses the computer's default agent; and with stand-in models whose scripts no other test has
+// taken steps of: each stand-in counts its steps from when it was started)
+const fixtures = {};
+async function setup(only = '') {
+  if (fixtures[only]) return fixtures[only];
   const S = scratch();
   cleanups.push(() => fs.rmSync(S, { recursive: true, force: true }));
   const home = path.join(S, 'home');
@@ -88,7 +91,7 @@ async function setup() {
   const agentBin = path.join(S, 'agentbin');
   fs.mkdirSync(agentBin);
   if (CLAUDE) fs.symlinkSync(CLAUDE, path.join(agentBin, 'claude'));
-  if (CODEX) fs.symlinkSync(CODEX, path.join(agentBin, 'codex'));
+  if (CODEX && only !== 'claude') fs.symlinkSync(CODEX, path.join(agentBin, 'codex'));
   const keychainDir = path.join(home, 'Library', 'Keychains', 'trif-test');
   const kc = makeFakeKeychain(keychainDir);
   const PATH = `${agentBin}:/usr/bin:/bin`;
@@ -144,8 +147,8 @@ async function setup() {
   };
   ext.hello();
   await ext.waitForSocket(10000);
-  fixture = { home, code, ws, priv, keychainDir, ext, anthropic, openai, anthropicScript, openaiScript };
-  return fixture;
+  fixtures[only] = { home, code, ws, priv, keychainDir, ext, anthropic, openai, anthropicScript, openaiScript };
+  return fixtures[only];
 }
 
 let reqN = 0;
@@ -205,14 +208,15 @@ const BY = {
   claude: /was blocked|haven't granted|requested permissions|not allowed/i,
   trif: /not available inside a side-panel agent run|inside a side-panel agent run, files are read only in/,
   curl: /curl: \(7\)/, // (couldn't connect)
+  phone: /this run is for the user's phone: the page is open there, not in a tab on this computer/, // (the helper, to a phone's run)
 };
 
-function checkRefused(named, refused, info) {
+function checkRefused(named, refused, info, secrets = [SECRET]) {
   for (const [i, x] of refused.entries()) {
     const got = named[i];
     assert.notEqual(got.code, 0, `\`${got.cmd}\` should have been refused:\n${info}`);
-    assert.ok(!got.out.includes(SECRET) && !/^CONNECTED$/m.test(got.out), `\`${got.cmd}\` got through:\n${info}`);
-    assert.match(got.out, BY[x.by], `\`${got.cmd}\` should have been refused (${x.by === 'sandbox' ? 'by the sandbox' : x.by === 'claude' ? "by Claude Code's rules" : 'by trif'}):\n${info}`);
+    assert.ok(!secrets.some((x) => got.out.includes(x)) && !/^CONNECTED$/m.test(got.out), `\`${got.cmd}\` got through:\n${info}`);
+    assert.match(got.out, BY[x.by], `\`${got.cmd}\` should have been refused (${x.by === 'sandbox' ? 'by the sandbox' : x.by === 'claude' ? "by Claude Code's rules" : x.by === 'trif' ? 'by trif' : `as ${x.by}`}):\n${info}`);
   }
 }
 
@@ -288,6 +292,134 @@ test('Codex: real `trif` commands work in a side-panel run\'s sandbox; the priva
   checkRefused(named.slice(commands.length), refused, info);
   assert.ok(!fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')));
   assert.ok(!JSON.stringify(f.openai.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
+});
+
+// ---------------------------------------------------------------- a run started from a paired phone
+// The phone link (docs/PHONE-LINK.md section 6): a stand-in phone (tests/phone-link-client.js) pairs with the
+// real helper from the panel's code and asks for a mod; the helper starts the computer's default agent (the
+// real one, with a stand-in model) in the same sandbox as a side-panel run's, for the site's phone twin. In
+// it `trif phone page|try|screenshot` must work (the mailbox, then the phone's answer and its screenshot as a
+// file the run can read), the phone's copy of the page must be readable, and the run must get nothing of
+// the link's own: the private folder's phone-link.json (the paired phones' keys) and phone-link/ (what is
+// kept for phones); nor a tab of this computer, nor the site's desktop mods. The listener is on 127.0.0.1
+// alone (FakeExtension's testEnv) and nothing is announced (no dns-sd in tests).
+// Claude Code alone, the default agent where both are installed. Not Codex yet: a phone's run can't choose a
+// model, Codex's own default one gets no `tools` list in the request, and the stand-in model knows how to
+// call a shell tool only from that list (the Codex test above names a model of its own for that reason).
+// What a Codex run is denied comes from the same runLimits as a side-panel run's, proven above and, for a
+// phone's run, in tests/phone-link-run.test.js.
+const { PhoneClient } = require('./phone-link-client');
+const { generateKeyPair } = require('../helper/lib/phonelink/noise');
+
+const PHONE_PAGE = '<main>THE-PAGE-AS-THE-PHONE-SHOWED-IT</main>';
+const PHONE_NOW = 'THE-PAGE-ON-THE-PHONE-JUST-NOW';
+const PHONE_TRIED = 'THE-DRAFT-TRIED-ON-THE-PHONE';
+const jpeg = (word) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(word)]).toString('base64');
+
+async function panel(f, cmd, args) {
+  const r = await extRequest(f.ext, cmd, args);
+  assert.equal(r.ok, true, `${cmd}: ${r.error}`);
+  return r.result;
+}
+
+/** The files a phone's run is to work beside: the site's desktop mods, and the link's folder of kept runs. */
+function phoneSite(f, host) {
+  fs.mkdirSync(path.join(f.ws, 'sites', host), { recursive: true });
+  fs.writeFileSync(path.join(f.ws, 'sites', host, 'mine.js'), `// ==WebMod==\n// @name Mine\n// @match https://${host}/*\n// ==/WebMod==\n`);
+  fs.mkdirSync(path.join(f.priv, 'phone-link'), { recursive: true });
+}
+
+/**
+ * Pairs a phone and has it start a run for a page of `host`; `known({runId, port, pageFile})` is called as
+ * soon as the run has an id (before its agent's first step), for the steps that need them.
+ */
+async function phoneRun(f, host, known) {
+  await panel(f, 'phone.on');
+  const w = await panel(f, 'phone.pair.start');
+  const u = new URL(w.qr);
+  const keys = generateKeyPair();
+  const phone = await PhoneClient.connect({ port: w.port, computerKey: Buffer.from(u.searchParams.get('k'), 'base64url'), keys, name: 'Sandbox iPhone', pair: u.searchParams.get('s') });
+  cleanups.push(() => phone.close());
+  await phone.request({ t: 'hello', app: '1.0', device: { name: 'iPhone', width: 393, height: 852 } });
+  phone.onTool = (m) => (m.tool === 'read_page' ? { text: PHONE_NOW } : m.tool === 'try_mod' ? { text: `${PHONE_TRIED}\nErrors: none`, shot: jpeg('tried') } : { shot: jpeg('now') });
+  const mark = f.ext.messages.length;
+  const started = await phone.request({ t: 'run.start', url: `https://${host}/page`, page: PHONE_PAGE, shot: jpeg('shot'), chat: 'sandbox', prompt: 'probe the sandbox' }, { timeout: 15000 });
+  assert.equal(started.t, 'run.started', JSON.stringify(started));
+  const runId = started.runId;
+  const pageFile = path.join(f.priv, 'screenshots', `phone_${host}`, `phone-page-${runId}.txt`);
+  known({ runId, port: w.port, pageFile });
+  const events = [];
+  while (!events.length || events[events.length - 1].kind !== 'done') {
+    events.push((await phone.next((m) => m.t === 'run.event' && m.runId === runId, { timeout: 100000 })).event);
+  }
+  const result = await phone.next((m) => m.t === 'run.result' && m.runId === runId, { timeout: 15000 });
+  const toExtension = f.ext.messages.slice(mark).filter((m) => m.type === 'agentEvent' || m.type === 'request');
+  // (what the link's file has of this phone: its public key; the computer's own is in the keychain's stand-in)
+  const secrets = [SECRET, Buffer.from(keys.publicKey).toString('base64url')];
+  for (const file of [path.join(f.priv, 'phone-link.json'), path.join(f.keychainDir, 'items.json')]) assert.ok(fs.existsSync(file), file);
+  assert.ok(fs.readFileSync(path.join(f.priv, 'phone-link.json'), 'utf8').includes(secrets[1]));
+  await panel(f, 'phone.off');
+  return { phone, runId, pageFile, events, done: events[events.length - 1], result, toExtension, secrets };
+}
+
+/** What both agents' phone runs must show, once the run has ended. */
+function checkPhoneRun(f, host, run, named, works, info) {
+  const twin = `phone~${host}`;
+  for (const x of works) {
+    assert.ok(!FILE_TROUBLE.test(x.out), `\`${x.cmd}\` ran into a file it couldn't read in the phone run's sandbox:\n${x.out}\n\n${info}`);
+    assert.equal(x.code, 0, `\`${x.cmd}\` failed in the phone run's sandbox:\n${x.out}\n\n${info}`);
+  }
+  const by = (c) => named.find((x) => x.cmd.startsWith(c)).out;
+  assert.ok(by('trif phone page').includes(PHONE_NOW), info);
+  assert.match(by('trif new'), /probe\.js/, info);
+  assert.match(by('trif check'), /^ok: /m, info);
+  assert.ok(by('trif phone try').includes(PHONE_TRIED), info);
+  assert.match(by('trif phone try'), /^screenshot: .*\.jpg$/m, info);
+  assert.match(by('trif phone screenshot'), /^screenshot: .*\.jpg$/m, info);
+  assert.ok(by('the phone\'s copy of the page').includes(PHONE_PAGE), info);
+  // The phone was asked, in order, and given the draft's code to try.
+  assert.deepEqual(run.phone.tools.map((m) => m.tool), ['read_page', 'try_mod', 'screenshot'], info);
+  const tried = run.phone.tools[1].input;
+  assert.equal(tried.id, `${twin}/probe`, info);
+  assert.match(tried.code, /==WebMod==/, info);
+  // The result: the twin's new mod, and nothing else new in the mods folder; no step went to the extension.
+  assert.deepEqual(run.result.mods.map((m) => m.id), [`${twin}/probe`], info);
+  assert.ok(fs.existsSync(path.join(f.ws, 'sites', twin, 'probe.js')), info);
+  assert.deepEqual(fs.readdirSync(path.join(f.ws, 'sites', host)), ['mine.js'], info);
+  assert.ok(!fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')), info);
+  assert.deepEqual(run.toExtension, [], info);
+  assert.ok(!fs.existsSync(run.pageFile), 'the phone\'s copy of the page is gone once the run has ended');
+}
+
+test('Claude Code, a run from a paired phone: `trif phone` works in the run\'s sandbox and the phone\'s page is readable; the link\'s own files and key, this computer\'s tabs and the site\'s desktop mods stay out of reach', { skip: skipWhy(CLAUDE, 'Claude Code') }, async () => {
+  const f = await setup('claude');
+  const host = 'example.net';
+  const twin = `phone~${host}`;
+  phoneSite(f, host);
+  const commands = ['trif phone page', `trif new ${twin} probe --style`, `trif check ${twin}/probe`, `trif phone try ${twin}/probe`, 'trif phone screenshot', 'trif mods', 'trif explain'];
+  const readPage = { tool: 'Read', input: { file_path: '' } }; // (the file's name has the run's id: filled in below)
+  const refused = [
+    { cmd: `ls ${q(path.join(f.priv, 'phone-link'))}`, by: 'claude' },
+    { tool: 'Read', input: { file_path: path.join(f.priv, 'phone-link.json') }, by: 'claude' },
+    { cmd: `trif check ${q(path.join(f.priv, 'phone-link.json'))}`, by: 'trif' },
+    { tool: 'Read', input: { file_path: path.join(f.keychainDir, 'items.json') }, by: 'claude' }, // (the computer's key for the link)
+    { cmd: 'trif tabs', by: 'phone' },
+    { cmd: 'trif screenshot', by: 'phone' },
+    { cmd: `trif new ${host} probe --style`, by: 'sandbox' },
+    { cmd: 'trif new other.net probe --style', by: 'sandbox' },
+  ];
+  setScript(f.anthropicScript, [...commands.map((c) => ({ bash: c })), readPage, ...refused.map((x) => (x.tool ? { tool: x.tool, input: x.input } : { bash: x.cmd })), { say: 'Done: probed.' }]);
+  const run = await phoneRun(f, host, ({ pageFile }) => { readPage.input.file_path = pageFile; });
+  const results = claudeResults(f.anthropic);
+  const labels = [...commands, 'the phone\'s copy of the page', ...refused.map((x) => x.cmd || `${x.tool} ${x.input.file_path}`)];
+  const named = results.map((x, i) => ({ ...x, cmd: labels[i] || '?' }));
+  const info = report(named, `events: ${JSON.stringify(run.events).slice(0, 2000)}\nhelper.log:\n${helperLog(f)}`);
+  assert.equal(run.done.ok, true, info);
+  assert.equal(results.length, labels.length, `every step ran:\n${info}`);
+  checkPhoneRun(f, host, run, named, named.slice(0, commands.length + 1), info);
+  checkRefused(named.slice(commands.length + 1), refused, info, run.secrets);
+  const sent = JSON.stringify(f.anthropic.requests.map((x) => x.body));
+  assert.ok(!run.secrets.some((x) => sent.includes(x)), `something secret reached the model:\n${info}`);
 });
 
 // (the stand-ins keep the script array they were started with: a test's own steps go into it)

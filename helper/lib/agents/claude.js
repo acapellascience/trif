@@ -235,7 +235,7 @@ const adapter = {
    * context (system prompt: the page the user is on) go in files in `agentDir`, the run's own folder that
    * only the helper and Claude Code itself read (runs.js writes `files`, 0600, and removes them after).
    */
-  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', fence = null, ...limits }) {
+  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', fence = null, live = false, ...limits }) {
     const file = (name) => path.join(agentDir || '.', name);
     // Windows (`fence`: runs.js _fence): no shell, the `trif` tool, the rules spelled for Windows; no
     // sandbox settings, since Claude Code has no sandbox there to give them to.
@@ -245,6 +245,8 @@ const adapter = {
     // file is read from the file's folder, not the run's; on the command line, from the run's)
     const files = [{ path: file('settings.json'), content: JSON.stringify(win ? { permissions: { ...(win.file.length ? { allow: win.file } : {}), deny: DENIED_TOOLS } } : runSettings(limits)) }];
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
+      // (a side-panel run: its stdin stays open for messages the user sends while it works, liveInput below)
+      ...(live ? ['--input-format', 'stream-json', '--replay-user-messages'] : []),
       '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
       '--settings', file('settings.json'),
       '--tools', (win ? WINDOWS_TOOLS : TOOLS).join(','), '--disable-slash-commands',
@@ -271,7 +273,20 @@ const adapter = {
     // (runs.js runLimits agentTmp), not /tmp/claude-<uid>, which every Claude Code session on the computer
     // shares (their scratch files and task output: a run's commands could write into them, 2.1.316).
     const env = limits.agentTmp ? { CLAUDE_CODE_TMPDIR: limits.agentTmp, TMPDIR: limits.agentTmp } : {};
-    return { file: bin || adapter.binary, args, stdin: prompt, files, env, locked: (limits.lockedDirs || []).filter((d) => !d.link).map((d) => d.rel) };
+    return { file: bin || adapter.binary, args, stdin: live ? adapter.userLine(prompt) : prompt, ...(live ? { keepStdin: true } : {}), files, env, locked: (limits.lockedDirs || []).filter((d) => !d.link).map((d) => d.rel) };
+  },
+
+  // Messages the user sends while a run works ("Send now" in the side panel): with `--input-format
+  // stream-json` Claude Code reads user messages from stdin as JSON lines for as long as it stays open, and
+  // takes one written mid-run at its next step, as its terminal does with what's typed while it works
+  // (checked with 2.1.319: written while a command ran, it came back as the next message after that command's
+  // result, and the run went on with it; written after the turn's result, it started one more turn before
+  // Claude Code exited). runs.js closes stdin at the first result, so the run ends as before.
+  // With --replay-user-messages each message comes back (isReplay) once Claude Code takes it: parse emits
+  // `taken` for those after the first, so a message the run never took isn't shown as sent.
+  liveInput: true,
+  userLine(text) {
+    return JSON.stringify({ type: 'user', message: { role: 'user', content: String(text) } }) + '\n';
   },
 
   // One stdout line -> zero or more normalized events. `state` is per run ({workspace}).
@@ -292,6 +307,12 @@ const adapter = {
       // the replay: the run goes on, and its later replies and result are new.
       state.replaying = msg.compact_metadata?.trigger !== 'auto';
     } else if (msg.type === 'user' && msg.message) {
+      // A message of the user's, taken (live runs: --replay-user-messages): the first is the run's own.
+      if (msg.isReplay === true && typeof msg.message.content === 'string' && !/<local-command-stdout>/.test(msg.message.content)) {
+        if (state.prompted) emit({ kind: 'taken', text: msg.message.content });
+        state.prompted = true;
+        return;
+      }
       // A slash command's output (`/context`, `/cost`…) comes back as <local-command-stdout>.
       const text = typeof msg.message.content === 'string' ? msg.message.content : '';
       const out = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text);

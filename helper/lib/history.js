@@ -48,8 +48,8 @@ function modOf(ws, rel) {
 
 // (each entry may have a <name>.source beside it: what replaced that version, `chat` (a side-panel run), `fix`
 // (a run Fix it started), `restore` (an older one put back), `import` (an import replaced it), `undo`, `edit` (the
-// user's edit in the code card: lib/edit.js))
-const SOURCES = new Set(['chat', 'fix', 'restore', 'import', 'undo', 'edit']);
+// user's edit in the code card: lib/edit.js), `phone` (the phone sync: phonelink/syncsession.js))
+const SOURCES = new Set(['chat', 'fix', 'restore', 'import', 'undo', 'edit', 'phone']);
 function writeEntry(ws, site, mod, content, at = Date.now(), source = null) {
   const dir = path.join(historyDir(ws), site);
   fs.mkdirSync(dir, { recursive: true });

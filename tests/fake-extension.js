@@ -69,6 +69,11 @@ function testEnv(home, extra = {}) {
     // Never the real Claude Code managed settings (agents/claude-managed.js): a folder with none, unless a
     // test brings some.
     TRIF_CLAUDE_MANAGED_DIR: path.join(home, 'no-claude-managed'),
+    // The phone link (helper/lib/phonelink/): never the real dns-sd, which would announce on the Wi-Fi (a
+    // program that isn't there, unless a test brings a stand-in: tests/fake-dns-sd.js), and a listener, if a
+    // test turns the link on, on this computer alone.
+    TRIF_DNS_SD: path.join(home, 'no-dns-sd', 'dns-sd'),
+    TRIF_PHONE_LINK_HOST: '127.0.0.1',
     ...extra,
   };
 }

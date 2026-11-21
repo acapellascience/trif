@@ -13,6 +13,15 @@ fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
 - "May be broken": a style mod's selectors (its rules), a boxed mod's `trif.observe` and `trif.hide`, a
   free mod's `trif.expect`: none on a page (its address without the query) on 3 loads in a row, where they
   were before. Counted once per load, at the 9-second look.
+- (11-20, with Tim) **Comes and goes**: on a page where what a mod looks for went away and came back (2 or more
+  loads in a row with nothing, or a raised flag, then a match), or one a fix run found nothing broken on
+  (`trif not-broken`), it comes and goes: no "may be broken" there again for that version of the mod (a new
+  version starts fresh). Kept in `modHealth` with the page (`pages[page].comesAndGoes`), trimmed with it.
+- (11-20) **Hide-only mods wait longer**: a mod that only hides things is flagged after 10 loads in a row
+  with nothing, spanning at least 3 days (others: 3 loads). Hide-only: a style mod with a hide list and no
+  filter or replace, whose CSS rules (if any) only set `display: none` (as the hide list does; any other
+  declaration, `visibility`/`opacity`/sizes included, makes it not hide-only: helper/lib/rules.js hidesOnly);
+  a boxed mod that only ever called `trif.hide` (not `observe`/`changes`). A free mod's `trif.expect`: 3 loads.
 - The toolbar icon gets a red **!** on a tab where a running mod has a new error (title below). The tab
   itself isn't marked: an extension can't change a tab's title or icon without changing the page.
 - A card per new fingerprint, once; Ignore is for that fingerprint and that version.
@@ -38,7 +47,8 @@ fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
   **{Mod name}'s fix may not work on {site}. Undo the fix, or want me to try again?**
 - Buttons: **Fix it** · **Show error** · **Ignore** (title: **Don't flag this again for this version of the
   mod**); after a fix: **Undo fix** · **Try again** · **Show error** · **Ignore**; once fixed: **Undo fix**
-- Its state, after: **Fixing…** · **Fixed.** · **Ignored.** · **Fix undone.**
+- Its state, after: **Fixing…** · **Fixed.** · **Ignored.** · **Fix undone.** · (APPROVED by Tim, 11-20)
+  **Not broken.** (a fix run found nothing broken and said so with `trif not-broken`; no buttons after it)
 - If a button fails: **Couldn't do that: {why}** · **Couldn't undo the fix: {why}**
 - Fix it automatically, before the run: **{Mod name} has a new error on {site}: TRIF asked your agent to fix
   it (Settings: When a mod breaks, Fix it automatically).** (or **may be broken on {site}: …**)
@@ -70,6 +80,9 @@ fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
   changed how this part of the page is built. Look at the page as it is now (trif text, trif screenshot,
   trif sweep), find what the mod should act on, and update the mod so it works again, doing the same thing
   as before.**
+  Then (11-20, agent wording, Claude's): **If nothing is broken (the mod still fits how the site builds that part,
+  and the site just didn't show it this time: some parts of a page, like promos, come and go), don't change
+  the mod. Run `trif not-broken {id} {page}` so TRIF stops flagging it there, and tell me what you found.**
 
 ## CLI (trif status, trif mods)
 

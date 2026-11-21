@@ -36,6 +36,12 @@
 //                            (`code`: its codeHash, for a mod with a style section), and its lines that use a
 //                            power (a change is judged on what it adds to those)
 //   $TRIF_HOME/edits.json    mod id -> {hash, free, matches, at}: a change the user saved in the code card (editNeeds)
+//   $TRIF_HOME/synced.json   mod id -> {hash, phone, name, at}: a change the phone sync wrote to a phone twin
+//                            (phonelink/syncsession.js): judged as any change from outside, its hold names the phone
+//   $TRIF_HOME/synced-allowed.json  sync key -> {rev, tier, powers, phone, name, at}: a paired phone allowed this
+//                            revision of a phone mod there (the approval hint, D13): never an approval here. A hold
+//                            of that very revision, asking for nothing beyond it, gets `allowedOn: <the phone's name>`
+//                            for its card's words ("You allowed this on …"); Allow is the same Allow.
 //   $TRIF_HOME/.ran/<site>/<mod>.js  that version's text: while a change to the mod waits, it's what runs
 //                            (lastRun), and "Don't allow" puts it back
 // A held entry lasts while that version of the mod is there; an edit makes it be worked out again.
@@ -170,6 +176,45 @@ function recordEdit(home, id, hash, was) {
   const all = loadEdits(home);
   all[id] = { hash, free: !!was && !was.rules && !was.sandboxed, matches: was && Array.isArray(was.matches) ? was.matches : [], at: Date.now() };
   saveJson(editsFile(home), all);
+}
+// What the phone sync wrote (phonelink/syncsession.js), in $TRIF_HOME/synced.json: mod id -> {hash (the file's
+// mod hash), phone (its id), name (the phone's, as paired), at}. Written before the file, as an edit's mark. Only
+// says where a change came from: it is judged as any change from outside (`by: 'outside'`, with `phone`).
+function syncedFile(home) { return path.join(home, 'synced.json'); }
+const loadSynced = (home) => loadJson(syncedFile(home));
+function recordSynced(home, id, hash, phone) {
+  const all = loadSynced(home);
+  all[id] = { hash, phone: String(phone && phone.id || ''), name: String(phone && phone.name || '').slice(0, 80), at: Date.now() };
+  saveJson(syncedFile(home), all);
+}
+// The approval hint (docs/PHONE-SYNC.md section 6b, D13): what each paired phone says it allowed, by sync key
+// (phonelink/sync.js syncKey). Written at each sync.begin from the phone's list (that phone's rows replaced).
+function syncedAllowedFile(home) { return path.join(home, 'synced-allowed.json'); }
+const loadSyncedAllowed = (home) => loadJson(syncedAllowedFile(home));
+/** Replaces one phone's hints with `hints` (Map key -> {rev, tier, powers}). Returns whether anything changed. */
+function recordSyncedAllowed(home, phone, hints) {
+  const all = loadSyncedAllowed(home);
+  const before = JSON.stringify(all);
+  const pid = String(phone && phone.id || '');
+  for (const [k, v] of Object.entries(all)) if (!v || v.phone === pid) delete all[k];
+  const at = Date.now();
+  for (const [k, h] of hints) all[k] = { rev: h.rev, tier: h.tier, powers: h.powers, phone: pid, name: String(phone && phone.name || '').slice(0, 80), at };
+  const strip = (o) => JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v && { ...v, at: 0 }])));
+  if (strip(JSON.parse(before)) === strip(all)) return false;
+  saveJson(syncedAllowedFile(home), all);
+  return true;
+}
+/** The phone whose hint fits this mod's file as it is (the name it was paired under), or null. Reads the file only
+ * when there's a hint for it. */
+function allowedOnFor(m, hints) {
+  const S = require('./phonelink/sync');
+  const key = S.keyOfModId(m.id, m.uid);
+  const h = key && hints[key] ? S.readHint(hints[key]) : null;
+  if (!h) return null;
+  let buf;
+  try { buf = fs.readFileSync(m.file); } catch { return null; }
+  const powers = m.sandboxed && Array.isArray(m.powers) ? m.powers : [];
+  return S.hintFits(h, { rev: S.rev(buf), tier: S.tierOf(m), powers }) ? (String(hints[key].name || '') || 'your phone') : null;
 }
 const FREE_NOW = 'is now a free mod, so it can do anything the page can do';
 function editNeeds(mod, edit) {
@@ -335,6 +380,8 @@ function updateHeld(ws, mods, scopes) {
   let seenChanged = false;
   const edits = loadEdits(ws.home);
   let editsChanged = false;
+  const synced = loadSynced(ws.home);
+  let syncedChanged = false;
   // (the lines of every version that ran, kept together: an undo back to one of them isn't new)
   const record = (m) => {
     const was = seen && typeof seen[m.id] === 'object' && seen[m.id] && seen[m.id].lines ? seen[m.id].lines : {};
@@ -420,6 +467,8 @@ function updateHeld(ws, mods, scopes) {
         reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
         lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
         ...reachOf(needs),
+        // (a change the phone sync wrote: the hold says which phone it came from)
+        ...(by === 'outside' && synced[m.id] && synced[m.id].hash === m.hash ? { phone: synced[m.id].name || 'your phone' } : {}),
       };
       changed = true;
     } else {
@@ -438,6 +487,18 @@ function updateHeld(ws, mods, scopes) {
   for (const [id, e] of Object.entries(edits)) {
     const m = byId.get(id);
     if (!m || (m.hash !== e.hash && Date.now() - (Number(e.at) || 0) > 60000)) { delete edits[id]; editsChanged = true; }
+  }
+  for (const [id, e] of Object.entries(synced)) {
+    const m = byId.get(id);
+    if (!m || (m.hash !== e.hash && Date.now() - (Number(e.at) || 0) > 60000)) { delete synced[id]; syncedChanged = true; }
+  }
+  if (syncedChanged) saveJson(syncedFile(ws.home), synced);
+  // (the approval hint: a hold of the very revision a paired phone allowed, asking nothing beyond it, says so)
+  const hints = loadSyncedAllowed(ws.home);
+  for (const [id, h] of Object.entries(held)) {
+    const m = byId.get(id);
+    const on = m && Object.keys(hints).length ? allowedOnFor(m, hints) : null;
+    if ((h.allowedOn || null) !== on) { if (on) h.allowedOn = on; else delete h.allowedOn; changed = true; }
   }
   if (changed) saveHeld(ws.home, held);
   if (seenChanged) saveJson(seenFile(ws.home), seen);
@@ -569,4 +630,5 @@ module.exports = {
   heldOnError, everywhere, codeOf, shippedVersion, shippedSiteNeeds,
   loadHeld, saveHeld, updateHeld, approveHeld, rejectHeld, lastRun, heldFile, allowedFile, seenFile, holdReason,
   needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys, recordEdit, loadEdits, editNeeds, editsFile,
+  recordSynced, loadSynced, syncedFile, recordSyncedAllowed, loadSyncedAllowed, syncedAllowedFile, allowedOnFor,
 };

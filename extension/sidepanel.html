@@ -29,11 +29,16 @@
     <button id="site-switch" class="icon-btn power" type="button" role="switch" aria-checked="false" hidden>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 4.3a5 5 0 1 0 5.6 0"/><path d="M8 2.2v5"/></svg>
     </button>
-    <!-- Edit for mobile (phone.js, docs/MOBILE-EDIT.md): this tab into a phone-sized window where the site sees an
-         iPhone; pressed in the phone view's own panel, where it's Back to desktop (sidepanel.js renderPhone). -->
-    <button id="phone-btn" class="icon-btn phone-btn" type="button" aria-pressed="false" hidden>
-      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.6"/><path d="M7 12.2h2"/></svg>
-    </button>
+    <!-- The phone menu (sidepanel.js renderPhone): Switch to phone view (phone.js, docs/MOBILE-EDIT.md: this tab into
+         a phone-sized window where the site sees an iPhone; in the phone view's own panel, Back to desktop) and Sync
+         with phone (the phone link through whichever browser's helper has it: Connect a phone, or Sync now). The
+         button shows as pressed in the phone view. -->
+    <span class="phone-menu-wrap" hidden>
+      <button id="phone-btn" class="icon-btn phone-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="phone-menu" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.6"/><path d="M7 12.2h2"/></svg>
+      </button>
+      <span id="phone-menu" class="pop-menu phone-menu" role="menu" aria-labelledby="phone-btn" hidden><button id="phone-menu-view" class="btn menu-item" type="button" role="menuitem" tabindex="-1">Switch to phone view</button><button id="phone-menu-sync" class="btn menu-item" type="button" role="menuitem" tabindex="-1">Sync with phone</button></span>
+    </span>
     <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat" disabled>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
     </button>
@@ -148,6 +153,9 @@
       <span id="sensitive-note" class="note" role="status"></span>
     </div>
   </div>
+  <!-- Connect a phone: TRIF on the iPhone asks this computer's agent for phone mods (phonelink.js; hidden
+       without a helper that has the phone link). It scrolls with Settings. -->
+  <div id="phone-link" class="phone-link" hidden></div>
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>
 </section>
 <section id="gate" class="gate" hidden>
@@ -196,7 +204,26 @@
 <section id="notice" class="notice" hidden></section>
 <section id="update" class="notice" hidden></section>
 <!-- The phone view's line: this panel follows a phone window (sidepanel.js renderPhone). -->
-<p id="phone-note" class="phone-note" hidden><span id="phone-note-text"></span> <button id="phone-back" class="link-btn" type="button">Back to desktop</button></p>
+<div id="phone-note" class="phone-note" hidden>
+  <!-- Its navigation, in the popup route only (a browser without a side panel, as Arc: the phone window is a popup,
+       with no address bar of its own; the window route has the browser's): back, forward, reload, and an address or
+       a search, for the phone tab (background.js phone.nav). In the panel, so the page keeps the phone's size. -->
+  <form id="phone-nav" class="phone-nav" autocomplete="off" hidden>
+    <button id="phone-nav-back" class="icon-btn" type="button" title="Back" aria-label="Back"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg></button>
+    <button id="phone-nav-forward" class="icon-btn" type="button" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button>
+    <button id="phone-nav-reload" class="icon-btn" type="button" title="Reload" aria-label="Reload"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5v3h-3"/></svg></button>
+    <input id="phone-nav-url" class="phone-nav-url" type="text" inputmode="url" spellcheck="false" autocapitalize="off" enterkeyhint="go" aria-label="Address or search" placeholder="Address or search">
+  </form>
+  <p class="phone-note-line"><span id="phone-note-text"></span> <button id="phone-back" class="link-btn" type="button">Back to desktop</button></p>
+  <!-- (the page wider than the phone's: the browser keeps the window wider; sidepanel.js renderPhone) -->
+  <p id="phone-width" class="phone-width" hidden></p>
+</div>
+<!-- The phone view just opened in a window of its own, without TRIF's panel there (Firefox, or the click's gesture
+     gone): in the panel that opened it, until TRIF's panel is open beside the phone (sidepanel.js renderPhoneHint). -->
+<p id="phone-hint" class="phone-sync phone-hint" hidden aria-live="polite"><span id="phone-hint-text"></span><button id="phone-hint-close" class="phone-sync-close" type="button" title="Close" aria-label="Close">×</button></p>
+<!-- The phone line: in the phone view, under its banner; elsewhere, after the phone menu's Sync with phone, until
+     closed (sidepanel.js renderPhoneSync, phonelink.js phoneSyncView). -->
+<p id="phone-sync" class="phone-sync" hidden aria-live="polite"><span id="phone-sync-text"></span><span id="phone-sync-acts" class="phone-sync-acts"></span><button id="phone-sync-close" class="phone-sync-close" type="button" title="Close" aria-label="Close" hidden>×</button></p>
 <!-- A mod file in the user's Downloads: "Add this mod?" (sidepanel.js renderDownloadOffer) -->
 <section id="download-offer" class="notice download-offer" hidden></section>
 
@@ -231,6 +258,8 @@
   </div>
   <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions"></ol>
   <div id="working" class="working" hidden role="status"><span class="pulse" aria-hidden="true"></span>Working…</div>
+  <!-- Messages typed while the agent works, waiting to go (sidepanel.js renderQueue). -->
+  <ol id="queue" class="queue" aria-label="Waiting to send" hidden></ol>
 </main>
 
 <!-- Over the message box: which agent and model this chat uses (sidepanel.js renderUsing; a click opens
@@ -267,5 +296,7 @@
 <p id="robotless-line" class="robotless-line">Robotless: your mods run, no agent. Pick one in <a href="#" id="robotless-settings">Settings</a> to chat.</p>
 
 <script type="module" src="sidepanel.js"></script>
+<!-- A short-lived line over the panel, which moves nothing: a sync with the phone done (sidepanel.js showToast). -->
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

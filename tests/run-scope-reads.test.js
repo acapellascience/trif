@@ -247,6 +247,10 @@ test('a command a run may not send is refused by the helper, never sent on to th
   }
   const viaSock = await sockRequest(ext.sock, { id: 'u', cmd: 'totally.made.up', args: {}, token });
   assert.match(viaSock.error, /isn't a command an agent run can send/);
+  // `trif phone page|try|screenshot` are a phone run's alone (phone-link-e2e.test.js has a phone run's side)
+  for (const cmd of ['remote.page', 'remote.try', 'remote.screenshot']) {
+    assert.match((await forge(box, cmd, { id: 'victim.com/secret' })).error, /in a run they started from the phone: this isn't one/, cmd);
+  }
   // the commands that were the user's alone still say so
   assert.match((await forge(box, 'agent.start', { site: 'victim.com', url: 'https://victim.com/', prompt: 'x' })).error, /isn't available inside an agent run/);
   assert.match((await forge(box, 'mod.historyCode', { id: 'victim.com/secret', stamp: 'x' })).error, /isn't available inside an agent run/);
@@ -255,8 +259,13 @@ test('a command a run may not send is refused by the helper, never sent on to th
   // a page command the run's `trif` sends goes on, held to the run's site
   const tabs = await forge(box, 'tabs', { scope: 'victim.com', agentRun: 'someone-else' });
   assert.deepEqual(tabs.result, { scope: 'attacker.com', agentRun: runs.desktop.runId });
+  // (`trif not-broken` too: the extension holds it to the run's site's mods, background.js mod.notBroken)
+  ext.handlers['mod.notBroken'] = (args) => ({ scope: args.scope ?? null, id: args.id });
+  const nb = await forge(box, 'mod.notBroken', { id: 'victim.com/secret', scope: 'victim.com' });
+  delete ext.handlers['mod.notBroken'];
+  assert.deepEqual(nb.result, { scope: 'attacker.com', id: 'victim.com/secret' });
   const sent = ext.messages.slice(since).filter((m) => m.type === 'request').map((m) => m.cmd);
-  assert.deepEqual(sent, ['tabs'], 'nothing but the page command reached the extension');
+  assert.deepEqual(sent, ['tabs', 'mod.notBroken'], 'nothing but the page commands reached the extension');
   // (the user's terminal: an unknown command still goes to the extension, which says what it makes of it)
   ext.handlers['totally.made.up'] = () => ({ reached: 'the extension' });
   const term = await sockRequest(ext.sock, { id: 't', cmd: 'totally.made.up', args: {} });

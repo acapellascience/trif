@@ -163,6 +163,18 @@ export function phoneGate(phone, code) {
   return `if (${phone ? '' : '!'}${PHONE_MARK_TEST}) ${code}`;
 }
 
+// A mod that changes kind can change world: a boxed mod runs in TRIF's sandbox world, any other (and a boxed
+// one run as a page script) in the page's. userScripts.update() merges with what's registered, keeping what it
+// isn't given, so a mod leaving TRIF's world would keep its worldId, which Chrome takes only in a USER_SCRIPT
+// world ("World ID can only be specified for USER_SCRIPT worlds."), and be refused at every sync. One whose
+// world changes is unregistered and registered afresh instead: here when the browser said what's registered
+// (getScripts), else once the update is refused (syncUserScripts reregister).
+const worldOf = (s) => `${s.world || 'USER_SCRIPT'}|${s.world === 'MAIN' ? '' : s.worldId || ''}`;
+function worldMoved(registeredAs, mod) {
+  if (!registeredAs || !('world' in registeredAs)) return false; // (known ids only, or a browser that doesn't say: not known)
+  return worldOf(registeredAs) !== worldOf(inSandboxWorld(mod) ? { world: 'USER_SCRIPT', worldId: SANDBOX_WORLD } : { world: 'MAIN' });
+}
+
 /** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
 export function inSandboxWorld(mod) { return !!(mod && mod.sandboxed && !mod.unsandboxed); }
 
@@ -344,15 +356,30 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   const next = {};
   const registered = [];
   let unsure = false; // a register or update failed: what's registered is then for the browser to say
+  // (update: true, or 'replace', for one whose world changed: unregistered and registered afresh, worldMoved)
   const registerMod = async (mod, update) => {
     try {
-      if (update) await us.update([modToUserScript(mod)]);
-      else await us.register([modToUserScript(mod)]);
+      if (update === 'replace') await reregister(mod);
+      else if (update) {
+        try { await us.update([modToUserScript(mod)]); } catch { await reregister(mod); }
+      } else await us.register([modToUserScript(mod)]);
       next[mod.id] = mod.hash ?? null;
       registered.push(mod.id);
     } catch (e) {
       unsure = true;
       errors.push({ id: mod.id, error: errMsg(e) });
+    }
+  };
+  // An update the browser refused: the mod unregistered and registered afresh (a change of world, when what's
+  // registered wasn't known: worldMoved), and if it won't go that way either, what was registered put back,
+  // so the version before runs on, as after a refused update.
+  const reregister = async (mod) => {
+    let old = null;
+    try { old = (await us.getScripts({ ids: [mod.id] })).find((s) => s.id === mod.id) || null; } catch { /* (the new one may still go) */ }
+    await us.unregister({ ids: [mod.id] });
+    try { await us.register([modToUserScript(mod)]); } catch (e) {
+      if (old) await us.register([old]).catch(() => {});
+      throw e;
     }
   };
   const knownNow = () => (unsure ? null : [RUNTIME_ID, ...(sandboxUp ? [SANDBOX_RUNTIME_ID] : []), ...registered]);
@@ -391,12 +418,16 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   await syncSandboxRuntime(false);
   const fresh = [];
   const changed = [];
+  const moved = [];
+  const registeredAs = new Map(existing.map((s) => [s.id, s]));
   for (const mod of desired) {
     if (inSandboxWorld(mod) && !sandboxUp) continue; // (reported above)
     if (!existingIds.has(mod.id)) fresh.push(mod);
     else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
+    else if (worldMoved(registeredAs.get(mod.id), mod)) moved.push(mod);
     else changed.push(mod);
   }
+  for (const mod of moved) await registerMod(mod, 'replace');
   await registerMods(changed, true);
   await registerMods(fresh, false);
   const order = new Map(desired.map((m, i) => [m.id, i]));
@@ -820,6 +851,8 @@ export function applyAbsorbed(mods, disabled = {}, offSites = {}, absorbed = {})
   return { disabled: d, offSites: o, absorbed: a, changed };
 }
 
+// A mod's file without its header's @name and @id lines (a rule mod's own text, not the code TRIF makes of it).
+const renameBody = (m) => String(typeof m.text === 'string' ? m.text : m.code).split('\n').filter((l) => !/^\s*\/\/\s*@(name|id)(\s|$)/i.test(l)).join('\n');
 /**
  * Mods renamed on disk since the last `mods` message. A mod's id is its site folder and file name, so a
  * renamed file arrives as a new id while the old one is gone; when the code is the same, in the same site
@@ -833,7 +866,10 @@ export function findRenames(prev, next) {
   for (const m of next || []) {
     if (!gone.length) break;
     if (typeof m?.id !== 'string' || typeof m.code !== 'string' || before.has(m.id)) continue;
-    const i = gone.findIndex((g) => g.site === m.site && g.code === m.code);
+    // (the same stable id, @id, in the same folder: renamed, its text changed or not: docs/PHONE-SYNC.md 2a)
+    let i = typeof m.uid === 'string' && m.uid ? gone.findIndex((g) => g.site === m.site && g.uid === m.uid) : -1;
+    // (else the same code once its @name and @id lines are left out: a rename that gave it its id, an mv)
+    if (i === -1) { const b = renameBody(m); i = gone.findIndex((g) => g.site === m.site && renameBody(g) === b); }
     if (i === -1) continue;
     out.push({ from: gone[i].id, to: m.id });
     gone.splice(i, 1);
@@ -1286,10 +1322,14 @@ export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [
   return out;
 }
 
-/** The site a mod's folder is: its id's first part, as a site (all-sites: null). */
+/**
+ * The site a mod's folder is: its id's first part, as a site (all-sites: null). A phone twin's (phone~x.com) is
+ * its site's, x.com: its pages are the site's (so a sensitive site's twin, phone~claude.ai, is that sensitive
+ * site's own, and its mods run there and only there: limitToSites, background.js waitsThere).
+ */
 export function modHome(mod, sensitive = null) {
-  const folder = String(mod?.id || '').split('/')[0] || String(mod?.site || '');
-  if (!folder || folder === 'all-sites') return null;
+  const folder = phoneBase(String(mod?.id || '').split('/')[0] || String(mod?.site || ''));
+  if (!folder || folder === 'all-sites') return null; // (the phone view's every-site folder too, phone~all-sites: D10)
   return sensitive ? sensitive.scopeOf(folder) : scopeFor(folder);
 }
 
@@ -1618,6 +1658,42 @@ export function capChat(chat) {
   while (total > CHAT_BYTES_MAX && drop < messages.length - 1) total -= sizes[drop++];
   chat.messages = drop ? messages.slice(drop) : messages;
   return chat;
+}
+
+// ---- messages sent while the agent works (chat.queue) -----------------------------------------------
+//
+// Typed while a run works, a message waits in the chat's queue (chat:<site> `queue`: [{id, text, time, opts,
+// now?}], `opts` what the panel would have started the run with) and goes when the run is done, in the same
+// conversation. Several waiting go as one message, in order, as Claude Code's terminal joins what's typed
+// while it works into its next turn. A run that failed or was stopped leaves them waiting. "Send now" (`now`)
+// writes it into the run if the agent can take it there (background.js sendNow), else stops the run and
+// sends it as soon as it has stopped.
+export const QUEUE_MAX = 20; // messages waiting per chat
+
+/** The queue as stored, cleaned: only well-formed items, at most QUEUE_MAX. */
+export function normalizeQueue(queue) {
+  if (!Array.isArray(queue)) return [];
+  return queue.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id && typeof x.text === 'string' && x.text.trim())
+    .slice(0, QUEUE_MAX);
+}
+
+/** The messages to send (`ids`: those only; else every one) and the one message they make, or null. */
+export function queuedMessage(queue, ids = null) {
+  const items = normalizeQueue(queue).filter((x) => !ids || ids.includes(x.id));
+  if (!items.length) return null;
+  return { items, ids: items.map((x) => x.id), text: items.map((x) => x.text.trim()).join('\n\n'), opts: { ...(items[items.length - 1].opts || {}) } };
+}
+
+/**
+ * A run ended: what waits now and what goes. `finished`: it was done (not stopped, nothing failed), so every
+ * waiting message goes; else only those the user sent now (`now`). `back`: messages written into the run that
+ * it never took (runs.js notTaken), waiting again first, as sent now. Returns {queue, send: ids or null}.
+ */
+export function queueAfterRun(queue, { finished = false, back = [] } = {}) {
+  const q = [...normalizeQueue(back).map((x) => ({ ...x, now: true })), ...normalizeQueue(queue)].slice(0, QUEUE_MAX);
+  const send = finished ? q.map((x) => x.id) : q.filter((x) => x.now).map((x) => x.id);
+  // (those going are marked so, `now`, until the next run takes them: background.js sendQueue)
+  return { queue: q.map((x) => (send.includes(x.id) ? { ...x, now: true } : x)), send: send.length ? send : null };
 }
 
 /** Hosts whose sign-in pages the side panel may open for an agent login (and their subdomains). */

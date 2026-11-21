@@ -23,9 +23,12 @@ const { workspace, VERSION, examplesDir } = require('./lib/paths');
 const pipes = require('./lib/win/pipes');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
-const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1 } = require('./lib/mods');
+const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1, isIgnoredName } = require('./lib/mods');
 const { restyle } = require('./lib/stylesection');
 const { Runs } = require('./lib/runs');
+const { remoteRefusal, remoteCommand, REMOTE_COMMANDS, REMOTE_TOOLS, NOT_REMOTE } = require('./lib/phonelink/remoterun');
+const { Link, COMMANDS: PHONE_COMMANDS } = require('./lib/phonelink/link');
+const phoneRelay = require('./lib/phonelink/relay');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
@@ -35,12 +38,12 @@ const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
   starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds, changedShipped } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
-const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
+const { ownSock, removeStaleSockets, codeStamp, helperSockets } = require('./lib/helpers');
 const { launchingBrowser, reconcileBrowser, browserFamily, browserKey } = require('./lib/browsers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash, siteInScope } = require('./lib/trash');
 const { ownFolder } = require('./lib/stage');
-const { runScope } = require('./lib/scope');
+const { runScope, isPhoneSite } = require('./lib/scope');
 const update = require('./lib/update');
 const modsFeed = require('./lib/modsfeed');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
@@ -99,6 +102,10 @@ const state = {
   updates: {}, // mod id -> new shipped version waiting (see lib/preinstalled.js pendingUpdates)
   lastSignature: null,
   lastFingerprint: null,
+  twinStamp: undefined, // (the phone twins' files as syncMods last saw them: a change nudges a connected phone to sync)
+  syncWriting: false, // (syncMods for the phone sync's own write: no nudge for it)
+  phoneSwitches: null, // (the phone twins' switches as the extension last said: Map mod id -> {on, off, at}; null: never said)
+  phoneSwitchesSent: new Map(), // (the phone's switches sent to the extension: mod id -> {key, when}, until its report has them)
   modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
   resentFor: null, // the signature of the last set re-sent because the extension asked (modsResend)
   sentMods: null, // id -> hash of the last set sent to this extension, for 'modsSame' (null: send every mod whole)
@@ -271,6 +278,16 @@ function onExtensionMessage(msg) {
         const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null);
         if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
       } catch (e) { logger.warn(`switches: ${e.message}`); }
+      // (the phone twins' switches, for the phone sync (docs/PHONE-SYNC.md section 4b): an extension that doesn't say
+      // has none synced. One changed since the last report: the phones are nudged)
+      if (msg.phoneSwitches && typeof msg.phoneSwitches === 'object' && !Array.isArray(msg.phoneSwitches)) {
+        const next = new Map();
+        for (const [id, v] of Object.entries(msg.phoneSwitches).slice(0, 2000)) if (/^phone~/.test(id) && v && typeof v === 'object') next.set(id, v);
+        // (not for the phone's own switches arriving: switchNews; that echo made each switch a second sync, refused busy)
+        const was = state.phoneSwitches;
+        state.phoneSwitches = next;
+        if (require('./lib/phonelink/sync').switchNews(was, next, state.phoneSwitchesSent)) { try { link.syncChanged(); } catch (e) { logger.warn(`phone sync: ${e.message}`); } }
+      }
       break;
     case 'log': {
       const level = ['error', 'warn', 'info', 'debug'].includes(msg.level) ? msg.level : 'info';
@@ -310,14 +327,45 @@ function pageFactsOf(m) {
   return pageFactsCache.get(key);
 }
 
+/** The phone twins' mod files (sites/phone~<site>/<name>.js), by name, size and time: what a phone sync would see change. */
+function twinStamp() {
+  const out = [];
+  let folders = [];
+  try { folders = fs.readdirSync(ws.modsDir).filter(isPhoneSite).sort(); } catch { return ''; }
+  for (const folder of folders) {
+    let files = [];
+    try { files = fs.readdirSync(path.join(ws.modsDir, folder)).filter((f) => f.endsWith('.js') && !isIgnoredName(f)).sort(); } catch { continue; }
+    for (const f of files) {
+      try { const st = fs.lstatSync(path.join(ws.modsDir, folder, f)); out.push(`${folder}/${f}:${st.size}:${st.mtimeMs}`); } catch { /* gone */ }
+    }
+  }
+  return out.join('\n');
+}
+
 function syncMods(reason, force) {
   if (state.shuttingDown) return;
   clearTimeout(debounceTimer);
   ensureWatchers();
   state.lastFingerprint = fingerprint();
+  // A phone twin changed here (an edit, a chat's change, a delete), not by the phone sync itself: the connected
+  // phones are nudged (docs/PHONE-SYNC.md section 7; nothing when syncing is off, link.syncChanged).
+  const twins = twinStamp();
+  if (state.twinStamp !== undefined && twins !== state.twinStamp && !state.syncWriting) {
+    try { link.syncChanged(); } catch (e) { logger.warn(`phone sync: ${e.message}`); }
+  }
+  state.twinStamp = twins;
   const scanned = scanMods(ws.modsDir);
   let { mods } = scanned;
   const { problems, warnings } = scanned;
+  // A mod renamed since the last look (its stable id in the same folder, or the same code: mods.js findRenames, a
+  // rename in the code card, an agent's mv, the phone sync's): what the helper keys by its id moves with it before
+  // held.js judges it, so it's the same mod (lib/rename.js moveKeys; idempotent, origins follow in trackOrigins).
+  if (state.mods && state.mods.length) {
+    try {
+      const renames = findRenames(state.mods, mods);
+      if (renames.length && require('./lib/rename').moveKeys(ws, renames)) logger.info(`renamed: ${renames.map((r) => `${r.from} -> ${r.to}`).join(', ')} (what it was allowed and its history kept)`);
+    } catch (e) { logger.warn(`renames: ${e.message}`); }
+  }
   // (an error here mustn't let a new or changed mod through unchecked: those wait until a sync works)
   try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); state.held = heldOnError(ws, mods, state.held, e); }
   // A change waiting for the user's OK to a mod that was running: the version that last ran keeps
@@ -375,6 +423,10 @@ function syncMods(reason, force) {
     const h = state.held[m.id], r = state.review && state.review[m.id];
     const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
       ...(h.reach ? { reach: h.reach } : {}), ...(h.runId ? { runId: h.runId } : {}),
+      // (a change the phone sync brought: the phone's name, for "From {phone}" on the card)
+      ...(h.phone ? { phone: String(h.phone).slice(0, 80) } : {}),
+      // (and the phone that allowed this very version there: the approval hint's words, never an approval here)
+      ...(h.allowedOn ? { allowedOn: String(h.allowedOn).slice(0, 80) } : {}),
       // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
       ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^(power|site):/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
@@ -408,7 +460,7 @@ function syncMods(reason, force) {
   let starter = null;
   try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}` : ''}${m.siteOk ? `:site ${m.siteOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}${m.held.allowedOn ? ` ok ${m.held.allowedOn}` : ''}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}${m.pending.allowedOn ? ` ok ${m.pending.allowedOn}` : ''}` : ''}${m.siteOk ? `:site ${m.siteOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
@@ -542,6 +594,11 @@ function fingerprint() {
 function poll() {
   if (state.shuttingDown) return;
   ensureWatchers();
+  // The phone link: what another browser's helper changed in its file, and whether helper.sock is still ours.
+  try {
+    link.refresh();
+    if (link.owner && !ownsSock()) { logger.info('phone link: helper.sock is another helper\'s now, so is the link'); link.stop(); }
+  } catch (e) { logger.warn(`phone link: ${e.message}`); }
   const fp = fingerprint();
   if (fp !== state.lastFingerprint) scheduleSync('poll');
 }
@@ -581,24 +638,173 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.toPhone', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.preview']);
+  'shipped.install', 'shipped.none', 'sensitive.split', 'mod.save', 'mod.undoEdit', 'mod.rename', 'mod.preview']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore']);
+// (agent.inject: a message the user sent from the panel while its run works, written into that run.)
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'agent.inject', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore', ...PHONE_COMMANDS]);
+
+// The phone link (lib/phonelink/link.js; docs/PHONE-LINK.md). Every helper has the store; the listener, the
+// announcer and the phones' runs are in the helper that owns helper.sock alone (becomePrimary), and nothing
+// listens there either until the user turns the link on in the side panel and connects a phone.
+const link = new Link({
+  home: ws.home, runs, version: VERSION, log: (line) => logger.info(line),
+  getWorkspace: () => workspace(ws.home),
+  // (the phone sync wrote a twin's file: the mods looked at again now, held.js judging it, and no nudge back)
+  afterWrite: () => {
+    state.syncWriting = true;
+    try { syncMods('phone sync', false); } finally { state.syncWriting = false; }
+    return state.held;
+  },
+  // (the phone twins' switches in this browser: what the extension last said, and the phone's sent to it; its next
+  // report says they're in)
+  switches: {
+    get: () => state.phoneSwitches,
+    set: (list) => {
+      if (!state.stdoutOpen || state.shuttingDown) return false;
+      sendToExtension({ type: 'phoneSwitches', set: list.map((x) => ({ id: x.modId, on: x.on, off: x.off, at: x.at })) });
+      const { switchKey, readSwitch } = require('./lib/phonelink/sync');
+      for (const x of list) { const v = readSwitch({ on: x.on, off: x.off }); if (v) state.phoneSwitchesSent.set(x.modId, { key: switchKey(v), when: Date.now() }); }
+      logger.info(`phone sync: ${list.length} switch(es) from the phone: ${list.map((x) => `${x.modId} ${x.on ? 'on' : 'off'}${x.off.length ? ` (off on ${x.off.join(', ')})` : ''}`).join('; ').slice(0, 500)}`);
+      return true;
+    },
+  },
+  // (a phone's run uses this computer's default agent: the first one that is installed, as agent.list says)
+  agent: () => {
+    const r = agents.listAgents(workspace(ws.home), { version: false });
+    const a = r.agents.find((x) => x.id === r.default);
+    return a && a.available ? { id: a.id, name: a.name, model: null } : null;
+  },
+});
+// The side panel is told when the link changes, once it has asked about it (an older extension never does).
+let linkWatched = false;
+function tellPanel(status) {
+  if (!linkWatched || !state.stdoutOpen || state.shuttingDown) return;
+  try { sendToExtension({ type: 'phoneLink', status }); } catch (e) { logger.warn(`could not send the phone link's status: ${e.message}`); }
+}
+link.on('change', () => {
+  if (state.shuttingDown) return;
+  if (link.owner) {
+    const status = linkStatus();
+    tellPanel(status);
+    tellHelpers(status);
+    return;
+  }
+  // (not the owner: what the owner says, so this panel shows its pairing window and its phones' syncs too)
+  if (!linkWatched) return;
+  phoneCommand('phone.status', {}).then(tellPanel, (e) => logger.warn(`phone link: ${e.message}`));
+});
+
+// ---- the phone link through another browser's helper (lib/phonelink/relay.js) ----
+// Every browser's panel can connect a phone, list and remove phones and change the link's settings: a helper that
+// doesn't own the link relays its panel's phone.* to the one that does (helper.sock's), which tells every helper
+// when the link changes. When the owner goes (its browser quits), another helper takes helper.sock, and the link
+// with it (becomePrimary): the same key and the same port, so the phones find it again with no pairing.
+
+/** The link's status as this helper's panel is told it: the owner's browser's name with it. */
+function linkStatus() {
+  return { ...link.status(), browser: state.hello?.browser || null };
+}
+let relayKeyCache = null;
+function relayKey() {
+  if (!relayKeyCache) relayKeyCache = phoneRelay.relayKey(ws.private);
+  return relayKeyCache;
+}
+/** The owner tells every other helper how the link is now (each tells its panel, if it has asked). */
+let toldHelpers = Promise.resolve();
+function tellHelpers(status) {
+  const others = helperSockets(ws.home).filter((h) => h.pid !== process.pid).map((h) => h.sock);
+  if (!others.length) return;
+  let key;
+  try { key = relayKey(); } catch (e) { logger.warn(`phone link: no relay key (${e.code || e.message})`); return; }
+  toldHelpers = toldHelpers.then(() => Promise.all(others.map((sock) => phoneRelay.ask(sock, 'phone.relayed', { key, status }, 3000).catch(() => null)))).catch(() => {});
+}
+/**
+ * A phone.* command of this helper's panel: the link's own, when this helper owns it; else relayed to the one that
+ * does. When none answers as the owner (none there, or one from before the relay), the file's part here (on, off,
+ * remove, the sync switch) and, for what needs the owner, the owner's browser's name in the error.
+ */
+async function phoneCommand(cmd, args) {
+  if (link.owner) {
+    const r = await link.command(cmd, args);
+    return r && typeof r === 'object' ? { ...r, browser: state.hello?.browser || null } : r;
+  }
+  let answer = null;
+  let why = null;
+  try {
+    answer = await phoneRelay.ask(ws.sock, 'phone.relay', { key: relayKey(), cmd, args }, cmd === 'phone.on' ? 60000 : 20000);
+  } catch (e) {
+    if (e.code === 'timeout') throw e; // (it may have done it: not done twice)
+    why = e.message;
+  }
+  if (answer && answer.ok) return answer.result;
+  // (the owner's own answer: an error of the link's, said as it is. Anything else, a helper from before the relay)
+  if (answer && answer.relay && answer.code !== 'not-owner' && answer.code !== 'refused') { const e = new Error(String(answer.error || 'the other helper refused')); e.code = answer.code; throw e; }
+  if (answer) why = answer.error;
+  // (no relay: as before, with the owner's browser named)
+  const owner = await ownerBrowser();
+  logger.info(`phone link: ${cmd} here, not relayed (${why || 'no answer'})`);
+  try {
+    const r = await link.command(cmd, args);
+    return r && typeof r === 'object' ? { ...r, browser: owner } : r;
+  } catch (e) {
+    if (e.code === 'elsewhere' && owner) e.message = `TRIF in ${owner} has the phone link just now: connect the phone from there, or quit ${owner}`;
+    throw e;
+  }
+}
+/** The browser whose helper serves helper.sock (its ping), or null. */
+async function ownerBrowser() {
+  try {
+    const info = await phoneRelay.ask(ws.sock, 'ping', {}, 1500);
+    return (info.ok && info.result && info.result.extension && info.result.extension.browser) || null;
+  } catch { return null; }
+}
+/**
+ * phone.relay and phone.relayed from another helper (the socket: never from a run, whose token isn't taken here,
+ * nor from anyone without the relay key, which is in the private folder). Answers through `answer(msg)`.
+ */
+function onRelay(cmd, args, answer) {
+  if (!phoneRelay.keyMatches(ws.private, args.key)) return answer({ ok: false, error: 'only another browser\'s TRIF helper can relay the phone link', code: 'refused' });
+  if (cmd === 'phone.relayed') {
+    // (the owner's news: this panel, if it has asked about the link)
+    if (!link.owner && args.status && typeof args.status === 'object' && !Array.isArray(args.status)) {
+      const { qr, ...status } = args.status; // (never a QR's text in news: it's only ever an answer to its panel)
+      tellPanel(status);
+    }
+    return answer({ ok: true, result: {} });
+  }
+  if (!link.owner) return answer({ ok: false, error: 'this helper doesn\'t have the phone link', code: 'not-owner' });
+  const inner = typeof args.cmd === 'string' ? args.cmd : '';
+  if (!PHONE_COMMANDS.includes(inner)) return answer({ ok: false, error: `"${inner.slice(0, 40)}" isn't a phone link command`, code: 'refused' });
+  const innerArgs = args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? args.args : {};
+  logger.info(`phone link: ${inner} from another browser's panel`);
+  Promise.resolve().then(() => link.command(inner, innerArgs)).then(
+    (r) => answer({ ok: true, result: r && typeof r === 'object' ? { ...r, browser: state.hello?.browser || null } : r }),
+    (e) => answer({ ok: false, error: e.message, code: e.code || null }),
+  );
+}
+/** helper.sock is still the one this helper made (a helper that lost it gives up the phone link). */
+function ownsSock() {
+  if (!server || serverIno === null) return !!server;
+  try { return fs.statSync(ws.sock).ino === serverIno; } catch { return false; }
+}
 // Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
 // The page commands a run's `trif` sends (cli.js; AGENTS.md "The CLI"): the only ones that go on from a run
 // to the extension, which holds each to the run's site (args.scope: background.js scopedTab, checkScopeUrl).
 const RUN_PAGE_COMMANDS = new Set(['status', 'tabs', 'run', 'reload', 'navigate', 'open', 'close', 'text', 'sweep', 'screenshot',
-  'record', 'requests', 'request', 'errors', 'logs', 'mod.enable']);
+  'record', 'requests', 'request', 'errors', 'logs', 'mod.enable', 'mod.notBroken']);
 // Everything a run may ask, by its token or through its mailbox (onClientLine): the helper's own `ping` and
 // `mods` (answered for the run's site alone: helperInfo, runMod), the mod-file commands and those page
 // commands. Anything else from a run is refused there and never sent on to the extension, whatever the
 // extension would make of it: a command added later is a run's only once it's named here.
 const RUN_COMMANDS = new Set(['ping', 'mods', ...MOD_FILE_COMMANDS, ...RUN_PAGE_COMMANDS]);
+// A phone's run (phonelink/remoterun.js): the helper's own of those (its page is on the phone, not in a tab here,
+// so none of RUN_PAGE_COMMANDS) and `trif phone page|try|screenshot`, which are a phone run's alone.
+const PHONE_RUN_COMMANDS = new Set([...[...RUN_COMMANDS].filter((c) => REMOTE_COMMANDS.has(c) && !RUN_PAGE_COMMANDS.has(c)), ...REMOTE_TOOLS.keys()]);
 
 const siteOfId = (id) => String(id ?? '').trim().split('/')[0];
 /**
@@ -652,8 +858,10 @@ function onAgentEvent(runId, event) {
     if (held.length) event.held = held;
   }
   // (A run that found the agent logged out: runs.js tells lib/agents, so agent.list says so.)
-  // Every run goes to the extension (panels ignore runs they didn't start).
-  if (state.stdoutOpen) {
+  // A phone's run goes to its phone (phonelink/remote.js), never to the extension: the phone's chat isn't a
+  // panel's. Every other run goes to the extension (panels ignore runs they didn't start).
+  const phones = link.onEvent(runId, event);
+  if (!phones && state.stdoutOpen) {
     try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }
   }
   const subs = runSubscribers.get(runId);
@@ -905,6 +1113,13 @@ function agentCommand(cmd, args) {
       const h = state.held[r.id];
       logger.info(`saved an edit of ${r.id}${h ? `, waiting for the user's OK (${(h.needs || []).join(', ')})` : ''}`);
       return { ...r, held: !!h, pending: (state.pending || []).includes(r.id) };
+    }
+    // The code card's Rename (lib/rename.js): the @name line set (an @id added if there's none), the file following
+    // the name, what the helper keeps by the mod's id moved with it. Never waits for an OK: only those lines change.
+    case 'mod.rename': {
+      const r = require('./lib/rename').renameMod(workspace(ws.home), { id: String(args.id ?? ''), name: args.name });
+      if (r.renamed) { syncMods('rename', false); logger.info(`renamed ${r.from} to "${r.name}" (${r.id})`); }
+      return { ...r, held: !!state.held[r.id] };
     }
     // Undo right after Save: the version before back, if the file is still the edit
     case 'mod.undoEdit': {
@@ -1260,8 +1475,11 @@ function onExtensionRequest(msg) {
  * agent.withoutSandbox {agent, allow}: "Use <agent> anyway" (allow: true) or Settings' "Stop allowing"
  * (false). Returns {agents: [ids allowed]}. agent.logout {agent}: Settings' Log out (agents/index.js
  * logout). (PANEL_COMMANDS: the extension's connection only, so a run can't log the user out.)
+ * agent.inject {runId, text, id}: "Send now" on a message the user queued while the run works (runs.js inject).
  */
 function panelCommand(cmd, args) {
+  if (PHONE_COMMANDS.includes(cmd)) { linkWatched = true; return phoneCommand(cmd, args); }
+  if (cmd === 'agent.inject') return runs.inject(typeof args.runId === 'string' ? args.runId : '', { text: args.text, id: args.id });
   if (cmd === 'agent.logout') {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
@@ -1324,6 +1542,7 @@ async function becomePrimary() {
       try { serverIno = fs.statSync(ws.sock).ino; } catch { serverIno = null; }
       state.role = 'primary';
       stopSecondaryChecks();
+      link.start().catch((e) => logger.warn(`phone link: ${e.message}`)); // (the owner of helper.sock owns the link)
       logger.info(`serving CLI on ${ws.sock}`);
       return 'primary';
     } catch (e) {
@@ -1481,6 +1700,7 @@ function allHelperInfo() {
   };
 }
 
+
 function onClientLine(sock, line) {
   let req;
   try { req = JSON.parse(line); } catch (e) {
@@ -1491,8 +1711,19 @@ function onClientLine(sock, line) {
   const args = req && req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
+  // Another browser's helper, for its panel (onRelay): with the relay key, never with a run's token.
+  if (cmd === 'phone.relay' || cmd === 'phone.relayed') {
+    if (req.token !== undefined) return reply(sock, { id, ok: false, error: `"${cmd}" isn't available inside an agent run` });
+    return onRelay(cmd, args, (r) => reply(sock, { id, ...r, relay: 1 }));
+  }
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
-  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
+  if (PANEL_COMMANDS.has(cmd)) {
+    const error = cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)'
+      : cmd === 'agent.inject' ? 'only TRIF\'s side panel sends messages into a run while it works'
+      : cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)'
+        : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)';
+    return reply(sock, { id, ok: false, error });
+  }
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {
@@ -1507,11 +1738,25 @@ function onClientLine(sock, line) {
             ? 'only the user adds Tim\'s mods (on the setup page, or in Settings in the side panel)'
             : `"${cmd}" isn't available inside an agent run` });
     }
-    // (and nothing but what a run may ask: RUN_COMMANDS. Not sent on for the extension to refuse.)
-    if (!RUN_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: `"${cmd.slice(0, 60)}" isn't a command an agent run can send (\`trif help\` lists the ones there are)` });
+    // (and nothing but what a run may ask: RUN_COMMANDS; a phone's run, PHONE_RUN_COMMANDS. Not sent on for the
+    // extension to refuse.)
+    if (!(run.remote ? PHONE_RUN_COMMANDS : RUN_COMMANDS).has(cmd)) {
+      const anyRun = `"${cmd.slice(0, 60)}" isn't a command an agent run can send (\`trif help\` lists the ones there are)`;
+      return reply(sock, { id, ok: false, error: run.remote ? (remoteRefusal(run, cmd, args) || anyRun) : REMOTE_TOOLS.has(cmd) ? NOT_REMOTE : anyRun });
+    }
+    // (a phone's run changes only its own phone twin's mods: phonelink/remoterun.js)
+    const refused = remoteRefusal(run, cmd, args);
+    if (refused) return reply(sock, { id, ok: false, error: refused });
     args.scope = run.scope;
     args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
+  }
+  // `trif phone …`: a phone run's way to the page on its phone, answered by the phone link (phonelink/remote.js
+  // Remote.tool, when this helper owns the link: `link.tool`), never by the extension. Refused for anyone else.
+  const viaPhone = remoteCommand(run, cmd, args, link.tool);
+  if (viaPhone) {
+    viaPhone.then((result) => reply(sock, { id, ok: true, result }), (e) => reply(sock, { id, ok: false, error: e.message }));
+    return;
   }
 
   // (an extension from before `run` could use the box would run box code in the page's own world: say so)
@@ -1618,7 +1863,10 @@ function shutdown(reason, code = 0) {
   }
   pending.clear();
   // Agents die with the helper (SIGTERM, SIGKILL after a moment); their final events still go out.
-  const agentsGone = Promise.all([runs.stopAll(), logins.stopAll()]);
+  link.closing(); // (no announcement and no new phone run from here on)
+  const agentsGone = Promise.all([runs.stopAll(), logins.stopAll()])
+    // (after the runs: their last events are kept for their phones; a second at most, the exit doesn't wait on a phone)
+    .then(() => Promise.race([link.stop(), new Promise((r) => setTimeout(r, 1000))])).catch(() => {});
   if (server) {
     try { server.close(); } catch { /* ignore */ }
     // Only remove the socket if it's still ours (a newer helper may have replaced it).

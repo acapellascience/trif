@@ -643,6 +643,18 @@ const handlers = {
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
   async disable(ctx, pos) { return switchMod(ctx, pos, false); },
 
+  // A fix run's "nothing is broken" for a "may be broken" flag (extension/modhealth.js markNotBroken)
+  async 'not-broken'(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing mod id');
+    const id = modId(pos[0]);
+    const page = pos[1] !== undefined ? String(pos[1]).trim() : '';
+    if (page && !/^https?:\/\//i.test(page)) throw new UsageError(`"${page.slice(0, 200)}" isn't a page's address: give it whole, like https://example.com/home`);
+    const r = await ctx.call('mod.notBroken', { id, ...(page ? { page } : {}) });
+    if (ctx.json) return printJson(r);
+    const pages = (r && Array.isArray(r.pages)) ? r.pages : [];
+    out(`${id}: not broken. What it looks for comes and goes on ${pages.join(', ') || 'that page'}, so TRIF won't say it may be broken there again (until the mod changes).`);
+  },
+
   // Inside a run the helper does it (it knows the run's scope); otherwise the CLI moves the file itself,
   // so this works without the browser, and a running helper picks the change up like any other.
   async delete(ctx, pos) {
@@ -971,6 +983,37 @@ const handlers = {
     out(file);
     // On stderr, so $(trif screenshot) is still just the path; agents see it either way.
     if (r.note) process.stderr.write(`note: ${r.note}\n`);
+  },
+
+  // The page on the user's phone, for a run they started from the phone (the phone link, docs/PHONE-LINK.md
+  // section 6): the helper asks the phone and waits up to a minute for its answer.
+  async phone(ctx, pos) {
+    const what = String(pos[0] || '').toLowerCase();
+    const usage = 'usage: trif phone page [selector] [--limit N] | trif phone try <mod> | trif phone screenshot';
+    let cmd;
+    let args = {};
+    if (what === 'page') {
+      const selector = ctx.opts['--selector'] || pos.slice(1).join(' ');
+      const limit = ctx.opts['--limit'] !== undefined ? Number(ctx.opts['--limit']) : null;
+      if (limit !== null && !(Number.isInteger(limit) && limit > 0)) throw new UsageError('--limit takes a number of elements (1 to 200)');
+      cmd = 'remote.page';
+      args = { ...(selector ? { selector: String(selector) } : {}), ...(limit ? { limit } : {}) };
+    } else if (what === 'try') {
+      if (!pos[1] || pos.length > 2) throw new UsageError(usage);
+      cmd = 'remote.try';
+      args = { id: String(pos[1]) };
+    } else if (what === 'screenshot') {
+      cmd = 'remote.screenshot';
+    } else throw new UsageError(usage);
+    if (!envVar('RUN_TOKEN')) throw new UsageError('`trif phone` works inside a run the user started from their phone: it reaches the page that is open there. From a terminal there is no such page');
+    const r = (await ctx.call(cmd, args, 75000)) || {};
+    if (ctx.json) printJson({ text: r.text || '', file: r.file || null, error: !!r.error });
+    else {
+      if (r.text) out(r.text);
+      if (r.file) out(`screenshot: ${r.file}`);
+      if (!r.text && !r.file) out(r.error ? 'the phone couldn\'t do that (it gave no reason)' : 'done (the phone sent nothing back)');
+    }
+    if (r.error) process.exitCode = 1;
   },
 
   async record(ctx, pos) {

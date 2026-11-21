@@ -16,10 +16,24 @@ import { iconSvg } from './icons.js';
 import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
+import { createPhoneLink, renderPhoneLink, TEXT as PHONE_TEXT } from './phonelink.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
+
+// Wording for messages typed while the agent works (drafts: docs/CHAT-QUEUE-STRINGS.md).
+const QUEUE_WORDS = {
+  sendTitle: 'Send when your agent is done',
+  waits: 'Sends when your agent is done',
+  stopping: 'Sends as soon as your agent has stopped',
+  stopped: 'Not sent: your agent stopped first',
+  sending: 'Sending…',
+  sendNow: 'Send now',
+  remove: 'Don’t send this',
+  edit: 'Click to edit',
+  pushed: 'Sent while your agent was working',
+};
 
 const ui = {
   modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), pasteMod: document.getElementById('paste-mod'), exportSite: document.getElementById('export-site'),
@@ -31,6 +45,10 @@ const ui = {
   sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
   waitingBadge: document.getElementById('waiting-badge'),
   phoneBtn: $('#phone-btn'), phoneNote: $('#phone-note'), phoneNoteText: $('#phone-note-text'), phoneBack: $('#phone-back'),
+  phoneMenu: $('#phone-menu'), phoneMenuView: $('#phone-menu-view'), phoneMenuSync: $('#phone-menu-sync'),
+  phoneNav: $('#phone-nav'), phoneNavBack: $('#phone-nav-back'), phoneNavForward: $('#phone-nav-forward'), phoneNavReload: $('#phone-nav-reload'), phoneNavUrl: $('#phone-nav-url'),
+  phoneWidth: $('#phone-width'), phoneHint: $('#phone-hint'), phoneHintText: $('#phone-hint-text'), phoneHintClose: $('#phone-hint-close'), toast: $('#toast'),
+  phoneSync: $('#phone-sync'), phoneSyncText: $('#phone-sync-text'), phoneSyncActs: $('#phone-sync-acts'), phoneSyncClose: $('#phone-sync-close'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateFoot: $('#gate-foot'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
@@ -46,7 +64,7 @@ const ui = {
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
-  chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
+  chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'), queue: $('#queue'),
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -80,6 +98,7 @@ const view = {
   modNatural: [],            // the ids of the mods listed, in the order they come before the user's (what an unsaved order is)
   myRuns: new Map(),         // runs this panel started: runId -> {prompt, tabId} for a message sent from the box, else null
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
+  updateLater: null,         // chrome.storage.local `updateLater`: the version whose card Not now put away
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
 };
@@ -145,6 +164,16 @@ function openTab(props) {
   return chrome.tabs.create({ ...props, ...(FALLBACK ? { windowId: OPENED_FOR } : {}) });
 }
 
+// Settings' Connect a phone: its state, drawn into its own box whenever it changes.
+// (and the phone line under the bar: renderPhoneSync)
+// (a sync with a phone done, whoever started it: a toast in every open panel, unless the phone line under the
+// bar already says what that sync did, after Sync now)
+const phoneLink = createPhoneLink({
+  request,
+  changed: () => { renderPhoneLink($('#phone-link'), phoneLink, { addMore }); renderPhoneSync(); },
+  synced: (text) => { if (text && !(phoneLink.state.asked && ui.phoneSync && !ui.phoneSync.hidden)) showToast(text); },
+});
+
 function request(msg) {
   if (!port) connectPort();
   const reqId = ++reqSeq;
@@ -174,6 +203,9 @@ function onPortMessage(msg) {
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
+    checkPhoneHint().catch(() => {}); // (the phone view's panel opened there, or the phone view ended)
+  } else if (msg?.type === 'phoneLink') {
+    phoneLink.onMessage(msg.status); // (Settings' Connect a phone: how the link is now)
   } else if (msg?.type === 'agentAsk') {
     showAgentAsk(msg.id, msg.site);
   } else if (msg?.type === 'agentAskDone') {
@@ -197,6 +229,11 @@ async function refreshStatus() {
     // (the background's name for the browser, which it may have learned since this panel opened)
     if (view.status?.browser) setBrowser(view.status.browser);
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
+    // (Settings open while the helper comes or goes: Connect a phone follows it; closed, the phone line and menu)
+    if (view.status.helper.connected !== wasConnected) {
+      if (!ui.settings.hidden) phoneLink.open(view.status.helper.connected);
+      else if (!SAFARI) phoneLink.peek(view.status.helper.connected);
+    }
     // Storage stopped working: switches can't be read from it, so they come with the status.
     if (view.status.storageBroken) {
       view.disabled = view.status.disabled || {};
@@ -246,8 +283,9 @@ async function init() {
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
   if (FALLBACK) await setUpPanelWindow();
   sayWindow();
-  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
+  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'updateLater', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
+  view.updateLater = typeof stored.updateLater === 'string' ? stored.updateLater : null;
   view.efforts = stored.agentEffort && typeof stored.agentEffort === 'object' ? stored.agentEffort : {};
   view.settings = normalizeSettings(stored.settings);
   // Once (0.2.3): the default's models, which models picked on sites used to be copied into (see
@@ -333,8 +371,17 @@ async function setTab(tab) {
     if (ui.input.value) drafts.set(view.tab.id, ui.input.value); else drafts.delete(view.tab.id);
     ui.input.value = drafts.get(tab.id) || '';
   }
+  const another = view.tab?.id !== tab.id;
   view.tab = { id: tab.id, url };
-  if (view.phone?.tabId !== tab.id) refreshPhone().then(() => renderPhone()).catch(() => {});
+  // Whether this tab is in the phone view, known before the site is drawn: the first paint is then the right
+  // view, not the desktop's turning into the phone's a moment later (Tim, 11-19), or the reverse (a tab back from
+  // the phone view whose last state here was the phone's). Briefly: the quick answer (refreshPhoneState).
+  if (another || view.phone?.tabId !== tab.id) {
+    await refreshPhoneState();
+    if (view.tab?.id !== tab.id) return; // (another tab meanwhile: its own setTab draws it)
+    logPhoneState().catch(() => {});
+  }
+  showPhoneUrl();
   const site = siteForUrl(url);
   if (site !== view.site) {
     leaveSite(view.site);
@@ -369,6 +416,7 @@ function leaveSite(prev) {
   if (agentAsk.dialog?.open) closeAgentAsk();
   closeLevelMenu(false);
   if (ui.modsMenu && !ui.modsMenu.hidden) { ui.modsMenu.hidden = true; ui.modsMore?.setAttribute('aria-expanded', 'false'); }
+  closePhoneMenu(false);
   if (ui.siteFilesBox) ui.siteFilesBox.open = false;
   if (document.activeElement?.tagName === 'SELECT') document.activeElement.blur(); // (an open dropdown)
 }
@@ -471,7 +519,7 @@ const cardKey = (m) => `${m.done || ''}|${m.undoneFix ? 1 : 0}|${m.fixRun || ''}
 function breakCard(li, m) {
   li.classList.add('break-card');
   li.dataset.cardKey = cardKey(m);
-  const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : '';
+  const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : m.done === 'notBroken' ? 'Not broken.' : ''; // (Not broken: approved by Tim 11-20, docs/MOD-HEALTH-STRINGS.md)
   if (state) li.append(' ', el('span', 'break-state', state));
   const acts = el('div', 'break-actions');
   const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: chatSite(), text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
@@ -491,7 +539,7 @@ function breakCard(li, m) {
   });
   const ignore = button('Ignore', 'text', async (e) => { const b = e.currentTarget; b.disabled = true; try { await request({ type: 'modError.dismiss', id: m.mod, fp: m.fp }); } catch (x) { fail(b, x); } });
   ignore.title = 'Don\'t flag this again for this version of the mod';
-  if (m.undoneFix || m.done === 'ignored' || m.done === 'fixing') return;
+  if (m.undoneFix || m.done === 'ignored' || m.done === 'fixing' || m.done === 'notBroken') return;
   if (m.done === 'fixed') acts.append(undo);
   else if (m.afterFix) acts.append(undo, fix, show, ignore);
   else acts.append(fix, show, ignore);
@@ -641,6 +689,7 @@ function messageNode(m) {
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
+  if (m.role === 'user' && m.pushed) li.title = QUEUE_WORDS.pushed; // (Send now, while it worked)
   if (m.role === 'tool') li.title = m.text;
   // "x.js was deleted." from the panel's trash icon: Undo until it's used (the restore adds its own line).
   if (m.undo && !m.undone) {
@@ -771,6 +820,7 @@ function render() {
   renderStarter();
   renderSiteStarter();
   renderMessages();
+  renderQueue();
   renderNoSandbox();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -786,10 +836,69 @@ function render() {
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
   ui.input.disabled = !site;
   ui.input.placeholder = site ? `What should I fix on ${site}?` : 'Open a website to fix it';
-  ui.send.hidden = running;
+  // While the agent works the box stays usable: Send (and Enter) queue the message (renderQueue), Stop beside it.
+  ui.composer.classList.toggle('busy', running);
+  if (running && !waitsForLogin) ui.send.title = QUEUE_WORDS.sendTitle;
+  ui.send.setAttribute('aria-label', ui.send.title);
   ui.stop.hidden = !running;
   ui.stop.disabled = !chat.run?.runId;
   ui.send.disabled = !canSend;
+}
+
+/**
+ * The messages waiting to go (chat.queue, background.js queueMessage), under the conversation: each one's
+ * text (a click puts it back in the box to edit), a quiet line saying when it goes, Send now and ×. Rebuilt
+ * only when what it shows changes, so a click isn't lost to a redraw.
+ */
+function renderQueue() {
+  const queue = view.site && Array.isArray(view.chat.queue) ? view.chat.queue.filter((x) => x && typeof x.id === 'string') : [];
+  const running = !!view.chat.run;
+  const key = JSON.stringify([view.site, running, queue.map((x) => [x.id, x.text, !!x.now])]);
+  if (ui.queue.dataset.key === key) return;
+  ui.queue.dataset.key = key;
+  ui.queue.hidden = !queue.length;
+  const nearBottom = ui.chat.scrollHeight - ui.chat.scrollTop - ui.chat.clientHeight < 60;
+  ui.queue.replaceChildren(...queue.map((item) => {
+    const li = el('li', 'queued');
+    li.dataset.id = item.id;
+    const text = el('button', 'q-text', item.text);
+    text.type = 'button';
+    text.title = QUEUE_WORDS.edit;
+    text.addEventListener('click', () => editQueued(item.id));
+    const note = el('span', 'q-note', item.now ? (running ? QUEUE_WORDS.stopping : QUEUE_WORDS.sending) : running ? QUEUE_WORDS.waits : QUEUE_WORDS.stopped);
+    const now = button(QUEUE_WORDS.sendNow, '', () => sendQueuedNow(item.id, now));
+    now.classList.add('q-now');
+    now.disabled = !!item.now;
+    const remove = el('button', 'q-remove', '×');
+    remove.type = 'button';
+    remove.title = QUEUE_WORDS.remove;
+    remove.setAttribute('aria-label', QUEUE_WORDS.remove);
+    remove.addEventListener('click', () => request({ type: 'chat.unqueue', site: chatSite(), id: item.id }).catch(() => {}));
+    const foot = el('div', 'q-foot');
+    foot.append(note, now, remove);
+    li.append(text, foot);
+    return li;
+  }));
+  if (queue.length && nearBottom) ui.chat.scrollTop = ui.chat.scrollHeight;
+}
+
+/** A waiting message back in the box to edit (before what's there), out of the queue. */
+async function editQueued(id) {
+  try {
+    const { text } = await request({ type: 'chat.unqueue', site: chatSite(), id });
+    const rest = ui.input.value.trim();
+    ui.input.value = rest ? `${text}\n${rest}` : text;
+    ui.input.focus();
+  } catch (e) { console.warn('[TRIF] edit failed', e); }
+}
+
+async function sendQueuedNow(id, btn) {
+  btn.disabled = true;
+  try { await request({ type: 'chat.sendNow', site: chatSite(), id }); }
+  catch (e) {
+    btn.disabled = false;
+    request({ type: 'chat.note', site: chatSite(), text: `Couldn't send it now: ${e?.message ?? e}` }).catch(() => {});
+  }
 }
 
 // Red (mods can't run): the helper isn't connected, or user scripts are off. Yellow, the rest: the agent
@@ -1262,6 +1371,18 @@ function foldLine(n, scope) {
   return foldLi;
 }
 
+// A row under the fold: no tier heading above it, so its tier is its colour (the stripe, its switch) and, for a
+// screen reader and the pointer's hover, the tier's name with its own. Not dragged: the order is the tiers' above.
+function markFolded(li, g) {
+  li.classList.toggle('folded', !!g);
+  const name = li.querySelector('.mod-name');
+  let t = name.querySelector(':scope > .mod-tier');
+  if (!g) { t?.remove(); name.removeAttribute('title'); return; }
+  if (!t) { t = el('span', 'visually-hidden mod-tier'); name.querySelector(':scope > span:not(.light)').after(t); }
+  t.textContent = `, ${GROUP_TEXT[g][0]}`;
+  name.title = GROUP_TEXT[g][0];
+}
+
 function renderMods() {
   // A row being dragged stays where the pointer has it: the list catches up when it's dropped.
   if (modDrag) { modDrag.dirty = true; return; }
@@ -1283,12 +1404,13 @@ function renderMods() {
   const ordered = orderMods(listed, view.modOrder[key]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
   // The ones whose @match doesn't cover this page (grey light) fold into one line at the bottom, "N more for
-  // other <site> pages" (lib.js splitForPage); a click shows them in their groups again (Tim, 2026-11-11).
+  // other <site> pages" (lib.js splitForPage); a click shows them right under it, a plain list: no tiers'
+  // headings, each row's tier in its colour (Tim, 11-20).
   const { other } = splitForPage(mods, tab?.url || '');
   const otherIds = new Set(other.map((m) => m.id));
   if (view.foldFor !== key) { view.foldFor = key; view.foldOpen = false; }
-  const shown = view.foldOpen ? mods : mods.filter((m) => !otherIds.has(m.id));
-  view.foldedIds = view.foldOpen ? [] : other.map((m) => m.id);
+  const shown = mods.filter((m) => !otherIds.has(m.id));
+  view.foldedIds = other.map((m) => m.id);
   ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
   updateApprovals(mods);
   // (the count first: a list that empties, the phone twin's with no mods yet, doesn't keep the last one's)
@@ -1316,10 +1438,11 @@ function renderMods() {
   const want = [];
   for (const g of GROUPS) {
     const inGroup = shown.filter((m) => modGroup(m) === g);
-    if (!inGroup.length && !groupOff(g) && !(mods.some((m) => modGroup(m) === g) && view.foldOpen)) continue;
+    if (!inGroup.length && !groupOff(g)) continue;
     want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
   }
-  if (other.length) want.push(foldLine(other.length, scope));
+  if (other.length) want.push(foldLine(other.length, scope), ...(view.foldOpen ? other.map((m) => rows.get(m.id).li) : []));
+  for (const m of mods) markFolded(rows.get(m.id).li, otherIds.has(m.id) ? modGroup(m) : null);
   want.forEach((li, i) => { if (ui.modList.children[i] !== li) ui.modList.insertBefore(li, ui.modList.children[i] || null); });
   while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
@@ -1845,6 +1968,11 @@ function siteBoxes(reach) {
   });
 }
 
+// A hold the phone sync brought (helper held.js: `phone`, the phone's name): where it came from, beside the
+// reason; and when that phone allowed this very version (held.js `allowedOn`, the approval hint: never an approval
+// here, Allow is the same Allow), it says so (drafts: docs/PHONE-LINK-STRINGS.md "Phone sync").
+const fromPhone = (info) => (info && typeof info.allowedOn === 'string' && info.allowedOn ? `You allowed this on ${info.allowedOn}.`
+  : info && typeof info.phone === 'string' && info.phone ? `From ${info.phone}.` : '');
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
   box.append(el('p', 'facts-head', kind === 'held' && info.asks ? 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
@@ -1864,7 +1992,7 @@ function factsBox(m, info, kind) {
   // by 'edit': the user's own, in the code card)
   const who = info.by === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : info.by === 'edit' ? 'You edited it.'
-    : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+    : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : fromPhone(info) || 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}${info.asks ? ' Allow is for these powers: a new version that asks for nothing more runs without asking again.' : ''}`));
   if (info.claim) {
@@ -2357,7 +2485,7 @@ function renderApproval() {
   P.siteBox.replaceChildren(...siteBoxes(info.reach));
   P.siteBox.hidden = !P.siteBox.childNodes.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside' && info.by !== 'switch' && info.by !== 'edit';
-  const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : info.by === 'edit' ? 'You edited it.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : info.by === 'edit' ? 'You edited it.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : fromPhone(info) || 'It\'s new or changed since TRIF last let it run.';
   P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
@@ -2855,9 +2983,58 @@ const DETAILS_TIER = {
   'boxed-mods': ['Boxed mod:', ' can do what you\'ve allowed.'],
   'free-mods': ['Free mod:', ' can do anything code can do.'],
 };
+// The mod's name in its Details, with Rename (Tim, 11-18; helper/lib/rename.js): the @name line, the file following
+// it. Words: drafts (docs/PHONE-LINK-STRINGS.md "Renaming a mod").
+function nameRow(P, m) {
+  const row = el('div', 'cv-d-name');
+  const show = () => {
+    const label = el('span', 'cv-d-name-label', 'Name');
+    const value = el('b', 'cv-d-name-value', m.name || m.id.split('/').pop());
+    const b = button('Rename', 'link-btn cv-rename', () => edit());
+    const connected = !!view.status?.helper?.connected;
+    b.disabled = !connected;
+    if (!connected) b.title = 'TRIF\'s helper isn\'t connected, so it can\'t rename the file';
+    row.replaceChildren(label, value, b);
+  };
+  const edit = () => {
+    const input = el('input', 'cv-d-name-input');
+    input.type = 'text';
+    input.value = m.name || '';
+    input.maxLength = 80;
+    input.setAttribute('aria-label', 'Name');
+    const note = el('p', 'ap-err cv-d-name-err');
+    note.hidden = true;
+    note.setAttribute('role', 'alert');
+    const save = button('Save', 'go cv-rename-save', () => go());
+    const cancel = button('Cancel', 'cv-rename-cancel', () => show());
+    const go = async () => {
+      const name = input.value.trim();
+      if (!name) { note.textContent = 'Give it a name.'; note.hidden = false; input.focus(); return; }
+      if (name === (m.name || '')) { show(); return; }
+      save.disabled = true;
+      note.hidden = true;
+      try {
+        const r = await request({ type: 'mod.rename', id: m.id, name });
+        await refreshStatus();
+        const now = (view.status?.mods || []).find((x) => x.id === r.id);
+        if (now && codeView.dialog?.open) openCodeView(r.id, { tab: 'details' });
+        else { m.name = name; show(); }
+      } catch (e) { note.textContent = String(e?.message ?? e); note.hidden = false; save.disabled = false; }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); show(); } });
+    const line = el('div', 'cv-d-name-edit');
+    line.append(input, save, cancel);
+    row.replaceChildren(el('span', 'cv-d-name-label', 'Name'), line, note);
+    input.focus();
+    input.select();
+  };
+  show();
+  return row;
+}
+
 function renderDetails(P, m) {
   const site = m.id.split('/')[0];
-  const out = [];
+  const out = [nameRow(P, m)];
   // The tier, in its colour (Tim, 11-13), with its explanation behind the "i"; a free mod's explanation is its
   // warning instead, in a coral box (the tier card's words, after its line), so no "i" to repeat it.
   const tierId = m.rules ? 'style-mods' : m.sandboxed ? 'boxed-mods' : 'free-mods';
@@ -2929,6 +3106,7 @@ function renderDetails(P, m) {
 const HISTORY_SOURCE = {
   chat: 'before your agent changed it in a chat', fix: 'before a fix', restore: 'before you restored an older version',
   import: 'before an import replaced it', undo: 'before an undo', edit: 'before you edited it',
+  phone: 'before a sync from your phone', // (draft: docs/PHONE-LINK-STRINGS.md "Phone sync")
 };
 // The tabs: the code, or History (the versions kept; one clicked is shown in place, with Diff and Restore)
 function setCodeTab(which) {
@@ -3245,34 +3423,123 @@ async function refreshPhone() {
     view.chat = normalizeChat((await chrome.storage.local.get(key))[key]);
     render();
   }
+  logPhoneState().catch(() => {});
 }
+/**
+ * Whether the tab shown is in the phone view (`view.phone`): the background's quick answer, which doesn't look
+ * into the page (that can take a second while the page loads, and the panel drew the desktop view meanwhile, then
+ * flipped: Tim, 11-19). 2 s at most: then as it was for this tab, or not in it.
+ */
 async function refreshPhoneState() {
   const tabId = view.tab?.id;
   if (!Number.isInteger(tabId) || SAFARI) { view.phone = null; return; }
   try {
-    const r = await request({ type: 'phone.state', tabId });
-    if (view.tab?.id === tabId) view.phone = { tabId, ...r };
-    // (a line in the panel's console when what's in place changes: Tim's check that the phone view is one)
-    if (r?.phone) {
-      const line = `[TRIF] phone view, tab ${tabId}: rules ${r.rules === 2 ? 'on' : `MISSING (${r.rules} of 2)`}, page script ${r.script ? 'registered' : 'MISSING'}, ` +
-        (r.page?.error ? `page not readable (${r.page.error})` : r.page ? `this page ${r.page.marked ? 'has the marker (it sees an iPhone)' : 'has NO marker (it sees a desktop)'}${r.page.worker ? ', a service worker controls it' : ''}` : 'no page');
-      if (line !== lastPhoneLine) { (r.rules === 2 && r.script && r.page?.marked ? console.info : console.warn)(line); lastPhoneLine = line; }
-    }
+    const r = await Promise.race([request({ type: 'phone.state', tabId, quick: true }), new Promise((res) => setTimeout(() => res(null), 2000))]);
+    if (view.tab?.id !== tabId) return;
+    if (r) view.phone = { tabId, ...r };
+    else if (view.phone?.tabId !== tabId) view.phone = { tabId, phone: false };
   } catch { view.phone = null; }
 }
+// A line in the panel's console when what's in place changes: Tim's check that the phone view is one (the
+// rules, the page script, the page's marker: the full phone.state).
+async function logPhoneState() {
+  const tabId = view.tab?.id;
+  if (!inPhone() || !Number.isInteger(tabId)) return;
+  const r = await request({ type: 'phone.state', tabId });
+  if (!r?.phone) return;
+  const line = `[TRIF] phone view, tab ${tabId}: rules ${r.rules === 2 ? 'on' : `MISSING (${r.rules} of 2)`}, page script ${r.script ? 'registered' : 'MISSING'}, ` +
+    (r.page?.error ? `page not readable (${r.page.error})` : r.page ? `this page ${r.page.marked ? 'has the marker (it sees an iPhone)' : 'has NO marker (it sees a desktop)'}${r.page.worker ? ', a service worker controls it' : ''}` : 'no page');
+  if (line !== lastPhoneLine) { (r.rules === 2 && r.script && r.page?.marked ? console.info : console.warn)(line); lastPhoneLine = line; }
+}
 
+// The phone menu (the bar's phone button): Switch to phone view (Back to desktop in the phone view) and Sync with
+// phone. Its words are drafts for Tim (docs/PHONE-LINK-STRINGS.md "The phone menu").
+const PHONE_MENU = { label: 'Phone view and sync with phone', view: 'Switch to phone view', back: 'Back to desktop', sync: 'Sync with phone' };
 function renderPhone() {
   const site = view.site;
   const here = !!view.phone && view.phone.tabId === view.tab?.id;
   const on = here && !!view.phone.phone;
   // (where the site is on: the phone view needs TRIF's access to it, and it's for making mods there)
   ui.phoneBtn.hidden = SAFARI || !site || !view.status || (!on && currentState() !== 'on');
-  ui.phoneBtn.setAttribute('aria-pressed', String(on));
-  ui.phoneBtn.title = on ? 'Back to desktop' : 'Edit for mobile';
-  ui.phoneBtn.setAttribute('aria-label', ui.phoneBtn.title);
+  ui.phoneBtn.parentElement.hidden = ui.phoneBtn.hidden;
+  if (ui.phoneBtn.hidden) closePhoneMenu(false);
+  ui.phoneBtn.dataset.on = String(on); // (drawn as pressed in the phone view)
+  ui.phoneBtn.title = PHONE_MENU.label;
+  ui.phoneBtn.setAttribute('aria-label', PHONE_MENU.label);
+  ui.phoneMenuView.textContent = on ? PHONE_MENU.back : PHONE_MENU.view;
+  ui.phoneMenuSync.textContent = PHONE_MENU.sync;
   ui.phoneNote.hidden = !on;
   document.body.classList.toggle('phone-view', on);
   if (on) ui.phoneNoteText.textContent = `Phone view: ${site} sees an ${view.phone.device || 'iPhone'}. Only its phone mods run here, and the mods you make here are for TRIF on your phone.`;
+  // (the navigation bar: the popup route's alone; the window route's window has the browser's own address bar)
+  ui.phoneNav.hidden = !on || view.phone.route === 'window';
+  // (the page wider than the phone's, as far as the window goes: said, with its width)
+  const w = on ? view.phone.width : null;
+  ui.phoneWidth.hidden = !(Number.isFinite(w) && w > PHONE_WIDTH + 2);
+  if (!ui.phoneWidth.hidden) ui.phoneWidth.textContent = PHONE_VIEW_TEXT.wider.replace('{w}', String(w));
+  showPhoneUrl();
+  renderPhoneSync();
+  renderPhoneHint();
+}
+
+// The phone view's words beyond the menu's (drafts for Tim: docs/PHONE-LINK-STRINGS.md "The phone view's window").
+const PHONE_VIEW_TEXT = {
+  hint: 'The phone view is in a window of its own. Click TRIF’s button there to open TRIF beside the phone.',
+  wider: 'This page is {w} px wide, wider than an iPhone’s 390: the browser won’t make this window narrower.',
+  navFailed: 'Couldn’t go there: {error}',
+};
+const PHONE_WIDTH = 390;
+// (the phone view this panel opened without TRIF's panel beside it: {tabId}, until it's there: renderPhoneHint)
+let phoneHint = null;
+
+/**
+ * Switch to phone view, and back. The window route (phone.js): the background moves the tab into an ordinary
+ * window and answers at once; this panel then opens TRIF's side panel in it itself, while the menu's click still
+ * counts as a gesture (about five seconds in Chrome: nothing slow comes before it), and the background fits the
+ * window to the page with the panel there (phone.settle). Firefox's sidebar can't be opened in another window
+ * from here: the window opens at phone width and this panel says to click TRIF's button in it (renderPhoneHint).
+ */
+async function openPhone(tabId) {
+  const r = await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
+  if (r?.route !== 'window' || r.already) return;
+  // (`same`: the tab was alone in this window, which became the phone's: this panel is in it, and stays)
+  let panel = !!r.same;
+  if (!panel && !FIREFOX && typeof chrome.sidePanel?.open === 'function') {
+    try { await chrome.sidePanel.open({ windowId: r.window }); panel = true; } catch (e) { console.warn(`[TRIF] phone view: the side panel didn't open in its window: ${e?.message ?? e}`); }
+  }
+  const s = await request({ type: 'phone.settle', tabId, panel });
+  if (!s?.panel) { phoneHint = { tabId }; renderPhoneHint(); }
+}
+/** The hint, while the phone view it's about is open without TRIF's panel beside it. */
+function renderPhoneHint() {
+  if (!ui.phoneHint) return;
+  ui.phoneHint.hidden = !phoneHint;
+  if (phoneHint) ui.phoneHintText.textContent = PHONE_VIEW_TEXT.hint;
+}
+async function checkPhoneHint() {
+  if (!phoneHint) return;
+  const r = await request({ type: 'phone.state', tabId: phoneHint.tabId, quick: true }).catch(() => null);
+  if (!r?.phone || r.panel) { phoneHint = null; renderPhoneHint(); }
+}
+ui.phoneHintClose?.addEventListener('click', () => { phoneHint = null; renderPhoneHint(); });
+
+/** A short-lived line over the panel's bottom edge (a sync done, a phone address that went nowhere); a click closes it. */
+let toastTimers = [];
+function hideToast() {
+  for (const t of toastTimers) clearTimeout(t);
+  toastTimers = [];
+  if (!ui.toast) return;
+  ui.toast.hidden = true;
+  ui.toast.classList.remove('fading');
+}
+ui.toast?.addEventListener('click', hideToast);
+function showToast(text, ms = 6000) {
+  if (!ui.toast || !text) return;
+  for (const t of toastTimers) clearTimeout(t);
+  ui.toast.textContent = text;
+  ui.toast.classList.remove('fading');
+  ui.toast.hidden = false;
+  toastTimers = [setTimeout(() => ui.toast.classList.add('fading'), ms), setTimeout(() => { ui.toast.hidden = true; ui.toast.classList.remove('fading'); }, ms + 300)];
 }
 
 async function togglePhone() {
@@ -3282,14 +3549,133 @@ async function togglePhone() {
   ui.phoneBtn.disabled = true;
   try {
     if (on) await request({ type: 'phone.close', tabId });
-    else await request({ type: 'phone.open', tabId, screen: { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight } });
+    else await openPhone(tabId);
     await refreshPhone();
   } catch (e) {
     request({ type: 'chat.note', site: chatSite(), text: `${on ? 'Couldn’t go back to desktop' : 'Couldn’t open the phone view'}: ${e?.message ?? e}` }).catch(() => {});
   } finally { ui.phoneBtn.disabled = false; renderPhone(); }
 }
-ui.phoneBtn?.addEventListener('click', togglePhone);
 ui.phoneBack?.addEventListener('click', togglePhone);
+
+// ---- the phone menu: a button that opens a menu (arrow keys, Home, End, Escape, Tab; a click outside closes it)
+const phoneItems = () => [ui.phoneMenuView, ui.phoneMenuSync].filter((b) => !b.hidden && !b.disabled);
+function openPhoneMenu(focus = 0) {
+  ui.phoneMenu.hidden = false;
+  ui.phoneBtn.setAttribute('aria-expanded', 'true');
+  const items = phoneItems();
+  items.at(focus)?.focus();
+}
+function closePhoneMenu(refocus = true) {
+  if (ui.phoneMenu.hidden) return;
+  ui.phoneMenu.hidden = true;
+  ui.phoneBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) ui.phoneBtn.focus();
+}
+ui.phoneBtn?.addEventListener('click', () => { if (ui.phoneMenu.hidden) openPhoneMenu(); else closePhoneMenu(); });
+ui.phoneBtn?.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openPhoneMenu(e.key === 'ArrowDown' ? 0 : -1); }
+});
+ui.phoneMenu?.addEventListener('keydown', (e) => {
+  const items = phoneItems();
+  const at = items.indexOf(document.activeElement);
+  const go = (i) => { e.preventDefault(); items.at(((i % items.length) + items.length) % items.length)?.focus(); };
+  if (e.key === 'ArrowDown') go(at + 1);
+  else if (e.key === 'ArrowUp') go(at - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(items.length - 1);
+  else if (e.key === 'Escape') { e.preventDefault(); closePhoneMenu(); }
+  else if (e.key === 'Tab') closePhoneMenu(false);
+});
+document.addEventListener('click', (e) => { if (!e.target.closest?.('.phone-menu-wrap')) closePhoneMenu(false); });
+ui.phoneMenuView?.addEventListener('click', () => { closePhoneMenu(); togglePhone(); });
+ui.phoneMenuSync?.addEventListener('click', () => { closePhoneMenu(); syncWithPhone(); });
+
+// ---- Sync with phone and the phone line (phonelink.js phoneSyncView): Connect a phone, or Sync now and its result.
+// Through this browser's helper, which relays to the browser's whose helper has the phone link (helper relay.js).
+let phoneLineShown = false; // (outside the phone view: after Sync with phone, until closed)
+async function syncWithPhone() {
+  const connected = !!view.status?.helper?.connected;
+  if (!phoneLink.state.status) await phoneLink.peek(connected);
+  const st = phoneLink.state.status;
+  // (no helper with the link, or another browser has it and can't be reached: Settings say so)
+  if (!st || st.here === false) { openPhoneSettings(); return; }
+  if (!(st.phones || []).length) { await connectPhone(); return; }
+  phoneLineShown = true;
+  await phoneLink.syncNow();
+}
+/** Settings, at Connect a phone. */
+function openPhoneSettings() {
+  openSettings();
+  requestAnimationFrame(() => $('#phone-link')?.scrollIntoView({ block: 'nearest' }));
+}
+/** Connect a phone from anywhere: Settings open at it, and its code on screen (the link turned on if it was off). */
+async function connectPhone() {
+  openPhoneSettings();
+  await phoneLink.open(!!view.status?.helper?.connected);
+  await phoneLink.connect();
+  // (the code itself in view, with Cancel under it)
+  requestAnimationFrame(() => ($('#phone-link .pl-pair') || $('#phone-link'))?.scrollIntoView({ block: 'nearest' }));
+}
+function renderPhoneSync() {
+  if (!ui.phoneSync) return;
+  const v = SAFARI ? null : phoneLink.syncView();
+  const show = !!v && (inPhone() || (phoneLineShown && !!v.text));
+  ui.phoneSync.hidden = !show;
+  if (!show) return;
+  ui.phoneSyncText.textContent = v.text || '';
+  ui.phoneSyncText.hidden = !v.text;
+  ui.phoneSync.classList.toggle('error', !!v.error);
+  const acts = { connect: [PHONE_TEXT.connectLink, () => connectPhone()], syncNow: [PHONE_TEXT.syncNow, () => phoneLink.syncNow()], settings: [PHONE_TEXT.phoneSettings, () => openPhoneSettings()] };
+  ui.phoneSyncActs.replaceChildren(...v.actions.map((a) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `link-btn phone-sync-${a}`;
+    b.textContent = acts[a][0];
+    b.disabled = !!v.busy;
+    b.addEventListener('click', acts[a][1]);
+    return b;
+  }));
+  ui.phoneSyncClose.hidden = inPhone();
+}
+// (its "last synced 5 min ago" kept true while it shows)
+setInterval(() => { if (ui.phoneSync && !ui.phoneSync.hidden) renderPhoneSync(); }, 30000);
+ui.phoneSyncClose?.addEventListener('click', () => { phoneLineShown = false; phoneLink.forgetAsked(); renderPhoneSync(); });
+
+// ---- the popup route's navigation (its window is a popup: no address bar of its own; background.js phone.nav)
+/** The address field shows the phone tab's address, unless it's being typed in. */
+function showPhoneUrl() {
+  if (!ui.phoneNavUrl || document.activeElement === ui.phoneNavUrl) return;
+  ui.phoneNavUrl.value = inPhone() ? (view.tab?.url || '') : '';
+}
+async function phoneNav(go, url) {
+  const tabId = view.tab?.id;
+  if (!inPhone() || !Number.isInteger(tabId)) return;
+  ui.phoneNav.classList.remove('failed');
+  try {
+    await request({ type: 'phone.nav', tabId, go, ...(url !== undefined ? { url } : {}) });
+  } catch (e) {
+    const why = String(e?.message ?? e);
+    console.warn(`[TRIF] phone view: ${go}${url !== undefined ? ` ${JSON.stringify(url)}` : ''} failed: ${why}`);
+    // (back with no page before it, say: the page stays, nothing to say; an address that went nowhere: said)
+    if (go === 'url') { ui.phoneNav.classList.add('failed'); showToast(PHONE_VIEW_TEXT.navFailed.replace('{error}', why)); }
+  }
+}
+ui.phoneNavBack?.addEventListener('click', () => phoneNav('back'));
+ui.phoneNavForward?.addEventListener('click', () => phoneNav('forward'));
+ui.phoneNavReload?.addEventListener('click', () => phoneNav('reload'));
+// (Enter in the field goes there itself, not through the form's implicit submission alone; the form's submit
+// is for anything else that submits it)
+function goTyped() {
+  const text = ui.phoneNavUrl.value.trim();
+  if (!text) return;
+  ui.phoneNavUrl.blur();
+  phoneNav('url', text);
+}
+ui.phoneNav?.addEventListener('submit', (e) => { e.preventDefault(); goTyped(); });
+ui.phoneNavUrl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); goTyped(); } });
+ui.phoneNavUrl?.addEventListener('focus', () => ui.phoneNavUrl.select());
+ui.phoneNavUrl?.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); ui.phoneNavUrl.blur(); showPhoneUrl(); } });
+ui.phoneNavUrl?.addEventListener('blur', () => setTimeout(showPhoneUrl, 0));
 
 // ---- Import, export, a site's files, and dropping files on the panel (helper lib/share.js) -------------
 function renderSiteTools() {
@@ -3605,7 +3991,7 @@ function gripButton(labelId) {
   return b;
 }
 
-const rowIds = () => [...ui.modList.children].filter((li) => li.dataset.mod).map((li) => li.dataset.mod);
+const rowIds = () => [...ui.modList.children].filter((li) => li.dataset.mod && !li.classList.contains('folded')).map((li) => li.dataset.mod);
 const rowName = (li) => li.querySelector('.mod-name > span:not(.light)')?.textContent || li.dataset.mod;
 
 /** Keep the list's current order as this site's (the rows are already where they belong). */
@@ -3626,7 +4012,7 @@ function saveModOrder(li) {
  */
 function placeRow(li, to) {
   const at = () => rowIds().indexOf(li.dataset.mod);
-  const same = (x) => x && x.dataset.mod && x.dataset.group === li.dataset.group;
+  const same = (x) => x && x.dataset.mod && !x.classList.contains('folded') && x.dataset.group === li.dataset.group;
   while (at() < to && same(li.nextElementSibling)) li.before(li.nextElementSibling);
   while (at() > to && same(li.previousElementSibling)) li.after(li.previousElementSibling);
 }
@@ -3635,7 +4021,7 @@ function placeRow(li, to) {
 ui.modList.addEventListener('keydown', (e) => {
   if (modDrag) return;
   const li = e.target.closest?.('#mod-list > li');
-  if (!li || !li.dataset.mod || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!li || !li.dataset.mod || li.classList.contains('folded') || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const onGrip = !!e.target.closest('.mod-grip');
   const ids = rowIds();
   const from = ids.indexOf(li.dataset.mod);
@@ -3660,7 +4046,7 @@ ui.modList.addEventListener('keydown', (e) => {
 ui.modList.addEventListener('pointerdown', (e) => {
   if (modDrag || e.button !== 0 || !e.isPrimary) return;
   const li = e.target.closest('#mod-list > li');
-  if (!li || !li.dataset.mod || rowIds().length < 2) return;
+  if (!li || !li.dataset.mod || li.classList.contains('folded') || rowIds().length < 2) return;
   const onGrip = !!e.target.closest('.mod-grip');
   // Buttons (the switch, delete, Allow…), the update offer and error text keep their clicks and text
   // selection; on a touch screen only the grip drags (elsewhere a finger scrolls the list).
@@ -3713,14 +4099,14 @@ function followPointer(d) {
   const r = list.getBoundingClientRect();
   const h = li.offsetHeight;
   // (the row stays inside its own group: it stops at the group's first and last rows, never past them)
-  const group = [...list.children].filter((x) => x.dataset.mod && x.dataset.group === li.dataset.group);
+  const group = [...list.children].filter((x) => x.dataset.mod && !x.classList.contains('folded') && x.dataset.group === li.dataset.group);
   const minTop = Math.min(...group.map((x) => x.offsetTop));
   const maxTop = Math.max(...group.map((x) => x.offsetTop + x.offsetHeight)) - h;
   const top = Math.max(minTop, Math.min(maxTop, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
   // (positions among the mod rows: the group headings aren't rows, and a row stays in its group: placeRow)
   // The leading edge decides: a row above is passed once the dragged row's top crosses its middle, a row below
   // once its bottom does, so the end rows make way at both ends of the group (equal heights tie otherwise).
-  const others = [...list.children].filter((x) => x !== li && x.dataset.mod);
+  const others = [...list.children].filter((x) => x !== li && x.dataset.mod && !x.classList.contains('folded'));
   const passed = (x) => (x.offsetTop < li.offsetTop ? top >= x.offsetTop + x.offsetHeight / 2 : top + h > x.offsetTop + x.offsetHeight / 2);
   let to = others.findIndex((x) => !passed(x));
   if (to === -1) to = others.length;
@@ -4066,12 +4452,20 @@ async function panelCommand(text) {
 
 async function send() {
   const text = ui.input.value.trim();
-  if (!text || !view.site || view.chat.run || !ui.composer.dataset.canSend) return;
+  if (!text || !view.site || !ui.composer.dataset.canSend) return;
   if (text.startsWith('/')) {
     ui.input.value = '';
     try { if (await panelCommand(text)) return; } catch (e) { console.warn('[TRIF] command failed', e); }
   }
   ui.input.value = '';
+  // While the agent works (or messages wait already): it waits too, and goes when the agent is done.
+  if (view.chat.run || view.chat.queue?.length) {
+    try { await queueMessage(text); } catch (e) {
+      if (!ui.input.value) ui.input.value = text;
+      request({ type: 'chat.note', site: chatSite(), text: `Couldn't keep that message: ${e?.message ?? e}` }).catch(() => {});
+    }
+    return;
+  }
   const tabId = view.tab.id;
   try {
     const runId = await startRun(text);
@@ -4082,6 +4476,16 @@ async function send() {
     if (!inChat && !ui.input.value) ui.input.value = text;
     console.warn('[TRIF] agent.start failed', e);
   }
+}
+
+/** `text` waits for the run going (or, with none, goes now with the others waiting): background.js queueMessage. */
+async function queueMessage(text) {
+  const { id: agent } = currentAgent();
+  await keepSettings();
+  return request({
+    type: 'chat.queue', site: chatSite(), text, tabId: view.tab.id, url: view.tab.url,
+    agent: agent || undefined, model: chosenModel(agent) || undefined, effort: chosenEffort(agent) || undefined,
+  });
 }
 
 /** Starts an agent run in this chat with `text` as the user's message; `extra` goes along (e.g. merge). */
@@ -4126,7 +4530,7 @@ ui.input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     if (e.isComposing || e.keyCode === 229) return; // IME confirming a candidate
-    if (!view.chat.run) ui.composer.requestSubmit();
+    ui.composer.requestSubmit(); // (while the agent works, the message waits: send)
   }
 });
 ui.stop.addEventListener('click', stop);
@@ -4150,6 +4554,8 @@ function toggleSettings(open = ui.settings.hidden) {
   ui.settings.hidden = !open;
   ui.settingsBtn.setAttribute('aria-expanded', String(open));
   if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
+  // Connect a phone (phonelink.js): asked for when Settings open; closing them closes a pairing window
+  if (open) phoneLink.open(!!view.status?.helper?.connected); else phoneLink.close();
 }
 const openSettings = () => { if (ui.settings.hidden) toggleSettings(true); };
 ui.using.addEventListener('click', () => { openSettings(); try { ui.model.focus(); } catch { /* disabled */ } });
@@ -4243,7 +4649,9 @@ function renderUpdate() {
   const u = view.status?.helper?.connected ? view.status.update : null;
   const done = view.updated && Date.now() - view.updated.at < UPDATED_SHOWN_MS && view.updated.to === (u?.current || view.status?.version) ? view.updated : null;
   const installing = view.updateBusy === 'installing' || u?.installing;
-  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to]);
+  // (Not now: that version's card stays away; a newer one brings it back, and Settings still says it's there: Tim 11-20)
+  const later = !!u?.available && !installing && !view.updateError && view.updateLater === u.latest;
+  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to, later]);
   renderUpdateSettings(u);
   if (n.dataset.key === key) return;
   n.dataset.key = key;
@@ -4252,12 +4660,18 @@ function renderUpdate() {
   if (installing) {
     parts.push(el('p', 'title', `Updating TRIF to ${u?.latest || 'the new version'}…`));
     parts.push(el('p', 'note', 'It reloads by itself when it’s done.'));
-  } else if (u?.available) {
+  } else if (u?.available && !later) {
     parts.push(el('p', 'title', `TRIF ${u.latest} is available`));
     if (view.updateError) { parts.push(el('p', 'note error', view.updateError)); n.classList.add('bad'); }
     const actions = el('p', 'actions');
     if (u.canInstall) actions.append(button('Update', 'primary', installUpdate));
     if (u.notes) actions.append(notesToggle(n, u.notes));
+    const latest = u.latest;
+    actions.append(button('Not now', null, () => {
+      view.updateLater = latest;
+      chrome.storage.local.set({ updateLater: latest }).catch(() => {});
+      renderUpdate();
+    }));
     if (actions.childNodes.length) parts.push(actions);
     if (!u.canInstall && u.why) parts.push(el('p', 'note', u.why));
   } else if (done) {
@@ -4279,7 +4693,7 @@ function notesToggle(container, notes) {
     const md = el('div', 'md');
     setMarkdown(md, unwrapMarkdown(notes));
     container.append(md);
-    e.target.textContent = 'Hide';
+    e.target.textContent = 'Hide what’s new';
   });
 }
 

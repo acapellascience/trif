@@ -87,6 +87,9 @@ const E2E_SITE_ORIGINS = ['*://127.0.0.1/*', '*://*.x.com/*', '*://*.google.com/
 // "Agent on this site" for the test sites (the harness drives them with trif run): Run code.
 const AGENT_SITES = { '127.0.0.1': 'run', 'x.com': 'run', 'google.com': 'run', 'example.com': 'run' };
 
+// (a mod TRIF wrote, without the stable id it gave it: docs/PHONE-SYNC.md 2a)
+const noId = (t) => String(t).replace(/^\/\/ @id [a-z0-9-]+\r?\n/m, '');
+
 class Scenario {
   /**
    * opts: { browser: 'firefox'|'chrome', kind: 'fresh'|'upgrade', work, newTgz, oldTgz, results, servers,
@@ -1406,6 +1409,7 @@ class Scenario {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a style mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('a style section (helper/lib/stylesection.js): a free mod\'s and a boxed mod\'s CSS applied by TRIF, their settings as trif.style; the code finds no trace of the section; a change to the section alone runs without asking; a code change waits as before, the version that runs meanwhile wearing the new style', () => this.styleSectionCheck(win));
+      await r.check('a mod that changes kind in its file (boxed, style, boxed, free, boxed): registered as each, never "World ID can only be specified for USER_SCRIPT worlds", and runs as it now is', () => this.kindChangeCheck(win));
       await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
@@ -1416,6 +1420,7 @@ class Scenario {
       await r.check('downloads: off until switched on in Settings; then a new mod file in Downloads (not one there before) gets an "Add this mod?" card naming where it came from (the file\'s where-from record); Try it here runs it in this tab with TRIF\'s runtime (style from the card, boxed from the paste card; a free mod refused) and Undo reloads it away; Add imports it switched off, the file left in Downloads; Not now, and Ignore files from <site>', () => this.downloadsCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('the code card\'s Edit: the code in an editor (numbered, monospace), typed keys and Tab, Undo and Redo; Save writes it and it runs, Undo after Save puts the version before back (History has both); a broken edit isn\'t saved and says so on its line; an edit adding a line that sends waits ("You edited it."), the version before running, until Allow; a change made meanwhile isn\'t overwritten', () => this.codeEditCheck(win));
+      await r.check('the code card\'s Rename: Details shows the name; an empty name is refused; a rename sets @name, adds @id, moves the file, keeps its switch, and never waits for an OK', () => this.codeRenameCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
       await r.check('mod rows: the light, the name, one chip by its level (hover says what, a click opens the code card), one line of description, the controls', () => this.modRowsCheck(win));
       await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
@@ -1430,7 +1435,8 @@ class Scenario {
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
       await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
       await r.check('Settings → Mods your chat makes → Wait for me: what the chat makes waits, with Show code and Turn on in its card; what it changes waits while the version before runs; Start on again', () => this.chatWaitCheck(win));
-      await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
+      await r.check('messages typed while the agent works (a stand-in Claude Code): they wait under the conversation and go as one message when it is done, kept across a panel reload; Send now goes into the working run; after Stop they wait, "Not sent", and a click puts one back in the box', () => this.queueCheck(win));
+      await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged, and a fix run that finds nothing broken clears it with trif not-broken (Not broken.); Settings has When a mod breaks', () => this.modHealthCheck(win));
       await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
@@ -1932,7 +1938,7 @@ class Scenario {
         for (const extra of [[], ['--full'], ...(chrome ? [['--copy'], ['--copy', '--full']] : [])]) {
           const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...extra, '-o', path.join(this.work, 'refused.png')]);
           if (x.status === 0) throw new Error(`trif screenshot ${extra.join(' ')} worked`);
-          if (!/access to every site/.test(x.stderr) || !/toolbar button/.test(x.stderr) || !/trif sweep/.test(x.stderr)) throw new Error(`no hint: ${x.stderr}`);
+          if (!/access to every site/.test(x.stderr) || !/robot icon/.test(x.stderr) || !/trif sweep/.test(x.stderr)) throw new Error(`no hint: ${x.stderr}`);
           results.push(x.stderr.trim().split('\n')[0]);
         }
         const after = await view();
@@ -1948,7 +1954,7 @@ class Scenario {
         const tab = String(this.win.tabId);
         const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-trif-screenshot-front.png`);
         const no = await this.cli(['screenshot', '--tab', tab, '-o', file]);
-        if (no.status === 0 || !/only after the user clicks the TRIF toolbar button on it/.test(no.stderr)) throw new Error(`before the click: ${no.status} ${no.stderr}`);
+        if (no.status === 0 || !/only after the user clicks TRIF's button on it/.test(no.stderr)) throw new Error(`before the click: ${no.status} ${no.stderr}`);
         const ctx = await d.findPage((u) => u === front);
         await d.clickToolbarButton(ctx);
         await sleep(500);
@@ -2839,6 +2845,51 @@ process.exitCode = 1;
       return `CSS, hide list and trif.style applied (free and boxed), no trace of the section in what the code can read; a style edit registered without asking (${two.colour}, ${two.spacing}); a code edit waits, the version before running in the new style (${three.colour})`;
     } finally {
       for (const f of [free, boxed]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
+  // ---- a mod that changes kind in its file (11-20: a run rewrote a boxed mod as a style mod; userScripts.update
+  // kept its sandbox worldId, which Chrome takes only in a USER_SCRIPT world, and refused it at every sync)
+
+  async kindChangeCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const file = path.join(this.trif, 'sites', site, 'e2e-kind.js');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st) => (st.split('\n').find((l) => /\/e2e-kind\s/.test(l)) || '').trim();
+    const head = (extra) => `// ==WebMod==\n// @name E2E kind\n// @match *://127.0.0.1/*\n// @run-at document-start\n${extra}// ==/WebMod==\n`;
+    const css = (px) => `#title { word-spacing: ${px}px }`;
+    const kinds = [
+      ['boxed', (px) => head('// @boxed\n') + `trif.css(${JSON.stringify(css(px))});\n`],
+      ['style', (px) => head('// @style\n') + JSON.stringify({ css: css(px) }) + '\n'],
+      ['boxed', (px) => head('// @boxed\n') + `trif.css(${JSON.stringify(css(px))});\n`],
+      ['free', (px) => head('') + `(document.head || document.documentElement).append(Object.assign(document.createElement('style'), { textContent: ${JSON.stringify(css(px))} }));\n`],
+      ['boxed', (px) => head('// @boxed\n') + `trif.css(${JSON.stringify(css(px))});\n`],
+    ];
+    const spacing = async () => (await this.cli(['run', '--tab', String(win.tabId), "getComputedStyle(document.getElementById('title')).wordSpacing"], { timeoutMs: 20000 })).stdout.trim().replace(/^"|"$/g, '');
+    let n = 0;
+    const seen = [];
+    try {
+      // (TRIF's own page to ask the browser from, again if a check skipped before left it elsewhere: TRIF_E2E_ONLY)
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.tabs)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
+      for (const [i, [kind, text]] of kinds.entries()) {
+        const px = 11 + i;
+        fs.writeFileSync(file, text(px));
+        const want = kind === 'boxed' ? /\sregistered \(boxed/ : /\sregistered(?! \(boxed)/;
+        let last = '';
+        try {
+          await waitFor(`${kind} registered`, async () => { last = line(await status()); return want.test(' ' + last.replace(/^\S+/, '')) ? last : null; }, { timeoutMs: 25000, intervalMs: 500 });
+        } catch { throw new Error(`as a ${kind} mod (step ${i + 1}): ${last || 'not listed'}`); }
+        await waitFor(`${kind} runs`, async () => {
+          await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=kind-${++n}`]);
+          await sleep(1200);
+          return (await spacing()) === `${px}px` || null;
+        }, { timeoutMs: 25000, intervalMs: 300 });
+        seen.push(`${kind} ${px}px`);
+      }
+      return seen.join(', ');
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
     }
   }
 
@@ -4282,6 +4333,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await go(at('x.com', '/home'));
       const folded = await waitFor('the fold', async () => { const v = await view(); return v.site === 'x.com' && /^\d+ more for other x\.com pages$/.test(v.fold) && v.mods ? v : null; }, { timeoutMs: 20000 });
       if (folded.mods.includes('x.com/e2e-sens-elsewhere')) problems.push('the mod for another page is listed above the fold');
+      if (folded.foldOpen) problems.push('the fold starts open');
       if (folded.overflowX !== 'hidden') problems.push(`the box scrolls sideways: ${folded.overflowX}`);
       const px = parseFloat(folded.maxH);
       const want = (empty, v) => (empty ? 0.7 : 0.4) * v.vh - 40;
@@ -4317,11 +4369,38 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('mods-fold');
       await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
       const opened = await waitFor('unfolded', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
+      // (opened, its mods right under the line, a plain list (Tim, 11-20): no tier heading between, each row's tier
+      // in its colour (a style mod: green) and, for a screen reader and hover, in words; the tiers above lack it)
+      const under = await this.panel(`async () => {
+        const kids = [...document.querySelectorAll('#mod-list > li')];
+        const fold = kids.findIndex((li) => li.classList.contains('mods-fold'));
+        const li = document.querySelector('#mod-list > li[data-mod="x.com/e2e-sens-elsewhere"]');
+        const at = kids.indexOf(li);
+        const paint = (host, bg) => { const p = document.createElement('div'); p.style.background = bg; host.append(p); const c = getComputedStyle(p).backgroundColor; p.remove(); return c; };
+        const tier = paint(li, 'var(--tier)');
+        const name = li.querySelector('.mod-name');
+        return { fold, at, last: kids.length - 1, folded: li.classList.contains('folded'), between: kids.slice(fold + 1, at).map((x) => x.dataset.mod || x.className),
+          above: kids.slice(0, fold).filter((x) => x.dataset.mod).map((x) => x.dataset.mod), headingsBelow: kids.slice(fold).filter((x) => x.classList.contains('mod-group')).length,
+          tier, green: paint(document.getElementById('mod-list'), 'var(--led-green)'), stripe: getComputedStyle(li, '::before').backgroundColor,
+          stripeWant: paint(li, li.classList.contains('off') ? 'color-mix(in srgb, var(--tier) 35%, var(--line))' : 'var(--tier)'),
+          words: name.textContent, title: name.title, grip: getComputedStyle(li.querySelector('.mod-grip')).display, light: li.querySelector('.light').classList.contains('on') };
+      }`);
+      if (!under.folded || under.at !== under.fold + 1 || under.headingsBelow) problems.push(`opened, the row isn't right under the fold line in a plain list: ${JSON.stringify(under)}`);
+      if (under.above.includes('x.com/e2e-sens-elsewhere')) problems.push('opened, the tiers above list the mod for another page too');
+      if (under.tier !== under.green || under.stripe !== under.stripeWant) problems.push(`the folded row's tier colour: ${under.tier} (green ${under.green}), its stripe ${under.stripe} (want ${under.stripeWant})`);
+      if (!/^E2E sensitive elsewhere, Style mods\b/.test(under.words) || under.title !== 'Style mods') problems.push(`the folded row's tier in words: "${under.words}", its hover "${under.title}"`);
+      if (under.grip !== 'none' || under.light) problems.push(`the folded row: grip ${under.grip}, light on ${under.light}`);
       await toBottom();
       const c2 = await clipped();
       if (c2.out.length) problems.push(`clipped at the right edge (opened): ${c2.out.join(', ')}`);
       await themes('mods-fold-open');
-      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${heights.join(', ')}`);
+      // (closed again: the row's gone from the list)
+      await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
+      const shut = await waitFor('folded again', async () => { const v = await view(); return !v.foldOpen ? v : null; }, { timeoutMs: 8000 });
+      if (shut.mods.includes('x.com/e2e-sens-elsewhere')) problems.push('closed again, the mod for another page still shows');
+      await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
+      await waitFor('unfolded again', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
+      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}, the row right under the line ("${under.words}", stripe ${under.stripe}), closed: ${shut.mods.length}; the box ${heights.join(', ')}`);
       // 5. Copy to {host}: the code card's menu brings a parent's mod over to a sensitive site of its own (off there)
       await this.panelClick('li[data-mod="x.com/e2e-sens-elsewhere"] .mod-code');
       const items = await waitFor('the code card\'s menu', () => this.panel(`async () => { const d = document.getElementById('code-view'); if (!d?.open) return null; return [...d.querySelectorAll('.cv-copy-host')].map((b) => b.textContent); }`), { timeoutMs: 8000 });
@@ -4457,7 +4536,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('share-paste');
       await this.d.click(this.panelCtx, '#paste-ask .ap-actions .btn:nth-child(1)');
       await waitFor('the pasted mod', () => (fs.existsSync(pasted) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Paste a mod wrote nothing'));
-      if (fs.existsSync(pasted) && fs.readFileSync(pasted, 'utf8') !== pasteText) problems.push('the pasted mod isn\'t the text pasted');
+      if (fs.existsSync(pasted) && noId(fs.readFileSync(pasted, 'utf8')) !== pasteText) problems.push('the pasted mod isn\'t the text pasted (but for the @id TRIF gives it)');
       const pastedStatus = await waitFor('the pasted mod off', async () => { const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout; const line = out.split('\n').find((l) => l.includes(`${site}/e2e-pasted-calm`)); return line && /off/.test(line) ? line.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
       if (!pastedStatus) problems.push('the pasted mod isn\'t listed as off');
       await themes('share-files');
@@ -4561,7 +4640,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       const added = path.join(dir, 'e2e-downloaded.js');
       made.push(added);
       await waitFor('the added mod', () => (fs.existsSync(added) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Add wrote nothing'));
-      if (fs.existsSync(added) && fs.readFileSync(added, 'utf8') !== styleText) problems.push('the added mod isn\'t the file');
+      if (fs.existsSync(added) && noId(fs.readFileSync(added, 'utf8')) !== styleText) problems.push('the added mod isn\'t the file (but for the @id TRIF gives it)');
       if (!fs.existsSync(f) || fs.readFileSync(f, 'utf8') !== styleText) problems.push('the download was moved or changed');
       const off = await waitFor('it\'s off', async () => { const l = (await this.cli(['status'], { timeoutMs: 20000 })).stdout.split('\n').find((x) => x.includes(`${site}/e2e-downloaded`)); return l && /off/.test(l) ? l.trim() : null; }, { timeoutMs: 15000, intervalMs: 500 }).catch(() => null);
       if (!off) problems.push('the added mod isn\'t off');
@@ -4801,8 +4880,8 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('edit-editor');
       // 2. Save: runs from the next page load, the version before in History; Undo puts it back
       c = await save('saved');
-      if (c.saved !== 'Saved. It runs from the next page load. Undo' || c.editing || c.code !== typed) problems.push(`saved: ${JSON.stringify(c)}`);
-      if (fs.readFileSync(file, 'utf8') !== typed) problems.push('the file isn\'t the edit');
+      if (c.saved !== 'Saved. It runs from the next page load. Undo' || c.editing || noId(c.code) !== typed || !/^\/\/ @id [a-z0-9-]{36}$/m.test(c.code)) problems.push(`saved (with the @id a saved edit gets): ${JSON.stringify(c)}`);
+      if (noId(fs.readFileSync(file, 'utf8')) !== typed) problems.push('the file isn\'t the edit');
       await themes('edit-saved');
       await runs('v2');
       done.push('typed, Tab, Undo and Redo; saved, it ran');
@@ -4862,6 +4941,55 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
     } finally {
       try { fs.unlinkSync(file); } catch { /* gone */ }
       await this.panel(`async () => { for (const id of ['code-view', 'approval']) { const d = document.getElementById(id); if (d && d.open) d.close(); } return true; }`).catch(() => {});
+    }
+  }
+
+  // ---- Rename in the code card's Details (Tim, 11-18; helper/lib/rename.js, docs/PHONE-SYNC.md 2a): the @name line set,
+  // an @id added, the file following the name, its switch kept (off stays off), not held, not new; an empty name refused
+  async codeRenameCheck(win) {
+    const site = '127.0.0.1';
+    const from = path.join(this.trif, 'sites', site, 'e2e-rename.js');
+    const to = path.join(this.trif, 'sites', site, 'e2e-quiet-feed.js');
+    const v1 = "// ==WebMod==\n// @name E2E rename\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eRename = 'v1';\n";
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const problems = [];
+    const row = (id) => this.panel(`async () => { const li = document.querySelector('li[data-mod="${id}"]'); if (!li) return null; const sw = li.querySelector('[role="switch"]'); return { on: sw ? sw.getAttribute('aria-checked') : null, name: li.querySelector('.mod-name')?.textContent || li.textContent.slice(0, 60) }; }`);
+    try {
+      fs.writeFileSync(from, v1);
+      await waitFor('the mod registered', async () => /e2e-rename\s+registered/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['disable', `${site}/e2e-rename`], { timeoutMs: 20000 });
+      await waitFor('its row, off', async () => { const r = await row(`${site}/e2e-rename`); return r && r.on === 'false' ? r : null; }, { timeoutMs: 15000 });
+      await this.dismissApproval();
+      await this.panelClick(`li[data-mod="${site}/e2e-rename"] .mod-code`);
+      await waitFor('the code card', () => this.panel(`async () => document.getElementById('code-view')?.open || null`), { timeoutMs: 8000 });
+      await this.panelClick('#code-view .cv-tab-details');
+      const shown = await waitFor('the name in Details', () => this.panel(`async () => { const r = document.querySelector('#code-view .cv-d-name'); return r && !r.closest('[hidden]') ? { name: r.querySelector('.cv-d-name-value')?.textContent, rename: !!r.querySelector('.cv-rename:not([disabled])') } : null; }`), { timeoutMs: 8000 });
+      if (shown.name !== 'E2E rename' || !shown.rename) problems.push(`Details' name: ${JSON.stringify(shown)}`);
+      await this.panelClick('#code-view .cv-rename');
+      // (an empty name: refused, nothing written)
+      await this.panel(`async () => { const i = document.querySelector('#code-view .cv-d-name-input'); i.value = '  '; return true; }`);
+      await this.panelClick('#code-view .cv-rename-save');
+      const refused = await waitFor('the refusal', () => this.panel(`async () => { const n = document.querySelector('#code-view .cv-d-name-err'); return n && !n.hidden ? n.textContent : null; }`), { timeoutMs: 5000 });
+      if (refused !== 'Give it a name.' || !fs.existsSync(from)) problems.push(`an empty name: ${refused}`);
+      await this.panel(`async () => { const i = document.querySelector('#code-view .cv-d-name-input'); i.value = 'E2E quiet feed'; return true; }`);
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `code-rename-field-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
+      await this.panelClick('#code-view .cv-rename-save');
+      const after = await waitFor('the card on the renamed mod', () => this.panel(`async () => { const d = document.getElementById('code-view'); const v = d?.querySelector('.cv-d-name-value'); return d?.open && d.dataset.mod === '${site}/e2e-quiet-feed' && v ? { name: v.textContent, title: document.getElementById('code-view-name').textContent } : null; }`), { timeoutMs: 15000 });
+      if (after.name !== 'E2E quiet feed' || after.title !== 'E2E quiet feed') problems.push(`after: ${JSON.stringify(after)}`);
+      await this.shot(this.panelCtx, 'code-renamed');
+      if (fs.existsSync(from) || !fs.existsSync(to)) problems.push(`the file didn't follow: ${fs.existsSync(from)} ${fs.existsSync(to)}`);
+      const text = fs.existsSync(to) ? fs.readFileSync(to, 'utf8') : '';
+      if (!/^\/\/ @name E2E quiet feed$/m.test(text) || !/^\/\/ @id [a-z0-9-]{36}$/m.test(text) || !text.includes("dataset.e2eRename = 'v1'")) problems.push(`the text: ${text}`);
+      const r = await waitFor('its row, renamed', async () => { const x = await row(`${site}/e2e-quiet-feed`); return x || null; }, { timeoutMs: 15000 });
+      if (r.on !== 'false') problems.push(`its switch didn't stay off: ${JSON.stringify(r)}`);
+      const st = await status();
+      if (/e2e-quiet-feed[^\n]*(held|waiting|new)/i.test(st)) problems.push(`it waits or is new: ${st.split('\n').filter((l) => /e2e-quiet/.test(l)).join(' | ')}`);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return 'Details shows the name with Rename; an empty name refused; renamed: the card on the new id, the file e2e-quiet-feed.js with @name and a new @id, its switch still off, not held or new';
+    } finally {
+      for (const f of [from, to]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
     }
   }
 
@@ -4977,7 +5105,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await this.dismissApproval();
       await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-icons').click(); return true; }`);
       // (the icons open the card on Details: the hold's presentation, with each "more")
-      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && x && !x.hidden ? { mod: d.dataset.mod, tab: d.querySelector('.cv-tab-details')?.getAttribute('aria-selected'), about: x.textContent, icons: [...x.querySelectorAll('.cv-d-facts svg')].filter((v) => !v.closest('.more-btn')).length, more: x.querySelectorAll('.more-btn').length, codeShown: !d.querySelector('.cv-code').hidden, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
+      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); const x = d?.querySelector('.cv-details'); return d?.open && x && !x.hidden ? { mod: d.dataset.mod, tab: d.querySelector('.cv-tab-details')?.getAttribute('aria-selected'), about: [...x.children].filter((c) => !c.classList.contains('cv-d-name')).map((c) => c.textContent).join(''), name: x.querySelector('.cv-d-name-value')?.textContent || null, icons: [...x.querySelectorAll('.cv-d-facts svg')].filter((v) => !v.closest('.more-btn')).length, more: x.querySelectorAll('.more-btn').length, codeShown: !d.querySelector('.cv-code').hidden, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
       if (about.mod !== `${site}/e2e-row-power` || about.tab !== 'true' || about.codeShown || !/Noticeable/.test(about.about) || !/It can see and filter/.test(about.about) || !/^Boxed mod: can do what you've allowed\./.test(about.about) || about.icons !== 1 || about.more < 3 || about.file !== 'e2e-row-power.js') problems.push(`the card's Details: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
       // (the warning about two powers together: in Details, as the hold put it, not on the icons)
@@ -5198,6 +5326,145 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     }
   }
 
+  // Messages typed while the agent works (sidepanel.js renderQueue, background.js queueMessage and sendNow), with a
+  // stand-in Claude Code that reads its messages as stream-json, as the real one does: one written into the run
+  // comes back (isReplay) at its next step, 400 ms apart; LONG in a message: 40 steps, else 3.
+  async queueCheck(win) {
+    const site = '127.0.0.1';
+    const dir = path.join(this.work, 'standin-queue');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const session = 'e2e-queue';
+let buf = '', closed = false, busy = false;
+const waiting = [];
+const take = (m) => { say({ type: 'user', message: { role: 'user', content: m.message.content }, session_id: session, isReplay: true }); return m.message.content; };
+const turn = (first) => {
+  busy = true;
+  const text = take(first);
+  say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'Working on: ' + text }] } });
+  let n = 0;
+  const steps = text.includes('LONG') ? 40 : 3;
+  const next = () => {
+    for (const m of waiting.splice(0)) say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'Also: ' + take(m) }] } });
+    if (++n < steps) return setTimeout(next, 400);
+    say({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: session });
+    busy = false;
+    setTimeout(after, 50);
+  };
+  setTimeout(next, 400);
+};
+const after = () => { if (busy) return; if (waiting.length) return turn(waiting.shift()); if (closed) process.exit(0); };
+say({ type: 'system', subtype: 'init', session_id: session });
+let started = false;
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => {
+  buf += d;
+  let nl;
+  while ((nl = buf.indexOf('\\n')) !== -1) {
+    const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (!started) { started = true; turn(m); } else waiting.push(m);
+  }
+});
+process.stdin.on('end', () => { closed = true; after(); });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const base = `http://${site}:${this.o.servers.port}`;
+    const chat = async () => (await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`])) || { messages: [] };
+    const users = async () => (await chat()).messages.filter((m) => m.role === 'user').map((m) => m.text);
+    const reopen = async () => { await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {}); await sleep(800); this.panelCtx = await this.d.findPage('sidepanel.html'); };
+    const type = async (text) => {
+      await this.panel(`async (t) => { const i = document.getElementById('input'); i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [text]);
+      await this.panelClick('#send');
+    };
+    const box = () => this.panel(`async () => {
+      const shown = (e) => !!e && e.getClientRects().length > 0;
+      const q = document.getElementById('queue');
+      return { send: shown(document.getElementById('send')), sendTitle: document.getElementById('send').title, stop: shown(document.getElementById('stop')),
+        input: document.getElementById('input').value, disabled: document.getElementById('input').disabled,
+        queue: shown(q) ? [...q.querySelectorAll('li.queued')].map((li) => ({ text: li.querySelector('.q-text').textContent, note: li.querySelector('.q-note').textContent, now: li.querySelector('.q-now').disabled })) : [] };
+    }`);
+    const running = (on) => waitFor(on ? 'the run' : 'the run to end', async () => { const c = await chat(); return (on ? !!c.run?.runId : !c.run) ? c : null; }, { timeoutMs: 30000, intervalMs: 200 });
+    const queued = (n) => waitFor(`${n} waiting`, async () => { const b = await box(); return b.queue.length === n ? b : null; }, { timeoutMs: 10000, intervalMs: 150 });
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    try {
+      // (TRIF's own page to ask the browser from, again if a check skipped before left it elsewhere: TRIF_E2E_ONLY)
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.storage)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=queue`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+
+      // 1. Typed while it works: it waits, under the conversation; Send and Stop both there; two join into one.
+      await type('LONG first');
+      await running(true);
+      await type('queued one');
+      let b = await queued(1);
+      if (!b.send || !b.stop || b.disabled || b.input) problems.push(`while it works, the box: ${JSON.stringify(b)}`);
+      if (b.queue[0].note !== 'Sends when your agent is done' || b.sendTitle !== 'Send when your agent is done') problems.push(`the waiting line: ${JSON.stringify(b)}`);
+      await type('queued two');
+      b = await queued(2);
+      await themes('queue-waiting');
+      // (the panel closed and opened again: still there)
+      await reopen();
+      b = await queued(2);
+      await waitFor('the queued pair sent as one', async () => (await users()).includes('queued one\n\nqueued two') || null, { timeoutMs: 60000, intervalMs: 300 });
+      await running(false);
+      const said = (await chat()).messages.filter((m) => m.role === 'assistant').map((m) => m.text);
+      if (!said.includes('Working on: queued one\n\nqueued two')) problems.push(`the next run: ${JSON.stringify(said)}`);
+      if ((await box()).queue.length) problems.push('the queue isn\'t empty after it went');
+
+      // 2. Send now: written into the run, shown as sent there, and the same run goes on with it.
+      await type('LONG second');
+      const c2 = await running(true);
+      await type('push me now');
+      await queued(1);
+      await this.panelClick('#queue li.queued .q-now');
+      await queued(0);
+      await waitFor('the run took it', async () => (await chat()).messages.some((m) => m.role === 'assistant' && m.text === 'Also: push me now') || null, { timeoutMs: 15000, intervalMs: 200 });
+      const c2b = await chat();
+      if (c2b.run?.runId !== c2.run.runId) problems.push('Send now started another run: it should go into the one working');
+      if (!c2b.messages.some((m) => m.role === 'user' && m.text === 'push me now' && m.pushed)) problems.push('the pushed message isn\'t in the chat as sent');
+      await themes('queue-pushed');
+
+      // 3. Stopped: what waits stays, "Not sent", Send now still there; a click on it puts it back in the box.
+      await running(false);
+      await type('LONG third');
+      await running(true);
+      await type('after the stop');
+      await queued(1);
+      await this.panelClick('#stop');
+      await running(false);
+      b = await queued(1);
+      if (b.queue[0].note !== 'Not sent: your agent stopped first' || b.queue[0].now) problems.push(`stopped, the waiting one: ${JSON.stringify(b.queue)}`);
+      if ((await users()).includes('after the stop')) problems.push('it was sent after a stop');
+      await themes('queue-stopped');
+      await this.panelClick('#queue li.queued .q-text');
+      await queued(0);
+      if ((await box()).input !== 'after the stop') problems.push(`clicked, the box has: ${JSON.stringify((await box()).input)}`);
+      // and sent from there, with nothing running: it goes at once
+      await this.panelClick('#send');
+      await waitFor('sent from the box', async () => (await users()).includes('after the stop') || null, { timeoutMs: 15000, intervalMs: 200 });
+      await running(false);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return 'two waiting went as one when the run was done (kept across a panel reload); Send now went into the working run; stopped, the waiting one stayed, back in the box with a click';
+    } finally {
+      if ((await chat().catch(() => null))?.run) await this.panelClick('#stop').catch(() => {});
+      fs.writeFileSync(cfgFile, saved);
+    }
+  }
+
   // "Mods your chat makes: Wait for me", with a stand-in Claude Code that writes a mod, then changes it
   async chatWaitCheck(win) {
     const site = '127.0.0.1';
@@ -5304,9 +5571,22 @@ if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0
 if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 say({ type: 'system', subtype: 'init', session_id: 'e2e-fix' });
+// (the message: a side-panel run's comes as one stream-json line, its stdin left open for more: the first line)
 let input = '';
-try { input = fs.readFileSync(0, 'utf8'); } catch { /* none */ }
+try { const b = Buffer.alloc(65536); for (;;) { const n = fs.readSync(0, b, 0, b.length, null); if (!n) break; input += b.toString('utf8', 0, n); if (input.includes('\\n')) break; } } catch { /* none */ }
+try { const m = JSON.parse(input.split('\\n')[0]); if (m && m.type === 'user') input = String(m.message.content); } catch { /* plain text */ }
 fs.writeFileSync(${JSON.stringify(promptFile)}, a.join('\\n') + '\\n---\\n' + input);
+// (a "may be broken" flag: it looks, finds nothing broken, and says so as the prompt says: trif not-broken)
+const nb = /may be broken/.test(input) && /Run \x60(trif not-broken [^\x60]+)\x60/.exec(input);
+if (nb) {
+  let said = '';
+  try { said = require('child_process').execSync(nb[1], { encoding: 'utf8' }); } catch (e) { said = 'FAILED: ' + (e.stderr || e.message); }
+  fs.writeFileSync(${JSON.stringify(path.join(standin, 'not-broken.txt'))}, said);
+  const t = "Nothing is broken: the part it looks for just isn't on the page this time.";
+  say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: t }] } });
+  say({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: 'e2e-fix' });
+  process.exit(0);
+}
 fs.writeFileSync('sites/127.0.0.1/e2e-broke.js', ${JSON.stringify(head('E2E Broke'))} + "document.documentElement.dataset.e2eBroke = 'fixed';\\n");
 const text = 'Fixed it: the element it wanted is gone, so it checks first now.';
 say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
@@ -5326,6 +5606,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     const problems = [];
     this.sandboxPage = true; // (the throwing mod's console error is expected)
     try {
+      // (TRIF's own page to ask the browser from, again if a check skipped before left it elsewhere: TRIF_E2E_ONLY)
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.storage)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
       fs.writeFileSync(brokeFile, broke(1));
       fs.writeFileSync(quietFile, `${head('E2E Quiet', '// @style\n')}{ "css": "#e2e-quiet-target { outline: 2px solid rgb(1, 2, 3) }" }\n`);
@@ -5390,6 +5672,24 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (!quiet || quiet.text !== 'E2E Quiet may be broken on 127.0.0.1: nothing it looks for is on the page any more. Want me to fix it?') problems.push(`the may-be-broken card: ${JSON.stringify(quiet)}`);
       const r3 = await row('e2e-quiet');
       if (!r3 || r3.badge !== 'may be broken') problems.push(`the quiet mod's badge: ${JSON.stringify(r3)}`);
+      // Fix it on it: the stand-in finds nothing broken and runs the prompt's `trif not-broken` (through the run's
+      // own scope); the card says Not broken., the badge goes, and three more loads without bring no new card
+      await this.panel(`async () => { const c = [...document.querySelectorAll('#messages li.break-card')].pop(); if (c) c.scrollIntoView({ block: 'center' }); return true; }`);
+      await this.panelClick('#messages li.break-card:last-of-type .break-actions .btn.go');
+      const nbFile = path.join(standin, 'not-broken.txt');
+      const nbCard = await waitFor('the card after trif not-broken', async () => { const c = await chat(); const q = c.messages.find((m) => m.kind === 'modError' && m.mod === `${site}/e2e-quiet`); return !c.run && q && q.done === 'notBroken' ? q : null; }, { timeoutMs: 60000, intervalMs: 500 })
+        .catch(async () => { problems.push(`trif not-broken from the run: ${fs.existsSync(nbFile) ? fs.readFileSync(nbFile, 'utf8').slice(0, 300) : 'never ran'}; ${JSON.stringify((await cards()).filter((c) => c.mod === `${site}/e2e-quiet`))}`); return null; });
+      if (nbCard) {
+        const said = fs.readFileSync(nbFile, 'utf8');
+        if (!/e2e-quiet: not broken\. What it looks for comes and goes on http:\/\/127\.0\.0\.1:\d+\/health\.html,/.test(said)) problems.push(`trif not-broken said: ${said.slice(0, 300)}`);
+        const shown = await waitFor('Not broken. on the card', () => this.panel(`async () => { const c = [...document.querySelectorAll('#messages li.break-card')].find((li) => li.textContent.includes('E2E Quiet may be broken')); return c && c.querySelector('.break-state')?.textContent === 'Not broken.' ? { buttons: c.querySelectorAll('.break-actions .btn').length } : null; }`), { timeoutMs: 10000 }).catch(() => null);
+        if (!shown || shown.buttons !== 0) problems.push(`the card's state: ${JSON.stringify(shown)}`);
+        await themes('health-not-broken');
+        const r4 = await waitFor('the badge gone', async () => { const x = await row('e2e-quiet'); return x && !x.badge ? x : null; }, { timeoutMs: 10000 }).catch(() => null);
+        if (!r4) problems.push('the quiet mod kept its badge after trif not-broken');
+        for (let i = 0; i < 3; i++) { await go(`?again=${i}`); await sleep(10500); }
+        if ((await cards()).filter((c) => c.mod === `${site}/e2e-quiet`).length !== 1) problems.push('a page that comes and goes got another may-be-broken card');
+      }
       // Settings: When a mod breaks
       await this.panelClick('#settings-btn');
       await this.panel(`async () => { document.getElementById('on-break').scrollIntoView({ block: 'center' }); return true; }`);

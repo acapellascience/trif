@@ -7,6 +7,10 @@ mobile site on the Mac, and then sent to the phone. The phone side is TRIF's iPh
 
 Short version:
 
+- **Since 11-18 (branch phone-view2): an ordinary window.** The tab moves into an ordinary browser window sized
+  so its page is 390 px wide beside TRIF's side panel (Chrome) or sidebar (Firefox): the browser's own address
+  bar, back and forward, TRIF's toolbar button, and TRIF's real panel. Browsers without a side panel (Arc) keep
+  the popup described below. Section 2b says why and what was measured.
 - **What's built** (no new permission): the panel's phone button moves the tab into a 390 px wide window
   where the site sees Safari on an iPhone: the user agent and no client hints in every request of that tab
   (declarativeNetRequest session rules for that tab only), and in the page's own JavaScript an iPhone's
@@ -39,6 +43,9 @@ third by its window size.
 
 ## 2. The window
 
+**This section is the popup route** (the design until 11-18), which browsers without a side panel still get.
+The ordinary window that Chrome and Firefox get now is section 2b.
+
 - `chrome.windows.create({ type: 'popup', width, height, left, top })`. Width and height are the window's
   outer size, frame included. A popup has no tab strip or toolbar, only a title bar and a line with the
   address; for the page to be 390 px wide the window is 390 plus the frame (0 on macOS), so TRIF measures the
@@ -61,6 +68,97 @@ third by its window size.
 - **Headless caveat**: headless Chrome ignores `windows.create`'s size (it took 1280 × 720, the
   `--window-size`) and doesn't keep windows on the screen; `windows.update` works. The fit step makes headless
   right too. The real limits on Tim's screen need one look in a headed Chrome.
+
+### 2b. The phone view in an ordinary window (11-18, branch phone-view2)
+
+Tim, after trying the popup: the URL field in the panel did nothing, and could the side panel stay a side panel,
+and the address field be on top of the window where it usually is. So the phone window is now an **ordinary
+window** whose page area is the phone's, with TRIF's side panel or sidebar beside the page:
+
+- **The width is measured, not guessed.** The window opens at 390 + a guess for the panel and the toolbar; then
+  the window's "frame" is its width less the page's (`innerWidth`, from TRIF's isolated world), which includes the
+  side panel, and the window is corrected by the difference (`fitPhoneWindow`, as the popup's). The panel's real
+  width (the person may have dragged it) is whatever it is.
+- **Kept right.** A resize listener in TRIF's isolated world in the phone tab (`phone.js` `watchSize`, put in each
+  page as it loads; trusted resize events only, so the site can't trigger it) tells the background, which
+  corrects the window's width alone (`widthOnly`: where the person put it, as tall as they made it), one at a
+  time. That covers the person resizing the window, dragging the panel wider or narrower, and the panel opening
+  or closing. A maximized or full-screen window is left alone.
+- **TRIF's side panel there needs a user gesture** (`chrome.sidePanel.open`). Checked in headless Chrome 156: the
+  📱 menu's click, in the panel that made it, carries for about five seconds of that page's transient activation:
+  `sidePanel.open({windowId})` from the panel page after `await`ing the new window works at 0, 2 and 4.5 s and is
+  refused at 6 s and with no click at all. So `phone.open` answers as soon as the window exists (rules, page
+  script, `windows.create`: well under a second), the panel opens its side panel in the new window itself
+  (`sidepanel.js openPhone`), and `phone.settle` then waits for that panel to say it's there (`panel.window`, 3 s
+  at most), fits the window and reloads the page as the phone's. (If the panel never asks, the background settles
+  on its own after 8 s.)
+- **Firefox can't** (headless Firefox Developer Edition 161): `sidebarAction.open()` has no window argument and
+  works only synchronously inside the click; called in the click while `windows.create` runs, it opens in the
+  window clicked in, not the new one, and new windows don't take the sidebar from the window they came from (no
+  opener for `windows.create`). The honest option chosen: the window opens fitted to a page without a panel, and
+  the panel that opened it shows one line, "The phone view is in a window of its own. Click TRIF's button there to
+  open TRIF beside the phone." (draft), with a ×, until a TRIF panel is open in the phone window. The click on
+  TRIF's button there opens the sidebar (`sidebarAction.toggle`, as always), the page shrinks, and the resize
+  listener fits the window to 390 beside it. Chrome shows the same line whenever its `sidePanel.open` fails.
+- **The browser's minimum.** An ordinary window won't go below the browser's minimum width. Measured headless:
+  Chrome 156, 500 px without the side panel, and 792 px with it, which leaves a **406 px page** beside its 386 px
+  side panel (the window is clamped there: asked for 776, it stays 792). Firefox 161: 500 px without its sidebar;
+  with it, the window went to 735 px with the page at exactly **390**. So in Chrome the page may be 16 px wider than
+  an iPhone 15's 390 (an iPhone 15 Pro Max is 430): the phone view's banner then says "This page is 406 px wide,
+  wider than an iPhone's 390: the browser won't make this window narrower." (draft). Tim's real Chrome may differ:
+  one look needed. Not done: zooming the tab to make 406 CSS px look like 390 (a per-tab zoom resets at every
+  navigation, section 2's "Zoom"). With the side panel closed the page is as wide as the window can go (500 in
+  headless): nothing says so, since the banner is in the panel that's closed.
+- **The address bar is the browser's**, so the panel's stand-in navigation bar is gone here (it stays in the popup
+  route). Typed in Firefox's real address bar (headless, `gURLBar`): the next page is still the phone's (the
+  rules are per tab, whatever navigates it).
+- **The tab still moves, and so does activeTab**; in the ordinary window a toolbar click there gives it too.
+  "Back to desktop" (since 11-20) expands the phone window back out, to the size, place and state of the window
+  the tab came from (as it is now, or as it was if it's closed), the tab staying in it and TRIF's side panel or
+  sidebar there staying open, now on the desktop page. Tim: "going back to desktop view now kills the sidebar. can
+  we instead expand back out and keep the sidebar?": moving the tab back closed the phone window with its panel.
+  (Before, the tab went back where it was; the popup route still does.) And a width correction under way when
+  Back to desktop came (`refit`, which can take two seconds where the browser won't go as narrow as asked) used
+  to narrow the window back to the phone's right after it was restored, the tab alone in its window too: the
+  fitting now stops once the phone view has ended (`fitPhoneWindow` `live`). A phone tab the person drags out of the phone window into another becomes a desktop tab again (rules
+  removed, reloaded): its window isn't the phone's to resize. A new tab opened in the phone window is an ordinary
+  tab.
+- **A tab alone in its window doesn't move (11-19).** Tim, real Chrome, google.com in a window of its own:
+  "it resizes the window but doesn't reopen the panel. then when you open the panel it stays on desktop site for
+  like a second before suddenly switching". Moving a window's last tab out closes that window, and the side panel
+  in it, the one that was to open TRIF's side panel in the new window: so no panel there, and the window settled
+  only on the 8 s timeout (the page reloaded as the phone's then: the "sudden switch"). Not a lost gesture: with
+  another tab in the window it worked. Now the tab's own window becomes the phone's (`phone.js open`, `same`):
+  measured and resized to the phone's page (`fitPhoneWindow`, at once: its side panel or sidebar is already open
+  and stays), the page reloaded as the phone's; Back to desktop gives the window its size and place again (and
+  its maximized or full-screen state, made normal for the phone view). Firefox the same (its sidebar stays; no
+  hint needed). And a side panel that says it's in a phone window starts the window's fitting itself, without
+  waiting for the panel that asked (which may be gone).
+- **The panel's first paint (11-19).** A panel opened in the phone window drew its site as the desktop view, then
+  flipped to the phone view: `phone.state` looked into the page (the rules, the marker: `executeScript`) before
+  answering, and that waits while the page is busy (google.com loading: about a second). Now the panel asks
+  `phone.state` with `quick` (from the background's record alone) before it draws a tab's site
+  (`sidepanel.js setTab`, 2 s at most), and the full look is for the console line only. The same for a tab back
+  from the phone view: the desktop view from its first paint.
+- **Which browser gets which** (`phone.js phoneRoute`): Firefox, the window (its sidebar); a Chromium browser
+  with `chrome.sidePanel`, the window, unless it's known to show no side panel: Arc, remembered as
+  `panelInWindow` the first time a toolbar click showed no side panel (lib.js "the panel in a window"), or a
+  request from a panel window (`sidepanel.html?window=…&fallback=1`, which only such a browser opens); a Chromium
+  without `chrome.sidePanel`: the popup. Safari has no phone view.
+
+### Navigating in the popup route: the panel's bar (11-18)
+
+A popup window has no toolbar: its address line can't be typed in, and there's no back or forward. A normal
+window can't be phone-sized instead: Chrome keeps a tabbed window wider than a phone (about 500 px on macOS, its
+toolbar's minimum), and Firefox's normal windows stop around 450 px; both over the 390 the page needs, so the
+page would be a small tablet's. (From the browsers' known limits, not measured here: headless browsers keep no
+minimum, and a headed test window would be on Tim's screen.) So
+the phone view's own panel has the bar, in its banner (since phone-view2, in the popup route only): back, forward, reload and "Address or search"
+(`background.js` `phone.nav`, the phone tab alone, from the panel alone: `tabs.goBack`/`goForward`/`reload`/
+`update`, all in Firefox too). What's typed is an address when it looks like one (https, or http for localhost
+and an IP address), else a Google search (Safari's default on an iPhone); never another scheme
+(`phone.js` `navTarget`). Nothing is added to the page, so it keeps the phone's size. A page on a site TRIF has
+no access to loads as a desktop page there (the rules can't change its headers), as a link to one does.
 
 ### Why the tab itself moves
 
@@ -117,8 +215,15 @@ weren't the cause: the same failure happens with the site granted, as Tim's was.
 The fix (`phone.js`): the phone view loads the page with a **hard reload** (`tabs.reload(…, {bypassCache: true})`),
 which skips the service worker and the HTTP cache for that load and leaves the page uncontrolled by the worker,
 so its own requests are the tab's again. And when a later page of the tab comes without the marker (a plain
-reload, a link the worker answers), TRIF **loads it again, hard**, once per address in 15 s. Back to desktop
-reloads hard too. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
+reload, a link the worker answers), TRIF **loads it again, hard**. Back to desktop reloads hard too.
+
+11-20, Tim on X: "i just edited a mod in phone view and when the page reloaded it reloaded the desktop version".
+The heal was once per address in 15 s: `trif verify`'s reload after the edit was healed, and the reload after
+the mod's approval two seconds later (the same address) wasn't, so the worker's desktop page stayed. Not the
+in-place window (both kinds of phone window did it). Now TRIF's own reloads of a phone tab (`trif reload`, `trif
+verify`, a mod switched, approved or tried, the popup route's reload button: `phones.reload`) are hard ones,
+past the worker; and the 15 s limit is only for a heal that didn't work (a page that comes back marked ends it),
+so the page's own reloads and a person's are healed each time. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
 that serves a kept copy of the page (an app shell), visited first, as X is.
 
 Other hosts: X's API is `api.x.com`, under `*.x.com`, which the site's Connect gives. Pictures, scripts and video
@@ -199,6 +304,14 @@ first "Edit for mobile" that wants it): no install or update warning for everyon
 
 ## 6. Firefox
 
+**11-18 (phone-view2), headless Firefox Developer Edition 161, `tests/phone-firefox.js`:** the window route: an
+ordinary window; without its sidebar a 500 px page; the sidebar opened there (Firefox's own
+`SidebarController.show`, standing in for the click on TRIF's button), the window fitted to 735 px and the page to
+390 × 750; the window widened to 1100 by script, corrected back to 735; a page typed in the browser's own address
+bar still the phone's (iPhone user agent, touch 5, 390 wide); Back to desktop: the tab home, the phone window
+gone, no rules left. The shot `docs/phone-link-shots/1118b/firefox-phone-window.png` is the whole phone window as
+Firefox draws it (toolbar, address bar, sidebar, page). What follows is the popup route's check of 11-16.
+
 **Checked in headless Firefox 159** (`tests/phone-firefox.js`, through TRIF's Firefox build): the panel's
 `phone.open` moves the tab into a 390 px popup, the server and the page see the iPhone (user agent, no
 `userAgentData`, touch, `matchMedia`, the screen, `window.orientation`, a frame too), the panel window opens
@@ -220,7 +333,8 @@ though Mozilla's documentation says it doesn't) with the rules gone. What's what
 
 ## 7. TRIF's panel and agent in the phone view
 
-- **The panel**: the bar's phone button (Edit for mobile) on any site TRIF is on. It moves the tab, opens
+- **The panel** (11-18: in the window route, TRIF's side panel or sidebar in the phone window itself, section 2b;
+  what follows is the popup route): the bar's phone button (Edit for mobile) on any site TRIF is on. It moves the tab, opens
   TRIF's panel in a window beside the phone (`sidepanel.html?window=<phone window>&fallback=1`, the panel window
   that follows another window's tabs; it closes with the phone window). There the button is pressed (Back to
   desktop) and a line under the bar says "Phone view: x.com sees an iPhone. Mods you make here are for TRIF on
@@ -332,6 +446,17 @@ would copy the file to `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/`.
 - `tests/phone.test.js` (unit, no browser): the rules, the window's bounds, the page script's profile matching
   `phone.js`, a page without the marker left alone, `resolveTab` with the phone's window, tab locks leaving the
   phone's rules, what the agent is told, `@device`, Send to iPhone's copy and fallback.
+- Since 11-18 (phone-view2): `tests/phone-browser.test.js`'s first test is the window route (the side panel
+  opened from the panel page with a click's gesture, `harness().openPhone`; the page's width; the window widened
+  and corrected; the side panel closed and opened again); a new test drives it as a person does (the toolbar's
+  side panel, trusted clicks on the 📱 menu, the phone's side panel and its banner, Back to desktop from it; then
+  a script's click with no gesture: the hint, and the toolbar click in the phone window that opens TRIF there and
+  ends it); the panel test is the popup route (asked from a panel window, as Arc's), its address field typed into
+  as a person does (an address, and a search); `tests/phone-firefox.js` the Firefox window route (and since 11-19
+  a tab alone in its window). Since 11-19: a window with only the phone's tab (its window made the phone's, the
+  side panel still open and in the phone view, one flip each way, the window's size back), and a side panel's
+  first paint in the phone window while its page is busy (recorded frame by frame from before its scripts run:
+  the phone view from the first, and the desktop view for the tab back home).
 - `tests/phone-browser.test.js` (headless Chrome for Testing, `TRIF_BROWSER_TESTS=1`, one browser at a time
   under `tests/cdp-page.js`'s lock and memory guard): TRIF's real extension (a copy granting 127.0.0.1), local
   pages that tell a phone the usual ways (`tests/phone-pages.js`: the server from the user agent and hints, an
@@ -354,6 +479,10 @@ Reddit ran its own JavaScript check (a `js_challenge` in the address) and let th
 for any browser that runs scripts.
 
 ## 10. What's left
+
+- (11-18, phone-view2) One look in Tim's real Chrome and Firefox Developer Edition: the page's width beside the
+  side panel (406 headless in Chrome), the window's place, and the gesture (the side panel opening in the phone
+  window from the 📱 menu's click). Arc's popup route in Arc itself.
 
 - A look in a real (headed) Chrome on Tim's Mac: the window's real size limits, the panel window beside it
   (it's as wide as the phone window, 390, since a panel window is never wider than the window it follows), X,

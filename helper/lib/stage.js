@@ -200,6 +200,7 @@ class Stage {
     this.written = new Map(); // path relative to the workspace (as held.js names mods) -> sha1 the run put there
     this.touched = new Set(); // paths relative to the workspace the run changed (pushes, and its trif delete/restore)
     this.refused = new Map(); // rel -> why (said once in the log)
+    this.twinOnly = false; // a run for a phone: only its phone twin's folder goes to the mods folder (ownTwin)
   }
 
   /** Makes the working folder and copies what the run may read and change into it. */
@@ -318,6 +319,7 @@ class Stage {
     const why = nameRefused(parts);
     if (why) return why;
     const site = parts[0];
+    if (this.twinOnly) return ownTwin(site, this.scope, this.splits) ? '' : `a run for a phone writes its phone twin's folder only, not ${site}/`;
     if (ownFolder(site, this.scope, this.splits) || this.newFolders.has(site)) return '';
     // (a phone view's run, scope phone~x.com: no all-sites/, desktop folder or new folder either, ownFolder)
     if (isPhoneSite(this.scope)) return `a phone view's run writes its phone twin's folder only (sites/${this.scope}/), not ${site}/`;

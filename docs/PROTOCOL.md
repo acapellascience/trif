@@ -300,6 +300,7 @@ Without one, the target is the active tab of the last-focused normal window.
 | `errors` | tab selector | `[{mod, message, stack, time}]`: errors thrown by mods in that page |
 | `logs` | tab selector | `[{mod, level, args:[strings], time}]`: what mods logged with `trif.log(...)` |
 | `mod.enable` | `id`, `enabled: bool`, `wait: bool` + tab selector | `{id, enabled, reloaded}`: switches a mod on/off (below). `reloaded` = the tab id reloaded, or null |
+| `mod.notBroken` | `id`, `page?` (an address) | `{id, pages}`: `trif not-broken`, a fix run's "nothing is broken" for a "may be broken" flag: that page (or every page the mod is flagged on) comes and goes for this version of the mod (extension/modhealth.js markNotBroken), the flag and its card done. From a run: its own site's mods (every `@match` in its scope; a phone view's run, its phone mods) and pages on its site |
 
 ### Sites TRIF is on for (`sitesOn`)
 
@@ -1004,6 +1005,38 @@ overwriting the user's own changes. Only examples whose header says `@source web
   on: off only on sites both were off on. It remembers that in chrome.storage.local `absorbed`, so after
   that the switch is the user's. A new workspace just gets the merged mods.
 
+## The phone link (branch `phone-link`, not released)
+
+The iPhone app's "My computer": a paired phone on the same Wi-Fi asks this computer's agent for a phone mod.
+Its design, its wire protocol (Noise IK over TCP, found over Bonjour as `_trif._tcp`) and its messages
+(`hello`, `run.start`, `run.event`, `run.result`, `run.resume`, `run.ack`, `run.stop`, `tool.request`,
+`tool.result`) are in **docs/PHONE-LINK.md**, not here. What touches this file's protocols:
+
+- **Helper ⇄ extension.** `phone.status`, `phone.on`, `phone.off`, `phone.pair.start`, `phone.pair.stop` and
+  `phone.remove` are requests of the side panel's alone, like `agent.withoutSandbox`: over the extension's own
+  connection, refused on the socket and from a run. The helper sends `{type: "phoneLink", status}` when the
+  link changes, once the panel has asked for the status (PHONE-LINK.md section 7). The extension's messages
+  are `phoneLink.status|on|off|pair.start|pair.stop|remove|sync`, from the panel page only (extension/phonelink.js;
+  the QR code is drawn by extension/qr.js). `phone.sync {on}` is the phone sync's switch (on for a paired phone).
+- **Runs.** A phone's run is an ordinary run of the default agent whose site is the page's phone twin
+  (`phone~<host>`, made by the helper from the page's address). Its events go to the phone, never to the
+  extension as `agentEvent`s, and of this file's commands it may use only the helper's own (`ping`, `mods`,
+  `mod.code`, `mod.diff`, and `mod.delete`/`mod.restore` in its own twin): a page command is refused before it
+  reaches the extension, since the page is on the phone (PHONE-LINK.md section 6).
+- **CLI.** `trif phone page [selector] [--limit N]`, `trif phone try <mod>`, `trif phone screenshot`: inside a
+  phone's run only, answered by the phone through the helper (`remote.page`, `remote.try`,
+  `remote.screenshot` on the run's mailbox), within a minute or with the reason in words.
+- **Phone sync.** The phone's mods and the computer's phone twins (`sites/phone~<site>/`) kept the same, both
+  ways, over the same session: `sync.begin`, `sync.get`, `sync.put`, `sync.end` from the phone, `sync.changed`
+  (a nudge naming nothing) from the computer. A mod is named by its id, `<site>/<name>`, never a path; the helper
+  writes only in the phone twins (and history, trash, its private folder). What arrives is checked like an
+  import and held by held.js as a change from outside, its hold saying which phone. The design, the messages and
+  the limits: **docs/PHONE-SYNC.md** (sections 7 and 9). Code: helper/lib/phonelink/sync.js, syncsession.js.
+- **Files.** `<private>/phone-link.json` (on or off, the port, the paired phones' public keys),
+  `<private>/phone-link/kept/` (runs a phone hasn't fetched yet), `<private>/phone-link/sync/<phone id>.json`
+  (each phone's sync base, mode 600) and `$TRIF_HOME/synced.json` (what the sync wrote, for held.js); the
+  computer's private key is in the keyring (service `TRIF phone link`). Code: helper/lib/phonelink/.
+
 ## Repository layout
 
 ```
@@ -1080,7 +1113,19 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     plain `login` line ("Claude Code needs you to log in again.") instead of an error, and none of the
     agent's own text about it; the panel shows its login notice, and the message that run was sent goes
     back in the text box (unless something was typed there meanwhile), to send again once logged in.
-    While running: a working indicator, the Stop button.
+    While running: a working indicator, the Stop button, and the text box still usable: Send (or Enter)
+    then *queues* the message (`chat:<site>` `queue: [{id, text, time, opts, now?}]`, `opts` the agent,
+    model, effort and tab it would have started with). Queued messages show under the conversation, each
+    with its text (a click puts it back in the box), when it goes, **Send now** and ×. When the run is done
+    (not stopped, nothing failed) every queued message goes, joined into one message in order, as the next
+    run in the same conversation, whether a panel is open or not; stopped or failed, they wait (with Send
+    now). Send now while a run works: Claude Code takes it in the run itself (`agent.inject`, below), at its
+    next step, and it shows in the chat as sent there; other agents (Codex) can't, so the run is stopped
+    (what it did is kept) and the message sent as soon as it has stopped, resuming the conversation. A
+    message written into a run that the run never took (stopped first: `done.notTaken`) leaves the chat and
+    is sent again. After a background restart queued messages wait, never sent by themselves. Only the
+    panel page may queue or send them (`chat.queue`, `chat.sendNow`, `chat.unqueue`; lib.js
+    `queuedMessage`, `queueAfterRun`).
   - **Slash commands.** The panel handles `/model [name|default]` (sets the model setting: each message
     is a new agent process, so the agent's own `/model` would last one message), `/clear` or `/new`
     (New chat) and `/help`, answering with a tool-style line (`chat.note`). Any other `/…` goes to the
@@ -1112,7 +1157,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}`, `{type: "downloads.setWatch", on}`, `{type: "downloads.take" | "downloads.done" | "downloads.ignore", id, how?}`, `{type: "mod.preview", text, name}`, `{type: "mod.try", text, name?, tabId}` and `{type: "mod.untry", tabId}` (the panel page only: "Try it here" runs a style mod's rules in the page's world, or a boxed mod in TRIF's sandbox with no powers, once, in that tab, if TRIF is on there and the mod's @match covers it; never a free mod; `mod.untry` reloads the tab; background.js tryMod) and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`, `{type: "chat.queue", site, text, tabId, url, agent?, model?, effort?}` (→ `{id, sent?}`: with no run going it goes at once, with any waiting), `{type: "chat.unqueue", site, id}` (→ `{text}`), `{type: "chat.sendNow", site, id}` (→ `{how: "sent" | "pushed" | "stopping" | "next" | "waiting"}`; these three from the panel page only). Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -1127,6 +1172,7 @@ New native request commands (answered with a normal `response`):
 | `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, loginExpired?, canLogin, loginFix}], default}` |
 | `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?, openModel?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods"). `openModel`: codex-oss only, this run's `{provider, model, baseUrl}` over the stored defaults (see "Open models") |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
+| `agent.inject` | `runId, text, id` | `{injected: true}` or `{injected: false, why}`. The extension's connection only (never the socket or a run). A message the user sent while the run works, written into it: only a run started with `live: true` (`agent.start`; the background sets it) of an agent that can take one (`liveInput`: Claude Code, run with `--input-format stream-json --replay-user-messages`, its stdin open until its first `result`). Each message taken comes back as `{kind: "taken", id}`; `done.notTaken` lists the ids it never took |
 | `agent.running` | – | `{runIds}`: the runs still going. In Safari the helper outlives the connection (the bridge keeps the host and queues its messages), so a chat's run survives a lost connection or a restarted background there instead of being marked interrupted; after reconnecting, the background finishes the ones that ended meanwhile (background.js `settleOrphans`) |
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
@@ -1290,7 +1336,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `RUN_COMMANDS`): the helper's own `ping` and `mods`, the mod-file commands `mod.delete`, `mod.restore`,
   `mod.code` and `mod.diff`, and the page commands its `trif` sends (`status`, `tabs`, `run`, `reload`,
   `navigate`, `open`, `close`, `text`, `sweep`, `screenshot`, `record`, `requests`, `request`, `errors`, `logs`,
-  `mod.enable`). Anything else from a run, a command nobody knows included, is refused by the helper and never
+  `mod.enable`, `mod.notBroken`). Anything else from a run, a command nobody knows included, is refused by the helper and never
   sent on to the extension. What the helper itself answers a run is its own site's: `mod.code` and `mod.diff`
   only for a mod in the run's site's folders (the rule its delete goes by, `trash.js` siteInScope: a phone view's
   run its phone twin's mods only, a sensitive site of its own and its parent each their own), refused before the
@@ -1314,8 +1360,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   volumes that ignore them (APFS by default: `/Users/x/.TRIF/SITES/` is the workspace's `sites/`).
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
-  only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
-  in scope. The tab can navigate between that check and the injection, so the document is checked again
+  only go to such URLs; `record` only for such sites; `mod.enable` and `mod.notBroken` only for mods whose every
+  `@match` is in scope. The tab can navigate between that check and the injection, so the document is checked again
   from inside (`lib.js` pageGuard: the scope, and TRIF on there): `run`'s code starts with the check,
   and the other page commands (`text`, `sweep`, `requests`, `request`, `errors`, `logs`) inject it first,
   in the isolated world, where it marks the document, and only count their result if the mark is still

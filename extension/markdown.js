@@ -145,7 +145,10 @@ export function setMarkdown(node, text) {
   if (typeof node.setHTML === 'function') {
     try {
       node.setHTML(html, { sanitizer: { elements: MARKDOWN_ELEMENTS, attributes: MARKDOWN_ATTRIBUTES } });
-      return;
+      // (a browser whose Sanitizer reads this config another way can drop everything without throwing: Safari's
+      // TRIF showed an empty What's new, Tim 11-20. renderMarkdown's output is safe by construction, so an empty
+      // result from non-empty markdown falls through to it.)
+      if (node.textContent.trim() || !html.replace(/<[^>]*>/g, '').trim()) return;
     } catch { /* older Sanitizer API shape: fall through */ }
   }
   node.innerHTML = html;

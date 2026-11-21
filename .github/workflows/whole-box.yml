@@ -176,6 +176,43 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g @anthropic-ai/claude-code
+      # (step 2: the daily run's Claude Code in place of the pin, as on the Mac)
+      - name: Pin the Claude Code under test (the daily run)
+        if: ${{ inputs.claude-code != '' && inputs.claude-code != null }}
+        shell: bash
+        env:
+          WANT: ${{ inputs.claude-code }}
+        run: |
+          case "$WANT" in *[!A-Za-z0-9.-]*) echo "not a version or tag: $WANT"; exit 1;; esac
+          V=$(npm view "@anthropic-ai/claude-code@$WANT" version | tail -1)
+          node helper/lib/claudepin.js pin "$V"
+      # Step 9b(1): TRIF's pinned claude.exe, installed as the helper does (the registry, its sha512 against
+      # the pin), and what its signature says (Authenticode; printed, not yet checked).
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/claude-pin
+          key: claude-pin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('helper/claude-code.json') }}
+      - name: Install TRIF's pinned Claude Code (claude.exe)
+        shell: pwsh
+        run: |
+          $out = node helper/lib/claudepin.js ensure "$env:RUNNER_TEMP\claude-pin"
+          $out
+          $r = $out | ConvertFrom-Json
+          if (-not $r.bin) { throw "no pinned claude.exe" }
+          Get-ChildItem (Split-Path $r.bin) | Format-Table Name, Length
+          & $r.bin --version
+          $sig = Get-AuthenticodeSignature -LiteralPath $r.bin
+          "signature: $($sig.Status) / $($sig.StatusMessage)"
+          "signer: $($sig.SignerCertificate.Subject)"
+          "issuer: $($sig.SignerCertificate.Issuer)"
+          "WBX_CLAUDE_BIN=$($r.bin)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # Step 9: the boxed claude.exe reaching TRIF's relay with no administrator step and no internetClient:
+      # a named pipe the run's container may open (pipe-bridge.cs, outside) and a shim inside giving Claude
+      # Code a port of the container's own. The real api.anthropic.com only with a made-up token (401).
+      - name: The network without the loopback exemption (named pipe), the pinned claude.exe
+        env:
+          WBX_REAL_RELAY: '1'
+        run: node tests/whole-box/win-net-probe.js
       - name: Claude Code in an AppContainer
         run: node tests/whole-box/win-probe.js
       # An organization's managed settings, for real (the runner's own C:\Program Files; never anyone's

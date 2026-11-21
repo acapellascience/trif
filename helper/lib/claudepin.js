@@ -163,7 +163,11 @@ function pinning(home, { platform = process.platform, arch = process.arch, pins 
   return !!key && inFlight.has(path.join(root(home), dirName(key, pins)));
 }
 
-async function ensureOnce(home, { pins, platform, arch, key, dest, tar = 'tar', onProgress = null }) {
+// (on Windows, the system's own tar.exe (bsdtar, in every Windows 10 1803+ and 11) by its full path: a `tar`
+// earlier on PATH, such as Git's GNU tar, reads C:\… as a remote host)
+const systemTar = () => (process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar');
+
+async function ensureOnce(home, { pins, platform, arch, key, dest, tar = systemTar(), onProgress = null }) {
   const have = installedPinned(home, { platform, arch, pins });
   if (have) return { ...have, fetched: false };
   const pkg = pins.packages[key];

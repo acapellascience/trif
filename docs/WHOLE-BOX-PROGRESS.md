@@ -294,6 +294,9 @@ question with nothing to decide.
   `git` (Xcode's shim) reading Xcode's libxcrun; `zsh` a temp file in /private/tmp; `trif` (node) reading
   config.json, ~/.trif/preinstalled.json, helper.log. None stopped the run, so a failed run's error
   would name these too: **step 3b leaves the ones every run has out of the error** (kept in the log).
+  Under load the kernel reports even fewer: the repo's `tests` workflow (the whole suite at once) saw no
+  report at all in 10 s for the real-Seatbelt unit test, which is strict only in whole-box.yml
+  (`TRIF_TEST_BOX_REPORTS=1`) and skips elsewhere when none arrive.
   Also: **not every refusal is reported** (the Write tool's refused write into the private folder had no
   report; the ones around it did), so the error names what was seen, best effort.
 - Finding: `log stream` works for an administrator account without sudo (Tim's Mac, here); its first
@@ -308,6 +311,22 @@ on CI; noise out of the error if needed), then step 4 (the informed fallback: "R
 protection", draft words).
 
 ## CI
+
+- Round 5, 7a: [run 44876683949](https://github.com/acapellascience/trif/actions/runs/44876683949) (whole-box.yml,
+  a394c4f) **passed** (macos and windows): with the loosest managed settings (`Bash(*)`, bypass mode,
+  every folder, Claude Code's sandbox off) **a boxed side-panel run went on without asking, no shell, every
+  `trif` command through the trif tool, the box refusing as before**; with settings that only loosen
+  (`acceptEdits`, every folder, sandbox off, no other commands) **not asked, a shell, the box refusing
+  config.json, the keychain file and the private folder**; the round-4 steps unchanged. The repo's `tests`
+  workflow: [run 44876684031](https://github.com/acapellascience/trif/actions/runs/44876684031) passed.
+  3a: [run 44877859928](https://github.com/acapellascience/trif/actions/runs/44877859928) (78ccb22): macos
+  **passed**: the real-Seatbelt unit test (tagged reports through `log stream`), and every boxed
+  side-panel run's refusals read back into its log (printed: Findings); windows still running at the
+  time of writing. Before it, 1836fdd's macos failed the real-Seatbelt test (a cold runner's first `log
+  stream`: now waits for its header up to 15 s in that test, 3 s in runs) and c4f6cbd's the
+  `loosen-shell` check of the Write's report (none came: not every refusal is reported). The repo's
+  `tests` workflow failed on the real-Seatbelt test for 1836fdd–78ccb22 (no reports under the whole
+  suite's load): strict only in whole-box.yml from the last push of the round.
 
 - Round 4, [run 44874659962](https://github.com/acapellascience/trif/actions/runs/44874659962) (whole-box.yml,
   18ca3f6): macos **passed**: the unit tests (wholebox-noshell added); the earlier steps unchanged; **with

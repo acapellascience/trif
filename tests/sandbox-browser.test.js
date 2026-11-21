@@ -248,3 +248,36 @@ test('under real SES: a stand-in from one observe callback, kept after its eleme
     server.close(); server.closeAllConnections();
   }
 });
+
+// Mods that break (extension/modhealth.js): what each boxed mod looks for, and whether it only ever hid things
+// (trif.hide alone: watchedHow 'hide', which waits much longer before "may be broken"), under real SES.
+test('under real SES: watched and watchedHow say what each boxed mod looks for, and which only hide', { skip }, async () => {
+  const sb = await import(pathToFileURL(path.join(__dirname, '..', 'extension', 'sandbox.js')).href);
+  const ses = fs.readFileSync(path.join(__dirname, '..', 'extension', sb.SES_FILE), 'utf8');
+  const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(PAGE); });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e.message)));
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page.addScriptTag({ content: ses });
+    await page.addScriptTag({ content: sb.sandboxRuntimeCode() });
+    const run = (id, source) => page.addScriptTag({ content: sb.sandboxModCode(id, source, { powers: [], args: {} }) });
+    await run('x.com/hider', "trif.hide('#more'); trif.hide('.promo');");
+    await run('x.com/looker', "trif.observe('#out', () => {});");
+    await run('x.com/both', "trif.hide('#del'); trif.changes('#out', () => {});");
+    await run('x.com/later', "trif.hide('#del'); setTimeout(() => trif.observe('#out', () => {}), 0);");
+    await page.waitForTimeout(200);
+    const got = await page.evaluate(() => ({ watched: { ...globalThis.__trifSandbox.watched }, how: { ...globalThis.__trifSandbox.watchedHow } }));
+    assert.deepEqual(got.watched, { 'x.com/hider': ['#more', '.promo'], 'x.com/looker': ['#out'], 'x.com/both': ['#del', '#out'], 'x.com/later': ['#del', '#out'] });
+    assert.deepEqual(got.how, { 'x.com/hider': 'hide', 'x.com/looker': 'look', 'x.com/both': 'look', 'x.com/later': 'look' });
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#more')).display), 'none');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    if (browser) await browser.close();
+    server.close(); server.closeAllConnections();
+  }
+});

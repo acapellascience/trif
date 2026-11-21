@@ -1435,7 +1435,7 @@ class Scenario {
       await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
       await r.check('Settings → Mods your chat makes → Wait for me: what the chat makes waits, with Show code and Turn on in its card; what it changes waits while the version before runs; Start on again', () => this.chatWaitCheck(win));
       await r.check('messages typed while the agent works (a stand-in Claude Code): they wait under the conversation and go as one message when it is done, kept across a panel reload; Send now goes into the working run; after Stop they wait, "Not sent", and a click puts one back in the box', () => this.queueCheck(win));
-      await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
+      await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged, and a fix run that finds nothing broken clears it with trif not-broken (Not broken.); Settings has When a mod breaks', () => this.modHealthCheck(win));
       await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
@@ -5502,6 +5502,17 @@ let input = '';
 try { const b = Buffer.alloc(65536); for (;;) { const n = fs.readSync(0, b, 0, b.length, null); if (!n) break; input += b.toString('utf8', 0, n); if (input.includes('\\n')) break; } } catch { /* none */ }
 try { const m = JSON.parse(input.split('\\n')[0]); if (m && m.type === 'user') input = String(m.message.content); } catch { /* plain text */ }
 fs.writeFileSync(${JSON.stringify(promptFile)}, a.join('\\n') + '\\n---\\n' + input);
+// (a "may be broken" flag: it looks, finds nothing broken, and says so as the prompt says: trif not-broken)
+const nb = /may be broken/.test(input) && /Run \x60(trif not-broken [^\x60]+)\x60/.exec(input);
+if (nb) {
+  let said = '';
+  try { said = require('child_process').execSync(nb[1], { encoding: 'utf8' }); } catch (e) { said = 'FAILED: ' + (e.stderr || e.message); }
+  fs.writeFileSync(${JSON.stringify(path.join(standin, 'not-broken.txt'))}, said);
+  const t = 'Nothing is broken: the part it hides just isn\x27t on the page this time.';
+  say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: t }] } });
+  say({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: 'e2e-fix' });
+  process.exit(0);
+}
 fs.writeFileSync('sites/127.0.0.1/e2e-broke.js', ${JSON.stringify(head('E2E Broke'))} + "document.documentElement.dataset.e2eBroke = 'fixed';\\n");
 const text = 'Fixed it: the element it wanted is gone, so it checks first now.';
 say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
@@ -5585,6 +5596,24 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (!quiet || quiet.text !== 'E2E Quiet may be broken on 127.0.0.1: nothing it looks for is on the page any more. Want me to fix it?') problems.push(`the may-be-broken card: ${JSON.stringify(quiet)}`);
       const r3 = await row('e2e-quiet');
       if (!r3 || r3.badge !== 'may be broken') problems.push(`the quiet mod's badge: ${JSON.stringify(r3)}`);
+      // Fix it on it: the stand-in finds nothing broken and runs the prompt's `trif not-broken` (through the run's
+      // own scope); the card says Not broken., the badge goes, and three more loads without bring no new card
+      await this.panel(`async () => { const c = [...document.querySelectorAll('#messages li.break-card')].pop(); if (c) c.scrollIntoView({ block: 'center' }); return true; }`);
+      await this.panelClick('#messages li.break-card:last-of-type .break-actions .btn.go');
+      const nbFile = path.join(standin, 'not-broken.txt');
+      const nbCard = await waitFor('the card after trif not-broken', async () => { const c = await chat(); const q = c.messages.find((m) => m.kind === 'modError' && m.mod === `${site}/e2e-quiet`); return !c.run && q && q.done === 'notBroken' ? q : null; }, { timeoutMs: 60000, intervalMs: 500 })
+        .catch(async () => { problems.push(`trif not-broken from the run: ${fs.existsSync(nbFile) ? fs.readFileSync(nbFile, 'utf8').slice(0, 300) : 'never ran'}; ${JSON.stringify((await cards()).filter((c) => c.mod === `${site}/e2e-quiet`))}`); return null; });
+      if (nbCard) {
+        const said = fs.readFileSync(nbFile, 'utf8');
+        if (!/e2e-quiet: not broken\. What it looks for comes and goes on http:\/\/127\.0\.0\.1:\d+\/health\.html,/.test(said)) problems.push(`trif not-broken said: ${said.slice(0, 300)}`);
+        const shown = await waitFor('Not broken. on the card', () => this.panel(`async () => { const c = [...document.querySelectorAll('#messages li.break-card')].find((li) => li.textContent.includes('E2E Quiet may be broken')); return c && c.querySelector('.break-state')?.textContent === 'Not broken.' ? { buttons: c.querySelectorAll('.break-actions .btn').length } : null; }`), { timeoutMs: 10000 }).catch(() => null);
+        if (!shown || shown.buttons !== 0) problems.push(`the card's state: ${JSON.stringify(shown)}`);
+        await themes('health-not-broken');
+        const r4 = await waitFor('the badge gone', async () => { const x = await row('e2e-quiet'); return x && !x.badge ? x : null; }, { timeoutMs: 10000 }).catch(() => null);
+        if (!r4) problems.push('the quiet mod kept its badge after trif not-broken');
+        for (let i = 0; i < 3; i++) { await go(`?again=${i}`); await sleep(10500); }
+        if ((await cards()).filter((c) => c.mod === `${site}/e2e-quiet`).length !== 1) problems.push('a page that comes and goes got another may-be-broken card');
+      }
       // Settings: When a mod breaks
       await this.panelClick('#settings-btn');
       await this.panel(`async () => { document.getElementById('on-break').scrollIntoView({ block: 'center' }); return true; }`);

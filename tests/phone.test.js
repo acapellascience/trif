@@ -2,7 +2,7 @@
 // The phone view's parts that need no browser (extension/phone.js, phone-page.js; docs/MOBILE-EDIT.md): its
 // rules, its window's bounds and fit, the page script's profile matching phone.js's, resolveTab finding the
 // phone's tab, tab locks leaving its rules alone, what the agent is told, and the @device header. The real
-// thing in a browser: tests/phone-browser.test.js.
+// thing in a browser: tests/phone-browser.test.js, phone-window-browser.test.js, phone-helper-browser.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

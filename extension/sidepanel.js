@@ -98,6 +98,7 @@ const view = {
   modNatural: [],            // the ids of the mods listed, in the order they come before the user's (what an unsaved order is)
   myRuns: new Map(),         // runs this panel started: runId -> {prompt, tabId} for a message sent from the box, else null
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
+  updateLater: null,         // chrome.storage.local `updateLater`: the version whose card Not now put away
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
 };
@@ -282,8 +283,9 @@ async function init() {
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
   if (FALLBACK) await setUpPanelWindow();
   sayWindow();
-  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
+  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'updateLater', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
+  view.updateLater = typeof stored.updateLater === 'string' ? stored.updateLater : null;
   view.efforts = stored.agentEffort && typeof stored.agentEffort === 'object' ? stored.agentEffort : {};
   view.settings = normalizeSettings(stored.settings);
   // Once (0.2.3): the default's models, which models picked on sites used to be copied into (see
@@ -1369,6 +1371,18 @@ function foldLine(n, scope) {
   return foldLi;
 }
 
+// A row under the fold: no tier heading above it, so its tier is its colour (the stripe, its switch) and, for a
+// screen reader and the pointer's hover, the tier's name with its own. Not dragged: the order is the tiers' above.
+function markFolded(li, g) {
+  li.classList.toggle('folded', !!g);
+  const name = li.querySelector('.mod-name');
+  let t = name.querySelector(':scope > .mod-tier');
+  if (!g) { t?.remove(); name.removeAttribute('title'); return; }
+  if (!t) { t = el('span', 'visually-hidden mod-tier'); name.querySelector(':scope > span:not(.light)').after(t); }
+  t.textContent = `, ${GROUP_TEXT[g][0]}`;
+  name.title = GROUP_TEXT[g][0];
+}
+
 function renderMods() {
   // A row being dragged stays where the pointer has it: the list catches up when it's dropped.
   if (modDrag) { modDrag.dirty = true; return; }
@@ -1390,12 +1404,13 @@ function renderMods() {
   const ordered = orderMods(listed, view.modOrder[key]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
   // The ones whose @match doesn't cover this page (grey light) fold into one line at the bottom, "N more for
-  // other <site> pages" (lib.js splitForPage); a click shows them in their groups again (Tim, 2026-11-11).
+  // other <site> pages" (lib.js splitForPage); a click shows them right under it, a plain list: no tiers'
+  // headings, each row's tier in its colour (Tim, 11-20).
   const { other } = splitForPage(mods, tab?.url || '');
   const otherIds = new Set(other.map((m) => m.id));
   if (view.foldFor !== key) { view.foldFor = key; view.foldOpen = false; }
-  const shown = view.foldOpen ? mods : mods.filter((m) => !otherIds.has(m.id));
-  view.foldedIds = view.foldOpen ? [] : other.map((m) => m.id);
+  const shown = mods.filter((m) => !otherIds.has(m.id));
+  view.foldedIds = other.map((m) => m.id);
   ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
   updateApprovals(mods);
   // (the count first: a list that empties, the phone twin's with no mods yet, doesn't keep the last one's)
@@ -1423,10 +1438,11 @@ function renderMods() {
   const want = [];
   for (const g of GROUPS) {
     const inGroup = shown.filter((m) => modGroup(m) === g);
-    if (!inGroup.length && !groupOff(g) && !(mods.some((m) => modGroup(m) === g) && view.foldOpen)) continue;
+    if (!inGroup.length && !groupOff(g)) continue;
     want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
   }
-  if (other.length) want.push(foldLine(other.length, scope));
+  if (other.length) want.push(foldLine(other.length, scope), ...(view.foldOpen ? other.map((m) => rows.get(m.id).li) : []));
+  for (const m of mods) markFolded(rows.get(m.id).li, otherIds.has(m.id) ? modGroup(m) : null);
   want.forEach((li, i) => { if (ui.modList.children[i] !== li) ui.modList.insertBefore(li, ui.modList.children[i] || null); });
   while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
@@ -3975,7 +3991,7 @@ function gripButton(labelId) {
   return b;
 }
 
-const rowIds = () => [...ui.modList.children].filter((li) => li.dataset.mod).map((li) => li.dataset.mod);
+const rowIds = () => [...ui.modList.children].filter((li) => li.dataset.mod && !li.classList.contains('folded')).map((li) => li.dataset.mod);
 const rowName = (li) => li.querySelector('.mod-name > span:not(.light)')?.textContent || li.dataset.mod;
 
 /** Keep the list's current order as this site's (the rows are already where they belong). */
@@ -3996,7 +4012,7 @@ function saveModOrder(li) {
  */
 function placeRow(li, to) {
   const at = () => rowIds().indexOf(li.dataset.mod);
-  const same = (x) => x && x.dataset.mod && x.dataset.group === li.dataset.group;
+  const same = (x) => x && x.dataset.mod && !x.classList.contains('folded') && x.dataset.group === li.dataset.group;
   while (at() < to && same(li.nextElementSibling)) li.before(li.nextElementSibling);
   while (at() > to && same(li.previousElementSibling)) li.after(li.previousElementSibling);
 }
@@ -4005,7 +4021,7 @@ function placeRow(li, to) {
 ui.modList.addEventListener('keydown', (e) => {
   if (modDrag) return;
   const li = e.target.closest?.('#mod-list > li');
-  if (!li || !li.dataset.mod || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!li || !li.dataset.mod || li.classList.contains('folded') || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const onGrip = !!e.target.closest('.mod-grip');
   const ids = rowIds();
   const from = ids.indexOf(li.dataset.mod);
@@ -4030,7 +4046,7 @@ ui.modList.addEventListener('keydown', (e) => {
 ui.modList.addEventListener('pointerdown', (e) => {
   if (modDrag || e.button !== 0 || !e.isPrimary) return;
   const li = e.target.closest('#mod-list > li');
-  if (!li || !li.dataset.mod || rowIds().length < 2) return;
+  if (!li || !li.dataset.mod || li.classList.contains('folded') || rowIds().length < 2) return;
   const onGrip = !!e.target.closest('.mod-grip');
   // Buttons (the switch, delete, Allow…), the update offer and error text keep their clicks and text
   // selection; on a touch screen only the grip drags (elsewhere a finger scrolls the list).
@@ -4083,14 +4099,14 @@ function followPointer(d) {
   const r = list.getBoundingClientRect();
   const h = li.offsetHeight;
   // (the row stays inside its own group: it stops at the group's first and last rows, never past them)
-  const group = [...list.children].filter((x) => x.dataset.mod && x.dataset.group === li.dataset.group);
+  const group = [...list.children].filter((x) => x.dataset.mod && !x.classList.contains('folded') && x.dataset.group === li.dataset.group);
   const minTop = Math.min(...group.map((x) => x.offsetTop));
   const maxTop = Math.max(...group.map((x) => x.offsetTop + x.offsetHeight)) - h;
   const top = Math.max(minTop, Math.min(maxTop, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
   // (positions among the mod rows: the group headings aren't rows, and a row stays in its group: placeRow)
   // The leading edge decides: a row above is passed once the dragged row's top crosses its middle, a row below
   // once its bottom does, so the end rows make way at both ends of the group (equal heights tie otherwise).
-  const others = [...list.children].filter((x) => x !== li && x.dataset.mod);
+  const others = [...list.children].filter((x) => x !== li && x.dataset.mod && !x.classList.contains('folded'));
   const passed = (x) => (x.offsetTop < li.offsetTop ? top >= x.offsetTop + x.offsetHeight / 2 : top + h > x.offsetTop + x.offsetHeight / 2);
   let to = others.findIndex((x) => !passed(x));
   if (to === -1) to = others.length;
@@ -4633,7 +4649,9 @@ function renderUpdate() {
   const u = view.status?.helper?.connected ? view.status.update : null;
   const done = view.updated && Date.now() - view.updated.at < UPDATED_SHOWN_MS && view.updated.to === (u?.current || view.status?.version) ? view.updated : null;
   const installing = view.updateBusy === 'installing' || u?.installing;
-  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to]);
+  // (Not now: that version's card stays away; a newer one brings it back, and Settings still says it's there: Tim 11-20)
+  const later = !!u?.available && !installing && !view.updateError && view.updateLater === u.latest;
+  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to, later]);
   renderUpdateSettings(u);
   if (n.dataset.key === key) return;
   n.dataset.key = key;
@@ -4642,12 +4660,18 @@ function renderUpdate() {
   if (installing) {
     parts.push(el('p', 'title', `Updating TRIF to ${u?.latest || 'the new version'}…`));
     parts.push(el('p', 'note', 'It reloads by itself when it’s done.'));
-  } else if (u?.available) {
+  } else if (u?.available && !later) {
     parts.push(el('p', 'title', `TRIF ${u.latest} is available`));
     if (view.updateError) { parts.push(el('p', 'note error', view.updateError)); n.classList.add('bad'); }
     const actions = el('p', 'actions');
     if (u.canInstall) actions.append(button('Update', 'primary', installUpdate));
     if (u.notes) actions.append(notesToggle(n, u.notes));
+    const latest = u.latest;
+    actions.append(button('Not now', null, () => {
+      view.updateLater = latest;
+      chrome.storage.local.set({ updateLater: latest }).catch(() => {});
+      renderUpdate();
+    }));
     if (actions.childNodes.length) parts.push(actions);
     if (!u.canInstall && u.why) parts.push(el('p', 'note', u.why));
   } else if (done) {
@@ -4669,7 +4693,7 @@ function notesToggle(container, notes) {
     const md = el('div', 'md');
     setMarkdown(md, unwrapMarkdown(notes));
     container.append(md);
-    e.target.textContent = 'Hide';
+    e.target.textContent = 'Hide what’s new';
   });
 }
 

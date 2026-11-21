@@ -4287,6 +4287,7 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await go(at('x.com', '/home'));
       const folded = await waitFor('the fold', async () => { const v = await view(); return v.site === 'x.com' && /^\d+ more for other x\.com pages$/.test(v.fold) && v.mods ? v : null; }, { timeoutMs: 20000 });
       if (folded.mods.includes('x.com/e2e-sens-elsewhere')) problems.push('the mod for another page is listed above the fold');
+      if (folded.foldOpen) problems.push('the fold starts open');
       if (folded.overflowX !== 'hidden') problems.push(`the box scrolls sideways: ${folded.overflowX}`);
       const px = parseFloat(folded.maxH);
       const want = (empty, v) => (empty ? 0.7 : 0.4) * v.vh - 40;
@@ -4322,11 +4323,38 @@ trif.css('#ok2 svg { opacity: 0 !important; } #ok2 .ic::after { content: ""; pos
       await themes('mods-fold');
       await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
       const opened = await waitFor('unfolded', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
+      // (opened, its mods right under the line, a plain list (Tim, 11-20): no tier heading between, each row's tier
+      // in its colour (a style mod: green) and, for a screen reader and hover, in words; the tiers above lack it)
+      const under = await this.panel(`async () => {
+        const kids = [...document.querySelectorAll('#mod-list > li')];
+        const fold = kids.findIndex((li) => li.classList.contains('mods-fold'));
+        const li = document.querySelector('#mod-list > li[data-mod="x.com/e2e-sens-elsewhere"]');
+        const at = kids.indexOf(li);
+        const paint = (host, bg) => { const p = document.createElement('div'); p.style.background = bg; host.append(p); const c = getComputedStyle(p).backgroundColor; p.remove(); return c; };
+        const tier = paint(li, 'var(--tier)');
+        const name = li.querySelector('.mod-name');
+        return { fold, at, last: kids.length - 1, folded: li.classList.contains('folded'), between: kids.slice(fold + 1, at).map((x) => x.dataset.mod || x.className),
+          above: kids.slice(0, fold).filter((x) => x.dataset.mod).map((x) => x.dataset.mod), headingsBelow: kids.slice(fold).filter((x) => x.classList.contains('mod-group')).length,
+          tier, green: paint(document.getElementById('mod-list'), 'var(--led-green)'), stripe: getComputedStyle(li, '::before').backgroundColor,
+          stripeWant: paint(li, li.classList.contains('off') ? 'color-mix(in srgb, var(--tier) 35%, var(--line))' : 'var(--tier)'),
+          words: name.textContent, title: name.title, grip: getComputedStyle(li.querySelector('.mod-grip')).display, light: li.querySelector('.light').classList.contains('on') };
+      }`);
+      if (!under.folded || under.at !== under.fold + 1 || under.headingsBelow) problems.push(`opened, the row isn't right under the fold line in a plain list: ${JSON.stringify(under)}`);
+      if (under.above.includes('x.com/e2e-sens-elsewhere')) problems.push('opened, the tiers above list the mod for another page too');
+      if (under.tier !== under.green || under.stripe !== under.stripeWant) problems.push(`the folded row's tier colour: ${under.tier} (green ${under.green}), its stripe ${under.stripe} (want ${under.stripeWant})`);
+      if (!/^E2E sensitive elsewhere, Style mods\b/.test(under.words) || under.title !== 'Style mods') problems.push(`the folded row's tier in words: "${under.words}", its hover "${under.title}"`);
+      if (under.grip !== 'none' || under.light) problems.push(`the folded row: grip ${under.grip}, light on ${under.light}`);
       await toBottom();
       const c2 = await clipped();
       if (c2.out.length) problems.push(`clipped at the right edge (opened): ${c2.out.join(', ')}`);
       await themes('mods-fold-open');
-      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${heights.join(', ')}`);
+      // (closed again: the row's gone from the list)
+      await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
+      const shut = await waitFor('folded again', async () => { const v = await view(); return !v.foldOpen ? v : null; }, { timeoutMs: 8000 });
+      if (shut.mods.includes('x.com/e2e-sens-elsewhere')) problems.push('closed again, the mod for another page still shows');
+      await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
+      await waitFor('unfolded again', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
+      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}, the row right under the line ("${under.words}", stripe ${under.stripe}), closed: ${shut.mods.length}; the box ${heights.join(', ')}`);
       // 5. Copy to {host}: the code card's menu brings a parent's mod over to a sensitive site of its own (off there)
       await this.panelClick('li[data-mod="x.com/e2e-sens-elsewhere"] .mod-code');
       const items = await waitFor('the code card\'s menu', () => this.panel(`async () => { const d = document.getElementById('code-view'); if (!d?.open) return null; return [...d.querySelectorAll('.cv-copy-host')].map((b) => b.textContent); }`), { timeoutMs: 8000 });

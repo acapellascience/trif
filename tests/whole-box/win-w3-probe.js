@@ -245,6 +245,28 @@ function parseStream(stdout) {
   show('the rules as Windows has them', ps(`Get-NetFirewallRule -Group '${winbox.RULE_GROUP}' -PolicyStore ActiveStore | ForEach-Object { $_.Name; ($_ | Get-NetFirewallPortFilter | Format-List Protocol, RemotePort | Out-String).Trim(); ($_ | Get-NetFirewallAddressFilter).RemoteAddress -join ' '; ($_ | Get-NetFirewallApplicationFilter).Package }`).stdout);
   show('TRIF\'s WFP filters (wfp status)', wfp('status'));
   show('CheckNetIsolation LoopbackExempt -s', spawnSync(sys('CheckNetIsolation.exe'), ['LoopbackExempt', '-s'], { encoding: 'utf8' }).stdout);
+  // status as the person runs it, before every boxed run: no administrator. (runas /trustlevel:0x20000, Windows'
+  // "Basic User": the Administrators group deny-only; no account or password)
+  const lowDir = path.join(base, 'low');
+  fs.mkdirSync(lowDir, { recursive: true });
+  const lowOut = path.join(lowDir, 'status.json');
+  const lowCmd = w(path.join(lowDir, 'status.cmd'), [
+    '@echo off',
+    `set "TRIF_WFP_EXE=${process.env.TRIF_WFP_EXE}"`,
+    `"${process.execPath}" "${path.join(__dirname, '..', '..', 'helper', 'lib', 'winbox.js')}" status > "${lowOut}.tmp" 2>&1`,
+    `whoami /groups | findstr /i "S-1-5-32-544" >> "${lowOut}.groups" 2>&1`,
+    `move /y "${lowOut}.tmp" "${lowOut}" > nul`,
+  ].join('\r\n'));
+  spawnSync(sys('runas.exe'), ['/trustlevel:0x20000', `cmd /c "${lowCmd}"`], { encoding: 'utf8', timeout: 30000 });
+  for (let i = 0; i < 60 && !fs.existsSync(lowOut); i++) await new Promise((r) => setTimeout(r, 500));
+  const lowText = fs.existsSync(lowOut) ? fs.readFileSync(lowOut, 'utf8') : '(nothing)';
+  show('status without an administrator (Basic User)', lowText);
+  show('  its Administrators group', fs.existsSync(`${lowOut}.groups`) ? fs.readFileSync(`${lowOut}.groups`, 'utf8') : '(none)');
+  let low = null;
+  try { low = JSON.parse(lowText.trim().split(/\r?\n/).pop()); } catch { /* none */ }
+  verdict['status without an administrator: ready, the filters read'] = !!(low && low.ready && low.ports && low.ports.relay === ports.relay);
+  learned['the status run was not an administrator (Administrators deny-only)'] = fs.existsSync(`${lowOut}.groups`) && /Deny only/i.test(fs.readFileSync(`${lowOut}.groups`, 'utf8'));
+
   const again = winbox.setup({ already: true, dir: base }); // (no ports given: the rules' own, though TRIF's ports are busy now)
   verdict['winbox.setup a second time: the same ports, ready'] = again.ok && again.status.ready && JSON.stringify(again.ports) === JSON.stringify(ports);
 

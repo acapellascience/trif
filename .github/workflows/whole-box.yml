@@ -215,7 +215,7 @@ jobs:
       # step, helper/lib/win/wfp.cs)
       - name: W3, the administrator step, the box reaching only TRIF's ports (strict)
         run: |
-          node --test tests/winbox.test.js
+          node --test tests/winbox.test.js tests/relay.test.js
           node tests/whole-box/win-w3-probe.js
       - name: The network without the loopback exemption (named pipe), the pinned claude.exe
         env:

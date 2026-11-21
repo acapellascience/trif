@@ -12,11 +12,13 @@
 //     NET_CAPABILITY: without one nothing connects at all; the rules close what it opens.) So the box reaches TRIF's relay and key proxy and nothing
 //     else on this computer, as on the Mac (the internet stays closed: no internetClient).
 //
-// NOT YET THE GUARANTEE (round 10, windows-latest): Windows Firewall rules don't filter traffic on this
-// computer itself. With the exemption the box reached every port on 127.0.0.1, this computer's own address,
-// ::1 and UDP, rules or not; the same rules did close the internet and the network (internetClient in their
-// place: refused). So these rules alone give W2's reach. Next: WFP filters of TRIF's own (the same one
-// administrator step) for the loopback part; until they hold, nothing turns this on (it isn't wired into runs).
+//   - TRIF's own WFP filters (helper/lib/win/wfp.cs; round 11): round 10 found that Windows Firewall rules
+//     don't filter traffic on this computer itself (with the exemption the box reached every port on
+//     127.0.0.1, this computer's own address, ::1 and UDP, rules or not; they did close the internet and the
+//     network). The filters, in a sublayer of TRIF's above the firewall's, permit TCP to 127.0.0.1 at TRIF's
+//     two ports for the container and block everything else it tries (connect, accept, listen; IPv4, IPv6).
+//     The elevated script compiles them from its own command line (Add-Type); status reads them back with
+//     the compiled wfp.exe. (Not wired into runs yet: the Windows run code is on branch windows.)
 //
 // Turning the setting off takes both out (the administrator again). Before every boxed run status() must
 // say ready (the rules in force, in the ACTIVE store, so a policy that ignores local rules shows; every
@@ -33,6 +35,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { spawnSync } = require('child_process');
 
 const CONTAINER = 'TRIF.FullSandbox';
@@ -134,8 +137,29 @@ function setupScript({ sid, ports, resultFile = null }) {
     lines.push(`  New-NetFirewallRule -Name ${psq(x.name)} -DisplayName ${psq(x.display)} -Group ${psq(RULE_GROUP)} -Description ${psq(describe(ports))} -Direction ${x.direction || 'Outbound'} -Action Block -Profile Any -Package ${psq(sid)} -Protocol ${x.protocol}${x.remotePort[0] === 'Any' ? '' : ` -RemotePort ${psList(x.remotePort)}`}${x.remoteAddress[0] === 'Any' ? '' : ` -RemoteAddress ${psList(x.remoteAddress)}`} | Out-Null`);
     lines.push(`  $r.steps += ${psq(x.name)}`);
   }
+  lines.push(...wfpLines(['add', sid, String(ports.relay), String(ports.keyProxy)], 'wfp', true));
   lines.push('  $r.ok = $true', '} catch { $r.error = "$_" }', ...finish(resultFile));
   return lines.join('\n');
+}
+
+// ---- TRIF's own WFP filters (helper/lib/win/wfp.cs), the loopback part the firewall rules don't hold (round
+// 10). The elevated script compiles the source from its own (encoded) command line with Add-Type, so nothing
+// it runs as an administrator is read from a file. (Comments and indentation dropped, then gzip: the
+// command line's 32767 characters.)
+const WFP_CS = path.join(__dirname, 'win', 'wfp.cs');
+function wfpSourceB64() {
+  const src = fs.readFileSync(WFP_CS, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).join('\n');
+  return zlib.gzipSync(Buffer.from(src, 'utf8'), { level: 9 }).toString('base64');
+}
+function wfpLines(args, step, strict) {
+  return [
+    `  $gz = New-Object IO.Compression.GZipStream((New-Object IO.MemoryStream(,[Convert]::FromBase64String('${wfpSourceB64()}'))), [IO.Compression.CompressionMode]::Decompress)`,
+    '  $src = (New-Object IO.StreamReader($gz)).ReadToEnd()',
+    "  if (-not ('TrifWfp' -as [type])) { Add-Type -TypeDefinition $src -Language CSharp }",
+    `  $w = [TrifWfp]::Run(@(${psList(args)}))`,
+    strict ? "  if ($w -notlike '{\"ok\":true*') { throw \"WFP: $w\" }" : "  if ($w -notlike '{\"ok\":true*') { $r.wfpError = \"$w\" }",
+    `  $r.steps += ${psq(step)}`,
+  ];
 }
 
 /** Run as an administrator: the rules and the exemption out. */
@@ -149,6 +173,8 @@ function removeScript({ sid, resultFile = null }) {
     "  $r.steps += 'rules'",
     `  $o = & ${CNI} LoopbackExempt -d ${psq(`-p=${sid}`)} 2>&1 | Out-String`,
     "  $r.steps += 'exemption'",
+    ...wfpLines(['remove'], 'wfp', false),
+    '  if ($r.wfpError) { throw $r.wfpError }',
     '  $r.ok = $true',
     '} catch { $r.error = "$_" }',
     ...finish(resultFile),
@@ -197,7 +223,50 @@ function normAddr(a) {
  * there but not as made: disabled, allowing, other ports, another program, a different container), 'extraRule'
  * (another rule in the group: an allow could open what the blocks close... a block wins, but say so).
  */
-function parseStatus(text, { sid }) {
+// TRIF's WFP filters as `wfp status` prints them -> {ports, problems}: 'filtersMissing' (none, or not all,
+// or the sublayer gone), 'filtersChanged' (there but not as made), 'filtersUnknown' (couldn't read them).
+function parseWfp(text, { sid }) {
+  let w;
+  try { w = JSON.parse(String(text || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch { return { ports: null, problems: ['filtersUnknown'] }; }
+  if (!w || w.ok !== true || !Array.isArray(w.filters)) return { ports: null, problems: ['filtersUnknown'] };
+  const problems = [];
+  if (!w.sublayer) problems.push('filtersMissing');
+  else if (w.sublayer.weight !== 65535) problems.push('filtersChanged');
+  const want = WFP_FILTERS;
+  if (w.filters.length !== want.length || w.filters.some((f) => f.missing)) problems.push('filtersMissing');
+  let ports = null;
+  for (const f of w.filters.filter((x) => !x.missing)) {
+    const x = want.find((y) => y.key === String(f.key).toLowerCase());
+    const conds = Array.isArray(f.conditions) ? f.conditions : [];
+    const pkg = conds.filter((c) => c.field === 'package');
+    let ok = !!x && f.ourSublayer === true && f.layer === x.layer && f.action === x.action && (f.flags & 1) === 1
+      && pkg.length === 1 && pkg[0].match === 0 && String(pkg[0].value).toUpperCase() === sid.toUpperCase();
+    if (ok && x.action === 'permit') {
+      const one = (field) => { const c = conds.filter((y) => y.field === field); return c.length === 1 ? c[0] : null; };
+      const proto = one('protocol');
+      const addr = one('remoteAddress');
+      const port = one('remotePort');
+      ok = conds.length === 4 && proto && proto.match === 0 && proto.value === 6 && addr && addr.match === 0 && addr.value === 0x7F000001
+        && port && port.match === 5 && Array.isArray(port.value) && validPort(port.value[0]) && port.value[1] === port.value[0] + 1;
+      if (ok) ports = { relay: port.value[0], keyProxy: port.value[1] };
+    } else if (ok) ok = conds.length === 1 && (f.flags & 8) === 8;
+    if (!ok) problems.push('filtersChanged');
+  }
+  return { ports, problems: [...new Set(problems)] };
+}
+
+// (wfp.cs's filters: keys, layers, actions)
+const WFP_FILTERS = [
+  { key: '5452e1f0-7769-4b49-8000-747269660010', layer: 'connect4', action: 'permit' },
+  { key: '5452e1f0-7769-4b49-8000-747269660011', layer: 'connect4', action: 'block' },
+  { key: '5452e1f0-7769-4b49-8000-747269660012', layer: 'connect6', action: 'block' },
+  { key: '5452e1f0-7769-4b49-8000-747269660013', layer: 'accept4', action: 'block' },
+  { key: '5452e1f0-7769-4b49-8000-747269660014', layer: 'accept6', action: 'block' },
+  { key: '5452e1f0-7769-4b49-8000-747269660015', layer: 'listen4', action: 'block' },
+  { key: '5452e1f0-7769-4b49-8000-747269660016', layer: 'listen6', action: 'block' },
+];
+
+function parseStatus(text, { sid, wfp = undefined }) {
   let s;
   try { s = JSON.parse(String(text || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch { return { ready: false, ports: null, problems: ['noStatus'] }; }
   if (!s || typeof s !== 'object') return { ready: false, ports: null, problems: ['noStatus'] };
@@ -222,6 +291,11 @@ function parseStatus(text, { sid }) {
     }
     if (found.some((x) => !want.some((w) => w.name === x.name))) problems.push('extraRule');
   }
+  if (wfp !== undefined) {
+    const f = parseWfp(wfp, { sid });
+    problems.push(...f.problems);
+    if (ports && f.ports && (f.ports.relay !== ports.relay)) problems.push('filtersChanged');
+  }
   const uniq = [...new Set(problems)];
   return { ready: !uniq.length, ports, problems: uniq };
 }
@@ -232,9 +306,18 @@ const encoded = (script) => Buffer.from(script, 'utf16le').toString('base64');
 // (a PowerShell 7 PSModulePath makes Windows PowerShell load 7's modules, which fail: round 9)
 function psEnv(env = process.env) { const e = { ...env }; for (const k of Object.keys(e)) if (k.toUpperCase() === 'PSMODULEPATH') delete e[k]; return e; }
 
-function runPs(script, { timeout = 60000 } = {}) {
-  const r = spawnSync(powershell(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded(script)], { encoding: 'utf8', timeout, env: psEnv(), windowsHide: true });
+// (`stdin`: the script on standard input, one line, for the outer script of runElevated: the elevated one
+// rides on ITS command line encoded, and encoding that twice would pass Windows' 32767 characters)
+function runPs(script, { timeout = 60000, stdin = false } = {}) {
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', ...(stdin ? ['-Command', '-'] : ['-EncodedCommand', encoded(script)])];
+  const r = spawnSync(powershell(), args, { encoding: 'utf8', timeout, env: psEnv(), windowsHide: true, ...(stdin ? { input: `${script}\n` } : {}) });
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error: r.error ? r.error.message : null };
+}
+
+/** The one-line outer script: Windows' administrator prompt for `script` (encoded on the elevated command
+ *  line). */
+function elevatedOuter(script) {
+  return `$ErrorActionPreference = 'Stop'; try { $p = Start-Process -FilePath ${psq(powershell())} -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList ${psList(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded(script)])}; "exit $($p.ExitCode)" } catch { "declined: $_" }`;
 }
 
 /** The script as an administrator: directly if this process is one (`already`), else through Windows'
@@ -246,14 +329,7 @@ function runElevated(scriptFor, { already = false, dir = os.tmpdir(), timeout = 
   let r;
   if (already) r = runPs(script, { timeout });
   else {
-    const outer = [
-      "$ErrorActionPreference = 'Stop'",
-      'try {',
-      `  $p = Start-Process -FilePath ${psq(powershell())} -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList ${psList(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded(script)])}`,
-      '  "exit $($p.ExitCode)"',
-      '} catch { "declined: $_" }',
-    ].join('\n');
-    r = runPs(outer, { timeout });
+    r = runPs(elevatedOuter(script), { timeout, stdin: true });
   }
   let out = null;
   try { out = JSON.parse(fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '')); } catch { /* none */ }
@@ -263,9 +339,16 @@ function runElevated(scriptFor, { already = false, dir = os.tmpdir(), timeout = 
   return { ok: false, declined, error: (declined ? r.stdout.replace(/^declined:\s*/m, '') : `${r.stdout}${r.stderr}${r.error || ''}`).trim().slice(0, 500) };
 }
 
-function status({ sid = containerSid(CONTAINER) } = {}) {
+/** status({sid, wfpExe}): what's in force. `wfpExe`: helper/lib/win/wfp.cs compiled (TRIF's bin, as the
+ *  fence; reading needs no administrator); without it the filters count as unknown (not ready). */
+function status({ sid = containerSid(CONTAINER), wfpExe = process.env.TRIF_WFP_EXE || null } = {}) {
   const r = runPs(statusScript({ sid }));
-  return { ...parseStatus(r.stdout, { sid }), raw: r.code === 0 ? undefined : `${r.stderr}${r.error || ''}`.slice(0, 500) };
+  let wfp = null;
+  if (wfpExe) {
+    const w = spawnSync(wfpExe, ['status'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    wfp = (w.stdout || '').trim() || null;
+  }
+  return { ...parseStatus(r.stdout, { sid, wfp }), raw: r.code === 0 ? undefined : `${r.stderr}${r.error || ''}`.slice(0, 500) };
 }
 
 function excludedPorts() {
@@ -281,24 +364,24 @@ function busyPorts() {
 /** setup({already, ports}) -> {ok, ports, declined?, error?, status}: the ports (given; else the ones the
  *  rules already have; else chosen: not excluded, nothing listening), then the one elevated step. (Choose
  *  before TRIF's own relay listens: it would count as busy.) */
-function setup({ already = false, sid = containerSid(CONTAINER), dir, ports: given = null } = {}) {
-  const now = status({ sid });
+function setup({ already = false, sid = containerSid(CONTAINER), dir, ports: given = null, wfpExe } = {}) {
+  const now = status({ sid, wfpExe });
   const ports = given || (now.ports && !now.problems.includes('rulesChanged') ? now.ports : choosePorts(excludedPorts(), busyPorts()));
   if (!ports) return { ok: false, error: 'no free ports for TRIF\'s relay', status: now };
   const r = runElevated((resultFile) => setupScript({ sid, ports, resultFile }), { already, dir });
-  const after = status({ sid });
+  const after = status({ sid, wfpExe });
   return { ...r, ok: r.ok && after.ready, ports, status: after };
 }
 
-function remove({ already = false, sid = containerSid(CONTAINER), dir } = {}) {
+function remove({ already = false, sid = containerSid(CONTAINER), dir, wfpExe } = {}) {
   const r = runElevated((resultFile) => removeScript({ sid, resultFile }), { already, dir });
-  return { ...r, status: status({ sid }) };
+  return { ...r, status: status({ sid, wfpExe }) };
 }
 
 module.exports = {
   CONTAINER, NET_CAPABILITY, RULE_GROUP, PORT_CANDIDATES, containerSid, capabilitySid, parseExcluded, choosePorts, otherPorts, rules,
-  describe, portsFromDescription, setupScript, removeScript, statusScript, parseStatus, runPs, runElevated, status, setup, remove,
-  excludedPorts, busyPorts, encoded,
+  describe, portsFromDescription, setupScript, removeScript, statusScript, parseStatus, parseWfp, WFP_FILTERS, WFP_CS, elevatedOuter,
+  runPs, runElevated, status, setup, remove, excludedPorts, busyPorts, encoded,
 };
 
 if (require.main === module) {

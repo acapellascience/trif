@@ -211,10 +211,9 @@ jobs:
       # Code a port of the container's own. The real api.anthropic.com only with a made-up token (401).
       # Step 9b' (Tim's pick W3): one administrator step (the runner is one) gives TRIF's one container the
       # loopback exemption and firewall rules; the box then reaches TRIF's relay and key proxy and nothing else.
+      # (round 10: Windows Firewall rules don't filter loopback; round 11: TRIF's own WFP filters in the same
+      # step, helper/lib/win/wfp.cs)
       - name: W3, the administrator step, the box reaching only TRIF's ports (strict)
-        # (round 10: Windows Firewall rules don't filter loopback, so the "closed" checks on this computer fail
-        # until TRIF's own WFP filters are in; the rest is strict in the log's VERDICT)
-        continue-on-error: true
         run: |
           node --test tests/winbox.test.js
           node tests/whole-box/win-w3-probe.js

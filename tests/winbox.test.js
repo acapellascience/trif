@@ -129,3 +129,60 @@ test('status: ready only with the exemption, every profile on, and the four rule
   assert.deepStrictEqual(w.parseStatus('warning\nnot json', { sid: SID }).problems, ['noStatus']);
   assert.ok(w.parseStatus(`WARNING: something\n${JSON.stringify(good())}`, { sid: SID }).ready, 'the last line');
 });
+
+// TRIF's own WFP filters (helper/lib/win/wfp.cs), as `wfp status` prints them
+function goodWfp(ports = PORTS, sid = SID) {
+  return {
+    ok: true,
+    sublayer: { weight: 65535, flags: 1 },
+    filters: w.WFP_FILTERS.map((f) => ({
+      key: f.key, name: 'x', layer: f.layer, ourSublayer: true, flags: f.action === 'block' ? 9 : 1, action: f.action, weight: f.action === 'block' ? 1 : 15,
+      conditions: [{ field: 'package', match: 0, value: sid },
+        ...(f.action === 'permit' ? [{ field: 'protocol', match: 0, value: 6 }, { field: 'remoteAddress', match: 0, value: 2130706433 }, { field: 'remotePort', match: 5, value: [ports.relay, ports.keyProxy] }] : [])],
+    })),
+  };
+}
+
+test('status with TRIF\'s WFP filters: ready only with all seven as made', () => {
+  const pw = (o) => w.parseWfp(JSON.stringify(o), { sid: SID });
+  assert.deepStrictEqual(pw(goodWfp()), { ports: PORTS, problems: [] });
+  const mut = (f) => { const o = goodWfp(); f(o); return pw(o).problems; };
+  assert.deepStrictEqual(mut((o) => { o.sublayer = null; }), ['filtersMissing']);
+  assert.deepStrictEqual(mut((o) => { o.sublayer.weight = 100; }), ['filtersChanged']);
+  assert.deepStrictEqual(mut((o) => { o.filters[3] = { key: o.filters[3].key, missing: '0x80320003' }; }), ['filtersMissing']);
+  assert.deepStrictEqual(mut((o) => { o.filters.pop(); }), ['filtersMissing']);
+  assert.deepStrictEqual(mut((o) => { o.filters[1].action = 'permit'; }), ['filtersChanged']);
+  assert.deepStrictEqual(mut((o) => { o.filters[1].flags = 1; }), ['filtersChanged'], 'a block must be a hard one');
+  assert.deepStrictEqual(mut((o) => { o.filters[2].conditions[0].value = w.containerSid('other'); }), ['filtersChanged']);
+  assert.deepStrictEqual(mut((o) => { o.filters[2].conditions.push({ field: 'remotePort', match: 0, value: 80 }); }), ['filtersChanged'], 'a block narrowed');
+  assert.deepStrictEqual(mut((o) => { o.filters[0].conditions[2].value = 2130706434; }), ['filtersChanged']);
+  assert.deepStrictEqual(mut((o) => { o.filters[0].conditions[3].value = [1, 65535]; }), ['filtersChanged'], 'a permit widened');
+  assert.deepStrictEqual(mut((o) => { o.filters[0].conditions.splice(1, 1); }), ['filtersChanged'], 'UDP too');
+  assert.deepStrictEqual(mut((o) => { o.filters[4].ourSublayer = false; }), ['filtersChanged']);
+  assert.deepStrictEqual(mut((o) => { o.filters[5].layer = 'connect6'; }), ['filtersChanged']);
+  assert.deepStrictEqual(w.parseWfp('', { sid: SID }).problems, ['filtersUnknown']);
+  assert.deepStrictEqual(w.parseWfp('{"ok":false,"error":"open the filtering engine 0x5"}', { sid: SID }).problems, ['filtersUnknown']);
+  // with the rest of status
+  const st = (o, wf) => w.parseStatus(JSON.stringify(o), { sid: SID, wfp: wf === null ? null : JSON.stringify(wf) });
+  assert.deepStrictEqual(st(good(), goodWfp()), { ready: true, ports: PORTS, problems: [] });
+  assert.deepStrictEqual(st(good(), null).problems, ['filtersUnknown']);
+  assert.deepStrictEqual(st(good(), goodWfp({ relay: 47491, keyProxy: 47492 })).problems, ['filtersChanged'], 'the rules\' ports and the filters\' agree');
+});
+
+test('the administrator step carries TRIF\'s WFP source on its own command line, under Windows\' limit', () => {
+  const s = w.setupScript({ sid: SID, ports: PORTS, resultFile: 'C:\\r.json' });
+  const b64 = /FromBase64String\('([A-Za-z0-9+/=]+)'\)/.exec(s)[1];
+  const src = require('zlib').gunzipSync(Buffer.from(b64, 'base64')).toString('utf8');
+  assert.match(src, /public static class TrifWfp/);
+  assert.ok(!/^\s*\/\//m.test(src), 'comments dropped');
+  assert.match(s, new RegExp(`\\[TrifWfp\\]::Run\\(@\\('add','${SID}','47391','47392'\\)\\)`));
+  assert.match(w.removeScript({ sid: SID }), /\[TrifWfp\]::Run\(@\('remove'\)\)/);
+  // the outer (non-elevated, on standard input) is one line; the elevated command line fits 32767
+  const outer = w.elevatedOuter(s);
+  assert.ok(!/\n/.test(outer));
+  const cmdLine = /-ArgumentList (.*?); "exit/.exec(outer)[1];
+  assert.ok(cmdLine.length < 30000, `elevated command line ${cmdLine.length}`);
+  // the filters' keys in wfp.cs and here agree
+  const cs = require('fs').readFileSync(w.WFP_CS, 'utf8');
+  for (const f of w.WFP_FILTERS) assert.ok(cs.toLowerCase().includes(`new guid("${f.key}")`), f.key);
+});

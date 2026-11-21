@@ -19,6 +19,10 @@
 //      api.anthropic.com through TRIF's relay on its port (401 for a made-up token)
 //   7. (what we learn) the firewall turned off: does the box reach other ports then? status says firewallOff
 //   8. winbox.remove: status not ready, TRIF's ports closed to the box again
+//
+// Round 11: TRIF's own WFP filters (helper/lib/win/wfp.cs) in the same step, for what the firewall rules
+// don't hold (round 10: loopback). Status reads them back (the compiled wfp.exe, no administrator). Also
+// learned: with the filters, are the firewall rules still needed (the rules out; then the firewall off)?
 
 const fs = require('fs');
 const os = require('os');
@@ -43,8 +47,9 @@ const verdict = {};
 const learned = {};
 let escaped = false;
 
-function compile(src, out, refs = []) {
-  const r = spawnSync(csc, ['/nologo', '/o+', ...refs.map((x) => `/r:${x}`), `/out:${out}`, path.join(__dirname, src)], { encoding: 'utf8' });
+function compile(src, out, refs = [], flags = []) {
+  const file = path.isAbsolute(src) ? src : path.join(__dirname, src);
+  const r = spawnSync(csc, ['/nologo', '/o+', ...flags, ...refs.map((x) => `/r:${x}`), `/out:${out}`, file], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`csc ${src}: ${r.stdout}${r.stderr}`);
   return out;
 }
@@ -152,6 +157,9 @@ function parseStream(stdout) {
   const bin = path.join(base, 'bin');
   fs.mkdirSync(bin, { recursive: true });
   const fence = compile('fence.cs', path.join(bin, 'trif-fence.exe'), ['System.Web.Extensions.dll']);
+  process.env.TRIF_WFP_EXE = compile(winbox.WFP_CS, path.join(bin, 'trif-wfp.exe'), [], ['/platform:x64']);
+  const wfp = (...a) => spawnSync(process.env.TRIF_WFP_EXE, a, { encoding: 'utf8' }).stdout.trim();
+  show('wfp status before anything', wfp('status'));
   const claude = findClaude();
   console.log(`claude.exe: ${claude.argv[0]}: ${(spawnSync(claude.argv[0], ['--version'], { encoding: 'utf8' }).stdout || '').trim()}`);
 
@@ -214,7 +222,7 @@ function parseStream(stdout) {
   // 2
   const before = winbox.status();
   console.log(`status before the step: ${JSON.stringify(before)}`);
-  verdict['status before the step: not ready (no exemption, no rules)'] = !before.ready && before.problems.includes('notExempt') && before.problems.includes('rulesMissing');
+  verdict['status before the step: not ready (no exemption, no rules, no filters)'] = !before.ready && before.problems.includes('notExempt') && before.problems.includes('rulesMissing') && before.problems.includes('filtersMissing');
   let o = await inside(fence, A, targets, 'run a, before the administrator step');
   holds(o, '(before)');
   verdict['before the step: TRIF\'s relay port closed to the box'] = o['TRIF\'s relay port, 127.0.0.1'] !== 'echo ok';
@@ -235,6 +243,7 @@ function parseStream(stdout) {
   console.log(`\nwinbox.setup: ${JSON.stringify(set)}`);
   verdict['winbox.setup: ok, the ports as chosen, status ready'] = set.ok && set.status.ready && JSON.stringify(set.ports) === JSON.stringify(ports);
   show('the rules as Windows has them', ps(`Get-NetFirewallRule -Group '${winbox.RULE_GROUP}' -PolicyStore ActiveStore | ForEach-Object { $_.Name; ($_ | Get-NetFirewallPortFilter | Format-List Protocol, RemotePort | Out-String).Trim(); ($_ | Get-NetFirewallAddressFilter).RemoteAddress -join ' '; ($_ | Get-NetFirewallApplicationFilter).Package }`).stdout);
+  show('TRIF\'s WFP filters (wfp status)', wfp('status'));
   show('CheckNetIsolation LoopbackExempt -s', spawnSync(sys('CheckNetIsolation.exe'), ['LoopbackExempt', '-s'], { encoding: 'utf8' }).stdout);
   const again = winbox.setup({ already: true, dir: base }); // (no ports given: the rules' own, though TRIF's ports are busy now)
   verdict['winbox.setup a second time: the same ports, ready'] = again.ok && again.status.ready && JSON.stringify(again.ports) === JSON.stringify(ports);
@@ -302,6 +311,26 @@ function parseStream(stdout) {
   verdict['the real Anthropic through TRIF\'s relay at its fixed port (401 for the made-up token)'] = rl.seen.some((x) => x.target === 'api.anthropic.com:443' && x.allowed && x.down > 0) && /401|OAuth|authenticat|invalid/i.test(`${r.stdout}\n${r.stderr}`);
   await rl.close();
 
+  // 7a (learned): with TRIF's filters, are the firewall rules still needed? The rules out, the exemption and
+  // the filters kept; then the firewall off as well.
+  const srvRelay1 = await echoTcp(ports.relay, '127.0.0.1');
+  const srvKey1 = await echoTcp(ports.keyProxy, '127.0.0.1');
+  const wide = Object.fromEntries(Object.entries(targets).filter(([k]) => !/folder$|secret/.test(k)));
+  ps(`Get-NetFirewallRule -Group '${winbox.RULE_GROUP}' | Remove-NetFirewallRule`);
+  const noRules = await inside(fence, A, wide, 'the filters and the exemption, no firewall rules');
+  for (const [k, v] of Object.entries(noRules)) if (!/^loopback/.test(k)) learned[`filters, no rules: ${k}`] = v;
+  ps('Set-NetFirewallProfile -All -Enabled False');
+  const noFw = await inside(fence, A, wide, 'the filters and the exemption, no rules, the firewall off');
+  for (const [k, v] of Object.entries(noFw)) if (!/^loopback/.test(k)) learned[`filters, no rules, firewall off: ${k}`] = v;
+  ps('Set-NetFirewallProfile -All -Enabled True');
+  const wfpOnly = (o2) => o2['TRIF\'s relay port, 127.0.0.1'] === 'echo ok' && o2['TRIF\'s key proxy port, 127.0.0.1'] === 'echo ok' && mustBeClosed.every((k) => !(k in o2) || o2[k] !== 'echo ok');
+  learned['THE FILTERS ALONE HOLD (no rules)'] = wfpOnly(noRules);
+  learned['THE FILTERS ALONE HOLD (no rules, the firewall off)'] = wfpOnly(noFw);
+  await srvRelay1.close();
+  await srvKey1.close();
+  const back = winbox.setup({ already: true, dir: base, ports });
+  verdict['setup again after the rules were taken out: ready'] = back.ok && back.status.ready;
+
   // 7: what the firewall being off does (the runner only; put back after)
   ps('Set-NetFirewallProfile -All -Enabled False');
   const off = winbox.status();
@@ -317,7 +346,8 @@ function parseStream(stdout) {
   // 8
   const rem = winbox.remove({ already: true, dir: base });
   console.log(`\nwinbox.remove: ${JSON.stringify(rem)}`);
-  verdict['winbox.remove: the exemption and the rules gone'] = rem.ok && rem.status.problems.includes('notExempt') && rem.status.problems.includes('rulesMissing');
+  verdict['winbox.remove: the exemption, the rules and the filters gone'] = rem.ok && rem.status.problems.includes('notExempt') && rem.status.problems.includes('rulesMissing') && rem.status.problems.includes('filtersMissing');
+  show('wfp status after remove', wfp('status'));
   o = await inside(fence, A, { 'TRIF\'s relay port, 127.0.0.1': targets['TRIF\'s relay port, 127.0.0.1'] }, 'run a, after winbox.remove');
   verdict['after remove: TRIF\'s relay port closed to the box again'] = o['TRIF\'s relay port, 127.0.0.1'] !== 'echo ok';
   await srvRelay2.close();

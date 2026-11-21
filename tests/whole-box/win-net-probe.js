@@ -37,6 +37,8 @@ if (process.env.GITHUB_ACTIONS !== 'true') { console.error('win-net-probe: runs 
 const SECRET = `SECRET-${crypto.randomBytes(4).toString('hex')}`;
 const sys = (n) => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', n);
 const csc = path.join(process.env.SystemRoot || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
+// (node in an lpac container can't lstat C:\, which resolving a script's real path does: these skip it)
+const NODE_IN = [process.execPath, '--preserve-symlinks', '--preserve-symlinks-main'];
 const show = (title, text) => console.log(`\n--- ${title}\n${String(text || '').trim().slice(0, 5000)}`);
 let escaped = false;
 const verdict = {};
@@ -148,7 +150,7 @@ function hostAddress() {
 }
 
 async function insideProbe(fence, specFile, L, targets, title) {
-  const r = await fenceExec(fence, specFile, [process.execPath, path.join(L.box, 'win-inside.js')], { timeout: 90000, env: { WBN_TARGETS: JSON.stringify(targets) } });
+  const r = await fenceExec(fence, specFile, [...NODE_IN, path.join(L.box, 'win-inside.js')], { timeout: 90000, env: { WBN_TARGETS: JSON.stringify(targets) } });
   show(`${title} (exit ${r.code}, ${r.ms} ms)`, r.stdout + r.stderr);
   try { return JSON.parse(r.stdout.trim().split(/\r?\n/).pop()); } catch { return {}; }
 }
@@ -176,8 +178,8 @@ async function standInRun(fence, bridgeExe, specFile, L, claude, sid) {
   const port = Number(new URL(api.url).port);
   const b = await startBridge(bridgeExe, sid, 'low', port);
   const mcp = path.join(L.box, 'mcp.json');
-  fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { trif: { command: process.execPath, args: [path.join(L.box, 'mcp-echo.js')] } } }));
-  const r = await fenceExec(fence, specFile, [process.execPath, path.join(L.box, 'box-shim.js'), ...claude.argv, ...claudeArgs(mcp, ['--model', 'claude-haiku-stand-in'])],
+  fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { trif: { command: NODE_IN[0], args: [...NODE_IN.slice(1), path.join(L.box, 'mcp-echo.js')] } } }));
+  const r = await fenceExec(fence, specFile, [...NODE_IN, path.join(L.box, 'box-shim.js'), ...claude.argv, ...claudeArgs(mcp, ['--model', 'claude-haiku-stand-in'])],
     { stdin: 'probe', env: { TRIF_SHIM_PIPE: b.name, ANTHROPIC_BASE_URL: 'http://{SHIM}', ANTHROPIC_API_KEY: 'trif-stand-in-key' } });
   const { init, result } = parseStream(r.stdout);
   const got = api.toolResults();
@@ -205,7 +207,7 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid) {
     const r0 = await relay.start();
     const viaPipe = how.startsWith('shim');
     const b = viaPipe ? await startBridge(bridgeExe, sid, 'low', r0.port) : null;
-    const argv = viaPipe ? [process.execPath, path.join(L.box, 'box-shim.js'), ...claude.argv] : claude.argv;
+    const argv = viaPipe ? [...NODE_IN, path.join(L.box, 'box-shim.js'), ...claude.argv] : claude.argv;
     const env = { ...base, HTTPS_PROXY: viaPipe ? 'http://{SHIM}' : `http://127.0.0.1:${r0.port}`, ...(viaPipe ? { TRIF_SHIM_PIPE: b.name } : {}) };
     const r = await fenceExec(fence, specFile, [...argv, ...claudeArgs(mcp)], { stdin: 'Say hi.', env, timeout: 90000 });
     const { result } = parseStream(r.stdout);

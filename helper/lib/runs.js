@@ -22,6 +22,8 @@ const { migratePrivate, privateLeftovers } = require('./migrate');
 const { Stage, INSTRUCTION_NAME } = require('./stage');
 const { remoteStart, writeRemoteFiles, removeRemoteFiles, remoteContext } = require('./phonelink/remoterun');
 const { cleanVisibility } = require('./visibility');
+const { syncGuides } = require('./guides');
+const { HELPER_DIR } = require('./paths');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -853,6 +855,8 @@ class Runs {
       run.screenshots = shots.dir;
       run.screenshotsReal = shots.real;
       if (run.remote) writeRemoteFiles(run); // (the phone's copy of the page and its screenshot)
+      // The guides it reads, as this copy of TRIF has them (guides.js: copied only when they differ)
+      try { syncGuides(ws, HELPER_DIR, { logger: this.logger }); } catch (e) { this.logger.warn(`guides: ${e.message}`); }
       // The run's own working folder, a copy of the workspace (stage.js): the only mods folder it writes.
       // The helper copies its changes into the real one as they're saved (_syncStage).
       run.stage = new Stage({ ws, dir: path.join(boxRoot(), `${run.id}.ws`), scope: run.scope, splits: run.splits, visibility: run.visibility, liveReal: run.modsReal, logger: this.logger,

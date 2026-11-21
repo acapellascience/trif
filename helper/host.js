@@ -19,7 +19,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { envVar } = require('./lib/env');
-const { workspace, VERSION, examplesDir } = require('./lib/paths');
+const { workspace, VERSION, examplesDir, HELPER_DIR } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames, sha1, isIgnoredName } = require('./lib/mods');
@@ -121,6 +121,9 @@ require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
   if (k.moved.length || k.left.length) { ws.config = workspace(ws.home).config; agents.forgetLoginStatus(); }
 }, (e) => logger.warn(`couldn't move API keys out of config.json: ${e.message}`));
 for (const e of privateMigration.errors) logger.warn(`couldn't move the private files out of the workspace: ${e}`);
+// The guides side-panel runs read (AGENTS.md, TECHNIQUES.md, BOXED.md, CLAUDE.md): in step with this copy's
+// helper/workspace/, which a git checkout changes without running setup (lib/guides.js; again before each run).
+try { require('./lib/guides').syncGuides(ws, HELPER_DIR, { logger }); } catch (e) { logger.warn(`guides: ${e.message}`); }
 if (ws.privateError) logger.warn(ws.privateError);
 if (ws.configError) logger.warn(ws.configError);
 

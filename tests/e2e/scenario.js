@@ -5765,6 +5765,9 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (JSON.stringify(texts) !== JSON.stringify(want)) problems.push(`the cards for home: ${JSON.stringify(texts)}; ${JSON.stringify(await Promise.all(mods.map(async (m) => [m.id, (await pages(m.id))['/spa/']])))}`);
       if (problems.length) {
         const all = await Promise.all(mods.map(async (m) => `${m.id}: ${JSON.stringify(await pages(m.id))}`));
+        all.push(`files: ${fs.readdirSync(path.join(this.trif, 'sites', site)).join(' ')}`);
+        all.push(`status: ${JSON.stringify(((await this.cli(['status'], { json: true, timeoutMs: 20000 })).json?.extension?.mods || []).filter((x) => x.id.startsWith(site)).map((x) => [x.id, x.on, x.newOff, x.held]))}`);
+        all.push(`stored mods: ${JSON.stringify(await this.ext(`async () => ((await chrome.storage.local.get('mods')).mods || []).map((m) => m.id).filter((id) => id.startsWith('127'))`))}`);
         throw new Error(`${problems.join('\n')}\n(the pushState: ${at}; tabs.onUpdated after it: ${JSON.stringify(upd)})\n${all.join('\n')}`);
       }
       return `pushState (${at}); tabs.onUpdated after it: ${JSON.stringify(upd)}; no flag on the watch view; home, broken, flagged (${texts.map((t) => `"${t}"`).join(', ')})`;

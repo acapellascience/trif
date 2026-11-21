@@ -213,6 +213,17 @@ port it), no Bash; an MCP allowlist that removes it → stop with a clear messag
 
 ## CI
 
+- Round 3, [run 44873370047](https://github.com/acapellascience/trif/actions/runs/44873370047) (whole-box.yml,
+  f19e44a): macos **passed**: the unit tests; the real pin; **the setup-token probe found the URL under the
+  pseudo-terminal, and through logins.js gave exactly: login URL → the refused stand-in code's words →
+  error → done not ok** (Findings); the box tests; the side-panel run in today's sandbox; the same in the
+  box, now with the token test (no sign-in → mode token, no model call; a stand-in token → a run with
+  `Bearer <token>` and no x-api-key; a 401 → refused, Settings told; Sign out); both managed-settings
+  steps. windows passed (the spike's probe, unchanged). Before it, run 44873006986 (52a4dc9) failed
+  one check: a refused token's status was from before the token was saved (fixed in f19e44a). The repo's
+  `tests` workflow: [run 44873370090](https://github.com/acapellascience/trif/actions/runs/44873370090)
+  (52a4dc9's, 44873006926, passed).
+
 - Round 2, [run 44871249783](https://github.com/acapellascience/trif/actions/runs/44871249783) (whole-box.yml,
   7e2146c): macos **passed**: claudepin + wholebox-setting + claudetoken unit tests; the real pin installed;
   the box tests; the side-panel run in today's sandbox; **the same with the whole process in the box, now

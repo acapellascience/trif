@@ -222,7 +222,7 @@ memory is the footprint of all the browser's processes; Firefox's baseline is ab
 | `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, family, browserVersion, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `browser`: the browser's name (since 0.3.1 its own: Brave, Edge, Opera, Vivaldi, Arc, Chromium, Chrome; Firefox or a fork's name; Safari: `lib.js` `detectBrowser`; before, every Chromium browser said Chrome); `family`: `chromium`, `firefox` or `safari`, what the code goes by (missing before 0.3.1: the name tells); `browserVersion`: the browser's own version where it has one (Opera's, not Chromium's; `chrome` stays the engine's), else null. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code), `boxRun` (`run` takes `world: "box"`). No `features` means 0.2.4 or older. |
 | `{type:"modsResend", reason}` | A set in parts didn't arrive whole, or a mod sent as `same` wasn't there (`reason` says how). The helper logs it and sends the set again, every mod whole, once per set; if that fails too, the next change or reconnect sends it again (whole). |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
-| `{type:"modsApplied", registered:[ids], errors:[{id, error}], splits:[hosts]}` | After applying a `mods` message. `splits`: the sensitive sites of their own it knows of (mail.google.com), each a site apart in a site's boxed mods together (helper/lib/sitecombos.js). |
+| `{type:"modsApplied", registered:[ids], errors:[{id, error}], splits:[hosts], visibility}` | After applying a `mods` message. `splits`: the sensitive sites of their own it knows of (mail.google.com), each a site apart in a site's boxed mods together (helper/lib/sitecombos.js). `visibility`: which sites' mods chats on other sites may not read (see "Sensitive sites"; helper/lib/visibility.js). |
 | `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `helper.log` (private folder). |
 
 ## Safari
@@ -378,7 +378,12 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   `scope` (the host's site) and `splits` (the sites of their own the extension knows of): the helper takes
   `scope` when it's the site or a part of it under the same registrable domain (helper/lib/scope.js
   runScope), and locks every other site's folder by `scopeOf`. `status` carries `sensitiveBlocked` (the
-  sensitive sites on the block list), which `trif status` counts instead of listing.
+  sensitive sites on the block list), which `trif status` counts instead of listing. `agent.start` (and
+  `modsApplied`, kept per browser in switches.json for runs that come without it) also carries `visibility:
+  {hidden, shown, sensitive}`: the sites the user set "Chats on other sites can read this site's mods" off
+  and on for (`modsReadable` in storage, `{type: "modsReadable.set", site, readable: true|false|null}` from
+  the panel), and the sensitive list's patterns; a sensitive site is off unless shown. The helper leaves the
+  hidden sites out of the run entirely (helper/lib/visibility.js; docs/STAGING.md "Other sites' mods").
 - **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access, re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
   it brings it back as it was.
 - **The browser's own blocked sites** (Chrome's "Don't allow extensions on these sites") don't show in

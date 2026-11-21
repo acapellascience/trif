@@ -21,6 +21,7 @@ const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
 const { Stage, INSTRUCTION_NAME } = require('./stage');
 const { remoteStart, writeRemoteFiles, removeRemoteFiles, remoteContext } = require('./phonelink/remoterun');
+const { cleanVisibility } = require('./visibility');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -526,9 +527,40 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
     .filter((p) => !within(tmp, p, { ci, orEqual: true }) && !within(real(agentTmp), p, { ci, orEqual: true }));
   const base = { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), tmp, agentTmp, systemTemp, screenshots: shots, modsDir: mods };
   if (!stage) return base;
+  // Another site whose mods chats on other sites may not read (visibility.js) isn't in the copy at all; where
+  // it is in the workspace, which runs otherwise read whole, it's denied: the mods folder itself (a run with
+  // a copy needs nothing in it: its every file the run may read is in the copy, as on Windows, where runs
+  // only ever get the copy), and the hidden sites' history and trash.
+  const hidden = hiddenPaths(ws, mods, stage);
   // (the copy is in ~/Library/Caches, beside the mailbox, which deniedInHome must still deny: so it's added
   // here, after the home folder's denies were worked out, not to what they were worked out from)
-  return { ...base, readable: [...readable, stage.dir], workspace: stage.dir, modsDir: stage.sites, staged: true, liveWorkspace: real(ws.home), liveMods: mods };
+  return { ...base, denied: [...new Set([...denied, ...hidden])], hidden, readable: [...readable, stage.dir], workspace: stage.dir, modsDir: stage.sites, staged: true, liveWorkspace: real(ws.home), liveMods: mods };
+}
+
+// The workspace's state files that name mods of every site (held.js, sitecombos.js, origins.js, share.js).
+const NAMING_STATE = ['held.json', 'allowed.json', 'seen.json', 'switches.json', 'switched-on.json', 'origins.json', 'imported.json', 'active-runs'];
+
+/**
+ * What a run with a copy (stage) mustn't read in the workspace: the mods folder, when the
+ * run hides another site's mods (stage.hiddenNames: such folders were there when it started), and the
+ * history/ and trash/ folders of the sites it hides (stage.hidden), and then TRIF's state files that name
+ * every site's mods (NAMING_STATE). (None of it for a run that hides nothing: runs have read the workspace
+ * whole, and nothing in it is kept from them.)
+ */
+function hiddenPaths(ws, modsReal, stage) {
+  if (!stage || typeof stage.hidden !== 'function') return [];
+  const out = [];
+  if (stage.hiddenNames && stage.hiddenNames.size) out.push(modsReal, ...[...stage.hiddenNames].map((n) => path.join(modsReal, n)));
+  for (const dir of [path.join(ws.home, 'history'), path.join(ws.home, 'trash')]) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const n of names) if (stage.hidden(n)) out.push(path.join(dir, n));
+  }
+  // (and, then, TRIF's state files that name every site's mods by id, or their sites: none is the run's to
+  // read, and `trif` in a run asks the helper instead, which tells it of its own site's alone)
+  if (out.length) out.push(...NAMING_STATE.map((f) => path.join(ws.home, f)).filter((f) => fs.existsSync(f)));
+  // (each by its real path, as sandboxes compare, and as named, as Claude Code's Read rules match)
+  return [...new Set(out.flatMap((p) => [realOrResolved(p), p]))];
 }
 
 /**
@@ -544,6 +576,10 @@ function withPrivatePaths(ws) {
   if (ws.private && ws.runs && ws.screenshots) return ws;
   const priv = ws.private || require('./paths').privateDir(ws.home);
   return { ...ws, private: priv, runs: ws.runs || path.join(priv, 'runs'), screenshots: ws.screenshots || path.join(priv, 'screenshots') };
+}
+
+function storedVisibility(ws) {
+  try { return require('./sitecombos').visibilityOf(ws.home); } catch { return null; }
 }
 
 function normalizeSite(site, url) {
@@ -632,6 +668,9 @@ class Runs {
       // (a sensitive host under a registrable domain is its own site: the extension says so, scope.js runScope)
       scope: runScope(site, args.scope),
       splits: cleanSplits(args.splits),
+      // (which other sites' mods it may read: the user's choices and the sensitive list, visibility.js)
+      // (one that comes without it, from the user's terminal or a phone: as the browsers last said, sitecombos.js)
+      visibility: cleanVisibility(args.visibility) || storedVisibility(ws),
       // Given to the agent as TRIF_RUN_TOKEN; `trif` sends it, and the helper scopes its requests.
       token: crypto.randomBytes(16).toString('hex'),
       agent: adapter.id,
@@ -816,7 +855,7 @@ class Runs {
       if (run.remote) writeRemoteFiles(run); // (the phone's copy of the page and its screenshot)
       // The run's own working folder, a copy of the workspace (stage.js): the only mods folder it writes.
       // The helper copies its changes into the real one as they're saved (_syncStage).
-      run.stage = new Stage({ ws, dir: path.join(boxRoot(), `${run.id}.ws`), scope: run.scope, splits: run.splits, liveReal: run.modsReal, logger: this.logger,
+      run.stage = new Stage({ ws, dir: path.join(boxRoot(), `${run.id}.ws`), scope: run.scope, splits: run.splits, visibility: run.visibility, liveReal: run.modsReal, logger: this.logger,
         settings: run.adapter.workspaceSettings ? JSON.stringify({ permissions: { allow: run.adapter.allowedTools, deny: run.adapter.deniedTools } }, null, 2) + '\n' : null });
       run.stage.twinOnly = !!run.remote; // (a run for a phone: its phone twin's folder only, stage.js ownTwin)
       run.stage.create();
@@ -1240,5 +1279,5 @@ class Runs {
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, deniedOutsideHome, trifCode, withPrivatePaths,
+  runLimits, hiddenPaths, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, deniedOutsideHome, trifCode, withPrivatePaths,
   pruneScreenshots, screenshotsFolder, checkModsFolder, instructionFiles, SCREENSHOT_KEEP_MS };

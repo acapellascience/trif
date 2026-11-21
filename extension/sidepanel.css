@@ -1189,5 +1189,10 @@ body.resizing-mods, body.resizing-mods * { cursor: ns-resize !important; user-se
 .download-offer .offer-can { margin: 4px 0 6px 18px; padding: 0; font-size: 12px; }
 .download-offer .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .paste-mod .paste-tried { margin: 0 0 8px; }
+/* "Chats on other sites can read this site's mods" in the ⋯ menu over the mods: a tick when on */
+.pop-menu .menu-check[aria-checked="true"]::before { content: '✓ '; }
+.pop-menu .menu-check[aria-checked="false"]::before { content: '\2003'; }
+.mods-readable-list label { overflow-wrap: anywhere; }
+.pop-menu .menu-check { white-space: normal; max-width: 280px; }
 /* (no box, no microphone line: robotless, or no site / the robot off) */
 body.robotless .dictation-note, body:is(.site-off, .no-site) .dictation-note { display: none; }

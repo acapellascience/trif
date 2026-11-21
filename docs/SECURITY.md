@@ -439,12 +439,16 @@ own), and say no before looking the mod up; delete and restore now say no first 
 own site's mods alone, and `ping` tells it of its own mods and of itself. The side panel and the user's
 terminal are as before. tests/run-scope-reads.test.js.
 
-**What this doesn't change.** A run can still read the other sites' mod files: its working copy holds them
-(every file but their `files/`, read-only: docs/STAGING.md), `trif mods` lists them from there, and the
-extension's `status` (`trif status`) lists every mod's id, whether it's on, and the sites TRIF is on for.
-That's how runs were designed (an agent looks at the mods its change will meet), not something the mailbox
-let through; whether a run should see other sites' mods at all, a sensitive site's above all, is a decision
-of its own.
+**Other sites' mods (11-20).** A run can still read the other sites' mod files: its working copy holds them
+(every file but their `files/`, read-only: docs/STAGING.md), and `trif mods` lists them from there. That's
+how runs are designed (an agent looks at the mods its change will meet). But it's the user's choice per site,
+"Chats on other sites can read this site's mods": on by default, **off by default for a sensitive site**
+(TRIF's list or the user's, each sensitive host a site of its own). A site that's off isn't in another site's
+run at all: not in its copy, denied where it is in the workspace (its folder, history and trash, and the
+state files that name every site's mods), and taken out of the extension's `status` as the run gets it
+(helper/lib/visibility.js; docs/STAGING.md "Other sites' mods"). A run keeps what it needs for its own site:
+its folders, its phone twin, the site it's part of (google.com's mods for a run on mail.google.com), and
+all-sites/. tests/mod-visibility.test.js, tests/run-sandbox.test.js.
 
 ## The mods feed (0.3.1)
 
